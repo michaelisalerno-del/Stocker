@@ -172,10 +172,10 @@ def _seed_outputs(database: Path) -> None:
             "underlying_instrument_id, asset_kind, minimum_days_to_expiry, "
             "maximum_days_to_expiry, option_right, strike_offset, reference_price, feed_kind, "
             "cadence, as_of_at_us, expires_at_us, required, priority, maximum_contracts, "
-            "input_event_ids_json, content_hash, lifecycle, next_attempt_at_us, created_at_us, "
+            "input_event_id, content_hash, lifecycle, next_attempt_at_us, created_at_us, "
             "updated_at_us) VALUES ('interest-web', 'run-live', 'instance-new', "
             "'primary-call', 'AAPL', 'option', 1, 1, 'call', 0, 101.27, 'quotes', "
-            "'snapshot', 189, 1000, 1, 100, 1, '[\"quote-aapl\"]', ?, 'pending', 189, 205, 205)",
+            "'snapshot', 189, 1000, 1, 100, 1, 'quote-aapl', ?, 'pending', 189, 205, 205)",
             (_hash("interest-web"),),
         )
         connection.execute(
@@ -615,6 +615,7 @@ def test_idea_detail_is_generic_bounded_and_cursor_paginated(tmp_path: Path) -> 
     assert payload["outputs"][0]["legs"][0]["action"] == "buy"
     assert payload["market_data"]["interests"][0]["interest_key"] == "primary-call"
     assert payload["market_data"]["interests"][0]["lifecycle"] == "resolved"
+    assert payload["market_data"]["interests"][0]["bound_subscription_id"] is None
     assert payload["market_data"]["receipts"][0]["instrument_id"] == "ibkr-option-9001"
     assert payload["next_cursor"]
 

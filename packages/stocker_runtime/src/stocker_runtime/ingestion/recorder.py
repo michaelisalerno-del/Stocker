@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
-import json
 import math
 import re
 import sqlite3
@@ -13,6 +12,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic_ns
 from typing import Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -253,8 +253,8 @@ class Recorder:
         self._idea_runner: IdeaRunner | None = None
         self._shadow_engine: ShadowEngine | None = None
         self._snapshot_handshake_lock = threading.Lock()
-        self._starting_dynamic_snapshot_ids: set[int] = set()
-        self._pending_dynamic_snapshot_ends: dict[int, MarketDataStatus] = {}
+        self._starting_dynamic_request_ids: set[int] = set()
+        self._pending_dynamic_statuses: dict[int, list[MarketDataStatus]] = {}
 
     def _authority(self) -> WriterAuthority:
         state = self._authority_state()
@@ -807,9 +807,7 @@ class Recorder:
                 "required": bool(row["required"]),
                 "priority": int(row["priority"]),
                 "maximum_contracts": int(row["maximum_contracts"]),
-                "input_event_ids": tuple(
-                    str(value) for value in json.loads(str(row["input_event_ids_json"]))
-                ),
+                "input_event_id": str(row["input_event_id"]),
             }
         )
 
@@ -961,6 +959,15 @@ class Recorder:
             if current is None or str(current["lifecycle"]) != "pending":
                 connection.rollback()
                 return
+            if now_us >= int(current["expires_at_us"]):
+                connection.execute(
+                    "UPDATE market_data_interests SET lifecycle='expired', "
+                    "reason_code='INTEREST_EXPIRED_DURING_DISCOVERY', updated_at_us=? "
+                    "WHERE interest_id=? AND lifecycle='pending'",
+                    (now_us, row["interest_id"]),
+                )
+                connection.commit()
+                return
             attempts = int(current["attempts"]) + 1
             if attempts < 5:
                 next_attempt = min(
@@ -1027,10 +1034,15 @@ class Recorder:
                 )
                 self._persist_discovery_receipt(receipt=receipt, option_spec=None, now_us=now_us)
             return
+        resolution_started_ns = monotonic_ns()
+
+        def completed_at_us() -> int:
+            return now_us + max(0, (monotonic_ns() - resolution_started_ns) // 1_000)
+
         resolver = InstrumentResolver(
             cast(OptionDiscoveryBackend, self.adapter),
             underlyings={item.instrument_id: item for item in self._instruments},
-            completed_at_us=lambda: now_us,
+            completed_at_us=completed_at_us,
         )
         underlying_by_id = {item.instrument_id: item for item in self._instruments}
         for row in rows:
@@ -1045,7 +1057,14 @@ class Recorder:
                     )
                 )
             except Exception as error:
-                self._defer_discovery(row, now_us=now_us, error=error)
+                self._defer_discovery(row, now_us=completed_at_us(), error=error)
+                continue
+            if receipt.completed_at_us >= interest.expires_at_us:
+                self._defer_discovery(
+                    row,
+                    now_us=receipt.completed_at_us,
+                    error=TimeoutError("interest expired during instrument discovery"),
+                )
                 continue
             underlying = underlying_by_id.get(interest.underlying_instrument_id)
             option_spec = (
@@ -1056,16 +1075,48 @@ class Recorder:
             self._persist_discovery_receipt(
                 receipt=receipt,
                 option_spec=option_spec,
-                now_us=now_us,
+                now_us=receipt.completed_at_us,
             )
 
-    def _dynamic_request_id(self, instrument_id: str, feed_kind: str, snapshot: bool) -> int:
-        digest = hashlib.sha256(
-            f"{self.config.run_id}|{instrument_id}|{feed_kind}|{int(snapshot)}".encode()
-        ).digest()
-        return _DYNAMIC_REQUEST_ID_BASE + int.from_bytes(digest[:8], "big") % (
-            _DYNAMIC_REQUEST_ID_SPAN
+    def _next_dynamic_request_ids(
+        self,
+        count: int,
+        *,
+        reserved: tuple[int, ...] = (),
+    ) -> tuple[int, ...]:
+        """Allocate never-reused request identities under the sole-writer lease."""
+
+        if not 0 <= count <= self.config.market_data_line_limit:
+            raise RecorderFatalError("dynamic request allocation bound exceeded")
+        with connect_v2(self.config.database) as connection:
+            maximum = connection.execute(
+                "SELECT max(request_id) FROM subscriptions WHERE run_id=? "
+                "AND request_id>=? AND request_id<?",
+                (
+                    self.config.run_id,
+                    _DYNAMIC_REQUEST_ID_BASE,
+                    _DYNAMIC_REQUEST_ID_BASE + _DYNAMIC_REQUEST_ID_SPAN,
+                ),
+            ).fetchone()[0]
+        candidate = max(
+            _DYNAMIC_REQUEST_ID_BASE,
+            _DYNAMIC_REQUEST_ID_BASE if maximum is None else int(maximum) + 1,
         )
+        used = {
+            *reserved,
+            *(spec.request_id for spec in self._base_subscriptions),
+            *(spec.request_id for spec in self._subscriptions),
+        }
+        allocated: list[int] = []
+        while len(allocated) < count:
+            while candidate in used:
+                candidate += 1
+            if candidate >= _DYNAMIC_REQUEST_ID_BASE + _DYNAMIC_REQUEST_ID_SPAN:
+                raise RecorderFatalError("dynamic request id range exhausted")
+            allocated.append(candidate)
+            used.add(candidate)
+            candidate += 1
+        return tuple(allocated)
 
     @staticmethod
     def _instrument_spec_from_row(row: sqlite3.Row) -> InstrumentSpec:
@@ -1146,14 +1197,30 @@ class Recorder:
             MarketDataCapacity(self.config.market_data_line_limit),
         )
         static_keys = {(spec.instrument_id, spec.feed_kind) for spec in self._base_subscriptions}
-        request_keys: dict[int, tuple[str, str, bool]] = {
-            spec.request_id: (spec.instrument_id, spec.feed_kind, spec.snapshot)
-            for spec in self._base_subscriptions
-        }
+        current_by_key: dict[tuple[str, str, bool], SubscriptionSpec] = {}
+        for spec in self._subscriptions:
+            if spec.request_id < _DYNAMIC_REQUEST_ID_BASE:
+                continue
+            key = (spec.instrument_id, spec.feed_kind, spec.snapshot)
+            if key in current_by_key:
+                raise RecorderFatalError("duplicate dynamic subscription key")
+            current_by_key[key] = spec
+        new_keys = tuple(
+            (planned.instrument_id, planned.feed_kind, planned.snapshot)
+            for planned in plan.subscriptions
+            if (planned.instrument_id, planned.feed_kind) not in static_keys
+            and (planned.instrument_id, planned.feed_kind, planned.snapshot) not in current_by_key
+            and any(
+                source_id.removeprefix("interest:") in retryable_interest_ids
+                for source_id in planned.source_ids
+                if source_id.startswith("interest:")
+            )
+        )
+        allocated_ids = iter(self._next_dynamic_request_ids(len(new_keys)))
         dynamic_specs: list[SubscriptionSpec] = []
         for planned in plan.subscriptions:
-            key = (planned.instrument_id, planned.feed_kind)
-            if key in static_keys:
+            market_key = (planned.instrument_id, planned.feed_kind)
+            if market_key in static_keys:
                 continue
             interest_source_ids = tuple(
                 source_id.removeprefix("interest:")
@@ -1164,17 +1231,14 @@ class Recorder:
                 interest_id in retryable_interest_ids for interest_id in interest_source_ids
             ):
                 continue
-            request_key = (*key, planned.snapshot)
-            request_id = self._dynamic_request_id(*request_key)
-            prior_key = request_keys.get(request_id)
-            if prior_key is not None and prior_key != request_key:
-                raise RecorderFatalError("deterministic dynamic request id collision")
-            request_keys[request_id] = request_key
+            request_key = (*market_key, planned.snapshot)
+            current = current_by_key.get(request_key)
+            request_id = current.request_id if current is not None else next(allocated_ids)
             dynamic_specs.append(
                 SubscriptionSpec(
                     name=(
                         f"dynamic:{planned.instrument_id}:{planned.feed_kind}:"
-                        f"{'snapshot' if planned.snapshot else 'stream'}"
+                        f"{'snapshot' if planned.snapshot else 'stream'}:{request_id}"
                     ),
                     instrument_id=planned.instrument_id,
                     feed_kind=planned.feed_kind,
@@ -1231,6 +1295,46 @@ class Recorder:
             for key, source_ids in interest_ids_by_key.items()
             if any(interest_id in due_ids for interest_id in source_ids)
         }
+
+    @staticmethod
+    def _dynamic_spec_with_request_id(
+        spec: SubscriptionSpec,
+        request_id: int,
+    ) -> SubscriptionSpec:
+        return SubscriptionSpec(
+            name=(
+                f"dynamic:{spec.instrument_id}:{spec.feed_kind}:"
+                f"{'snapshot' if spec.snapshot else 'stream'}:{request_id}"
+            ),
+            instrument_id=spec.instrument_id,
+            feed_kind=spec.feed_kind,
+            request_id=request_id,
+            continuity_required=spec.continuity_required,
+            optional=spec.optional,
+            stale_after_us=spec.stale_after_us,
+            snapshot=spec.snapshot,
+        )
+
+    def _bind_planned_interests(
+        self,
+        connection: sqlite3.Connection,
+        plan: MarketDataPlan,
+        instrument_id: str,
+        feed_kind: str,
+        subscription_id: str,
+    ) -> None:
+        interest_ids = self._planned_interest_ids(plan).get((instrument_id, feed_kind), ())
+        if not interest_ids:
+            return
+        connection.execute(
+            "UPDATE market_data_interests SET bound_subscription_id=? "
+            "WHERE interest_id IN (SELECT value FROM json_each(?)) "
+            "AND lifecycle IN ('resolved','active')",
+            (
+                subscription_id,
+                canonical_json_bytes(cast(JsonValue, interest_ids)).decode(),
+            ),
+        )
 
     def _record_subscription_attempt(
         self,
@@ -1292,30 +1396,28 @@ class Recorder:
             connection.commit()
 
     def _sync_interest_lifecycles(self, plan: MarketDataPlan, *, now_us: int) -> None:
+        state = self._authority_state()
         with connect_v2(self.config.database) as connection:
-            active_keys = {
-                (str(row["instrument_id"]), str(row["feed_kind"]))
-                for row in connection.execute(
-                    "SELECT instrument_id, feed_kind FROM subscriptions WHERE run_id=? "
+            active_rows = tuple(
+                connection.execute(
+                    "SELECT subscription_id, instrument_id, feed_kind, snapshot "
+                    "FROM subscriptions WHERE run_id=? "
                     "AND recorder_generation=? AND connection_generation=? "
                     "AND lifecycle IN ('active','degraded')",
                     (
                         self.config.run_id,
-                        self._authority_state().recorder_generation,
-                        self._authority_state().connection_generation,
+                        state.recorder_generation,
+                        state.connection_generation,
                     ),
                 )
-            }
-        active_sources = {
-            source_id
-            for subscription in plan.subscriptions
-            for source_id in subscription.source_ids
-            if source_id.startswith("interest:")
-            and (subscription.instrument_id, subscription.feed_kind) in active_keys
-        }
-        active_interest_ids = tuple(
-            source_id.removeprefix("interest:") for source_id in sorted(active_sources)
-        )
+            )
+        active_by_key: dict[tuple[str, str], sqlite3.Row] = {}
+        for row in active_rows:
+            key = (str(row["instrument_id"]), str(row["feed_kind"]))
+            if key in active_by_key:
+                raise RecorderFatalError("multiple active subscriptions share one market-data key")
+            active_by_key[key] = row
+        active_keys = set(active_by_key)
         incident_id = hashlib.sha256(
             f"{self.config.run_id}|DYNAMIC_MARKET_DATA_CAPACITY".encode()
         ).hexdigest()
@@ -1329,17 +1431,48 @@ class Recorder:
                 "AND lifecycle IN ('resolved','active')",
                 (now_us, self.config.run_id),
             )
-            if active_interest_ids:
+            for subscription in plan.subscriptions:
+                key = (subscription.instrument_id, subscription.feed_kind)
+                active = active_by_key.get(key)
+                if active is None or bool(active["snapshot"]):
+                    continue
+                self._bind_planned_interests(
+                    connection,
+                    plan,
+                    subscription.instrument_id,
+                    subscription.feed_kind,
+                    str(active["subscription_id"]),
+                )
+            active_subscription_ids = tuple(str(row["subscription_id"]) for row in active_rows)
+            if active_subscription_ids:
                 connection.execute(
                     "UPDATE market_data_interests SET lifecycle='active', reason_code=NULL, "
-                    "updated_at_us=? WHERE run_id=? AND interest_id IN "
+                    "updated_at_us=? WHERE run_id=? AND bound_subscription_id IN "
                     "(SELECT value FROM json_each(?)) AND lifecycle IN ('resolved','active')",
                     (
                         now_us,
                         self.config.run_id,
-                        canonical_json_bytes(cast(JsonValue, active_interest_ids)).decode(),
+                        canonical_json_bytes(cast(JsonValue, active_subscription_ids)).decode(),
                     ),
                 )
+            for subscription in plan.subscriptions:
+                active = active_by_key.get((subscription.instrument_id, subscription.feed_kind))
+                if active is None or not bool(active["snapshot"]):
+                    continue
+                interest_ids = self._planned_interest_ids(plan).get(
+                    (subscription.instrument_id, subscription.feed_kind), ()
+                )
+                if interest_ids:
+                    connection.execute(
+                        "UPDATE market_data_interests SET reason_code='SNAPSHOT_QUEUED', "
+                        "updated_at_us=? WHERE interest_id IN (SELECT value FROM json_each(?)) "
+                        "AND lifecycle='resolved' AND bound_subscription_id IS NULL "
+                        "AND attempts=0",
+                        (
+                            now_us,
+                            canonical_json_bytes(cast(JsonValue, interest_ids)).decode(),
+                        ),
+                    )
             required_active = all(
                 not subscription.required
                 or (subscription.instrument_id, subscription.feed_kind) in active_keys
@@ -1391,6 +1524,14 @@ class Recorder:
                 dynamic_specs,
                 now_us,
             )
+            for spec, fence in zip(dynamic_specs, fences, strict=True):
+                self._bind_planned_interests(
+                    connection,
+                    plan,
+                    spec.instrument_id,
+                    spec.feed_kind,
+                    cast(str, fence.subscription_id),
+                )
             connection.commit()
         self._subscriptions = (*self._base_subscriptions, *dynamic_specs)
         self.state = RecorderState(
@@ -1411,10 +1552,14 @@ class Recorder:
             spec for spec in self._subscriptions if spec.request_id >= _DYNAMIC_REQUEST_ID_BASE
         )
         if not current and not desired:
+            self._sync_interest_lifecycles(plan, now_us=now_us)
             return
-        current_by_key = {
-            (item.instrument_id, item.feed_kind, item.snapshot): item for item in current
-        }
+        current_by_key: dict[tuple[str, str, bool], SubscriptionSpec] = {}
+        for item in current:
+            key = (item.instrument_id, item.feed_kind, item.snapshot)
+            if key in current_by_key:
+                raise RecorderFatalError("duplicate current dynamic subscription key")
+            current_by_key[key] = item
         desired_by_key = {
             (item.instrument_id, item.feed_kind, item.snapshot): item for item in desired
         }
@@ -1440,34 +1585,57 @@ class Recorder:
                     ),
                 )
             }
+        shared_keys = desired_by_key.keys() & current_by_key.keys()
+        replacement_keys = tuple(
+            sorted(
+                key
+                for key in shared_keys
+                if key[:2] in due_keys
+                and lifecycle_by_request.get(current_by_key[key].request_id)
+                not in {"active", "degraded"}
+            )
+        )
+        reserved_ids = tuple(spec.request_id for spec in (*current, *desired))
+        fresh_ids = iter(
+            self._next_dynamic_request_ids(len(replacement_keys), reserved=reserved_ids)
+        )
+        replacement_pairs: dict[
+            tuple[str, str, bool], tuple[SubscriptionSpec, SubscriptionSpec]
+        ] = {}
+        for key in replacement_keys:
+            old = current_by_key[key]
+            fresh = self._dynamic_spec_with_request_id(desired_by_key[key], next(fresh_ids))
+            desired_by_key[key] = fresh
+            replacement_pairs[key] = (old, fresh)
         new_starts = tuple(
-            spec
-            for key, spec in desired_by_key.items()
-            if key not in current_by_key and key[:2] in due_keys
-        )
-        retry_starts = tuple(
-            spec
-            for key, spec in desired_by_key.items()
-            if key in current_by_key
-            and key[:2] in due_keys
-            and lifecycle_by_request.get(current_by_key[key].request_id)
-            not in {"active", "degraded"}
-        )
-        starts = (*new_starts, *retry_starts)
-        stops = tuple(spec for key, spec in current_by_key.items() if key not in desired_by_key)
-        kept = tuple(
             desired_by_key[key]
-            for key in sorted(desired_by_key.keys() & current_by_key.keys())
+            for key in sorted(desired_by_key.keys() - current_by_key.keys())
+            if key[:2] in due_keys
+        )
+        retry_starts = tuple(replacement_pairs[key][1] for key in replacement_keys)
+        starts = (*new_starts, *retry_starts)
+        removed = tuple(
+            current_by_key[key] for key in sorted(current_by_key.keys() - desired_by_key.keys())
+        )
+        replacement_old = tuple(replacement_pairs[key][0] for key in replacement_keys)
+        stops = tuple(
+            spec
+            for spec in (*removed, *replacement_old)
+            if lifecycle_by_request.get(spec.request_id) != "closed"
+        )
+        kept = tuple(
+            current_by_key[key]
+            for key in sorted(shared_keys)
             if lifecycle_by_request.get(current_by_key[key].request_id) in {"active", "degraded"}
         )
         waiting = tuple(
-            desired_by_key[key]
-            for key in sorted(desired_by_key.keys() & current_by_key.keys())
+            current_by_key[key]
+            for key in sorted(shared_keys)
             if key[:2] not in due_keys
             and lifecycle_by_request.get(current_by_key[key].request_id)
             not in {"active", "degraded"}
         )
-        for key in desired_by_key.keys() & current_by_key.keys():
+        for key in shared_keys - set(replacement_keys):
             current_spec = current_by_key[key]
             desired_spec = desired_by_key[key]
             if (
@@ -1485,7 +1653,7 @@ class Recorder:
         with connect_v2(self.config.database) as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._verify_owned(connection)
-            for spec in (*stops, *retry_starts):
+            for spec in stops:
                 fence = current_fences.get(spec.request_id)
                 if fence is not None:
                     connection.execute(
@@ -1497,10 +1665,18 @@ class Recorder:
                 connection,
                 state.recorder_generation,
                 state.connection_generation,
-                new_starts,
+                starts,
                 now_us,
             )
-            for spec in (*kept, *waiting, *retry_starts):
+            for spec, fence in zip(starts, new_start_fences, strict=True):
+                self._bind_planned_interests(
+                    connection,
+                    plan,
+                    spec.instrument_id,
+                    spec.feed_kind,
+                    cast(str, fence.subscription_id),
+                )
+            for spec in (*kept, *waiting):
                 fence = current_fences.get(spec.request_id)
                 if fence is None:
                     raise RecorderFatalError("dynamic subscription fence is missing")
@@ -1517,19 +1693,16 @@ class Recorder:
                 )
             connection.commit()
         new_fence_by_request = {cast(int, fence.request_id): fence for fence in new_start_fences}
-        start_fences = tuple(
-            new_fence_by_request.get(spec.request_id, current_fences.get(spec.request_id))
-            for spec in starts
-        )
+        start_fences = tuple(new_fence_by_request.get(spec.request_id) for spec in starts)
         if any(fence is None for fence in start_fences):
             raise RecorderFatalError("dynamic subscription start fence is missing")
         typed_start_fences = cast(tuple[CallbackFence, ...], start_fences)
-        desired_subscriptions = (*self._base_subscriptions, *desired)
+        desired_subscriptions = (*self._base_subscriptions, *desired_by_key.values())
         exact = self._exact_subscriptions(self._instruments, desired_subscriptions)
         exact_by_request = {item.request_id: item for item in exact}
-        starting_snapshot_ids = {item.request_id for item in starts if item.snapshot}
+        starting_request_ids = {item.request_id for item in starts}
         with self._snapshot_handshake_lock:
-            self._starting_dynamic_snapshot_ids = starting_snapshot_ids
+            self._starting_dynamic_request_ids = starting_request_ids
         try:
             result = SubscriptionController(cast(SubscriptionBackend, self.adapter)).apply(
                 SubscriptionApplyPlan(
@@ -1538,14 +1711,14 @@ class Recorder:
                         (exact_by_request[cast(int, fence.request_id)], fence)
                         for fence in typed_start_fences
                     ),
-                    stops=tuple(item.request_id for item in (*stops, *retry_starts)),
+                    stops=tuple(item.request_id for item in stops),
                 )
             )
         except Exception:
             with self._snapshot_handshake_lock:
-                self._starting_dynamic_snapshot_ids = set()
-                for request_id in starting_snapshot_ids:
-                    self._pending_dynamic_snapshot_ends.pop(request_id, None)
+                self._starting_dynamic_request_ids = set()
+                for request_id in starting_request_ids:
+                    self._pending_dynamic_statuses.pop(request_id, None)
             raise
         started = set(result.started_request_ids)
         stopped = set(result.stopped_request_ids)
@@ -1553,7 +1726,9 @@ class Recorder:
         with connect_v2(self.config.database) as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._verify_owned(connection)
-            restart_request_ids = {item.request_id for item in retry_starts}
+            replacement_old_by_new = {
+                fresh.request_id: old for old, fresh in replacement_pairs.values()
+            }
             for spec, fence in zip(starts, typed_start_fences, strict=True):
                 if spec.request_id in started:
                     connection.execute(
@@ -1570,17 +1745,38 @@ class Recorder:
                         now_us,
                         "DYNAMIC_SUBSCRIBE_FAILED",
                     )
+                    self._resolve_subscription_status_failures(
+                        connection,
+                        spec.instrument_id,
+                        spec.feed_kind,
+                        now_us,
+                    )
                 else:
-                    lifecycle = (
-                        "cancelling"
-                        if spec.request_id in restart_request_ids and spec.request_id not in stopped
-                        else "paused"
+                    replaced = replacement_old_by_new.get(spec.request_id)
+                    old_stop_failed = (
+                        replaced is not None
+                        and lifecycle_by_request.get(replaced.request_id) != "closed"
+                        and replaced.request_id not in stopped
                     )
+                    lifecycle = "closed" if old_stop_failed else "paused"
                     connection.execute(
-                        "UPDATE subscriptions SET lifecycle=?, closed_at_us=NULL "
+                        "UPDATE subscriptions SET lifecycle=?, closed_at_us=? "
                         "WHERE subscription_id=?",
-                        (lifecycle, fence.subscription_id),
+                        (
+                            lifecycle,
+                            now_us if lifecycle == "closed" else None,
+                            fence.subscription_id,
+                        ),
                     )
+                    if old_stop_failed and replaced is not None:
+                        old_fence = current_fences[replaced.request_id]
+                        self._bind_planned_interests(
+                            connection,
+                            plan,
+                            replaced.instrument_id,
+                            replaced.feed_kind,
+                            cast(str, old_fence.subscription_id),
+                        )
                     self._record_subscription_attempt(
                         connection, plan, spec, succeeded=False, now_us=now_us
                     )
@@ -1613,27 +1809,18 @@ class Recorder:
                         "DYNAMIC_CANCEL_FAILED",
                         failures.get(("cancel", spec.request_id), "not_cancelled"),
                     )
-            for spec in retry_starts:
-                fence = current_fences[spec.request_id]
-                if spec.request_id in stopped:
-                    self._resolve_dynamic_incident(
-                        connection,
-                        cast(str, fence.subscription_id),
-                        now_us,
-                        "DYNAMIC_CANCEL_FAILED",
-                    )
-                else:
-                    self._record_dynamic_incident(
-                        connection,
-                        cast(str, fence.subscription_id),
-                        now_us,
-                        "DYNAMIC_CANCEL_FAILED",
-                        failures.get(("cancel", spec.request_id), "not_cancelled"),
-                    )
             connection.commit()
         failed_stop_ids = {item.request_id for item in stops if item.request_id not in stopped}
-        retained_stops = tuple(item for item in stops if item.request_id in failed_stop_ids)
-        next_dynamic = (*kept, *waiting, *retained_stops, *starts)
+        retained_removed = tuple(item for item in removed if item.request_id in failed_stop_ids)
+        next_replacements = tuple(
+            old if old.request_id in failed_stop_ids else fresh
+            for old, fresh in replacement_pairs.values()
+        )
+        next_dynamic = (*kept, *waiting, *retained_removed, *new_starts, *next_replacements)
+        if len(
+            {(item.instrument_id, item.feed_kind, item.snapshot) for item in next_dynamic}
+        ) != len(next_dynamic):
+            raise RecorderFatalError("next dynamic subscription set is ambiguous")
         next_request_ids = {item.request_id for item in next_dynamic}
         retained_fences = tuple(
             fence
@@ -1659,21 +1846,44 @@ class Recorder:
         )
         self._sync_interest_lifecycles(plan, now_us=now_us)
         with self._snapshot_handshake_lock:
-            self._starting_dynamic_snapshot_ids = set()
-            completed_inline = tuple(
-                self._pending_dynamic_snapshot_ends.pop(request_id)
-                for request_id in sorted(starting_snapshot_ids & started)
-                if request_id in self._pending_dynamic_snapshot_ends
+            self._starting_dynamic_request_ids = set()
+            pending_statuses = tuple(
+                status
+                for request_id in sorted(starting_request_ids)
+                for status in self._pending_dynamic_statuses.pop(request_id, ())
             )
-            for request_id in starting_snapshot_ids - started:
-                self._pending_dynamic_snapshot_ends.pop(request_id, None)
-        for status in completed_inline:
-            self._complete_dynamic_snapshot(status)
+        for status in pending_statuses:
+            self.market_data_status(status)
 
     def _reconcile_dynamic_market_data(self, *, now_us: int) -> None:
         self._expire_interests(now_us=now_us)
         self._resolve_pending_interests(now_us=now_us)
         self._reconcile_dynamic_subscriptions(now_us=now_us)
+
+    def _fulfill_snapshot_interests_from_streams(self, *, now_us: int) -> None:
+        """Fulfill snapshot demand only after its bound stream records a causal event."""
+
+        with connect_v2(self.config.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            connection.execute(
+                "UPDATE market_data_interests AS interest SET lifecycle='fulfilled', "
+                "reason_code=NULL, updated_at_us=? WHERE interest.run_id=? "
+                "AND interest.cadence='snapshot' "
+                "AND interest.lifecycle IN ('resolved','active') AND EXISTS ("
+                "SELECT 1 FROM subscriptions subscription JOIN market_events event "
+                "ON event.event_id=subscription.latest_event_id "
+                "WHERE subscription.subscription_id=interest.bound_subscription_id "
+                "AND subscription.run_id=interest.run_id AND subscription.snapshot=0 "
+                "AND subscription.lifecycle IN ('active','degraded') "
+                "AND event.run_id=interest.run_id "
+                "AND event.instrument_id=subscription.instrument_id "
+                "AND event.feed_kind=subscription.feed_kind "
+                "AND event.event_at_us>=interest.as_of_at_us "
+                "AND event.received_at_us<=?)",
+                (now_us, self.config.run_id, now_us),
+            )
+            connection.commit()
 
     def _connect_subscriptions(self, *, now_us: int) -> None:
         """Expose connected/active state only after each external action succeeds."""
@@ -2067,6 +2277,51 @@ class Recorder:
             (now_us, incident_id),
         )
 
+    def _resolve_subscription_status_failures(
+        self,
+        connection: sqlite3.Connection,
+        instrument_id: str,
+        feed_kind: str,
+        now_us: int,
+    ) -> None:
+        """Resolve prior-incarnation request failures after a fresh start succeeds."""
+
+        parameters = (
+            now_us,
+            self.config.run_id,
+            self.config.run_id,
+            instrument_id,
+            feed_kind,
+        )
+        connection.execute(
+            "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE run_id=? "
+            "AND reason LIKE 'IBKR_STATUS_%' AND resolved_at_us IS NULL "
+            "AND subscription_id IN (SELECT subscription_id FROM subscriptions "
+            "WHERE run_id=? AND instrument_id=? AND feed_kind=?)",
+            (
+                now_us,
+                now_us,
+                self.config.run_id,
+                self.config.run_id,
+                instrument_id,
+                feed_kind,
+            ),
+        )
+        connection.execute(
+            "UPDATE incidents SET resolved_at_us=? WHERE run_id=? "
+            "AND code LIKE 'IBKR_STATUS_%' AND resolved_at_us IS NULL "
+            "AND subscription_id IN (SELECT subscription_id FROM subscriptions "
+            "WHERE run_id=? AND instrument_id=? AND feed_kind=?)",
+            parameters,
+        )
+        connection.execute(
+            "UPDATE runtime_state SET lifecycle='running', reason=NULL WHERE run_id=? "
+            "AND connection_state='connected' AND lifecycle='degraded' "
+            "AND reason LIKE 'IBKR_STATUS_%' AND NOT EXISTS (SELECT 1 FROM gaps "
+            "WHERE run_id=? AND resolved_at_us IS NULL AND continuity_required=1)",
+            (self.config.run_id, self.config.run_id),
+        )
+
     def receive(self, fence: CallbackFence, callback: MarketDataCallback) -> AdmissionResult:
         """External callback boundary: durable admission completes before return."""
 
@@ -2118,6 +2373,7 @@ class Recorder:
                 limit=limit,
                 authority=authority,
             )
+            self._fulfill_snapshot_interests_from_streams(now_us=now_us)
             self._heartbeat(now_us)
             if self._idea_runner is not None:
                 self._idea_runner.run_once(now_us=now_us)
@@ -2256,6 +2512,14 @@ class Recorder:
     def market_data_status(self, status: MarketDataStatus) -> None:
         """Persist a typed official status without broadening the broker surface."""
 
+        if status.request_id is not None:
+            with self._snapshot_handshake_lock:
+                if status.request_id in self._starting_dynamic_request_ids:
+                    pending = self._pending_dynamic_statuses.setdefault(status.request_id, [])
+                    if len(pending) >= 16:
+                        raise RecorderFatalError("dynamic request status buffer exceeded")
+                    pending.append(status)
+                    return
         if status.kind == "snapshot_end":
             self._complete_dynamic_snapshot(status)
             return
@@ -2344,14 +2608,15 @@ class Recorder:
             connection.commit()
         finally:
             connection.close()
+        if dynamic_plan is not None and status.kind != "recovered":
+            self._sync_interest_lifecycles(
+                dynamic_plan,
+                now_us=status.received_at_us,
+            )
 
     def _complete_dynamic_snapshot(self, status: MarketDataStatus) -> None:
         if status.request_id is None:
             return
-        with self._snapshot_handshake_lock:
-            if status.request_id in self._starting_dynamic_snapshot_ids:
-                self._pending_dynamic_snapshot_ends.setdefault(status.request_id, status)
-                return
         self._check_owned()
         state = self._authority_state()
         fence = next((item for item in state.fences if item.request_id == status.request_id), None)
@@ -2365,10 +2630,6 @@ class Recorder:
             or not spec.snapshot
         ):
             return
-        plan, _dynamic_specs = self._dynamic_plan(now_us=status.received_at_us)
-        interest_ids = self._planned_interest_ids(plan).get(
-            (spec.instrument_id, spec.feed_kind), ()
-        )
         with connect_v2(self.config.database) as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._verify_owned(connection)
@@ -2377,16 +2638,12 @@ class Recorder:
                 "WHERE subscription_id=? AND lifecycle!='closed'",
                 (status.received_at_us, fence.subscription_id),
             )
-            if interest_ids:
-                connection.execute(
-                    "UPDATE market_data_interests SET lifecycle='fulfilled', reason_code=NULL, "
-                    "updated_at_us=? WHERE interest_id IN (SELECT value FROM json_each(?)) "
-                    "AND lifecycle IN ('resolved','active')",
-                    (
-                        status.received_at_us,
-                        canonical_json_bytes(cast(JsonValue, interest_ids)).decode(),
-                    ),
-                )
+            connection.execute(
+                "UPDATE market_data_interests SET lifecycle='fulfilled', reason_code=NULL, "
+                "updated_at_us=? WHERE bound_subscription_id=? "
+                "AND lifecycle IN ('resolved','active')",
+                (status.received_at_us, fence.subscription_id),
+            )
             connection.commit()
         updated_plan, _dynamic_specs = self._dynamic_plan(now_us=status.received_at_us)
         self._sync_interest_lifecycles(updated_plan, now_us=status.received_at_us)

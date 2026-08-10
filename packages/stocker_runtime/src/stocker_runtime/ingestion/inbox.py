@@ -356,7 +356,7 @@ class CallbackInbox:
             subscription = connection.execute(
                 "SELECT 1 FROM subscriptions WHERE subscription_id = ? AND run_id = ? "
                 "AND recorder_generation = ? AND connection_generation = ? AND request_id = ? "
-                "AND lifecycle = 'active'",
+                "AND lifecycle IN ('connecting', 'active')",
                 (
                     fence.subscription_id,
                     fence.run_id,

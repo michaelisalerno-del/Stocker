@@ -1105,10 +1105,10 @@ def _insert_dynamic_interest(
         "underlying_instrument_id, asset_kind, minimum_days_to_expiry, "
         "maximum_days_to_expiry, option_right, strike_offset, reference_price, feed_kind, "
         "cadence, as_of_at_us, expires_at_us, required, priority, maximum_contracts, "
-        "input_event_ids_json, content_hash, lifecycle, next_attempt_at_us, created_at_us, "
+        "input_event_id, content_hash, lifecycle, next_attempt_at_us, created_at_us, "
         "updated_at_us) VALUES (?, 'run-1', 'instance-1', ?, ?, 'option', "
         "1, 1, 'call', 0, 100.0, 'quotes', 'snapshot', 20, 100, 1, 100, 1, "
-        "'[\"event-1\"]', ?, ?, 20, 20, ?)",
+        "'event-1', ?, ?, 20, 20, ?)",
         (
             interest_id,
             interest_key or f"key-{interest_id}",
@@ -1146,6 +1146,34 @@ def test_dynamic_interest_schema_enforces_scope_identity_and_exact_receipt(
             "UPDATE market_data_interests SET lifecycle='resolved', updated_at_us=21 "
             "WHERE interest_id='interest-1'"
         )
+        connection.execute(
+            "INSERT INTO runtime_state(run_id, recorder_generation, lifecycle, "
+            "connection_state, connection_generation) VALUES "
+            "('run-1', 1, 'running', 'connected', 1)"
+        )
+        connection.execute(
+            "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
+            "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
+            "requirements_hash, opened_at_us) VALUES ('option-subscription', 'run-1', 1, 1, "
+            "'option-1', 'quotes', 20, 'connecting', ?, 21)",
+            ("6" * 64,),
+        )
+        connection.execute(
+            "UPDATE market_data_interests SET bound_subscription_id='option-subscription' "
+            "WHERE interest_id='interest-1'"
+        )
+        connection.execute(
+            "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
+            "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
+            "requirements_hash, opened_at_us) VALUES ('wrong-subscription', 'run-1', 1, 1, "
+            "'instrument-1', 'quotes', 21, 'connecting', ?, 21)",
+            ("7" * 64,),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="subscription_binding"):
+            connection.execute(
+                "UPDATE market_data_interests SET bound_subscription_id='wrong-subscription' "
+                "WHERE interest_id='interest-1'"
+            )
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):
             connection.execute(
                 "UPDATE instrument_discovery_receipts SET strike=101 WHERE receipt_id='receipt-1'"
@@ -1216,9 +1244,19 @@ def test_dynamic_interest_query_indexes_are_exercised_by_bounded_lifecycle_plans
                 ("instance-1",),
             )
         )
+        retention_reference_plan = " ".join(
+            str(row["detail"])
+            for row in connection.execute(
+                "EXPLAIN QUERY PLAN SELECT 1 FROM market_data_interests "
+                "WHERE input_event_id=? LIMIT 1",
+                ("event-1",),
+            )
+        )
     assert "market_data_interests_run_lifecycle_idx" in pending_plan
     assert "instrument_discovery_receipts_instance_time_idx" in receipt_plan
     assert "market_data_interests_instance_updated_idx" in detail_plan
+    assert "market_data_interests_input_event_idx" in retention_reference_plan
+    assert "SCAN market_data_interests" not in retention_reference_plan
 
 
 def test_retention_counts_interest_receipt_cascade_before_releasing_input_event(

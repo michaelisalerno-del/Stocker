@@ -39,7 +39,7 @@ def _interest(**changes: object) -> MarketDataInterest:
         "required": True,
         "priority": 100,
         "maximum_contracts": 1,
-        "input_event_ids": ("event-1",),
+        "input_event_id": "event-1",
     }
     values.update(changes)
     return MarketDataInterest.model_validate(values)
@@ -51,8 +51,8 @@ def test_market_data_interest_is_bounded_causal_and_option_only() -> None:
         _interest(minimum_days_to_expiry=5, maximum_days_to_expiry=3)
     with pytest.raises(ValidationError, match="seven days"):
         _interest(expires_at_us=1_786_281_600_000_000 + 7 * 86_400_000_000 + 1)
-    with pytest.raises(ValidationError, match="unique"):
-        _interest(input_event_ids=("event-1", "event-1"))
+    with pytest.raises(ValidationError):
+        _interest(input_event_id="")
     with pytest.raises(ValidationError):
         _interest(asset_kind="stock")
 
@@ -175,6 +175,58 @@ def test_instrument_resolver_uses_metadata_then_one_exact_contract_query() -> No
     assert second.status == "resolved"
     assert backend.parameter_calls == 1
     assert backend.contract_calls[-1] == ("20260810", 100.0, "P")
+
+
+def test_instrument_resolver_selects_globally_nearest_strike_across_smart_classes() -> None:
+    backend = _DiscoveryBackend()
+    backend.option_parameters = lambda **_kwargs: (  # type: ignore[method-assign]
+        OptionParameterSet(
+            exchange="SMART",
+            trading_class="AAL-WIDE",
+            multiplier="100",
+            expirations=("20260810",),
+            strikes=(90.0, 120.0),
+        ),
+        OptionParameterSet(
+            exchange="SMART",
+            trading_class="AAL-TIGHT",
+            multiplier="100",
+            expirations=("20260810",),
+            strikes=(100.0, 105.0),
+        ),
+    )
+
+    def exact_contract(**kwargs: object) -> tuple[ContractCandidate, ...]:
+        expiry = str(kwargs["expiry"])
+        strike = float(kwargs["strike"])
+        right = str(kwargs["right"])
+        trading_class = str(kwargs["trading_class"])
+        backend.contract_calls.append((expiry, strike, right))
+        return (
+            ContractCandidate(
+                con_id=9001,
+                symbol="AAPL",
+                expiry=expiry,
+                strike=strike,
+                right=right,
+                multiplier="100",
+                exchange="SMART",
+                currency="USD",
+                trading_class=trading_class,
+            ),
+        )
+
+    backend.option_contracts = exact_contract  # type: ignore[method-assign]
+
+    resolver = InstrumentResolver(
+        backend,
+        underlyings={"AAPL": InstrumentSpec("AAPL", 265598, "stock", "AAPL", "SMART", "USD")},
+        completed_at_us=lambda: 1_786_281_600_000_123,
+    )
+    receipt = resolver.resolve(InterestResolutionRequest("interest-1", "instance-1", _interest()))
+
+    assert receipt.status == "resolved"
+    assert backend.contract_calls == [("20260810", 100.0, "C")]
 
 
 def test_instrument_resolver_rejects_ambiguous_exact_identity() -> None:

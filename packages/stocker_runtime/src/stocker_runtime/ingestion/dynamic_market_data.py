@@ -298,7 +298,7 @@ class InstrumentResolver:
         if len(parameter_sets) > MAX_OPTION_PARAMETER_SETS:
             return self._denied(request, "OPTION_METADATA_BOUND_EXCEEDED", 0)
         as_of_date = datetime.fromtimestamp(interest.as_of_at_us / 1_000_000, _NEW_YORK).date()
-        choices: list[tuple[str, float, OptionParameterSet]] = []
+        choices: list[tuple[str, float, float, OptionParameterSet]] = []
         for parameters in parameter_sets:
             if parameters.exchange != "SMART":
                 continue
@@ -320,12 +320,25 @@ class InstrumentResolver:
                 )
                 selected_index = nearest + interest.strike_offset
                 if 0 <= selected_index < len(strikes):
-                    choices.append((expiry, strikes[selected_index], parameters))
+                    choices.append(
+                        (
+                            expiry,
+                            abs(strikes[nearest] - interest.reference_price),
+                            strikes[selected_index],
+                            parameters,
+                        )
+                    )
         if not choices:
             return self._denied(request, "NO_MATCHING_EXPIRY_OR_STRIKE", 0)
-        expiry, strike, parameters = min(
+        expiry, _nearest_distance, strike, parameters = min(
             choices,
-            key=lambda item: (item[0], item[1], item[2].trading_class, item[2].multiplier),
+            key=lambda item: (
+                item[0],
+                item[1],
+                item[2],
+                item[3].trading_class,
+                item[3].multiplier,
+            ),
         )
         right = "C" if interest.option_right == "call" else "P"
         candidates = self._backend.option_contracts(

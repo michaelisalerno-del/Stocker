@@ -24,12 +24,7 @@ CREATE TABLE market_data_interests (
     required INTEGER NOT NULL CHECK(required IN (0, 1)),
     priority INTEGER NOT NULL CHECK(priority BETWEEN 0 AND 1000),
     maximum_contracts INTEGER NOT NULL CHECK(maximum_contracts = 1),
-    input_event_ids_json TEXT NOT NULL CHECK(
-        stocker_canonical_json(input_event_ids_json) = 1
-        AND json_type(input_event_ids_json) = 'array'
-        AND json_array_length(input_event_ids_json) BETWEEN 1 AND 256
-        AND length(CAST(input_event_ids_json AS BLOB)) <= 32768
-    ),
+    input_event_id TEXT NOT NULL REFERENCES market_events(event_id),
     content_hash TEXT NOT NULL CHECK(length(content_hash) = 64),
     lifecycle TEXT NOT NULL CHECK(
         lifecycle IN (
@@ -41,6 +36,7 @@ CREATE TABLE market_data_interests (
     next_attempt_at_us INTEGER NOT NULL CHECK(next_attempt_at_us >= 0),
     created_at_us INTEGER NOT NULL CHECK(created_at_us >= 0),
     updated_at_us INTEGER NOT NULL CHECK(updated_at_us >= created_at_us),
+    bound_subscription_id TEXT REFERENCES subscriptions(subscription_id) ON DELETE SET NULL,
     UNIQUE(instance_id, interest_key, as_of_at_us)
 ) STRICT;
 CREATE INDEX market_data_interests_run_lifecycle_idx
@@ -49,6 +45,11 @@ CREATE INDEX market_data_interests_instance_expiry_idx
     ON market_data_interests(instance_id, expires_at_us, interest_id);
 CREATE INDEX market_data_interests_instance_updated_idx
     ON market_data_interests(instance_id, updated_at_us DESC, interest_id);
+CREATE INDEX market_data_interests_input_event_idx
+    ON market_data_interests(input_event_id, interest_id);
+CREATE INDEX market_data_interests_bound_subscription_idx
+    ON market_data_interests(bound_subscription_id, lifecycle, interest_id)
+    WHERE bound_subscription_id IS NOT NULL;
 CREATE INDEX market_data_interests_retention_idx
     ON market_data_interests(updated_at_us, interest_id)
     WHERE lifecycle IN ('fulfilled', 'denied', 'expired', 'cancelled');
@@ -56,14 +57,10 @@ CREATE INDEX market_data_interests_retention_idx
 CREATE TRIGGER market_data_interests_input_provenance_insert
 BEFORE INSERT ON market_data_interests
 BEGIN
-    SELECT CASE WHEN EXISTS (
-        SELECT value FROM json_each(NEW.input_event_ids_json)
-        GROUP BY value HAVING count(*) > 1
-    ) OR EXISTS (
-        SELECT 1 FROM json_each(NEW.input_event_ids_json) input
-        LEFT JOIN market_events event
-          ON event.event_id=input.value AND event.run_id=NEW.run_id
-        WHERE event.event_id IS NULL OR event.event_at_us>NEW.as_of_at_us
+    SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM market_events event
+        WHERE event.event_id=NEW.input_event_id AND event.run_id=NEW.run_id
+          AND event.event_at_us<=NEW.as_of_at_us
     ) OR NOT EXISTS (
         SELECT 1 FROM idea_instances instance
         WHERE instance.instance_id=NEW.instance_id AND instance.run_id=NEW.run_id
@@ -83,7 +80,7 @@ BEFORE UPDATE OF
     interest_id, run_id, instance_id, interest_key, underlying_instrument_id,
     asset_kind, minimum_days_to_expiry, maximum_days_to_expiry, option_right,
     strike_offset, reference_price, feed_kind, cadence, as_of_at_us, expires_at_us,
-    required, priority, maximum_contracts, input_event_ids_json, content_hash, created_at_us
+    required, priority, maximum_contracts, input_event_id, content_hash, created_at_us
 ON market_data_interests
 BEGIN
     SELECT RAISE(ABORT, 'market_data_interest_identity_immutable');
@@ -160,6 +157,28 @@ BEGIN
               AND instrument.option_multiplier=NEW.multiplier
         )
     ) THEN RAISE(ABORT, 'instrument_discovery_receipt_scope_mismatch') END;
+END;
+
+CREATE TRIGGER market_data_interests_subscription_binding_update
+BEFORE UPDATE OF bound_subscription_id ON market_data_interests
+WHEN NEW.bound_subscription_id IS NOT NULL
+BEGIN
+    SELECT CASE WHEN NEW.lifecycle NOT IN ('resolved', 'active') OR NOT EXISTS (
+        SELECT 1 FROM subscriptions subscription
+        JOIN runtime_state state
+          ON state.run_id=subscription.run_id
+         AND state.recorder_generation=subscription.recorder_generation
+         AND state.connection_generation=subscription.connection_generation
+        JOIN instrument_discovery_receipts receipt
+          ON receipt.interest_id=NEW.interest_id
+         AND receipt.status='resolved'
+         AND receipt.instrument_id=subscription.instrument_id
+        WHERE subscription.subscription_id=NEW.bound_subscription_id
+          AND subscription.run_id=NEW.run_id
+          AND subscription.feed_kind=NEW.feed_kind
+          AND subscription.lifecycle IN ('connecting', 'active', 'degraded', 'cancelling')
+          AND (NEW.cadence='snapshot' OR subscription.snapshot=0)
+    ) THEN RAISE(ABORT, 'market_data_interest_subscription_binding_invalid') END;
 END;
 
 CREATE TRIGGER instrument_discovery_receipts_immutable_update

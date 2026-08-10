@@ -100,7 +100,7 @@ class MarketDataInterest(DomainModel):
     required: bool
     priority: int = Field(ge=0, le=1_000)
     maximum_contracts: Literal[1] = 1
-    input_event_ids: tuple[str, ...] = Field(min_length=1, max_length=MAX_EVENTS_PER_BATCH)
+    input_event_id: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def bounded_causal_window(self) -> Self:
@@ -110,8 +110,6 @@ class MarketDataInterest(DomainModel):
             raise ValueError("interest expiry must follow its causal as-of time")
         if self.expires_at_us - self.as_of_at_us > MAX_INTEREST_LIFETIME_US:
             raise ValueError("interest lifetime must not exceed seven days")
-        if len(set(self.input_event_ids)) != len(self.input_event_ids):
-            raise ValueError("interest input event ids must be unique")
         return self
 
 

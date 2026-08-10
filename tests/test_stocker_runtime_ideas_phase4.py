@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import pytest
 
@@ -674,11 +674,18 @@ class _EarlyLineageProposalPlugin:
 
 
 class _InterestPlugin:
-    def __init__(self, original: IdeaPlugin, *, lifetime_us: int = 3_600_000_000) -> None:
+    def __init__(
+        self,
+        original: IdeaPlugin,
+        *,
+        lifetime_us: int = 3_600_000_000,
+        cadence: Literal["snapshot", "stream"] = "snapshot",
+    ) -> None:
         self._manifest = IdeaManifest.model_validate(
             {**original.manifest.model_dump(mode="python"), "maximum_interests_per_batch": 1}
         )
         self._lifetime_us = lifetime_us
+        self._cadence = cadence
 
     @property
     def manifest(self) -> IdeaManifest:
@@ -704,13 +711,13 @@ class _InterestPlugin:
                     option_right="call",
                     strike_offset=0,
                     reference_price=100.0,
-                    cadence="snapshot",
+                    cadence=self._cadence,
                     as_of_at_us=first.event_at_us,
                     expires_at_us=first.event_at_us + self._lifetime_us,
                     required=True,
                     priority=100,
                     maximum_contracts=1,
-                    input_event_ids=(first.event_id,),
+                    input_event_id=first.event_id,
                 ),
             ),
         )
@@ -732,9 +739,63 @@ def _bounded_interest(interest_key: str, *, option_right: str) -> MarketDataInte
             "expires_at_us": as_of_at_us + 3_600_000_000,
             "required": True,
             "priority": 100,
-            "input_event_ids": ("event-1",),
+            "input_event_id": "event-1",
         }
     )
+
+
+def _insert_resolved_interest_fixture(
+    connection: sqlite3.Connection,
+    activation: IdeaActivation,
+    *,
+    ordinal: int,
+    completed_at_us: int,
+    lifecycle: str,
+) -> tuple[str, str]:
+    interest_key = f"receipt-priority-{ordinal}"
+    IdeaRunner._insert_interest(
+        connection,
+        activation,
+        _bounded_interest(interest_key, option_right="call"),
+        1_000 + ordinal,
+    )
+    interest_id = str(
+        connection.execute(
+            "SELECT interest_id FROM market_data_interests WHERE instance_id=? AND interest_key=?",
+            (activation.instance_id, interest_key),
+        ).fetchone()[0]
+    )
+    instrument_id = f"option-priority-{ordinal}"
+    connection.execute(
+        "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+        "exchange, currency, option_expiry, option_strike, option_right, option_multiplier) "
+        "VALUES (?, ?, ?, 'option', 'AAL', 'SMART', 'USD', '20260804', '100', 'call', '100')",
+        (instrument_id, hashlib.sha256(instrument_id.encode()).hexdigest(), 20_000 + ordinal),
+    )
+    connection.execute(
+        "INSERT INTO instrument_discovery_receipts(receipt_id, interest_id, run_id, "
+        "instance_id, status, instrument_id, expiry, strike, option_right, multiplier, "
+        "candidates_inspected, completed_at_us) VALUES (?, ?, 'run-1', ?, 'resolved', ?, "
+        "'20260804', 100, 'call', '100', 1, ?)",
+        (
+            f"receipt-priority-{ordinal}",
+            interest_id,
+            activation.instance_id,
+            instrument_id,
+            completed_at_us,
+        ),
+    )
+    connection.execute(
+        "UPDATE market_data_interests SET lifecycle='resolved', updated_at_us=? "
+        "WHERE interest_id=?",
+        (completed_at_us, interest_id),
+    )
+    if lifecycle != "resolved":
+        connection.execute(
+            "UPDATE market_data_interests SET lifecycle=?, updated_at_us=? WHERE interest_id=?",
+            (lifecycle, completed_at_us + 1, interest_id),
+        )
+    return interest_id, instrument_id
 
 
 def test_runner_commits_causal_interest_and_loads_resolved_dynamic_events(tmp_path: Path) -> None:
@@ -776,7 +837,7 @@ def test_runner_commits_causal_interest_and_loads_resolved_dynamic_events(tmp_pa
             "SELECT * FROM market_data_interests WHERE instance_id=?", (activation.instance_id,)
         ).fetchone()
         assert interest is not None
-        assert json.loads(interest["input_event_ids_json"]) == ["event-1"]
+        assert interest["input_event_id"] == "event-1"
         assert interest["lifecycle"] == "pending"
         connection.execute(
             "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
@@ -824,6 +885,125 @@ def test_runner_commits_causal_interest_and_loads_resolved_dynamic_events(tmp_pa
     assert loaded is not None
     assert tuple(event.event_id for event in loaded[1].events) == ("option-event-2",)
     assert loaded[1].discovery_receipts[0].instrument_id == "ibkr-option-9001"
+
+
+def test_runner_prioritizes_active_receipts_over_newer_terminal_history(tmp_path: Path) -> None:
+    database = tmp_path / "runner-active-receipt-priority.sqlite3"
+    _seed(database)
+    original = discover_plugins((_config(),))[0]
+    requirement = MarketDataRequirement(
+        instrument_id="AAL",
+        feed_kind="bars",
+        event_kind="bar",
+        cadence="5s",
+        gaps_block=False,
+        staleness_block=False,
+    )
+    discovered = replace(original, requirements=(requirement,))
+    runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    activated = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    activation = discovered.activation(
+        instance_id=activated.instance_id,
+        run_id="run-1",
+        data_class=ProtectedDataClass.PROSPECTIVE,
+        activated_at_us=100,
+    )
+    base_time = int(datetime(2026, 8, 3, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    with connect_v2(database) as connection:
+        _event(connection, 1, "AAL", 100.0)
+        _active_interest_id, active_instrument_id = _insert_resolved_interest_fixture(
+            connection,
+            activation,
+            ordinal=0,
+            completed_at_us=base_time + 1,
+            lifecycle="resolved",
+        )
+        for ordinal in range(1, 65):
+            _insert_resolved_interest_fixture(
+                connection,
+                activation,
+                ordinal=ordinal,
+                completed_at_us=base_time + 100 + ordinal,
+                lifecycle="fulfilled",
+            )
+        _persist_market_event(
+            connection,
+            2,
+            MarketEvent(
+                event_id="active-option-event",
+                instrument_id=active_instrument_id,
+                feed_kind="quotes",
+                event_kind="quote",
+                event_at_us=base_time + 500,
+                received_at_us=base_time + 501,
+                payload={"bid": 1.0, "ask": 1.1},
+            ),
+        )
+
+    loaded = runner._load_batch(activation.instance_id)
+    runner.close()
+
+    assert loaded is not None
+    assert any(
+        receipt.instrument_id == active_instrument_id for receipt in loaded[1].discovery_receipts
+    )
+    assert any(event.event_id == "active-option-event" for event in loaded[1].events)
+
+
+def test_runner_excludes_discovery_receipts_completed_after_batch_causal_time(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "runner-receipt-causality.sqlite3"
+    _seed(database)
+    original = discover_plugins((_config(),))[0]
+    requirement = MarketDataRequirement(
+        instrument_id="AAL",
+        feed_kind="bars",
+        event_kind="bar",
+        cadence="5s",
+        gaps_block=False,
+        staleness_block=False,
+    )
+    discovered = replace(original, requirements=(requirement,))
+    runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    activated = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    activation = discovered.activation(
+        instance_id=activated.instance_id,
+        run_id="run-1",
+        data_class=ProtectedDataClass.PROSPECTIVE,
+        activated_at_us=100,
+    )
+    base_time = int(datetime(2026, 8, 3, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    with connect_v2(database) as connection:
+        _event(connection, 1, "AAL", 100.0)
+        _interest_id, future_instrument_id = _insert_resolved_interest_fixture(
+            connection,
+            activation,
+            ordinal=0,
+            completed_at_us=base_time + 1_000,
+            lifecycle="resolved",
+        )
+        _persist_market_event(
+            connection,
+            2,
+            MarketEvent(
+                event_id="pre-receipt-option-event",
+                instrument_id=future_instrument_id,
+                feed_kind="quotes",
+                event_kind="quote",
+                event_at_us=base_time + 500,
+                received_at_us=base_time + 501,
+                payload={"bid": 1.0, "ask": 1.1},
+            ),
+        )
+
+    loaded = runner._load_batch(activation.instance_id)
+    runner.close()
+
+    assert loaded is not None
+    assert loaded[1].causal_through_at_us < base_time + 1_000
+    assert loaded[1].discovery_receipts == ()
+    assert all(event.event_id != "pre-receipt-option-event" for event in loaded[1].events)
 
 
 def test_runner_caps_nonterminal_interests_per_instance(tmp_path: Path) -> None:
@@ -2013,6 +2193,7 @@ class _DynamicRecorderAdapter(_RecorderAdapter):
         fail_parameter_calls: int = 0,
         inline_snapshot_at_us: int | None = None,
         deferred_snapshot_at_us: int | None = None,
+        inline_rejection_at_us: int | None = None,
     ) -> None:
         super().__init__()
         self.cancelled_request_ids: list[int] = []
@@ -2024,6 +2205,7 @@ class _DynamicRecorderAdapter(_RecorderAdapter):
         self.fail_parameter_calls = fail_parameter_calls
         self.inline_snapshot_at_us = inline_snapshot_at_us
         self.deferred_snapshot_at_us = deferred_snapshot_at_us
+        self.inline_rejection_at_us = inline_rejection_at_us
         self.release_snapshot = threading.Event()
         self.snapshot_completed = threading.Event()
 
@@ -2035,6 +2217,16 @@ class _DynamicRecorderAdapter(_RecorderAdapter):
             self.fail_dynamic_subscriptions -= 1
             raise RuntimeError("synthetic subscription failure")
         super().subscribe(fence)
+        if request_id >= 2_000_000 and self.inline_rejection_at_us is not None:
+            cast(Callable[[MarketDataStatus], None], self.status_callback)(
+                MarketDataStatus(
+                    kind="pacing",
+                    code=420,
+                    request_id=request_id,
+                    message="synthetic prompt pacing rejection",
+                    received_at_us=self.inline_rejection_at_us,
+                )
+            )
         if request_id >= 2_000_000 and self.inline_snapshot_at_us is not None:
             cast(Callable[[MarketDataStatus], None], self.status_callback)(
                 MarketDataStatus(
@@ -2439,10 +2631,17 @@ def _synthetic_discovered(config: IdeaConfig) -> DiscoveredPlugin:
 
 
 def _dynamic_discovered(
-    config: IdeaConfig, *, interest_lifetime_us: int = 3_600_000_000
+    config: IdeaConfig,
+    *,
+    interest_lifetime_us: int = 3_600_000_000,
+    cadence: Literal["snapshot", "stream"] = "snapshot",
 ) -> DiscoveredPlugin:
     base = _synthetic_discovered(config)
-    plugin = _InterestPlugin(base.plugin, lifetime_us=interest_lifetime_us)
+    plugin = _InterestPlugin(
+        base.plugin,
+        lifetime_us=interest_lifetime_us,
+        cadence=cadence,
+    )
     manifest_json = plugin.manifest.to_canonical_json().decode()
     requirement = MarketDataRequirement(
         feed_kind="bars",
@@ -2468,6 +2667,7 @@ def _dynamic_recorder(
     adapter: _DynamicRecorderAdapter,
     *,
     owner_id: str,
+    line_limit: int = 100,
 ) -> Recorder:
     return Recorder(
         RecorderConfig(
@@ -2482,6 +2682,7 @@ def _dynamic_recorder(
             external_read_only_verified=True,
             config_hash="a" * 64,
             git_commit="deadbee",
+            market_data_line_limit=line_limit,
             idea_config=idea_path,
         ),
         adapter,
@@ -2572,11 +2773,12 @@ def test_dynamic_interest_records_exact_option_and_recovers_across_restart(
     second = _dynamic_recorder(database, idea_path, second_adapter, owner_id="owner-2")
     second_state = second.start(now_us=restart_at_us, instruments=(), subscriptions=())
     new_dynamic_fence = next(
-        fence for fence in second_state.fences if fence.request_id == dynamic_request_id
+        fence for fence in second_state.fences if cast(int, fence.request_id) >= 2_000_000
     )
     assert second_state.recorder_generation == first_state.recorder_generation + 1
+    assert new_dynamic_fence.request_id != dynamic_request_id
     assert second_adapter.parameter_calls == []
-    assert second_adapter.subscribed_request_ids[-1] == dynamic_request_id
+    assert second_adapter.subscribed_request_ids[-1] == new_dynamic_fence.request_id
 
     stale = second.receive(
         old_dynamic_fence,
@@ -2609,8 +2811,352 @@ def test_dynamic_interest_records_exact_option_and_recovers_across_restart(
         ).fetchone()[0]
     assert lifecycle == "expired"
     assert closed == "closed"
-    assert second_adapter.cancelled_request_ids == [dynamic_request_id]
+    assert second_adapter.cancelled_request_ids == [new_dynamic_fence.request_id]
     second.stop(now_us=expires_at_us + 2)
+
+
+def test_repeated_same_contract_snapshot_gets_fresh_fence_and_rejects_late_callback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-repeated-contract.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _DynamicRecorderAdapter()
+    recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
+    first_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+    recorder.market_data_status(
+        MarketDataStatus(
+            kind="snapshot_end",
+            code=0,
+            request_id=first_fence.request_id,
+            message="first complete",
+            received_at_us=event_at_us + 3,
+        )
+    )
+    assert recorder.state is not None
+    base_fence = next(
+        fence for fence in recorder.state.fences if cast(int, fence.request_id) < 2_000_000
+    )
+    recorder.receive(
+        base_fence,
+        MarketDataCallback(
+            callback_kind="bar",
+            received_at_us=event_at_us + 11,
+            provider_at_us=event_at_us + 10,
+            payload={
+                "event_at_us": event_at_us + 10,
+                "open": 100.0,
+                "high": 102.0,
+                "low": 99.0,
+                "close": 101.0,
+                "volume": 1.0,
+            },
+        ),
+    )
+    recorder.drain(now_us=event_at_us + 12)
+    assert recorder.state is not None
+    second_fence = next(
+        fence for fence in recorder.state.fences if cast(int, fence.request_id) >= 2_000_000
+    )
+
+    assert second_fence.request_id != first_fence.request_id
+    assert second_fence.subscription_id != first_fence.subscription_id
+    late = recorder.receive(
+        first_fence,
+        MarketDataCallback(
+            callback_kind="quote",
+            received_at_us=event_at_us + 13,
+            provider_at_us=None,
+            payload={"event_at_us": event_at_us + 13, "bid": 1.0, "ask": 1.1},
+        ),
+    )
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT failure_code FROM callback_inbox WHERE source_sequence=?",
+                (late.source_sequence,),
+            ).fetchone()[0]
+            == "STALE_REQUEST_GENERATION"
+        )
+        rows = connection.execute(
+            "SELECT request_id, lifecycle FROM subscriptions WHERE request_id>=2000000 "
+            "ORDER BY opened_at_us, subscription_id"
+        ).fetchall()
+    assert len(rows) == 2
+    assert rows[-1]["lifecycle"] == "active"
+    recorder.stop(now_us=event_at_us + 14)
+
+
+def test_snapshot_completion_fulfills_only_interests_bound_when_request_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-snapshot-binding.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    recorder = _dynamic_recorder(database, idea_path, _DynamicRecorderAdapter(), owner_id="owner")
+    first_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+    assert recorder.state is not None
+    base_fence = next(
+        fence for fence in recorder.state.fences if cast(int, fence.request_id) < 2_000_000
+    )
+    recorder.receive(
+        base_fence,
+        MarketDataCallback(
+            callback_kind="bar",
+            received_at_us=event_at_us + 11,
+            provider_at_us=event_at_us + 10,
+            payload={
+                "event_at_us": event_at_us + 10,
+                "open": 100.0,
+                "high": 102.0,
+                "low": 99.0,
+                "close": 101.0,
+                "volume": 1.0,
+            },
+        ),
+    )
+    recorder.drain(now_us=event_at_us + 12)
+
+    recorder.market_data_status(
+        MarketDataStatus(
+            kind="snapshot_end",
+            code=0,
+            request_id=first_fence.request_id,
+            message="first complete",
+            received_at_us=event_at_us + 13,
+        )
+    )
+
+    with connect_v2(database) as connection:
+        interests = connection.execute(
+            "SELECT lifecycle, bound_subscription_id FROM market_data_interests "
+            "ORDER BY as_of_at_us"
+        ).fetchall()
+    assert [row["lifecycle"] for row in interests] == ["fulfilled", "resolved"]
+    assert interests[0]["bound_subscription_id"] == first_fence.subscription_id
+    assert interests[1]["bound_subscription_id"] is None
+
+    recorder.drain(now_us=event_at_us + 14)
+    assert recorder.state is not None
+    second_fence = next(
+        fence for fence in recorder.state.fences if cast(int, fence.request_id) >= 2_000_000
+    )
+    assert second_fence.request_id != first_fence.request_id
+    with connect_v2(database) as connection:
+        second = connection.execute(
+            "SELECT lifecycle, bound_subscription_id FROM market_data_interests "
+            "ORDER BY as_of_at_us DESC LIMIT 1"
+        ).fetchone()
+    assert tuple(second) == ("active", second_fence.subscription_id)
+    recorder.stop(now_us=event_at_us + 15)
+
+
+def test_snapshot_interest_merged_into_stream_waits_for_a_causal_stream_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-snapshot-on-stream.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured, cadence="stream")
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    recorder = _dynamic_recorder(database, idea_path, _DynamicRecorderAdapter(), owner_id="owner")
+    stream_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+    recorder._idea_runner = None
+
+    with connect_v2(database) as connection:
+        first_interest = connection.execute("SELECT * FROM market_data_interests").fetchone()
+        first_receipt = connection.execute("SELECT * FROM instrument_discovery_receipts").fetchone()
+        instance_id = str(first_interest["instance_id"])
+        activation = discovered.activation(
+            instance_id=instance_id,
+            run_id="run-dynamic-shadow",
+            data_class=ProtectedDataClass.SHADOW,
+            activated_at_us=event_at_us,
+        )
+        snapshot_as_of_us = event_at_us + 3
+        IdeaRunner._insert_interest(
+            connection,
+            activation,
+            MarketDataInterest(
+                interest_key="snapshot-on-existing-stream",
+                underlying_instrument_id="AAL",
+                minimum_days_to_expiry=1,
+                maximum_days_to_expiry=1,
+                option_right="call",
+                strike_offset=0,
+                reference_price=100.0,
+                cadence="snapshot",
+                as_of_at_us=snapshot_as_of_us,
+                expires_at_us=snapshot_as_of_us + 3_600_000_000,
+                required=True,
+                priority=100,
+                maximum_contracts=1,
+                input_event_id=str(first_interest["input_event_id"]),
+            ),
+            snapshot_as_of_us,
+        )
+        snapshot_interest = connection.execute(
+            "SELECT * FROM market_data_interests WHERE interest_key='snapshot-on-existing-stream'"
+        ).fetchone()
+        connection.execute(
+            "INSERT INTO instrument_discovery_receipts(receipt_id, interest_id, run_id, "
+            "instance_id, status, instrument_id, expiry, strike, option_right, multiplier, "
+            "candidates_inspected, completed_at_us) VALUES ('receipt-snapshot-on-stream', ?, "
+            "'run-dynamic-shadow', ?, 'resolved', ?, ?, ?, ?, ?, 1, ?)",
+            (
+                snapshot_interest["interest_id"],
+                instance_id,
+                first_receipt["instrument_id"],
+                first_receipt["expiry"],
+                first_receipt["strike"],
+                first_receipt["option_right"],
+                first_receipt["multiplier"],
+                snapshot_as_of_us + 1,
+            ),
+        )
+        connection.execute(
+            "UPDATE market_data_interests SET lifecycle='resolved', updated_at_us=? "
+            "WHERE interest_id=?",
+            (snapshot_as_of_us + 1, snapshot_interest["interest_id"]),
+        )
+
+    recorder.drain(now_us=event_at_us + 5)
+    with connect_v2(database) as connection:
+        queued = connection.execute(
+            "SELECT lifecycle, bound_subscription_id FROM market_data_interests "
+            "WHERE interest_key='snapshot-on-existing-stream'"
+        ).fetchone()
+    assert tuple(queued) == ("active", stream_fence.subscription_id)
+
+    recorder.receive(
+        stream_fence,
+        MarketDataCallback(
+            callback_kind="quote",
+            received_at_us=event_at_us + 6,
+            provider_at_us=None,
+            payload={"event_at_us": event_at_us + 6, "bid": 1.0, "ask": 1.1},
+        ),
+    )
+    recorder.drain(now_us=event_at_us + 7)
+    with connect_v2(database) as connection:
+        fulfilled = connection.execute(
+            "SELECT lifecycle, bound_subscription_id FROM market_data_interests "
+            "WHERE interest_key='snapshot-on-existing-stream'"
+        ).fetchone()
+    assert tuple(fulfilled) == ("fulfilled", stream_fence.subscription_id)
+    recorder.stop(now_us=event_at_us + 8)
+
+
+def test_prompt_dynamic_pacing_status_is_retried_and_resolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-inline-pacing.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _DynamicRecorderAdapter(inline_rejection_at_us=event_at_us + 3)
+    recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
+    first_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+
+    with connect_v2(database) as connection:
+        first = connection.execute(
+            "SELECT lifecycle FROM subscriptions WHERE subscription_id=?",
+            (first_fence.subscription_id,),
+        ).fetchone()
+        interest = connection.execute(
+            "SELECT attempts, reason_code FROM market_data_interests"
+        ).fetchone()
+    assert first["lifecycle"] == "disconnected"
+    assert tuple(interest) == (1, "SUBSCRIPTION_RETRY")
+
+    adapter.inline_rejection_at_us = None
+    recorder.drain(now_us=event_at_us + 1_000_004)
+    assert recorder.state is not None
+    active_fence = next(
+        fence for fence in recorder.state.fences if cast(int, fence.request_id) >= 2_000_000
+    )
+    assert active_fence.request_id != first_fence.request_id
+    with connect_v2(database) as connection:
+        open_status_gaps = connection.execute(
+            "SELECT count(*) FROM gaps WHERE reason LIKE 'IBKR_STATUS_%' AND resolved_at_us IS NULL"
+        ).fetchone()[0]
+        open_status_incidents = connection.execute(
+            "SELECT count(*) FROM incidents WHERE code LIKE 'IBKR_STATUS_%' "
+            "AND resolved_at_us IS NULL"
+        ).fetchone()[0]
+        state = connection.execute(
+            "SELECT lifecycle, reason FROM runtime_state WHERE run_id='run-dynamic-shadow'"
+        ).fetchone()
+    assert open_status_gaps == open_status_incidents == 0
+    assert tuple(state) == ("running", None)
+    recorder.stop(now_us=event_at_us + 1_000_005)
+
+
+def test_fully_deferred_required_interest_records_capacity_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-capacity-deferred.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    recorder = _dynamic_recorder(
+        database,
+        idea_path,
+        _DynamicRecorderAdapter(),
+        owner_id="owner",
+        line_limit=1,
+    )
+
+    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    recorder.receive(
+        state.fences[0],
+        MarketDataCallback(
+            callback_kind="bar",
+            received_at_us=event_at_us + 1,
+            provider_at_us=event_at_us,
+            payload={
+                "event_at_us": event_at_us,
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "volume": 1.0,
+            },
+        ),
+    )
+    recorder.drain(now_us=event_at_us + 2)
+
+    with connect_v2(database) as connection:
+        interest = connection.execute(
+            "SELECT lifecycle, reason_code FROM market_data_interests"
+        ).fetchone()
+        incident = connection.execute(
+            "SELECT code, resolved_at_us FROM incidents WHERE code='DYNAMIC_MARKET_DATA_CAPACITY'"
+        ).fetchone()
+    assert tuple(interest) == ("resolved", "CAPACITY_DEFERRED")
+    assert incident is not None and incident["resolved_at_us"] is None
+    recorder.stop(now_us=event_at_us + 3)
 
 
 def test_restored_dynamic_snapshot_may_complete_inline_during_subscribe(
@@ -2630,7 +3176,10 @@ def test_restored_dynamic_snapshot_may_complete_inline_during_subscribe(
     restart_at_us = event_at_us + 60_000_003
     adapter = _DynamicRecorderAdapter(inline_snapshot_at_us=restart_at_us + 1)
     second = _dynamic_recorder(database, idea_path, adapter, owner_id="owner-2")
-    second.start(now_us=restart_at_us, instruments=(), subscriptions=())
+    second_state = second.start(now_us=restart_at_us, instruments=(), subscriptions=())
+    restored_fence = next(
+        fence for fence in second_state.fences if cast(int, fence.request_id) >= 2_000_000
+    )
 
     with connect_v2(database) as connection:
         assert (
@@ -2640,11 +3189,13 @@ def test_restored_dynamic_snapshot_may_complete_inline_during_subscribe(
         assert (
             connection.execute(
                 "SELECT lifecycle FROM subscriptions WHERE subscription_id=?",
-                (dynamic_fence.subscription_id,),
+                (restored_fence.subscription_id,),
             ).fetchone()[0]
             == "closed"
         )
-    assert adapter.subscribe_attempts.count(cast(int, dynamic_fence.request_id)) == 1
+    assert restored_fence.request_id != dynamic_fence.request_id
+    assert adapter.subscribe_attempts.count(cast(int, restored_fence.request_id)) == 1
+    assert adapter.subscribe_attempts.count(cast(int, dynamic_fence.request_id)) == 0
     second.stop(now_us=restart_at_us + 2)
 
 
@@ -2691,20 +3242,23 @@ def test_dynamic_subscription_failure_retries_without_duplicate_identity(
     assert adapter.subscribe_attempts.count(dynamic_request_id) == 1
     recorder.drain(now_us=event_at_us + 1_000_003)
 
+    dynamic_attempts = tuple(item for item in adapter.subscribe_attempts if item >= 2_000_000)
     with connect_v2(database) as connection:
         rows = connection.execute(
-            "SELECT subscription_id, lifecycle FROM subscriptions WHERE request_id=?",
-            (dynamic_request_id,),
+            "SELECT request_id, subscription_id, lifecycle FROM subscriptions "
+            "WHERE request_id>=2000000 ORDER BY request_id"
         ).fetchall()
         interest_retry = connection.execute(
             "SELECT attempts, next_attempt_at_us, reason_code FROM market_data_interests"
         ).fetchone()
-    assert adapter.subscribe_attempts.count(dynamic_request_id) == 2
-    assert [(row["subscription_id"], row["lifecycle"]) for row in rows] == [
-        (first_row["subscription_id"], "active")
+    assert len(dynamic_attempts) == len(set(dynamic_attempts)) == 2
+    assert dynamic_attempts[0] == dynamic_request_id
+    assert [(row["request_id"], row["subscription_id"], row["lifecycle"]) for row in rows] == [
+        (dynamic_request_id, first_row["subscription_id"], "closed"),
+        (dynamic_attempts[1], rows[1]["subscription_id"], "active"),
     ]
     assert tuple(interest_retry) == (0, 0, None)
-    recorder.stop(now_us=event_at_us + 4)
+    recorder.stop(now_us=event_at_us + 1_000_004)
 
 
 def test_dynamic_subscription_retry_exhaustion_releases_the_line(
@@ -2727,18 +3281,20 @@ def test_dynamic_subscription_retry_exhaustion_releases_the_line(
 
     with connect_v2(database) as connection:
         interest = connection.execute("SELECT * FROM market_data_interests").fetchone()
-        subscription = connection.execute(
-            "SELECT lifecycle FROM subscriptions WHERE subscription_id=?",
-            (dynamic_fence.subscription_id,),
-        ).fetchone()
+        subscriptions = connection.execute(
+            "SELECT request_id, lifecycle FROM subscriptions WHERE request_id>=2000000 "
+            "ORDER BY request_id"
+        ).fetchall()
         incident_count = connection.execute(
             "SELECT count(*) FROM incidents WHERE code='DYNAMIC_SUBSCRIBE_FAILED'"
         ).fetchone()[0]
-    assert adapter.subscribe_attempts.count(cast(int, dynamic_fence.request_id)) == 5
+    dynamic_attempts = tuple(item for item in adapter.subscribe_attempts if item >= 2_000_000)
+    assert len(dynamic_attempts) == len(set(dynamic_attempts)) == 5
+    assert dynamic_attempts[0] == dynamic_fence.request_id
     assert interest["attempts"] == 5
     assert interest["reason_code"] == "SUBSCRIPTION_RETRY_EXHAUSTED"
-    assert subscription["lifecycle"] == "closed"
-    assert incident_count == 1
+    assert all(row["lifecycle"] == "closed" for row in subscriptions)
+    assert incident_count == 5
     recorder.stop(now_us=first_attempt_at_us + 31_000_001)
 
 
@@ -2829,7 +3385,7 @@ def test_dynamic_discovery_retries_are_backed_off_and_bounded(
     )
     first_attempt_at_us = event_at_us + 2
     recorder.drain(now_us=first_attempt_at_us)
-    for elapsed_us in (1_000_000, 3_000_000, 7_000_000, 15_000_000):
+    for elapsed_us in (1_500_000, 4_000_000, 8_500_000, 17_000_000):
         recorder.drain(now_us=first_attempt_at_us + elapsed_us)
 
     with connect_v2(database) as connection:
@@ -2844,7 +3400,7 @@ def test_dynamic_discovery_retries_are_backed_off_and_bounded(
     assert receipt["status"] == "denied"
     assert receipt["reason_code"] == "DISCOVERY_RETRY_EXHAUSTED"
     assert retry_incidents == 4
-    recorder.stop(now_us=first_attempt_at_us + 15_000_001)
+    recorder.stop(now_us=first_attempt_at_us + 17_000_001)
 
 
 def test_dynamic_discovery_retry_never_moves_past_interest_expiry(
@@ -2894,6 +3450,54 @@ def test_dynamic_discovery_retry_never_moves_past_interest_expiry(
             == "expired"
         )
     recorder.stop(now_us=int(interest["expires_at_us"]) + 2)
+
+
+def test_dynamic_discovery_response_after_expiry_never_resolves_or_subscribes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-discovery-completes-after-expiry.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured, interest_lifetime_us=500_000)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    elapsed = iter((0, 1_000_000_000))
+    monkeypatch.setattr(recorder_module, "monotonic_ns", lambda: next(elapsed), raising=False)
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _DynamicRecorderAdapter()
+    recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
+    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    recorder.receive(
+        state.fences[0],
+        MarketDataCallback(
+            callback_kind="bar",
+            received_at_us=event_at_us + 1,
+            provider_at_us=event_at_us,
+            payload={
+                "event_at_us": event_at_us,
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "volume": 1.0,
+            },
+        ),
+    )
+
+    recorder.drain(now_us=event_at_us + 2)
+
+    with connect_v2(database) as connection:
+        interest = connection.execute(
+            "SELECT lifecycle, reason_code FROM market_data_interests"
+        ).fetchone()
+        receipt_count = connection.execute(
+            "SELECT count(*) FROM instrument_discovery_receipts"
+        ).fetchone()[0]
+    assert tuple(interest) == ("expired", "INTEREST_EXPIRED_DURING_DISCOVERY")
+    assert receipt_count == 0
+    assert all(request_id < 2_000_000 for request_id in adapter.subscribe_attempts)
+    recorder.stop(now_us=event_at_us + 1_000_003)
 
 
 def test_dynamic_snapshot_completion_is_terminal_and_rejects_late_callbacks(
@@ -2971,7 +3575,7 @@ def test_dynamic_snapshot_completion_is_terminal_and_rejects_late_callbacks(
             == "STALE_REQUEST_GENERATION"
         )
     recorder.drain(now_us=event_at_us + 5)
-    assert adapter.cancelled_request_ids == [dynamic_fence.request_id]
+    assert adapter.cancelled_request_ids == []
     assert adapter.subscribe_attempts.count(cast(int, dynamic_fence.request_id)) == 1
     recorder.stop(now_us=event_at_us + 6)
 

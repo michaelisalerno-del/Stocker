@@ -638,9 +638,103 @@ class IdeaRunner:
                 "FROM instrument_discovery_receipts receipt "
                 "JOIN market_data_interests interest USING(interest_id) "
                 "WHERE receipt.instance_id=? "
-                "ORDER BY receipt.completed_at_us DESC, receipt.receipt_id DESC LIMIT 64",
+                "ORDER BY CASE WHEN interest.lifecycle IN ('resolved','active') "
+                "THEN 0 ELSE 1 END, receipt.completed_at_us DESC, receipt.receipt_id DESC "
+                "LIMIT 64",
                 (instance_id,),
             ).fetchall()
+            batch_requirements = tuple(
+                cast(
+                    JsonValue,
+                    {
+                        "feed_kind": item.feed_kind,
+                        "event_kind": item.event_kind,
+                        "instrument_id": item.instrument_id,
+                        "available_at_us": 0,
+                    },
+                )
+                for item in requirements
+            ) + tuple(
+                cast(
+                    JsonValue,
+                    {
+                        "feed_kind": str(item["feed_kind"]),
+                        "event_kind": None,
+                        "instrument_id": str(item["instrument_id"]),
+                        "available_at_us": int(item["completed_at_us"]),
+                    },
+                )
+                for item in receipt_rows
+                if str(item["status"]) == "resolved" and item["instrument_id"] is not None
+            )
+            batch_requirements_json = _json(cast(JsonValue, batch_requirements))
+            # Imported at the use site to avoid the ingestion package's public recorder
+            # exports creating a runner/recorder import cycle.
+            from stocker_runtime.ingestion.bar_projection import (
+                project_required_five_minute_bars,
+            )
+
+            project_required_five_minute_bars(
+                connection,
+                run_id=str(row["run_id"]),
+                requirements=requirements,
+                after_source_sequence=int(row["activated_after_source_sequence"]),
+            )
+            start_sequence = (
+                int(row["last_source_sequence"])
+                if row["last_source_sequence"] is not None
+                else int(row["activated_after_source_sequence"])
+            )
+            candidates = connection.execute(
+                "SELECT event.* FROM market_events event WHERE event.run_id=? "
+                "AND EXISTS (SELECT 1 FROM json_each(?) requirement "
+                "WHERE event.instrument_id=json_extract(requirement.value, '$.instrument_id') "
+                "AND event.feed_kind=json_extract(requirement.value, '$.feed_kind') "
+                "AND (json_extract(requirement.value, '$.event_kind') IS NULL "
+                "OR event.event_kind=json_extract(requirement.value, '$.event_kind')) "
+                "AND json_extract(requirement.value, '$.available_at_us') "
+                "<=max(event.event_at_us, event.received_at_us)) "
+                "AND (coalesce(event.source_sequence, event.derived_after_source_sequence)>? "
+                "OR (? IS NOT NULL AND "
+                "coalesce(event.source_sequence, event.derived_after_source_sequence)=? "
+                "AND event.event_id>?)) "
+                "AND (event.event_kind!='bar_5m' OR "
+                "json_extract(event.payload_json, '$.first_source_sequence')>?) "
+                "ORDER BY coalesce(event.source_sequence, event.derived_after_source_sequence), "
+                "event.event_id LIMIT 256",
+                (
+                    row["run_id"],
+                    batch_requirements_json,
+                    start_sequence,
+                    row["last_market_event_id"],
+                    start_sequence,
+                    row["last_market_event_id"],
+                    int(row["activated_after_source_sequence"]),
+                ),
+            ).fetchall()
+            rows = list(candidates)
+            if not rows:
+                return None
+            events = tuple(
+                MarketEvent(
+                    event_id=str(item["event_id"]),
+                    instrument_id=str(item["instrument_id"]),
+                    feed_kind=str(item["feed_kind"]),
+                    event_kind=str(item["event_kind"]),
+                    event_at_us=int(item["event_at_us"]),
+                    received_at_us=int(item["received_at_us"]),
+                    payload=cast(Mapping[str, JsonValue], json.loads(str(item["payload_json"]))),
+                )
+                for item in rows
+            )
+            causal_through_at_us = max(
+                max(item.event_at_us, item.received_at_us) for item in events
+            )
+            causal_receipt_rows = tuple(
+                item
+                for item in receipt_rows
+                if int(item["completed_at_us"]) <= causal_through_at_us
+            )
             discovery_receipts = tuple(
                 DiscoveryReceipt.model_validate(
                     {
@@ -667,9 +761,9 @@ class IdeaRunner:
                         "completed_at_us": int(item["completed_at_us"]),
                     }
                 )
-                for item in receipt_rows
+                for item in causal_receipt_rows
             )
-            dynamic_requirements = tuple(
+            causal_dynamic_requirements = tuple(
                 MarketDataRequirement(
                     feed_kind=str(item["feed_kind"]),
                     event_kind=None,
@@ -682,37 +776,13 @@ class IdeaRunner:
                         bool(item["required"]) and str(item["lifecycle"]) in {"resolved", "active"}
                     ),
                 )
-                for item in receipt_rows
+                for item in causal_receipt_rows
                 if str(item["status"]) == "resolved" and item["instrument_id"] is not None
             )
-            combined_requirements = _merge_batch_requirements(
-                (*requirements, *dynamic_requirements)
+            causal_requirements = _merge_batch_requirements(
+                (*requirements, *causal_dynamic_requirements)
             )
-            batch_requirements = tuple(
-                {
-                    "feed_kind": item.feed_kind,
-                    "event_kind": item.event_kind,
-                    "instrument_id": item.instrument_id,
-                    "cadence": item.cadence,
-                    "gaps_block": item.gaps_block,
-                    "staleness_block": item.staleness_block,
-                }
-                for item in combined_requirements
-            )
-            batch_requirements_json = _json(cast(JsonValue, batch_requirements))
-            # Imported at the use site to avoid the ingestion package's public recorder
-            # exports creating a runner/recorder import cycle.
-            from stocker_runtime.ingestion.bar_projection import (
-                project_required_five_minute_bars,
-            )
-
-            project_required_five_minute_bars(
-                connection,
-                run_id=str(row["run_id"]),
-                requirements=requirements,
-                after_source_sequence=int(row["activated_after_source_sequence"]),
-            )
-            for requirement in combined_requirements:
+            for requirement in causal_requirements:
                 gap = connection.execute(
                     "SELECT 1 FROM gaps gap JOIN subscriptions subscription "
                     "ON subscription.subscription_id=gap.subscription_id "
@@ -732,51 +802,6 @@ class IdeaRunner:
                 ).fetchone()
                 if gap is not None:
                     return None
-            start_sequence = (
-                int(row["last_source_sequence"])
-                if row["last_source_sequence"] is not None
-                else int(row["activated_after_source_sequence"])
-            )
-            candidates = connection.execute(
-                "SELECT event.* FROM market_events event JOIN json_each(?) requirement "
-                "ON event.instrument_id=json_extract(requirement.value, '$.instrument_id') "
-                "AND event.feed_kind=json_extract(requirement.value, '$.feed_kind') "
-                "AND (json_extract(requirement.value, '$.event_kind') IS NULL "
-                "OR event.event_kind=json_extract(requirement.value, '$.event_kind')) "
-                "WHERE event.run_id=? "
-                "AND (coalesce(event.source_sequence, event.derived_after_source_sequence)>? "
-                "OR (? IS NOT NULL AND "
-                "coalesce(event.source_sequence, event.derived_after_source_sequence)=? "
-                "AND event.event_id>?)) "
-                "AND (event.event_kind!='bar_5m' OR "
-                "json_extract(event.payload_json, '$.first_source_sequence')>?) "
-                "ORDER BY coalesce(event.source_sequence, event.derived_after_source_sequence), "
-                "event.event_id LIMIT 256",
-                (
-                    batch_requirements_json,
-                    row["run_id"],
-                    start_sequence,
-                    row["last_market_event_id"],
-                    start_sequence,
-                    row["last_market_event_id"],
-                    int(row["activated_after_source_sequence"]),
-                ),
-            ).fetchall()
-            rows = list(candidates)
-            if not rows:
-                return None
-            events = tuple(
-                MarketEvent(
-                    event_id=str(item["event_id"]),
-                    instrument_id=str(item["instrument_id"]),
-                    feed_kind=str(item["feed_kind"]),
-                    event_kind=str(item["event_kind"]),
-                    event_at_us=int(item["event_at_us"]),
-                    received_at_us=int(item["received_at_us"]),
-                    payload=cast(Mapping[str, JsonValue], json.loads(str(item["payload_json"]))),
-                )
-                for item in rows
-            )
             prior_state_input_event_ids = tuple(
                 str(value) for value in json.loads(str(row["state_input_event_ids_json"]))
             )
@@ -795,9 +820,7 @@ class IdeaRunner:
                 events=events,
                 input_watermark=events[-1].event_id,
                 causal_from_at_us=min(item.event_at_us for item in events),
-                causal_through_at_us=max(
-                    max(item.event_at_us, item.received_at_us) for item in events
-                ),
+                causal_through_at_us=causal_through_at_us,
                 prior_state_input_event_ids=prior_state_input_event_ids,
                 discovery_receipts=discovery_receipts,
             )
@@ -833,7 +856,7 @@ class IdeaRunner:
         declared = (
             *evaluation.output_input_event_ids,
             evaluation.retained_input_event_ids,
-            *(interest.input_event_ids for interest in evaluation.interests),
+            *((interest.input_event_id,) for interest in evaluation.interests),
         )
         for lineage in declared:
             if not set(lineage).issubset(available_set) or tuple(
@@ -880,10 +903,7 @@ class IdeaRunner:
             if interest.underlying_instrument_id not in activation.universe:
                 raise IdeaRunnerError("market-data interest underlying is outside the universe")
             if (
-                any(
-                    event_times[event_id][0] > interest.as_of_at_us
-                    for event_id in interest.input_event_ids
-                )
+                event_times[interest.input_event_id][0] > interest.as_of_at_us
                 or interest.as_of_at_us > batch.causal_through_at_us
             ):
                 raise IdeaRunnerError("market-data interest has noncausal input lineage")
@@ -1000,7 +1020,6 @@ class IdeaRunner:
                 },
             )
         )
-        inputs_json = _json(cast(JsonValue, interest.input_event_ids))
         existing = connection.execute(
             "SELECT content_hash FROM market_data_interests WHERE interest_id=?",
             (interest_id,),
@@ -1033,7 +1052,7 @@ class IdeaRunner:
             "underlying_instrument_id, asset_kind, minimum_days_to_expiry, "
             "maximum_days_to_expiry, option_right, strike_offset, reference_price, feed_kind, "
             "cadence, as_of_at_us, expires_at_us, required, priority, maximum_contracts, "
-            "input_event_ids_json, content_hash, lifecycle, next_attempt_at_us, "
+            "input_event_id, content_hash, lifecycle, next_attempt_at_us, "
             "created_at_us, updated_at_us) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
             "'pending', ?, ?, ?) ON CONFLICT(interest_id) DO NOTHING",
@@ -1056,7 +1075,7 @@ class IdeaRunner:
                 int(interest.required),
                 interest.priority,
                 interest.maximum_contracts,
-                inputs_json,
+                interest.input_event_id,
                 content_hash,
                 min(now_us, interest.expires_at_us),
                 now_us,

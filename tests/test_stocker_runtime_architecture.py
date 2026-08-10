@@ -4,10 +4,12 @@ import ast
 from pathlib import Path
 
 from stocker_runtime import (
+    DiscoveryReceipt,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
     IdeaManifest,
+    MarketDataInterest,
     MarketDataRequirement,
     MarketEvent,
     Observation,
@@ -61,6 +63,8 @@ def test_public_contract_schemas_reject_extra_fields_and_expose_no_authority_fie
         IdeaManifest,
         IdeaActivation,
         MarketDataRequirement,
+        MarketDataInterest,
+        DiscoveryReceipt,
         IdeaBatch,
         IdeaEvaluation,
     )

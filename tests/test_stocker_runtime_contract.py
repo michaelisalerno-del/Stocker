@@ -286,7 +286,7 @@ def test_non_proposal_json_allows_legitimate_evidence_and_configuration_vocabula
             expires_at_us=2,
             required=True,
             priority=100,
-            input_event_ids=("event-001",),
+            input_event_id="event-001",
         ),
         DiscoveryReceipt(
             receipt_id="receipt-001",

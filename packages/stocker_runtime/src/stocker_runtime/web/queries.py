@@ -631,8 +631,9 @@ class ReadModel:
                 "SELECT interest_id, interest_key, underlying_instrument_id, asset_kind, "
                 "minimum_days_to_expiry, maximum_days_to_expiry, option_right, strike_offset, "
                 "reference_price, feed_kind, cadence, as_of_at_us, expires_at_us, required, "
-                "priority, maximum_contracts, input_event_ids_json, content_hash, lifecycle, "
-                "reason_code, attempts, next_attempt_at_us, created_at_us, updated_at_us "
+                "priority, maximum_contracts, input_event_id, bound_subscription_id, "
+                "content_hash, lifecycle, reason_code, attempts, next_attempt_at_us, "
+                "created_at_us, updated_at_us "
                 "FROM market_data_interests WHERE instance_id=? "
                 "ORDER BY updated_at_us DESC, interest_id LIMIT 64",
                 (instance_id,),
@@ -1145,12 +1146,9 @@ class ReadModel:
 
     @staticmethod
     def _interest_projection(row: sqlite3.Row) -> dict[str, Any]:
-        input_event_ids = json.loads(row["input_event_ids_json"])
         return {
-            **{key: value for key, value in dict(row).items() if key != "input_event_ids_json"},
+            **dict(row),
             "required": bool(row["required"]),
-            "input_event_count": len(input_event_ids),
-            "input_event_id_sample": input_event_ids[:8],
         }
 
     @staticmethod

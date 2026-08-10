@@ -1282,7 +1282,7 @@ def test_frozen_m1c_rejects_capture_at_or_after_the_frozen_interest_cutoff(
         )
         for symbol in UNIVERSE
     )
-    evaluation = plugin.evaluate(
+    evaluation = FrozenM1CSignalV0().evaluate(
         IdeaBatch(
             mode=RuntimeMode.SHADOW,
             events=current_events,
@@ -1290,6 +1290,7 @@ def test_frozen_m1c_rejects_capture_at_or_after_the_frozen_interest_cutoff(
             causal_from_at_us=current_events[0].event_at_us,
             causal_through_at_us=current_events[-1].event_at_us,
             prior_state_input_event_ids=captured.retained_input_event_ids,
+            discovery_receipts=(receipt,),
         ),
         captured.state,
     )

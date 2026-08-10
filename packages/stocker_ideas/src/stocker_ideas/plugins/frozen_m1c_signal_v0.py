@@ -714,10 +714,17 @@ class FrozenM1CSignalV0:
                     if terminal is None or str(terminal.get("s", "")) < receipt_session:
                         terminal = {"s": receipt_session}
                     if terminal.get("s") == receipt_session:
-                        terminal[right] = receipt.status
-                        terminal[f"{right}_k"] = receipt.interest_key
-                        if receipt.reason_code is not None:
-                            terminal[f"{right}_r"] = receipt.reason_code
+                        existing_status = terminal.get(right)
+                        if existing_status not in {
+                            "captured",
+                            "denied",
+                            "late",
+                            "window_elapsed",
+                        }:
+                            terminal[right] = receipt.status
+                            terminal[f"{right}_k"] = receipt.interest_key
+                            if receipt.reason_code is not None:
+                                terminal[f"{right}_r"] = receipt.reason_code
                         option_terminal[symbol] = terminal
             if receipt.status == "resolved" and receipt.instrument_id is not None:
                 receipts_by_instrument.setdefault(receipt.instrument_id, []).append(receipt)

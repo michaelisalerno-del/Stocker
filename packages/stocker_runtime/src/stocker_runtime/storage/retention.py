@@ -845,13 +845,19 @@ class RetentionManager:
         prune(
             "market_event_derivations",
             "rowid",
-            "created_at_us <= ?",
+            "created_at_us <= ? AND NOT EXISTS (SELECT 1 FROM market_events derived "
+            "WHERE derived.event_id=market_event_derivations.derived_event_id "
+            "AND derived.event_kind IN ('bar_5m_session_prefix', "
+            "'session_volume_baseline', 'option_snapshot_capture') "
+            "AND derived.event_at_us > ?)",
             now_us - self.policy.derivation_mapping_us,
+            now_us - self.policy.completed_bar_us,
         )
         prune(
             "market_events",
             "event_id",
-            "event_kind NOT IN ('historical_bar', 'bar_5m') AND event_at_us <= ? "
+            "event_kind NOT IN ('historical_bar', 'bar_5m', 'bar_5m_session_prefix', "
+            "'session_volume_baseline', 'option_snapshot_capture') AND event_at_us <= ? "
             "AND NOT EXISTS (SELECT 1 FROM market_latest l "
             "WHERE market_events.event_id IN (l.event_id, l.bid_source_event_id, "
             "l.ask_source_event_id, l.bid_size_source_event_id, l.ask_size_source_event_id, "
@@ -898,7 +904,8 @@ class RetentionManager:
         prune(
             "market_events",
             "event_id",
-            "event_kind IN ('historical_bar', 'bar_5m') AND event_at_us <= ? "
+            "event_kind IN ('historical_bar', 'bar_5m', 'bar_5m_session_prefix', "
+            "'session_volume_baseline', 'option_snapshot_capture') AND event_at_us <= ? "
             "AND NOT EXISTS (SELECT 1 FROM market_latest l "
             "WHERE market_events.event_id IN (l.event_id, l.bid_source_event_id, "
             "l.ask_source_event_id, l.bid_size_source_event_id, l.ask_size_source_event_id, "

@@ -1426,9 +1426,14 @@ def test_official_tick_semantics_do_not_mix_quotes_and_trades() -> None:
 
     assert _price_tick_projection("quotes", 1) == ("quote", "bid")
     assert _price_tick_projection("quotes", 2) == ("quote", "ask")
+    assert _price_tick_projection("quotes", 9) == ("quote", "close")
     assert _price_tick_projection("quotes", 4) is None
     assert _price_tick_projection("trades", 4) == ("trade", "last")
     assert _size_tick_projection("quotes", 3) == ("quote", "ask_size")
+    assert _size_tick_projection("quotes", 27) == ("quote", "call_open_interest")
+    assert _size_tick_projection("quotes", 28) == ("quote", "put_open_interest")
+    assert _size_tick_projection("quotes", 29) == ("quote", "call_option_volume")
+    assert _size_tick_projection("quotes", 30) == ("quote", "put_option_volume")
     assert _size_tick_projection("trades", 3) is None
     assert _size_tick_projection("trades", 5) == ("trade", "size")
 
@@ -1452,6 +1457,7 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
         def __init__(self, wrapper: object) -> None:
             self.wrapper = wrapper
             self.requests: list[tuple[str, int]] = []
+            self.generic_ticks: dict[int, str] = {}
             self.cancelled: list[tuple[str, int]] = []
             self.disconnected = False
             clients.append(self)
@@ -1468,8 +1474,15 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
             self.disconnected = True
             release_reader.set()
 
-        def reqMktData(self, request_id: int, *_args: object) -> None:  # noqa: N802
+        def reqMktData(  # noqa: N802
+            self,
+            request_id: int,
+            _contract: object,
+            generic_ticks: str,
+            *_args: object,
+        ) -> None:
             self.requests.append(("market", request_id))
+            self.generic_ticks[request_id] = generic_ticks
 
         def reqRealTimeBars(self, request_id: int, *_args: object) -> None:  # noqa: N802
             self.requests.append(("bars", request_id))
@@ -1506,7 +1519,7 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
             IBKRSubscription(3, 123, "AAPL", "STK", "SMART", "USD", "quotes"),
             IBKRSubscription(4, 123, "AAPL", "STK", "SMART", "USD", "trades"),
             IBKRSubscription(5, 123, "AAPL", "STK", "SMART", "USD", "bars"),
-            IBKRSubscription(6, 123, "AAPL", "STK", "SMART", "USD", "quotes", snapshot=True),
+            IBKRSubscription(6, 123, "AAPL", "OPT", "SMART", "USD", "quotes", snapshot=True),
         ),
     )
     callbacks: list[tuple[CallbackFence, MarketDataCallback]] = []
@@ -1531,9 +1544,18 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
     wrapper.tickPrice(3, 1, 100.0, object())
     wrapper.tickPrice(3, 2, 101.0, object())
     wrapper.tickSize(3, 0, 10)
+    wrapper.tickSize(3, 27, 999)
+    wrapper.tickOptionComputation(3, 13, object(), 0.9, 0.1, 9.0, 0.0, 0.1, 0.1, 0.1, 100.0)
     wrapper.tickPrice(3, 4, 999.0, object())
     wrapper.tickPrice(4, 4, 100.25, object())
     wrapper.tickSize(4, 5, 3)
+    wrapper.tickPrice(6, 1, 2.0, object())
+    wrapper.tickPrice(6, 2, 2.2, object())
+    wrapper.tickPrice(6, 9, 100.0, object())
+    wrapper.tickSize(6, 27, 150)
+    wrapper.tickSize(6, 29, 25)
+    wrapper.tickOptionComputation(6, 13, object(), 0.4, 0.52, 2.1, 0.0, 0.01, 0.1, -0.02, 100.0)
+    wrapper.tickSnapshotEnd(6)
     wrapper.realtimeBar(5, 1_700_000_000, 99.0, 101.0, 98.0, 100.0, 50, 0, 2)
     wrapper.error(3, 420, "pacing")
     wrapper.error(-1, 2103, "market farm disconnected")
@@ -1547,6 +1569,30 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
         ("quote", {"event_at_us": callbacks[2][1].received_at_us, "bid_size": 10.0}),
         ("trade", {"event_at_us": callbacks[3][1].received_at_us, "last": 100.25}),
         ("trade", {"event_at_us": callbacks[4][1].received_at_us, "size": 3.0}),
+        ("quote", {"event_at_us": callbacks[5][1].received_at_us, "bid": 2.0}),
+        ("quote", {"event_at_us": callbacks[6][1].received_at_us, "ask": 2.2}),
+        ("quote", {"event_at_us": callbacks[7][1].received_at_us, "close": 100.0}),
+        ("quote", {"event_at_us": callbacks[8][1].received_at_us, "call_open_interest": 150.0}),
+        ("quote", {"event_at_us": callbacks[9][1].received_at_us, "call_option_volume": 25.0}),
+        (
+            "option_computation",
+            {
+                "event_at_us": callbacks[10][1].received_at_us,
+                "tick_type": 13,
+                "implied_volatility": 0.4,
+                "delta": 0.52,
+                "option_price": 2.1,
+                "present_value_dividend": 0.0,
+                "gamma": 0.01,
+                "vega": 0.1,
+                "theta": -0.02,
+                "underlying_price": 100.0,
+            },
+        ),
+        (
+            "option_snapshot_end",
+            {"event_at_us": callbacks[11][1].received_at_us, "complete": True},
+        ),
         (
             "bar",
             {
@@ -1560,6 +1606,7 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
         ),
     ]
     assert [(status.kind, status.code, status.request_id) for status in statuses] == [
+        ("snapshot_end", 0, 6),
         ("pacing", 420, 3),
         ("farm_degraded", 2103, None),
     ]
@@ -1570,9 +1617,11 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
         ("bars", 5),
         ("market", 6),
     ]
+    assert client.generic_ticks == {3: "", 4: "", 6: "100,101"}  # type: ignore[attr-defined]
     bridge.disconnect()
     wrapper.tickSnapshotEnd(6)
     assert [(status.kind, status.code, status.request_id) for status in statuses] == [
+        ("snapshot_end", 0, 6),
         ("pacing", 420, 3),
         ("farm_degraded", 2103, None),
     ]

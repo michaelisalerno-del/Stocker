@@ -644,7 +644,13 @@ class CallbackInbox:
             if isinstance(event_at, bool) or not isinstance(event_at, int) or event_at < 0:
                 raise NormalizationError("event_at_us must be a nonnegative integer")
             callback_kind = str(inbox_row["callback_kind"])
-            if callback_kind not in {"quote", "trade", "bar"}:
+            if callback_kind not in {
+                "quote",
+                "trade",
+                "bar",
+                "option_computation",
+                "option_snapshot_end",
+            }:
                 raise NormalizationError("callback kind is not a normalized market-data surface")
             values = {
                 field: self._number(payload, field)
@@ -662,6 +668,21 @@ class CallbackInbox:
                     "size",
                 )
             }
+            for field in (
+                "call_open_interest",
+                "put_open_interest",
+                "call_option_volume",
+                "put_option_volume",
+                "implied_volatility",
+                "delta",
+                "option_price",
+                "present_value_dividend",
+                "gamma",
+                "vega",
+                "theta",
+                "underlying_price",
+            ):
+                self._number(payload, field)
             run_id = str(inbox_row["run_id"])
             recorder_generation = int(inbox_row["recorder_generation"])
             connection_generation = int(inbox_row["connection_generation"])

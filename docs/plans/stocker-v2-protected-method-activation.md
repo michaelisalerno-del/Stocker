@@ -98,8 +98,8 @@ or claim scientific completeness for partial coverage.
 
 ## 4. Schema and API impacts
 
-One sequential V2 migration may add only the generic operational tables needed for
-dynamic interests and discovery receipts:
+The Phase-1 migration adds only the generic operational tables needed for dynamic
+interests and discovery receipts:
 
 - `market_data_interests`
 - `instrument_discovery_receipts`
@@ -108,6 +108,14 @@ Existing instruments, subscriptions, market events, idea outputs, shadow positio
 marks, and outcomes remain authoritative. Add indexes only for measured bounded query
 or lifecycle plans. Do not add method-specific tables or a second operational
 database.
+
+Owner-approved amendment on 2026-08-10: Phase 2 may add one further sequential,
+generic migration that generalises `market_events` and `market_event_derivations` for
+bounded derived market-data receipts. It may add no domain table, method-specific
+schema, route, mutation surface, or paper/live authority. The existing 64 KiB plugin
+state and 256-event retained-lineage bounds remain unchanged. The authorised receipt
+kinds are generic session-volume baselines, five-minute session prefixes, and
+per-contract option-snapshot captures with exact causal input mappings.
 
 The JSON API remains exactly the existing seven GET routes. No method-specific route,
 schema, screen, renderer, poller, or mutation is added. Unknown plugins continue to
@@ -226,6 +234,13 @@ Resolved on 2026-08-09:
 - perform no backfill, tuning, or protected-data fitting;
 - keep the recorder stopped until all four methods are reviewed and deployable; and
 - accept the five public TDD seams listed at the top of this plan.
+
+Resolved on 2026-08-10:
+
+- authorise the additional generic Phase-2 derived-market-event migration described
+  in section 4, after the existing schema proved unable to represent the required
+  causal receipt chains without payload-only pseudo-lineage or exceeding the retained
+  event bound.
 
 Remaining attended evidence gates are operational facts, not design discretion:
 

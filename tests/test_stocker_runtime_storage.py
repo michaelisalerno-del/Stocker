@@ -72,7 +72,7 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
 
     result = initialize_database(database, applied_at_us=1_700_000_000_000_000)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
     with connect_v2(database) as connection:
         tables = {
             str(row[0])
@@ -121,6 +121,95 @@ def test_shadow_runtime_keeps_only_authoritative_schedule_and_quote_indexes(
         "source_sequence",
         "event_id",
     )
+
+
+def test_phase2_migration_preserves_dynamic_rows_and_admits_only_causal_derived_receipts(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "phase2-derived-events.sqlite3"
+    migration_root = tmp_path / "phase1-migrations"
+    migration_root.mkdir()
+    for migration in migration_plan()[:12]:
+        (migration_root / migration.name).write_text(migration.sql, encoding="utf-8")
+    initialize_database(database, migration_root=migration_root, applied_at_us=1)
+    _seed_output_dependencies(database, verify_schema=False)
+    with connect_v2(database, verify_schema=False) as connection:
+        _insert_dynamic_interest(connection)
+
+    result = migrate_database(database, applied_at_us=2)
+
+    assert result.applied_versions == (13,)
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT interest_key FROM market_data_interests WHERE interest_id='interest-1'"
+            ).fetchone()[0]
+            == "key-interest-1"
+        )
+        connection.execute(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle) VALUES "
+            "('callback-2', 'run-1', 1, 1, 'bar', 20, '{}', ?, 'pending')",
+            ("3" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+            "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+            "payload_json, payload_sha256) VALUES "
+            "('bar-1', 'run-1', 2, 'instrument-1', 'bars', 'bar', 10, 20, 1, '{}', ?)",
+            ("4" * 64,),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            connection.execute(
+                "INSERT INTO market_events(event_id, run_id, source_sequence, "
+                "derived_after_source_sequence, instrument_id, feed_kind, event_kind, "
+                "event_at_us, received_at_us, connection_generation, payload_json, "
+                "payload_sha256) VALUES ('unauthorised-derived', 'run-1', NULL, 2, "
+                "'instrument-1', 'bars', 'idea_specific_receipt', 20, 20, 1, '{}', ?)",
+                ("0" * 64,),
+            )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, "
+            "derived_after_source_sequence, instrument_id, feed_kind, event_kind, "
+            "event_at_us, received_at_us, connection_generation, payload_json, "
+            "payload_sha256) VALUES ('bar-5m-1', 'run-1', NULL, 2, 'instrument-1', "
+            "'bars', 'bar_5m', 20, 20, 1, '{}', ?)",
+            ("5" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO market_event_derivations(derived_event_id, input_event_id, "
+            "input_ordinal, input_role, created_at_us) "
+            "VALUES ('bar-5m-1', 'bar-1', 0, 'constituent', 20)"
+        )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, "
+            "derived_after_source_sequence, instrument_id, feed_kind, event_kind, "
+            "event_at_us, received_at_us, connection_generation, payload_json, "
+            "payload_sha256) VALUES ('prefix-1', 'run-1', NULL, 2, 'instrument-1', "
+            "'bars', 'bar_5m_session_prefix', 20, 20, 1, '{}', ?)",
+            ("1" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO market_event_derivations(derived_event_id, input_event_id, "
+            "input_ordinal, input_role, created_at_us) "
+            "VALUES ('prefix-1', 'bar-5m-1', 0, 'constituent', 20)"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="callback_provenance"):
+            connection.execute(
+                "INSERT INTO market_events(event_id, run_id, source_sequence, "
+                "instrument_id, feed_kind, event_kind, event_at_us, received_at_us, "
+                "connection_generation, payload_json, payload_sha256) VALUES "
+                "('source-without-callback', 'run-1', 999, 'instrument-1', 'quotes', "
+                "'quote', 20, 20, 1, '{}', ?)",
+                ("2" * 64,),
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="derivation_provenance"):
+            connection.execute(
+                "INSERT INTO market_event_derivations(derived_event_id, input_event_id, "
+                "input_ordinal, input_role, created_at_us) "
+                "VALUES ('prefix-1', 'event-1', 1, 'completion', 19)"
+            )
 
 
 def test_runtime_connection_state_is_constrained_and_defaults_disconnected(tmp_path: Path) -> None:
@@ -178,7 +267,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (13, '0013_future.sql', ?, 2)",
+            "VALUES (14, '0014_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -260,7 +349,7 @@ def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_h
 
     result = migrate_database(backfill_database, applied_at_us=2)
 
-    assert result.applied_versions == (7, 8, 9, 10, 11, 12)
+    assert result.applied_versions == (7, 8, 9, 10, 11, 12, 13)
     with connect_v2(backfill_database) as connection:
         assert tuple(
             connection.execute(
@@ -353,7 +442,7 @@ def test_expiry_projection_migration_deactivates_terminal_history(tmp_path: Path
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (8, 9, 10, 11, 12)
+    assert result.applied_versions == (8, 9, 10, 11, 12, 13)
     with connect_v2(database) as connection:
         assert tuple(
             connection.execute(
@@ -497,7 +586,7 @@ def test_commit_boundary_migration_rewinds_pending_shadow_to_conservative_run_ma
             ("9" * 64,),
         )
 
-    assert migrate_database(database, applied_at_us=2).applied_versions == (9, 10, 11, 12)
+    assert migrate_database(database, applied_at_us=2).applied_versions == (9, 10, 11, 12, 13)
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -2857,6 +2946,73 @@ def test_derived_event_retention_waits_for_explicit_mapping_prune_at_batch_cut(
         )
 
 
+def test_phase2_receipt_mappings_follow_the_bounded_receipt_retention_tier(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "phase2-receipt-retention.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+            "recorder_generation, connection_generation, callback_kind, received_at_us, "
+            "payload_json, payload_sha256, lifecycle) VALUES "
+            "(2, 'bar-callback', 'run-1', 1, 1, 'bar', 10, '{}', ?, 'pending')",
+            ("1" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+            "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+            "payload_json, payload_sha256) VALUES "
+            "('input-bar', 'run-1', 2, 'instrument-1', 'bars', 'bar', 10, 10, 1, '{}', ?)",
+            ("2" * 64,),
+        )
+        for event_id, event_kind in (
+            ("derived-bar", "bar_5m"),
+            ("session-prefix", "bar_5m_session_prefix"),
+        ):
+            connection.execute(
+                "INSERT INTO market_events(event_id, run_id, source_sequence, "
+                "derived_after_source_sequence, instrument_id, feed_kind, event_kind, "
+                "event_at_us, received_at_us, connection_generation, payload_json, "
+                "payload_sha256) VALUES (?, 'run-1', NULL, 2, 'instrument-1', 'bars', ?, "
+                "20, 20, 1, '{}', ?)",
+                (event_id, event_kind, hashlib.sha256(event_id.encode()).hexdigest()),
+            )
+        connection.execute(
+            "INSERT INTO market_event_derivations(derived_event_id, input_event_id, "
+            "input_ordinal, input_role, created_at_us) VALUES "
+            "('derived-bar', 'input-bar', 0, 'constituent', 20)"
+        )
+        connection.execute(
+            "INSERT INTO market_event_derivations(derived_event_id, input_event_id, "
+            "input_ordinal, input_role, created_at_us) VALUES "
+            "('session-prefix', 'derived-bar', 0, 'constituent', 20)"
+        )
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(
+            raw_market_event_us=10**18,
+            completed_bar_us=1_000,
+            derivation_mapping_us=10,
+            idea_shadow_us=10**18,
+            maintenance_batch_rows=100,
+        ),
+    )
+
+    manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    with connect_v2(database) as connection:
+        mappings = tuple(
+            tuple(row)
+            for row in connection.execute(
+                "SELECT derived_event_id, input_event_id FROM market_event_derivations "
+                "ORDER BY derived_event_id"
+            )
+        )
+    assert mappings == (("session-prefix", "derived-bar"),)
+
+
 def test_retention_uses_one_shared_batch_budget_and_expires_dependencies_in_order(
     tmp_path: Path,
 ) -> None:
@@ -3322,11 +3478,11 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     migration_payload = json.loads(migrated.stdout)
     retention_payload = json.loads(retained.stdout)
     assert init_payload == {
-        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-        "current_version": 12,
+        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+        "current_version": 13,
         "status": "ok",
     }
-    assert migration_payload == {"applied_versions": [], "current_version": 12, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 13, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

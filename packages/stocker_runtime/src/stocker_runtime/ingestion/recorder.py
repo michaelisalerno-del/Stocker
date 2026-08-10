@@ -2529,6 +2529,19 @@ class Recorder:
                 limit=limit,
                 authority=authority,
             )
+            from stocker_runtime.ingestion.snapshot_projection import (
+                project_option_snapshot_captures,
+            )
+
+            with connect_v2(self.config.database) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._verify_owned(connection)
+                project_option_snapshot_captures(
+                    connection,
+                    run_id=self.config.run_id,
+                    limit=min(limit, 256),
+                )
+                connection.commit()
             self._fulfill_snapshot_interests_from_streams(now_us=now_us)
             self._heartbeat(now_us)
             if self._idea_runner is not None:

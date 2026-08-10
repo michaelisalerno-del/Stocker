@@ -675,8 +675,17 @@ class IdeaRunner:
             from stocker_runtime.ingestion.bar_projection import (
                 project_required_five_minute_bars,
             )
+            from stocker_runtime.ingestion.session_projection import (
+                project_required_session_receipts,
+            )
 
             project_required_five_minute_bars(
+                connection,
+                run_id=str(row["run_id"]),
+                requirements=requirements,
+                after_source_sequence=int(row["activated_after_source_sequence"]),
+            )
+            project_required_session_receipts(
                 connection,
                 run_id=str(row["run_id"]),
                 requirements=requirements,

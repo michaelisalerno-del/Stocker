@@ -284,7 +284,8 @@ def project_required_five_minute_bars(
         {
             requirement.instrument_id
             for requirement in requirements
-            if requirement.feed_kind == "bars" and requirement.event_kind == "bar_5m"
+            if requirement.feed_kind == "bars"
+            and requirement.event_kind in {"bar_5m", "bar_5m_session_prefix"}
         }
     )
     return sum(

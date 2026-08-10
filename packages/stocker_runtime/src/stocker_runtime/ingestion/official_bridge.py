@@ -46,16 +46,23 @@ class _MetadataWaiter:
 
 
 def _price_tick_projection(feed_kind: str, tick_type: int) -> tuple[str, str] | None:
-    if feed_kind == "quotes" and tick_type in {1, 2}:
-        return "quote", {1: "bid", 2: "ask"}[tick_type]
+    if feed_kind == "quotes" and tick_type in {1, 2, 9}:
+        return "quote", {1: "bid", 2: "ask", 9: "close"}[tick_type]
     if feed_kind == "trades" and tick_type == 4:
         return "trade", "last"
     return None
 
 
 def _size_tick_projection(feed_kind: str, tick_type: int) -> tuple[str, str] | None:
-    if feed_kind == "quotes" and tick_type in {0, 3}:
-        return "quote", {0: "bid_size", 3: "ask_size"}[tick_type]
+    if feed_kind == "quotes" and tick_type in {0, 3, 27, 28, 29, 30}:
+        return "quote", {
+            0: "bid_size",
+            3: "ask_size",
+            27: "call_open_interest",
+            28: "put_open_interest",
+            29: "call_option_volume",
+            30: "put_option_volume",
+        }[tick_type]
     if feed_kind == "trades" and tick_type == 5:
         return "trade", "size"
     return None
@@ -113,6 +120,34 @@ def create_official_bridge(
         def tickSnapshotEnd(self, reqId: int) -> None:  # noqa: N802
             if owner is not None:
                 owner.snapshot_end(reqId)
+
+        def tickOptionComputation(  # noqa: N802
+            self,
+            reqId: int,
+            tickType: int,
+            _tickAttrib: Any,
+            impliedVol: float,
+            delta: float,
+            optPrice: float,
+            pvDividend: float,
+            gamma: float,
+            vega: float,
+            theta: float,
+            undPrice: float,
+        ) -> None:
+            if owner is not None:
+                owner.tick_option_computation(
+                    reqId,
+                    tickType,
+                    implied_volatility=float(impliedVol),
+                    delta=float(delta),
+                    option_price=float(optPrice),
+                    present_value_dividend=float(pvDividend),
+                    gamma=float(gamma),
+                    vega=float(vega),
+                    theta=float(theta),
+                    underlying_price=float(undPrice),
+                )
 
         def error(self, reqId: int, errorCode: int, errorString: str, *args: Any) -> None:  # noqa: N802
             del args
@@ -568,7 +603,7 @@ class _PrivateOfficialBridge:
             self.__client.reqMktData(
                 request_id,
                 self._contracts[request_id],
-                "",
+                "100,101" if item.security_type == "OPT" else "",
                 item.snapshot,
                 False,
                 [],
@@ -618,10 +653,49 @@ class _PrivateOfficialBridge:
         configured = self._configured.get(request_id)
         if configured is None:
             return
+        if tick_type in {27, 28, 29, 30} and configured.security_type != "OPT":
+            return
         projection = _size_tick_projection(configured.feed_kind, tick_type)
         if projection is not None:
             kind, name = projection
             self.emit(request_id, kind, {name: size})
+
+    def tick_option_computation(
+        self,
+        request_id: int,
+        tick_type: int,
+        *,
+        implied_volatility: float,
+        delta: float,
+        option_price: float,
+        present_value_dividend: float,
+        gamma: float,
+        vega: float,
+        theta: float,
+        underlying_price: float,
+    ) -> None:
+        configured = self._configured.get(request_id)
+        if (
+            configured is None
+            or configured.feed_kind != "quotes"
+            or configured.security_type != "OPT"
+        ):
+            return
+        self.emit(
+            request_id,
+            "option_computation",
+            {
+                "tick_type": int(tick_type),
+                "implied_volatility": implied_volatility,
+                "delta": delta,
+                "option_price": option_price,
+                "present_value_dividend": present_value_dividend,
+                "gamma": gamma,
+                "vega": vega,
+                "theta": theta,
+                "underlying_price": underlying_price,
+            },
+        )
 
     def snapshot_end(self, request_id: int) -> None:
         if not self._callback_is_current_connection():
@@ -629,6 +703,7 @@ class _PrivateOfficialBridge:
         configured = self._configured.get(request_id)
         if configured is None or not configured.snapshot:
             return
+        self.emit(request_id, "option_snapshot_end", {"complete": True})
         self._fences.pop(request_id, None)
         self._configured.pop(request_id, None)
         self._contracts.pop(request_id, None)

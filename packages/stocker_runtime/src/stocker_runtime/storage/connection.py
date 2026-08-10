@@ -174,6 +174,9 @@ def _expected_schema_digest(migration_fingerprints: tuple[tuple[str, str], ...])
     connection = sqlite3.connect(":memory:", isolation_level=None)
     try:
         _register_functions(connection)
+        # Schema-changing migrations must be fingerprinted under the same foreign-key
+        # and legacy-rename semantics as an operational writer connection.
+        _apply_pragmas(connection)
         for migration in plan[: len(migration_fingerprints)]:
             connection.executescript(migration.sql)
         return _schema_digest(connection)

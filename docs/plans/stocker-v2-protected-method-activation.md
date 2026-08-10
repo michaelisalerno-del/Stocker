@@ -145,6 +145,14 @@ fetch. Every continuation root and ancestor is fenced lexicographically by the e
 committed `(source_sequence, event_id)` watermark pair, including events that share a
 source sequence.
 
+Frozen M1C option snapshots remain prospective at their immutable D-1 cutoff. Each
+required pair expires 30 minutes after its baseline event. A complete next-session
+cohort whose availability is at or after that cutoff terminalizes any still-missing
+right as unavailable and drains the frozen cohort before later input; evidence arriving
+after the cutoff is never admitted retrospectively. A purported next-session cohort
+available before the D-1 cutoff is an invariant failure. Unavailable evidence records
+the interest key, cutoff, cohort availability, and terminal basis generically.
+
 ## 5. Migration, activation, and rollback
 
 - Do not mutate or re-import either V1 source.
@@ -226,6 +234,8 @@ before the next phase.
 - Strict-prefix validation, suffix invisibility, exact consumed watermark pairs,
   combined-versus-split multi-session equivalence, sparse-session draining, and
   fail-closed rejection of zero or out-of-range prefix selections.
+- Valid option capture before its immutable cutoff, explicit denial, missing evidence
+  at cutoff, late-capture rejection, and fail-closed pre-cutoff cohort invariants.
 - Gap and staleness blocking, incomplete/crossed quote handling, and virtual outcome
   lineage to exact proposal and market events.
 - Shadow-only results conspicuously remain `shadow=true`, `broker_position=false`, and

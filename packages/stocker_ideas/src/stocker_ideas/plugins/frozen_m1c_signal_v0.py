@@ -38,6 +38,7 @@ from stocker_runtime.ideas.contract import (
 
 UNIVERSE = (*COHORT, "VTI")
 _OPTION_RIGHTS: tuple[Literal["call", "put"], ...] = ("call", "put")
+_OPTION_WINDOW_US = 30 * 60 * 1_000_000
 _PARAMETERS = {
     "checkpoints": CHECKPOINTS,
     "minimum_activity_sessions": 10,
@@ -101,6 +102,23 @@ def _number(value: object) -> float | None:
         return None
     result = float(value)
     return result if result == result and abs(result) != float("inf") else None
+
+
+def _integer(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _baseline_expiry(baseline: Mapping[str, object]) -> int | None:
+    explicit = _integer(baseline.get("x"))
+    if explicit is not None:
+        return explicit
+    event_at_us = _integer(baseline.get("t"))
+    return None if event_at_us is None else event_at_us + _OPTION_WINDOW_US
+
+
+def _root_availability(root: Mapping[str, object]) -> int | None:
+    explicit = _integer(root.get("a"))
+    return explicit if explicit is not None else _integer(root.get("t"))
 
 
 def _interest_parts(key: str) -> tuple[str, str, str] | None:
@@ -169,6 +187,7 @@ def _update_prefix_root(
         "s": prefix_session,
         "n": bar_number,
         "t": event.event_at_us,
+        "a": max(event.event_at_us, event.received_at_us),
     }
     existing = prefix_roots.get(event.instrument_id)
     current_order = (
@@ -248,6 +267,7 @@ def _status_output(
     checkpoint: int,
     reason: str,
     as_of_at_us: int,
+    details: Mapping[str, JsonValue] | None = None,
 ) -> Observation:
     return Observation(
         subject_instrument_id=symbol,
@@ -258,6 +278,7 @@ def _status_output(
             "checkpoint": checkpoint,
             "status": "unavailable",
             "reason": reason,
+            **({} if details is None else details),
             "research_only": True,
             "execution_enabled": False,
         },
@@ -269,32 +290,43 @@ def _prerequisites_are_terminal(
     current_session: str,
     baselines: Mapping[str, Mapping[str, object]],
     option_context: Mapping[str, Mapping[str, object]],
-    option_terminal: Mapping[str, Mapping[str, object]],
+    option_terminal: dict[str, dict[str, object]],
+    prefix_roots: Mapping[str, Mapping[str, object]],
 ) -> bool:
     for symbol in COHORT:
         baseline = baselines.get(symbol)
-        baseline_session = (
-            None
-            if baseline is None or not isinstance(baseline.get("s"), str)
-            else str(baseline["s"])
-        )
+        if baseline is None:
+            continue
+        baseline_session = None if not isinstance(baseline.get("s"), str) else str(baseline["s"])
         if baseline_session is None or baseline_session >= current_session:
             continue
+        expiry = _baseline_expiry(baseline)
+        stock_root = prefix_roots.get(symbol)
+        market_root = prefix_roots.get("VTI")
+        stock_available = None if stock_root is None else _root_availability(stock_root)
+        market_available = None if market_root is None else _root_availability(market_root)
+        if expiry is None or stock_available is None or market_available is None:
+            raise ValueError("M1C causal option-window evidence is incomplete")
+        cohort_available = max(stock_available, market_available)
         context = option_context.get(symbol)
         terminal = option_terminal.get(symbol)
+        if terminal is None or str(terminal.get("s", "")) < baseline_session:
+            terminal = {"s": baseline_session}
         for right in _OPTION_RIGHTS:
             capture = (
                 {}
                 if context is None or context.get("s") != baseline_session
                 else _mapping(context.get(right))
             )
-            denied = (
-                terminal is not None
-                and terminal.get("s") == baseline_session
-                and terminal.get(right) == "denied"
-            )
-            if not capture and not denied:
-                return False
+            terminal_status = None if terminal.get("s") != baseline_session else terminal.get(right)
+            if capture or terminal_status in {"denied", "window_elapsed", "late"}:
+                continue
+            if expiry > cohort_available:
+                raise ValueError("complete M1C cohort precedes its D-1 option cutoff")
+            terminal[right] = "window_elapsed"
+            terminal[f"{right}_x"] = expiry
+            terminal[f"{right}_a"] = cohort_available
+        option_terminal[symbol] = terminal
     return True
 
 
@@ -304,6 +336,7 @@ def _evaluate_exact_cohort(
     events_by_symbol: Mapping[str, MarketEvent],
     baselines: Mapping[str, dict[str, object]],
     option_context: Mapping[str, dict[str, object]],
+    option_terminal: Mapping[str, dict[str, object]],
     statuses: dict[str, dict[str, object]],
     episodes: dict[str, dict[str, object]],
 ) -> tuple[list[IdeaOutput], list[tuple[str, ...]], str]:
@@ -334,6 +367,7 @@ def _evaluate_exact_cohort(
         selected_times = [current_event.event_at_us, market_event.event_at_us]
         group_i: Mapping[str, object] | None = None
         reason: str | None = None
+        status_details: Mapping[str, JsonValue] | None = None
         if current_event.payload.get("source_completeness") != "complete":
             reason = "session_prefix_incomplete"
         else:
@@ -387,6 +421,30 @@ def _evaluate_exact_cohort(
                 or call_strike != put_strike
             ):
                 reason = reason or "prior_session_option_pair_mismatch"
+        terminal = option_terminal.get(symbol)
+        baseline_session = None if baseline is None else baseline.get("s")
+        if terminal is not None and terminal.get("s") == baseline_session:
+            elapsed_rights = tuple(
+                right
+                for right in _OPTION_RIGHTS
+                if terminal.get(right) in {"window_elapsed", "late"}
+            )
+            if elapsed_rights:
+                expiry = _baseline_expiry({} if baseline is None else baseline)
+                cohort_available = max(
+                    max(current_event.event_at_us, current_event.received_at_us),
+                    max(market_event.event_at_us, market_event.received_at_us),
+                )
+                if expiry is not None:
+                    status_details = {
+                        "terminal_basis": "causal_window_elapsed_without_capture",
+                        "interest_keys": tuple(
+                            f"m1c:d1:{baseline_session}:{symbol}:{right}"
+                            for right in elapsed_rights
+                        ),
+                        "interest_expires_at_us": expiry,
+                        "cohort_available_at_us": cohort_available,
+                    }
         as_of_at_us = max(selected_times)
         status = statuses.get(symbol)
         if reason is not None:
@@ -400,6 +458,7 @@ def _evaluate_exact_cohort(
                             checkpoint=checkpoint,
                             reason=reason,
                             as_of_at_us=as_of_at_us,
+                            details=status_details,
                         )
                     )
                     output_lineages.append(lineage)
@@ -601,7 +660,7 @@ class FrozenM1CSignalV0:
                 receipts_by_instrument.setdefault(receipt.instrument_id, []).append(receipt)
 
         if batch.continuation_request is None:
-            baseline_requests: dict[str, tuple[str, float, int, str]] = {}
+            baseline_requests: dict[str, tuple[str, float, int, int, str]] = {}
             roots_changed = False
             for event in batch.events:
                 if event.event_kind == "session_volume_baseline" and event.instrument_id in COHORT:
@@ -630,12 +689,15 @@ class FrozenM1CSignalV0:
                             "c": close,
                             "v": _number(event.payload.get("realised_volatility_20d")),
                             "t": event.event_at_us,
+                            "a": max(event.event_at_us, event.received_at_us),
+                            "x": event.event_at_us + _OPTION_WINDOW_US,
                             "k": count,
                         }
                         baseline_requests[event.instrument_id] = (
                             baseline_session,
                             close,
                             event.event_at_us,
+                            event.event_at_us + _OPTION_WINDOW_US,
                             event.event_id,
                         )
                     continue
@@ -653,6 +715,25 @@ class FrozenM1CSignalV0:
                         parts = _interest_parts(receipt.interest_key)
                         if parts is not None:
                             receipt_session, symbol, right = parts
+                            baseline = baselines.get(symbol)
+                            capture_available = max(event.event_at_us, event.received_at_us)
+                            capture_expiry = (
+                                None
+                                if baseline is None or baseline.get("s") != receipt_session
+                                else _baseline_expiry(baseline)
+                            )
+                            if capture_expiry is None:
+                                continue
+                            if capture_available > capture_expiry:
+                                terminal = option_terminal.get(symbol)
+                                if terminal is None or str(terminal.get("s", "")) < receipt_session:
+                                    terminal = {"s": receipt_session}
+                                if terminal.get("s") == receipt_session:
+                                    terminal[right] = "late"
+                                    terminal[f"{right}_x"] = capture_expiry
+                                    terminal[f"{right}_a"] = capture_available
+                                    option_terminal[symbol] = terminal
+                                continue
                             existing = option_context.get(symbol)
                             if existing is None or str(existing.get("s", "")) <= receipt_session:
                                 if existing is None or existing.get("s") != receipt_session:
@@ -660,6 +741,8 @@ class FrozenM1CSignalV0:
                                 existing[right] = {
                                     "i": event.event_id,
                                     "t": event.event_at_us,
+                                    "a": capture_available,
+                                    "x": capture_expiry,
                                     "source_completeness": event.payload.get("source_completeness"),
                                     "bid": event.payload.get("bid"),
                                     "ask": event.payload.get("ask"),
@@ -685,7 +768,7 @@ class FrozenM1CSignalV0:
                     and _update_prefix_root(prefix_roots, event)
                 ):
                     roots_changed = True
-            for symbol, (session, close, as_of_at_us, input_event_id) in sorted(
+            for symbol, (session, close, as_of_at_us, expires_at_us, input_event_id) in sorted(
                 baseline_requests.items()
             ):
                 if requested.get(symbol) == session:
@@ -702,7 +785,7 @@ class FrozenM1CSignalV0:
                             reference_price=close,
                             cadence="snapshot",
                             as_of_at_us=as_of_at_us,
-                            expires_at_us=as_of_at_us + 30 * 60 * 1_000_000,
+                            expires_at_us=expires_at_us,
                             required=True,
                             priority=100,
                             input_event_id=input_event_id,
@@ -727,6 +810,7 @@ class FrozenM1CSignalV0:
                 baselines=baselines,
                 option_context=option_context,
                 option_terminal=option_terminal,
+                prefix_roots=prefix_roots,
             ):
                 continuation = _ancestor_request(prefix_roots)
 
@@ -776,6 +860,7 @@ class FrozenM1CSignalV0:
                 events_by_symbol=events_by_symbol,
                 baselines=baselines,
                 option_context=option_context,
+                option_terminal=option_terminal,
                 statuses=statuses,
                 episodes=episodes,
             )

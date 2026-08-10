@@ -996,34 +996,7 @@ class IdeaRunner:
                     for item in receipt_rows
                     if int(item["completed_at_us"]) <= causal_through_at_us
                 )
-            discovery_receipts = tuple(
-                DiscoveryReceipt.model_validate(
-                    {
-                        "receipt_id": str(item["receipt_id"]),
-                        "interest_id": str(item["interest_id"]),
-                        "interest_key": str(item["interest_key"]),
-                        "instance_id": str(item["instance_id"]),
-                        "status": str(item["status"]),
-                        "reason_code": (
-                            None if item["reason_code"] is None else str(item["reason_code"])
-                        ),
-                        "instrument_id": (
-                            None if item["instrument_id"] is None else str(item["instrument_id"])
-                        ),
-                        "expiry": None if item["expiry"] is None else str(item["expiry"]),
-                        "strike": None if item["strike"] is None else float(item["strike"]),
-                        "option_right": (
-                            None if item["option_right"] is None else str(item["option_right"])
-                        ),
-                        "multiplier": (
-                            None if item["multiplier"] is None else str(item["multiplier"])
-                        ),
-                        "candidates_inspected": int(item["candidates_inspected"]),
-                        "completed_at_us": int(item["completed_at_us"]),
-                    }
-                )
-                for item in causal_receipt_rows
-            )
+            discovery_receipts = _discovery_receipts(causal_receipt_rows)
             causal_dynamic_requirements = tuple(
                 MarketDataRequirement(
                     feed_kind=str(item["feed_kind"]),

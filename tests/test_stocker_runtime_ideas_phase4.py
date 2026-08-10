@@ -3298,9 +3298,10 @@ def test_restored_dynamic_snapshot_may_complete_inline_during_subscribe(
     adapter = _DynamicRecorderAdapter(inline_snapshot_at_us=restart_at_us + 1)
     second = _dynamic_recorder(database, idea_path, adapter, owner_id="owner-2")
     second_state = second.start(now_us=restart_at_us, instruments=(), subscriptions=())
-    restored_fence = next(
-        fence for fence in second_state.fences if cast(int, fence.request_id) >= 2_000_000
+    restored_request_id = next(
+        request_id for request_id in adapter.subscribe_attempts if request_id >= 2_000_000
     )
+    assert restored_request_id not in {fence.request_id for fence in second_state.fences}
 
     with connect_v2(database) as connection:
         assert (
@@ -3309,13 +3310,13 @@ def test_restored_dynamic_snapshot_may_complete_inline_during_subscribe(
         )
         assert (
             connection.execute(
-                "SELECT lifecycle FROM subscriptions WHERE subscription_id=?",
-                (restored_fence.subscription_id,),
+                "SELECT lifecycle FROM subscriptions WHERE request_id=?",
+                (restored_request_id,),
             ).fetchone()[0]
             == "closed"
         )
-    assert restored_fence.request_id != dynamic_fence.request_id
-    assert adapter.subscribe_attempts.count(cast(int, restored_fence.request_id)) == 1
+    assert restored_request_id != dynamic_fence.request_id
+    assert adapter.subscribe_attempts.count(restored_request_id) == 1
     assert adapter.subscribe_attempts.count(cast(int, dynamic_fence.request_id)) == 0
     second.stop(now_us=restart_at_us + 2)
 
@@ -3732,7 +3733,7 @@ def test_dynamic_discovery_refreshes_writer_lease_between_bounded_metadata_calls
     recorder.stop(now_us=event_at_us + 20_000_001)
 
 
-def test_dynamic_snapshot_completion_is_terminal_and_rejects_late_callbacks(
+def test_dynamic_snapshot_completion_is_terminal_across_reconnect_and_late_callbacks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "dynamic-snapshot.sqlite3"
@@ -3777,14 +3778,21 @@ def test_dynamic_snapshot_completion_is_terminal_and_rejects_late_callbacks(
             received_at_us=event_at_us + 3,
         )
     )
+    assert recorder.state is not None
+    assert dynamic_fence.request_id not in {fence.request_id for fence in recorder.state.fences}
+
+    recorder.disconnected(now_us=event_at_us + 4)
+    reconnected = recorder.reconnect(now_us=event_at_us + 5)
+    assert dynamic_fence.request_id not in {fence.request_id for fence in reconnected.fences}
+    assert adapter.subscribe_attempts.count(cast(int, dynamic_fence.request_id)) == 1
 
     late = recorder.receive(
         dynamic_fence,
         MarketDataCallback(
             callback_kind="quote",
-            received_at_us=event_at_us + 4,
+            received_at_us=event_at_us + 6,
             provider_at_us=None,
-            payload={"event_at_us": event_at_us + 4, "bid": 1.0, "ask": 1.1},
+            payload={"event_at_us": event_at_us + 6, "bid": 1.0, "ask": 1.1},
         ),
     )
     with connect_v2(database) as connection:
@@ -3806,10 +3814,10 @@ def test_dynamic_snapshot_completion_is_terminal_and_rejects_late_callbacks(
             ).fetchone()[0]
             == "STALE_REQUEST_GENERATION"
         )
-    recorder.drain(now_us=event_at_us + 5)
+    recorder.drain(now_us=event_at_us + 7)
     assert adapter.cancelled_request_ids == []
     assert adapter.subscribe_attempts.count(cast(int, dynamic_fence.request_id)) == 1
-    recorder.stop(now_us=event_at_us + 6)
+    recorder.stop(now_us=event_at_us + 8)
 
 
 def test_dynamic_snapshot_completion_after_expiry_records_expired_not_fulfilled(

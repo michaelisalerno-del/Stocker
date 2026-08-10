@@ -2674,6 +2674,26 @@ class Recorder:
                 ),
             )
             connection.commit()
+        current_state = self._authority_state()
+        matching_fence = next(
+            (
+                item
+                for item in current_state.fences
+                if item.request_id == status.request_id
+                and item.subscription_id == fence.subscription_id
+            ),
+            None,
+        )
+        if matching_fence is not None:
+            self._subscriptions = tuple(
+                item for item in self._subscriptions if item.request_id != status.request_id
+            )
+            self.state = RecorderState(
+                current_state.run_id,
+                current_state.recorder_generation,
+                current_state.connection_generation,
+                tuple(item for item in current_state.fences if item != matching_fence),
+            )
         updated_plan, _dynamic_specs = self._dynamic_plan(now_us=status.received_at_us)
         self._sync_interest_lifecycles(updated_plan, now_us=status.received_at_us)
 

@@ -64,6 +64,10 @@ CALLBACK_GAP_RECOVERY_SQL = (
     "AND prior.recorder_generation=? AND prior.connection_generation<=? "
     "AND gap.reason IN (?, ?, ?, ?, ?) AND gap.started_at_us<=? AND ?<=?)"
 )
+CALLBACK_INCIDENT_RECOVERY_SQL = (
+    "UPDATE incidents SET resolved_at_us=? WHERE incident_id IN (?, ?, ?, ?) "
+    "AND opened_at_us<=? AND resolved_at_us IS NULL"
+)
 
 
 def transport_incident_id(
@@ -937,16 +941,12 @@ class CallbackInbox:
                     transport_incident_id(leased.run_id, code) for code in TRANSPORT_INCIDENT_CODES
                 )
                 connection.execute(
-                    "UPDATE incidents SET resolved_at_us=? WHERE run_id=? "
-                    "AND code IN ('IBKR_CONNECT_FAILED','IBKR_SUBSCRIBE_FAILED') "
-                    "AND opened_at_us<=? AND resolved_at_us IS NULL "
-                    "AND incident_id IN (?, ?, ?, ?)",
+                    CALLBACK_INCIDENT_RECOVERY_SQL,
                     (
                         acknowledged_at_us,
-                        leased.run_id,
-                        evidence_at_us,
                         *global_incident_ids,
                         *scoped_incident_ids,
+                        evidence_at_us,
                     ),
                 )
 

@@ -320,6 +320,40 @@ def test_subscription_controller_does_not_start_after_cancellation_failure() -> 
     assert backend.actions == [("cancel", 1_000_001)]
 
 
+def test_subscription_controller_partial_cancel_reports_no_unattempted_starts() -> None:
+    class FailingSecondCancelBackend(_LifecycleBackend):
+        def cancel(self, request_id: int) -> None:
+            super().cancel(request_id)
+            if request_id == 1_000_002:
+                raise RuntimeError("second cancel failed")
+
+    backend = FailingSecondCancelBackend()
+    controller = SubscriptionController(backend)
+    configured = tuple(
+        type("Configured", (), {"request_id": request_id})()
+        for request_id in (2_000_001, 2_000_002)
+    )
+
+    result = controller.apply(
+        SubscriptionApplyPlan(
+            configured=configured,
+            starts=tuple(
+                (
+                    object(),
+                    CallbackFence("run", 1, 1, request_id, f"new-{request_id}"),
+                )
+                for request_id in (2_000_001, 2_000_002)
+            ),
+            stops=(1_000_001, 1_000_002),
+        )
+    )
+
+    assert result.started_request_ids == ()
+    assert result.stopped_request_ids == (1_000_001,)
+    assert result.failures == (("cancel", 1_000_002, "RuntimeError"),)
+    assert backend.actions == [("cancel", 1_000_001), ("cancel", 1_000_002)]
+
+
 def test_subscription_apply_plan_is_bounded_and_rejects_duplicate_actions() -> None:
     configured_item = type("Configured", (), {"request_id": 2_000_001})()
     fence = CallbackFence("run", 1, 1, 2_000_001, "new")

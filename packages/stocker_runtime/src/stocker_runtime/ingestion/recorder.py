@@ -1800,7 +1800,8 @@ class Recorder:
                         and lifecycle_by_request.get(replaced.request_id) != "closed"
                         and replaced.request_id not in stopped
                     )
-                    lifecycle = "closed" if old_stop_failed else "paused"
+                    subscribe_failure = failures.get(("subscribe", spec.request_id))
+                    lifecycle = "paused" if subscribe_failure is not None else "closed"
                     connection.execute(
                         "UPDATE subscriptions SET lifecycle=?, closed_at_us=? "
                         "WHERE subscription_id=?",
@@ -1819,16 +1820,23 @@ class Recorder:
                             replaced.feed_kind,
                             cast(str, old_fence.subscription_id),
                         )
-                    self._record_subscription_attempt(
-                        connection, plan, spec, succeeded=False, now_us=now_us
-                    )
-                    if not old_stop_failed:
+                    elif subscribe_failure is None:
+                        connection.execute(
+                            "UPDATE market_data_interests SET bound_subscription_id=NULL "
+                            "WHERE bound_subscription_id=? "
+                            "AND lifecycle IN ('resolved','active')",
+                            (fence.subscription_id,),
+                        )
+                    if subscribe_failure is not None:
+                        self._record_subscription_attempt(
+                            connection, plan, spec, succeeded=False, now_us=now_us
+                        )
                         self._record_dynamic_incident(
                             connection,
                             cast(str, fence.subscription_id),
                             now_us,
                             "DYNAMIC_SUBSCRIBE_FAILED",
-                            failures.get(("subscribe", spec.request_id), "not_started"),
+                            subscribe_failure,
                         )
             for spec in stops:
                 fence = current_fences[spec.request_id]
@@ -1854,12 +1862,25 @@ class Recorder:
                     )
             connection.commit()
         failed_stop_ids = {item.request_id for item in stops if item.request_id not in stopped}
+        attempted_start_ids = started | {
+            request_id for (action, request_id), _code in failures.items() if action == "subscribe"
+        }
         retained_removed = tuple(item for item in removed if item.request_id in failed_stop_ids)
         next_replacements = tuple(
             old if old.request_id in failed_stop_ids else fresh
             for old, fresh in replacement_pairs.values()
+            if old.request_id in failed_stop_ids or fresh.request_id in attempted_start_ids
         )
-        next_dynamic = (*kept, *waiting, *retained_removed, *new_starts, *next_replacements)
+        retained_new_starts = tuple(
+            item for item in new_starts if item.request_id in attempted_start_ids
+        )
+        next_dynamic = (
+            *kept,
+            *waiting,
+            *retained_removed,
+            *retained_new_starts,
+            *next_replacements,
+        )
         if len(
             {(item.instrument_id, item.feed_kind, item.snapshot) for item in next_dynamic}
         ) != len(next_dynamic):

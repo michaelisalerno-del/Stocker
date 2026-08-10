@@ -3733,6 +3733,12 @@ def test_dynamic_replacement_cancel_failures_do_not_leak_additive_mappings(
             received_at_us=event_at_us + 3,
         )
     )
+    with connect_v2(database) as connection:
+        retry_state_before_cancellations = tuple(
+            connection.execute(
+                "SELECT attempts, next_attempt_at_us, reason_code FROM market_data_interests"
+            ).fetchone()
+        )
 
     for retry_at_us in (event_at_us + 1_000_004, event_at_us + 3_000_004, event_at_us + 7_000_004):
         recorder.drain(now_us=retry_at_us)
@@ -3750,12 +3756,144 @@ def test_dynamic_replacement_cancel_failures_do_not_leak_additive_mappings(
             "AND code IN ('DYNAMIC_CANCEL_FAILED','DYNAMIC_SUBSCRIBE_FAILED') "
             "GROUP BY code ORDER BY code"
         ).fetchall()
+        retry_state = connection.execute(
+            "SELECT attempts, next_attempt_at_us, reason_code FROM market_data_interests"
+        ).fetchone()
     assert len(failed_replacements) == 3
     assert all(row["lifecycle"] == "closed" for row in failed_replacements)
     assert [(row["code"], row["total"]) for row in unresolved_incidents] == [
         ("DYNAMIC_CANCEL_FAILED", 1)
     ]
+    assert tuple(retry_state) == retry_state_before_cancellations
     recorder.stop(now_us=event_at_us + 7_000_005)
+
+
+def test_dynamic_cancel_failure_does_not_misreport_unattempted_new_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-cancel-aborted-new-start.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _AdditiveDynamicRecorderAdapter(fail_cancellations=1)
+    recorder = _dynamic_recorder(
+        database,
+        idea_path,
+        adapter,
+        owner_id="owner",
+        line_limit=2,
+    )
+    old_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+    recorder._idea_runner = None
+
+    new_as_of_us = event_at_us + 3_600_000_001
+    with connect_v2(database) as connection:
+        first_interest = connection.execute("SELECT * FROM market_data_interests").fetchone()
+        instance_id = str(first_interest["instance_id"])
+        activation = discovered.activation(
+            instance_id=instance_id,
+            run_id="run-dynamic-shadow",
+            data_class=ProtectedDataClass.SHADOW,
+            activated_at_us=event_at_us,
+        )
+        IdeaRunner._insert_interest(
+            connection,
+            activation,
+            MarketDataInterest(
+                interest_key="unrelated-new-start",
+                underlying_instrument_id="AAL",
+                minimum_days_to_expiry=1,
+                maximum_days_to_expiry=1,
+                option_right="put",
+                strike_offset=0,
+                reference_price=100.0,
+                cadence="snapshot",
+                as_of_at_us=new_as_of_us,
+                expires_at_us=new_as_of_us + 3_600_000_000,
+                required=True,
+                priority=100,
+                maximum_contracts=1,
+                input_event_id=str(first_interest["input_event_id"]),
+            ),
+            new_as_of_us,
+        )
+        new_interest = connection.execute(
+            "SELECT * FROM market_data_interests WHERE interest_key='unrelated-new-start'"
+        ).fetchone()
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+            "exchange, currency, option_expiry, option_strike, option_right, option_multiplier) "
+            "VALUES ('ibkr-option-9002', ?, 9002, 'option', 'AAL', 'SMART', 'USD', "
+            "'20260811', '100', 'put', '100')",
+            ("8" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO instrument_discovery_receipts(receipt_id, interest_id, run_id, "
+            "instance_id, status, instrument_id, expiry, strike, option_right, multiplier, "
+            "candidates_inspected, completed_at_us) VALUES "
+            "('receipt-unrelated-new-start', ?, 'run-dynamic-shadow', ?, 'resolved', "
+            "'ibkr-option-9002', '20260811', 100, 'put', '100', 1, ?)",
+            (new_interest["interest_id"], instance_id, new_as_of_us + 1),
+        )
+        connection.execute(
+            "UPDATE market_data_interests SET lifecycle='resolved', updated_at_us=? "
+            "WHERE interest_id=?",
+            (new_as_of_us + 1, new_interest["interest_id"]),
+        )
+    recorder.drain(now_us=new_as_of_us + 2)
+    assert adapter.cancelled_request_ids == [old_fence.request_id]
+    assert [item for item in adapter.subscribe_attempts if item >= 2_000_000] == [
+        old_fence.request_id
+    ]
+    with connect_v2(database) as connection:
+        unresolved = connection.execute(
+            "SELECT code FROM incidents WHERE resolved_at_us IS NULL AND code IN "
+            "('DYNAMIC_CANCEL_FAILED','DYNAMIC_SUBSCRIBE_FAILED') ORDER BY code"
+        ).fetchall()
+        retry_state = connection.execute(
+            "SELECT lifecycle, attempts, next_attempt_at_us, reason_code, "
+            "bound_subscription_id FROM market_data_interests "
+            "WHERE interest_key='unrelated-new-start'"
+        ).fetchone()
+        aborted_start = connection.execute(
+            "SELECT request_id, lifecycle FROM subscriptions WHERE request_id>=2000000 "
+            "AND request_id!=?",
+            (old_fence.request_id,),
+        ).fetchone()
+    assert [row["code"] for row in unresolved] == ["DYNAMIC_CANCEL_FAILED"]
+    assert tuple(retry_state) == (
+        "resolved",
+        0,
+        new_as_of_us,
+        "CAPACITY_DEFERRED",
+        None,
+    )
+    assert aborted_start["lifecycle"] == "closed"
+    assert {
+        cast(int, fence.request_id)
+        for fence in recorder._authority_state().fences
+        if cast(int, fence.request_id) >= 2_000_000
+    } == {cast(int, old_fence.request_id)}
+
+    recorder.drain(now_us=new_as_of_us + 1_000_003)
+    with connect_v2(database) as connection:
+        unresolved = connection.execute(
+            "SELECT code FROM incidents WHERE resolved_at_us IS NULL AND code IN "
+            "('DYNAMIC_CANCEL_FAILED','DYNAMIC_SUBSCRIBE_FAILED') ORDER BY code"
+        ).fetchall()
+        recovered_interest = connection.execute(
+            "SELECT lifecycle, attempts, next_attempt_at_us, reason_code "
+            "FROM market_data_interests WHERE interest_key='unrelated-new-start'"
+        ).fetchone()
+    assert unresolved == []
+    assert tuple(recovered_interest) == ("active", 0, 0, None)
+    assert adapter.cancelled_request_ids == [old_fence.request_id, old_fence.request_id]
+    assert aborted_start["request_id"] not in adapter.subscribe_attempts
+    recorder.stop(now_us=new_as_of_us + 1_000_004)
 
 
 def test_dynamic_discovery_retries_are_backed_off_and_bounded(

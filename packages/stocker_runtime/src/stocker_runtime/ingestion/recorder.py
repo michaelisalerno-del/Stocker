@@ -1822,13 +1822,14 @@ class Recorder:
                     self._record_subscription_attempt(
                         connection, plan, spec, succeeded=False, now_us=now_us
                     )
-                    self._record_dynamic_incident(
-                        connection,
-                        cast(str, fence.subscription_id),
-                        now_us,
-                        "DYNAMIC_SUBSCRIBE_FAILED",
-                        failures.get(("subscribe", spec.request_id), "not_started"),
-                    )
+                    if not old_stop_failed:
+                        self._record_dynamic_incident(
+                            connection,
+                            cast(str, fence.subscription_id),
+                            now_us,
+                            "DYNAMIC_SUBSCRIBE_FAILED",
+                            failures.get(("subscribe", spec.request_id), "not_started"),
+                        )
             for spec in stops:
                 fence = current_fences[spec.request_id]
                 if spec.request_id in stopped:

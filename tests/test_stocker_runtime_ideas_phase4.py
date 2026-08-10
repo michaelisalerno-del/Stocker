@@ -3745,8 +3745,16 @@ def test_dynamic_replacement_cancel_failures_do_not_leak_additive_mappings(
             "AND request_id!=? ORDER BY request_id",
             (dynamic_fence.request_id,),
         ).fetchall()
+        unresolved_incidents = connection.execute(
+            "SELECT code, count(*) AS total FROM incidents WHERE resolved_at_us IS NULL "
+            "AND code IN ('DYNAMIC_CANCEL_FAILED','DYNAMIC_SUBSCRIBE_FAILED') "
+            "GROUP BY code ORDER BY code"
+        ).fetchall()
     assert len(failed_replacements) == 3
     assert all(row["lifecycle"] == "closed" for row in failed_replacements)
+    assert [(row["code"], row["total"]) for row in unresolved_incidents] == [
+        ("DYNAMIC_CANCEL_FAILED", 1)
+    ]
     recorder.stop(now_us=event_at_us + 7_000_005)
 
 

@@ -23,6 +23,8 @@ MAX_PLUGIN_STATE_BYTES = 64 * 1024
 MAX_OUTPUTS_PER_BATCH = 256
 MAX_EVENTS_PER_BATCH = 256
 MAX_INTERESTS_PER_BATCH = 64
+MAX_REHYDRATED_EVENTS = 64
+MAX_REHYDRATED_BYTES = 512 * 1024
 MAX_INTEREST_LIFETIME_US = 7 * 86_400_000_000
 
 
@@ -150,11 +152,61 @@ class DiscoveryReceipt(DomainModel):
         return self
 
 
+class AncestorPageContinuation(DomainModel):
+    """Request one bounded page of causal ancestors for retained roots."""
+
+    kind: Literal["ancestor_page"] = "ancestor_page"
+    root_event_ids: tuple[str, ...] = Field(min_length=1, max_length=64)
+    event_kind: str = Field(min_length=1)
+    input_roles: tuple[Literal["prior_receipt"], ...] = Field(min_length=1, max_length=1)
+    cursor: str | None = Field(default=None, min_length=1, max_length=256)
+    maximum_depth: Literal[78] = 78
+    page_size: Literal[64] = 64
+
+    @model_validator(mode="after")
+    def identities_are_unique(self) -> Self:
+        if len(set(self.root_event_ids)) != len(self.root_event_ids):
+            raise ValueError("continuation root event ids must be unique")
+        if len(set(self.input_roles)) != len(self.input_roles):
+            raise ValueError("continuation input roles must be unique")
+        return self
+
+
+class ExactEventsContinuation(DomainModel):
+    """Request exact causal ancestors previously discovered through a page scan."""
+
+    kind: Literal["exact_events"] = "exact_events"
+    root_event_ids: tuple[str, ...] = Field(min_length=1, max_length=64)
+    event_ids: tuple[str, ...] = Field(min_length=1, max_length=64)
+    event_kind: str = Field(min_length=1)
+    input_roles: tuple[Literal["prior_receipt"], ...] = Field(min_length=1, max_length=1)
+    maximum_depth: Literal[78] = 78
+
+    @model_validator(mode="after")
+    def identities_are_unique(self) -> Self:
+        if len(set(self.root_event_ids)) != len(self.root_event_ids):
+            raise ValueError("continuation root event ids must be unique")
+        if len(set(self.event_ids)) != len(self.event_ids):
+            raise ValueError("continuation exact event ids must be unique")
+        if len(set(self.input_roles)) != len(self.input_roles):
+            raise ValueError("continuation input roles must be unique")
+        return self
+
+
+type ContinuationRequest = Annotated[
+    AncestorPageContinuation | ExactEventsContinuation,
+    Field(discriminator="kind"),
+]
+
+
 class IdeaBatch(DomainModel):
     """Immutable causal input of at most 256 market events."""
 
     mode: RuntimeMode
-    events: tuple[MarketEvent, ...] = Field(min_length=1, max_length=MAX_EVENTS_PER_BATCH)
+    events: tuple[MarketEvent, ...] = Field(default=(), max_length=MAX_EVENTS_PER_BATCH)
+    rehydrated_events: tuple[MarketEvent, ...] = Field(default=(), max_length=MAX_REHYDRATED_EVENTS)
+    continuation_request: ContinuationRequest | None = None
+    continuation_token: str | None = Field(default=None, min_length=1, max_length=256)
     input_watermark: str = Field(min_length=1)
     causal_from_at_us: int = Field(ge=0)
     causal_through_at_us: int = Field(ge=0)
@@ -169,6 +221,18 @@ class IdeaBatch(DomainModel):
     def causal_range_is_ordered(self) -> Self:
         if self.causal_from_at_us > self.causal_through_at_us:
             raise ValueError("causal_from_at_us must not exceed causal_through_at_us")
+        if self.continuation_request is None:
+            if not self.events or self.rehydrated_events or self.continuation_token is not None:
+                raise ValueError("ordinary idea batches require only new market events")
+        elif self.events or not self.rehydrated_events:
+            raise ValueError("continuation batches require only rehydrated events")
+        rehydrated_bytes = (
+            2
+            + max(0, len(self.rehydrated_events) - 1)
+            + sum(len(event.to_canonical_json()) for event in self.rehydrated_events)
+        )
+        if rehydrated_bytes > MAX_REHYDRATED_BYTES:
+            raise ValueError("rehydrated continuation events exceed 512 KiB")
         return self
 
 
@@ -185,6 +249,7 @@ class IdeaEvaluation(DomainModel):
         default=(), max_length=MAX_OUTPUTS_PER_BATCH
     )
     interests: tuple[MarketDataInterest, ...] = Field(max_length=MAX_INTERESTS_PER_BATCH)
+    continuation: ContinuationRequest | None = None
 
     @model_validator(mode="after")
     def state_fits_bound(self) -> Self:

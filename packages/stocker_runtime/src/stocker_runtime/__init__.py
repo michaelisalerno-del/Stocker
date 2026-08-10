@@ -19,7 +19,12 @@ from stocker_runtime.domain import (
 )
 from stocker_runtime.ideas import (
     MAX_EVENTS_PER_BATCH,
+    MAX_REHYDRATED_BYTES,
+    MAX_REHYDRATED_EVENTS,
+    AncestorPageContinuation,
+    ContinuationRequest,
     DiscoveryReceipt,
+    ExactEventsContinuation,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
@@ -32,6 +37,9 @@ from stocker_runtime.ideas import (
 __all__ = [
     "IdeaOutput",
     "IdeaActivation",
+    "AncestorPageContinuation",
+    "ContinuationRequest",
+    "ExactEventsContinuation",
     "IdeaBatch",
     "IdeaEvaluation",
     "IdeaManifest",
@@ -39,6 +47,8 @@ __all__ = [
     "DiscoveryReceipt",
     "JsonValue",
     "MAX_EVENTS_PER_BATCH",
+    "MAX_REHYDRATED_BYTES",
+    "MAX_REHYDRATED_EVENTS",
     "MAX_MARKET_EVENT_PAYLOAD_BYTES",
     "MarketDataRequirement",
     "MarketDataInterest",

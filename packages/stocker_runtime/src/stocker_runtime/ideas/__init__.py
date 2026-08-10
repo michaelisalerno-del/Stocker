@@ -2,7 +2,12 @@
 
 from stocker_runtime.ideas.contract import (
     MAX_EVENTS_PER_BATCH,
+    MAX_REHYDRATED_BYTES,
+    MAX_REHYDRATED_EVENTS,
+    AncestorPageContinuation,
+    ContinuationRequest,
     DiscoveryReceipt,
+    ExactEventsContinuation,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
@@ -29,6 +34,9 @@ from stocker_runtime.ideas.identity import (
 
 __all__ = [
     "IdeaActivation",
+    "AncestorPageContinuation",
+    "ContinuationRequest",
+    "ExactEventsContinuation",
     "IdeaBatch",
     "IdeaEvaluation",
     "IdeaManifest",
@@ -39,6 +47,8 @@ __all__ = [
     "DiscoveredPlugin",
     "DiscoveryReceipt",
     "MAX_EVENTS_PER_BATCH",
+    "MAX_REHYDRATED_BYTES",
+    "MAX_REHYDRATED_EVENTS",
     "MarketDataRequirement",
     "MarketDataInterest",
     "aggregate_instruments",

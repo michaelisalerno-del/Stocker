@@ -50,7 +50,9 @@ from stocker_runtime.domain import (
     canonical_json_bytes,
 )
 from stocker_runtime.ideas.contract import (
+    AncestorPageContinuation,
     DiscoveryReceipt,
+    ExactEventsContinuation,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
@@ -251,6 +253,166 @@ def _event(
         received_at_us=at_us,
         payload=payload,
     )
+
+
+def _exact_continuation_fixture(
+    *,
+    state: JsonValue,
+    session: str,
+    checkpoints: tuple[int, ...],
+    prior_ids: tuple[str, ...],
+    event_overrides: Mapping[tuple[str, int], MarketEvent] | None = None,
+) -> tuple[
+    JsonValue,
+    tuple[str, ...],
+    Mapping[int, tuple[MarketEvent, ...]],
+    Mapping[int, ExactEventsContinuation],
+]:
+    events_by_checkpoint: dict[int, tuple[MarketEvent, ...]] = {}
+    indexes: dict[str, dict[str, str]] = {}
+    overrides = {} if event_overrides is None else dict(event_overrides)
+    for checkpoint in checkpoints:
+        values = {
+            symbol: overrides.get(
+                (symbol, checkpoint),
+                _event(
+                    f"exact-{symbol}-{checkpoint}",
+                    symbol,
+                    "bar_5m_session_prefix",
+                    checkpoint * 1_000_000 + sorted(UNIVERSE).index(symbol),
+                    _prefix_fixture(
+                        session=session,
+                        checkpoint=checkpoint,
+                        base=250.0 if symbol == "VTI" else 100.0,
+                    ),
+                ),
+            )
+            for symbol in UNIVERSE
+        }
+        events_by_checkpoint[checkpoint] = tuple(values[symbol] for symbol in sorted(UNIVERSE))
+        indexes[f"{session}|{checkpoint:02d}"] = {
+            symbol: values[symbol].event_id for symbol in UNIVERSE
+        }
+    roots = {symbol: f"root-{symbol}" for symbol in UNIVERSE}
+    state_value = cast(dict[str, JsonValue], json.loads(canonical_json_bytes(state)))
+    state_value.update(
+        {
+            "schema_version": 2,
+            "prefix_roots": {
+                symbol: {
+                    "i": roots[symbol],
+                    "s": session,
+                    "n": 78,
+                    "t": 78_000_000,
+                }
+                for symbol in UNIVERSE
+            },
+            "prefix_index": indexes,
+            "processed": state_value.get("processed", {}),
+            "statuses": {
+                **{
+                    symbol: {"s": session, "r": "prior_session_baseline_missing"}
+                    for symbol in COHORT
+                    if symbol != "AAL"
+                },
+                **cast(dict[str, JsonValue], state_value.get("statuses", {})),
+            },
+        }
+    )
+    root_ids = tuple(roots[symbol] for symbol in UNIVERSE)
+    retained = (*prior_ids, *root_ids)
+    requests = {
+        checkpoint: ExactEventsContinuation(
+            root_event_ids=root_ids,
+            event_ids=tuple(item.event_id for item in events_by_checkpoint[checkpoint]),
+            event_kind="bar_5m_session_prefix",
+            input_roles=("prior_receipt",),
+        )
+        for checkpoint in checkpoints
+    }
+    return cast(JsonValue, state_value), retained, events_by_checkpoint, requests
+
+
+def _exact_batch(
+    *,
+    events: tuple[MarketEvent, ...],
+    request: ExactEventsContinuation,
+    retained: tuple[str, ...],
+) -> IdeaBatch:
+    return IdeaBatch(
+        mode=RuntimeMode.SHADOW,
+        rehydrated_events=events,
+        continuation_request=request,
+        input_watermark="ordinary-watermark",
+        causal_from_at_us=min(item.event_at_us for item in events),
+        causal_through_at_us=max(item.event_at_us for item in events),
+        prior_state_input_event_ids=retained,
+    )
+
+
+def _full_cohort_context_state() -> tuple[JsonValue, tuple[str, ...]]:
+    baselines = {
+        symbol: {
+            "i": f"baseline-{symbol}",
+            "s": "2026-08-07",
+            "c": 100.0,
+            "v": 0.25,
+            "t": 1_000_000,
+            "k": 21,
+        }
+        for symbol in COHORT
+    }
+    option_context = {
+        symbol: {
+            "s": "2026-08-07",
+            "call": {
+                "i": f"capture-{symbol}-call",
+                "t": 2_000_000,
+                "source_completeness": "complete",
+                "bid": 2.0,
+                "ask": 2.2,
+                "model_implied_volatility": 0.40,
+                "option_right": "call",
+                "expiry": "20260918",
+                "strike": 100.0,
+            },
+            "put": {
+                "i": f"capture-{symbol}-put",
+                "t": 2_000_001,
+                "source_completeness": "complete",
+                "bid": 1.8,
+                "ask": 2.0,
+                "model_implied_volatility": 0.38,
+                "option_right": "put",
+                "expiry": "20260918",
+                "strike": 100.0,
+            },
+        }
+        for symbol in COHORT
+    }
+    state = cast(
+        JsonValue,
+        {
+            "schema_version": 2,
+            "baselines": baselines,
+            "option_context": option_context,
+            "option_terminal": {
+                symbol: {"s": "2026-08-07", "call": "captured", "put": "captured"}
+                for symbol in COHORT
+            },
+            "prefix_roots": {},
+            "prefix_index": {},
+            "processed": {},
+            "statuses": {},
+            "episodes": {},
+            "requested": {symbol: "2026-08-07" for symbol in COHORT},
+        },
+    )
+    retained = tuple(
+        [*(f"baseline-{symbol}" for symbol in COHORT)]
+        + [f"capture-{symbol}-{right}" for symbol in COHORT for right in ("call", "put")]
+    )
+    return state, retained
 
 
 def _project_all(database: Path, instruments: tuple[str, ...] = ("AAL",)) -> int:
@@ -880,7 +1042,7 @@ def test_frozen_m1c_catch_up_requests_only_latest_pair_per_symbol() -> None:
     assert {item.underlying_instrument_id for item in evaluation.interests} == set(COHORT)
 
 
-def test_frozen_m1c_status_is_bounded_until_context_is_valid() -> None:
+def test_frozen_m1c_emits_nothing_before_a_complete_cohort_is_available() -> None:
     plugin = FrozenM1CSignalV0()
     first = _event(
         "aal-prefix-6",
@@ -899,10 +1061,8 @@ def test_frozen_m1c_status_is_bounded_until_context_is_valid() -> None:
         ),
         {},
     )
-    assert len(initial.outputs) == 1
-    assert initial.outputs[0].kind == "observation"
-    assert initial.outputs[0].payload["status"] == "unavailable"
-    assert initial.outputs[0].payload["reason"] == "market_prefix_not_ready"
+    assert initial.outputs == ()
+    assert initial.continuation is None
     assert not initial.interests
 
     second = _event(
@@ -924,6 +1084,7 @@ def test_frozen_m1c_status_is_bounded_until_context_is_valid() -> None:
         initial.state,
     )
     assert repeated.outputs == ()
+    assert repeated.continuation is None
     assert len(repeated.state_json()) < 65_536
 
 
@@ -1009,22 +1170,23 @@ def test_frozen_m1c_consumes_exact_resolved_snapshot_pair_and_scores() -> None:
         10_000_001,
         _prefix_fixture(session="2026-08-10", checkpoint=6, base=250.0),
     )
+    continuation_state, retained, events, requests = _exact_continuation_fixture(
+        state=captured.state,
+        session="2026-08-10",
+        checkpoints=(6,),
+        prior_ids=captured.retained_input_event_ids,
+        event_overrides={("AAL", 6): stock, ("VTI", 6): market},
+    )
     scored = plugin.evaluate(
-        IdeaBatch(
-            mode=RuntimeMode.SHADOW,
-            events=(stock, market),
-            input_watermark=market.event_id,
-            causal_from_at_us=stock.event_at_us,
-            causal_through_at_us=market.event_at_us,
-            prior_state_input_event_ids=captured.retained_input_event_ids,
-        ),
-        captured.state,
+        _exact_batch(events=events[6], request=requests[6], retained=retained),
+        continuation_state,
     )
 
-    assert scored.outputs
-    assert scored.outputs[0].kind == "observation"
-    assert scored.outputs[0].payload["status"] == "complete"
-    assert isinstance(scored.outputs[0].payload["probability"], float)
+    aal_outputs = tuple(item for item in scored.outputs if item.subject_instrument_id == "AAL")
+    assert aal_outputs
+    assert aal_outputs[0].kind == "observation"
+    assert aal_outputs[0].payload["status"] == "complete"
+    assert isinstance(aal_outputs[0].payload["probability"], float)
     assert all(item.kind in {"observation", "signal"} for item in scored.outputs)
     assert len(scored.state_json()) < 65_536
 
@@ -1103,22 +1265,23 @@ def test_frozen_m1c_fails_closed_for_invalid_option_pair(
             "requested": {"AAL": "2026-08-07"},
         },
     )
+    continuation_state, retained, events, requests = _exact_continuation_fixture(
+        state=state,
+        session="2026-08-10",
+        checkpoints=(6,),
+        prior_ids=("baseline-aal", "capture-call", "capture-put"),
+        event_overrides={("AAL", 6): stock, ("VTI", 6): market},
+    )
     evaluation = FrozenM1CSignalV0().evaluate(
-        IdeaBatch(
-            mode=RuntimeMode.SHADOW,
-            events=(stock, market),
-            input_watermark=market.event_id,
-            causal_from_at_us=stock.event_at_us,
-            causal_through_at_us=market.event_at_us,
-            prior_state_input_event_ids=("baseline-aal", "capture-call", "capture-put"),
-        ),
-        state,
+        _exact_batch(events=events[6], request=requests[6], retained=retained),
+        continuation_state,
     )
 
-    assert len(evaluation.outputs) == 1
-    assert evaluation.outputs[0].kind == "observation"
-    assert evaluation.outputs[0].payload["status"] == "unavailable"
-    assert evaluation.outputs[0].payload["reason"] == reason
+    aal_outputs = tuple(item for item in evaluation.outputs if item.subject_instrument_id == "AAL")
+    assert len(aal_outputs) == 1
+    assert aal_outputs[0].kind == "observation"
+    assert aal_outputs[0].payload["status"] == "unavailable"
+    assert aal_outputs[0].payload["reason"] == reason
     assert not evaluation.interests
 
 
@@ -1225,19 +1388,20 @@ def test_fresh_m1c_emits_real_labelled_classifications_only_as_generic_evidence(
         "requested": {},
     }
     prior_ids = ("aal-baseline", "aal-call", "aal-put")
+    continuation_state, retained, events, requests = _exact_continuation_fixture(
+        state=cast(JsonValue, state),
+        session=session,
+        checkpoints=(6,),
+        prior_ids=prior_ids,
+        event_overrides={("AAL", 6): stock, ("VTI", 6): market},
+    )
     evaluation = FrozenM1CSignalV0().evaluate(
-        IdeaBatch(
-            mode=RuntimeMode.SHADOW,
-            events=(stock, market),
-            input_watermark=market.event_id,
-            causal_from_at_us=stock.event_at_us,
-            causal_through_at_us=market.event_at_us,
-            prior_state_input_event_ids=prior_ids,
-        ),
-        cast(JsonValue, state),
+        _exact_batch(events=events[6], request=requests[6], retained=retained),
+        continuation_state,
     )
 
-    assert [item.kind for item in evaluation.outputs] == [
+    aal_outputs = tuple(item for item in evaluation.outputs if item.subject_instrument_id == "AAL")
+    assert [item.kind for item in aal_outputs] == [
         "observation",
         "signal",
         "observation",
@@ -1246,16 +1410,14 @@ def test_fresh_m1c_emits_real_labelled_classifications_only_as_generic_evidence(
     ]
     controls = [
         item.payload
-        for item in evaluation.outputs
+        for item in aal_outputs
         if item.payload.get("control") == "direction_classification"
     ]
     assert [item["model_id"] for item in controls] == ["A1", "C1", "R1"]
     assert controls[0]["label"] == "prospective hypothesis — not validated"
     assert controls[1]["label"] == controls[2]["label"] == "comparison only — not validated"
-    assert all(item.payload.get("execution_enabled") is False for item in evaluation.outputs)
-    assert {item.kind for item in evaluation.outputs}.isdisjoint(
-        {"proposed_position", "proposed_trade"}
-    )
+    assert all(item.payload.get("execution_enabled") is False for item in aal_outputs)
+    assert {item.kind for item in aal_outputs}.isdisjoint({"proposed_position", "proposed_trade"})
     assert len(evaluation.state_json()) < 65_536
 
 
@@ -1344,58 +1506,39 @@ def test_frozen_m1c_backlog_batch_preserves_every_checkpoint(
         )
 
     session = "2026-08-10"
-    events = tuple(
-        event
-        for checkpoint in (6, 8)
-        for event in (
-            _event(
-                f"aal-{checkpoint}",
-                "AAL",
-                "bar_5m_session_prefix",
-                checkpoint * 1_000_000,
-                _prefix_fixture(session=session, checkpoint=checkpoint),
-            ),
-            _event(
-                f"vti-{checkpoint}",
-                "VTI",
-                "bar_5m_session_prefix",
-                checkpoint * 1_000_000 + 1,
-                _prefix_fixture(session=session, checkpoint=checkpoint, base=250.0),
+    events = {
+        (instrument_id, checkpoint): _event(
+            f"{instrument_id.lower()}-{checkpoint}",
+            instrument_id,
+            "bar_5m_session_prefix",
+            checkpoint * 1_000_000 + (1 if instrument_id == "VTI" else 0),
+            _prefix_fixture(
+                session=session,
+                checkpoint=checkpoint,
+                base=250.0 if instrument_id == "VTI" else 100.0,
             ),
         )
-    )
+        for checkpoint in (6, 8)
+        for instrument_id in ("AAL", "VTI")
+    }
     prior_ids = ("aal-baseline", "aal-call", "aal-put")
-    combined = FrozenM1CSignalV0().evaluate(
-        IdeaBatch(
-            mode=RuntimeMode.SHADOW,
-            events=events,
-            input_watermark=events[-1].event_id,
-            causal_from_at_us=events[0].event_at_us,
-            causal_through_at_us=events[-1].event_at_us,
-            prior_state_input_event_ids=prior_ids,
-        ),
-        initial_state(),
+    continuation_state, retained, cohort_events, requests = _exact_continuation_fixture(
+        state=initial_state(),
+        session=session,
+        checkpoints=(6, 8),
+        prior_ids=prior_ids,
+        event_overrides=events,
     )
-
     first = FrozenM1CSignalV0().evaluate(
-        IdeaBatch(
-            mode=RuntimeMode.SHADOW,
-            events=events[:2],
-            input_watermark=events[1].event_id,
-            causal_from_at_us=events[0].event_at_us,
-            causal_through_at_us=events[1].event_at_us,
-            prior_state_input_event_ids=prior_ids,
-        ),
-        initial_state(),
+        _exact_batch(events=cohort_events[6], request=requests[6], retained=retained),
+        continuation_state,
     )
+    assert first.continuation == requests[8]
     second = FrozenM1CSignalV0().evaluate(
-        IdeaBatch(
-            mode=RuntimeMode.SHADOW,
-            events=events[2:],
-            input_watermark=events[-1].event_id,
-            causal_from_at_us=events[2].event_at_us,
-            causal_through_at_us=events[-1].event_at_us,
-            prior_state_input_event_ids=first.retained_input_event_ids,
+        _exact_batch(
+            events=cohort_events[8],
+            request=cast(ExactEventsContinuation, first.continuation),
+            retained=first.retained_input_event_ids,
         ),
         first.state,
     )
@@ -1407,60 +1550,28 @@ def test_frozen_m1c_backlog_batch_preserves_every_checkpoint(
         ]
 
     split_outputs = (*first.outputs, *second.outputs)
-    assert combined.outputs == split_outputs
-    assert combined.output_input_event_ids == (
-        *first.output_input_event_ids,
-        *second.output_input_event_ids,
-    )
-    assert combined.state == second.state
-    assert (
-        summary(combined.outputs)
-        == summary(split_outputs)
-        == [
-            ("observation", 6, None),
-            ("signal", 6, None),
-            ("observation", 6, "direction_classification"),
-            ("observation", 8, None),
-        ]
-    )
-    assert combined.output_input_event_ids == (
+    assert summary(split_outputs) == [
+        ("observation", 6, None),
+        ("signal", 6, None),
+        ("observation", 6, "direction_classification"),
+        ("observation", 8, None),
+    ]
+    assert (*first.output_input_event_ids, *second.output_input_event_ids) == (
         ("aal-baseline", "aal-call", "aal-put", "aal-6", "vti-6"),
         ("aal-baseline", "aal-call", "aal-put", "aal-6", "vti-6"),
         ("aal-baseline", "aal-call", "aal-put", "aal-6", "vti-6"),
         ("aal-baseline", "aal-call", "aal-put", "aal-8", "vti-8"),
     )
+    assert second.continuation is None
 
 
-def test_frozen_m1c_worst_case_pending_state_stays_within_contract_bound() -> None:
-    rows = _prefix_fixture(session="2026-08-10", checkpoint=34)["trailing_bars"]
-    pending = {
-        symbol: {
-            "i": f"prefix-{symbol}",
-            "s": "2026-08-10",
-            "n": 34,
-            "t": 34_000_000,
-            "c": "complete",
-            "r": [
-                [
-                    item["bar_number"],
-                    item["return_bps"],
-                    item["open"],
-                    item["high"],
-                    item["low"],
-                    item["close"],
-                    item["historical_relative_activity"],
-                    item["session_vwap"],
-                ]
-                for item in rows
-            ],
-            "a": _prefix_fixture(session="2026-08-10", checkpoint=34)["accumulator"],
-            "g": {name: 5.0 for name in CAUSAL_GROUP_I_FEATURES},
-        }
-        for symbol in COHORT
-    }
+def test_frozen_m1c_worst_case_continuation_state_stays_within_contract_bound() -> None:
+    def event_id(value: str) -> str:
+        return hashlib.sha256(value.encode()).hexdigest()
+
     baselines = {
         symbol: {
-            "i": f"baseline-{symbol}",
+            "i": event_id(f"baseline-{symbol}"),
             "s": "2026-08-07",
             "c": 999_999.123456789,
             "v": 9.123456789012345,
@@ -1474,7 +1585,7 @@ def test_frozen_m1c_worst_case_pending_state_stays_within_contract_bound() -> No
             "s": "2026-08-07",
             **{
                 right: {
-                    "i": f"capture-{symbol}-{right}",
+                    "i": event_id(f"capture-{symbol}-{right}"),
                     "t": 9_999_999_999_999_999,
                     "source_completeness": "complete",
                     "bid": 999_999.123456789,
@@ -1489,14 +1600,34 @@ def test_frozen_m1c_worst_case_pending_state_stays_within_contract_bound() -> No
         }
         for symbol in COHORT
     }
+    prefix_roots = {
+        symbol: {
+            "i": event_id(f"root-{symbol}"),
+            "s": "2026-08-10",
+            "n": 78,
+            "t": 9_999_999_999_999_999,
+        }
+        for symbol in UNIVERSE
+    }
+    prefix_index = {
+        f"2026-08-10|{checkpoint:02d}": {
+            symbol: event_id(f"prefix-{symbol}-{checkpoint}") for symbol in UNIVERSE
+        }
+        for checkpoint in range(6, 35, 2)
+    }
     state = cast(
         JsonValue,
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "baselines": baselines,
             "option_context": option_context,
-            "pending": pending,
-            "market": pending["AAL"],
+            "option_terminal": {
+                symbol: {"s": "2026-08-07", "call": "captured", "put": "captured"}
+                for symbol in COHORT
+            },
+            "prefix_roots": prefix_roots,
+            "prefix_index": prefix_index,
+            "processed": {f"2026-08-10|{checkpoint:02d}": 1 for checkpoint in range(6, 34, 2)},
             "statuses": {symbol: {"s": "2026-08-10", "r": "fixture"} for symbol in COHORT},
             "episodes": {
                 symbol: {"s": "2026-08-10", "p": 0.999999999, "l": 1, "c": 99} for symbol in COHORT
@@ -1505,9 +1636,15 @@ def test_frozen_m1c_worst_case_pending_state_stays_within_contract_bound() -> No
         },
     )
     retained = tuple(
-        [*(f"baseline-{symbol}" for symbol in COHORT)]
-        + [f"capture-{symbol}-{right}" for symbol in COHORT for right in ("call", "put")]
-        + [*(f"prefix-{symbol}" for symbol in COHORT)]
+        [*(event_id(f"baseline-{symbol}") for symbol in COHORT)]
+        + [event_id(f"capture-{symbol}-{right}") for symbol in COHORT for right in ("call", "put")]
+        + [*(event_id(f"root-{symbol}") for symbol in UNIVERSE)]
+    )
+    continuation = ExactEventsContinuation(
+        root_event_ids=tuple(event_id(f"root-{symbol}") for symbol in UNIVERSE),
+        event_ids=tuple(prefix_index["2026-08-10|34"][symbol] for symbol in sorted(UNIVERSE)),
+        event_kind="bar_5m_session_prefix",
+        input_roles=("prior_receipt",),
     )
 
     evaluation = IdeaEvaluation(
@@ -1516,10 +1653,249 @@ def test_frozen_m1c_worst_case_pending_state_stays_within_contract_bound() -> No
         retained_input_event_ids=retained,
         output_input_event_ids=(),
         interests=(),
+        continuation=continuation,
+    )
+    envelope = canonical_json_bytes(
+        {
+            "_stocker_runner_state_version": 1,
+            "plugin_state": state,
+            "continuation": continuation.model_dump(mode="json"),
+        }
     )
 
-    assert len(evaluation.state_json()) <= 65_536
-    assert len(retained) == 80
+    assert len(evaluation.state_json()) < 60_000
+    assert len(envelope) <= 65_536
+    assert len(retained) == 81
+    assert sum(len(values) for values in prefix_index.values()) == 315
+
+
+def test_frozen_m1c_skewed_full_cohort_backlog_drains_every_checkpoint_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        m1c_plugin,
+        "score_m1c",
+        lambda **_values: {
+            "probability": 0.75,
+            "threshold_passed": True,
+            "missing_feature_count": 0,
+            "feature_hash": "1" * 64,
+            "model_hash": "2" * 64,
+        },
+    )
+    monkeypatch.setattr(m1c_plugin, "build_direction_features", lambda **_values: {})
+    monkeypatch.setattr(
+        m1c_plugin,
+        "classify_directions",
+        lambda **_values: tuple(
+            {
+                "model_id": model_id,
+                "probability_up": 0.6,
+                "confidence": 0.1,
+                "action": "CALL",
+                "boundary": 0.05,
+                "label": (
+                    "prospective hypothesis — not validated"
+                    if model_id == "A1"
+                    else "comparison only — not validated"
+                ),
+                "model_hash": "3" * 64,
+                "preprocessing_hash": "4" * 64,
+                "feature_hash": "5" * 64,
+                "fallback_levels": ("stock_checkpoint",),
+            }
+            for model_id in ("A1", "C1", "R1")
+        ),
+    )
+    plugin = FrozenM1CSignalV0()
+    session = "2026-08-10"
+    stock_events = tuple(
+        _event(
+            f"prefix-{symbol}-{checkpoint}",
+            symbol,
+            "bar_5m_session_prefix",
+            (symbol_index * 100 + checkpoint) * 1_000_000,
+            _prefix_fixture(session=session, checkpoint=checkpoint),
+        )
+        for symbol_index, symbol in enumerate(COHORT)
+        for checkpoint in range(1, 79)
+    )
+    market_events = tuple(
+        _event(
+            f"prefix-VTI-{checkpoint}",
+            "VTI",
+            "bar_5m_session_prefix",
+            (10_000 + checkpoint) * 1_000_000,
+            _prefix_fixture(session=session, checkpoint=checkpoint, base=250.0),
+        )
+        for checkpoint in range(1, 79)
+    )
+    state, retained = _full_cohort_context_state()
+    evaluation: IdeaEvaluation | None = None
+    events = (*stock_events, *market_events)
+    for start in range(0, len(events), 256):
+        page = events[start : start + 256]
+        evaluation = plugin.evaluate(
+            IdeaBatch(
+                mode=RuntimeMode.SHADOW,
+                events=page,
+                input_watermark=page[-1].event_id,
+                causal_from_at_us=min(item.event_at_us for item in page),
+                causal_through_at_us=max(item.event_at_us for item in page),
+                prior_state_input_event_ids=retained,
+            ),
+            state,
+        )
+        assert evaluation.outputs == ()
+        state = evaluation.state
+        retained = evaluation.retained_input_event_ids
+
+    assert evaluation is not None
+    assert isinstance(evaluation.continuation, AncestorPageContinuation)
+    assert len(evaluation.continuation.root_event_ids) == len(UNIVERSE)
+    assert len(retained) <= 81
+    assert len(evaluation.state_json()) < 65_536
+
+    split_state, split_retained = _full_cohort_context_state()
+    split_evaluation: IdeaEvaluation | None = None
+    for start in range(0, len(events), 73):
+        page = events[start : start + 73]
+        split_evaluation = plugin.evaluate(
+            IdeaBatch(
+                mode=RuntimeMode.SHADOW,
+                events=page,
+                input_watermark=page[-1].event_id,
+                causal_from_at_us=min(item.event_at_us for item in page),
+                causal_through_at_us=max(item.event_at_us for item in page),
+                prior_state_input_event_ids=split_retained,
+            ),
+            split_state,
+        )
+        split_state = split_evaluation.state
+        split_retained = split_evaluation.retained_input_event_ids
+    assert split_evaluation is not None
+    assert split_evaluation.state == evaluation.state
+    assert split_evaluation.continuation == evaluation.continuation
+    assert split_retained == retained
+
+    ancestry = tuple(sorted(events, key=lambda item: (item.event_at_us, item.event_id)))
+    assert len(ancestry) == len(UNIVERSE) * 78
+    request = evaluation.continuation
+    for start in range(0, len(ancestry), 64):
+        page = ancestry[start : start + 64]
+        next_token = (
+            f"fixture-page-{start + len(page)}" if start + len(page) < len(ancestry) else None
+        )
+        evaluation = plugin.evaluate(
+            IdeaBatch(
+                mode=RuntimeMode.SHADOW,
+                rehydrated_events=page,
+                continuation_request=request,
+                continuation_token=next_token,
+                input_watermark="ordinary-watermark",
+                causal_from_at_us=min(item.event_at_us for item in page),
+                causal_through_at_us=max(item.event_at_us for item in page),
+                prior_state_input_event_ids=retained,
+            ),
+            state,
+        )
+        assert evaluation.outputs == ()
+        assert not evaluation.interests
+        state = evaluation.state
+        retained = evaluation.retained_input_event_ids
+        request = cast(AncestorPageContinuation, evaluation.continuation)
+
+    by_id = {event.event_id: event for event in ancestry}
+    continuation_calls = 0
+    maximum_outputs = 0
+    primary_outputs: list[IdeaOutput] = []
+    while isinstance(evaluation.continuation, ExactEventsContinuation):
+        request = evaluation.continuation
+        exact_events = tuple(by_id[event_id] for event_id in request.event_ids)
+        evaluation = plugin.evaluate(
+            _exact_batch(events=exact_events, request=request, retained=retained),
+            state,
+        )
+        exact_by_symbol = {item.instrument_id: item.event_id for item in exact_events}
+        for output, lineage in zip(
+            evaluation.outputs,
+            evaluation.output_input_event_ids,
+            strict=True,
+        ):
+            assert {
+                f"baseline-{output.subject_instrument_id}",
+                f"capture-{output.subject_instrument_id}-call",
+                f"capture-{output.subject_instrument_id}-put",
+                exact_by_symbol[output.subject_instrument_id],
+                exact_by_symbol["VTI"],
+            } == set(lineage)
+        continuation_calls += 1
+        maximum_outputs = max(maximum_outputs, len(evaluation.outputs))
+        primary_outputs.extend(
+            item
+            for item in evaluation.outputs
+            if item.kind == "observation"
+            and item.payload.get("status") == "complete"
+            and item.payload.get("control") is None
+        )
+        assert len(evaluation.outputs) <= plugin.manifest.maximum_outputs_per_batch
+        assert not evaluation.interests
+        state = evaluation.state
+        retained = evaluation.retained_input_event_ids
+
+    assert continuation_calls == len(range(6, 35, 2))
+    assert maximum_outputs == 100
+    assert len(primary_outputs) == len(COHORT) * len(range(6, 35, 2))
+    assert {item.payload["checkpoint"] for item in primary_outputs} == set(range(6, 35, 2))
+    assert evaluation.continuation is None
+    assert len(retained) == 81
+    assert len(evaluation.state_json()) < 65_536
+
+
+@pytest.mark.parametrize("market_first", (False, True))
+def test_frozen_m1c_prefix_roots_survive_cross_instrument_arrival_skew(
+    market_first: bool,
+) -> None:
+    session = "2026-08-10"
+    stock_events = tuple(
+        _event(
+            f"{symbol}-{checkpoint}",
+            symbol,
+            "bar_5m_session_prefix",
+            checkpoint * 1_000_000,
+            _prefix_fixture(session=session, checkpoint=checkpoint),
+        )
+        for symbol in COHORT
+        for checkpoint in (6, 8)
+    )
+    market_events = tuple(
+        _event(
+            f"VTI-{checkpoint}",
+            "VTI",
+            "bar_5m_session_prefix",
+            checkpoint * 1_000_000,
+            _prefix_fixture(session=session, checkpoint=checkpoint, base=250.0),
+        )
+        for checkpoint in (6, 8)
+    )
+    events = (*market_events, *stock_events) if market_first else (*stock_events, *market_events)
+
+    evaluation = FrozenM1CSignalV0().evaluate(
+        IdeaBatch(
+            mode=RuntimeMode.SHADOW,
+            events=events,
+            input_watermark=events[-1].event_id,
+            causal_from_at_us=min(item.event_at_us for item in events),
+            causal_through_at_us=max(item.event_at_us for item in events),
+        ),
+        {},
+    )
+
+    assert evaluation.outputs == ()
+    assert isinstance(evaluation.continuation, AncestorPageContinuation)
+    roots = cast(Mapping[str, Mapping[str, JsonValue]], evaluation.state)["prefix_roots"]
+    assert set(roots) == set(UNIVERSE)
+    assert {root["n"] for root in roots.values()} == {8}
 
 
 def test_frozen_m1c_source_graph_includes_reviewed_generated_data() -> None:

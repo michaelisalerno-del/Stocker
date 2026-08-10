@@ -32,6 +32,8 @@ from stocker_runtime.domain import (
     canonical_json_bytes,
 )
 from stocker_runtime.ideas import (
+    AncestorPageContinuation,
+    ExactEventsContinuation,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
@@ -53,6 +55,7 @@ from stocker_runtime.ideas.discovery import (
     reviewed_code_hash,
 )
 from stocker_runtime.ideas.runner import (
+    EvaluationResult,
     IdeaRunner,
     IdeaRunnerError,
     _merge_batch_requirements,
@@ -1085,6 +1088,7 @@ def test_runner_commit_boundary_covers_batch_watermark_and_overlapping_callback(
         evaluation: IdeaEvaluation,
         event_ids: tuple[str, ...],
         starting_checkpoint: str | None,
+        starting_state_hash: str,
         now_us: int,
     ) -> None:
         with connect_v2(database) as connection:
@@ -1095,6 +1099,7 @@ def test_runner_commit_boundary_covers_batch_watermark_and_overlapping_callback(
             evaluation,
             event_ids,
             starting_checkpoint,
+            starting_state_hash,
             now_us,
         )
 
@@ -1148,7 +1153,7 @@ def test_runner_sealed_retry_survives_real_lineage_compaction(tmp_path: Path) ->
             _event(connection, 2, "AAL", 101.0)
         loaded = runner._load_batch(activation.instance_id)
         assert loaded is not None
-        loaded_activation, batch, state, _, _ = loaded
+        loaded_activation, batch, state, _, _, _ = loaded
         evaluation = discovered.plugin.evaluate(batch, state)
         assert runner.run_once(now_us=1_000)[0].output_count == 1
         output_id = deterministic_idea_output_id(
@@ -1347,6 +1352,124 @@ class _CursorRecordingPlugin:
         )
 
 
+class _ContinuationProbePlugin:
+    def __init__(self, original: IdeaPlugin) -> None:
+        self._manifest = original.manifest
+
+    @property
+    def manifest(self) -> IdeaManifest:
+        return self._manifest
+
+    def requirements(self, activation: IdeaActivation) -> tuple[MarketDataRequirement, ...]:
+        del activation
+        return ()
+
+    def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
+        prior = state if isinstance(state, Mapping) else {}
+        retained = batch.prior_state_input_event_ids
+        if batch.continuation_request is None:
+            root = batch.events[-1].event_id
+            return IdeaEvaluation(
+                state={"seen": ()},
+                outputs=(),
+                retained_input_event_ids=(root,),
+                interests=(),
+                continuation=AncestorPageContinuation(
+                    root_event_ids=(root,),
+                    event_kind="bar_5m_session_prefix",
+                    input_roles=("prior_receipt",),
+                ),
+            )
+        if isinstance(batch.continuation_request, AncestorPageContinuation):
+            seen_value = prior.get("seen", ())
+            assert isinstance(seen_value, tuple | list)
+            seen = (*seen_value, *(event.event_id for event in batch.rehydrated_events))
+            continuation = (
+                AncestorPageContinuation(
+                    **{
+                        **batch.continuation_request.model_dump(mode="python"),
+                        "cursor": batch.continuation_token,
+                    }
+                )
+                if batch.continuation_token is not None
+                else ExactEventsContinuation(
+                    root_event_ids=batch.continuation_request.root_event_ids,
+                    event_ids=(str(seen[0]),),
+                    event_kind="bar_5m_session_prefix",
+                    input_roles=("prior_receipt",),
+                )
+            )
+            return IdeaEvaluation(
+                state={"seen": seen},
+                outputs=(),
+                retained_input_event_ids=retained,
+                interests=(),
+                continuation=continuation,
+            )
+        event = batch.rehydrated_events[0]
+        return IdeaEvaluation(
+            state={"seen": prior.get("seen", ()), "completed": event.event_id},
+            outputs=(
+                Observation(
+                    subject_instrument_id=event.instrument_id,
+                    as_of_at_us=event.event_at_us,
+                    payload={"status": "continuation_complete"},
+                ),
+            ),
+            retained_input_event_ids=retained,
+            output_input_event_ids=((event.event_id,),),
+            interests=(),
+        )
+
+
+def _insert_prefix_chain(
+    connection: sqlite3.Connection,
+    *,
+    count: int,
+    prefix: str = "continuation",
+    run_id: str = "run-1",
+) -> tuple[str, ...]:
+    event_ids: list[str] = []
+    prior_id: str | None = None
+    for sequence in range(1, count + 1):
+        event = MarketEvent(
+            event_id=f"{prefix}-{sequence:03d}",
+            instrument_id="AAL",
+            feed_kind="bars",
+            event_kind="bar_5m_session_prefix",
+            event_at_us=sequence * 1_000_000,
+            received_at_us=sequence * 1_000_000,
+            payload={"session": "2026-08-10", "bar_number": sequence},
+        )
+        payload_json = canonical_json_bytes(event.payload).decode()
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, "
+            "derived_after_source_sequence, instrument_id, feed_kind, event_kind, "
+            "event_at_us, received_at_us, connection_generation, payload_json, "
+            "payload_sha256) VALUES (?, ?, NULL, ?, 'AAL', 'bars', "
+            "'bar_5m_session_prefix', ?, ?, 1, ?, ?)",
+            (
+                event.event_id,
+                run_id,
+                sequence,
+                event.event_at_us,
+                event.received_at_us,
+                payload_json,
+                hashlib.sha256(payload_json.encode()).hexdigest(),
+            ),
+        )
+        event_ids.append(event.event_id)
+        if prior_id is not None:
+            connection.execute(
+                "INSERT INTO market_event_derivations(derived_event_id, input_event_id, "
+                "input_ordinal, input_role, created_at_us) VALUES (?, ?, 0, "
+                "'prior_receipt', ?)",
+                (event.event_id, prior_id, event.received_at_us),
+            )
+        prior_id = event.event_id
+    return tuple(event_ids)
+
+
 def test_runner_keyset_cursor_does_not_skip_tied_sequence_after_256(
     tmp_path: Path,
 ) -> None:
@@ -1393,9 +1516,223 @@ def test_runner_keyset_cursor_does_not_skip_tied_sequence_after_256(
         ).fetchone()
     runner.close()
     assert tuple(checkpoint[:2]) == (1, "tied-256")
-    assert json.loads(str(checkpoint["state_json"]))["seen"] == [
+    assert json.loads(str(checkpoint["state_json"]))["plugin_state"]["seen"] == [
         f"tied-{index:03d}" for index in range(257)
     ]
+
+
+def test_runner_continuation_pages_restart_and_finish_without_new_input(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "continuation.sqlite3"
+    _seed(database)
+    original = discover_plugins((_config(),))[0]
+    requirement = MarketDataRequirement(
+        instrument_id="AAL",
+        feed_kind="bars",
+        event_kind="bar_5m_session_prefix",
+        cadence="5s",
+        gaps_block=False,
+        staleness_block=False,
+    )
+    discovered = replace(
+        original,
+        plugin=_ContinuationProbePlugin(original.plugin),
+        requirements=(requirement,),
+    )
+    runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    activation = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    with connect_v2(database) as connection:
+        event_ids = _insert_prefix_chain(connection, count=70)
+
+    assert runner.run_once(now_us=1_000_000)[0] == EvaluationResult(activation.instance_id, True, 0)
+    first_page = runner.run_once(now_us=2_000_000)[0]
+    assert first_page.error_code is None, first_page.error_code
+    assert first_page == EvaluationResult(activation.instance_id, True, 0)
+    with connect_v2(database) as connection:
+        paged_state = json.loads(
+            str(
+                connection.execute(
+                    "SELECT state_json FROM idea_checkpoints WHERE instance_id=?",
+                    (activation.instance_id,),
+                ).fetchone()[0]
+            )
+        )
+    assert len(paged_state["plugin_state"]["seen"]) == 64
+    assert paged_state["continuation"]["cursor"].startswith("64:")
+    runner.close()
+    runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    assert runner.run_once(now_us=3_000_000)[0] == EvaluationResult(activation.instance_id, True, 0)
+    completed = runner.run_once(now_us=4_000_000)[0]
+    assert completed == EvaluationResult(activation.instance_id, True, 1)
+    assert runner.run_once(now_us=5_000_000)[0].advanced is False
+    with connect_v2(database) as connection:
+        checkpoint = connection.execute(
+            "SELECT last_market_event_id, last_source_sequence, state_json, "
+            "state_input_event_ids_json FROM idea_checkpoints WHERE instance_id=?",
+            (activation.instance_id,),
+        ).fetchone()
+        output_inputs = tuple(
+            row[0]
+            for row in connection.execute(
+                "SELECT input.event_id FROM idea_output_inputs input "
+                "JOIN idea_outputs output USING(output_id) WHERE output.instance_id=?",
+                (activation.instance_id,),
+            )
+        )
+    runner.close()
+
+    checkpoint_state = json.loads(str(checkpoint["state_json"]))
+    assert tuple(checkpoint[:2]) == (event_ids[-1], 70)
+    assert checkpoint_state["continuation"] is None
+    assert checkpoint_state["plugin_state"]["completed"] == event_ids[0]
+    assert json.loads(str(checkpoint["state_input_event_ids_json"])) == [event_ids[-1]]
+    assert output_inputs == (event_ids[0],)
+
+
+def test_runner_continuation_commit_rejects_stale_state_hash(tmp_path: Path) -> None:
+    database = tmp_path / "continuation-cas.sqlite3"
+    _seed(database)
+    original = discover_plugins((_config(),))[0]
+    requirement = MarketDataRequirement(
+        instrument_id="AAL",
+        feed_kind="bars",
+        event_kind="bar_5m_session_prefix",
+        cadence="5s",
+        gaps_block=False,
+        staleness_block=False,
+    )
+    plugin = _ContinuationProbePlugin(original.plugin)
+    discovered = replace(original, plugin=plugin, requirements=(requirement,))
+    runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    activation = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    with connect_v2(database) as connection:
+        _insert_prefix_chain(connection, count=1)
+    assert runner.run_once(now_us=1_000_000)[0].advanced is True
+
+    first = runner._load_batch(activation.instance_id)
+    second = runner._load_batch(activation.instance_id)
+    assert first is not None and second is not None
+    first_evaluation = plugin.evaluate(first[1], first[2])
+    second_evaluation = plugin.evaluate(second[1], second[2])
+    runner._validate_evaluation(first[0], plugin, first[1], first_evaluation)
+    runner._validate_evaluation(second[0], plugin, second[1], second_evaluation)
+    runner._commit_evaluation(
+        first[0],
+        first[1],
+        first_evaluation,
+        first[3],
+        first[4],
+        first[5],
+        2_000_000,
+    )
+    with pytest.raises(IdeaRunnerError, match="checkpoint changed"):
+        runner._commit_evaluation(
+            second[0],
+            second[1],
+            second_evaluation,
+            second[3],
+            second[4],
+            second[5],
+            2_000_001,
+        )
+    runner.close()
+
+
+def test_runner_continuation_rejects_unbound_roots_cursors_and_exact_events(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "continuation-boundary.sqlite3"
+    _seed(database)
+    requirement = MarketDataRequirement(
+        instrument_id="AAL",
+        feed_kind="bars",
+        event_kind="bar_5m_session_prefix",
+        cadence="5s",
+        gaps_block=False,
+        staleness_block=False,
+    )
+    with connect_v2(database) as connection:
+        chain = _insert_prefix_chain(connection, count=3)
+        unrelated = _insert_prefix_chain(connection, count=1, prefix="unrelated")[0]
+        valid = AncestorPageContinuation(
+            root_event_ids=(chain[-1],),
+            event_kind="bar_5m_session_prefix",
+            input_roles=("prior_receipt",),
+        )
+        events, token = IdeaRunner._load_continuation_events(
+            connection,
+            run_id="run-1",
+            last_source_sequence=3,
+            retained_event_ids=(chain[-1],),
+            requirements=(requirement,),
+            request=valid,
+        )
+        assert tuple(item.event_id for item in events) == chain
+        assert token is None
+
+        with pytest.raises(IdeaRunnerError, match="not retained"):
+            IdeaRunner._load_continuation_events(
+                connection,
+                run_id="run-1",
+                last_source_sequence=3,
+                retained_event_ids=(),
+                requirements=(requirement,),
+                request=valid,
+            )
+        with pytest.raises(IdeaRunnerError, match="causal watermark"):
+            IdeaRunner._load_continuation_events(
+                connection,
+                run_id="run-1",
+                last_source_sequence=2,
+                retained_event_ids=(chain[-1],),
+                requirements=(requirement,),
+                request=valid,
+            )
+        with pytest.raises(IdeaRunnerError, match="not declared"):
+            IdeaRunner._load_continuation_events(
+                connection,
+                run_id="run-1",
+                last_source_sequence=3,
+                retained_event_ids=(chain[-1],),
+                requirements=(
+                    MarketDataRequirement(
+                        **{
+                            **requirement.model_dump(mode="python"),
+                            "event_kind": "session_volume_baseline",
+                        }
+                    ),
+                ),
+                request=valid,
+            )
+        with pytest.raises(IdeaRunnerError, match="not an allowed causal ancestor"):
+            IdeaRunner._load_continuation_events(
+                connection,
+                run_id="run-1",
+                last_source_sequence=3,
+                retained_event_ids=(chain[-1],),
+                requirements=(requirement,),
+                request=ExactEventsContinuation(
+                    root_event_ids=(chain[-1],),
+                    event_ids=(unrelated,),
+                    event_kind="bar_5m_session_prefix",
+                    input_roles=("prior_receipt",),
+                ),
+            )
+        with pytest.raises(IdeaRunnerError, match="cursor does not match"):
+            IdeaRunner._load_continuation_events(
+                connection,
+                run_id="run-1",
+                last_source_sequence=3,
+                retained_event_ids=(chain[-1],),
+                requirements=(requirement,),
+                request=AncestorPageContinuation(
+                    **{
+                        **valid.model_dump(mode="python"),
+                        "cursor": "1:" + "0" * 64,
+                    }
+                ),
+            )
 
 
 @pytest.mark.parametrize("restart", (False, True))

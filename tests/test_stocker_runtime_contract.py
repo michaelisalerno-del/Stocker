@@ -10,7 +10,11 @@ from pydantic import ValidationError
 from stocker_runtime import (
     MAX_EVENTS_PER_BATCH,
     MAX_MARKET_EVENT_PAYLOAD_BYTES,
+    MAX_REHYDRATED_BYTES,
+    MAX_REHYDRATED_EVENTS,
+    AncestorPageContinuation,
     DiscoveryReceipt,
+    ExactEventsContinuation,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
@@ -164,6 +168,89 @@ def test_evaluation_enforces_global_state_and_output_bounds() -> None:
 
     with pytest.raises(ValidationError):
         IdeaEvaluation(state=None, outputs=(output,) * 257, interests=())
+
+
+def test_continuation_batches_are_discriminated_and_serialization_bounded() -> None:
+    event = MarketEvent(
+        event_id="event-001",
+        instrument_id="AAPL",
+        feed_kind="bars",
+        event_kind="bar_5m_session_prefix",
+        event_at_us=1,
+        received_at_us=2,
+        payload={"value": 1},
+    )
+    request = AncestorPageContinuation(
+        root_event_ids=(event.event_id,),
+        event_kind=event.event_kind,
+        input_roles=("prior_receipt",),
+    )
+    batch = IdeaBatch(
+        mode=RuntimeMode.SHADOW,
+        rehydrated_events=(event,),
+        continuation_request=request,
+        input_watermark="ordinary-watermark",
+        causal_from_at_us=1,
+        causal_through_at_us=2,
+        prior_state_input_event_ids=(event.event_id,),
+    )
+
+    assert batch.events == ()
+    assert batch.continuation_request == request
+    assert MAX_REHYDRATED_EVENTS == 64
+    assert MAX_REHYDRATED_BYTES == 512 * 1024
+
+    with pytest.raises(ValidationError, match="ordinary idea batches"):
+        IdeaBatch(
+            mode=RuntimeMode.SHADOW,
+            input_watermark="empty",
+            causal_from_at_us=1,
+            causal_through_at_us=1,
+        )
+    with pytest.raises(ValidationError, match="continuation batches"):
+        IdeaBatch(
+            mode=RuntimeMode.SHADOW,
+            events=(event,),
+            rehydrated_events=(event,),
+            continuation_request=request,
+            input_watermark="mixed",
+            causal_from_at_us=1,
+            causal_through_at_us=2,
+        )
+    with pytest.raises(ValidationError, match="must be unique"):
+        ExactEventsContinuation(
+            root_event_ids=(event.event_id,),
+            event_ids=(event.event_id, event.event_id),
+            event_kind=event.event_kind,
+            input_roles=("prior_receipt",),
+        )
+    with pytest.raises(ValidationError):
+        AncestorPageContinuation(
+            root_event_ids=(event.event_id,),
+            event_kind=event.event_kind,
+            input_roles=("constituent",),
+        )
+    large_events = tuple(
+        MarketEvent(
+            event_id=f"large-{index}",
+            instrument_id="AAPL",
+            feed_kind="bars",
+            event_kind=event.event_kind,
+            event_at_us=index + 1,
+            received_at_us=index + 1,
+            payload={"value": "x" * 60_000},
+        )
+        for index in range(9)
+    )
+    with pytest.raises(ValidationError, match="512 KiB"):
+        IdeaBatch(
+            mode=RuntimeMode.SHADOW,
+            rehydrated_events=large_events,
+            continuation_request=request,
+            input_watermark="large",
+            causal_from_at_us=1,
+            causal_through_at_us=9,
+        )
 
 
 @pytest.mark.parametrize("unsupported_mode", ["paper", "live", "research", "unknown"])

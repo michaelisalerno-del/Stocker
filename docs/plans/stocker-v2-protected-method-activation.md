@@ -121,6 +121,18 @@ The JSON API remains exactly the existing seven GET routes. No method-specific r
 schema, screen, renderer, poller, or mutation is added. Unknown plugins continue to
 render through the generic Ideas and Results views.
 
+Phase 2 also uses a schema-neutral, generic runner continuation for bounded causal
+rehydration. A plugin checkpoint may request either a 64-event page of declared-kind
+ancestors from at most 64 retained roots, or at most 64 exact events discovered by
+that traversal. Traversal follows only the generic `prior_receipt` role and is limited
+to 78 derivation edges; rehydrated input is limited to 512 KiB, and every root must
+remain retained evidence from the same run at or before the committed watermark. The
+core persists the continuation beside plugin state in the existing 64 KiB checkpoint
+envelope. Continuations run before new input, never advance the ordinary input
+watermark, and may not create dynamic interests.
+This permits one canonical 20-stock-plus-VTI M1C checkpoint cohort per evaluation
+without increasing the 128-output M1C manifest limit or the central 256-event bound.
+
 ## 5. Migration, activation, and rollback
 
 - Do not mutate or re-import either V1 source.
@@ -196,6 +208,9 @@ before the next phase.
 - Shared-contract deduplication, priority, required/optional behavior, and per-instance
   provenance.
 - Plugin isolation and bounded state/output/interest counts.
+- Continuation cursor/filter binding, ancestry and run/watermark validation, restart
+  recovery, skewed source arrival, no-new-event draining, canonical cohort ordering,
+  and exact 64-event/512-KiB/64-KiB/128-output bounds.
 - Gap and staleness blocking, incomplete/crossed quote handling, and virtual outcome
   lineage to exact proposal and market events.
 - Shadow-only results conspicuously remain `shadow=true`, `broker_position=false`, and

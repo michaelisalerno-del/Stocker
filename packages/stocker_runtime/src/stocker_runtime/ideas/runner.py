@@ -25,7 +25,10 @@ from stocker_runtime.domain import (
     ensure_authority_free_json,
 )
 from stocker_runtime.ideas.contract import (
+    AncestorPageContinuation,
+    ContinuationRequest,
     DiscoveryReceipt,
+    ExactEventsContinuation,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
@@ -48,6 +51,8 @@ MAX_EVALUATION_SECONDS = MAX_EVALUATION_NS / 1_000_000_000
 WORKER_START_SECONDS = 5.0
 RETRY_BASE_US = 1_000_000
 RETRY_MAX_US = 60_000_000
+_RUNNER_STATE_VERSION = 1
+_RUNNER_STATE_VERSION_KEY = "_stocker_runner_state_version"
 
 
 class IdeaRunnerError(RuntimeError):
@@ -199,6 +204,92 @@ def _hash(value: JsonValue) -> str:
 
 def _json(value: JsonValue) -> str:
     return canonical_json_bytes(value).decode()
+
+
+def _checkpoint_state_json(
+    plugin_state: JsonValue,
+    continuation: ContinuationRequest | None,
+) -> str:
+    return _json(
+        cast(
+            JsonValue,
+            {
+                _RUNNER_STATE_VERSION_KEY: _RUNNER_STATE_VERSION,
+                "plugin_state": plugin_state,
+                "continuation": (
+                    None if continuation is None else continuation.model_dump(mode="json")
+                ),
+            },
+        )
+    )
+
+
+def _decode_checkpoint_state(text: str) -> tuple[JsonValue, ContinuationRequest | None]:
+    parsed = json.loads(text)
+    if not isinstance(parsed, Mapping) or parsed.get(_RUNNER_STATE_VERSION_KEY) != 1:
+        return cast(JsonValue, parsed), None
+    if set(parsed) != {_RUNNER_STATE_VERSION_KEY, "plugin_state", "continuation"}:
+        raise IdeaRunnerError("checkpoint runner envelope has unknown fields")
+    continuation_value = parsed.get("continuation")
+    continuation: ContinuationRequest | None = None
+    if continuation_value is not None:
+        if not isinstance(continuation_value, Mapping):
+            raise IdeaRunnerError("checkpoint continuation is invalid")
+        kind = continuation_value.get("kind")
+        continuation_json = canonical_json_bytes(cast(JsonValue, continuation_value))
+        if kind == "ancestor_page":
+            continuation = AncestorPageContinuation.model_validate_json(continuation_json)
+        elif kind == "exact_events":
+            continuation = ExactEventsContinuation.model_validate_json(continuation_json)
+        else:
+            raise IdeaRunnerError("checkpoint continuation kind is invalid")
+    return cast(JsonValue, parsed.get("plugin_state")), continuation
+
+
+def _continuation_cursor(
+    request: AncestorPageContinuation,
+    offset: int,
+) -> str:
+    material = cast(
+        JsonValue,
+        {
+            "root_event_ids": request.root_event_ids,
+            "event_kind": request.event_kind,
+            "input_roles": request.input_roles,
+            "maximum_depth": request.maximum_depth,
+            "page_size": request.page_size,
+            "offset": offset,
+        },
+    )
+    return f"{offset}:{hashlib.sha256(canonical_json_bytes(material)).hexdigest()}"
+
+
+def _continuation_offset(request: AncestorPageContinuation) -> int:
+    if request.cursor is None:
+        return 0
+    offset_text, separator, digest = request.cursor.partition(":")
+    if not separator or not offset_text.isdigit():
+        raise IdeaRunnerError("continuation cursor is malformed")
+    offset = int(offset_text)
+    if (
+        offset < 0
+        or offset > 8_192
+        or _continuation_cursor(request, offset).partition(":")[2] != digest
+    ):
+        raise IdeaRunnerError("continuation cursor does not match its request")
+    return offset
+
+
+def _market_event(row: sqlite3.Row) -> MarketEvent:
+    return MarketEvent(
+        event_id=str(row["event_id"]),
+        instrument_id=str(row["instrument_id"]),
+        feed_kind=str(row["feed_kind"]),
+        event_kind=str(row["event_kind"]),
+        event_at_us=int(row["event_at_us"]),
+        received_at_us=int(row["received_at_us"]),
+        payload=cast(Mapping[str, JsonValue], json.loads(str(row["payload_json"]))),
+    )
 
 
 def _verified_json(text: str, expected_hash: str, label: str) -> object:
@@ -592,7 +683,14 @@ class IdeaRunner:
             context = self._load_batch(instance_id)
             if context is None:
                 return EvaluationResult(instance_id, False, 0)
-            activation, batch, state, event_ids, starting_checkpoint = context
+            (
+                activation,
+                batch,
+                state,
+                event_ids,
+                starting_checkpoint,
+                starting_state_hash,
+            ) = context
             worker = self._workers.get(instance_id)
             if worker is None:
                 worker = _PluginWorker(cast(IdeaPlugin, plugin))
@@ -600,7 +698,13 @@ class IdeaRunner:
             evaluation = worker.evaluate(batch, state)
             self._validate_evaluation(activation, cast(IdeaPlugin, plugin), batch, evaluation)
             self._commit_evaluation(
-                activation, batch, evaluation, event_ids, starting_checkpoint, now_us
+                activation,
+                batch,
+                evaluation,
+                event_ids,
+                starting_checkpoint,
+                starting_state_hash,
+                now_us,
             )
             return EvaluationResult(instance_id, True, len(evaluation.outputs))
         except Exception as error:
@@ -612,7 +716,7 @@ class IdeaRunner:
 
     def _load_batch(
         self, instance_id: str
-    ) -> tuple[IdeaActivation, IdeaBatch, JsonValue, tuple[str, ...], str | None] | None:
+    ) -> tuple[IdeaActivation, IdeaBatch, JsonValue, tuple[str, ...], str | None, str] | None:
         with connect_v2(self.database_path) as connection:
             row = connection.execute(
                 "SELECT instance.*, checkpoint.last_market_event_id, "
@@ -644,6 +748,61 @@ class IdeaRunner:
                 "LIMIT 64",
                 (instance_id,),
             ).fetchall()
+            prior_state_input_event_ids = tuple(
+                str(value) for value in json.loads(str(row["state_input_event_ids_json"]))
+            )
+            plugin_state, continuation = _decode_checkpoint_state(str(row["state_json"]))
+            activation = IdeaActivation(
+                instance_id=instance_id,
+                parameters=cast(Mapping[str, JsonValue], json.loads(str(row["parameters_json"]))),
+                parameters_hash=str(row["parameters_hash"]),
+                plugin_code_hash=str(row["plugin_code_hash"]),
+                activated_at_us=int(row["activated_at_us"]),
+                run_id=str(row["run_id"]),
+                protected_data_class=ProtectedDataClass(str(row["data_class"])),
+                universe=tuple(json.loads(str(row["universe_json"]))),
+            )
+            if continuation is not None:
+                if row["last_market_event_id"] is None or row["last_source_sequence"] is None:
+                    raise IdeaRunnerError("continuation requires a committed market watermark")
+                rehydrated, next_token = self._load_continuation_events(
+                    connection,
+                    run_id=activation.run_id,
+                    last_source_sequence=int(row["last_source_sequence"]),
+                    retained_event_ids=prior_state_input_event_ids,
+                    requirements=requirements,
+                    request=continuation,
+                )
+                watermark = connection.execute(
+                    "SELECT event_at_us, received_at_us FROM market_events "
+                    "WHERE run_id=? AND event_id=?",
+                    (activation.run_id, row["last_market_event_id"]),
+                ).fetchone()
+                if watermark is None:
+                    raise IdeaRunnerError("continuation market watermark disappeared")
+                causal_through_at_us = max(
+                    int(watermark["event_at_us"]),
+                    int(watermark["received_at_us"]),
+                    *(max(item.event_at_us, item.received_at_us) for item in rehydrated),
+                )
+                batch = IdeaBatch(
+                    mode=RuntimeMode(str(row["mode"])),
+                    rehydrated_events=rehydrated,
+                    continuation_request=continuation,
+                    continuation_token=next_token,
+                    input_watermark=str(row["last_market_event_id"]),
+                    causal_from_at_us=min(item.event_at_us for item in rehydrated),
+                    causal_through_at_us=causal_through_at_us,
+                    prior_state_input_event_ids=prior_state_input_event_ids,
+                )
+                return (
+                    activation,
+                    batch,
+                    plugin_state,
+                    (),
+                    str(row["last_market_event_id"]),
+                    str(row["state_hash"]),
+                )
             batch_requirements = tuple(
                 cast(
                     JsonValue,
@@ -816,19 +975,6 @@ class IdeaRunner:
                 ).fetchone()
                 if gap is not None:
                     return None
-            prior_state_input_event_ids = tuple(
-                str(value) for value in json.loads(str(row["state_input_event_ids_json"]))
-            )
-            activation = IdeaActivation(
-                instance_id=instance_id,
-                parameters=cast(Mapping[str, JsonValue], json.loads(str(row["parameters_json"]))),
-                parameters_hash=str(row["parameters_hash"]),
-                plugin_code_hash=str(row["plugin_code_hash"]),
-                activated_at_us=int(row["activated_at_us"]),
-                run_id=str(row["run_id"]),
-                protected_data_class=ProtectedDataClass(str(row["data_class"])),
-                universe=tuple(json.loads(str(row["universe_json"]))),
-            )
             batch = IdeaBatch(
                 mode=RuntimeMode(str(row["mode"])),
                 events=events,
@@ -841,10 +987,91 @@ class IdeaRunner:
             return (
                 activation,
                 batch,
-                cast(JsonValue, json.loads(str(row["state_json"]))),
+                plugin_state,
                 tuple(item.event_id for item in events),
                 None if row["last_market_event_id"] is None else str(row["last_market_event_id"]),
+                str(row["state_hash"]),
             )
+
+    @staticmethod
+    def _load_continuation_events(
+        connection: sqlite3.Connection,
+        *,
+        run_id: str,
+        last_source_sequence: int,
+        retained_event_ids: tuple[str, ...],
+        requirements: tuple[MarketDataRequirement, ...],
+        request: ContinuationRequest,
+    ) -> tuple[tuple[MarketEvent, ...], str | None]:
+        retained = set(retained_event_ids)
+        if not set(request.root_event_ids).issubset(retained):
+            raise IdeaRunnerError("continuation roots are not retained checkpoint evidence")
+        declared_kinds = {
+            requirement.event_kind
+            for requirement in requirements
+            if requirement.event_kind is not None
+        }
+        if request.event_kind not in declared_kinds:
+            raise IdeaRunnerError("continuation event kind is not declared by the plugin")
+        root_count = int(
+            connection.execute(
+                "SELECT count(*) FROM market_events WHERE run_id=? "
+                "AND coalesce(source_sequence, derived_after_source_sequence)<=? "
+                "AND event_id IN (SELECT value FROM json_each(?))",
+                (
+                    run_id,
+                    last_source_sequence,
+                    _json(cast(JsonValue, request.root_event_ids)),
+                ),
+            ).fetchone()[0]
+        )
+        if root_count != len(request.root_event_ids):
+            raise IdeaRunnerError("continuation roots cross the run or causal watermark")
+        parameters: tuple[object, ...] = (
+            _json(cast(JsonValue, request.root_event_ids)),
+            request.maximum_depth,
+            _json(cast(JsonValue, request.input_roles)),
+            run_id,
+            request.event_kind,
+            last_source_sequence,
+        )
+        ancestry_sql = (
+            "WITH RECURSIVE walk(event_id, depth) AS ("
+            "SELECT value, 0 FROM json_each(?) UNION ALL "
+            "SELECT derivation.input_event_id, walk.depth + 1 "
+            "FROM walk JOIN market_event_derivations derivation "
+            "ON derivation.derived_event_id=walk.event_id "
+            "WHERE walk.depth<? AND derivation.input_role IN "
+            "(SELECT value FROM json_each(?))), "
+            "ancestry(event_id) AS (SELECT event_id FROM walk GROUP BY event_id) "
+            "SELECT event.* FROM ancestry JOIN market_events event USING(event_id) "
+            "WHERE event.run_id=? AND event.event_kind=? "
+            "AND coalesce(event.source_sequence, event.derived_after_source_sequence)<=? "
+        )
+        if isinstance(request, AncestorPageContinuation):
+            offset = _continuation_offset(request)
+            rows = connection.execute(
+                ancestry_sql + "ORDER BY event.event_at_us, event.event_id LIMIT ? OFFSET ?",
+                (*parameters, request.page_size + 1, offset),
+            ).fetchall()
+            page = rows[: request.page_size]
+            next_token = (
+                _continuation_cursor(
+                    request,
+                    offset + len(page),
+                )
+                if len(rows) > request.page_size
+                else None
+            )
+            return tuple(_market_event(row) for row in page), next_token
+        rows = connection.execute(
+            ancestry_sql + "AND event.event_id IN (SELECT value FROM json_each(?))",
+            (*parameters, _json(cast(JsonValue, request.event_ids))),
+        ).fetchall()
+        by_id = {str(row["event_id"]): row for row in rows}
+        if len(by_id) != len(request.event_ids):
+            raise IdeaRunnerError("continuation exact event is not an allowed causal ancestor")
+        return tuple(_market_event(by_id[event_id]) for event_id in request.event_ids), None
 
     def _validate_evaluation(
         self,
@@ -855,13 +1082,22 @@ class IdeaRunner:
     ) -> None:
         if len(evaluation.state_json()) > plugin.manifest.maximum_state_bytes:
             raise IdeaRunnerError("plugin state exceeds manifest bound")
+        if len(_checkpoint_state_json(evaluation.state, evaluation.continuation).encode()) > 65_536:
+            raise IdeaRunnerError("checkpoint state envelope exceeds 64 KiB")
         if len(evaluation.outputs) > min(plugin.manifest.maximum_outputs_per_batch, 256):
             raise IdeaRunnerError("plugin outputs exceed manifest bound")
         if len(evaluation.interests) > plugin.manifest.maximum_interests_per_batch:
             raise IdeaRunnerError("plugin interests exceed manifest bound")
+        if batch.continuation_request is not None and evaluation.interests:
+            raise IdeaRunnerError("continuations may not create market-data interests")
+        if evaluation.continuation is not None and not set(
+            evaluation.continuation.root_event_ids
+        ).issubset(set(evaluation.retained_input_event_ids)):
+            raise IdeaRunnerError("continuation roots must remain retained checkpoint evidence")
         available = (
             *batch.prior_state_input_event_ids,
             *(event.event_id for event in batch.events),
+            *(event.event_id for event in batch.rehydrated_events),
         )
         available = tuple(dict.fromkeys(available))
         available_set = set(available)
@@ -878,7 +1114,8 @@ class IdeaRunner:
             ) != tuple(lineage):
                 raise IdeaRunnerError("plugin declared invalid or unordered causal lineage")
         event_times: dict[str, tuple[int, int]] = {
-            event.event_id: (event.event_at_us, event.received_at_us) for event in batch.events
+            event.event_id: (event.event_at_us, event.received_at_us)
+            for event in (*batch.events, *batch.rehydrated_events)
         }
         allowed_instrument_ids = {
             *activation.universe,
@@ -952,19 +1189,21 @@ class IdeaRunner:
         evaluation: IdeaEvaluation,
         event_ids: tuple[str, ...],
         starting_checkpoint: str | None,
+        starting_state_hash: str,
         now_us: int,
     ) -> None:
-        state_json = evaluation.state_json().decode()
+        state_json = _checkpoint_state_json(evaluation.state, evaluation.continuation)
         state_hash = hashlib.sha256(state_json.encode()).hexdigest()
         retained_json = _json(cast(JsonValue, evaluation.retained_input_event_ids))
         with connect_v2(self.database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             current = connection.execute(
-                "SELECT last_market_event_id FROM idea_checkpoints WHERE instance_id=?",
+                "SELECT last_market_event_id, state_hash FROM idea_checkpoints WHERE instance_id=?",
                 (activation.instance_id,),
             ).fetchone()
             current_id = None if current is None or current[0] is None else str(current[0])
-            if current_id != starting_checkpoint:
+            current_state_hash = None if current is None else str(current["state_hash"])
+            if current_id != starting_checkpoint or current_state_hash != starting_state_hash:
                 raise IdeaRunnerError("checkpoint changed during plugin evaluation")
             for interest in evaluation.interests:
                 self._insert_interest(connection, activation, interest, now_us)
@@ -980,30 +1219,49 @@ class IdeaRunner:
                     _hash(cast(JsonValue, output_event_ids)),
                     now_us,
                 )
-            watermark_row = connection.execute(
-                "SELECT coalesce(source_sequence, derived_after_source_sequence) "
-                "FROM market_events WHERE event_id=? AND run_id=?",
-                (batch.input_watermark, activation.run_id),
-            ).fetchone()
-            if watermark_row is None:
-                raise IdeaRunnerError("input watermark disappeared before checkpoint commit")
-            changed = connection.execute(
-                "UPDATE idea_checkpoints SET last_market_event_id=?, last_source_sequence=?, "
-                "state_json=?, state_hash=?, state_input_event_ids_json=?, "
-                "last_success_at_us=?, updated_at_us=?, consecutive_failures=0 WHERE instance_id=? "
-                "AND last_market_event_id IS ?",
-                (
-                    batch.input_watermark,
-                    int(watermark_row[0]),
-                    state_json,
-                    state_hash,
-                    retained_json,
-                    now_us,
-                    now_us,
-                    activation.instance_id,
-                    starting_checkpoint,
-                ),
-            ).rowcount
+            if batch.continuation_request is None:
+                watermark_row = connection.execute(
+                    "SELECT coalesce(source_sequence, derived_after_source_sequence) "
+                    "FROM market_events WHERE event_id=? AND run_id=?",
+                    (batch.input_watermark, activation.run_id),
+                ).fetchone()
+                if watermark_row is None:
+                    raise IdeaRunnerError("input watermark disappeared before checkpoint commit")
+                changed = connection.execute(
+                    "UPDATE idea_checkpoints SET last_market_event_id=?, last_source_sequence=?, "
+                    "state_json=?, state_hash=?, state_input_event_ids_json=?, "
+                    "last_success_at_us=?, updated_at_us=?, consecutive_failures=0 "
+                    "WHERE instance_id=? AND last_market_event_id IS ? AND state_hash=?",
+                    (
+                        batch.input_watermark,
+                        int(watermark_row[0]),
+                        state_json,
+                        state_hash,
+                        retained_json,
+                        now_us,
+                        now_us,
+                        activation.instance_id,
+                        starting_checkpoint,
+                        starting_state_hash,
+                    ),
+                ).rowcount
+            else:
+                changed = connection.execute(
+                    "UPDATE idea_checkpoints SET state_json=?, state_hash=?, "
+                    "state_input_event_ids_json=?, last_success_at_us=?, updated_at_us=?, "
+                    "consecutive_failures=0 WHERE instance_id=? AND last_market_event_id IS ? "
+                    "AND state_hash=?",
+                    (
+                        state_json,
+                        state_hash,
+                        retained_json,
+                        now_us,
+                        now_us,
+                        activation.instance_id,
+                        starting_checkpoint,
+                        starting_state_hash,
+                    ),
+                ).rowcount
             if changed != 1:
                 raise IdeaRunnerError("checkpoint compare-and-swap failed")
             connection.execute(

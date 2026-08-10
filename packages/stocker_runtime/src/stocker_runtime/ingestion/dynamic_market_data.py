@@ -239,11 +239,20 @@ class InstrumentResolver:
         *,
         underlyings: Mapping[str, UnderlyingInstrument],
         completed_at_us: Callable[[], int],
+        lease_heartbeat: Callable[[], None] | None = None,
     ) -> None:
         self._backend = backend
         self._underlyings = dict(underlyings)
         self._completed_at_us = completed_at_us
+        self._lease_heartbeat = lease_heartbeat or (lambda: None)
         self._parameter_cache: dict[tuple[int, str], tuple[OptionParameterSet, ...]] = {}
+
+    def _external_call(self, call: Callable[[], object]) -> object:
+        self._lease_heartbeat()
+        try:
+            return call()
+        finally:
+            self._lease_heartbeat()
 
     @staticmethod
     def _receipt_id(material: Mapping[str, JsonValue]) -> str:
@@ -287,12 +296,18 @@ class InstrumentResolver:
             or underlying.kind.lower() != "stock"
         ):
             return self._denied(request, "UNDERLYING_IDENTITY_UNAVAILABLE", 0)
-        parameter_key = (underlying.ibkr_con_id, underlying.symbol)
+        underlying_con_id = underlying.ibkr_con_id
+        parameter_key = (underlying_con_id, underlying.symbol)
         parameter_sets = self._parameter_cache.get(parameter_key)
         if parameter_sets is None:
-            parameter_sets = self._backend.option_parameters(
-                underlying_con_id=underlying.ibkr_con_id,
-                symbol=underlying.symbol,
+            parameter_sets = cast(
+                tuple[OptionParameterSet, ...],
+                self._external_call(
+                    lambda: self._backend.option_parameters(
+                        underlying_con_id=underlying_con_id,
+                        symbol=underlying.symbol,
+                    )
+                ),
             )
             self._parameter_cache[parameter_key] = parameter_sets
         if len(parameter_sets) > MAX_OPTION_PARAMETER_SETS:
@@ -304,30 +319,31 @@ class InstrumentResolver:
                 continue
             expirations = tuple(sorted(set(parameters.expirations)))
             strikes = tuple(sorted(set(parameters.strikes)))
+            if not strikes:
+                continue
+            nearest = min(
+                range(len(strikes)),
+                key=lambda index: (
+                    abs(strikes[index] - interest.reference_price),
+                    strikes[index],
+                ),
+            )
+            selected_index = nearest + interest.strike_offset
+            if not 0 <= selected_index < len(strikes):
+                continue
             for expiry in expirations:
                 expiry_date = datetime.strptime(expiry, "%Y%m%d").date()
                 days = (expiry_date - as_of_date).days
                 if not (interest.minimum_days_to_expiry <= days <= interest.maximum_days_to_expiry):
                     continue
-                if not strikes:
-                    continue
-                nearest = min(
-                    range(len(strikes)),
-                    key=lambda index: (
-                        abs(strikes[index] - interest.reference_price),
-                        strikes[index],
-                    ),
-                )
-                selected_index = nearest + interest.strike_offset
-                if 0 <= selected_index < len(strikes):
-                    choices.append(
-                        (
-                            expiry,
-                            abs(strikes[nearest] - interest.reference_price),
-                            strikes[selected_index],
-                            parameters,
-                        )
+                choices.append(
+                    (
+                        expiry,
+                        abs(strikes[nearest] - interest.reference_price),
+                        strikes[selected_index],
+                        parameters,
                     )
+                )
         if not choices:
             return self._denied(request, "NO_MATCHING_EXPIRY_OR_STRIKE", 0)
         expiry, _nearest_distance, strike, parameters = min(
@@ -341,13 +357,18 @@ class InstrumentResolver:
             ),
         )
         right = "C" if interest.option_right == "call" else "P"
-        candidates = self._backend.option_contracts(
-            symbol=underlying.symbol,
-            expiry=expiry,
-            strike=strike,
-            right=right,
-            multiplier=parameters.multiplier,
-            trading_class=parameters.trading_class,
+        candidates = cast(
+            tuple[ContractCandidate, ...],
+            self._external_call(
+                lambda: self._backend.option_contracts(
+                    symbol=underlying.symbol,
+                    expiry=expiry,
+                    strike=strike,
+                    right=right,
+                    multiplier=parameters.multiplier,
+                    trading_class=parameters.trading_class,
+                )
+            ),
         )
         if len(candidates) > MAX_EXACT_CONTRACT_CANDIDATES:
             return self._denied(request, "EXACT_CONTRACT_BOUND_EXCEEDED", len(candidates))

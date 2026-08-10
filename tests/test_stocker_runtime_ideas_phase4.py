@@ -60,6 +60,7 @@ from stocker_runtime.ideas.runner import (
 from stocker_runtime.ingestion import (
     CallbackFence,
     ContractCandidate,
+    DuplicateWriterError,
     IBKRSubscription,
     InstrumentSpec,
     MarketDataCallback,
@@ -870,9 +871,22 @@ def test_runner_commits_causal_interest_and_loads_resolved_dynamic_events(tmp_pa
                 instrument_id="ibkr-option-9001",
                 feed_kind="quotes",
                 event_kind="quote",
-                event_at_us=1_786_281_600_000_001,
-                received_at_us=1_786_281_600_000_002,
+                event_at_us=int(interest["as_of_at_us"]) + 2,
+                received_at_us=int(interest["as_of_at_us"]) + 2,
                 payload={"bid": 1.0, "ask": 1.1},
+            ),
+        )
+        _persist_market_event(
+            connection,
+            3,
+            MarketEvent(
+                event_id="option-event-after-expiry",
+                instrument_id="ibkr-option-9001",
+                feed_kind="quotes",
+                event_kind="quote",
+                event_at_us=int(interest["expires_at_us"]),
+                received_at_us=int(interest["expires_at_us"]),
+                payload={"bid": 1.2, "ask": 1.3},
             ),
         )
         connection.execute(
@@ -2668,6 +2682,7 @@ def _dynamic_recorder(
     *,
     owner_id: str,
     line_limit: int = 100,
+    writer_lease_stale_us: int = 60_000_000,
 ) -> Recorder:
     return Recorder(
         RecorderConfig(
@@ -2683,6 +2698,7 @@ def _dynamic_recorder(
             config_hash="a" * 64,
             git_commit="deadbee",
             market_data_line_limit=line_limit,
+            writer_lease_stale_us=writer_lease_stale_us,
             idea_config=idea_path,
         ),
         adapter,
@@ -2712,6 +2728,100 @@ def _activate_dynamic_interest(recorder: Recorder, *, event_at_us: int) -> Callb
     return next(
         fence for fence in recorder.state.fences if cast(int, fence.request_id) >= 2_000_000
     )
+
+
+def test_static_subscription_in_dynamic_numeric_range_is_never_reconciled(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "static-high-request-id.sqlite3"
+    initialize_database(database)
+    adapter = _DynamicRecorderAdapter()
+    recorder = Recorder(
+        RecorderConfig(
+            database=database,
+            run_id="run-static-high-request-id",
+            owner_id="owner",
+            mode="prospective_record",
+            host="127.0.0.1",
+            port=4002,
+            client_id=1,
+            read_only=True,
+            external_read_only_verified=True,
+            config_hash="a" * 64,
+            git_commit="deadbee",
+        ),
+        adapter,
+    )
+    instrument = InstrumentSpec("AAL", 1, "stock", "AAL", "SMART", "USD")
+    static = SubscriptionSpec(
+        name="static-aal-bars",
+        instrument_id="AAL",
+        feed_kind="bars",
+        request_id=2_000_000,
+        continuity_required=True,
+        optional=False,
+        stale_after_us=15_000_000,
+    )
+
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=(static,))
+    recorder.drain(now_us=101)
+    recorder.drain(now_us=102)
+
+    assert recorder.state is not None
+    assert tuple(fence.request_id for fence in recorder.state.fences) == (2_000_000,)
+    assert adapter.cancelled_request_ids == []
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT lifecycle FROM subscriptions WHERE request_id=2000000"
+            ).fetchone()[0]
+            == "active"
+        )
+    recorder.stop(now_us=103)
+
+
+def test_dynamic_request_high_water_survives_restart_without_subscription_rows(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "dynamic-request-high-water.sqlite3"
+    initialize_database(database)
+
+    def create(owner_id: str) -> Recorder:
+        return Recorder(
+            RecorderConfig(
+                database=database,
+                run_id="run-high-water",
+                owner_id=owner_id,
+                mode="shadow",
+                host="127.0.0.1",
+                port=4002,
+                client_id=1,
+                read_only=True,
+                external_read_only_verified=True,
+                config_hash="a" * 64,
+                git_commit="deadbee",
+                writer_lease_stale_us=15_000_000,
+            ),
+            _DynamicRecorderAdapter(),
+        )
+
+    first = create("owner-1")
+    first.start(now_us=100, instruments=(), subscriptions=())
+    first_request_id = first._next_dynamic_request_ids(1)[0]
+
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM subscriptions").fetchone()[0] == 0
+        assert (
+            connection.execute("SELECT dynamic_request_high_water FROM runtime_state").fetchone()[0]
+            == first_request_id
+        )
+
+    second = create("owner-2")
+    second.start(now_us=15_000_101, instruments=(), subscriptions=())
+    second_request_id = second._next_dynamic_request_ids(1)[0]
+
+    assert (first_request_id, second_request_id) == (2_000_000, 2_000_001)
+    second.stop(now_us=15_000_102)
 
 
 def test_dynamic_interest_records_exact_option_and_recovers_across_restart(
@@ -2768,7 +2878,7 @@ def test_dynamic_interest_records_exact_option_and_recovers_across_restart(
         fence for fence in first.state.fences if fence.request_id == dynamic_request_id
     )
 
-    restart_at_us = event_at_us + 60_000_003
+    restart_at_us = event_at_us + 120_000_003
     second_adapter = _DynamicRecorderAdapter()
     second = _dynamic_recorder(database, idea_path, second_adapter, owner_id="owner-2")
     second_state = second.start(now_us=restart_at_us, instruments=(), subscriptions=())
@@ -2961,8 +3071,15 @@ def test_snapshot_completion_fulfills_only_interests_bound_when_request_started(
     recorder.stop(now_us=event_at_us + 15)
 
 
-def test_snapshot_interest_merged_into_stream_waits_for_a_causal_stream_event(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("callback_offset_us", "expected_lifecycle"),
+    ((6, "fulfilled"), (3_600_000_004, "expired")),
+)
+def test_snapshot_interest_merged_into_stream_honors_causal_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    callback_offset_us: int,
+    expected_lifecycle: str,
 ) -> None:
     database = tmp_path / "dynamic-snapshot-on-stream.sqlite3"
     initialize_database(database)
@@ -3045,19 +3162,23 @@ def test_snapshot_interest_merged_into_stream_waits_for_a_causal_stream_event(
         stream_fence,
         MarketDataCallback(
             callback_kind="quote",
-            received_at_us=event_at_us + 6,
+            received_at_us=event_at_us + callback_offset_us,
             provider_at_us=None,
-            payload={"event_at_us": event_at_us + 6, "bid": 1.0, "ask": 1.1},
+            payload={
+                "event_at_us": event_at_us + callback_offset_us,
+                "bid": 1.0,
+                "ask": 1.1,
+            },
         ),
     )
-    recorder.drain(now_us=event_at_us + 7)
+    recorder.drain(now_us=event_at_us + callback_offset_us + 1)
     with connect_v2(database) as connection:
-        fulfilled = connection.execute(
+        completed = connection.execute(
             "SELECT lifecycle, bound_subscription_id FROM market_data_interests "
             "WHERE interest_key='snapshot-on-existing-stream'"
         ).fetchone()
-    assert tuple(fulfilled) == ("fulfilled", stream_fence.subscription_id)
-    recorder.stop(now_us=event_at_us + 8)
+    assert tuple(completed) == (expected_lifecycle, stream_fence.subscription_id)
+    recorder.stop(now_us=event_at_us + callback_offset_us + 2)
 
 
 def test_prompt_dynamic_pacing_status_is_retried_and_resolved(
@@ -3173,7 +3294,7 @@ def test_restored_dynamic_snapshot_may_complete_inline_during_subscribe(
     first = _dynamic_recorder(database, idea_path, _DynamicRecorderAdapter(), owner_id="owner-1")
     dynamic_fence = _activate_dynamic_interest(first, event_at_us=event_at_us)
 
-    restart_at_us = event_at_us + 60_000_003
+    restart_at_us = event_at_us + 120_000_003
     adapter = _DynamicRecorderAdapter(inline_snapshot_at_us=restart_at_us + 1)
     second = _dynamic_recorder(database, idea_path, adapter, owner_id="owner-2")
     second_state = second.start(now_us=restart_at_us, instruments=(), subscriptions=())
@@ -3462,7 +3583,12 @@ def test_dynamic_discovery_response_after_expiry_never_resolves_or_subscribes(
     discovered = _dynamic_discovered(configured, interest_lifetime_us=500_000)
     monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
     elapsed = iter((0, 1_000_000_000))
-    monkeypatch.setattr(recorder_module, "monotonic_ns", lambda: next(elapsed), raising=False)
+    monkeypatch.setattr(
+        recorder_module,
+        "monotonic_ns",
+        lambda: next(elapsed, 1_000_000_000),
+        raising=False,
+    )
     idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
     event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
     adapter = _DynamicRecorderAdapter()
@@ -3498,6 +3624,112 @@ def test_dynamic_discovery_response_after_expiry_never_resolves_or_subscribes(
     assert receipt_count == 0
     assert all(request_id < 2_000_000 for request_id in adapter.subscribe_attempts)
     recorder.stop(now_us=event_at_us + 1_000_003)
+
+
+def test_dynamic_discovery_refreshes_writer_lease_between_bounded_metadata_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-discovery-lease.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    elapsed_ns = [0]
+    monkeypatch.setattr(recorder_module, "monotonic_ns", lambda: elapsed_ns[0])
+    contract_started = threading.Event()
+    release_contract = threading.Event()
+
+    class SlowMetadataAdapter(_DynamicRecorderAdapter):
+        def option_parameters(
+            self, *, underlying_con_id: int, symbol: str
+        ) -> tuple[OptionParameterSet, ...]:
+            result = super().option_parameters(
+                underlying_con_id=underlying_con_id,
+                symbol=symbol,
+            )
+            elapsed_ns[0] = 10_000_000_000
+            return result
+
+        def option_contracts(
+            self,
+            *,
+            symbol: str,
+            expiry: str,
+            strike: float,
+            right: str,
+            multiplier: str,
+            trading_class: str,
+        ) -> tuple[ContractCandidate, ...]:
+            contract_started.set()
+            assert release_contract.wait(timeout=5)
+            return super().option_contracts(
+                symbol=symbol,
+                expiry=expiry,
+                strike=strike,
+                right=right,
+                multiplier=multiplier,
+                trading_class=trading_class,
+            )
+
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    recorder = _dynamic_recorder(
+        database,
+        idea_path,
+        SlowMetadataAdapter(),
+        owner_id="owner-1",
+        writer_lease_stale_us=15_000_000,
+    )
+    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    recorder.receive(
+        state.fences[0],
+        MarketDataCallback(
+            callback_kind="bar",
+            received_at_us=event_at_us + 1,
+            provider_at_us=event_at_us,
+            payload={
+                "event_at_us": event_at_us,
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "volume": 1.0,
+            },
+        ),
+    )
+
+    failure: list[BaseException] = []
+
+    def drain() -> None:
+        try:
+            recorder.drain(now_us=event_at_us + 2)
+        except BaseException as error:
+            failure.append(error)
+
+    worker = threading.Thread(target=drain)
+    worker.start()
+    assert contract_started.wait(timeout=5)
+    contender = _dynamic_recorder(
+        database,
+        idea_path,
+        _DynamicRecorderAdapter(),
+        owner_id="owner-2",
+        writer_lease_stale_us=15_000_000,
+    )
+    try:
+        with pytest.raises(DuplicateWriterError):
+            contender.start(
+                now_us=event_at_us + 20_000_000,
+                instruments=(),
+                subscriptions=(),
+            )
+    finally:
+        release_contract.set()
+        worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert failure == []
+    recorder.stop(now_us=event_at_us + 20_000_001)
 
 
 def test_dynamic_snapshot_completion_is_terminal_and_rejects_late_callbacks(
@@ -3578,6 +3810,48 @@ def test_dynamic_snapshot_completion_is_terminal_and_rejects_late_callbacks(
     assert adapter.cancelled_request_ids == []
     assert adapter.subscribe_attempts.count(cast(int, dynamic_fence.request_id)) == 1
     recorder.stop(now_us=event_at_us + 6)
+
+
+def test_dynamic_snapshot_completion_after_expiry_records_expired_not_fulfilled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-snapshot-after-expiry.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured, interest_lifetime_us=10_000_000)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    recorder = _dynamic_recorder(
+        database,
+        idea_path,
+        _DynamicRecorderAdapter(),
+        owner_id="owner",
+    )
+    dynamic_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+
+    recorder.market_data_status(
+        MarketDataStatus(
+            kind="snapshot_end",
+            code=0,
+            request_id=dynamic_fence.request_id,
+            message="complete after expiry",
+            received_at_us=event_at_us + 10_000_001,
+        )
+    )
+
+    with connect_v2(database) as connection:
+        interest = connection.execute(
+            "SELECT lifecycle, reason_code FROM market_data_interests"
+        ).fetchone()
+        subscription = connection.execute(
+            "SELECT lifecycle FROM subscriptions WHERE subscription_id=?",
+            (dynamic_fence.subscription_id,),
+        ).fetchone()
+    assert tuple(interest) == ("expired", "INTEREST_EXPIRED")
+    assert subscription[0] == "closed"
+    recorder.stop(now_us=event_at_us + 10_000_002)
 
 
 def test_dynamic_snapshot_may_complete_inline_during_subscribe(

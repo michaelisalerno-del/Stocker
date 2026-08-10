@@ -184,7 +184,7 @@ class RecorderConfig(BaseModel):
     external_read_only_verified: Literal[True]
     config_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     git_commit: str = Field(pattern=r"^[a-f0-9]{7,64}$")
-    writer_lease_stale_us: int = Field(default=60_000_000, ge=5_000_000)
+    writer_lease_stale_us: int = Field(default=60_000_000, ge=15_000_000)
     callback_lease_us: int = Field(default=30_000_000, ge=5_000_000)
     market_data_line_limit: int = Field(default=100, ge=1, le=100)
     idea_config: Path | None = None
@@ -1043,6 +1043,7 @@ class Recorder:
             cast(OptionDiscoveryBackend, self.adapter),
             underlyings={item.instrument_id: item for item in self._instruments},
             completed_at_us=completed_at_us,
+            lease_heartbeat=lambda: self._heartbeat(completed_at_us()),
         )
         underlying_by_id = {item.instrument_id: item for item in self._instruments}
         for row in rows:
@@ -1078,6 +1079,15 @@ class Recorder:
                 now_us=receipt.completed_at_us,
             )
 
+    def _base_request_ids(self) -> frozenset[int]:
+        return frozenset(spec.request_id for spec in self._base_subscriptions)
+
+    def _dynamic_subscriptions(self) -> tuple[SubscriptionSpec, ...]:
+        base_request_ids = self._base_request_ids()
+        return tuple(
+            spec for spec in self._subscriptions if spec.request_id not in base_request_ids
+        )
+
     def _next_dynamic_request_ids(
         self,
         count: int,
@@ -1088,34 +1098,42 @@ class Recorder:
 
         if not 0 <= count <= self.config.market_data_line_limit:
             raise RecorderFatalError("dynamic request allocation bound exceeded")
-        with connect_v2(self.config.database) as connection:
-            maximum = connection.execute(
-                "SELECT max(request_id) FROM subscriptions WHERE run_id=? "
-                "AND request_id>=? AND request_id<?",
-                (
-                    self.config.run_id,
-                    _DYNAMIC_REQUEST_ID_BASE,
-                    _DYNAMIC_REQUEST_ID_BASE + _DYNAMIC_REQUEST_ID_SPAN,
-                ),
-            ).fetchone()[0]
-        candidate = max(
-            _DYNAMIC_REQUEST_ID_BASE,
-            _DYNAMIC_REQUEST_ID_BASE if maximum is None else int(maximum) + 1,
-        )
+        if count == 0:
+            return ()
         used = {
             *reserved,
             *(spec.request_id for spec in self._base_subscriptions),
             *(spec.request_id for spec in self._subscriptions),
         }
-        allocated: list[int] = []
-        while len(allocated) < count:
-            while candidate in used:
+        with connect_v2(self.config.database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            row = connection.execute(
+                "SELECT dynamic_request_high_water FROM runtime_state WHERE run_id=?",
+                (self.config.run_id,),
+            ).fetchone()
+            if row is None:
+                raise RecorderFatalError("dynamic request high-water state is missing")
+            candidate = max(_DYNAMIC_REQUEST_ID_BASE, int(row[0]) + 1)
+            allocated: list[int] = []
+            while len(allocated) < count:
+                while candidate in used:
+                    candidate += 1
+                if candidate >= _DYNAMIC_REQUEST_ID_BASE + _DYNAMIC_REQUEST_ID_SPAN:
+                    raise RecorderFatalError("dynamic request id range exhausted")
+                allocated.append(candidate)
+                used.add(candidate)
                 candidate += 1
-            if candidate >= _DYNAMIC_REQUEST_ID_BASE + _DYNAMIC_REQUEST_ID_SPAN:
-                raise RecorderFatalError("dynamic request id range exhausted")
-            allocated.append(candidate)
-            used.add(candidate)
-            candidate += 1
+            connection.execute(
+                "UPDATE runtime_state SET dynamic_request_high_water=? WHERE run_id=? "
+                "AND recorder_generation=?",
+                (
+                    allocated[-1],
+                    self.config.run_id,
+                    self._authority_state().recorder_generation,
+                ),
+            )
+            connection.commit()
         return tuple(allocated)
 
     @staticmethod
@@ -1198,9 +1216,7 @@ class Recorder:
         )
         static_keys = {(spec.instrument_id, spec.feed_kind) for spec in self._base_subscriptions}
         current_by_key: dict[tuple[str, str, bool], SubscriptionSpec] = {}
-        for spec in self._subscriptions:
-            if spec.request_id < _DYNAMIC_REQUEST_ID_BASE:
-                continue
+        for spec in self._dynamic_subscriptions():
             key = (spec.instrument_id, spec.feed_kind, spec.snapshot)
             if key in current_by_key:
                 raise RecorderFatalError("duplicate dynamic subscription key")
@@ -1548,9 +1564,7 @@ class Recorder:
 
     def _reconcile_dynamic_subscriptions(self, *, now_us: int) -> None:
         plan, desired = self._dynamic_plan(now_us=now_us)
-        current = tuple(
-            spec for spec in self._subscriptions if spec.request_id >= _DYNAMIC_REQUEST_ID_BASE
-        )
+        current = self._dynamic_subscriptions()
         if not current and not desired:
             self._sync_interest_lifecycles(plan, now_us=now_us)
             return
@@ -1570,18 +1584,23 @@ class Recorder:
         }
         if any(spec.request_id not in current_fences for spec in current):
             raise RecorderFatalError("dynamic subscription fence is missing")
+        current_request_ids_json = canonical_json_bytes(
+            cast(JsonValue, tuple(spec.request_id for spec in current))
+        ).decode()
         with connect_v2(self.config.database) as connection:
             lifecycle_by_request = {
                 int(row["request_id"]): str(row["lifecycle"])
                 for row in connection.execute(
-                    "SELECT request_id, lifecycle FROM subscriptions WHERE run_id=? "
-                    "AND recorder_generation=? AND connection_generation=? "
-                    "AND request_id>=?",
+                    "SELECT subscription.request_id, subscription.lifecycle "
+                    "FROM subscriptions subscription JOIN json_each(?) selected "
+                    "ON selected.value=subscription.request_id WHERE subscription.run_id=? "
+                    "AND subscription.recorder_generation=? "
+                    "AND subscription.connection_generation=?",
                     (
+                        current_request_ids_json,
                         self.config.run_id,
                         state.recorder_generation,
                         state.connection_generation,
-                        _DYNAMIC_REQUEST_ID_BASE,
                     ),
                 )
             }
@@ -1822,11 +1841,12 @@ class Recorder:
         ) != len(next_dynamic):
             raise RecorderFatalError("next dynamic subscription set is ambiguous")
         next_request_ids = {item.request_id for item in next_dynamic}
+        base_request_ids = self._base_request_ids()
         retained_fences = tuple(
             fence
             for fence in state.fences
             if fence.request_id is None
-            or fence.request_id < _DYNAMIC_REQUEST_ID_BASE
+            or fence.request_id in base_request_ids
             or fence.request_id in next_request_ids
         )
         fence_by_request = {
@@ -1835,7 +1855,7 @@ class Recorder:
         next_fences = tuple(
             fence
             for fence in state.fences
-            if fence.request_id is None or fence.request_id < _DYNAMIC_REQUEST_ID_BASE
+            if fence.request_id is None or fence.request_id in base_request_ids
         ) + tuple(fence_by_request[spec.request_id] for spec in next_dynamic)
         self._subscriptions = (*self._base_subscriptions, *next_dynamic)
         self.state = RecorderState(
@@ -1870,7 +1890,8 @@ class Recorder:
                 "UPDATE market_data_interests AS interest SET lifecycle='fulfilled', "
                 "reason_code=NULL, updated_at_us=? WHERE interest.run_id=? "
                 "AND interest.cadence='snapshot' "
-                "AND interest.lifecycle IN ('resolved','active') AND EXISTS ("
+                "AND interest.lifecycle IN ('resolved','active') "
+                "AND interest.expires_at_us>? AND EXISTS ("
                 "SELECT 1 FROM subscriptions subscription JOIN market_events event "
                 "ON event.event_id=subscription.latest_event_id "
                 "WHERE subscription.subscription_id=interest.bound_subscription_id "
@@ -1880,8 +1901,9 @@ class Recorder:
                 "AND event.instrument_id=subscription.instrument_id "
                 "AND event.feed_kind=subscription.feed_kind "
                 "AND event.event_at_us>=interest.as_of_at_us "
+                "AND max(event.event_at_us, event.received_at_us)<interest.expires_at_us "
                 "AND event.received_at_us<=?)",
-                (now_us, self.config.run_id, now_us),
+                (now_us, self.config.run_id, now_us, now_us),
             )
             connection.commit()
 
@@ -2537,7 +2559,7 @@ class Recorder:
         spec = None if status.request_id is None else specs.get(status.request_id)
         dynamic_plan = (
             self._dynamic_plan(now_us=status.received_at_us)[0]
-            if spec is not None and spec.request_id >= _DYNAMIC_REQUEST_ID_BASE
+            if spec is not None and spec.request_id not in self._base_request_ids()
             else None
         )
         connection = connect_v2(self.config.database)
@@ -2626,7 +2648,7 @@ class Recorder:
         if (
             fence is None
             or spec is None
-            or spec.request_id < _DYNAMIC_REQUEST_ID_BASE
+            or spec.request_id in self._base_request_ids()
             or not spec.snapshot
         ):
             return
@@ -2639,10 +2661,17 @@ class Recorder:
                 (status.received_at_us, fence.subscription_id),
             )
             connection.execute(
-                "UPDATE market_data_interests SET lifecycle='fulfilled', reason_code=NULL, "
+                "UPDATE market_data_interests SET "
+                "lifecycle=CASE WHEN expires_at_us<=? THEN 'expired' ELSE 'fulfilled' END, "
+                "reason_code=CASE WHEN expires_at_us<=? THEN 'INTEREST_EXPIRED' ELSE NULL END, "
                 "updated_at_us=? WHERE bound_subscription_id=? "
                 "AND lifecycle IN ('resolved','active')",
-                (status.received_at_us, fence.subscription_id),
+                (
+                    status.received_at_us,
+                    status.received_at_us,
+                    status.received_at_us,
+                    fence.subscription_id,
+                ),
             )
             connection.commit()
         updated_plan, _dynamic_specs = self._dynamic_plan(now_us=status.received_at_us)

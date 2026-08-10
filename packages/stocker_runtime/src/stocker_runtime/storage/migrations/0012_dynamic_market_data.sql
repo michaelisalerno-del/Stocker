@@ -1,6 +1,18 @@
 ALTER TABLE subscriptions ADD COLUMN snapshot INTEGER NOT NULL DEFAULT 0
     CHECK(snapshot IN (0, 1));
 
+ALTER TABLE runtime_state ADD COLUMN dynamic_request_high_water INTEGER NOT NULL
+    DEFAULT 1999999 CHECK(
+        dynamic_request_high_water BETWEEN 1999999 AND 901999999
+    );
+
+CREATE TRIGGER runtime_state_dynamic_request_high_water_monotonic
+BEFORE UPDATE OF dynamic_request_high_water ON runtime_state
+WHEN NEW.dynamic_request_high_water < OLD.dynamic_request_high_water
+BEGIN
+    SELECT RAISE(ABORT, 'dynamic_request_high_water_monotonic');
+END;
+
 CREATE TABLE market_data_interests (
     interest_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES runs(run_id),

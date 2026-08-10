@@ -468,6 +468,8 @@ class _PrivateOfficialBridge:
         else:
             self.__client.cancelMktData(request_id)
         self._fences.pop(request_id, None)
+        self._configured.pop(request_id, None)
+        self._contracts.pop(request_id, None)
 
     def emit(self, request_id: int, kind: str, values: dict[str, object]) -> None:
         fence = self._fences.get(request_id)
@@ -509,6 +511,8 @@ class _PrivateOfficialBridge:
         if configured is None or not configured.snapshot:
             return
         self._fences.pop(request_id, None)
+        self._configured.pop(request_id, None)
+        self._contracts.pop(request_id, None)
         callback = self._status_callback
         if callback is not None:
             callback(

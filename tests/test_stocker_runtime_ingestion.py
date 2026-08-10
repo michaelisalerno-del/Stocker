@@ -121,6 +121,7 @@ def test_recorder_config_rejects_unsafe_mode_host_and_read_only_state(tmp_path: 
         {"host": "192.0.2.1"},
         {"read_only": False},
         {"external_read_only_verified": False},
+        {"writer_lease_stale_us": 14_999_999},
     ):
         with pytest.raises(ValidationError):
             _config(database, **changes)
@@ -668,9 +669,9 @@ def test_recorder_owns_one_writer_and_restart_reclaims_only_after_stale_lease(
         )
 
     restarted = Recorder(
-        _config(database, owner_id="owner-2", writer_lease_stale_us=5_000_000),
+        _config(database, owner_id="owner-2", writer_lease_stale_us=15_000_000),
         FakeMarketData(),
-    ).start(now_us=5_000_101, instruments=(instrument,), subscriptions=specs)
+    ).start(now_us=15_000_101, instruments=(instrument,), subscriptions=specs)
 
     assert started.recorder_generation == 1
     assert restarted.recorder_generation == 2
@@ -686,7 +687,7 @@ def test_recorder_owns_one_writer_and_restart_reclaims_only_after_stale_lease(
             ).fetchone()[0]
             == 2
         )
-    assert tuple(old) == (5_000_101, 0)
+    assert tuple(old) == (15_000_101, 0)
 
 
 def test_recorder_disconnect_reconnect_and_staleness_are_scoped(tmp_path: Path) -> None:
@@ -952,10 +953,10 @@ def test_stale_writer_from_another_run_is_closed_before_takeover(tmp_path: Path)
             database,
             run_id="run-2",
             owner_id="owner-2",
-            writer_lease_stale_us=5_000_000,
+            writer_lease_stale_us=15_000_000,
         ),
         FakeMarketData(),
-    ).start(now_us=5_000_101, instruments=(instrument,), subscriptions=specs)
+    ).start(now_us=15_000_101, instruments=(instrument,), subscriptions=specs)
 
     assert second.run_id == "run-2"
     with connect_v2(database) as connection:
@@ -973,7 +974,7 @@ def test_stale_writer_from_another_run_is_closed_before_takeover(tmp_path: Path)
         )
     assert runs == {"run-1": "stopped", "run-2": "running"}
     assert states == {"run-1": "stopped", "run-2": "running"}
-    assert all(tuple(row) == ("closed", 5_000_101) for row in old_subscriptions)
+    assert all(tuple(row) == ("closed", 15_000_101) for row in old_subscriptions)
     assert all(tuple(row) == ("active", None) for row in replacement_subscriptions)
 
 
@@ -1010,10 +1011,10 @@ def test_stale_takeover_closes_every_owned_subscription_and_scopes_uncertainty(
         )
 
     replacement = Recorder(
-        _config(database, owner_id="owner-2", writer_lease_stale_us=5_000_000),
+        _config(database, owner_id="owner-2", writer_lease_stale_us=15_000_000),
         FakeMarketData(),
     )
-    replacement.start(now_us=5_000_101, instruments=(instrument,), subscriptions=specs)
+    replacement.start(now_us=15_000_101, instruments=(instrument,), subscriptions=specs)
 
     with connect_v2(database) as connection:
         old = dict(
@@ -1049,7 +1050,7 @@ def test_stale_takeover_closes_every_owned_subscription_and_scopes_uncertainty(
             "SELECT resolved_at_us FROM gaps WHERE reason='EXISTING_SCIENTIFIC_GAP'"
         ).fetchone()
     assert old == {3: "closed", 4: "closed"}
-    assert old_closed == {3: 5_000_101, 4: 5_000_101}
+    assert old_closed == {3: 15_000_101, 4: 15_000_101}
     assert current == {3: "active", 4: "active"}
     assert all(row[0] is None for row in current_closed)
     assert uncertainty == ({3: 1} if stale_lifecycle == "paused" else {3: 1, 4: 0})
@@ -1076,9 +1077,9 @@ def test_stale_takeover_closure_is_idempotent_and_old_rows_are_retention_prunabl
             super()._close_stale_writer(*args, **kwargs)  # type: ignore[arg-type]
 
     RepeatedCloseRecorder(
-        _config(database, owner_id="owner-2", writer_lease_stale_us=5_000_000),
+        _config(database, owner_id="owner-2", writer_lease_stale_us=15_000_000),
         FakeMarketData(),
-    ).start(now_us=5_000_101, instruments=(instrument,), subscriptions=specs)
+    ).start(now_us=15_000_101, instruments=(instrument,), subscriptions=specs)
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -1090,7 +1091,7 @@ def test_stale_takeover_closure_is_idempotent_and_old_rows_are_retention_prunabl
     RetentionManager(
         database,
         RetentionPolicy(closed_subscription_us=1),
-    ).run(now_us=5_000_103, measured_database_bytes=1, measured_wal_bytes=0)
+    ).run(now_us=15_000_103, measured_database_bytes=1, measured_wal_bytes=0)
     with connect_v2(database) as connection:
         generations = dict(
             connection.execute(
@@ -1121,23 +1122,23 @@ def test_late_prior_run_callback_is_failed_and_receipted_by_current_recorder(
             database,
             run_id="run-2",
             owner_id="owner-2",
-            writer_lease_stale_us=5_000_000,
+            writer_lease_stale_us=15_000_000,
         ),
         FakeMarketData(),
     )
     current_recorder.start(
-        now_us=5_000_101,
+        now_us=15_000_101,
         instruments=(instrument,),
         subscriptions=specs,
     )
 
-    callback = MarketDataCallback("quote", 5_000_102, None, {"event_at_us": 5_000_102})
+    callback = MarketDataCallback("quote", 15_000_102, None, {"event_at_us": 15_000_102})
     first = current_recorder.receive(
         prior.fences[0],
         callback,
     )
     retry = current_recorder.receive(prior.fences[0], callback)
-    assert current_recorder.drain(now_us=5_000_103) == 0
+    assert current_recorder.drain(now_us=15_000_103) == 0
 
     with connect_v2(database) as connection:
         durable = connection.execute(
@@ -1433,8 +1434,20 @@ def test_official_bridge_discovers_one_exact_option_before_dynamic_subscription(
     client.wrapper.tickSnapshotEnd(subscription.request_id)  # type: ignore[attr-defined]
     bridge.cancel(subscription.request_id)
     assert client.market_requests == [(2_000_001, True)]  # type: ignore[attr-defined]
-    assert client.cancelled == [2_000_001]  # type: ignore[attr-defined]
+    assert client.cancelled == []  # type: ignore[attr-defined]
     assert [status.kind for status in statuses] == ["snapshot_end"]
+    private_bridge = cast(Any, bridge)
+    assert private_bridge._configured == {}
+    assert private_bridge._contracts == {}
+    stream = IBKRSubscription(
+        2_000_002, 9001, "AAPL", "OPT", "SMART", "USD", "quotes", snapshot=False
+    )
+    bridge.configure_subscriptions((stream,))
+    bridge.subscribe(CallbackFence("run", 1, 1, stream.request_id, "dynamic-stream"))
+    bridge.cancel(stream.request_id)
+    assert client.cancelled == [2_000_002]  # type: ignore[attr-defined]
+    assert private_bridge._configured == {}
+    assert private_bridge._contracts == {}
     assert client.metadata_requests == [  # type: ignore[attr-defined]
         ("parameters", 1_500_000_000),
         ("contract", 1_500_000_001),
@@ -2404,16 +2417,16 @@ def test_market_latest_resets_across_runs_and_tracks_each_field_source(tmp_path:
             database,
             run_id="run-2",
             owner_id="owner-2",
-            writer_lease_stale_us=5_000_000,
+            writer_lease_stale_us=15_000_000,
         ),
         FakeMarketData(),
     )
-    second_state = second.start(now_us=5_000_103, instruments=(instrument,), subscriptions=specs)
+    second_state = second.start(now_us=15_000_103, instruments=(instrument,), subscriptions=specs)
     ask = second.receive(
         second_state.fences[0],
-        MarketDataCallback("quote", 5_000_104, None, {"event_at_us": 5_000_104, "ask": 101.0}),
+        MarketDataCallback("quote", 15_000_104, None, {"event_at_us": 15_000_104, "ask": 101.0}),
     )
-    second.drain(now_us=5_000_105)
+    second.drain(now_us=15_000_105)
     with connect_v2(database) as connection:
         latest = connection.execute(
             "SELECT run_id, bid_value, bid_source_event_id, ask_value, ask_source_event_id "
@@ -2561,7 +2574,7 @@ def test_replay_foreign_unexpired_lease_errors_bounded_and_stops_current_writer(
     config_path = tmp_path / "runtime.json"
     fixture_path = tmp_path / "fixture.json"
     config_path.write_text(
-        json.dumps(_config(database, writer_lease_stale_us=5_000_000).model_dump(mode="json")),
+        json.dumps(_config(database, writer_lease_stale_us=15_000_000).model_dump(mode="json")),
         encoding="utf-8",
     )
     fixture_path.write_text(
@@ -2569,7 +2582,7 @@ def test_replay_foreign_unexpired_lease_errors_bounded_and_stops_current_writer(
     )
     result = CliRunner().invoke(
         app,
-        ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "5000002"],
+        ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "15000002"],
     )
     payload = json.loads(result.stdout)
     assert result.exit_code == 1
@@ -2595,7 +2608,7 @@ def test_replay_budget_uses_preexisting_backlog_not_fixture_count(tmp_path: Path
     config_path = tmp_path / "runtime.json"
     fixture_path = tmp_path / "fixture.json"
     config_path.write_text(
-        json.dumps(_config(database, writer_lease_stale_us=5_000_000).model_dump(mode="json")),
+        json.dumps(_config(database, writer_lease_stale_us=15_000_000).model_dump(mode="json")),
         encoding="utf-8",
     )
     fixture_path.write_text(
@@ -2603,7 +2616,7 @@ def test_replay_budget_uses_preexisting_backlog_not_fixture_count(tmp_path: Path
     )
     result = CliRunner().invoke(
         app,
-        ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "5000002"],
+        ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "15000002"],
     )
     assert result.exit_code == 0, result.stdout
     with connect_v2(database) as connection:

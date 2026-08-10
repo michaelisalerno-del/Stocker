@@ -634,7 +634,8 @@ class IdeaRunner:
             )
             receipt_rows = connection.execute(
                 "SELECT receipt.*, interest.interest_key, interest.feed_kind, "
-                "interest.cadence, interest.required, interest.lifecycle "
+                "interest.cadence, interest.required, interest.lifecycle, "
+                "interest.expires_at_us "
                 "FROM instrument_discovery_receipts receipt "
                 "JOIN market_data_interests interest USING(interest_id) "
                 "WHERE receipt.instance_id=? "
@@ -662,6 +663,7 @@ class IdeaRunner:
                         "event_kind": None,
                         "instrument_id": str(item["instrument_id"]),
                         "available_at_us": int(item["completed_at_us"]),
+                        "available_until_us": int(item["expires_at_us"]),
                     },
                 )
                 for item in receipt_rows
@@ -693,7 +695,10 @@ class IdeaRunner:
                 "AND (json_extract(requirement.value, '$.event_kind') IS NULL "
                 "OR event.event_kind=json_extract(requirement.value, '$.event_kind')) "
                 "AND json_extract(requirement.value, '$.available_at_us') "
-                "<=max(event.event_at_us, event.received_at_us)) "
+                "<=max(event.event_at_us, event.received_at_us) "
+                "AND (json_extract(requirement.value, '$.available_until_us') IS NULL "
+                "OR max(event.event_at_us, event.received_at_us)<"
+                "json_extract(requirement.value, '$.available_until_us'))) "
                 "AND (coalesce(event.source_sequence, event.derived_after_source_sequence)>? "
                 "OR (? IS NOT NULL AND "
                 "coalesce(event.source_sequence, event.derived_after_source_sequence)=? "

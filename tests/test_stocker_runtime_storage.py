@@ -1151,6 +1151,19 @@ def test_dynamic_interest_schema_enforces_scope_identity_and_exact_receipt(
             "connection_state, connection_generation) VALUES "
             "('run-1', 1, 'running', 'connected', 1)"
         )
+        assert (
+            connection.execute(
+                "SELECT dynamic_request_high_water FROM runtime_state WHERE run_id='run-1'"
+            ).fetchone()[0]
+            == 1_999_999
+        )
+        connection.execute(
+            "UPDATE runtime_state SET dynamic_request_high_water=2000000 WHERE run_id='run-1'"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="high_water_monotonic"):
+            connection.execute(
+                "UPDATE runtime_state SET dynamic_request_high_water=1999999 WHERE run_id='run-1'"
+            )
         connection.execute(
             "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
             "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "

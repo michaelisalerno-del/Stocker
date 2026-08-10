@@ -308,6 +308,8 @@ def _prerequisites_are_terminal(
         if expiry is None or stock_available is None or market_available is None:
             raise ValueError("M1C causal option-window evidence is incomplete")
         cohort_available = max(stock_available, market_available)
+        if expiry > cohort_available:
+            raise ValueError("complete M1C cohort precedes its D-1 option cutoff")
         context = option_context.get(symbol)
         terminal = option_terminal.get(symbol)
         if terminal is None or str(terminal.get("s", "")) < baseline_session:
@@ -321,8 +323,6 @@ def _prerequisites_are_terminal(
             terminal_status = None if terminal.get("s") != baseline_session else terminal.get(right)
             if capture or terminal_status in {"denied", "window_elapsed", "late"}:
                 continue
-            if expiry > cohort_available:
-                raise ValueError("complete M1C cohort precedes its D-1 option cutoff")
             terminal[right] = "window_elapsed"
             terminal[f"{right}_x"] = expiry
             terminal[f"{right}_a"] = cohort_available
@@ -724,7 +724,7 @@ class FrozenM1CSignalV0:
                             )
                             if capture_expiry is None:
                                 continue
-                            if capture_available > capture_expiry:
+                            if capture_available >= capture_expiry:
                                 terminal = option_terminal.get(symbol)
                                 if terminal is None or str(terminal.get("s", "")) < receipt_session:
                                     terminal = {"s": receipt_session}

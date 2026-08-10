@@ -1192,7 +1192,10 @@ def test_frozen_m1c_consumes_exact_resolved_snapshot_pair_and_scores() -> None:
     assert len(scored.state_json()) < 65_536
 
 
-def test_frozen_m1c_rejects_capture_after_the_frozen_interest_cutoff() -> None:
+@pytest.mark.parametrize("capture_at_us", (1_801_000_000, 1_801_000_001))
+def test_frozen_m1c_rejects_capture_at_or_after_the_frozen_interest_cutoff(
+    capture_at_us: int,
+) -> None:
     plugin = FrozenM1CSignalV0()
     baseline_event = _event(
         "baseline-aal",
@@ -1234,7 +1237,7 @@ def test_frozen_m1c_rejects_capture_after_the_frozen_interest_cutoff() -> None:
         "late-capture-call",
         "AAL-call",
         "option_snapshot_capture",
-        1_801_000_001,
+        capture_at_us,
         {
             "source_completeness": "complete",
             "bid": 2.0,
@@ -2123,7 +2126,7 @@ def test_frozen_m1c_strict_prefix_hides_newer_context_until_continuation_commits
             f"{current_session}-{checkpoint:02d}-{symbol}",
             symbol,
             "bar_5m_session_prefix",
-            checkpoint * 1_000_000,
+            2_000_000_000 + checkpoint * 1_000_000,
             _prefix_fixture(
                 session=current_session,
                 checkpoint=checkpoint,
@@ -2137,7 +2140,7 @@ def test_frozen_m1c_strict_prefix_hides_newer_context_until_continuation_commits
         "newer-baseline-AAL",
         "AAL",
         "session_volume_baseline",
-        7_000_000,
+        2_100_000_000,
         {
             "session": "2026-08-09",
             "complete_session_count": 22,
@@ -2263,13 +2266,17 @@ def test_frozen_m1c_terminalizes_elapsed_option_window_before_later_session() ->
     assert aal_output.payload["cohort_available_at_us"] >= 2_000_000_000
 
 
-def test_frozen_m1c_rejects_complete_cohort_before_d1_interest_cutoff() -> None:
+@pytest.mark.parametrize("context_terminal", (False, True))
+def test_frozen_m1c_rejects_complete_cohort_before_d1_interest_cutoff(
+    context_terminal: bool,
+) -> None:
     plugin = FrozenM1CSignalV0()
-    state, _ = _full_cohort_context_state()
-    mutable_state = cast(dict[str, JsonValue], state)
-    mutable_state["option_context"] = {}
-    mutable_state["option_terminal"] = {}
-    retained = tuple(f"baseline-{symbol}" for symbol in COHORT)
+    state, retained = _full_cohort_context_state()
+    if not context_terminal:
+        mutable_state = cast(dict[str, JsonValue], state)
+        mutable_state["option_context"] = {}
+        mutable_state["option_terminal"] = {}
+        retained = tuple(f"baseline-{symbol}" for symbol in COHORT)
     events = tuple(
         _event(
             f"early-06-{symbol}",

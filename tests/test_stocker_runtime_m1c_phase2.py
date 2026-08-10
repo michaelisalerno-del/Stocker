@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import sqlite3
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
@@ -41,6 +42,7 @@ from stocker_research.legacy_prospective.m1c_features import (
     M1CCausalFeatureBuilder,
 )
 from stocker_runtime.domain import (
+    IdeaOutput,
     JsonValue,
     MarketEvent,
     ProtectedDataClass,
@@ -107,6 +109,7 @@ def _insert_session(
     first_sequence: int,
     volume_multiplier: float = 1.0,
     incomplete_bar: int | None = None,
+    zero_volume_bar: int | None = None,
     instrument_id: str = "AAL",
     base_price: float = 100.0,
 ) -> int:
@@ -135,7 +138,11 @@ def _insert_session(
                         "high": opening_value + 1.0,
                         "low": opening_value - 1.0,
                         "close": opening_value + 0.25,
-                        "volume": volume_multiplier * float(bar_number),
+                        "volume": (
+                            0.0
+                            if zero_volume_bar == bar_number
+                            else volume_multiplier * float(bar_number)
+                        ),
                     }
                 )
             payload_json = canonical_json_bytes(payload).decode()
@@ -310,6 +317,93 @@ def test_session_11_prefix_uses_ten_complete_session_volume_baseline(tmp_path: P
     assert payload["historical_relative_activity"] == 2.0
     assert [role for role, _event_id in mappings] == ["constituent", "context"]
     assert _project_all(database) == 0
+
+
+def test_missing_activity_poison_is_sticky_until_the_next_session(tmp_path: Path) -> None:
+    database = tmp_path / "activity-poison.sqlite3"
+    _seed(database)
+    sequence = 1
+    sessions = _sessions(12)
+    for session in sessions[:10]:
+        sequence = _insert_session(
+            database,
+            session,
+            first_sequence=sequence,
+            zero_volume_bar=2,
+        )
+        _project_all(database)
+
+    sequence = _insert_session(database, sessions[10], first_sequence=sequence)
+    _project_all(database)
+    with connect_v2(database) as connection:
+        poisoned = connection.execute(
+            "SELECT payload_json FROM market_events "
+            "WHERE event_kind='bar_5m_session_prefix' "
+            "AND json_extract(payload_json, '$.session')=? "
+            "AND json_extract(payload_json, '$.bar_number')=34",
+            (sessions[10].isoformat(),),
+        ).fetchone()
+    assert poisoned is not None
+    poisoned_payload = json.loads(str(poisoned["payload_json"]))
+    assert poisoned_payload["activity_ready"] is False
+    assert poisoned_payload["accumulator"]["activity_sum"] is None
+    with pytest.raises(ValueError, match="activity"):
+        build_group_i_for_symbol(poisoned_payload, symbol="AAL", checkpoint=34)
+
+    _insert_session(database, sessions[11], first_sequence=sequence)
+    _project_all(database)
+    with connect_v2(database) as connection:
+        recovered = connection.execute(
+            "SELECT payload_json FROM market_events "
+            "WHERE event_kind='bar_5m_session_prefix' "
+            "AND json_extract(payload_json, '$.session')=? "
+            "AND json_extract(payload_json, '$.bar_number')=6",
+            (sessions[11].isoformat(),),
+        ).fetchone()
+    assert recovered is not None
+    recovered_payload = json.loads(str(recovered["payload_json"]))
+    assert recovered_payload["activity_ready"] is True
+    assert isinstance(recovered_payload["accumulator"]["activity_sum"], float)
+
+
+def test_session_receipt_and_lineage_insert_are_atomic(tmp_path: Path) -> None:
+    database = tmp_path / "atomic-session-receipt.sqlite3"
+    _seed(database)
+    _insert_session(database, _sessions(1)[0], first_sequence=1)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "CREATE TEMP TRIGGER fail_session_lineage "
+            "BEFORE INSERT ON market_event_derivations BEGIN "
+            "SELECT RAISE(ABORT, 'fixture lineage failure'); END"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="fixture lineage failure"):
+            project_required_session_receipts(
+                connection,
+                run_id="run-1",
+                requirements=(_requirement(),),
+                after_source_sequence=0,
+                limit=1,
+            )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM market_events WHERE event_kind='bar_5m_session_prefix'"
+            ).fetchone()[0]
+            == 0
+        )
+        connection.execute("DROP TRIGGER fail_session_lineage")
+        assert (
+            project_required_session_receipts(
+                connection,
+                run_id="run-1",
+                requirements=(_requirement(),),
+                after_source_sequence=0,
+                limit=1,
+            )
+            == 1
+        )
+        assert (
+            connection.execute("SELECT count(*) FROM market_event_derivations").fetchone()[0] == 1
+        )
 
 
 def test_incomplete_session_does_not_advance_baseline_or_realised_volatility(
@@ -1163,6 +1257,178 @@ def test_fresh_m1c_emits_real_labelled_classifications_only_as_generic_evidence(
         {"proposed_position", "proposed_trade"}
     )
     assert len(evaluation.state_json()) < 65_536
+
+
+def test_frozen_m1c_backlog_batch_preserves_every_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        m1c_plugin,
+        "score_m1c",
+        lambda **values: {
+            "probability": 0.75 if values["checkpoint"] == 6 else 0.25,
+            "threshold_passed": values["checkpoint"] == 6,
+            "missing_feature_count": 0,
+            "feature_hash": f"{values['checkpoint']:064x}",
+            "model_hash": "2" * 64,
+        },
+    )
+    monkeypatch.setattr(m1c_plugin, "build_direction_features", lambda **_values: {})
+    monkeypatch.setattr(
+        m1c_plugin,
+        "classify_directions",
+        lambda **_values: (
+            {
+                "model_id": "A1",
+                "probability_up": 0.6,
+                "confidence": 0.1,
+                "action": "CALL",
+                "boundary": 0.05,
+                "label": "prospective hypothesis — not validated",
+                "model_hash": "3" * 64,
+                "preprocessing_hash": "4" * 64,
+                "feature_hash": "5" * 64,
+                "fallback_levels": ("stock_checkpoint",),
+            },
+        ),
+    )
+
+    def initial_state() -> JsonValue:
+        return cast(
+            JsonValue,
+            {
+                "schema_version": 1,
+                "baselines": {
+                    "AAL": {
+                        "i": "aal-baseline",
+                        "s": "2026-08-07",
+                        "c": 100.0,
+                        "v": 0.25,
+                        "t": 1_000_000,
+                        "k": 21,
+                    }
+                },
+                "option_context": {
+                    "AAL": {
+                        "s": "2026-08-07",
+                        "call": {
+                            "i": "aal-call",
+                            "t": 2_000_000,
+                            "source_completeness": "complete",
+                            "bid": 2.0,
+                            "ask": 2.2,
+                            "model_implied_volatility": 0.4,
+                            "option_right": "call",
+                            "expiry": "20260918",
+                            "strike": 100.0,
+                        },
+                        "put": {
+                            "i": "aal-put",
+                            "t": 2_000_001,
+                            "source_completeness": "complete",
+                            "bid": 1.8,
+                            "ask": 2.0,
+                            "model_implied_volatility": 0.38,
+                            "option_right": "put",
+                            "expiry": "20260918",
+                            "strike": 100.0,
+                        },
+                    }
+                },
+                "pending": {},
+                "market": {},
+                "statuses": {},
+                "episodes": {},
+                "requested": {},
+            },
+        )
+
+    session = "2026-08-10"
+    events = tuple(
+        event
+        for checkpoint in (6, 8)
+        for event in (
+            _event(
+                f"aal-{checkpoint}",
+                "AAL",
+                "bar_5m_session_prefix",
+                checkpoint * 1_000_000,
+                _prefix_fixture(session=session, checkpoint=checkpoint),
+            ),
+            _event(
+                f"vti-{checkpoint}",
+                "VTI",
+                "bar_5m_session_prefix",
+                checkpoint * 1_000_000 + 1,
+                _prefix_fixture(session=session, checkpoint=checkpoint, base=250.0),
+            ),
+        )
+    )
+    prior_ids = ("aal-baseline", "aal-call", "aal-put")
+    combined = FrozenM1CSignalV0().evaluate(
+        IdeaBatch(
+            mode=RuntimeMode.SHADOW,
+            events=events,
+            input_watermark=events[-1].event_id,
+            causal_from_at_us=events[0].event_at_us,
+            causal_through_at_us=events[-1].event_at_us,
+            prior_state_input_event_ids=prior_ids,
+        ),
+        initial_state(),
+    )
+
+    first = FrozenM1CSignalV0().evaluate(
+        IdeaBatch(
+            mode=RuntimeMode.SHADOW,
+            events=events[:2],
+            input_watermark=events[1].event_id,
+            causal_from_at_us=events[0].event_at_us,
+            causal_through_at_us=events[1].event_at_us,
+            prior_state_input_event_ids=prior_ids,
+        ),
+        initial_state(),
+    )
+    second = FrozenM1CSignalV0().evaluate(
+        IdeaBatch(
+            mode=RuntimeMode.SHADOW,
+            events=events[2:],
+            input_watermark=events[-1].event_id,
+            causal_from_at_us=events[2].event_at_us,
+            causal_through_at_us=events[-1].event_at_us,
+            prior_state_input_event_ids=first.retained_input_event_ids,
+        ),
+        first.state,
+    )
+
+    def summary(outputs: tuple[IdeaOutput, ...]) -> list[tuple[str, object, object]]:
+        return [
+            (item.kind, item.payload.get("checkpoint"), item.payload.get("control"))
+            for item in outputs
+        ]
+
+    split_outputs = (*first.outputs, *second.outputs)
+    assert combined.outputs == split_outputs
+    assert combined.output_input_event_ids == (
+        *first.output_input_event_ids,
+        *second.output_input_event_ids,
+    )
+    assert combined.state == second.state
+    assert (
+        summary(combined.outputs)
+        == summary(split_outputs)
+        == [
+            ("observation", 6, None),
+            ("signal", 6, None),
+            ("observation", 6, "direction_classification"),
+            ("observation", 8, None),
+        ]
+    )
+    assert combined.output_input_event_ids == (
+        ("aal-baseline", "aal-call", "aal-put", "aal-6", "vti-6"),
+        ("aal-baseline", "aal-call", "aal-put", "aal-6", "vti-6"),
+        ("aal-baseline", "aal-call", "aal-put", "aal-6", "vti-6"),
+        ("aal-baseline", "aal-call", "aal-put", "aal-8", "vti-8"),
+    )
 
 
 def test_frozen_m1c_worst_case_pending_state_stays_within_contract_bound() -> None:

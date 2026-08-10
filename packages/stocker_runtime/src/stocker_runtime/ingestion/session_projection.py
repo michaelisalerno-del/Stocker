@@ -186,9 +186,12 @@ def _prefix_payload(
     history_count, relative_activity = _relative_activity(
         baseline, bar_number=bar_number, volume=volume
     )
-    ready = relative_activity is not None
     complete = current_complete and prior_complete
     prior_accumulator = _mapping(prior.get("accumulator", {})) if prior is not None else {}
+    prior_activity_sum = _number(prior_accumulator, "activity_sum")
+    ready = relative_activity is not None and (
+        prior is None or (prior.get("activity_ready") is True and prior_activity_sum is not None)
+    )
     prior_trailing = prior.get("trailing_bars", []) if prior is not None else []
     prior_volumes = prior.get("session_volumes", []) if prior is not None else []
     if not isinstance(prior_trailing, list) or not isinstance(prior_volumes, list):
@@ -278,8 +281,9 @@ def _prefix_payload(
             ),
             "last_close": cast(float, compact["close"]),
             "activity_sum": (
-                (_number(prior_accumulator, "activity_sum") or 0.0) + relative_activity
-                if relative_activity is not None
+                (0.0 if prior is None else cast(float, prior_activity_sum))
+                + cast(float, relative_activity)
+                if ready
                 else None
             ),
             "range_sum": (_number(prior_accumulator, "range_sum") or 0.0)
@@ -326,32 +330,39 @@ def _insert_derived(
             },
         )
     )
-    connection.execute(
-        "INSERT INTO market_events(event_id, run_id, source_sequence, "
-        "derived_after_source_sequence, instrument_id, feed_kind, event_kind, event_at_us, "
-        "received_at_us, connection_generation, payload_json, payload_sha256) "
-        "VALUES (?, ?, NULL, ?, ?, 'bars', ?, ?, ?, ?, ?, ?)",
-        (
-            event_id,
-            run_id,
-            derived_after_source_sequence,
-            instrument_id,
-            event_kind,
-            event_at_us,
-            received_at_us,
-            connection_generation,
-            payload_json,
-            hashlib.sha256(payload_json.encode()).hexdigest(),
-        ),
-    )
-    connection.executemany(
-        "INSERT INTO market_event_derivations(derived_event_id, input_event_id, "
-        "input_ordinal, input_role, created_at_us) VALUES (?, ?, ?, ?, ?)",
-        (
-            (event_id, input_id, ordinal, role, received_at_us)
-            for ordinal, (input_id, role) in enumerate(inputs)
-        ),
-    )
+    connection.execute("SAVEPOINT stocker_session_derived_event")
+    try:
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, "
+            "derived_after_source_sequence, instrument_id, feed_kind, event_kind, event_at_us, "
+            "received_at_us, connection_generation, payload_json, payload_sha256) "
+            "VALUES (?, ?, NULL, ?, ?, 'bars', ?, ?, ?, ?, ?, ?)",
+            (
+                event_id,
+                run_id,
+                derived_after_source_sequence,
+                instrument_id,
+                event_kind,
+                event_at_us,
+                received_at_us,
+                connection_generation,
+                payload_json,
+                hashlib.sha256(payload_json.encode()).hexdigest(),
+            ),
+        )
+        connection.executemany(
+            "INSERT INTO market_event_derivations(derived_event_id, input_event_id, "
+            "input_ordinal, input_role, created_at_us) VALUES (?, ?, ?, ?, ?)",
+            (
+                (event_id, input_id, ordinal, role, received_at_us)
+                for ordinal, (input_id, role) in enumerate(inputs)
+            ),
+        )
+    except BaseException:
+        connection.execute("ROLLBACK TO SAVEPOINT stocker_session_derived_event")
+        connection.execute("RELEASE SAVEPOINT stocker_session_derived_event")
+        raise
+    connection.execute("RELEASE SAVEPOINT stocker_session_derived_event")
     return event_id
 
 

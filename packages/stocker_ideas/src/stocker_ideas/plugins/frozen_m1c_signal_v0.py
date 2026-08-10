@@ -262,6 +262,41 @@ class FrozenM1CSignalV0:
         output_lineages: list[tuple[str, ...]] = []
         interests: list[MarketDataInterest] = []
         baseline_requests: dict[str, tuple[str, float, int, str]] = {}
+        evaluation_candidates: list[
+            tuple[
+                str,
+                dict[str, object],
+                dict[str, object],
+                dict[str, object] | None,
+                dict[str, object] | None,
+            ]
+        ] = []
+        candidate_keys: set[tuple[str, str]] = set()
+
+        def queue_candidate(
+            symbol: str,
+            current: dict[str, object],
+            current_market: dict[str, object],
+        ) -> None:
+            current_id = current.get("i")
+            market_id = current_market.get("i")
+            if not isinstance(current_id, str):
+                return
+            key = (current_id, market_id if isinstance(market_id, str) else "")
+            if key in candidate_keys:
+                return
+            candidate_keys.add(key)
+            baseline = baselines.get(symbol)
+            context = option_context.get(symbol)
+            evaluation_candidates.append(
+                (
+                    symbol,
+                    dict(current),
+                    dict(current_market),
+                    None if baseline is None else dict(baseline),
+                    None if context is None else dict(context),
+                )
+            )
 
         receipts_by_instrument: dict[str, list[DiscoveryReceipt]] = {}
         for receipt in batch.discovery_receipts:
@@ -346,6 +381,14 @@ class FrozenM1CSignalV0:
                 packed = _pack_prefix(event.payload, event.event_id, event.event_at_us)
                 if event.instrument_id == "VTI":
                     market = packed
+                    for symbol in COHORT:
+                        current = pending.get(symbol)
+                        if (
+                            current is not None
+                            and current.get("s") == market.get("s")
+                            and current.get("n") == market.get("n")
+                        ):
+                            queue_candidate(symbol, current, market)
                 else:
                     try:
                         packed["g"] = build_group_i_for_symbol(
@@ -356,6 +399,8 @@ class FrozenM1CSignalV0:
                     except ValueError as error:
                         packed["e"] = str(error)
                     pending[event.instrument_id] = packed
+                    if market.get("s") == packed.get("s") and market.get("n") == packed.get("n"):
+                        queue_candidate(event.instrument_id, packed, market)
 
         for symbol, (session, close, as_of_at_us, input_event_id) in sorted(
             baseline_requests.items()
@@ -384,8 +429,10 @@ class FrozenM1CSignalV0:
 
         for symbol in COHORT:
             current = pending.get(symbol)
-            if current is None:
-                continue
+            if current is not None:
+                queue_candidate(symbol, current, market)
+
+        for symbol, current, candidate_market, baseline, context in evaluation_candidates:
             session_value = current.get("s")
             checkpoint_value = current.get("n")
             event_id = current.get("i")
@@ -407,13 +454,14 @@ class FrozenM1CSignalV0:
                 reason = "session_prefix_incomplete"
             elif "g" not in current:
                 reason = "activity_baseline_not_ready"
-            if market.get("s") != current_session or market.get("n") != checkpoint:
+            if (
+                candidate_market.get("s") != current_session
+                or candidate_market.get("n") != checkpoint
+            ):
                 reason = reason or "market_prefix_not_ready"
-            market_id = market.get("i")
-            if isinstance(market_id, str) and market.get("s") == current_session:
+            market_id = candidate_market.get("i")
+            if isinstance(market_id, str) and candidate_market.get("s") == current_session:
                 selected.add(market_id)
-            baseline = baselines.get(symbol)
-            context = option_context.get(symbol)
             if baseline is None or not isinstance(baseline.get("i"), str):
                 reason = reason or "prior_session_baseline_missing"
             elif not isinstance(baseline.get("s"), str) or str(baseline["s"]) >= current_session:
@@ -492,12 +540,12 @@ class FrozenM1CSignalV0:
                 symbol=symbol,
                 checkpoint=checkpoint,
                 stock_prefix=_inflate_prefix(current),
-                market_prefix=_inflate_prefix(market),
+                market_prefix=_inflate_prefix(candidate_market),
             )
             lineage = _lineage(batch, selected)
             as_of_at_us = max(
                 current_at,
-                cast(int, market["t"]),
+                cast(int, candidate_market["t"]),
                 cast(int, baseline["t"]),
                 cast(int, call["t"]),
                 cast(int, put["t"]),
@@ -593,7 +641,9 @@ class FrozenM1CSignalV0:
                     output_lineages.append(lineage)
             episodes[symbol] = episode
             statuses[symbol] = {"s": current_session, "r": "ready"}
-            pending.pop(symbol, None)
+            latest_pending = pending.get(symbol)
+            if latest_pending is not None and latest_pending.get("i") == event_id:
+                pending.pop(symbol, None)
 
         retained_values: list[str] = []
         for item in baselines.values():

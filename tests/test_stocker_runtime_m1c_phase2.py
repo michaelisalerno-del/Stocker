@@ -59,6 +59,7 @@ from stocker_runtime.ideas.contract import (
     MarketDataRequirement,
 )
 from stocker_runtime.ideas.discovery import IdeaConfig, discover_plugins, reviewed_code_hash
+from stocker_runtime.ideas.identity import deterministic_idea_output_id
 from stocker_runtime.ingestion.session_projection import project_required_session_receipts
 from stocker_runtime.ingestion.snapshot_projection import project_option_snapshot_captures
 from stocker_runtime.storage import connect_v2, initialize_database
@@ -1896,6 +1897,209 @@ def test_frozen_m1c_prefix_roots_survive_cross_instrument_arrival_skew(
     roots = cast(Mapping[str, Mapping[str, JsonValue]], evaluation.state)["prefix_roots"]
     assert set(roots) == set(UNIVERSE)
     assert {root["n"] for root in roots.values()} == {8}
+
+
+def test_frozen_m1c_strict_prefix_makes_multi_session_batches_partition_invariant() -> None:
+    plugin = FrozenM1CSignalV0()
+
+    def session_events(session: str, session_index: int) -> tuple[MarketEvent, ...]:
+        return tuple(
+            _event(
+                f"{session}-{checkpoint:02d}-{symbol}",
+                symbol,
+                "bar_5m_session_prefix",
+                (session_index * 100 + checkpoint) * 1_000_000,
+                _prefix_fixture(
+                    session=session,
+                    checkpoint=checkpoint,
+                    base=250.0 if symbol == "VTI" else 100.0,
+                ),
+            )
+            for checkpoint in range(1, 7)
+            for symbol in UNIVERSE
+        )
+
+    first_session = session_events("2026-08-10", 1)
+    second_session = session_events("2026-08-11", 2)
+    two_sessions = (*first_session, *second_session)
+    assert len(two_sessions) == 252
+
+    def run(
+        all_events: tuple[MarketEvent, ...],
+        candidate_sizes: tuple[int, ...],
+    ) -> tuple[JsonValue, tuple[str, ...], tuple[str, ...]]:
+        state: JsonValue = {}
+        retained: tuple[str, ...] = ()
+        event_offset = 0
+        output_ids: list[str] = []
+        for candidate_size in candidate_sizes:
+            remaining = all_events[event_offset : event_offset + candidate_size]
+            while remaining:
+                candidate = IdeaBatch(
+                    mode=RuntimeMode.SHADOW,
+                    events=remaining,
+                    input_watermark=remaining[-1].event_id,
+                    causal_from_at_us=min(item.event_at_us for item in remaining),
+                    causal_through_at_us=max(item.event_at_us for item in remaining),
+                    prior_state_input_event_ids=retained,
+                )
+                selected = plugin.select_input_prefix(candidate, state)
+                ordinary_events = remaining[:selected]
+                evaluation = plugin.evaluate(
+                    IdeaBatch(
+                        mode=RuntimeMode.SHADOW,
+                        events=ordinary_events,
+                        input_watermark=ordinary_events[-1].event_id,
+                        causal_from_at_us=min(item.event_at_us for item in ordinary_events),
+                        causal_through_at_us=max(item.event_at_us for item in ordinary_events),
+                        prior_state_input_event_ids=retained,
+                    ),
+                    state,
+                )
+                state = evaluation.state
+                retained = evaluation.retained_input_event_ids
+                request = cast(AncestorPageContinuation, evaluation.continuation)
+                ancestry = tuple(
+                    sorted(ordinary_events, key=lambda item: (item.event_at_us, item.event_id))
+                )
+                for page_start in range(0, len(ancestry), 64):
+                    page = ancestry[page_start : page_start + 64]
+                    next_token = (
+                        f"fixture-{page_start + len(page)}"
+                        if page_start + len(page) < len(ancestry)
+                        else None
+                    )
+                    evaluation = plugin.evaluate(
+                        IdeaBatch(
+                            mode=RuntimeMode.SHADOW,
+                            rehydrated_events=page,
+                            continuation_request=request,
+                            continuation_token=next_token,
+                            input_watermark=ordinary_events[-1].event_id,
+                            causal_from_at_us=min(item.event_at_us for item in page),
+                            causal_through_at_us=max(item.event_at_us for item in page),
+                            prior_state_input_event_ids=retained,
+                        ),
+                        state,
+                    )
+                    state = evaluation.state
+                    retained = evaluation.retained_input_event_ids
+                    request = cast(AncestorPageContinuation, evaluation.continuation)
+                exact_request = cast(ExactEventsContinuation, evaluation.continuation)
+                by_id = {event.event_id: event for event in ordinary_events}
+                exact_events = tuple(by_id[event_id] for event_id in exact_request.event_ids)
+                evaluation = plugin.evaluate(
+                    _exact_batch(
+                        events=exact_events,
+                        request=exact_request,
+                        retained=retained,
+                    ),
+                    state,
+                )
+                for ordinal, (output, lineage) in enumerate(
+                    zip(evaluation.outputs, evaluation.output_input_event_ids, strict=True)
+                ):
+                    output_ids.append(
+                        deterministic_idea_output_id(
+                            instance_id="partition-invariant-instance",
+                            input_event_ids=lineage,
+                            output_kind=output.kind,
+                            output_ordinal=ordinal,
+                            as_of_at_us=output.as_of_at_us,
+                            payload=cast(JsonValue, output.payload),
+                        )
+                    )
+                state = evaluation.state
+                retained = evaluation.retained_input_event_ids
+                assert evaluation.continuation is None
+                event_offset += selected
+                remaining = remaining[selected:]
+        assert event_offset == len(all_events)
+        return state, retained, tuple(output_ids)
+
+    combined = run(two_sessions, (252,))
+    split = run(two_sessions, (126, 126))
+    assert combined == split
+    assert len(combined[2]) == 40
+    assert len(set(combined[2])) == 40
+
+    sparse_sessions = tuple(
+        event
+        for session, session_index in (
+            ("2026-08-10", 1),
+            ("2026-08-11", 2),
+            ("2026-08-12", 3),
+        )
+        for event in session_events(session, session_index)
+        if event.payload["bar_number"] == 6
+    )
+    assert len(sparse_sessions) == 63
+    sparse_combined = run(sparse_sessions, (63,))
+    sparse_split = run(sparse_sessions, (21, 21, 21))
+    assert sparse_combined == sparse_split
+    assert len(sparse_combined[2]) == 60
+    assert len(set(sparse_combined[2])) == 60
+
+
+def test_frozen_m1c_strict_prefix_hides_newer_context_until_continuation_commits() -> None:
+    plugin = FrozenM1CSignalV0()
+    state, retained = _full_cohort_context_state()
+    current_session = "2026-08-10"
+    prefix_events = tuple(
+        _event(
+            f"{current_session}-{checkpoint:02d}-{symbol}",
+            symbol,
+            "bar_5m_session_prefix",
+            checkpoint * 1_000_000,
+            _prefix_fixture(
+                session=current_session,
+                checkpoint=checkpoint,
+                base=250.0 if symbol == "VTI" else 100.0,
+            ),
+        )
+        for checkpoint in range(1, 7)
+        for symbol in UNIVERSE
+    )
+    newer_baseline = _event(
+        "newer-baseline-AAL",
+        "AAL",
+        "session_volume_baseline",
+        7_000_000,
+        {
+            "session": "2026-08-09",
+            "complete_session_count": 22,
+            "session_closes": [100.0, 101.0],
+            "realised_volatility_20d": 0.20,
+        },
+    )
+    candidate_events = (*prefix_events, newer_baseline)
+    candidate = IdeaBatch(
+        mode=RuntimeMode.SHADOW,
+        events=candidate_events,
+        input_watermark=newer_baseline.event_id,
+        causal_from_at_us=prefix_events[0].event_at_us,
+        causal_through_at_us=newer_baseline.event_at_us,
+        prior_state_input_event_ids=retained,
+    )
+
+    selected = plugin.select_input_prefix(candidate, state)
+
+    assert selected == len(prefix_events)
+    evaluation = plugin.evaluate(
+        IdeaBatch(
+            mode=RuntimeMode.SHADOW,
+            events=prefix_events,
+            input_watermark=prefix_events[-1].event_id,
+            causal_from_at_us=prefix_events[0].event_at_us,
+            causal_through_at_us=prefix_events[-1].event_at_us,
+            prior_state_input_event_ids=retained,
+        ),
+        state,
+    )
+    assert isinstance(evaluation.continuation, AncestorPageContinuation)
+    baselines = cast(Mapping[str, Mapping[str, JsonValue]], evaluation.state)["baselines"]
+    assert baselines["AAL"]["i"] == "baseline-AAL"
+    assert "newer-baseline-AAL" not in evaluation.retained_input_event_ids
 
 
 def test_frozen_m1c_source_graph_includes_reviewed_generated_data() -> None:

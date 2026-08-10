@@ -273,6 +273,13 @@ class IdeaEvaluation(DomainModel):
 
 
 @runtime_checkable
+class IdeaInputPrefixSelector(Protocol):
+    """Optional pure seam for consuming one strict prefix of an ordinary batch."""
+
+    def select_input_prefix(self, batch: IdeaBatch, state: JsonValue) -> int: ...
+
+
+@runtime_checkable
 class IdeaPlugin(Protocol):
     """Public protocol implemented by reviewed, first-party idea plugins."""
 

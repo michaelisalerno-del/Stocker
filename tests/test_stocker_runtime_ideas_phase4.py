@@ -1422,6 +1422,35 @@ class _ContinuationProbePlugin:
         )
 
 
+class _PrefixSelectingPlugin:
+    def __init__(self, original: IdeaPlugin, maximum: int, *, clamp: bool = True) -> None:
+        self._manifest = original.manifest
+        self._maximum = maximum
+        self._clamp = clamp
+
+    @property
+    def manifest(self) -> IdeaManifest:
+        return self._manifest
+
+    def requirements(self, activation: IdeaActivation) -> tuple[MarketDataRequirement, ...]:
+        del activation
+        return ()
+
+    def select_input_prefix(self, batch: IdeaBatch, state: JsonValue) -> int:
+        del state
+        return min(self._maximum, len(batch.events)) if self._clamp else self._maximum
+
+    def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
+        prior = state if isinstance(state, Mapping) else {}
+        seen = prior.get("seen", ())
+        assert isinstance(seen, tuple | list)
+        return IdeaEvaluation(
+            state={"seen": (*seen, *(event.event_id for event in batch.events))},
+            outputs=(),
+            interests=(),
+        )
+
+
 def _insert_prefix_chain(
     connection: sqlite3.Connection,
     *,
@@ -1590,6 +1619,91 @@ def test_runner_continuation_pages_restart_and_finish_without_new_input(
     assert output_inputs == (event_ids[0],)
 
 
+def test_runner_commits_only_selected_prefix_and_reselects_suffix(tmp_path: Path) -> None:
+    database = tmp_path / "strict-prefix.sqlite3"
+    _seed(database)
+    original = discover_plugins((_config(),))[0]
+    requirement = MarketDataRequirement(
+        instrument_id="AAL",
+        feed_kind="bars",
+        event_kind="bar_5m_session_prefix",
+        cadence="5s",
+        gaps_block=False,
+        staleness_block=False,
+    )
+    discovered = replace(
+        original,
+        plugin=_PrefixSelectingPlugin(original.plugin, 2),
+        requirements=(requirement,),
+    )
+    runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    activation = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    with connect_v2(database) as connection:
+        event_ids = _insert_prefix_chain(connection, count=3)
+
+    assert runner.run_once(now_us=1_000_000)[0] == EvaluationResult(activation.instance_id, True, 0)
+    with connect_v2(database) as connection:
+        first = connection.execute(
+            "SELECT last_market_event_id, last_source_sequence, state_json "
+            "FROM idea_checkpoints WHERE instance_id=?",
+            (activation.instance_id,),
+        ).fetchone()
+    assert tuple(first[:2]) == (event_ids[1], 2)
+    assert json.loads(str(first["state_json"]))["plugin_state"]["seen"] == list(event_ids[:2])
+
+    runner.close()
+    runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    assert runner.run_once(now_us=2_000_000)[0] == EvaluationResult(activation.instance_id, True, 0)
+    with connect_v2(database) as connection:
+        second = connection.execute(
+            "SELECT last_market_event_id, last_source_sequence, state_json "
+            "FROM idea_checkpoints WHERE instance_id=?",
+            (activation.instance_id,),
+        ).fetchone()
+    runner.close()
+    assert tuple(second[:2]) == (event_ids[2], 3)
+    assert json.loads(str(second["state_json"]))["plugin_state"]["seen"] == list(event_ids)
+
+
+@pytest.mark.parametrize("selection", (0, 2, True))
+def test_runner_rejects_invalid_selected_prefix_without_advancing(
+    tmp_path: Path,
+    selection: int,
+) -> None:
+    database = tmp_path / "strict-prefix-invalid.sqlite3"
+    _seed(database)
+    original = discover_plugins((_config(),))[0]
+    requirement = MarketDataRequirement(
+        instrument_id="AAL",
+        feed_kind="bars",
+        event_kind="bar_5m_session_prefix",
+        cadence="5s",
+        gaps_block=False,
+        staleness_block=False,
+    )
+    discovered = replace(
+        original,
+        plugin=_PrefixSelectingPlugin(original.plugin, selection, clamp=False),
+        requirements=(requirement,),
+    )
+    runner = IdeaRunner(database, (discovered,), run_id="run-1")
+    activation = runner.activate(run_id="run-1", plugin=discovered, activated_at_us=100)
+    with connect_v2(database) as connection:
+        _insert_prefix_chain(connection, count=1)
+
+    result = runner.run_once(now_us=1_000_000)[0]
+    with connect_v2(database) as connection:
+        checkpoint = connection.execute(
+            "SELECT last_market_event_id, last_source_sequence FROM idea_checkpoints "
+            "WHERE instance_id=?",
+            (activation.instance_id,),
+        ).fetchone()
+    runner.close()
+    assert result.advanced is False
+    assert result.error_code is not None and "INVALID ORDINARY INPUT PREFIX" in result.error_code
+    assert tuple(checkpoint) == (None, None)
+
+
 def test_runner_continuation_commit_rejects_stale_state_hash(tmp_path: Path) -> None:
     database = tmp_path / "continuation-cas.sqlite3"
     _seed(database)
@@ -1655,6 +1769,27 @@ def test_runner_continuation_rejects_unbound_roots_cursors_and_exact_events(
     with connect_v2(database) as connection:
         chain = _insert_prefix_chain(connection, count=3)
         unrelated = _insert_prefix_chain(connection, count=1, prefix="unrelated")[0]
+        tied_payload = canonical_json_bytes({"session": "2026-08-10", "bar_number": 1}).decode()
+        for event_id, event_at_us in (("z-tied-ancestor", 1_000_000), ("a-tied-root", 2_000_000)):
+            connection.execute(
+                "INSERT INTO market_events(event_id, run_id, source_sequence, "
+                "derived_after_source_sequence, instrument_id, feed_kind, event_kind, "
+                "event_at_us, received_at_us, connection_generation, payload_json, "
+                "payload_sha256) VALUES (?, 'run-1', NULL, 1, 'AAL', 'bars', "
+                "'bar_5m_session_prefix', ?, ?, 1, ?, ?)",
+                (
+                    event_id,
+                    event_at_us,
+                    event_at_us,
+                    tied_payload,
+                    hashlib.sha256(tied_payload.encode()).hexdigest(),
+                ),
+            )
+        connection.execute(
+            "INSERT INTO market_event_derivations(derived_event_id, input_event_id, "
+            "input_ordinal, input_role, created_at_us) VALUES "
+            "('a-tied-root', 'z-tied-ancestor', 0, 'prior_receipt', 2000000)"
+        )
         valid = AncestorPageContinuation(
             root_event_ids=(chain[-1],),
             event_kind="bar_5m_session_prefix",
@@ -1664,6 +1799,7 @@ def test_runner_continuation_rejects_unbound_roots_cursors_and_exact_events(
             connection,
             run_id="run-1",
             last_source_sequence=3,
+            last_market_event_id=chain[-1],
             retained_event_ids=(chain[-1],),
             requirements=(requirement,),
             request=valid,
@@ -1671,11 +1807,44 @@ def test_runner_continuation_rejects_unbound_roots_cursors_and_exact_events(
         assert tuple(item.event_id for item in events) == chain
         assert token is None
 
+        tied = AncestorPageContinuation(
+            root_event_ids=("a-tied-root",),
+            event_kind="bar_5m_session_prefix",
+            input_roles=("prior_receipt",),
+        )
+        tied_events, tied_token = IdeaRunner._load_continuation_events(
+            connection,
+            run_id="run-1",
+            last_source_sequence=1,
+            last_market_event_id="a-tied-root",
+            retained_event_ids=("a-tied-root",),
+            requirements=(requirement,),
+            request=tied,
+        )
+        assert tuple(item.event_id for item in tied_events) == ("a-tied-root",)
+        assert tied_token is None
+        with pytest.raises(IdeaRunnerError, match="not an allowed causal ancestor"):
+            IdeaRunner._load_continuation_events(
+                connection,
+                run_id="run-1",
+                last_source_sequence=1,
+                last_market_event_id="a-tied-root",
+                retained_event_ids=("a-tied-root",),
+                requirements=(requirement,),
+                request=ExactEventsContinuation(
+                    root_event_ids=("a-tied-root",),
+                    event_ids=("z-tied-ancestor",),
+                    event_kind="bar_5m_session_prefix",
+                    input_roles=("prior_receipt",),
+                ),
+            )
+
         with pytest.raises(IdeaRunnerError, match="not retained"):
             IdeaRunner._load_continuation_events(
                 connection,
                 run_id="run-1",
                 last_source_sequence=3,
+                last_market_event_id=chain[-1],
                 retained_event_ids=(),
                 requirements=(requirement,),
                 request=valid,
@@ -1685,6 +1854,7 @@ def test_runner_continuation_rejects_unbound_roots_cursors_and_exact_events(
                 connection,
                 run_id="run-1",
                 last_source_sequence=2,
+                last_market_event_id=chain[1],
                 retained_event_ids=(chain[-1],),
                 requirements=(requirement,),
                 request=valid,
@@ -1694,6 +1864,7 @@ def test_runner_continuation_rejects_unbound_roots_cursors_and_exact_events(
                 connection,
                 run_id="run-1",
                 last_source_sequence=3,
+                last_market_event_id=chain[-1],
                 retained_event_ids=(chain[-1],),
                 requirements=(
                     MarketDataRequirement(
@@ -1710,6 +1881,7 @@ def test_runner_continuation_rejects_unbound_roots_cursors_and_exact_events(
                 connection,
                 run_id="run-1",
                 last_source_sequence=3,
+                last_market_event_id=chain[-1],
                 retained_event_ids=(chain[-1],),
                 requirements=(requirement,),
                 request=ExactEventsContinuation(
@@ -1724,6 +1896,7 @@ def test_runner_continuation_rejects_unbound_roots_cursors_and_exact_events(
                 connection,
                 run_id="run-1",
                 last_source_sequence=3,
+                last_market_event_id=chain[-1],
                 retained_event_ids=(chain[-1],),
                 requirements=(requirement,),
                 request=AncestorPageContinuation(

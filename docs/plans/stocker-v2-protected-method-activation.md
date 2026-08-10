@@ -133,6 +133,18 @@ watermark, and may not create dynamic interests.
 This permits one canonical 20-stock-plus-VTI M1C checkpoint cohort per evaluation
 without increasing the 128-output M1C manifest limit or the central 256-event bound.
 
+Before an ordinary evaluation, a plugin may also select one non-empty strict prefix of
+the candidate batch through the isolated plugin worker. The default is the complete
+batch. The core validates the selected count, hides the suffix from evaluation, and
+recomputes the input watermark, causal range, discovery receipts, and gap requirements
+from only the consumed prefix. The untouched suffix remains in the database for the
+next ordinary evaluation after any continuation drains. Frozen M1C uses this seam to
+stop at the first complete session/checkpoint cohort, so later sessions and newer D-1
+context cannot overwrite evidence needed by an earlier cohort in the same bounded
+fetch. Every continuation root and ancestor is fenced lexicographically by the exact
+committed `(source_sequence, event_id)` watermark pair, including events that share a
+source sequence.
+
 ## 5. Migration, activation, and rollback
 
 - Do not mutate or re-import either V1 source.
@@ -211,6 +223,9 @@ before the next phase.
 - Continuation cursor/filter binding, ancestry and run/watermark validation, restart
   recovery, skewed source arrival, no-new-event draining, canonical cohort ordering,
   and exact 64-event/512-KiB/64-KiB/128-output bounds.
+- Strict-prefix validation, suffix invisibility, exact consumed watermark pairs,
+  combined-versus-split multi-session equivalence, sparse-session draining, and
+  fail-closed rejection of zero or out-of-range prefix selections.
 - Gap and staleness blocking, incomplete/crossed quote handling, and virtual outcome
   lineage to exact proposal and market events.
 - Shadow-only results conspicuously remain `shadow=true`, `broker_position=false`, and

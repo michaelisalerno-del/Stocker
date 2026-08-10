@@ -152,6 +152,70 @@ def _root_ids(prefix_roots: Mapping[str, Mapping[str, object]]) -> tuple[str, ..
     return tuple(cast(str, prefix_roots[symbol]["i"]) for symbol in UNIVERSE)
 
 
+def _update_prefix_root(
+    prefix_roots: dict[str, dict[str, object]],
+    event: MarketEvent,
+) -> bool:
+    prefix_session = event.payload.get("session")
+    bar_number = event.payload.get("bar_number")
+    if (
+        not isinstance(prefix_session, str)
+        or isinstance(bar_number, bool)
+        or not isinstance(bar_number, int)
+    ):
+        raise ValueError("session-prefix identity is invalid")
+    root = {
+        "i": event.event_id,
+        "s": prefix_session,
+        "n": bar_number,
+        "t": event.event_at_us,
+    }
+    existing = prefix_roots.get(event.instrument_id)
+    current_order = (
+        (
+            str(existing.get("s", "")),
+            cast(int, existing.get("n", 0)),
+            cast(int, existing.get("t", 0)),
+            str(existing.get("i", "")),
+        )
+        if existing is not None
+        else None
+    )
+    next_order = (
+        prefix_session,
+        bar_number,
+        event.event_at_us,
+        event.event_id,
+    )
+    if current_order is not None and next_order <= current_order:
+        return False
+    prefix_roots[event.instrument_id] = root
+    return True
+
+
+def _next_root_checkpoint(
+    prefix_roots: Mapping[str, Mapping[str, object]],
+    processed: Mapping[str, object],
+) -> tuple[str, int] | None:
+    if set(prefix_roots) != set(UNIVERSE):
+        return None
+    sessions = {str(prefix_roots[symbol].get("s", "")) for symbol in UNIVERSE}
+    if len(sessions) != 1:
+        return None
+    session = next(iter(sessions))
+    for checkpoint in CHECKPOINTS:
+        if _cohort_key(session, checkpoint) in processed:
+            continue
+        if all(
+            isinstance(prefix_roots[symbol].get("n"), int)
+            and not isinstance(prefix_roots[symbol].get("n"), bool)
+            and cast(int, prefix_roots[symbol]["n"]) >= checkpoint
+            for symbol in UNIVERSE
+        ):
+            return session, checkpoint
+    return None
+
+
 def _ancestor_request(
     prefix_roots: Mapping[str, Mapping[str, object]],
     *,
@@ -487,6 +551,20 @@ class FrozenM1CSignalV0:
         )
         return (*prefixes, *baselines)
 
+    def select_input_prefix(self, batch: IdeaBatch, state: JsonValue) -> int:
+        if batch.continuation_request is not None or not batch.events:
+            raise ValueError("M1C input-prefix selection requires an ordinary batch")
+        prior = _mapping(state)
+        prefix_roots = _table(prior.get("prefix_roots"))
+        processed = _mapping(prior.get("processed"))
+        for index, event in enumerate(batch.events):
+            if event.event_kind != "bar_5m_session_prefix" or event.instrument_id not in UNIVERSE:
+                continue
+            _update_prefix_root(prefix_roots, event)
+            if _next_root_checkpoint(prefix_roots, processed) is not None:
+                return index + 1
+        return len(batch.events)
+
     def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
         prior = _mapping(state)
         baselines = _table(prior.get("baselines"))
@@ -601,41 +679,12 @@ class FrozenM1CSignalV0:
                                     terminal[right] = "captured"
                                     option_terminal[symbol] = terminal
                     continue
-                if event.event_kind == "bar_5m_session_prefix" and event.instrument_id in UNIVERSE:
-                    prefix_session = event.payload.get("session")
-                    bar_number = event.payload.get("bar_number")
-                    if (
-                        not isinstance(prefix_session, str)
-                        or isinstance(bar_number, bool)
-                        or not isinstance(bar_number, int)
-                    ):
-                        raise ValueError("session-prefix identity is invalid")
-                    root = {
-                        "i": event.event_id,
-                        "s": prefix_session,
-                        "n": bar_number,
-                        "t": event.event_at_us,
-                    }
-                    existing = prefix_roots.get(event.instrument_id)
-                    current_order = (
-                        (
-                            str(existing.get("s", "")),
-                            cast(int, existing.get("n", 0)),
-                            cast(int, existing.get("t", 0)),
-                            str(existing.get("i", "")),
-                        )
-                        if existing is not None
-                        else None
-                    )
-                    next_order = (
-                        prefix_session,
-                        bar_number,
-                        event.event_at_us,
-                        event.event_id,
-                    )
-                    if current_order is None or next_order > current_order:
-                        prefix_roots[event.instrument_id] = root
-                        roots_changed = True
+                if (
+                    event.event_kind == "bar_5m_session_prefix"
+                    and event.instrument_id in UNIVERSE
+                    and _update_prefix_root(prefix_roots, event)
+                ):
+                    roots_changed = True
             for symbol, (session, close, as_of_at_us, input_event_id) in sorted(
                 baseline_requests.items()
             ):
@@ -672,17 +721,14 @@ class FrozenM1CSignalV0:
                     for key, value in processed.items()
                     if (_cohort_identity(str(key)) or ("", 0))[0] in active_sessions
                 }
-            if len(prefix_roots) == len(UNIVERSE):
-                root_sessions = {str(prefix_roots[symbol].get("s", "")) for symbol in UNIVERSE}
-                if len(root_sessions) == 1:
-                    current_session = next(iter(root_sessions))
-                    if _prerequisites_are_terminal(
-                        current_session=current_session,
-                        baselines=baselines,
-                        option_context=option_context,
-                        option_terminal=option_terminal,
-                    ):
-                        continuation = _ancestor_request(prefix_roots)
+            next_root_checkpoint = _next_root_checkpoint(prefix_roots, processed)
+            if next_root_checkpoint is not None and _prerequisites_are_terminal(
+                current_session=next_root_checkpoint[0],
+                baselines=baselines,
+                option_context=option_context,
+                option_terminal=option_terminal,
+            ):
+                continuation = _ancestor_request(prefix_roots)
 
         elif isinstance(batch.continuation_request, AncestorPageContinuation):
             if batch.continuation_request.root_event_ids != _root_ids(prefix_roots):

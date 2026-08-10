@@ -8,7 +8,7 @@ import multiprocessing
 import sqlite3
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 from pathlib import Path
@@ -122,10 +122,17 @@ def _worker_main(connection: Connection, plugin: IdeaPlugin) -> None:
             return
         if message is None:
             return
-        batch, state = message
+        action, batch, state = message
         try:
-            evaluation = plugin.evaluate(batch, state)
-            connection.send(("ok", evaluation.model_dump(mode="python")))
+            if action == "select_input_prefix":
+                selector = getattr(plugin, "select_input_prefix", None)
+                selected = len(batch.events) if selector is None else selector(batch, state)
+                connection.send(("ok", selected))
+            elif action == "evaluate":
+                evaluation = plugin.evaluate(batch, state)
+                connection.send(("ok", evaluation.model_dump(mode="python")))
+            else:
+                connection.send(("error", "IdeaRunnerError:unknown plugin worker action"))
         except BaseException as error:
             connection.send(("error", f"{type(error).__name__}:{error}"))
 
@@ -145,13 +152,13 @@ class _PluginWorker:
         self.connection = parent
         self.process = process
 
-    def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
+    def _request(self, action: str, batch: IdeaBatch, state: JsonValue) -> object:
         deadline = time.monotonic() + MAX_EVALUATION_SECONDS
         send_error: list[BaseException] = []
 
         def send() -> None:
             try:
-                self.connection.send((batch, state))
+                self.connection.send((action, batch, state))
             except BaseException as error:
                 send_error.append(error)
 
@@ -186,7 +193,21 @@ class _PluginWorker:
         status, payload = cast(tuple[object, object], response[0])
         if status != "ok":
             raise IdeaRunnerError(str(payload))
-        return IdeaEvaluation.model_validate(payload)
+        return payload
+
+    def select_input_prefix(self, batch: IdeaBatch, state: JsonValue) -> int:
+        selected = self._request("select_input_prefix", batch, state)
+        if (
+            isinstance(selected, bool)
+            or not isinstance(selected, int)
+            or selected < 1
+            or selected > len(batch.events)
+        ):
+            raise IdeaRunnerError("plugin selected an invalid ordinary input prefix")
+        return selected
+
+    def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
+        return IdeaEvaluation.model_validate(self._request("evaluate", batch, state))
 
     def terminate(self) -> None:
         if self.process.is_alive():
@@ -289,6 +310,33 @@ def _market_event(row: sqlite3.Row) -> MarketEvent:
         event_at_us=int(row["event_at_us"]),
         received_at_us=int(row["received_at_us"]),
         payload=cast(Mapping[str, JsonValue], json.loads(str(row["payload_json"]))),
+    )
+
+
+def _discovery_receipts(rows: tuple[sqlite3.Row, ...]) -> tuple[DiscoveryReceipt, ...]:
+    return tuple(
+        DiscoveryReceipt.model_validate(
+            {
+                "receipt_id": str(item["receipt_id"]),
+                "interest_id": str(item["interest_id"]),
+                "interest_key": str(item["interest_key"]),
+                "instance_id": str(item["instance_id"]),
+                "status": str(item["status"]),
+                "reason_code": (None if item["reason_code"] is None else str(item["reason_code"])),
+                "instrument_id": (
+                    None if item["instrument_id"] is None else str(item["instrument_id"])
+                ),
+                "expiry": None if item["expiry"] is None else str(item["expiry"]),
+                "strike": None if item["strike"] is None else float(item["strike"]),
+                "option_right": (
+                    None if item["option_right"] is None else str(item["option_right"])
+                ),
+                "multiplier": (None if item["multiplier"] is None else str(item["multiplier"])),
+                "candidates_inspected": int(item["candidates_inspected"]),
+                "completed_at_us": int(item["completed_at_us"]),
+            }
+        )
+        for item in rows
     )
 
 
@@ -679,8 +727,18 @@ class IdeaRunner:
             if worker is not None:
                 worker.terminate()
             return self._degrade(instance_id, now_us, "PLUGIN_UNAVAILABLE")
+        worker = self._workers.get(instance_id)
         try:
-            context = self._load_batch(instance_id)
+            select_input_prefix: Callable[[IdeaBatch, JsonValue], int] | None = None
+            if callable(getattr(plugin, "select_input_prefix", None)):
+                if worker is None:
+                    worker = _PluginWorker(cast(IdeaPlugin, plugin))
+                    self._workers[instance_id] = worker
+                select_input_prefix = worker.select_input_prefix
+            context = self._load_batch(
+                instance_id,
+                select_input_prefix=select_input_prefix,
+            )
             if context is None:
                 return EvaluationResult(instance_id, False, 0)
             (
@@ -691,7 +749,6 @@ class IdeaRunner:
                 starting_checkpoint,
                 starting_state_hash,
             ) = context
-            worker = self._workers.get(instance_id)
             if worker is None:
                 worker = _PluginWorker(cast(IdeaPlugin, plugin))
                 self._workers[instance_id] = worker
@@ -715,7 +772,10 @@ class IdeaRunner:
             return self._degrade(instance_id, now_us, code)
 
     def _load_batch(
-        self, instance_id: str
+        self,
+        instance_id: str,
+        *,
+        select_input_prefix: Callable[[IdeaBatch, JsonValue], int] | None = None,
     ) -> tuple[IdeaActivation, IdeaBatch, JsonValue, tuple[str, ...], str | None, str] | None:
         with connect_v2(self.database_path) as connection:
             row = connection.execute(
@@ -769,6 +829,7 @@ class IdeaRunner:
                     connection,
                     run_id=activation.run_id,
                     last_source_sequence=int(row["last_source_sequence"]),
+                    last_market_event_id=str(row["last_market_event_id"]),
                     retained_event_ids=prior_state_input_event_ids,
                     requirements=requirements,
                     request=continuation,
@@ -908,6 +969,33 @@ class IdeaRunner:
                 for item in receipt_rows
                 if int(item["completed_at_us"]) <= causal_through_at_us
             )
+            candidate_batch = IdeaBatch(
+                mode=RuntimeMode(str(row["mode"])),
+                events=events,
+                input_watermark=events[-1].event_id,
+                causal_from_at_us=min(item.event_at_us for item in events),
+                causal_through_at_us=causal_through_at_us,
+                prior_state_input_event_ids=prior_state_input_event_ids,
+                discovery_receipts=_discovery_receipts(causal_receipt_rows),
+            )
+            if select_input_prefix is not None:
+                selected_count = select_input_prefix(candidate_batch, plugin_state)
+                if (
+                    isinstance(selected_count, bool)
+                    or not isinstance(selected_count, int)
+                    or selected_count < 1
+                    or selected_count > len(events)
+                ):
+                    raise IdeaRunnerError("plugin selected an invalid ordinary input prefix")
+                events = events[:selected_count]
+                causal_through_at_us = max(
+                    max(item.event_at_us, item.received_at_us) for item in events
+                )
+                causal_receipt_rows = tuple(
+                    item
+                    for item in receipt_rows
+                    if int(item["completed_at_us"]) <= causal_through_at_us
+                )
             discovery_receipts = tuple(
                 DiscoveryReceipt.model_validate(
                     {
@@ -999,6 +1087,7 @@ class IdeaRunner:
         *,
         run_id: str,
         last_source_sequence: int,
+        last_market_event_id: str,
         retained_event_ids: tuple[str, ...],
         requirements: tuple[MarketDataRequirement, ...],
         request: ContinuationRequest,
@@ -1016,12 +1105,16 @@ class IdeaRunner:
         root_count = int(
             connection.execute(
                 "SELECT count(*) FROM market_events WHERE run_id=? "
-                "AND coalesce(source_sequence, derived_after_source_sequence)<=? "
-                "AND event_id IN (SELECT value FROM json_each(?))",
+                "AND event_id IN (SELECT value FROM json_each(?)) "
+                "AND (coalesce(source_sequence, derived_after_source_sequence)<? "
+                "OR (coalesce(source_sequence, derived_after_source_sequence)=? "
+                "AND event_id<=?))",
                 (
                     run_id,
-                    last_source_sequence,
                     _json(cast(JsonValue, request.root_event_ids)),
+                    last_source_sequence,
+                    last_source_sequence,
+                    last_market_event_id,
                 ),
             ).fetchone()[0]
         )
@@ -1034,6 +1127,8 @@ class IdeaRunner:
             run_id,
             request.event_kind,
             last_source_sequence,
+            last_source_sequence,
+            last_market_event_id,
         )
         ancestry_sql = (
             "WITH RECURSIVE walk(event_id, depth) AS ("
@@ -1046,7 +1141,9 @@ class IdeaRunner:
             "ancestry(event_id) AS (SELECT event_id FROM walk GROUP BY event_id) "
             "SELECT event.* FROM ancestry JOIN market_events event USING(event_id) "
             "WHERE event.run_id=? AND event.event_kind=? "
-            "AND coalesce(event.source_sequence, event.derived_after_source_sequence)<=? "
+            "AND (coalesce(event.source_sequence, event.derived_after_source_sequence)<? "
+            "OR (coalesce(event.source_sequence, event.derived_after_source_sequence)=? "
+            "AND event.event_id<=?)) "
         )
         if isinstance(request, AncestorPageContinuation):
             offset = _continuation_offset(request)

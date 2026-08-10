@@ -167,6 +167,35 @@ def _seed_outputs(database: Path) -> None:
         ("output-trade", "proposed_trade", 204, "unapproved", {"thesis": "generic"}),
     )
     with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO market_data_interests(interest_id, run_id, instance_id, interest_key, "
+            "underlying_instrument_id, asset_kind, minimum_days_to_expiry, "
+            "maximum_days_to_expiry, option_right, strike_offset, reference_price, feed_kind, "
+            "cadence, as_of_at_us, expires_at_us, required, priority, maximum_contracts, "
+            "input_event_ids_json, content_hash, lifecycle, next_attempt_at_us, created_at_us, "
+            "updated_at_us) VALUES ('interest-web', 'run-live', 'instance-new', "
+            "'primary-call', 'AAPL', 'option', 1, 1, 'call', 0, 101.27, 'quotes', "
+            "'snapshot', 189, 1000, 1, 100, 1, '[\"quote-aapl\"]', ?, 'pending', 189, 205, 205)",
+            (_hash("interest-web"),),
+        )
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+            "exchange, currency, option_expiry, option_strike, option_right, option_multiplier) "
+            "VALUES ('ibkr-option-9001', ?, 9001, 'option', 'AAPL', 'SMART', 'USD', "
+            "'20260810', '100', 'call', '100')",
+            (_hash("ibkr-option-9001"),),
+        )
+        connection.execute(
+            "INSERT INTO instrument_discovery_receipts(receipt_id, interest_id, run_id, "
+            "instance_id, status, instrument_id, expiry, strike, option_right, multiplier, "
+            "candidates_inspected, completed_at_us) VALUES ('receipt-web', 'interest-web', "
+            "'run-live', 'instance-new', 'resolved', 'ibkr-option-9001', '20260810', 100, "
+            "'call', '100', 1, 206)"
+        )
+        connection.execute(
+            "UPDATE market_data_interests SET lifecycle='resolved', updated_at_us=206 "
+            "WHERE interest_id='interest-web'"
+        )
         for ordinal, (output_id, kind, as_of_at_us, authority, payload) in enumerate(records):
             payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
             connection.execute(
@@ -584,6 +613,9 @@ def test_idea_detail_is_generic_bounded_and_cursor_paginated(tmp_path: Path) -> 
     assert payload["outputs"][0]["authority"] == "unapproved"
     assert payload["outputs"][0]["payload"] == {"thesis": "generic"}
     assert payload["outputs"][0]["legs"][0]["action"] == "buy"
+    assert payload["market_data"]["interests"][0]["interest_key"] == "primary-call"
+    assert payload["market_data"]["interests"][0]["lifecycle"] == "resolved"
+    assert payload["market_data"]["receipts"][0]["instrument_id"] == "ibkr-option-9001"
     assert payload["next_cursor"]
 
     second = client.get(

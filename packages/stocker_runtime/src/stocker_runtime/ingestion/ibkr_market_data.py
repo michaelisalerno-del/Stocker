@@ -4,13 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal, Protocol, cast, runtime_checkable
 
+from stocker_runtime.ingestion.dynamic_market_data import (
+    ContractCandidate,
+    OptionParameterSet,
+)
 from stocker_runtime.ingestion.inbox import (
     AdmissionResult,
     CallbackFence,
     MarketDataCallback,
 )
+
+MAX_MARKET_DATA_REQUEST_ID = 1_499_999_999
 
 
 @dataclass(frozen=True)
@@ -24,6 +30,7 @@ class MarketDataStatus:
         "farm_recovered",
         "pacing",
         "request_rejected",
+        "snapshot_end",
     ]
     code: int
     request_id: int | None
@@ -66,10 +73,12 @@ class IBKRSubscription:
     exchange: str
     currency: str
     feed_kind: str
+    snapshot: bool = False
 
     def __post_init__(self) -> None:
         if (
             self.request_id < 0
+            or self.request_id > MAX_MARKET_DATA_REQUEST_ID
             or self.con_id <= 0
             or not self.symbol
             or not self.security_type
@@ -80,12 +89,29 @@ class IBKRSubscription:
             raise ValueError("IBKR market-data subscription identity is invalid")
 
 
+class _OptionMarketDataBridge(MarketDataAdapter, Protocol):
+    def option_parameters(
+        self, *, underlying_con_id: int, symbol: str
+    ) -> tuple[OptionParameterSet, ...]: ...
+
+    def option_contracts(
+        self,
+        *,
+        symbol: str,
+        expiry: str,
+        strike: float,
+        right: str,
+        multiplier: str,
+        trading_class: str,
+    ) -> tuple[ContractCandidate, ...]: ...
+
+
 class IBKRMarketData:
     """Narrow facade over the private official API bridge."""
 
     __slots__ = ("_bridge",)
 
-    def __init__(self, bridge: MarketDataAdapter) -> None:
+    def __init__(self, bridge: _OptionMarketDataBridge) -> None:
         self._bridge = bridge
 
     @classmethod
@@ -111,7 +137,7 @@ class IBKRMarketData:
             external_read_only_verified=external_read_only_verified,
             subscriptions=subscriptions,
         )
-        return cls(bridge)
+        return cls(cast(_OptionMarketDataBridge, bridge))
 
     def set_callback(
         self, callback: Callable[[CallbackFence, MarketDataCallback], AdmissionResult]
@@ -138,3 +164,30 @@ class IBKRMarketData:
 
     def cancel(self, request_id: int) -> None:
         self._bridge.cancel(request_id)
+
+    def option_parameters(
+        self, *, underlying_con_id: int, symbol: str
+    ) -> tuple[OptionParameterSet, ...]:
+        return self._bridge.option_parameters(
+            underlying_con_id=underlying_con_id,
+            symbol=symbol,
+        )
+
+    def option_contracts(
+        self,
+        *,
+        symbol: str,
+        expiry: str,
+        strike: float,
+        right: str,
+        multiplier: str,
+        trading_class: str,
+    ) -> tuple[ContractCandidate, ...]:
+        return self._bridge.option_contracts(
+            symbol=symbol,
+            expiry=expiry,
+            strike=strike,
+            right=right,
+            multiplier=multiplier,
+            trading_class=trading_class,
+        )

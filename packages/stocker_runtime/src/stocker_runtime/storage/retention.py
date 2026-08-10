@@ -596,6 +596,7 @@ class RetentionManager:
             "shadow_outcomes": "outcome_at_us, position_id",
             "shadow_positions": "closed_at_us, position_id",
             "idea_outputs": "emitted_at_us, output_id",
+            "market_data_interests": "updated_at_us, interest_id",
             "market_events": "event_at_us, event_kind, event_id",
             "subscriptions": "closed_at_us, subscription_id",
             "incidents": "resolved_at_us, incident_id",
@@ -755,6 +756,41 @@ class RetentionManager:
                 deleted_rows += progress_cursor.rowcount
         return deleted_rows
 
+    def _prune_market_data_interests(
+        self, connection: sqlite3.Connection, cutoff_us: int, remaining: int
+    ) -> int:
+        """Delete terminal interests while accounting for their one receipt cascade."""
+
+        if remaining <= 0:
+            return 0
+        candidates = tuple(
+            connection.execute(
+                "SELECT interest.interest_id, 1 + EXISTS(SELECT 1 FROM "
+                "instrument_discovery_receipts receipt "
+                "WHERE receipt.interest_id=interest.interest_id) AS cascade_rows "
+                "FROM market_data_interests interest WHERE interest.lifecycle IN "
+                "('fulfilled','denied','expired','cancelled') AND interest.updated_at_us<=? "
+                "ORDER BY interest.updated_at_us, interest.interest_id LIMIT ?",
+                (cutoff_us, remaining),
+            )
+        )
+        deleted = 0
+        for candidate in candidates:
+            cascade_rows = int(candidate["cascade_rows"])
+            if deleted + cascade_rows > remaining:
+                break
+            prior_changes = connection.total_changes
+            cursor = connection.execute(
+                "DELETE FROM market_data_interests WHERE interest_id=? AND lifecycle IN "
+                "('fulfilled','denied','expired','cancelled') AND updated_at_us<=?",
+                (candidate["interest_id"], cutoff_us),
+            )
+            physical_changes = connection.total_changes - prior_changes
+            if cursor.rowcount != 1 or physical_changes != cascade_rows:
+                raise RetentionInvariantError("market-data interest cascade accounting changed")
+            deleted += physical_changes
+        return deleted
+
     def _prune_expired(self, connection: sqlite3.Connection, now_us: int, limit: int) -> int:
         deleted = 0
 
@@ -801,6 +837,11 @@ class RetentionManager:
             protected_cutoff,
             limit - deleted,
         )
+        deleted += self._prune_market_data_interests(
+            connection,
+            protected_cutoff,
+            limit - deleted,
+        )
         prune(
             "market_event_derivations",
             "rowid",
@@ -817,6 +858,9 @@ class RetentionManager:
             "l.last_source_event_id, l.size_source_event_id, l.close_source_event_id)) "
             "AND NOT EXISTS (SELECT 1 FROM idea_checkpoints checkpoint, "
             "json_each(checkpoint.state_input_event_ids_json) input "
+            "WHERE input.value=market_events.event_id) "
+            "AND NOT EXISTS (SELECT 1 FROM market_data_interests interest, "
+            "json_each(interest.input_event_ids_json) input "
             "WHERE input.value=market_events.event_id) "
             "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
             "WHERE derivation.input_event_id=market_events.event_id) "
@@ -862,6 +906,9 @@ class RetentionManager:
             "l.last_source_event_id, l.size_source_event_id, l.close_source_event_id)) "
             "AND NOT EXISTS (SELECT 1 FROM idea_checkpoints checkpoint, "
             "json_each(checkpoint.state_input_event_ids_json) input "
+            "WHERE input.value=market_events.event_id) "
+            "AND NOT EXISTS (SELECT 1 FROM market_data_interests interest, "
+            "json_each(interest.input_event_ids_json) input "
             "WHERE input.value=market_events.event_id) "
             "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
             "WHERE derivation.input_event_id=market_events.event_id) "

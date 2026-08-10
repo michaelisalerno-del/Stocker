@@ -756,6 +756,7 @@ def test_output_causality_checks_exact_current_and_prior_lineage(tmp_path: Path)
             Observation(subject_instrument_id="AAL", as_of_at_us=prior.event_at_us, payload={}),
         ),
         output_input_event_ids=((prior.event_id,),),
+        interests=(),
     )
     runner._validate_evaluation(activation, discovered.plugin, batch, valid)
     late = IdeaEvaluation(
@@ -766,6 +767,7 @@ def test_output_causality_checks_exact_current_and_prior_lineage(tmp_path: Path)
             ),
         ),
         output_input_event_ids=((current.event_id,),),
+        interests=(),
     )
     with pytest.raises(IdeaRunnerError, match="as-of"):
         runner._validate_evaluation(activation, discovered.plugin, batch, late)

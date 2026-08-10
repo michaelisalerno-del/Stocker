@@ -19,11 +19,13 @@ from stocker_runtime.domain import (
 )
 from stocker_runtime.ideas import (
     MAX_EVENTS_PER_BATCH,
+    DiscoveryReceipt,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
     IdeaManifest,
     IdeaPlugin,
+    MarketDataInterest,
     MarketDataRequirement,
 )
 
@@ -34,10 +36,12 @@ __all__ = [
     "IdeaEvaluation",
     "IdeaManifest",
     "IdeaPlugin",
+    "DiscoveryReceipt",
     "JsonValue",
     "MAX_EVENTS_PER_BATCH",
     "MAX_MARKET_EVENT_PAYLOAD_BYTES",
     "MarketDataRequirement",
+    "MarketDataInterest",
     "MarketEvent",
     "Observation",
     "OutputKind",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from collections.abc import Iterator, Mapping
@@ -67,7 +68,7 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
 
     result = initialize_database(database, applied_at_us=1_700_000_000_000_000)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
     with connect_v2(database) as connection:
         tables = {
             str(row[0])
@@ -173,7 +174,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (12, '0012_future.sql', ?, 2)",
+            "VALUES (13, '0013_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -255,7 +256,7 @@ def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_h
 
     result = migrate_database(backfill_database, applied_at_us=2)
 
-    assert result.applied_versions == (7, 8, 9, 10, 11)
+    assert result.applied_versions == (7, 8, 9, 10, 11, 12)
     with connect_v2(backfill_database) as connection:
         assert tuple(
             connection.execute(
@@ -348,7 +349,7 @@ def test_expiry_projection_migration_deactivates_terminal_history(tmp_path: Path
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (8, 9, 10, 11)
+    assert result.applied_versions == (8, 9, 10, 11, 12)
     with connect_v2(database) as connection:
         assert tuple(
             connection.execute(
@@ -492,7 +493,7 @@ def test_commit_boundary_migration_rewinds_pending_shadow_to_conservative_run_ma
             ("9" * 64,),
         )
 
-    assert migrate_database(database, applied_at_us=2).applied_versions == (9, 10, 11)
+    assert migrate_database(database, applied_at_us=2).applied_versions == (9, 10, 11, 12)
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -1087,6 +1088,183 @@ def _seed_output_dependencies(database: Path, *, verify_schema: bool = True) -> 
                 "healthy",
                 "shadow_protected",
             ),
+        )
+
+
+def _insert_dynamic_interest(
+    connection: sqlite3.Connection,
+    *,
+    interest_id: str = "interest-1",
+    lifecycle: str = "pending",
+    updated_at_us: int = 20,
+    underlying_instrument_id: str = "instrument-1",
+    interest_key: str | None = None,
+) -> None:
+    connection.execute(
+        "INSERT INTO market_data_interests(interest_id, run_id, instance_id, interest_key, "
+        "underlying_instrument_id, asset_kind, minimum_days_to_expiry, "
+        "maximum_days_to_expiry, option_right, strike_offset, reference_price, feed_kind, "
+        "cadence, as_of_at_us, expires_at_us, required, priority, maximum_contracts, "
+        "input_event_ids_json, content_hash, lifecycle, next_attempt_at_us, created_at_us, "
+        "updated_at_us) VALUES (?, 'run-1', 'instance-1', ?, ?, 'option', "
+        "1, 1, 'call', 0, 100.0, 'quotes', 'snapshot', 20, 100, 1, 100, 1, "
+        "'[\"event-1\"]', ?, ?, 20, 20, ?)",
+        (
+            interest_id,
+            interest_key or f"key-{interest_id}",
+            underlying_instrument_id,
+            hashlib.sha256(interest_id.encode()).hexdigest(),
+            lifecycle,
+            updated_at_us,
+        ),
+    )
+
+
+def test_dynamic_interest_schema_enforces_scope_identity_and_exact_receipt(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "dynamic-schema.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        _insert_dynamic_interest(connection)
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+            "exchange, currency, option_expiry, option_strike, option_right, option_multiplier) "
+            "VALUES ('option-1', ?, 9001, 'option', 'XYZ', 'SMART', 'USD', '20260811', "
+            "'100', 'call', '100')",
+            ("8" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO instrument_discovery_receipts(receipt_id, interest_id, run_id, "
+            "instance_id, status, instrument_id, expiry, strike, option_right, multiplier, "
+            "candidates_inspected, completed_at_us) VALUES ('receipt-1', 'interest-1', "
+            "'run-1', 'instance-1', 'resolved', 'option-1', '20260811', 100, 'call', "
+            "'100', 1, 21)"
+        )
+        connection.execute(
+            "UPDATE market_data_interests SET lifecycle='resolved', updated_at_us=21 "
+            "WHERE interest_id='interest-1'"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            connection.execute(
+                "UPDATE instrument_discovery_receipts SET strike=101 WHERE receipt_id='receipt-1'"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="lifecycle"):
+            connection.execute(
+                "UPDATE market_data_interests SET lifecycle='pending' "
+                "WHERE interest_id='interest-1'"
+            )
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, kind, symbol, exchange, "
+            "currency) VALUES ('outside', ?, 'stock', 'OUT', 'SMART', 'USD')",
+            ("7" * 64,),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="provenance"):
+            _insert_dynamic_interest(
+                connection,
+                interest_id="interest-outside",
+                underlying_instrument_id="outside",
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            _insert_dynamic_interest(
+                connection,
+                interest_id="interest-long-key",
+                interest_key="x" * 129,
+            )
+        _insert_dynamic_interest(connection, interest_id="interest-long-reason")
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            connection.execute(
+                "INSERT INTO instrument_discovery_receipts(receipt_id, interest_id, run_id, "
+                "instance_id, status, reason_code, candidates_inspected, completed_at_us) "
+                "VALUES ('receipt-long-reason', 'interest-long-reason', 'run-1', "
+                "'instance-1', 'denied', ?, 0, 21)",
+                ("x" * 129,),
+            )
+
+
+def test_dynamic_interest_query_indexes_are_exercised_by_bounded_lifecycle_plans(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "dynamic-query-plans.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        _insert_dynamic_interest(connection)
+        pending_plan = " ".join(
+            str(row["detail"])
+            for row in connection.execute(
+                "EXPLAIN QUERY PLAN SELECT * FROM market_data_interests WHERE run_id=? "
+                "AND lifecycle='pending' AND expires_at_us>? AND next_attempt_at_us<=? "
+                "ORDER BY required DESC, priority DESC, interest_id LIMIT 4",
+                ("run-1", 10, 20),
+            )
+        )
+        receipt_plan = " ".join(
+            str(row["detail"])
+            for row in connection.execute(
+                "EXPLAIN QUERY PLAN SELECT * FROM instrument_discovery_receipts "
+                "WHERE instance_id=? ORDER BY completed_at_us DESC, receipt_id DESC LIMIT 64",
+                ("instance-1",),
+            )
+        )
+        detail_plan = " ".join(
+            str(row["detail"])
+            for row in connection.execute(
+                "EXPLAIN QUERY PLAN SELECT * FROM market_data_interests "
+                "WHERE instance_id=? ORDER BY updated_at_us DESC, interest_id LIMIT 64",
+                ("instance-1",),
+            )
+        )
+    assert "market_data_interests_run_lifecycle_idx" in pending_plan
+    assert "instrument_discovery_receipts_instance_time_idx" in receipt_plan
+    assert "market_data_interests_instance_updated_idx" in detail_plan
+
+
+def test_retention_counts_interest_receipt_cascade_before_releasing_input_event(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "dynamic-retention.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        _insert_dynamic_interest(connection, lifecycle="denied", updated_at_us=20)
+        connection.execute(
+            "INSERT INTO instrument_discovery_receipts(receipt_id, interest_id, run_id, "
+            "instance_id, status, reason_code, candidates_inspected, completed_at_us) "
+            "VALUES ('receipt-1', 'interest-1', 'run-1', 'instance-1', 'denied', "
+            "'NO_MATCH', 0, 21)"
+        )
+    policy = RetentionPolicy(
+        idea_shadow_us=50,
+        raw_market_event_us=1,
+        maintenance_batch_rows=2,
+    )
+
+    first = RetentionManager(database, policy).run(now_us=100)
+
+    assert first.expired_rows_deleted == 2
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM market_data_interests").fetchone()[0] == 0
+        assert (
+            connection.execute("SELECT count(*) FROM instrument_discovery_receipts").fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM market_events WHERE event_id='event-1'"
+            ).fetchone()[0]
+            == 1
+        )
+
+    second = RetentionManager(database, policy).run(now_us=100)
+    assert second.expired_rows_deleted == 1
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM market_events WHERE event_id='event-1'"
+            ).fetchone()[0]
+            == 0
         )
 
 
@@ -3041,11 +3219,11 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     migration_payload = json.loads(migrated.stdout)
     retention_payload = json.loads(retained.stdout)
     assert init_payload == {
-        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-        "current_version": 11,
+        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "current_version": 12,
         "status": "ok",
     }
-    assert migration_payload == {"applied_versions": [], "current_version": 11, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 12, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

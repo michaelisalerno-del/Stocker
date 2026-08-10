@@ -6,8 +6,15 @@ import ipaddress
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any, cast
 
+from stocker_runtime.ingestion.dynamic_market_data import (
+    MAX_EXACT_CONTRACT_CANDIDATES,
+    MAX_OPTION_PARAMETER_SETS,
+    ContractCandidate,
+    OptionParameterSet,
+)
 from stocker_runtime.ingestion.ibkr_api import (
     OfficialIBKRDependencyError,
     require_official_ibkr_api,
@@ -26,6 +33,15 @@ from stocker_runtime.ingestion.inbox import (
 
 class OfficialBridgeUnavailable(RuntimeError):
     """The externally installed official API cannot be verified or loaded."""
+
+
+@dataclass
+class _MetadataWaiter:
+    kind: str
+    completed: threading.Event = field(default_factory=threading.Event)
+    parameter_sets: list[OptionParameterSet] = field(default_factory=list)
+    contracts: list[ContractCandidate] = field(default_factory=list)
+    error: str | None = None
 
 
 def _price_tick_projection(feed_kind: str, tick_type: int) -> tuple[str, str] | None:
@@ -89,6 +105,10 @@ def create_official_bridge(
             if owner is not None:
                 owner.tick_size(reqId, tickType, float(size))
 
+        def tickSnapshotEnd(self, reqId: int) -> None:  # noqa: N802
+            if owner is not None:
+                owner.snapshot_end(reqId)
+
         def error(self, reqId: int, errorCode: int, errorString: str, *args: Any) -> None:  # noqa: N802
             del args
             if owner is not None:
@@ -120,6 +140,39 @@ def create_official_bridge(
                     },
                 )
 
+        def securityDefinitionOptionParameter(  # noqa: N802
+            self,
+            reqId: int,
+            exchange: str,
+            underlyingConId: int,
+            tradingClass: str,
+            multiplier: str,
+            expirations: set[str],
+            strikes: set[float],
+        ) -> None:
+            del underlyingConId
+            if owner is not None:
+                owner.option_parameter(
+                    reqId,
+                    exchange,
+                    tradingClass,
+                    multiplier,
+                    expirations,
+                    strikes,
+                )
+
+        def securityDefinitionOptionParameterEnd(self, reqId: int) -> None:  # noqa: N802
+            if owner is not None:
+                owner.metadata_end(reqId, "parameters")
+
+        def contractDetails(self, reqId: int, contractDetails: Any) -> None:  # noqa: N802
+            if owner is not None:
+                owner.contract_detail(reqId, contractDetails)
+
+        def contractDetailsEnd(self, reqId: int) -> None:  # noqa: N802
+            if owner is not None:
+                owner.metadata_end(reqId, "contracts")
+
     wrapper = _Callbacks()
     client = EClient(wrapper)
 
@@ -132,6 +185,9 @@ def create_official_bridge(
         contract.currency = item.currency
         return contract
 
+    def make_metadata_contract() -> Any:
+        return Contract()
+
     contracts = {request_id: make_contract(item) for request_id, item in configured.items()}
     owner = _PrivateOfficialBridge(
         client=client,
@@ -141,6 +197,7 @@ def create_official_bridge(
         configured=configured,
         contracts=contracts,
         contract_factory=make_contract,
+        metadata_contract_factory=make_metadata_contract,
     )
     return cast(MarketDataAdapter, owner)
 
@@ -158,6 +215,7 @@ class _PrivateOfficialBridge:
         configured: dict[int, IBKRSubscription],
         contracts: dict[int, Any],
         contract_factory: Callable[[IBKRSubscription], Any],
+        metadata_contract_factory: Callable[[], Any],
     ) -> None:
         self.__client = client
         self._host = host
@@ -166,11 +224,16 @@ class _PrivateOfficialBridge:
         self._configured = configured
         self._contracts = contracts
         self._contract_factory = contract_factory
+        self._metadata_contract_factory = metadata_contract_factory
         self._fences: dict[int, CallbackFence] = {}
         self._callback: Callable[[CallbackFence, MarketDataCallback], AdmissionResult] | None = None
         self._disconnect_callback: Callable[[int], None] | None = None
         self._status_callback: Callable[[MarketDataStatus], None] | None = None
         self._thread: threading.Thread | None = None
+        self._metadata_operation_lock = threading.Lock()
+        self._metadata_state_lock = threading.Lock()
+        self._metadata_waiters: dict[int, _MetadataWaiter] = {}
+        self._next_metadata_request_id = 1_500_000_000
 
     def set_callback(
         self, callback: Callable[[CallbackFence, MarketDataCallback], AdmissionResult]
@@ -198,19 +261,178 @@ class _PrivateOfficialBridge:
         self.__client.disconnect()
 
     def configure_subscriptions(self, subscriptions: tuple[IBKRSubscription, ...]) -> None:
-        """Install the core-owned exact read-only request set before connecting."""
+        """Add core-owned exact identities without reusing a request id."""
 
-        if self._thread is not None:
-            raise OfficialBridgeUnavailable("subscriptions cannot change after connect")
         if len({item.request_id for item in subscriptions}) != len(subscriptions):
             raise OfficialBridgeUnavailable("IBKR request identifiers must be unique")
         configured = {item.request_id: item for item in subscriptions}
-        if self._configured and self._configured != configured:
-            raise OfficialBridgeUnavailable("configured subscription identity changed")
-        self._configured = configured
-        self._contracts = {
-            request_id: self._contract_factory(item) for request_id, item in configured.items()
+        for request_id, item in configured.items():
+            existing = self._configured.get(request_id)
+            if existing is not None and existing != item:
+                raise OfficialBridgeUnavailable("configured subscription identity changed")
+        additions = {
+            request_id: item
+            for request_id, item in configured.items()
+            if request_id not in self._configured
         }
+        self._configured.update(additions)
+        self._contracts.update(
+            {request_id: self._contract_factory(item) for request_id, item in additions.items()}
+        )
+
+    def _new_metadata_waiter(self, kind: str) -> tuple[int, _MetadataWaiter]:
+        with self._metadata_state_lock:
+            request_id = self._next_metadata_request_id
+            self._next_metadata_request_id += 1
+            if self._next_metadata_request_id >= 2_000_000_000:
+                raise OfficialBridgeUnavailable("IBKR metadata request id range exhausted")
+            waiter = _MetadataWaiter(kind)
+            self._metadata_waiters[request_id] = waiter
+            return request_id, waiter
+
+    def _finish_metadata_waiter(self, request_id: int, waiter: _MetadataWaiter) -> _MetadataWaiter:
+        if not waiter.completed.wait(timeout=5.0):
+            with self._metadata_state_lock:
+                self._metadata_waiters.pop(request_id, None)
+            raise OfficialBridgeUnavailable("IBKR option metadata request timed out")
+        with self._metadata_state_lock:
+            self._metadata_waiters.pop(request_id, None)
+        if waiter.error is not None:
+            raise OfficialBridgeUnavailable(waiter.error)
+        return waiter
+
+    def option_parameters(
+        self, *, underlying_con_id: int, symbol: str
+    ) -> tuple[OptionParameterSet, ...]:
+        """Request bounded option metadata; this never creates a live subscription."""
+
+        if underlying_con_id <= 0 or not symbol:
+            raise OfficialBridgeUnavailable("underlying option identity is invalid")
+        with self._metadata_operation_lock:
+            request_id, waiter = self._new_metadata_waiter("parameters")
+            try:
+                self.__client.reqSecDefOptParams(
+                    request_id,
+                    symbol,
+                    "",
+                    "STK",
+                    underlying_con_id,
+                )
+            except Exception:
+                with self._metadata_state_lock:
+                    self._metadata_waiters.pop(request_id, None)
+                raise
+            return tuple(self._finish_metadata_waiter(request_id, waiter).parameter_sets)
+
+    def option_contracts(
+        self,
+        *,
+        symbol: str,
+        expiry: str,
+        strike: float,
+        right: str,
+        multiplier: str,
+        trading_class: str,
+    ) -> tuple[ContractCandidate, ...]:
+        """Resolve one exact selected contract identity without streaming a chain."""
+
+        if (
+            not symbol
+            or len(expiry) != 8
+            or not expiry.isdigit()
+            or strike <= 0
+            or right not in {"C", "P"}
+            or not multiplier
+            or not trading_class
+        ):
+            raise OfficialBridgeUnavailable("exact option contract query is invalid")
+        with self._metadata_operation_lock:
+            request_id, waiter = self._new_metadata_waiter("contracts")
+            contract = self._metadata_contract_factory()
+            contract.symbol = symbol
+            contract.secType = "OPT"
+            contract.exchange = "SMART"
+            contract.currency = "USD"
+            contract.lastTradeDateOrContractMonth = expiry
+            contract.strike = strike
+            contract.right = right
+            contract.multiplier = multiplier
+            contract.tradingClass = trading_class
+            try:
+                self.__client.reqContractDetails(request_id, contract)
+            except Exception:
+                with self._metadata_state_lock:
+                    self._metadata_waiters.pop(request_id, None)
+                raise
+            return tuple(self._finish_metadata_waiter(request_id, waiter).contracts)
+
+    def option_parameter(
+        self,
+        request_id: int,
+        exchange: str,
+        trading_class: str,
+        multiplier: str,
+        expirations: set[str],
+        strikes: set[float],
+    ) -> None:
+        with self._metadata_state_lock:
+            waiter = self._metadata_waiters.get(request_id)
+            if waiter is None or waiter.kind != "parameters" or waiter.completed.is_set():
+                return
+            try:
+                if len(waiter.parameter_sets) >= MAX_OPTION_PARAMETER_SETS:
+                    raise ValueError("option parameter set bound exceeded")
+                waiter.parameter_sets.append(
+                    OptionParameterSet(
+                        exchange=str(exchange),
+                        trading_class=str(trading_class),
+                        multiplier=str(multiplier),
+                        expirations=tuple(sorted(str(value) for value in expirations)),
+                        strikes=tuple(sorted(float(value) for value in strikes)),
+                    )
+                )
+            except Exception:
+                waiter.error = "IBKR option parameter metadata is invalid or unbounded"
+                waiter.completed.set()
+
+    def contract_detail(self, request_id: int, details: Any) -> None:
+        with self._metadata_state_lock:
+            waiter = self._metadata_waiters.get(request_id)
+            if waiter is None or waiter.kind != "contracts" or waiter.completed.is_set():
+                return
+            try:
+                if len(waiter.contracts) >= MAX_EXACT_CONTRACT_CANDIDATES:
+                    raise ValueError("exact option contract candidate bound exceeded")
+                contract = details.contract
+                waiter.contracts.append(
+                    ContractCandidate(
+                        con_id=int(contract.conId),
+                        symbol=str(contract.symbol),
+                        expiry=str(contract.lastTradeDateOrContractMonth),
+                        strike=float(contract.strike),
+                        right=str(contract.right),
+                        multiplier=str(contract.multiplier),
+                        exchange=str(contract.exchange),
+                        currency=str(contract.currency),
+                        trading_class=str(contract.tradingClass),
+                    )
+                )
+            except Exception:
+                waiter.error = "IBKR exact option contract metadata is invalid or unbounded"
+                waiter.completed.set()
+
+    def metadata_end(self, request_id: int, kind: str) -> None:
+        with self._metadata_state_lock:
+            waiter = self._metadata_waiters.get(request_id)
+            if waiter is not None and waiter.kind == kind:
+                waiter.completed.set()
+
+    def _metadata_error(self, request_id: int, code: int) -> None:
+        with self._metadata_state_lock:
+            waiter = self._metadata_waiters.get(request_id)
+            if waiter is not None:
+                waiter.error = f"IBKR option metadata request rejected ({code})"
+                waiter.completed.set()
 
     def subscribe(self, fence: CallbackFence) -> None:
         if fence.request_id is None or fence.request_id not in self._configured:
@@ -232,7 +454,7 @@ class _PrivateOfficialBridge:
                 request_id,
                 self._contracts[request_id],
                 "",
-                False,
+                item.snapshot,
                 False,
                 [],
             )
@@ -282,7 +504,26 @@ class _PrivateOfficialBridge:
             kind, name = projection
             self.emit(request_id, kind, {name: size})
 
+    def snapshot_end(self, request_id: int) -> None:
+        configured = self._configured.get(request_id)
+        if configured is None or not configured.snapshot:
+            return
+        self._fences.pop(request_id, None)
+        callback = self._status_callback
+        if callback is not None:
+            callback(
+                MarketDataStatus(
+                    kind="snapshot_end",
+                    code=0,
+                    request_id=request_id,
+                    message="option snapshot completed",
+                    received_at_us=time.time_ns() // 1_000,
+                )
+            )
+
     def official_status(self, request_id: int, code: int, message: str) -> None:
+        if request_id >= 0:
+            self._metadata_error(request_id, code)
         callback = self._status_callback
         if callback is None:
             return

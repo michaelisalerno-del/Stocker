@@ -77,6 +77,7 @@ MANIFEST = IdeaManifest(
     },
     maximum_state_bytes=65_536,
     maximum_outputs_per_batch=54,
+    maximum_interests_per_batch=0,
 )
 
 
@@ -320,6 +321,7 @@ class OpeningLeaderContinuationV0:
             outputs=tuple(outputs),
             retained_input_event_ids=retained,
             output_input_event_ids=tuple(output_lineages),
+            interests=(),
         )
 
 

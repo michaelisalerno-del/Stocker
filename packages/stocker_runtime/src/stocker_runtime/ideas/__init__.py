@@ -2,11 +2,13 @@
 
 from stocker_runtime.ideas.contract import (
     MAX_EVENTS_PER_BATCH,
+    DiscoveryReceipt,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
     IdeaManifest,
     IdeaPlugin,
+    MarketDataInterest,
     MarketDataRequirement,
 )
 from stocker_runtime.ideas.discovery import (
@@ -35,8 +37,10 @@ __all__ = [
     "IdeaDiscoveryError",
     "IdeaInstrumentConfig",
     "DiscoveredPlugin",
+    "DiscoveryReceipt",
     "MAX_EVENTS_PER_BATCH",
     "MarketDataRequirement",
+    "MarketDataInterest",
     "aggregate_instruments",
     "aggregate_requirements",
     "discover_plugins",

@@ -364,6 +364,10 @@ async function selectIdea(instanceId, button) {
           64,
         ),
       ]),
+      element("article", { className: "stream-entry" }, [
+        element("h4", { text: "Market-data interests and discovery" }),
+        fields(payload.market_data, "market_data", 128),
+      ]),
       ...(payload.outputs.length
         ? payload.outputs.map(outputEntry)
         : [empty("No sealed outputs in the requested seven-day window.")]),

@@ -10,11 +10,13 @@ from pydantic import ValidationError
 from stocker_runtime import (
     MAX_EVENTS_PER_BATCH,
     MAX_MARKET_EVENT_PAYLOAD_BYTES,
+    DiscoveryReceipt,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
     IdeaManifest,
     IdeaPlugin,
+    MarketDataInterest,
     MarketDataRequirement,
     MarketEvent,
     Observation,
@@ -58,6 +60,7 @@ def _manifest_data() -> dict[str, object]:
         "parameter_schema": {"type": "object", "additionalProperties": False},
         "maximum_state_bytes": 65_536,
         "maximum_outputs_per_batch": 256,
+        "maximum_interests_per_batch": 0,
     }
 
 
@@ -122,6 +125,7 @@ def test_first_party_plugin_protocol_uses_bounded_authority_free_dtos() -> None:
                 payload={"rank": 1},
             ),
         ),
+        interests=(),
     )
 
     class ExamplePlugin:
@@ -148,18 +152,18 @@ def test_first_party_plugin_protocol_uses_bounded_authority_free_dtos() -> None:
 
 
 def test_evaluation_enforces_global_state_and_output_bounds() -> None:
-    accepted = IdeaEvaluation(state={"value": "x" * 65_524}, outputs=())
+    accepted = IdeaEvaluation(state={"value": "x" * 65_524}, outputs=(), interests=())
 
     assert len(accepted.state_json()) == 64 * 1024
 
     with pytest.raises(ValidationError, match="state exceeds 65536 bytes"):
-        IdeaEvaluation(state={"value": "x" * 65_525}, outputs=())
+        IdeaEvaluation(state={"value": "x" * 65_525}, outputs=(), interests=())
 
     output = Observation(subject_instrument_id="AAPL", as_of_at_us=1, payload={})
-    assert len(IdeaEvaluation(state=None, outputs=(output,) * 256).outputs) == 256
+    assert len(IdeaEvaluation(state=None, outputs=(output,) * 256, interests=()).outputs) == 256
 
     with pytest.raises(ValidationError):
-        IdeaEvaluation(state=None, outputs=(output,) * 257)
+        IdeaEvaluation(state=None, outputs=(output,) * 257, interests=())
 
 
 @pytest.mark.parametrize("unsupported_mode", ["paper", "live", "research", "unknown"])
@@ -269,7 +273,32 @@ def test_non_proposal_json_allows_legitimate_evidence_and_configuration_vocabula
             protected_data_class=ProtectedDataClass.PROSPECTIVE,
             universe=("AAPL",),
         ),
-        IdeaEvaluation(state=evidence, outputs=()),
+        MarketDataInterest(
+            interest_key="primary-call",
+            underlying_instrument_id="AAPL",
+            minimum_days_to_expiry=1,
+            maximum_days_to_expiry=1,
+            option_right="call",
+            strike_offset=0,
+            reference_price=100.0,
+            cadence="snapshot",
+            as_of_at_us=1,
+            expires_at_us=2,
+            required=True,
+            priority=100,
+            input_event_ids=("event-001",),
+        ),
+        DiscoveryReceipt(
+            receipt_id="receipt-001",
+            interest_id="interest-001",
+            interest_key="primary-call",
+            instance_id="instance-001",
+            status="denied",
+            reason_code="NO_MATCH",
+            candidates_inspected=0,
+            completed_at_us=2,
+        ),
+        IdeaEvaluation(state=evidence, outputs=(), interests=()),
     )
 
     assert all(model.to_canonical_json() for model in models)
@@ -379,6 +408,7 @@ def test_public_dto_json_is_deeply_immutable_and_round_trips() -> None:
                         legs=_leg(),
                     ),
                 ),
+                interests=(),
             ),
             "state",
             ("nested",),

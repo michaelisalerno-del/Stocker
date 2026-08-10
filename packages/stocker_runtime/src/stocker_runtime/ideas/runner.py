@@ -25,11 +25,13 @@ from stocker_runtime.domain import (
     ensure_authority_free_json,
 )
 from stocker_runtime.ideas.contract import (
+    DiscoveryReceipt,
     IdeaActivation,
     IdeaBatch,
     IdeaEvaluation,
     IdeaManifest,
     IdeaPlugin,
+    MarketDataInterest,
     MarketDataRequirement,
 )
 from stocker_runtime.ideas.discovery import DiscoveredPlugin
@@ -40,6 +42,8 @@ from stocker_runtime.ideas.identity import (
 from stocker_runtime.storage.connection import connect_v2
 
 MAX_EVALUATION_NS = 50_000_000
+MAX_NONTERMINAL_INTERESTS_PER_INSTANCE = 64
+MAX_NONTERMINAL_INTERESTS_PER_RUN = 256
 MAX_EVALUATION_SECONDS = MAX_EVALUATION_NS / 1_000_000_000
 WORKER_START_SECONDS = 5.0
 RETRY_BASE_US = 1_000_000
@@ -48,6 +52,43 @@ RETRY_MAX_US = 60_000_000
 
 class IdeaRunnerError(RuntimeError):
     """An activation or evaluation violates a generic Phase 4 invariant."""
+
+
+def _merge_batch_requirements(
+    requirements: tuple[MarketDataRequirement, ...],
+) -> tuple[MarketDataRequirement, ...]:
+    """Merge duplicate static and discovered needs without weakening a blocker."""
+
+    merged: dict[tuple[str, str], MarketDataRequirement] = {}
+    for requirement in requirements:
+        key = (requirement.instrument_id, requirement.feed_kind)
+        prior = merged.get(key)
+        if prior is None:
+            merged[key] = requirement
+            continue
+        if prior.cadence == requirement.cadence:
+            cadence = prior.cadence
+        elif prior.cadence == "snapshot":
+            cadence = requirement.cadence
+        elif requirement.cadence == "snapshot":
+            cadence = prior.cadence
+        elif prior.cadence == "stream":
+            cadence = requirement.cadence
+        elif requirement.cadence == "stream":
+            cadence = prior.cadence
+        else:
+            raise IdeaRunnerError(f"conflicting requirement cadence for {key}")
+        merged[key] = MarketDataRequirement(
+            feed_kind=requirement.feed_kind,
+            event_kind=(
+                requirement.event_kind if prior.event_kind == requirement.event_kind else None
+            ),
+            instrument_id=requirement.instrument_id,
+            cadence=cadence,
+            gaps_block=prior.gaps_block or requirement.gaps_block,
+            staleness_block=prior.staleness_block or requirement.staleness_block,
+        )
+    return tuple(sorted(merged.values(), key=lambda item: item.to_canonical_json()))
 
 
 @dataclass(frozen=True)
@@ -507,6 +548,12 @@ class IdeaRunner:
                     "AND resolved_at_us IS NULL",
                     (now_us, instance_id),
                 )
+                connection.execute(
+                    "UPDATE market_data_interests SET lifecycle='cancelled', "
+                    "reason_code='PLUGIN_DEACTIVATED', updated_at_us=? WHERE instance_id=? "
+                    "AND lifecycle IN ('pending','resolved','active')",
+                    (now_us, instance_id),
+                )
             connection.commit()
         for instance_id in deactivated:
             self._plugins_by_instance.pop(instance_id, None)
@@ -585,6 +632,74 @@ class IdeaRunner:
                 MarketDataRequirement.model_validate(item)
                 for item in json.loads(str(row["requirements_json"]))
             )
+            receipt_rows = connection.execute(
+                "SELECT receipt.*, interest.interest_key, interest.feed_kind, "
+                "interest.cadence, interest.required, interest.lifecycle "
+                "FROM instrument_discovery_receipts receipt "
+                "JOIN market_data_interests interest USING(interest_id) "
+                "WHERE receipt.instance_id=? "
+                "ORDER BY receipt.completed_at_us DESC, receipt.receipt_id DESC LIMIT 64",
+                (instance_id,),
+            ).fetchall()
+            discovery_receipts = tuple(
+                DiscoveryReceipt.model_validate(
+                    {
+                        "receipt_id": str(item["receipt_id"]),
+                        "interest_id": str(item["interest_id"]),
+                        "interest_key": str(item["interest_key"]),
+                        "instance_id": str(item["instance_id"]),
+                        "status": str(item["status"]),
+                        "reason_code": (
+                            None if item["reason_code"] is None else str(item["reason_code"])
+                        ),
+                        "instrument_id": (
+                            None if item["instrument_id"] is None else str(item["instrument_id"])
+                        ),
+                        "expiry": None if item["expiry"] is None else str(item["expiry"]),
+                        "strike": None if item["strike"] is None else float(item["strike"]),
+                        "option_right": (
+                            None if item["option_right"] is None else str(item["option_right"])
+                        ),
+                        "multiplier": (
+                            None if item["multiplier"] is None else str(item["multiplier"])
+                        ),
+                        "candidates_inspected": int(item["candidates_inspected"]),
+                        "completed_at_us": int(item["completed_at_us"]),
+                    }
+                )
+                for item in receipt_rows
+            )
+            dynamic_requirements = tuple(
+                MarketDataRequirement(
+                    feed_kind=str(item["feed_kind"]),
+                    event_kind=None,
+                    instrument_id=str(item["instrument_id"]),
+                    cadence=str(item["cadence"]),
+                    gaps_block=(
+                        bool(item["required"]) and str(item["lifecycle"]) in {"resolved", "active"}
+                    ),
+                    staleness_block=(
+                        bool(item["required"]) and str(item["lifecycle"]) in {"resolved", "active"}
+                    ),
+                )
+                for item in receipt_rows
+                if str(item["status"]) == "resolved" and item["instrument_id"] is not None
+            )
+            combined_requirements = _merge_batch_requirements(
+                (*requirements, *dynamic_requirements)
+            )
+            batch_requirements = tuple(
+                {
+                    "feed_kind": item.feed_kind,
+                    "event_kind": item.event_kind,
+                    "instrument_id": item.instrument_id,
+                    "cadence": item.cadence,
+                    "gaps_block": item.gaps_block,
+                    "staleness_block": item.staleness_block,
+                }
+                for item in combined_requirements
+            )
+            batch_requirements_json = _json(cast(JsonValue, batch_requirements))
             # Imported at the use site to avoid the ingestion package's public recorder
             # exports creating a runner/recorder import cycle.
             from stocker_runtime.ingestion.bar_projection import (
@@ -597,7 +712,7 @@ class IdeaRunner:
                 requirements=requirements,
                 after_source_sequence=int(row["activated_after_source_sequence"]),
             )
-            for requirement in requirements:
+            for requirement in combined_requirements:
                 gap = connection.execute(
                     "SELECT 1 FROM gaps gap JOIN subscriptions subscription "
                     "ON subscription.subscription_id=gap.subscription_id "
@@ -638,7 +753,7 @@ class IdeaRunner:
                 "ORDER BY coalesce(event.source_sequence, event.derived_after_source_sequence), "
                 "event.event_id LIMIT 256",
                 (
-                    row["requirements_json"],
+                    batch_requirements_json,
                     row["run_id"],
                     start_sequence,
                     row["last_market_event_id"],
@@ -684,6 +799,7 @@ class IdeaRunner:
                     max(item.event_at_us, item.received_at_us) for item in events
                 ),
                 prior_state_input_event_ids=prior_state_input_event_ids,
+                discovery_receipts=discovery_receipts,
             )
             return (
                 activation,
@@ -704,6 +820,8 @@ class IdeaRunner:
             raise IdeaRunnerError("plugin state exceeds manifest bound")
         if len(evaluation.outputs) > min(plugin.manifest.maximum_outputs_per_batch, 256):
             raise IdeaRunnerError("plugin outputs exceed manifest bound")
+        if len(evaluation.interests) > plugin.manifest.maximum_interests_per_batch:
+            raise IdeaRunnerError("plugin interests exceed manifest bound")
         available = (
             *batch.prior_state_input_event_ids,
             *(event.event_id for event in batch.events),
@@ -712,7 +830,11 @@ class IdeaRunner:
         available_set = set(available)
         if len(evaluation.output_input_event_ids) != len(evaluation.outputs):
             raise IdeaRunnerError("plugin must declare one causal lineage per output")
-        declared = (*evaluation.output_input_event_ids, evaluation.retained_input_event_ids)
+        declared = (
+            *evaluation.output_input_event_ids,
+            evaluation.retained_input_event_ids,
+            *(interest.input_event_ids for interest in evaluation.interests),
+        )
         for lineage in declared:
             if not set(lineage).issubset(available_set) or tuple(
                 event_id for event_id in available if event_id in set(lineage)
@@ -720,6 +842,14 @@ class IdeaRunner:
                 raise IdeaRunnerError("plugin declared invalid or unordered causal lineage")
         event_times: dict[str, tuple[int, int]] = {
             event.event_id: (event.event_at_us, event.received_at_us) for event in batch.events
+        }
+        allowed_instrument_ids = {
+            *activation.universe,
+            *(
+                receipt.instrument_id
+                for receipt in batch.discovery_receipts
+                if receipt.status == "resolved" and receipt.instrument_id is not None
+            ),
         }
         missing_prior = tuple(
             event_id
@@ -746,12 +876,23 @@ class IdeaRunner:
             if any(event_id not in event_times for event_id in missing_prior):
                 raise IdeaRunnerError("retained causal evidence is missing")
         allowed = {item.value for item in plugin.manifest.output_kinds}
+        for interest in evaluation.interests:
+            if interest.underlying_instrument_id not in activation.universe:
+                raise IdeaRunnerError("market-data interest underlying is outside the universe")
+            if (
+                any(
+                    event_times[event_id][0] > interest.as_of_at_us
+                    for event_id in interest.input_event_ids
+                )
+                or interest.as_of_at_us > batch.causal_through_at_us
+            ):
+                raise IdeaRunnerError("market-data interest has noncausal input lineage")
         for output, lineage in zip(
             evaluation.outputs, evaluation.output_input_event_ids, strict=True
         ):
             if output.kind not in allowed:
                 raise IdeaRunnerError("plugin emitted a forbidden output kind")
-            if output.subject_instrument_id not in activation.universe:
+            if output.subject_instrument_id not in allowed_instrument_ids:
                 raise IdeaRunnerError("plugin output subject is outside the activation universe")
             if not (
                 min(event_times[event_id][0] for event_id in lineage)
@@ -767,7 +908,7 @@ class IdeaRunner:
                 ensure_authority_free_json(output.payload)
             if isinstance(output, ProposedTrade):
                 for leg in output.legs:
-                    if leg.instrument_id not in activation.universe:
+                    if leg.instrument_id not in allowed_instrument_ids:
                         raise IdeaRunnerError("proposed trade leg is outside activation universe")
 
     def _commit_evaluation(
@@ -791,6 +932,8 @@ class IdeaRunner:
             current_id = None if current is None or current[0] is None else str(current[0])
             if current_id != starting_checkpoint:
                 raise IdeaRunnerError("checkpoint changed during plugin evaluation")
+            for interest in evaluation.interests:
+                self._insert_interest(connection, activation, interest, now_us)
             for ordinal, output in enumerate(evaluation.outputs):
                 output_event_ids = evaluation.output_input_event_ids[ordinal]
                 self._insert_output(
@@ -839,6 +982,94 @@ class IdeaRunner:
                 (now_us, activation.instance_id),
             )
             connection.commit()
+
+    @staticmethod
+    def _insert_interest(
+        connection: sqlite3.Connection,
+        activation: IdeaActivation,
+        interest: MarketDataInterest,
+        now_us: int,
+    ) -> None:
+        content_hash = hashlib.sha256(interest.to_canonical_json()).hexdigest()
+        interest_id = _hash(
+            cast(
+                JsonValue,
+                {
+                    "instance_id": activation.instance_id,
+                    "interest": interest.model_dump(mode="json"),
+                },
+            )
+        )
+        inputs_json = _json(cast(JsonValue, interest.input_event_ids))
+        existing = connection.execute(
+            "SELECT content_hash FROM market_data_interests WHERE interest_id=?",
+            (interest_id,),
+        ).fetchone()
+        if existing is not None:
+            if str(existing["content_hash"]) != content_hash:
+                raise IdeaRunnerError("deterministic market-data interest collision")
+            return
+        instance_count = int(
+            connection.execute(
+                "SELECT count(*) FROM market_data_interests WHERE instance_id=? "
+                "AND lifecycle IN ('pending','resolved','active')",
+                (activation.instance_id,),
+            ).fetchone()[0]
+        )
+        run_count = int(
+            connection.execute(
+                "SELECT count(*) FROM market_data_interests WHERE run_id=? "
+                "AND lifecycle IN ('pending','resolved','active')",
+                (activation.run_id,),
+            ).fetchone()[0]
+        )
+        if (
+            instance_count >= MAX_NONTERMINAL_INTERESTS_PER_INSTANCE
+            or run_count >= MAX_NONTERMINAL_INTERESTS_PER_RUN
+        ):
+            raise IdeaRunnerError("nonterminal interest cap is reached")
+        cursor = connection.execute(
+            "INSERT INTO market_data_interests(interest_id, run_id, instance_id, interest_key, "
+            "underlying_instrument_id, asset_kind, minimum_days_to_expiry, "
+            "maximum_days_to_expiry, option_right, strike_offset, reference_price, feed_kind, "
+            "cadence, as_of_at_us, expires_at_us, required, priority, maximum_contracts, "
+            "input_event_ids_json, content_hash, lifecycle, next_attempt_at_us, "
+            "created_at_us, updated_at_us) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "'pending', ?, ?, ?) ON CONFLICT(interest_id) DO NOTHING",
+            (
+                interest_id,
+                activation.run_id,
+                activation.instance_id,
+                interest.interest_key,
+                interest.underlying_instrument_id,
+                interest.asset_kind,
+                interest.minimum_days_to_expiry,
+                interest.maximum_days_to_expiry,
+                interest.option_right,
+                interest.strike_offset,
+                interest.reference_price,
+                interest.feed_kind,
+                interest.cadence,
+                interest.as_of_at_us,
+                interest.expires_at_us,
+                int(interest.required),
+                interest.priority,
+                interest.maximum_contracts,
+                inputs_json,
+                content_hash,
+                min(now_us, interest.expires_at_us),
+                now_us,
+                now_us,
+            ),
+        )
+        if cursor.rowcount == 0:
+            existing = connection.execute(
+                "SELECT content_hash FROM market_data_interests WHERE interest_id=?",
+                (interest_id,),
+            ).fetchone()
+            if existing is None or str(existing[0]) != content_hash:
+                raise IdeaRunnerError("deterministic market-data interest collision")
 
     @staticmethod
     def _insert_output(

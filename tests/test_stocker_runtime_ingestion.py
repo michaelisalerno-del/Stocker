@@ -10,6 +10,7 @@ import types
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -34,6 +35,7 @@ from stocker_runtime.ingestion import (
     SubscriptionSpec,
     WriterAuthority,
 )
+from stocker_runtime.ingestion.dynamic_market_data import OptionDiscoveryBackend
 from stocker_runtime.storage import (
     RetentionResult,
     StorageCapState,
@@ -1324,6 +1326,175 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
     ]
     assert len(disconnects) == 1
     assert client.requests == [("market", 3), ("market", 4), ("bars", 5)]  # type: ignore[attr-defined]
+
+
+def test_official_bridge_discovers_one_exact_option_before_dynamic_subscription(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stocker_runtime.ingestion import IBKRSubscription
+    from stocker_runtime.ingestion.official_bridge import create_official_bridge
+
+    clients: list[object] = []
+
+    class EWrapper:
+        pass
+
+    class Contract:
+        pass
+
+    class EClient:
+        def __init__(self, wrapper: object) -> None:
+            self.wrapper: Any = wrapper
+            self.metadata_requests: list[tuple[str, int]] = []
+            self.market_requests: list[tuple[int, bool]] = []
+            self.cancelled: list[int] = []
+            clients.append(self)
+
+        def reqSecDefOptParams(  # noqa: N802
+            self, request_id: int, symbol: str, *_args: object
+        ) -> None:
+            self.metadata_requests.append(("parameters", request_id))
+            self.wrapper.securityDefinitionOptionParameter(
+                request_id,
+                "SMART",
+                265598,
+                symbol,
+                "100",
+                {"20260811"},
+                {99.0, 100.0, 101.0},
+            )
+            self.wrapper.securityDefinitionOptionParameterEnd(request_id)
+
+        def reqContractDetails(self, request_id: int, contract: Any) -> None:  # noqa: N802
+            self.metadata_requests.append(("contract", request_id))
+            contract.conId = 9001
+            self.wrapper.contractDetails(request_id, types.SimpleNamespace(contract=contract))
+            self.wrapper.contractDetailsEnd(request_id)
+
+        def reqMktData(  # noqa: N802
+            self,
+            request_id: int,
+            _contract: object,
+            _generic_ticks: str,
+            snapshot: bool,
+            *_args: object,
+        ) -> None:
+            self.market_requests.append((request_id, snapshot))
+
+        def cancelMktData(self, request_id: int) -> None:  # noqa: N802
+            self.cancelled.append(request_id)
+
+    package = types.ModuleType("ibapi")
+    client_module = types.ModuleType("ibapi.client")
+    contract_module = types.ModuleType("ibapi.contract")
+    wrapper_module = types.ModuleType("ibapi.wrapper")
+    client_module.EClient = EClient  # type: ignore[attr-defined]
+    contract_module.Contract = Contract  # type: ignore[attr-defined]
+    wrapper_module.EWrapper = EWrapper  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "ibapi", package)
+    monkeypatch.setitem(sys.modules, "ibapi.client", client_module)
+    monkeypatch.setitem(sys.modules, "ibapi.contract", contract_module)
+    monkeypatch.setitem(sys.modules, "ibapi.wrapper", wrapper_module)
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.official_bridge.require_official_ibkr_api",
+        lambda: package,
+    )
+    bridge = create_official_bridge(
+        host="127.0.0.1",
+        port=4001,
+        client_id=71,
+        read_only=True,
+        external_read_only_verified=True,
+    )
+    option_bridge = cast(OptionDiscoveryBackend, bridge)
+    client = clients[0]
+
+    parameters = option_bridge.option_parameters(underlying_con_id=265598, symbol="AAPL")
+    contracts = option_bridge.option_contracts(
+        symbol="AAPL",
+        expiry="20260811",
+        strike=100.0,
+        right="C",
+        multiplier="100",
+        trading_class="AAPL",
+    )
+
+    assert parameters[0].expirations == ("20260811",)
+    assert contracts[0].con_id == 9001
+    assert client.market_requests == []  # type: ignore[attr-defined]
+    subscription = IBKRSubscription(
+        2_000_001, 9001, "AAPL", "OPT", "SMART", "USD", "quotes", snapshot=True
+    )
+    statuses: list[MarketDataStatus] = []
+    bridge.set_status_callback(statuses.append)
+    bridge.configure_subscriptions((subscription,))
+    fence = CallbackFence("run", 1, 1, subscription.request_id, "dynamic")
+    bridge.subscribe(fence)
+    client.wrapper.tickSnapshotEnd(subscription.request_id)  # type: ignore[attr-defined]
+    bridge.cancel(subscription.request_id)
+    assert client.market_requests == [(2_000_001, True)]  # type: ignore[attr-defined]
+    assert client.cancelled == [2_000_001]  # type: ignore[attr-defined]
+    assert [status.kind for status in statuses] == ["snapshot_end"]
+    assert client.metadata_requests == [  # type: ignore[attr-defined]
+        ("parameters", 1_500_000_000),
+        ("contract", 1_500_000_001),
+    ]
+
+
+def test_official_bridge_option_metadata_timeout_is_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stocker_runtime.ingestion.official_bridge import (
+        OfficialBridgeUnavailable,
+        create_official_bridge,
+    )
+
+    class EWrapper:
+        pass
+
+    class Contract:
+        pass
+
+    class EClient:
+        def __init__(self, wrapper: object) -> None:
+            self.wrapper = wrapper
+
+        def reqSecDefOptParams(self, *_args: object) -> None:  # noqa: N802
+            return None
+
+    package = types.ModuleType("ibapi")
+    client_module = types.ModuleType("ibapi.client")
+    contract_module = types.ModuleType("ibapi.contract")
+    wrapper_module = types.ModuleType("ibapi.wrapper")
+    client_module.EClient = EClient  # type: ignore[attr-defined]
+    contract_module.Contract = Contract  # type: ignore[attr-defined]
+    wrapper_module.EWrapper = EWrapper  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "ibapi", package)
+    monkeypatch.setitem(sys.modules, "ibapi.client", client_module)
+    monkeypatch.setitem(sys.modules, "ibapi.contract", contract_module)
+    monkeypatch.setitem(sys.modules, "ibapi.wrapper", wrapper_module)
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.official_bridge.require_official_ibkr_api",
+        lambda: package,
+    )
+
+    def bounded_wait(_self: threading.Event, timeout: float | None = None) -> bool:
+        assert timeout == 5.0
+        return False
+
+    monkeypatch.setattr(threading.Event, "wait", bounded_wait)
+
+    bridge = create_official_bridge(
+        host="127.0.0.1",
+        port=4001,
+        client_id=71,
+        read_only=True,
+        external_read_only_verified=True,
+    )
+    option_bridge = cast(OptionDiscoveryBackend, bridge)
+
+    with pytest.raises(OfficialBridgeUnavailable, match="metadata request timed out"):
+        option_bridge.option_parameters(underlying_con_id=265598, symbol="AAPL")
 
 
 def test_stale_recorder_object_cannot_mutate_or_touch_adapter_after_takeover(

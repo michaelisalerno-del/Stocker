@@ -22,6 +22,8 @@ from stocker_runtime.domain import (
 MAX_PLUGIN_STATE_BYTES = 64 * 1024
 MAX_OUTPUTS_PER_BATCH = 256
 MAX_EVENTS_PER_BATCH = 256
+MAX_INTERESTS_PER_BATCH = 64
+MAX_INTEREST_LIFETIME_US = 7 * 86_400_000_000
 
 
 class IdeaManifest(DomainModel):
@@ -38,6 +40,7 @@ class IdeaManifest(DomainModel):
     parameter_schema: Mapping[str, JsonValue]
     maximum_state_bytes: int = Field(ge=1, le=MAX_PLUGIN_STATE_BYTES)
     maximum_outputs_per_batch: int = Field(ge=1, le=MAX_OUTPUTS_PER_BATCH)
+    maximum_interests_per_batch: int = Field(ge=0, le=MAX_INTERESTS_PER_BATCH)
 
     @model_validator(mode="after")
     def declarations_are_unique(self) -> Self:
@@ -79,6 +82,76 @@ class MarketDataRequirement(DomainModel):
     staleness_block: bool
 
 
+class MarketDataInterest(DomainModel):
+    """One bounded, causal request for core-owned option discovery and recording."""
+
+    interest_key: str = Field(min_length=1, max_length=128)
+    underlying_instrument_id: str = Field(min_length=1, max_length=128)
+    asset_kind: Literal["option"] = "option"
+    minimum_days_to_expiry: int = Field(ge=0, le=365)
+    maximum_days_to_expiry: int = Field(ge=0, le=365)
+    option_right: Literal["call", "put"]
+    strike_offset: int = Field(ge=-32, le=32)
+    reference_price: float = Field(gt=0)
+    feed_kind: Literal["quotes"] = "quotes"
+    cadence: Literal["snapshot", "stream"]
+    as_of_at_us: int = Field(ge=0)
+    expires_at_us: int = Field(ge=0)
+    required: bool
+    priority: int = Field(ge=0, le=1_000)
+    maximum_contracts: Literal[1] = 1
+    input_event_ids: tuple[str, ...] = Field(min_length=1, max_length=MAX_EVENTS_PER_BATCH)
+
+    @model_validator(mode="after")
+    def bounded_causal_window(self) -> Self:
+        if self.minimum_days_to_expiry > self.maximum_days_to_expiry:
+            raise ValueError("minimum expiry must not exceed maximum expiry")
+        if self.expires_at_us <= self.as_of_at_us:
+            raise ValueError("interest expiry must follow its causal as-of time")
+        if self.expires_at_us - self.as_of_at_us > MAX_INTEREST_LIFETIME_US:
+            raise ValueError("interest lifetime must not exceed seven days")
+        if len(set(self.input_event_ids)) != len(self.input_event_ids):
+            raise ValueError("interest input event ids must be unique")
+        return self
+
+
+class DiscoveryReceipt(DomainModel):
+    """Authority-free result of one bounded core-owned instrument discovery."""
+
+    receipt_id: str = Field(min_length=1)
+    interest_id: str = Field(min_length=1)
+    interest_key: str = Field(min_length=1, max_length=128)
+    instance_id: str = Field(min_length=1)
+    status: Literal["resolved", "denied"]
+    reason_code: str | None = Field(default=None, min_length=1, max_length=128)
+    instrument_id: str | None = Field(default=None, min_length=1)
+    expiry: str | None = Field(default=None, pattern=r"^[0-9]{8}$")
+    strike: float | None = Field(default=None, gt=0)
+    option_right: Literal["call", "put"] | None = None
+    multiplier: str | None = Field(default=None, min_length=1, max_length=16)
+    candidates_inspected: int = Field(ge=0, le=4_096)
+    completed_at_us: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def resolved_fields_are_complete(self) -> Self:
+        resolved = (
+            self.instrument_id,
+            self.expiry,
+            self.strike,
+            self.option_right,
+            self.multiplier,
+        )
+        if self.status == "resolved" and (
+            self.reason_code is not None or any(value is None for value in resolved)
+        ):
+            raise ValueError("resolved discovery receipt requires complete identity")
+        if self.status == "denied" and (
+            self.reason_code is None or any(value is not None for value in resolved)
+        ):
+            raise ValueError("denied discovery receipt requires only a reason")
+        return self
+
+
 class IdeaBatch(DomainModel):
     """Immutable causal input of at most 256 market events."""
 
@@ -89,6 +162,9 @@ class IdeaBatch(DomainModel):
     causal_through_at_us: int = Field(ge=0)
     prior_state_input_event_ids: tuple[str, ...] = Field(
         default=(), max_length=MAX_EVENTS_PER_BATCH
+    )
+    discovery_receipts: tuple[DiscoveryReceipt, ...] = Field(
+        default=(), max_length=MAX_INTERESTS_PER_BATCH
     )
 
     @model_validator(mode="after")
@@ -110,6 +186,7 @@ class IdeaEvaluation(DomainModel):
     output_input_event_ids: tuple[tuple[str, ...], ...] = Field(
         default=(), max_length=MAX_OUTPUTS_PER_BATCH
     )
+    interests: tuple[MarketDataInterest, ...] = Field(max_length=MAX_INTERESTS_PER_BATCH)
 
     @model_validator(mode="after")
     def state_fits_bound(self) -> Self:
@@ -122,6 +199,8 @@ class IdeaEvaluation(DomainModel):
             for lineage in self.output_input_event_ids
         ):
             raise ValueError("every output lineage must contain 1..256 unique event ids")
+        if len({interest.interest_key for interest in self.interests}) != len(self.interests):
+            raise ValueError("interest keys must be unique within one evaluation")
         return self
 
     def state_json(self) -> bytes:

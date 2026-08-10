@@ -1,5 +1,19 @@
 """Read-only, prospective market-data ingestion for Stocker V2."""
 
+from stocker_runtime.ingestion.dynamic_market_data import (
+    ContractCandidate,
+    InstrumentResolver,
+    InterestResolutionRequest,
+    MarketDataCapacity,
+    MarketDataDemand,
+    MarketDataPlan,
+    OptionParameterSet,
+    PlannedSubscription,
+    SubscriptionApplyPlan,
+    SubscriptionController,
+    SubscriptionLifecycleResult,
+    plan_market_data,
+)
 from stocker_runtime.ingestion.ibkr_market_data import (
     IBKRMarketData,
     IBKRSubscription,
@@ -50,10 +64,22 @@ __all__ = [
     "WriterAuthority",
     "RecorderConfig",
     "DuplicateWriterError",
+    "ContractCandidate",
     "InstrumentSpec",
+    "InstrumentResolver",
+    "InterestResolutionRequest",
+    "MarketDataCapacity",
+    "MarketDataDemand",
+    "MarketDataPlan",
+    "OptionParameterSet",
+    "PlannedSubscription",
     "Recorder",
     "RecorderFatalError",
     "RecorderState",
     "SubscriptionSpec",
+    "SubscriptionApplyPlan",
+    "SubscriptionController",
+    "SubscriptionLifecycleResult",
     "load_recorder_config",
+    "plan_market_data",
 ]

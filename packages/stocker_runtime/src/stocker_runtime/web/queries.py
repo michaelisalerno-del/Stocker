@@ -627,6 +627,23 @@ class ReadModel:
             ).fetchone()
             if instance is None:
                 return None
+            interests = connection.execute(
+                "SELECT interest_id, interest_key, underlying_instrument_id, asset_kind, "
+                "minimum_days_to_expiry, maximum_days_to_expiry, option_right, strike_offset, "
+                "reference_price, feed_kind, cadence, as_of_at_us, expires_at_us, required, "
+                "priority, maximum_contracts, input_event_ids_json, content_hash, lifecycle, "
+                "reason_code, attempts, next_attempt_at_us, created_at_us, updated_at_us "
+                "FROM market_data_interests WHERE instance_id=? "
+                "ORDER BY updated_at_us DESC, interest_id LIMIT 64",
+                (instance_id,),
+            ).fetchall()
+            receipts = connection.execute(
+                "SELECT receipt_id, interest_id, status, reason_code, instrument_id, expiry, "
+                "strike, option_right, multiplier, candidates_inspected, completed_at_us "
+                "FROM instrument_discovery_receipts WHERE instance_id=? "
+                "ORDER BY completed_at_us DESC, receipt_id LIMIT 64",
+                (instance_id,),
+            ).fetchall()
             if position is not None:
                 assert position.window is not None
                 window = position.window
@@ -701,6 +718,10 @@ class ReadModel:
             )
         return {
             "instance": self._idea_detail_projection(instance),
+            "market_data": {
+                "interests": [self._interest_projection(row) for row in interests],
+                "receipts": [dict(row) for row in receipts],
+            },
             "outputs": [
                 self._output_projection(row, legs_by_output[str(row["output_id"])]) for row in page
             ],
@@ -1120,6 +1141,16 @@ class ReadModel:
             "parameters": json.loads(row["parameters_json"]),
             "universe": json.loads(row["universe_json"]),
             "requirements": json.loads(row["requirements_json"]),
+        }
+
+    @staticmethod
+    def _interest_projection(row: sqlite3.Row) -> dict[str, Any]:
+        input_event_ids = json.loads(row["input_event_ids_json"])
+        return {
+            **{key: value for key, value in dict(row).items() if key != "input_event_ids_json"},
+            "required": bool(row["required"]),
+            "input_event_count": len(input_event_ids),
+            "input_event_id_sample": input_event_ids[:8],
         }
 
     @staticmethod

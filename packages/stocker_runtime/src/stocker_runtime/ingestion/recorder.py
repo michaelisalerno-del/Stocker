@@ -253,6 +253,7 @@ class Recorder:
         self._idea_runner: IdeaRunner | None = None
         self._shadow_engine: ShadowEngine | None = None
         self._snapshot_handshake_lock = threading.Lock()
+        self._subscription_lifecycle_lock = threading.RLock()
         self._starting_dynamic_request_ids: set[int] = set()
         self._pending_dynamic_statuses: dict[int, list[MarketDataStatus]] = {}
 
@@ -1563,6 +1564,10 @@ class Recorder:
         )
 
     def _reconcile_dynamic_subscriptions(self, *, now_us: int) -> None:
+        with self._subscription_lifecycle_lock:
+            self._reconcile_dynamic_subscriptions_locked(now_us=now_us)
+
+    def _reconcile_dynamic_subscriptions_locked(self, *, now_us: int) -> None:
         plan, desired = self._dynamic_plan(now_us=now_us)
         current = self._dynamic_subscriptions()
         if not current and not desired:
@@ -2636,63 +2641,70 @@ class Recorder:
                 now_us=status.received_at_us,
             )
 
+    def _retire_dynamic_snapshot_state(
+        self,
+        *,
+        request_id: int,
+        fence: CallbackFence,
+        state: RecorderState,
+    ) -> None:
+        self._subscriptions = tuple(
+            item for item in self._subscriptions if item.request_id != request_id
+        )
+        self.state = RecorderState(
+            state.run_id,
+            state.recorder_generation,
+            state.connection_generation,
+            tuple(item for item in state.fences if item != fence),
+        )
+
     def _complete_dynamic_snapshot(self, status: MarketDataStatus) -> None:
         if status.request_id is None:
             return
-        self._check_owned()
-        state = self._authority_state()
-        fence = next((item for item in state.fences if item.request_id == status.request_id), None)
-        spec = next(
-            (item for item in self._subscriptions if item.request_id == status.request_id), None
-        )
-        if (
-            fence is None
-            or spec is None
-            or spec.request_id in self._base_request_ids()
-            or not spec.snapshot
-        ):
-            return
-        with connect_v2(self.config.database) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            self._verify_owned(connection)
-            connection.execute(
-                "UPDATE subscriptions SET lifecycle='closed', closed_at_us=? "
-                "WHERE subscription_id=? AND lifecycle!='closed'",
-                (status.received_at_us, fence.subscription_id),
+        with self._subscription_lifecycle_lock:
+            self._check_owned()
+            state = self._authority_state()
+            fence = next(
+                (item for item in state.fences if item.request_id == status.request_id), None
             )
-            connection.execute(
-                "UPDATE market_data_interests SET "
-                "lifecycle=CASE WHEN expires_at_us<=? THEN 'expired' ELSE 'fulfilled' END, "
-                "reason_code=CASE WHEN expires_at_us<=? THEN 'INTEREST_EXPIRED' ELSE NULL END, "
-                "updated_at_us=? WHERE bound_subscription_id=? "
-                "AND lifecycle IN ('resolved','active')",
-                (
-                    status.received_at_us,
-                    status.received_at_us,
-                    status.received_at_us,
-                    fence.subscription_id,
-                ),
+            spec = next(
+                (item for item in self._subscriptions if item.request_id == status.request_id),
+                None,
             )
-            connection.commit()
-        current_state = self._authority_state()
-        matching_fence = next(
-            (
-                item
-                for item in current_state.fences
-                if item.request_id == status.request_id
-                and item.subscription_id == fence.subscription_id
-            ),
-            None,
-        )
-        if matching_fence is not None:
-            self._subscriptions = tuple(
-                item for item in self._subscriptions if item.request_id != status.request_id
-            )
-            self.state = RecorderState(
-                current_state.run_id,
-                current_state.recorder_generation,
-                current_state.connection_generation,
-                tuple(item for item in current_state.fences if item != matching_fence),
+            if (
+                fence is None
+                or spec is None
+                or spec.request_id in self._base_request_ids()
+                or not spec.snapshot
+            ):
+                return
+            with connect_v2(self.config.database) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._verify_owned(connection)
+                connection.execute(
+                    "UPDATE subscriptions SET lifecycle='closed', closed_at_us=? "
+                    "WHERE subscription_id=? AND lifecycle!='closed'",
+                    (status.received_at_us, fence.subscription_id),
+                )
+                connection.execute(
+                    "UPDATE market_data_interests SET "
+                    "lifecycle=CASE WHEN expires_at_us<=? THEN 'expired' ELSE 'fulfilled' END, "
+                    "reason_code=CASE WHEN expires_at_us<=? "
+                    "THEN 'INTEREST_EXPIRED' ELSE NULL END, "
+                    "updated_at_us=? WHERE bound_subscription_id=? "
+                    "AND lifecycle IN ('resolved','active')",
+                    (
+                        status.received_at_us,
+                        status.received_at_us,
+                        status.received_at_us,
+                        fence.subscription_id,
+                    ),
+                )
+                connection.commit()
+            self._retire_dynamic_snapshot_state(
+                request_id=status.request_id,
+                fence=fence,
+                state=state,
             )
         updated_plan, _dynamic_specs = self._dynamic_plan(now_us=status.received_at_us)
         self._sync_interest_lifecycles(updated_plan, now_us=status.received_at_us)
@@ -2875,61 +2887,110 @@ class Recorder:
         """Fence old requests and reconnect with a new durable socket generation."""
 
         self._check_owned()
-        old = self._authority_state()
-        connection = connect_v2(self.config.database)
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            self._verify_owned(connection)
-            paused_request_ids = {
-                int(row[0])
-                for row in connection.execute(
-                    "SELECT request_id FROM subscriptions WHERE run_id=? "
-                    "AND recorder_generation=? AND lifecycle='paused'",
-                    (self.config.run_id, old.recorder_generation),
+        with self._subscription_lifecycle_lock:
+            old = self._authority_state()
+            dynamic = self._dynamic_subscriptions()
+            fresh_request_ids = iter(
+                self._next_dynamic_request_ids(
+                    len(dynamic),
+                    reserved=tuple(spec.request_id for spec in self._subscriptions),
                 )
-            }
-            connection.execute(
-                "UPDATE subscriptions SET lifecycle='closed', closed_at_us=? WHERE run_id=? "
-                "AND connection_generation=? AND lifecycle!='closed'",
-                (now_us, self.config.run_id, old.connection_generation),
             )
-            generation = old.connection_generation + 1
-            fences = self._install_subscriptions(
-                connection,
+            replacement_by_request = {
+                spec.request_id: self._dynamic_spec_with_request_id(spec, next(fresh_request_ids))
+                for spec in dynamic
+            }
+            reconnect_subscriptions = tuple(
+                replacement_by_request.get(spec.request_id, spec) for spec in self._subscriptions
+            )
+            prior_request_by_request = {
+                replacement.request_id: request_id
+                for request_id, replacement in replacement_by_request.items()
+            }
+            old_fence_by_request = {
+                fence.request_id: fence for fence in old.fences if fence.request_id is not None
+            }
+            connection = connect_v2(self.config.database)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                self._verify_owned(connection)
+                paused_request_ids = {
+                    int(row[0])
+                    for row in connection.execute(
+                        "SELECT request_id FROM subscriptions WHERE run_id=? "
+                        "AND recorder_generation=? AND lifecycle='paused'",
+                        (self.config.run_id, old.recorder_generation),
+                    )
+                }
+                connection.execute(
+                    "UPDATE subscriptions SET lifecycle='closed', closed_at_us=? "
+                    "WHERE run_id=? AND connection_generation=? AND lifecycle!='closed'",
+                    (now_us, self.config.run_id, old.connection_generation),
+                )
+                generation = old.connection_generation + 1
+                fences = self._install_subscriptions(
+                    connection,
+                    old.recorder_generation,
+                    generation,
+                    reconnect_subscriptions,
+                    now_us,
+                )
+                connection.execute(
+                    "UPDATE runtime_state SET connection_generation=?, "
+                    "connection_state='disconnected', lifecycle=CASE WHEN "
+                    "lifecycle='degraded' AND reason='IBKR_DISCONNECT' "
+                    "THEN 'recovering' ELSE lifecycle END, reason=CASE WHEN "
+                    "lifecycle='degraded' AND reason='IBKR_DISCONNECT' "
+                    "THEN NULL ELSE reason END, process_heartbeat_at_us=? WHERE run_id=?",
+                    (generation, now_us, self.config.run_id),
+                )
+                for fence, spec in zip(fences, reconnect_subscriptions, strict=True):
+                    prior_request_id = prior_request_by_request.get(
+                        spec.request_id, spec.request_id
+                    )
+                    if prior_request_id in paused_request_ids:
+                        connection.execute(
+                            "UPDATE subscriptions SET lifecycle='paused' WHERE subscription_id=?",
+                            (fence.subscription_id,),
+                        )
+                    prior_fence = old_fence_by_request.get(prior_request_id)
+                    if prior_fence is not None and prior_fence.subscription_id is not None:
+                        connection.execute(
+                            "UPDATE market_data_interests SET bound_subscription_id=?, "
+                            "updated_at_us=? WHERE bound_subscription_id=? "
+                            "AND lifecycle IN ('resolved','active')",
+                            (
+                                fence.subscription_id,
+                                now_us,
+                                prior_fence.subscription_id,
+                            ),
+                        )
+                    self._open_gap(
+                        connection,
+                        cast(str, fence.subscription_id),
+                        now_us,
+                        "RECONNECT_UNCERTAINTY",
+                        spec.continuity_required,
+                    )
+                connection.commit()
+            except Exception:
+                if connection.in_transaction:
+                    connection.rollback()
+                raise
+            finally:
+                connection.close()
+            self._subscriptions = reconnect_subscriptions
+            self.state = RecorderState(
+                self.config.run_id,
                 old.recorder_generation,
                 generation,
-                self._subscriptions,
-                now_us,
+                fences,
             )
-            for fence, spec in zip(fences, self._subscriptions, strict=True):
-                if fence.request_id in paused_request_ids:
-                    connection.execute(
-                        "UPDATE subscriptions SET lifecycle='paused' WHERE subscription_id=?",
-                        (fence.subscription_id,),
-                    )
-                self._open_gap(
-                    connection,
-                    cast(str, fence.subscription_id),
-                    now_us,
-                    "RECONNECT_UNCERTAINTY",
-                    spec.continuity_required,
-                )
-            connection.execute(
-                "UPDATE runtime_state SET connection_generation=?, "
-                "connection_state='disconnected', lifecycle=CASE WHEN lifecycle='degraded' "
-                "AND reason='IBKR_DISCONNECT' THEN 'recovering' ELSE lifecycle END, "
-                "reason=CASE WHEN lifecycle='degraded' AND reason='IBKR_DISCONNECT' "
-                "THEN NULL ELSE reason END, process_heartbeat_at_us=? WHERE run_id=?",
-                (generation, now_us, self.config.run_id),
+            self._configure_adapter(
+                self._instruments,
+                reconnect_subscriptions,
+                required=bool(self.idea_requirements or dynamic),
             )
-            connection.commit()
-        except Exception:
-            if connection.in_transaction:
-                connection.rollback()
-            raise
-        finally:
-            connection.close()
-        self.state = RecorderState(self.config.run_id, old.recorder_generation, generation, fences)
         self._connect_subscriptions(now_us=now_us)
         return self.state
 

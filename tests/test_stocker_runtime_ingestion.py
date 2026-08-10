@@ -1272,6 +1272,7 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
             IBKRSubscription(3, 123, "AAPL", "STK", "SMART", "USD", "quotes"),
             IBKRSubscription(4, 123, "AAPL", "STK", "SMART", "USD", "trades"),
             IBKRSubscription(5, 123, "AAPL", "STK", "SMART", "USD", "bars"),
+            IBKRSubscription(6, 123, "AAPL", "STK", "SMART", "USD", "quotes", snapshot=True),
         ),
     )
     callbacks: list[tuple[CallbackFence, MarketDataCallback]] = []
@@ -1286,7 +1287,7 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
     bridge.set_status_callback(statuses.append)
     bridge.set_disconnect_callback(disconnects.append)
     bridge.connect()
-    for request_id in (3, 4, 5):
+    for request_id in (3, 4, 5, 6):
         bridge.subscribe(CallbackFence("run-1", 1, 1, request_id, f"sub-{request_id}"))
 
     client = clients[0]
@@ -1326,7 +1327,23 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
         ("farm_degraded", 2103, None),
     ]
     assert len(disconnects) == 1
-    assert client.requests == [("market", 3), ("market", 4), ("bars", 5)]  # type: ignore[attr-defined]
+    assert client.requests == [  # type: ignore[attr-defined]
+        ("market", 3),
+        ("market", 4),
+        ("bars", 5),
+        ("market", 6),
+    ]
+    bridge.disconnect()
+    wrapper.tickSnapshotEnd(6)
+    assert [(status.kind, status.code, status.request_id) for status in statuses] == [
+        ("pacing", 420, 3),
+        ("farm_degraded", 2103, None),
+    ]
+    private_bridge = cast(Any, bridge)
+    assert private_bridge._fences == {}
+    assert private_bridge._configured == {}
+    assert private_bridge._contracts == {}
+    assert client.disconnected is True  # type: ignore[attr-defined]
 
 
 def test_official_bridge_discovers_one_exact_option_before_dynamic_subscription(

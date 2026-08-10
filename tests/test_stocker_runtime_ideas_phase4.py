@@ -69,6 +69,7 @@ from stocker_runtime.ingestion import (
     OptionParameterSet,
     Recorder,
     RecorderConfig,
+    RecorderState,
     SubscriptionSpec,
 )
 from stocker_runtime.ingestion.official_bridge import create_official_bridge
@@ -3862,6 +3863,75 @@ def test_dynamic_snapshot_completion_after_expiry_records_expired_not_fulfilled(
     recorder.stop(now_us=event_at_us + 10_000_002)
 
 
+def test_unfinished_snapshot_reconnects_with_fresh_fence_and_exact_interest_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-snapshot-reconnect.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _DynamicRecorderAdapter()
+    recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
+    old_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+
+    recorder.disconnected(now_us=event_at_us + 3)
+    state = recorder.reconnect(now_us=event_at_us + 4)
+    new_fence = next(
+        fence for fence in state.fences if fence.request_id not in recorder._base_request_ids()
+    )
+    assert new_fence.request_id != old_fence.request_id
+    with connect_v2(database) as connection:
+        interest = connection.execute(
+            "SELECT lifecycle, bound_subscription_id FROM market_data_interests"
+        ).fetchone()
+    assert tuple(interest) == ("active", new_fence.subscription_id)
+
+    recorder.market_data_status(
+        MarketDataStatus(
+            kind="snapshot_end",
+            code=0,
+            request_id=old_fence.request_id,
+            message="late prior-generation completion",
+            received_at_us=event_at_us + 5,
+        )
+    )
+    with connect_v2(database) as connection:
+        interest = connection.execute(
+            "SELECT lifecycle, bound_subscription_id FROM market_data_interests"
+        ).fetchone()
+        current = connection.execute(
+            "SELECT lifecycle FROM subscriptions WHERE subscription_id=?",
+            (new_fence.subscription_id,),
+        ).fetchone()
+    assert tuple(interest) == ("active", new_fence.subscription_id)
+    assert current["lifecycle"] == "active"
+
+    recorder.market_data_status(
+        MarketDataStatus(
+            kind="snapshot_end",
+            code=0,
+            request_id=new_fence.request_id,
+            message="current-generation completion",
+            received_at_us=event_at_us + 6,
+        )
+    )
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute("SELECT lifecycle FROM market_data_interests").fetchone()[0]
+            == "fulfilled"
+        )
+    recorder.drain(now_us=event_at_us + 7)
+    dynamic_attempts = [
+        request_id for request_id in adapter.subscribe_attempts if request_id >= 2_000_000
+    ]
+    assert dynamic_attempts == [old_fence.request_id, new_fence.request_id]
+    recorder.stop(now_us=event_at_us + 8)
+
+
 def test_dynamic_snapshot_may_complete_inline_during_subscribe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3974,6 +4044,157 @@ def test_dynamic_snapshot_callback_thread_is_held_until_state_is_published(
             == "closed"
         )
     recorder.stop(now_us=event_at_us + 4)
+
+
+def test_completed_dynamic_snapshot_cannot_be_republished_by_inflight_reconciliation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-snapshot-reconcile-race.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _DynamicRecorderAdapter()
+    recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
+    dynamic_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+    original_configure = adapter.configure_subscriptions
+    reconciliation_started = threading.Event()
+    release_reconciliation = threading.Event()
+
+    def pause_reconciliation(subscriptions: tuple[IBKRSubscription, ...]) -> None:
+        reconciliation_started.set()
+        assert release_reconciliation.wait(timeout=5)
+        original_configure(subscriptions)
+
+    monkeypatch.setattr(adapter, "configure_subscriptions", pause_reconciliation)
+    failure: list[BaseException] = []
+
+    def reconcile() -> None:
+        try:
+            recorder.drain(now_us=event_at_us + 3)
+        except BaseException as error:  # pragma: no cover - asserted below
+            failure.append(error)
+
+    worker = threading.Thread(target=reconcile)
+    worker.start()
+    assert reconciliation_started.wait(timeout=5)
+    completion_failure: list[BaseException] = []
+    completion_started = threading.Event()
+
+    def complete() -> None:
+        try:
+            completion_started.set()
+            recorder.market_data_status(
+                MarketDataStatus(
+                    kind="snapshot_end",
+                    code=0,
+                    request_id=dynamic_fence.request_id,
+                    message="complete during reconciliation",
+                    received_at_us=event_at_us + 4,
+                )
+            )
+        except BaseException as error:  # pragma: no cover - asserted below
+            completion_failure.append(error)
+
+    completion = threading.Thread(target=complete)
+    completion.start()
+    try:
+        assert completion_started.wait(timeout=5)
+        assert completion.is_alive()
+    finally:
+        release_reconciliation.set()
+        worker.join(timeout=5)
+        completion.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert not completion.is_alive()
+    assert failure == []
+    assert completion_failure == []
+    assert recorder.state is not None
+    assert dynamic_fence.request_id not in {fence.request_id for fence in recorder.state.fences}
+    recorder.disconnected(now_us=event_at_us + 5)
+    reconnected = recorder.reconnect(now_us=event_at_us + 6)
+    assert dynamic_fence.request_id not in {fence.request_id for fence in reconnected.fences}
+    assert adapter.subscribe_attempts.count(cast(int, dynamic_fence.request_id)) == 1
+    recorder.stop(now_us=event_at_us + 7)
+
+
+def test_snapshot_retirement_serializes_concurrent_reconnect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-snapshot-reconnect-race.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _DynamicRecorderAdapter()
+    recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
+    dynamic_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+    original_retire = recorder._retire_dynamic_snapshot_state
+    retirement_started = threading.Event()
+    release_retirement = threading.Event()
+
+    def pause_retirement(*, request_id: int, fence: CallbackFence, state: RecorderState) -> None:
+        retirement_started.set()
+        assert release_retirement.wait(timeout=5)
+        original_retire(request_id=request_id, fence=fence, state=state)
+
+    monkeypatch.setattr(recorder, "_retire_dynamic_snapshot_state", pause_retirement)
+    completion_failure: list[BaseException] = []
+
+    def complete() -> None:
+        try:
+            recorder.market_data_status(
+                MarketDataStatus(
+                    kind="snapshot_end",
+                    code=0,
+                    request_id=dynamic_fence.request_id,
+                    message="complete before concurrent reconnect",
+                    received_at_us=event_at_us + 3,
+                )
+            )
+        except BaseException as error:  # pragma: no cover - asserted below
+            completion_failure.append(error)
+
+    completion = threading.Thread(target=complete)
+    completion.start()
+    assert retirement_started.wait(timeout=5)
+    reconnect_failure: list[BaseException] = []
+    reconnect_state: list[RecorderState] = []
+    reconnect_started = threading.Event()
+
+    def reconnect() -> None:
+        try:
+            recorder.disconnected(now_us=event_at_us + 4)
+            reconnect_started.set()
+            reconnect_state.append(recorder.reconnect(now_us=event_at_us + 5))
+        except BaseException as error:  # pragma: no cover - asserted below
+            reconnect_failure.append(error)
+
+    reconnecting = threading.Thread(target=reconnect)
+    reconnecting.start()
+    try:
+        assert reconnect_started.wait(timeout=5)
+        assert reconnecting.is_alive()
+    finally:
+        release_retirement.set()
+        completion.join(timeout=5)
+        reconnecting.join(timeout=5)
+
+    assert not completion.is_alive()
+    assert not reconnecting.is_alive()
+    assert completion_failure == []
+    assert reconnect_failure == []
+    assert len(reconnect_state) == 1
+    assert dynamic_fence.request_id not in {fence.request_id for fence in reconnect_state[0].fences}
+    assert adapter.subscribe_attempts.count(cast(int, dynamic_fence.request_id)) == 1
+    recorder.stop(now_us=event_at_us + 6)
 
 
 def test_synthetic_idea_config_adds_subscription_without_core_wiring(

@@ -258,7 +258,12 @@ class _PrivateOfficialBridge:
         self._thread.start()
 
     def disconnect(self) -> None:
-        self.__client.disconnect()
+        try:
+            self.__client.disconnect()
+        finally:
+            self._fences.clear()
+            self._configured.clear()
+            self._contracts.clear()
 
     def configure_subscriptions(self, subscriptions: tuple[IBKRSubscription, ...]) -> None:
         """Add core-owned exact identities without reusing a request id."""

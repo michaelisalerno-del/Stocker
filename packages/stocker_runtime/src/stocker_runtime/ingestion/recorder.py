@@ -8,8 +8,8 @@ import math
 import re
 import sqlite3
 import threading
-from collections.abc import Callable
-from contextlib import suppress
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic_ns
@@ -253,9 +253,18 @@ class Recorder:
         self._idea_runner: IdeaRunner | None = None
         self._shadow_engine: ShadowEngine | None = None
         self._snapshot_handshake_lock = threading.Lock()
+        self._adapter_transition_lock = threading.Lock()
         self._subscription_lifecycle_lock = threading.RLock()
         self._starting_dynamic_request_ids: set[int] = set()
         self._pending_dynamic_statuses: list[MarketDataStatus] = []
+
+    @contextmanager
+    def _adapter_reset_transition(self) -> Iterator[None]:
+        with self._adapter_transition_lock:
+            self._check_owned()
+            self.adapter.disconnect()
+            self._check_owned()
+            yield
 
     def _authority(self) -> WriterAuthority:
         state = self._authority_state()
@@ -1564,7 +1573,7 @@ class Recorder:
         )
 
     def _reconcile_dynamic_subscriptions(self, *, now_us: int) -> None:
-        with self._subscription_lifecycle_lock:
+        with self._adapter_transition_lock, self._subscription_lifecycle_lock:
             if not self._connection_is_connected():
                 return
             self._reconcile_dynamic_subscriptions_locked(now_us=now_us)
@@ -2896,9 +2905,7 @@ class Recorder:
         """Fence old requests and reconnect with a new durable socket generation."""
 
         self._check_owned()
-        self.adapter.disconnect()
-        self._check_owned()
-        with self._subscription_lifecycle_lock:
+        with self._adapter_reset_transition(), self._subscription_lifecycle_lock:
             old = self._authority_state()
             self._expire_interests(now_us=now_us)
             reconnect_plan, dynamic = self._dynamic_plan(now_us=now_us)

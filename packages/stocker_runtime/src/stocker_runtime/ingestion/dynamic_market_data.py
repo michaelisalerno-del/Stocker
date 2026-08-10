@@ -472,7 +472,6 @@ class SubscriptionController:
         self._backend = backend
 
     def apply(self, plan: SubscriptionApplyPlan) -> SubscriptionLifecycleResult:
-        self._backend.configure_subscriptions(plan.configured)
         stopped: list[int] = []
         for request_id in plan.stops:
             try:
@@ -484,6 +483,7 @@ class SubscriptionController:
                     (("cancel", request_id, type(error).__name__),),
                 )
             stopped.append(request_id)
+        self._backend.configure_subscriptions(plan.configured)
         started: list[int] = []
         failures: list[tuple[str, int, str]] = []
         for _configured, fence in plan.starts:

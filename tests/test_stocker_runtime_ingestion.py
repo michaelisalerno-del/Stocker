@@ -1346,6 +1346,98 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
     assert client.disconnected is True  # type: ignore[attr-defined]
 
 
+def test_official_bridge_drains_intentional_close_and_fences_old_socket_statuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stocker_runtime.ingestion.official_bridge import create_official_bridge
+
+    clients: list[object] = []
+    run_started = (threading.Event(), threading.Event())
+    release_run = (threading.Event(), threading.Event())
+    run_finished = (threading.Event(), threading.Event())
+
+    class EWrapper:
+        pass
+
+    class Contract:
+        pass
+
+    class EClient:
+        def __init__(self, wrapper: object) -> None:
+            self.wrapper: Any = wrapper
+            self.run_count = 0
+            self.active_run = -1
+            clients.append(self)
+
+        def connect(self, _host: str, _port: int, _client_id: int) -> bool:
+            return True
+
+        def run(self) -> None:
+            index = self.run_count
+            self.run_count += 1
+            self.active_run = index
+            run_started[index].set()
+            assert release_run[index].wait(timeout=5)
+            if index == 0:
+                self.wrapper.error(-1, 2103, "late status from intentionally closed socket")
+            self.wrapper.connectionClosed()
+            run_finished[index].set()
+
+        def disconnect(self) -> None:
+            if self.active_run >= 0:
+                release_run[self.active_run].set()
+
+    package = types.ModuleType("ibapi")
+    client_module = types.ModuleType("ibapi.client")
+    contract_module = types.ModuleType("ibapi.contract")
+    wrapper_module = types.ModuleType("ibapi.wrapper")
+    client_module.EClient = EClient  # type: ignore[attr-defined]
+    contract_module.Contract = Contract  # type: ignore[attr-defined]
+    wrapper_module.EWrapper = EWrapper  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "ibapi", package)
+    monkeypatch.setitem(sys.modules, "ibapi.client", client_module)
+    monkeypatch.setitem(sys.modules, "ibapi.contract", contract_module)
+    monkeypatch.setitem(sys.modules, "ibapi.wrapper", wrapper_module)
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.official_bridge.require_official_ibkr_api",
+        lambda: package,
+    )
+
+    bridge = create_official_bridge(
+        host="127.0.0.1",
+        port=4001,
+        client_id=71,
+        read_only=True,
+        external_read_only_verified=True,
+    )
+    statuses: list[MarketDataStatus] = []
+    disconnects: list[int] = []
+    natural_disconnect_seen = threading.Event()
+    bridge.set_status_callback(statuses.append)
+
+    def disconnected(at_us: int) -> None:
+        disconnects.append(at_us)
+        natural_disconnect_seen.set()
+
+    bridge.set_disconnect_callback(disconnected)
+    bridge.connect()
+    assert run_started[0].wait(timeout=5)
+
+    bridge.disconnect()
+
+    assert run_finished[0].is_set()
+    assert statuses == []
+    assert disconnects == []
+
+    bridge.connect()
+    assert run_started[1].wait(timeout=5)
+    release_run[1].set()
+    assert natural_disconnect_seen.wait(timeout=5)
+    assert run_finished[1].wait(timeout=5)
+    assert len(disconnects) == 1
+    bridge.disconnect()
+
+
 def test_official_bridge_discovers_one_exact_option_before_dynamic_subscription(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1367,6 +1459,15 @@ def test_official_bridge_discovers_one_exact_option_before_dynamic_subscription(
             self.market_requests: list[tuple[int, bool]] = []
             self.cancelled: list[int] = []
             clients.append(self)
+
+        def connect(self, _host: str, _port: int, _client_id: int) -> bool:
+            return True
+
+        def run(self) -> None:
+            return None
+
+        def disconnect(self) -> None:
+            return None
 
         def reqSecDefOptParams(  # noqa: N802
             self, request_id: int, symbol: str, *_args: object
@@ -1426,6 +1527,7 @@ def test_official_bridge_discovers_one_exact_option_before_dynamic_subscription(
     )
     option_bridge = cast(OptionDiscoveryBackend, bridge)
     client = clients[0]
+    bridge.connect()
 
     parameters = option_bridge.option_parameters(underlying_con_id=265598, symbol="AAPL")
     contracts = option_bridge.option_contracts(
@@ -1451,6 +1553,7 @@ def test_official_bridge_discovers_one_exact_option_before_dynamic_subscription(
     client.wrapper.tickSnapshotEnd(subscription.request_id)  # type: ignore[attr-defined]
     bridge.cancel(subscription.request_id)
     assert client.market_requests == [(2_000_001, True)]  # type: ignore[attr-defined]
+    bridge.disconnect()
     assert client.cancelled == []  # type: ignore[attr-defined]
     assert [status.kind for status in statuses] == ["snapshot_end"]
     private_bridge = cast(Any, bridge)

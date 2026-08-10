@@ -205,6 +205,8 @@ def create_official_bridge(
 class _PrivateOfficialBridge:
     """The sole Phase 3 holder of the official client instance."""
 
+    _THREAD_STOP_TIMEOUT_SECONDS = 5.0
+
     def __init__(
         self,
         *,
@@ -230,6 +232,10 @@ class _PrivateOfficialBridge:
         self._disconnect_callback: Callable[[int], None] | None = None
         self._status_callback: Callable[[MarketDataStatus], None] | None = None
         self._thread: threading.Thread | None = None
+        self._connection_state_lock = threading.Lock()
+        self._callback_context = threading.local()
+        self._connection_epoch = 0
+        self._active_connection_epoch: int | None = None
         self._metadata_operation_lock = threading.Lock()
         self._metadata_state_lock = threading.Lock()
         self._metadata_waiters: dict[int, _MetadataWaiter] = {}
@@ -247,23 +253,72 @@ class _PrivateOfficialBridge:
         self._status_callback = callback
 
     def connect(self) -> None:
-        result = self.__client.connect(self._host, self._port, self._client_id)
+        with self._connection_state_lock:
+            if self._active_connection_epoch is not None:
+                raise OfficialBridgeUnavailable("official IBKR socket is already connected")
+            if self._thread is not None and self._thread.is_alive():
+                raise OfficialBridgeUnavailable("prior official IBKR socket thread is still active")
+            self._connection_epoch += 1
+            connection_epoch = self._connection_epoch
+            self._active_connection_epoch = connection_epoch
+        try:
+            result = self.__client.connect(self._host, self._port, self._client_id)
+        except Exception:
+            with self._connection_state_lock:
+                if self._active_connection_epoch == connection_epoch:
+                    self._active_connection_epoch = None
+            raise
         if result is False:
+            with self._connection_state_lock:
+                if self._active_connection_epoch == connection_epoch:
+                    self._active_connection_epoch = None
             raise OfficialBridgeUnavailable("official IBKR socket connection failed")
-        self._thread = threading.Thread(
-            target=self.__client.run,
+        thread = threading.Thread(
+            target=self._run_connection,
+            args=(connection_epoch,),
             name="stocker-v2-ibkr-market-data",
             daemon=True,
         )
-        self._thread.start()
+        with self._connection_state_lock:
+            if self._active_connection_epoch != connection_epoch:
+                raise OfficialBridgeUnavailable("official IBKR socket closed while connecting")
+            self._thread = thread
+        thread.start()
+
+    def _run_connection(self, connection_epoch: int) -> None:
+        self._callback_context.connection_epoch = connection_epoch
+        try:
+            self.__client.run()
+        finally:
+            del self._callback_context.connection_epoch
+
+    def _callback_is_current_connection(self) -> bool:
+        callback_epoch = getattr(self._callback_context, "connection_epoch", None)
+        with self._connection_state_lock:
+            active_epoch = self._active_connection_epoch
+        return active_epoch is not None and (
+            callback_epoch is None or callback_epoch == active_epoch
+        )
 
     def disconnect(self) -> None:
+        with self._connection_state_lock:
+            self._active_connection_epoch = None
+            thread = self._thread
         try:
             self.__client.disconnect()
         finally:
             self._fences.clear()
             self._configured.clear()
             self._contracts.clear()
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=self._THREAD_STOP_TIMEOUT_SECONDS)
+                if thread.is_alive():
+                    raise OfficialBridgeUnavailable(
+                        "official IBKR socket thread did not stop after disconnect"
+                    )
+                with self._connection_state_lock:
+                    if self._thread is thread:
+                        self._thread = None
 
     def configure_subscriptions(self, subscriptions: tuple[IBKRSubscription, ...]) -> None:
         """Add core-owned exact identities without reusing a request id."""
@@ -380,6 +435,8 @@ class _PrivateOfficialBridge:
         expirations: set[str],
         strikes: set[float],
     ) -> None:
+        if not self._callback_is_current_connection():
+            return
         with self._metadata_state_lock:
             waiter = self._metadata_waiters.get(request_id)
             if waiter is None or waiter.kind != "parameters" or waiter.completed.is_set():
@@ -401,6 +458,8 @@ class _PrivateOfficialBridge:
                 waiter.completed.set()
 
     def contract_detail(self, request_id: int, details: Any) -> None:
+        if not self._callback_is_current_connection():
+            return
         with self._metadata_state_lock:
             waiter = self._metadata_waiters.get(request_id)
             if waiter is None or waiter.kind != "contracts" or waiter.completed.is_set():
@@ -427,6 +486,8 @@ class _PrivateOfficialBridge:
                 waiter.completed.set()
 
     def metadata_end(self, request_id: int, kind: str) -> None:
+        if not self._callback_is_current_connection():
+            return
         with self._metadata_state_lock:
             waiter = self._metadata_waiters.get(request_id)
             if waiter is not None and waiter.kind == kind:
@@ -477,6 +538,8 @@ class _PrivateOfficialBridge:
         self._contracts.pop(request_id, None)
 
     def emit(self, request_id: int, kind: str, values: dict[str, object]) -> None:
+        if not self._callback_is_current_connection():
+            return
         fence = self._fences.get(request_id)
         callback = self._callback
         if fence is None or callback is None:
@@ -512,6 +575,8 @@ class _PrivateOfficialBridge:
             self.emit(request_id, kind, {name: size})
 
     def snapshot_end(self, request_id: int) -> None:
+        if not self._callback_is_current_connection():
+            return
         configured = self._configured.get(request_id)
         if configured is None or not configured.snapshot:
             return
@@ -531,6 +596,8 @@ class _PrivateOfficialBridge:
             )
 
     def official_status(self, request_id: int, code: int, message: str) -> None:
+        if not self._callback_is_current_connection():
+            return
         if request_id >= 0:
             self._metadata_error(request_id, code)
         callback = self._status_callback
@@ -571,7 +638,15 @@ class _PrivateOfficialBridge:
         )
 
     def connection_closed(self) -> None:
+        callback_epoch = getattr(self._callback_context, "connection_epoch", None)
+        with self._connection_state_lock:
+            active_epoch = self._active_connection_epoch
+            if active_epoch is None or (
+                callback_epoch is not None and callback_epoch != active_epoch
+            ):
+                return
+            self._active_connection_epoch = None
+            callback = self._disconnect_callback
         self._fences.clear()
-        callback = self._disconnect_callback
         if callback is not None:
             callback(time.time_ns() // 1_000)

@@ -270,7 +270,7 @@ class _LifecycleBackend:
         self.actions.append(("subscribe", fence.request_id))
 
 
-def test_subscription_controller_configures_then_frees_capacity_then_subscribes() -> None:
+def test_subscription_controller_frees_capacity_then_configures_and_subscribes() -> None:
     backend = _LifecycleBackend()
     controller = SubscriptionController(backend)
     configured_item = type("Configured", (), {"request_id": 2000001})()
@@ -290,8 +290,8 @@ def test_subscription_controller_configures_then_frees_capacity_then_subscribes(
     assert result.started_request_ids == (2000001,)
     assert result.stopped_request_ids == (1000001,)
     assert backend.actions == [
-        ("configure", (2000001,)),
         ("cancel", 1000001),
+        ("configure", (2000001,)),
         ("subscribe", 2000001),
     ]
 
@@ -317,7 +317,7 @@ def test_subscription_controller_does_not_start_after_cancellation_failure() -> 
     assert result.started_request_ids == ()
     assert result.stopped_request_ids == ()
     assert result.failures == (("cancel", 1_000_001, "RuntimeError"),)
-    assert backend.actions == [("configure", (2_000_001,)), ("cancel", 1_000_001)]
+    assert backend.actions == [("cancel", 1_000_001)]
 
 
 def test_subscription_apply_plan_is_bounded_and_rejects_duplicate_actions() -> None:

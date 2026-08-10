@@ -2326,8 +2326,8 @@ class _DynamicRecorderAdapter(_RecorderAdapter):
 
 
 class _AdditiveDynamicRecorderAdapter(_DynamicRecorderAdapter):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, *, fail_cancellations: int = 0) -> None:
+        super().__init__(fail_cancellations=fail_cancellations)
         self.configured_by_request: dict[int, IBKRSubscription] = {}
         self.disconnect_calls = 0
 
@@ -2339,6 +2339,31 @@ class _AdditiveDynamicRecorderAdapter(_DynamicRecorderAdapter):
         self.configured_by_request.update(
             {subscription.request_id: subscription for subscription in subscriptions}
         )
+
+    def cancel(self, request_id: int) -> None:
+        super().cancel(request_id)
+        self.configured_by_request.pop(request_id, None)
+
+
+class _BlockingConfigureAdditiveRecorderAdapter(_AdditiveDynamicRecorderAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.block_next_configuration = False
+        self.configure_entered = threading.Event()
+        self.release_configuration = threading.Event()
+        self.disconnect_entered = threading.Event()
+
+    def disconnect(self) -> None:
+        self.disconnect_entered.set()
+        super().disconnect()
+
+    def configure_subscriptions(self, subscriptions: tuple[IBKRSubscription, ...]) -> None:
+        if self.block_next_configuration:
+            self.block_next_configuration = False
+            self.configure_entered.set()
+            if not self.release_configuration.wait(timeout=5):
+                raise RuntimeError("timed out waiting to release synthetic configuration")
+        super().configure_subscriptions(subscriptions)
 
 
 def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
@@ -3584,6 +3609,55 @@ def test_dynamic_cancellation_failure_is_tombstoned_and_retried(
     recorder.stop(now_us=expires_at_us + 3)
 
 
+def test_dynamic_replacement_cancel_failures_do_not_leak_additive_mappings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-cancel-mapping-bound.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _AdditiveDynamicRecorderAdapter(fail_cancellations=3)
+    recorder = _dynamic_recorder(
+        database,
+        idea_path,
+        adapter,
+        owner_id="owner",
+        line_limit=2,
+    )
+    dynamic_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+    expected_request_ids = {
+        cast(int, fence.request_id) for fence in recorder._authority_state().fences
+    }
+    recorder.market_data_status(
+        MarketDataStatus(
+            kind="pacing",
+            code=420,
+            request_id=dynamic_fence.request_id,
+            message="force replacement retries",
+            received_at_us=event_at_us + 3,
+        )
+    )
+
+    for retry_at_us in (event_at_us + 1_000_004, event_at_us + 3_000_004, event_at_us + 7_000_004):
+        recorder.drain(now_us=retry_at_us)
+        assert set(adapter.configured_by_request) == expected_request_ids
+        assert len(adapter.configured_by_request) == 2
+
+    with connect_v2(database) as connection:
+        failed_replacements = connection.execute(
+            "SELECT request_id, lifecycle FROM subscriptions WHERE request_id>=2000000 "
+            "AND request_id!=? ORDER BY request_id",
+            (dynamic_fence.request_id,),
+        ).fetchall()
+    assert len(failed_replacements) == 3
+    assert all(row["lifecycle"] == "closed" for row in failed_replacements)
+    recorder.stop(now_us=event_at_us + 7_000_005)
+
+
 def test_dynamic_discovery_retries_are_backed_off_and_bounded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4079,6 +4153,90 @@ def test_direct_dynamic_reconnect_resets_additive_bridge_mappings(
         request_id for request_id in adapter.subscribe_attempts if request_id >= 2_000_000
     ] == dynamic_request_ids
     recorder.stop(now_us=event_at_us + 7)
+
+
+def test_dynamic_reconcile_and_direct_reconnect_serialize_adapter_reset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-reconcile-reconnect-serialization.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _BlockingConfigureAdditiveRecorderAdapter()
+    recorder = _dynamic_recorder(
+        database,
+        idea_path,
+        adapter,
+        owner_id="owner",
+        line_limit=2,
+    )
+    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    adapter.block_next_configuration = True
+    errors: list[BaseException] = []
+    reconnected: list[RecorderState] = []
+    reconnect_attempted = threading.Event()
+
+    def reconcile() -> None:
+        try:
+            recorder.receive(
+                state.fences[0],
+                MarketDataCallback(
+                    callback_kind="bar",
+                    received_at_us=event_at_us + 1,
+                    provider_at_us=event_at_us,
+                    payload={
+                        "event_at_us": event_at_us,
+                        "open": 100.0,
+                        "high": 101.0,
+                        "low": 99.0,
+                        "close": 100.0,
+                        "volume": 1.0,
+                    },
+                ),
+            )
+            recorder.drain(now_us=event_at_us + 2)
+        except BaseException as error:
+            errors.append(error)
+
+    def reconnect() -> None:
+        try:
+            reconnect_attempted.set()
+            reconnected.append(recorder.reconnect(now_us=event_at_us + 3))
+        except BaseException as error:
+            errors.append(error)
+
+    reconcile_thread = threading.Thread(target=reconcile)
+    reconcile_thread.start()
+    assert adapter.configure_entered.wait(timeout=5)
+    reconnect_thread = threading.Thread(target=reconnect)
+    reconnect_thread.start()
+    assert reconnect_attempted.wait(timeout=5)
+    reset_raced_configuration = adapter.disconnect_entered.wait(timeout=0.25)
+    adapter.release_configuration.set()
+    reconcile_thread.join(timeout=5)
+    reconnect_thread.join(timeout=5)
+
+    assert not reconcile_thread.is_alive()
+    assert not reconnect_thread.is_alive()
+    assert errors == []
+    assert reset_raced_configuration is False
+    assert len(reconnected) == 1
+    current_request_ids = {cast(int, fence.request_id) for fence in reconnected[0].fences}
+    assert set(adapter.configured_by_request) == current_request_ids
+    assert len(adapter.configured_by_request) == 2
+    with connect_v2(database) as connection:
+        current_rows = connection.execute(
+            "SELECT request_id, lifecycle FROM subscriptions WHERE connection_generation=2 "
+            "ORDER BY request_id"
+        ).fetchall()
+    assert [(row["request_id"], row["lifecycle"]) for row in current_rows] == [
+        (request_id, "active") for request_id in sorted(current_request_ids)
+    ]
+    recorder.stop(now_us=event_at_us + 4)
 
 
 def test_reconnect_expires_interest_before_cloning_dynamic_subscription(

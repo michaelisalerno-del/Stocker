@@ -2209,6 +2209,7 @@ class _DynamicRecorderAdapter(_RecorderAdapter):
         inline_snapshot_at_us: int | None = None,
         deferred_snapshot_at_us: int | None = None,
         inline_rejection_at_us: int | None = None,
+        inline_connection_status: MarketDataStatus | None = None,
     ) -> None:
         super().__init__()
         self.cancelled_request_ids: list[int] = []
@@ -2221,6 +2222,7 @@ class _DynamicRecorderAdapter(_RecorderAdapter):
         self.inline_snapshot_at_us = inline_snapshot_at_us
         self.deferred_snapshot_at_us = deferred_snapshot_at_us
         self.inline_rejection_at_us = inline_rejection_at_us
+        self.inline_connection_status = inline_connection_status
         self.release_snapshot = threading.Event()
         self.snapshot_completed = threading.Event()
 
@@ -2232,6 +2234,10 @@ class _DynamicRecorderAdapter(_RecorderAdapter):
             self.fail_dynamic_subscriptions -= 1
             raise RuntimeError("synthetic subscription failure")
         super().subscribe(fence)
+        if request_id >= 2_000_000 and self.inline_connection_status is not None:
+            cast(Callable[[MarketDataStatus], None], self.status_callback)(
+                self.inline_connection_status
+            )
         if request_id >= 2_000_000 and self.inline_rejection_at_us is not None:
             cast(Callable[[MarketDataStatus], None], self.status_callback)(
                 MarketDataStatus(
@@ -2316,6 +2322,22 @@ class _DynamicRecorderAdapter(_RecorderAdapter):
                 currency="USD",
                 trading_class=trading_class,
             ),
+        )
+
+
+class _AdditiveDynamicRecorderAdapter(_DynamicRecorderAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.configured_by_request: dict[int, IBKRSubscription] = {}
+        self.disconnect_calls = 0
+
+    def disconnect(self) -> None:
+        self.disconnect_calls += 1
+        self.configured_by_request.clear()
+
+    def configure_subscriptions(self, subscriptions: tuple[IBKRSubscription, ...]) -> None:
+        self.configured_by_request.update(
+            {subscription.request_id: subscription for subscription in subscriptions}
         )
 
 
@@ -3231,6 +3253,71 @@ def test_prompt_dynamic_pacing_status_is_retried_and_resolved(
     recorder.stop(now_us=event_at_us + 1_000_005)
 
 
+@pytest.mark.parametrize(
+    ("kind", "code", "affected", "connection_state", "lifecycle", "reason"),
+    (
+        ("temporary_disconnect", 1100, (), "disconnected", "degraded", "IBKR_DISCONNECT"),
+        (
+            "farm_degraded",
+            2103,
+            ("quotes", "trades"),
+            "connected",
+            "degraded",
+            "IBKR_FARM_2103_DEGRADED",
+        ),
+    ),
+)
+def test_connection_status_during_dynamic_subscribe_waits_for_state_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: Literal["temporary_disconnect", "farm_degraded"],
+    code: int,
+    affected: tuple[Literal["quotes", "trades", "bars"], ...],
+    connection_state: str,
+    lifecycle: str,
+    reason: str,
+) -> None:
+    database = tmp_path / f"dynamic-inline-{kind}.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    status = MarketDataStatus(
+        kind=kind,
+        code=code,
+        request_id=None,
+        message="synthetic connection-level status",
+        received_at_us=event_at_us + 3,
+        affected_feed_kinds=affected,
+    )
+    adapter = _DynamicRecorderAdapter(inline_connection_status=status)
+    recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
+    dynamic_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT connection_state, lifecycle, reason FROM runtime_state "
+            "WHERE run_id='run-dynamic-shadow'"
+        ).fetchone()
+        subscription = connection.execute(
+            "SELECT lifecycle FROM subscriptions WHERE subscription_id=?",
+            (dynamic_fence.subscription_id,),
+        ).fetchone()
+        gap = connection.execute(
+            "SELECT reason FROM gaps WHERE subscription_id=? AND resolved_at_us IS NULL",
+            (dynamic_fence.subscription_id,),
+        ).fetchone()
+    assert tuple(runtime) == (connection_state, lifecycle, reason)
+    assert subscription["lifecycle"] == (
+        "disconnected" if kind == "temporary_disconnect" else "degraded"
+    )
+    assert gap["reason"] == reason
+    recorder.stop(now_us=event_at_us + 4)
+
+
 def test_fully_deferred_required_interest_records_capacity_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3322,7 +3409,7 @@ def test_restored_dynamic_snapshot_may_complete_inline_during_subscribe(
     second.stop(now_us=restart_at_us + 2)
 
 
-def test_dynamic_subscription_failure_retries_without_duplicate_identity(
+def test_dynamic_subscription_failure_survives_reconnect_and_retries_with_fresh_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "dynamic-subscribe-retry.sqlite3"
@@ -3361,7 +3448,26 @@ def test_dynamic_subscription_failure_retries_without_duplicate_identity(
         ).fetchone()
     assert first_row["lifecycle"] == "paused"
 
-    recorder.drain(now_us=event_at_us + 3)
+    recorder.disconnected(now_us=event_at_us + 3)
+    reconnected = recorder.reconnect(now_us=event_at_us + 4)
+    reconnected_request_id = next(
+        fence.request_id
+        for fence in reconnected.fences
+        if fence.request_id not in recorder._base_request_ids()
+    )
+    assert reconnected_request_id != dynamic_request_id
+    with connect_v2(database) as connection:
+        paused = connection.execute(
+            "SELECT lifecycle FROM subscriptions WHERE request_id=?",
+            (reconnected_request_id,),
+        ).fetchone()
+        unresolved = connection.execute(
+            "SELECT lifecycle, bound_subscription_id FROM market_data_interests"
+        ).fetchone()
+    assert paused["lifecycle"] == "paused"
+    assert tuple(unresolved) == ("resolved", first_row["subscription_id"])
+
+    recorder.drain(now_us=event_at_us + 5)
     assert adapter.subscribe_attempts.count(dynamic_request_id) == 1
     recorder.drain(now_us=event_at_us + 1_000_003)
 
@@ -3376,10 +3482,12 @@ def test_dynamic_subscription_failure_retries_without_duplicate_identity(
         ).fetchone()
     assert len(dynamic_attempts) == len(set(dynamic_attempts)) == 2
     assert dynamic_attempts[0] == dynamic_request_id
-    assert [(row["request_id"], row["subscription_id"], row["lifecycle"]) for row in rows] == [
-        (dynamic_request_id, first_row["subscription_id"], "closed"),
-        (dynamic_attempts[1], rows[1]["subscription_id"], "active"),
+    assert [row["request_id"] for row in rows] == [
+        dynamic_request_id,
+        reconnected_request_id,
+        dynamic_attempts[1],
     ]
+    assert [row["lifecycle"] for row in rows] == ["closed", "closed", "active"]
     assert tuple(interest_retry) == (0, 0, None)
     recorder.stop(now_us=event_at_us + 1_000_004)
 
@@ -3932,6 +4040,86 @@ def test_unfinished_snapshot_reconnects_with_fresh_fence_and_exact_interest_bind
     recorder.stop(now_us=event_at_us + 8)
 
 
+def test_direct_dynamic_reconnect_resets_additive_bridge_mappings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-direct-reconnect.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _AdditiveDynamicRecorderAdapter()
+    recorder = _dynamic_recorder(
+        database,
+        idea_path,
+        adapter,
+        owner_id="owner",
+        line_limit=2,
+    )
+    first_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+    dynamic_request_ids = [cast(int, first_fence.request_id)]
+
+    for offset in range(3, 7):
+        state = recorder.reconnect(now_us=event_at_us + offset)
+        current = next(
+            fence for fence in state.fences if fence.request_id not in recorder._base_request_ids()
+        )
+        dynamic_request_ids.append(cast(int, current.request_id))
+        assert len(adapter.configured_by_request) == 2
+        assert set(adapter.configured_by_request) == {
+            cast(int, fence.request_id) for fence in state.fences
+        }
+
+    assert len(dynamic_request_ids) == len(set(dynamic_request_ids)) == 5
+    assert adapter.disconnect_calls == 4
+    assert [
+        request_id for request_id in adapter.subscribe_attempts if request_id >= 2_000_000
+    ] == dynamic_request_ids
+    recorder.stop(now_us=event_at_us + 7)
+
+
+def test_reconnect_expires_interest_before_cloning_dynamic_subscription(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-reconnect-expiry.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured, interest_lifetime_us=10_000_000)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _DynamicRecorderAdapter()
+    recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
+    dynamic_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+
+    state = recorder.reconnect(now_us=event_at_us + 10_000_001)
+    assert dynamic_fence.request_id not in {fence.request_id for fence in state.fences}
+    assert all(
+        fence.request_id in recorder._base_request_ids()
+        for fence in state.fences
+        if fence.request_id is not None
+    )
+    with connect_v2(database) as connection:
+        interest = connection.execute(
+            "SELECT lifecycle, reason_code FROM market_data_interests"
+        ).fetchone()
+        dynamic_rows = connection.execute(
+            "SELECT request_id, lifecycle FROM subscriptions WHERE request_id>=2000000"
+        ).fetchall()
+    assert tuple(interest) == ("expired", "INTEREST_EXPIRED")
+    assert [(row["request_id"], row["lifecycle"]) for row in dynamic_rows] == [
+        (dynamic_fence.request_id, "closed")
+    ]
+    assert [request_id for request_id in adapter.subscribe_attempts if request_id >= 2_000_000] == [
+        dynamic_fence.request_id
+    ]
+    recorder.stop(now_us=event_at_us + 10_000_002)
+
+
 def test_dynamic_snapshot_may_complete_inline_during_subscribe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4171,8 +4359,8 @@ def test_snapshot_retirement_serializes_concurrent_reconnect(
 
     def reconnect() -> None:
         try:
-            recorder.disconnected(now_us=event_at_us + 4)
             reconnect_started.set()
+            recorder.disconnected(now_us=event_at_us + 4)
             reconnect_state.append(recorder.reconnect(now_us=event_at_us + 5))
         except BaseException as error:  # pragma: no cover - asserted below
             reconnect_failure.append(error)

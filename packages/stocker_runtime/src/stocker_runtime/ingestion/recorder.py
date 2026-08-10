@@ -255,7 +255,7 @@ class Recorder:
         self._snapshot_handshake_lock = threading.Lock()
         self._subscription_lifecycle_lock = threading.RLock()
         self._starting_dynamic_request_ids: set[int] = set()
-        self._pending_dynamic_statuses: dict[int, list[MarketDataStatus]] = {}
+        self._pending_dynamic_statuses: list[MarketDataStatus] = []
 
     def _authority(self) -> WriterAuthority:
         state = self._authority_state()
@@ -1565,6 +1565,8 @@ class Recorder:
 
     def _reconcile_dynamic_subscriptions(self, *, now_us: int) -> None:
         with self._subscription_lifecycle_lock:
+            if not self._connection_is_connected():
+                return
             self._reconcile_dynamic_subscriptions_locked(now_us=now_us)
 
     def _reconcile_dynamic_subscriptions_locked(self, *, now_us: int) -> None:
@@ -1726,6 +1728,8 @@ class Recorder:
         exact_by_request = {item.request_id: item for item in exact}
         starting_request_ids = {item.request_id for item in starts}
         with self._snapshot_handshake_lock:
+            if self._pending_dynamic_statuses:
+                raise RecorderFatalError("dynamic request status buffer was not drained")
             self._starting_dynamic_request_ids = starting_request_ids
         try:
             result = SubscriptionController(cast(SubscriptionBackend, self.adapter)).apply(
@@ -1741,8 +1745,7 @@ class Recorder:
         except Exception:
             with self._snapshot_handshake_lock:
                 self._starting_dynamic_request_ids = set()
-                for request_id in starting_request_ids:
-                    self._pending_dynamic_statuses.pop(request_id, None)
+                self._pending_dynamic_statuses.clear()
             raise
         started = set(result.started_request_ids)
         stopped = set(result.stopped_request_ids)
@@ -1872,11 +1875,8 @@ class Recorder:
         self._sync_interest_lifecycles(plan, now_us=now_us)
         with self._snapshot_handshake_lock:
             self._starting_dynamic_request_ids = set()
-            pending_statuses = tuple(
-                status
-                for request_id in sorted(starting_request_ids)
-                for status in self._pending_dynamic_statuses.pop(request_id, ())
-            )
+            pending_statuses = tuple(self._pending_dynamic_statuses)
+            self._pending_dynamic_statuses.clear()
         for status in pending_statuses:
             self.market_data_status(status)
 
@@ -2484,6 +2484,10 @@ class Recorder:
     def disconnected(self, *, now_us: int) -> None:
         """Treat a temporary socket loss as recoverable degraded state."""
 
+        with self._subscription_lifecycle_lock:
+            self._disconnected_locked(now_us=now_us)
+
+    def _disconnected_locked(self, *, now_us: int) -> None:
         self._check_owned()
         state = self._authority_state()
         required = {spec.request_id: spec.continuity_required for spec in self._subscriptions}
@@ -2539,14 +2543,15 @@ class Recorder:
     def market_data_status(self, status: MarketDataStatus) -> None:
         """Persist a typed official status without broadening the broker surface."""
 
-        if status.request_id is not None:
-            with self._snapshot_handshake_lock:
-                if status.request_id in self._starting_dynamic_request_ids:
-                    pending = self._pending_dynamic_statuses.setdefault(status.request_id, [])
-                    if len(pending) >= 16:
-                        raise RecorderFatalError("dynamic request status buffer exceeded")
-                    pending.append(status)
-                    return
+        with self._snapshot_handshake_lock:
+            if self._starting_dynamic_request_ids and (
+                status.request_id is None or status.request_id in self._starting_dynamic_request_ids
+            ):
+                status_limit = 16 * len(self._starting_dynamic_request_ids)
+                if len(self._pending_dynamic_statuses) >= status_limit:
+                    raise RecorderFatalError("dynamic request status buffer exceeded")
+                self._pending_dynamic_statuses.append(status)
+                return
         if status.kind == "snapshot_end":
             self._complete_dynamic_snapshot(status)
             return
@@ -2712,6 +2717,10 @@ class Recorder:
     def _market_data_farm_status(self, status: MarketDataStatus) -> None:
         """Scope farm health to affected feeds while the shared socket remains connected."""
 
+        with self._subscription_lifecycle_lock:
+            self._market_data_farm_status_locked(status)
+
+    def _market_data_farm_status_locked(self, status: MarketDataStatus) -> None:
         self._check_owned()
         state = self._authority_state()
         specs = {spec.request_id: spec for spec in self._subscriptions}
@@ -2887,9 +2896,12 @@ class Recorder:
         """Fence old requests and reconnect with a new durable socket generation."""
 
         self._check_owned()
+        self.adapter.disconnect()
+        self._check_owned()
         with self._subscription_lifecycle_lock:
             old = self._authority_state()
-            dynamic = self._dynamic_subscriptions()
+            self._expire_interests(now_us=now_us)
+            reconnect_plan, dynamic = self._dynamic_plan(now_us=now_us)
             fresh_request_ids = iter(
                 self._next_dynamic_request_ids(
                     len(dynamic),
@@ -2901,14 +2913,11 @@ class Recorder:
                 for spec in dynamic
             }
             reconnect_subscriptions = tuple(
-                replacement_by_request.get(spec.request_id, spec) for spec in self._subscriptions
+                (*self._base_subscriptions, *replacement_by_request.values())
             )
             prior_request_by_request = {
                 replacement.request_id: request_id
                 for request_id, replacement in replacement_by_request.items()
-            }
-            old_fence_by_request = {
-                fence.request_id: fence for fence in old.fences if fence.request_id is not None
             }
             connection = connect_v2(self.config.database)
             try:
@@ -2948,22 +2957,19 @@ class Recorder:
                     prior_request_id = prior_request_by_request.get(
                         spec.request_id, spec.request_id
                     )
-                    if prior_request_id in paused_request_ids:
+                    remains_paused = prior_request_id in paused_request_ids
+                    if remains_paused:
                         connection.execute(
                             "UPDATE subscriptions SET lifecycle='paused' WHERE subscription_id=?",
                             (fence.subscription_id,),
                         )
-                    prior_fence = old_fence_by_request.get(prior_request_id)
-                    if prior_fence is not None and prior_fence.subscription_id is not None:
-                        connection.execute(
-                            "UPDATE market_data_interests SET bound_subscription_id=?, "
-                            "updated_at_us=? WHERE bound_subscription_id=? "
-                            "AND lifecycle IN ('resolved','active')",
-                            (
-                                fence.subscription_id,
-                                now_us,
-                                prior_fence.subscription_id,
-                            ),
+                    if not remains_paused:
+                        self._bind_planned_interests(
+                            connection,
+                            reconnect_plan,
+                            spec.instrument_id,
+                            spec.feed_kind,
+                            cast(str, fence.subscription_id),
                         )
                     self._open_gap(
                         connection,

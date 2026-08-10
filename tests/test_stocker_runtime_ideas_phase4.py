@@ -3313,6 +3313,19 @@ def test_dynamic_retry_does_not_resolve_future_status_diagnostics(
     adapter = _DynamicRecorderAdapter()
     recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
     first_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+    capacity_incident_id = hashlib.sha256(
+        b"run-dynamic-shadow|DYNAMIC_MARKET_DATA_CAPACITY"
+    ).hexdigest()
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
+            "opened_at_us, resolved_at_us, details_json) VALUES (?, "
+            "'run-dynamic-shadow', 'market_data', 'degraded', "
+            "'DYNAMIC_MARKET_DATA_CAPACITY', ?, ?, '{}') ON CONFLICT(incident_id) "
+            "DO UPDATE SET opened_at_us=excluded.opened_at_us, "
+            "resolved_at_us=excluded.resolved_at_us",
+            (capacity_incident_id, event_at_us + 10, event_at_us + 20),
+        )
     future_status_at_us = event_at_us + 2_000_000
     retry_at_us = event_at_us + 1_000_000
     recorder.market_data_status(
@@ -3342,9 +3355,14 @@ def test_dynamic_retry_does_not_resolve_future_status_diagnostics(
         active_dynamic = connection.execute(
             "SELECT count(*) FROM subscriptions WHERE request_id>=2000000 AND lifecycle='active'"
         ).fetchone()[0]
+        capacity_incident = connection.execute(
+            "SELECT opened_at_us, resolved_at_us FROM incidents WHERE incident_id=?",
+            (capacity_incident_id,),
+        ).fetchone()
     assert status_gap["resolved_at_us"] is None
     assert status_incident["resolved_at_us"] is None
     assert active_dynamic == 1
+    assert tuple(capacity_incident) == (future_status_at_us, None)
     assert (
         len([request_id for request_id in adapter.subscribe_attempts if request_id >= 2_000_000])
         == 2

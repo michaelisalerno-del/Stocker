@@ -54,6 +54,7 @@ from stocker_runtime.ingestion.inbox import (
     MarketDataCallback,
     NormalizationError,
     WriterAuthority,
+    transport_incident_id,
 )
 from stocker_runtime.shadow import ShadowEngine
 from stocker_runtime.storage import (
@@ -1518,7 +1519,9 @@ class Recorder:
                     "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
                     "opened_at_us, details_json) VALUES (?, ?, 'market_data', 'degraded', "
                     "'DYNAMIC_MARKET_DATA_CAPACITY', ?, '{}') ON CONFLICT(incident_id) "
-                    "DO UPDATE SET resolved_at_us=NULL",
+                    "DO UPDATE SET opened_at_us=CASE WHEN incidents.resolved_at_us IS NULL "
+                    "THEN incidents.opened_at_us ELSE excluded.opened_at_us END, "
+                    "resolved_at_us=NULL",
                     (incident_id, self.config.run_id, now_us),
                 )
             connection.commit()
@@ -2311,17 +2314,13 @@ class Recorder:
         spec: SubscriptionSpec | None,
         code: str,
     ) -> str:
-        semantic_scope = (
-            "connection"
-            if spec is None
-            else (
-                f"subscription|{spec.instrument_id}|{spec.feed_kind}|"
-                f"{'snapshot' if spec.snapshot else 'stream'}"
-            )
+        return transport_incident_id(
+            self.config.run_id,
+            code,
+            instrument_id=None if spec is None else spec.instrument_id,
+            feed_kind=None if spec is None else spec.feed_kind,
+            snapshot=None if spec is None else spec.snapshot,
         )
-        return hashlib.sha256(
-            f"{self.config.run_id}|transport|{semantic_scope}|{code}".encode()
-        ).hexdigest()
 
     def _record_transport_incident(
         self,

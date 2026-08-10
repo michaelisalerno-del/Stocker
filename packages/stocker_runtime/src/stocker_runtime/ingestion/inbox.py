@@ -54,6 +54,39 @@ CALLBACK_RECOVERABLE_GAP_REASONS = frozenset(
         "STREAM_STALE",
     }
 )
+TRANSPORT_INCIDENT_CODES = ("IBKR_CONNECT_FAILED", "IBKR_SUBSCRIBE_FAILED")
+CALLBACK_GAP_RECOVERY_SQL = (
+    "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE gap_id IN ("
+    "SELECT gap.gap_id FROM gaps gap JOIN subscriptions prior "
+    "ON prior.subscription_id=gap.subscription_id WHERE gap.run_id=? "
+    "AND gap.resolved_at_us IS NULL AND prior.run_id=? "
+    "AND prior.instrument_id=? AND prior.feed_kind=? AND prior.snapshot=? "
+    "AND prior.recorder_generation=? AND prior.connection_generation<=? "
+    "AND gap.reason IN (?, ?, ?, ?, ?) AND gap.started_at_us<=? AND ?<=?)"
+)
+
+
+def transport_incident_id(
+    run_id: str,
+    code: str,
+    *,
+    instrument_id: str | None = None,
+    feed_kind: str | None = None,
+    snapshot: bool | None = None,
+) -> str:
+    """Identify one bounded connection or semantic-subscription incident."""
+
+    subscription_scope = (instrument_id, feed_kind, snapshot)
+    if any(value is not None for value in subscription_scope) and any(
+        value is None for value in subscription_scope
+    ):
+        raise ValueError("transport incident subscription scope is incomplete")
+    semantic_scope = (
+        "connection"
+        if instrument_id is None
+        else (f"subscription|{instrument_id}|{feed_kind}|{'snapshot' if snapshot else 'stream'}")
+    )
+    return hashlib.sha256(f"{run_id}|transport|{semantic_scope}|{code}".encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -854,7 +887,7 @@ class CallbackInbox:
                 (leased.run_id,),
             )
             subscription = connection.execute(
-                "SELECT subscription_id, instrument_id, feed_kind FROM subscriptions "
+                "SELECT subscription_id, instrument_id, feed_kind, snapshot FROM subscriptions "
                 "WHERE run_id=? AND recorder_generation=? "
                 "AND connection_generation=? AND request_id IS ? AND lifecycle='active'",
                 (
@@ -873,13 +906,7 @@ class CallbackInbox:
                 # clock. Provider/event times may lag and cannot prove recovery.
                 evidence_at_us = event_received_at_us
                 connection.execute(
-                    "UPDATE gaps SET ended_at_us=?, resolved_at_us=? "
-                    "WHERE run_id=? AND subscription_id IN (SELECT prior.subscription_id "
-                    "FROM subscriptions prior WHERE prior.run_id=? "
-                    "AND prior.instrument_id=? AND prior.feed_kind=? "
-                    "AND prior.recorder_generation=? AND prior.connection_generation<=?) "
-                    "AND reason IN (?, ?, ?, ?, ?) AND started_at_us<=? AND ?<=? "
-                    "AND resolved_at_us IS NULL",
+                    CALLBACK_GAP_RECOVERY_SQL,
                     (
                         evidence_at_us,
                         acknowledged_at_us,
@@ -887,6 +914,7 @@ class CallbackInbox:
                         leased.run_id,
                         str(subscription["instrument_id"]),
                         str(subscription["feed_kind"]),
+                        int(subscription["snapshot"]),
                         leased.recorder_generation,
                         leased.connection_generation,
                         *sorted(CALLBACK_RECOVERABLE_GAP_REASONS),
@@ -895,23 +923,30 @@ class CallbackInbox:
                         acknowledged_at_us,
                     ),
                 )
+                scoped_incident_ids = tuple(
+                    transport_incident_id(
+                        leased.run_id,
+                        code,
+                        instrument_id=str(subscription["instrument_id"]),
+                        feed_kind=str(subscription["feed_kind"]),
+                        snapshot=bool(subscription["snapshot"]),
+                    )
+                    for code in TRANSPORT_INCIDENT_CODES
+                )
+                global_incident_ids = tuple(
+                    transport_incident_id(leased.run_id, code) for code in TRANSPORT_INCIDENT_CODES
+                )
                 connection.execute(
                     "UPDATE incidents SET resolved_at_us=? WHERE run_id=? "
                     "AND code IN ('IBKR_CONNECT_FAILED','IBKR_SUBSCRIBE_FAILED') "
-                    "AND opened_at_us<=? AND resolved_at_us IS NULL AND ("
-                    "subscription_id IS NULL OR subscription_id IN ("
-                    "SELECT prior.subscription_id FROM subscriptions prior "
-                    "WHERE prior.run_id=? AND prior.instrument_id=? AND prior.feed_kind=? "
-                    "AND prior.recorder_generation=? AND prior.connection_generation<=?))",
+                    "AND opened_at_us<=? AND resolved_at_us IS NULL "
+                    "AND incident_id IN (?, ?, ?, ?)",
                     (
                         acknowledged_at_us,
                         leased.run_id,
                         evidence_at_us,
-                        leased.run_id,
-                        str(subscription["instrument_id"]),
-                        str(subscription["feed_kind"]),
-                        leased.recorder_generation,
-                        leased.connection_generation,
+                        *global_incident_ids,
+                        *scoped_incident_ids,
                     ),
                 )
 

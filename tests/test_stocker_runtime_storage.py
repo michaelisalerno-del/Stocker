@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from stocker_runtime import ProposedTradeLeg
 from stocker_runtime.cli import app as runtime_app
+from stocker_runtime.ingestion.inbox import CALLBACK_GAP_RECOVERY_SQL
 from stocker_runtime.storage import (
     EXPECTED_TABLES,
     CallbackReceiptRecord,
@@ -3255,6 +3256,39 @@ def test_planned_ui_projection_queries_use_declared_indexes(tmp_path: Path) -> N
             if expected_index == "shadow_positions_retention_idx":
                 assert "sqlite_autoindex_shadow_progress_1" in plan
                 assert "sqlite_autoindex_shadow_quote_state_1" in plan
+
+
+def test_callback_recovery_uses_bounded_unresolved_gap_plan(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    with connect_v2(database) as connection:
+        plan = " ".join(
+            str(row["detail"])
+            for row in connection.execute(
+                f"EXPLAIN QUERY PLAN {CALLBACK_GAP_RECOVERY_SQL}",
+                (
+                    150,
+                    152,
+                    "run",
+                    "run",
+                    "instrument",
+                    "quotes",
+                    0,
+                    1,
+                    100,
+                    "IBKR_CONNECT_FAILED",
+                    "IBKR_DISCONNECT",
+                    "IBKR_SUBSCRIBE_FAILED",
+                    "RECONNECT_UNCERTAINTY",
+                    "STREAM_STALE",
+                    150,
+                    150,
+                    152,
+                ),
+            )
+        )
+    assert "gaps_unresolved_idx" in plan
+    assert "sqlite_autoindex_subscriptions_1" in plan
 
 
 def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: Path) -> None:

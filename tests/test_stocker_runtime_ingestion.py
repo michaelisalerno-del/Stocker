@@ -36,6 +36,7 @@ from stocker_runtime.ingestion import (
     WriterAuthority,
 )
 from stocker_runtime.ingestion.dynamic_market_data import OptionDiscoveryBackend
+from stocker_runtime.ingestion.inbox import transport_incident_id
 from stocker_runtime.storage import (
     RetentionResult,
     StorageCapState,
@@ -2467,6 +2468,95 @@ def test_acknowledgement_resolves_only_causal_allowlisted_gap_for_exact_subscrip
         "UNCLEAN_RECORDER_RESTART",
     ):
         assert resolved[(required, reason, 102)] == (None, None)
+
+
+def test_callback_recovery_does_not_cross_snapshot_and_stream_cadence(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "callback-cadence.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    stream_subscription_id = "prior-stream"
+    snapshot_subscription_id = "current-snapshot"
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+            "exchange, currency) VALUES ('instrument-1', ?, 123, 'option', 'AAPL', "
+            "'SMART', 'USD')",
+            ("b" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
+            "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
+            "requirements_hash, opened_at_us, closed_at_us, snapshot) VALUES "
+            "(?, 'run-1', 1, 1, 'instrument-1', 'quotes', 3, 'closed', ?, 1, 120, 0)",
+            (stream_subscription_id, "c" * 64),
+        )
+        connection.execute(
+            "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
+            "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
+            "requirements_hash, opened_at_us, snapshot) VALUES "
+            "(?, 'run-1', 1, 2, 'instrument-1', 'quotes', 4, 'active', ?, 130, 1)",
+            (snapshot_subscription_id, "d" * 64),
+        )
+        for subscription_id, cadence in (
+            (stream_subscription_id, "stream"),
+            (snapshot_subscription_id, "snapshot"),
+        ):
+            Recorder._open_gap_for_run(
+                connection,
+                "run-1",
+                subscription_id,
+                140,
+                "IBKR_SUBSCRIBE_FAILED",
+                True,
+            )
+            incident_id = transport_incident_id(
+                "run-1",
+                "IBKR_SUBSCRIBE_FAILED",
+                instrument_id="instrument-1",
+                feed_kind="quotes",
+                snapshot=cadence == "snapshot",
+            )
+            connection.execute(
+                "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
+                "subscription_id, opened_at_us, details_json) VALUES (?, 'run-1', "
+                "'market_data', 'degraded', 'IBKR_SUBSCRIBE_FAILED', ?, 140, '{}')",
+                (incident_id, subscription_id),
+            )
+
+    fence = CallbackFence("run-1", 1, 2, 4, snapshot_subscription_id)
+    inbox = CallbackInbox(database)
+    admitted = inbox.admit(
+        fence,
+        MarketDataCallback("quote", 150, 150, {"event_at_us": 150, "bid": 1.0}),
+    )
+    leased = inbox.lease_pending(
+        "owner-1", now_us=151, lease_us=10, limit=1, authority=_authority()
+    )[0]
+    event = inbox.project(leased, authority=_authority())
+    inbox.acknowledge(leased, event.event_id, acknowledged_at_us=152, authority=_authority())
+
+    with connect_v2(database) as connection:
+        gaps = dict(
+            connection.execute(
+                "SELECT subscription_id, resolved_at_us FROM gaps "
+                "WHERE reason='IBKR_SUBSCRIBE_FAILED'"
+            )
+        )
+        incidents = dict(
+            connection.execute(
+                "SELECT subscription_id, resolved_at_us FROM incidents "
+                "WHERE code='IBKR_SUBSCRIBE_FAILED'"
+            )
+        )
+        callback = connection.execute(
+            "SELECT lifecycle FROM callback_inbox WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()[0]
+    assert callback == "acknowledged"
+    assert gaps == {stream_subscription_id: None, snapshot_subscription_id: 152}
+    assert incidents == {stream_subscription_id: None, snapshot_subscription_id: 152}
 
 
 @pytest.mark.parametrize("with_gap", (False, True))

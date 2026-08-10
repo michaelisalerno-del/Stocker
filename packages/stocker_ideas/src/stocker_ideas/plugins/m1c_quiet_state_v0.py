@@ -125,6 +125,10 @@ def _available(
     structure_type: StructureType,
     legs: tuple[StructureLeg, ...],
 ) -> StructureAttempt:
+    if any(leg.side == "short" and leg.contract.bid <= 0.0 for leg in legs):
+        return _unavailable(structure_type, "short_leg_bid_not_positive")
+    if any(leg.side == "long" and leg.contract.ask <= 0.0 for leg in legs):
+        return _unavailable(structure_type, "protective_leg_ask_not_positive")
     opening_credit = math.fsum(
         leg.contract.bid if leg.side == "short" else -leg.contract.ask for leg in legs
     )

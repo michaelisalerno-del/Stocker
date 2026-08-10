@@ -78,7 +78,11 @@ MANIFEST = IdeaManifest(
         "additionalProperties": False,
         "required": tuple(PARAMETERS),
         "properties": {
-            "checkpoints": {"type": "array", "enum": (CHECKPOINTS,)},
+            "checkpoints": {
+                "type": "array",
+                "items": {"type": "integer", "enum": CHECKPOINTS},
+                "enum": (CHECKPOINTS,),
+            },
             "quiet_threshold": {"type": "number", "enum": (BOTTOM_10_THRESHOLD,)},
             "minimum_episode_spacing_minutes": {"type": "integer", "enum": (30,)},
             "d1_option_minimum_days_to_expiry": {"type": "integer", "enum": (7,)},
@@ -86,9 +90,17 @@ MANIFEST = IdeaManifest(
             "d1_snapshot_lifetime_minutes": {"type": "integer", "enum": (30,)},
             "entry_dte_buckets": {
                 "type": "array",
+                "items": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                },
                 "enum": (((0, 0), (1, 1), (3, 5)),),
             },
-            "entry_strike_offsets": {"type": "array", "enum": (_OFFSETS,)},
+            "entry_strike_offsets": {
+                "type": "array",
+                "items": {"type": "integer", "enum": _OFFSETS},
+                "enum": (_OFFSETS,),
+            },
             "option_panel_lifetime_minutes": {"type": "integer", "enum": (60,)},
             "maximum_active_episodes": {"type": "integer", "enum": (1,)},
         },
@@ -199,8 +211,79 @@ def _base_payload(**values: JsonValue) -> Mapping[str, JsonValue]:
     }
 
 
+def _available_at(event: MarketEvent) -> int:
+    return max(event.event_at_us, event.received_at_us)
+
+
+def _first_cutoff_event(batch: IdeaBatch, cutoff_at_us: int) -> MarketEvent | None:
+    return next((event for event in batch.events if _available_at(event) >= cutoff_at_us), None)
+
+
+def _terminal_attribution(
+    statuses: Mapping[str, object],
+    expected: tuple[str, ...],
+) -> Mapping[str, JsonValue]:
+    return {
+        key: {
+            "status": str(_mapping(statuses.get(key)).get("status", "missing")),
+            "reason": (
+                str(_mapping(statuses.get(key))["reason"])
+                if isinstance(_mapping(statuses.get(key)).get("reason"), str)
+                else None
+            ),
+            "completed_at_us": _integer(_mapping(statuses.get(key)).get("completed")),
+        }
+        for key in expected
+    }
+
+
+def _d1_terminal_payload(
+    *,
+    symbol: str,
+    session: str,
+    cutoff_at_us: int,
+    cohort_available_at_us: int,
+    terminal: Mapping[str, object],
+) -> Mapping[str, JsonValue]:
+    statuses: dict[str, str] = {right: str(terminal.get(right, "missing")) for right in _RIGHTS}
+    reasons: dict[str, str] = {
+        right: str(terminal[f"{right}_r"])
+        for right in _RIGHTS
+        if isinstance(terminal.get(f"{right}_r"), str)
+    }
+    evidence_available: dict[str, int] = {
+        right: cast(int, terminal[f"{right}_a"])
+        for right in _RIGHTS
+        if _integer(terminal.get(f"{right}_a")) is not None
+    }
+    completed: dict[str, int] = {
+        right: cast(int, terminal[f"{right}_completed"])
+        for right in _RIGHTS
+        if _integer(terminal.get(f"{right}_completed")) is not None
+    }
+    observed = set(statuses.values())
+    if "denied" in observed:
+        basis = "explicit_discovery_denial"
+    elif "late" in observed:
+        basis = "late_capture"
+    elif "window_elapsed" in observed:
+        basis = "causal_window_elapsed_without_capture"
+    else:
+        basis = "captured_evidence_invalid"
+    return {
+        "interest_keys": tuple(f"quiet:m1c:d1:{session}:{symbol}:{right}" for right in _RIGHTS),
+        "terminal_statuses": statuses,
+        "denial_reasons": reasons,
+        "interest_completed_at_us": completed,
+        "evidence_available_at_us": evidence_available,
+        "cutoff_at_us": cutoff_at_us,
+        "cohort_available_at_us": cohort_available_at_us,
+        "terminal_basis": basis,
+    }
+
+
 def _valid_quote(event: MarketEvent, *, after_us: int, before_us: int) -> float | None:
-    available = max(event.event_at_us, event.received_at_us)
+    available = _available_at(event)
     bid = _number(event.payload.get("bid"))
     ask = _number(event.payload.get("ask"))
     if (
@@ -349,7 +432,12 @@ def _panel_contracts(
     return tuple(contracts), None
 
 
-def _panel_lineage(batch: IdeaBatch, active: Mapping[str, object]) -> tuple[str, ...]:
+def _panel_lineage(
+    batch: IdeaBatch,
+    active: Mapping[str, object],
+    *,
+    extra_event_ids: tuple[str, ...] = (),
+) -> tuple[str, ...]:
     proof = active.get("d")
     selected = (
         {value for value in proof if isinstance(value, str)}
@@ -364,6 +452,7 @@ def _panel_lineage(batch: IdeaBatch, active: Mapping[str, object]) -> tuple[str,
         event_id = _mapping(raw).get("event_id")
         if isinstance(event_id, str):
             selected.add(event_id)
+    selected.update(extra_event_ids)
     return _lineage(batch, selected)
 
 
@@ -498,10 +587,240 @@ def _complete_panel(
             "k": tuple(item.interest_key for item in interests),
             "m": stream_instruments,
             "u": {},
+            "z": {},
             "d": lineage,
         }
     )
     return outputs, lineages, interests, stream_state
+
+
+def _advance_episode(
+    *,
+    batch: IdeaBatch,
+    pending: dict[str, object],
+    active: dict[str, object],
+    existing_interest_count: int,
+) -> tuple[
+    dict[str, object],
+    dict[str, object],
+    list[IdeaOutput],
+    list[tuple[str, ...]],
+    list[MarketDataInterest],
+]:
+    outputs: list[IdeaOutput] = []
+    lineages: list[tuple[str, ...]] = []
+    interests: list[MarketDataInterest] = []
+
+    if pending and not active:
+        trigger = _integer(pending.get("t"))
+        deadline = _integer(pending.get("x"))
+        symbol_value = pending.get("y")
+        if trigger is not None and deadline is not None and isinstance(symbol_value, str):
+            valid = tuple(
+                (event, price)
+                for event in batch.events
+                if event.instrument_id == symbol_value
+                and (price := _valid_quote(event, after_us=trigger, before_us=deadline)) is not None
+            )
+            if valid:
+                quote, reference = min(
+                    valid,
+                    key=lambda item: (_available_at(item[0]), item[0].event_id),
+                )
+                if existing_interest_count <= 10:
+                    entry = _entry_interests(
+                        episode=pending,
+                        quote=quote,
+                        reference_price=reference,
+                    )
+                    interests.extend(entry)
+                    active = {
+                        **pending,
+                        "g": "entry",
+                        "q": quote.event_id,
+                        "r": reference,
+                        "a": _available_at(quote),
+                        "k": tuple(item.interest_key for item in entry),
+                        "z": {},
+                    }
+                    pending = {}
+                else:
+                    lineage = _panel_lineage(
+                        batch,
+                        pending,
+                        extra_event_ids=(quote.event_id,),
+                    )
+                    if lineage:
+                        outputs.append(
+                            Observation(
+                                subject_instrument_id=symbol_value,
+                                as_of_at_us=_available_at(quote),
+                                payload=_base_payload(
+                                    status="incomplete",
+                                    reason="complete_panel_capacity_unavailable",
+                                    quiet_episode_id=cast(str, pending["e"]),
+                                ),
+                            )
+                        )
+                        lineages.append(lineage)
+                    pending = {}
+            elif (cutoff_event := _first_cutoff_event(batch, deadline)) is not None:
+                lineage = _panel_lineage(
+                    batch,
+                    pending,
+                    extra_event_ids=(cutoff_event.event_id,),
+                )
+                if lineage:
+                    outputs.append(
+                        Observation(
+                            subject_instrument_id=symbol_value,
+                            as_of_at_us=_available_at(cutoff_event),
+                            payload=_base_payload(
+                                status="incomplete",
+                                reason="underlying_reference_quote_unavailable",
+                                quiet_episode_id=cast(str, pending["e"]),
+                                cutoff_at_us=deadline,
+                                cutoff_crossing_event_id=cutoff_event.event_id,
+                            ),
+                        )
+                    )
+                    lineages.append(lineage)
+                pending = {}
+
+    if active.get("g") == "entry":
+        expected_value = active.get("k")
+        expected = (
+            tuple(key for key in expected_value if isinstance(key, str))
+            if isinstance(expected_value, list | tuple)
+            else ()
+        )
+        terminal = _mapping(active.get("u"))
+        captures = _mapping(active.get("z"))
+        deadline = _integer(active.get("x"))
+        panel_reason: str | None = None
+        terminal_event: MarketEvent | None = None
+        denied = tuple(
+            key for key in expected if _mapping(terminal.get(key)).get("status") == "denied"
+        )
+        if denied:
+            denied_at = max(
+                (_integer(_mapping(terminal.get(key)).get("completed")) or 0 for key in denied),
+                default=0,
+            )
+            terminal_event = _first_cutoff_event(batch, denied_at)
+            if terminal_event is not None:
+                panel_reason = "option_panel_discovery_denied"
+        elif len(captures) == len(expected) == 54:
+            contracts, panel_reason = _panel_contracts(active)
+            if panel_reason is None:
+                panel_outputs, panel_lineages, stream_interests, stream_state = _complete_panel(
+                    batch=batch,
+                    active=active,
+                    contracts=contracts,
+                )
+                if existing_interest_count + len(interests) + len(stream_interests) > 64:
+                    panel_reason = "complete_panel_capacity_unavailable"
+                else:
+                    outputs.extend(panel_outputs)
+                    lineages.extend(panel_lineages)
+                    interests.extend(stream_interests)
+                    active = stream_state if stream_interests else {}
+        elif deadline is not None:
+            terminal_event = _first_cutoff_event(batch, deadline)
+            if terminal_event is not None:
+                panel_reason = "option_panel_capture_missing"
+        if panel_reason is not None:
+            extra = () if terminal_event is None else (terminal_event.event_id,)
+            lineage = _panel_lineage(batch, active, extra_event_ids=extra)
+            if lineage:
+                attribution = _terminal_attribution(terminal, expected)
+                payload: dict[str, JsonValue] = {
+                    "status": "incomplete",
+                    "reason": panel_reason,
+                    "quiet_episode_id": cast(str, active["e"]),
+                    "interest_statuses": attribution,
+                    "resolved_interest_count": sum(
+                        1
+                        for value in terminal.values()
+                        if isinstance(value, Mapping) and value.get("status") == "resolved"
+                    ),
+                    "capture_count": len(captures),
+                }
+                if deadline is not None and terminal_event is not None:
+                    payload.update(
+                        {
+                            "cutoff_at_us": deadline,
+                            "cutoff_crossing_event_id": terminal_event.event_id,
+                        }
+                    )
+                outputs.append(
+                    Observation(
+                        subject_instrument_id=cast(str, active["y"]),
+                        as_of_at_us=(
+                            _available_at(terminal_event)
+                            if terminal_event is not None
+                            else batch.causal_through_at_us
+                        ),
+                        payload=_base_payload(**payload),
+                    )
+                )
+                lineages.append(lineage)
+            active = {}
+
+    if active.get("g") == "streams":
+        deadline = _integer(active.get("x"))
+        cutoff_event = None if deadline is None else _first_cutoff_event(batch, deadline)
+        if deadline is not None and cutoff_event is not None:
+            expected_value = active.get("k")
+            expected = (
+                tuple(key for key in expected_value if isinstance(key, str))
+                if isinstance(expected_value, list | tuple)
+                else ()
+            )
+            statuses = _mapping(active.get("u"))
+            proofs = _mapping(active.get("z"))
+            completed_keys: list[str] = []
+            for key in expected:
+                status = _mapping(statuses.get(key))
+                completed_at_us = _integer(status.get("completed"))
+                if (
+                    status.get("status") == "resolved"
+                    and completed_at_us is not None
+                    and completed_at_us < deadline
+                    and isinstance(_mapping(proofs.get(key)).get("event_id"), str)
+                ):
+                    completed_keys.append(key)
+            complete = len(completed_keys) == len(expected) and bool(expected)
+            lineage = _panel_lineage(
+                batch,
+                active,
+                extra_event_ids=(cutoff_event.event_id,),
+            )
+            if lineage:
+                outputs.append(
+                    Observation(
+                        subject_instrument_id=cast(str, active["y"]),
+                        as_of_at_us=_available_at(cutoff_event),
+                        payload=_base_payload(
+                            status="complete" if complete else "incomplete",
+                            reason=None if complete else "selected_leg_stream_window_incomplete",
+                            quiet_episode_id=cast(str, active["e"]),
+                            expected_stream_count=len(expected),
+                            resolved_stream_count=len(completed_keys),
+                            stream_interest_statuses=_terminal_attribution(statuses, expected),
+                            quote_proof_event_ids={
+                                key: cast(str, _mapping(proofs[key])["event_id"])
+                                for key in completed_keys
+                            },
+                            cutoff_at_us=deadline,
+                            cutoff_crossing_event_id=cutoff_event.event_id,
+                        ),
+                    )
+                )
+                lineages.append(lineage)
+            active = {}
+
+    return pending, active, outputs, lineages, interests
 
 
 class M1CQuietStateOptionsV0:
@@ -552,12 +871,9 @@ class M1CQuietStateOptionsV0:
     def select_input_prefix(self, batch: IdeaBatch, state: JsonValue) -> int:
         if batch.continuation_request is not None or not batch.events:
             raise ValueError("Quiet input-prefix selection requires an ordinary batch")
-        observed = 0
         for index, event in enumerate(batch.events):
             if event.event_kind == "bar_5m_session_prefix" and event.instrument_id in COHORT:
-                observed += 1
-                if observed == 20:
-                    return index + 1
+                return index + 1
         return len(batch.events)
 
     def evaluate(self, batch: IdeaBatch, state: JsonValue) -> IdeaEvaluation:
@@ -604,9 +920,11 @@ class M1CQuietStateOptionsV0:
                     "captured",
                     "denied",
                     "late",
+                    "window_elapsed",
                 }:
                     terminal[right] = receipt.status
                     terminal[f"{right}_k"] = receipt.interest_key
+                    terminal[f"{right}_completed"] = receipt.completed_at_us
                     if receipt.reason_code is not None:
                         terminal[f"{right}_r"] = receipt.reason_code
                     d1_terminal[symbol] = terminal
@@ -724,6 +1042,35 @@ class M1CQuietStateOptionsV0:
                     requested[event.instrument_id] = baseline_session
                 continue
 
+            if event.event_kind == "quote" and active.get("g") == "streams":
+                expected_instruments = _mapping(active.get("m"))
+                stream_statuses = _mapping(active.get("u"))
+                quote_proofs = _mapping(active.get("z"))
+                stream_deadline = _integer(active.get("x"))
+                for key, instrument_id in expected_instruments.items():
+                    stream_status = _mapping(stream_statuses.get(key))
+                    completed_at_us = _integer(stream_status.get("completed"))
+                    if (
+                        instrument_id != event.instrument_id
+                        or stream_status.get("status") != "resolved"
+                        or completed_at_us is None
+                        or stream_deadline is None
+                        or key in quote_proofs
+                        or _valid_quote(
+                            event,
+                            after_us=completed_at_us,
+                            before_us=stream_deadline,
+                        )
+                        is None
+                    ):
+                        continue
+                    quote_proofs[key] = {
+                        "event_id": event.event_id,
+                        "available": _available_at(event),
+                    }
+                active["z"] = quote_proofs
+                continue
+
             if event.event_kind == "option_snapshot_capture":
                 entry_terminal = _mapping(active.get("u")) if active.get("g") == "entry" else {}
                 entry_matches = tuple(
@@ -785,6 +1132,13 @@ class M1CQuietStateOptionsV0:
                 terminal = d1_terminal.get(symbol)
                 if terminal is None or str(terminal.get("s", "")) < session:
                     terminal = {"s": session}
+                if terminal.get(right) in {
+                    "captured",
+                    "denied",
+                    "late",
+                    "window_elapsed",
+                }:
+                    continue
                 if available >= expiry:
                     terminal[right] = "late"
                     terminal[f"{right}_k"] = receipt.interest_key
@@ -825,6 +1179,9 @@ class M1CQuietStateOptionsV0:
             model_hash: str | None = None
             baseline = baselines.get(event.instrument_id)
             context = d1_context.get(event.instrument_id)
+            prefix_terminal: dict[str, object] = {}
+            cutoff_at_us: int | None = None
+            as_of = _available_at(event)
             if (
                 not isinstance(prefix_session_value, str)
                 or isinstance(checkpoint_value, bool)
@@ -840,48 +1197,90 @@ class M1CQuietStateOptionsV0:
                 prefix_session_value
             ):
                 reason = "prior_session_baseline_not_causal"
-            elif _number(baseline.get("v")) is None:
-                reason = "realised_volatility_20d_not_ready"
-            elif context is None or context.get("s") != baseline.get("s"):
-                reason = "prior_session_option_pair_missing"
             else:
-                call = _mapping(context.get("call"))
-                put = _mapping(context.get("put"))
-                if not call or not put:
-                    reason = "prior_session_option_pair_incomplete"
+                selected.add(cast(str, baseline["i"]))
+                cutoff_at_us = _integer(baseline.get("x"))
+                if cutoff_at_us is None:
+                    reason = "prior_session_baseline_invalid"
+                elif as_of < cutoff_at_us:
+                    raise ValueError("next-session Quiet cohort precedes the D-1 cutoff")
                 else:
-                    selected.update(
-                        cast(str, item["i"])
-                        for item in (baseline, call, put)
-                        if isinstance(item.get("i"), str)
-                    )
-                    try:
-                        group_i = build_group_i_for_symbol(
-                            event.payload,
-                            symbol=event.instrument_id,
-                            checkpoint=checkpoint_value,
+                    prefix_terminal = d1_terminal.get(event.instrument_id, {})
+                    if prefix_terminal.get("s") != baseline.get("s"):
+                        prefix_terminal = {"s": baseline["s"]}
+                    for right in _RIGHTS:
+                        if prefix_terminal.get(right) not in {
+                            "captured",
+                            "denied",
+                            "late",
+                            "window_elapsed",
+                        }:
+                            prefix_terminal[right] = "window_elapsed"
+                            prefix_terminal[f"{right}_k"] = (
+                                f"quiet:m1c:d1:{baseline['s']}:{event.instrument_id}:{right}"
+                            )
+                    d1_terminal[event.instrument_id] = prefix_terminal
+                    if context is not None and context.get("s") == baseline.get("s"):
+                        selected.update(
+                            cast(str, capture["i"])
+                            for right in _RIGHTS
+                            if (capture := _mapping(context.get(right)))
+                            and isinstance(capture.get("i"), str)
                         )
-                        group_o = build_front_options_context(
-                            call_capture=call,
-                            put_capture=put,
-                            prior_close=cast(float, _number(baseline["c"])),
-                            realised_volatility_20d=cast(float, _number(baseline["v"])),
-                        )
-                        score = score_m1c(
-                            symbol=event.instrument_id,
-                            checkpoint=checkpoint_value,
-                            group_o=group_o,
-                            group_i=group_i,
-                        )
-                        probability = cast(float, score["probability"])
-                        feature_hash = cast(str, score["feature_hash"])
-                        model_hash = cast(str, score["model_hash"])
-                    except ValueError:
-                        reason = "m1c_inputs_invalid"
-            as_of = max(event.event_at_us, event.received_at_us)
+                    if _number(baseline.get("v")) is None:
+                        reason = "realised_volatility_20d_not_ready"
+                    elif context is None or context.get("s") != baseline.get("s"):
+                        reason = "prior_session_option_pair_missing"
+                    else:
+                        call = _mapping(context.get("call"))
+                        put = _mapping(context.get("put"))
+                        if not call or not put:
+                            reason = "prior_session_option_pair_incomplete"
+                        else:
+                            try:
+                                group_i = build_group_i_for_symbol(
+                                    event.payload,
+                                    symbol=event.instrument_id,
+                                    checkpoint=checkpoint_value,
+                                )
+                                group_o = build_front_options_context(
+                                    call_capture=call,
+                                    put_capture=put,
+                                    prior_close=cast(float, _number(baseline["c"])),
+                                    realised_volatility_20d=cast(float, _number(baseline["v"])),
+                                )
+                                score = score_m1c(
+                                    symbol=event.instrument_id,
+                                    checkpoint=checkpoint_value,
+                                    group_o=group_o,
+                                    group_i=group_i,
+                                )
+                                probability = cast(float, score["probability"])
+                                feature_hash = cast(str, score["feature_hash"])
+                                model_hash = cast(str, score["model_hash"])
+                            except ValueError:
+                                reason = "m1c_inputs_invalid"
             if reason is not None or probability is None:
                 lineage = _lineage(batch, selected)
                 if lineage:
+                    evidence: dict[str, JsonValue] = {}
+                    if (
+                        baseline is not None
+                        and isinstance(baseline.get("i"), str)
+                        and isinstance(baseline.get("s"), str)
+                        and cutoff_at_us is not None
+                    ):
+                        evidence = {
+                            "baseline_event_id": cast(str, baseline["i"]),
+                            "baseline_session": cast(str, baseline["s"]),
+                            **_d1_terminal_payload(
+                                symbol=event.instrument_id,
+                                session=cast(str, baseline["s"]),
+                                cutoff_at_us=cutoff_at_us,
+                                cohort_available_at_us=as_of,
+                                terminal=prefix_terminal,
+                            ),
+                        }
                     outputs.append(
                         Observation(
                             subject_instrument_id=event.instrument_id,
@@ -891,6 +1290,7 @@ class M1CQuietStateOptionsV0:
                                 reason=reason or "m1c_score_unavailable",
                                 session=prefix_session_value,
                                 checkpoint=checkpoint_value,
+                                **evidence,
                             ),
                         )
                     )
@@ -957,15 +1357,17 @@ class M1CQuietStateOptionsV0:
             )
             output_lineages.append(lineage)
 
+        pending, active, stage_outputs, stage_lineages, stage_interests = _advance_episode(
+            batch=batch,
+            pending=pending,
+            active=active,
+            existing_interest_count=len(interests),
+        )
+        outputs.extend(stage_outputs)
+        output_lineages.extend(stage_lineages)
+        interests.extend(stage_interests)
+
         if candidates:
-            candidates.sort(
-                key=lambda item: (
-                    cast(float, item["p"]),
-                    cast(int, item["t"]),
-                    cast(str, item["y"]),
-                    cast(str, item["e"]),
-                )
-            )
             if pending or active:
                 selected_candidate = None
             else:
@@ -998,209 +1400,6 @@ class M1CQuietStateOptionsV0:
                     )
                     output_lineages.append(lineage)
 
-        if pending and not active:
-            trigger = _integer(pending.get("t"))
-            deadline = _integer(pending.get("x"))
-            pending_symbol_value = pending.get("y")
-            if (
-                trigger is not None
-                and deadline is not None
-                and isinstance(pending_symbol_value, str)
-            ):
-                pending_symbol = pending_symbol_value
-                quote_candidates = tuple(
-                    (event, _valid_quote(event, after_us=trigger, before_us=deadline))
-                    for event in batch.events
-                    if event.instrument_id == pending_symbol
-                )
-                valid = tuple(
-                    (event, price) for event, price in quote_candidates if price is not None
-                )
-                if valid:
-                    quote, reference = min(
-                        valid,
-                        key=lambda item: (
-                            max(item[0].event_at_us, item[0].received_at_us),
-                            item[0].event_id,
-                        ),
-                    )
-                    if len(interests) <= 10:
-                        entry = _entry_interests(
-                            episode=pending,
-                            quote=quote,
-                            reference_price=reference,
-                        )
-                        interests.extend(entry)
-                        active = {
-                            **pending,
-                            "g": "entry",
-                            "q": quote.event_id,
-                            "r": reference,
-                            "a": max(quote.event_at_us, quote.received_at_us),
-                            "k": tuple(item.interest_key for item in entry),
-                            "z": {},
-                        }
-                        pending = {}
-                    else:
-                        lineage = _lineage(
-                            batch,
-                            {cast(str, pending["i"]), quote.event_id},
-                        )
-                        if lineage:
-                            outputs.append(
-                                Observation(
-                                    subject_instrument_id=pending_symbol,
-                                    as_of_at_us=max(quote.event_at_us, quote.received_at_us),
-                                    payload=_base_payload(
-                                        status="incomplete",
-                                        reason="complete_panel_capacity_unavailable",
-                                        quiet_episode_id=cast(str, pending["e"]),
-                                    ),
-                                )
-                            )
-                            output_lineages.append(lineage)
-                        pending = {}
-                elif batch.causal_through_at_us >= deadline:
-                    lineage = _lineage(batch, {cast(str, pending["i"])})
-                    if lineage:
-                        outputs.append(
-                            Observation(
-                                subject_instrument_id=pending_symbol,
-                                as_of_at_us=deadline,
-                                payload=_base_payload(
-                                    status="incomplete",
-                                    reason="underlying_reference_quote_unavailable",
-                                    quiet_episode_id=cast(str, pending["e"]),
-                                ),
-                            )
-                        )
-                        output_lineages.append(lineage)
-                    pending = {}
-
-        if active.get("g") == "entry":
-            expected = active.get("k")
-            terminal = _mapping(active.get("u"))
-            captures = _mapping(active.get("z"))
-            deadline = _integer(active.get("x"))
-            panel_reason: str | None = None
-            denied = tuple(
-                key
-                for key, value in terminal.items()
-                if isinstance(key, str)
-                and isinstance(value, Mapping)
-                and value.get("status") == "denied"
-            )
-            if denied:
-                panel_reason = "option_panel_discovery_denied"
-            elif isinstance(expected, list | tuple) and len(captures) == len(expected) == 54:
-                contracts, panel_reason = _panel_contracts(active)
-                if panel_reason is None:
-                    panel_outputs, panel_lineages, stream_interests, stream_state = _complete_panel(
-                        batch=batch,
-                        active=active,
-                        contracts=contracts,
-                    )
-                    if len(interests) + len(stream_interests) > 64:
-                        panel_reason = "complete_panel_capacity_unavailable"
-                    else:
-                        outputs.extend(panel_outputs)
-                        output_lineages.extend(panel_lineages)
-                        interests.extend(stream_interests)
-                        active = stream_state if stream_interests else {}
-            elif deadline is not None and batch.causal_through_at_us >= deadline:
-                panel_reason = "option_panel_capture_missing"
-            if panel_reason is not None:
-                lineage = _panel_lineage(batch, active)
-                if lineage:
-                    outputs.append(
-                        Observation(
-                            subject_instrument_id=cast(str, active["y"]),
-                            as_of_at_us=min(
-                                batch.causal_through_at_us,
-                                cast(int, active["x"]),
-                            ),
-                            payload=_base_payload(
-                                status="incomplete",
-                                reason=panel_reason,
-                                quiet_episode_id=cast(str, active["e"]),
-                                resolved_interest_count=sum(
-                                    1
-                                    for value in terminal.values()
-                                    if isinstance(value, Mapping)
-                                    and value.get("status") == "resolved"
-                                ),
-                                capture_count=len(captures),
-                            ),
-                        )
-                    )
-                    output_lineages.append(lineage)
-                active = {}
-
-        if active.get("g") == "streams":
-            stream_statuses = _mapping(active.get("u"))
-            denied_streams = tuple(
-                _mapping(value)
-                for value in stream_statuses.values()
-                if isinstance(value, Mapping) and value.get("status") == "denied"
-            )
-            if denied_streams and active.get("reported") is not True:
-                lineage = _panel_lineage(batch, active)
-                if lineage:
-                    outputs.append(
-                        Observation(
-                            subject_instrument_id=cast(str, active["y"]),
-                            as_of_at_us=max(
-                                cast(int, active["t"]),
-                                *(cast(int, value["completed"]) for value in denied_streams),
-                            ),
-                            payload=_base_payload(
-                                status="incomplete",
-                                reason="selected_leg_stream_denied",
-                                quiet_episode_id=cast(str, active["e"]),
-                                denial_reason_codes=tuple(
-                                    sorted(
-                                        {
-                                            cast(str, value["reason"])
-                                            for value in denied_streams
-                                            if isinstance(value.get("reason"), str)
-                                        }
-                                    )
-                                ),
-                            ),
-                        )
-                    )
-                    output_lineages.append(lineage)
-                active["reported"] = True
-            stream_deadline = _integer(active.get("x"))
-            if stream_deadline is not None and batch.causal_through_at_us >= stream_deadline:
-                expected_streams = active.get("k")
-                expected_count = (
-                    len(expected_streams) if isinstance(expected_streams, list | tuple) else 0
-                )
-                resolved_count = sum(
-                    1
-                    for value in stream_statuses.values()
-                    if isinstance(value, Mapping) and value.get("status") == "resolved"
-                )
-                if resolved_count != expected_count and active.get("reported") is not True:
-                    lineage = _panel_lineage(batch, active)
-                    if lineage:
-                        outputs.append(
-                            Observation(
-                                subject_instrument_id=cast(str, active["y"]),
-                                as_of_at_us=stream_deadline,
-                                payload=_base_payload(
-                                    status="incomplete",
-                                    reason="selected_leg_stream_window_incomplete",
-                                    quiet_episode_id=cast(str, active["e"]),
-                                    resolved_stream_count=resolved_count,
-                                    expected_stream_count=expected_count,
-                                ),
-                            )
-                        )
-                        output_lineages.append(lineage)
-                active = {}
-
         retained_values: set[str] = set()
         for item in baselines.values():
             if isinstance(item.get("i"), str):
@@ -1217,7 +1416,7 @@ class M1CQuietStateOptionsV0:
             proof_ids = item.get("d")
             if isinstance(proof_ids, list | tuple):
                 retained_values.update(value for value in proof_ids if isinstance(value, str))
-        if active.get("g") == "entry":
+        if active.get("g") in {"entry", "streams"}:
             for raw_capture in _mapping(active.get("z")).values():
                 capture = _mapping(raw_capture)
                 if isinstance(capture.get("event_id"), str):
@@ -1226,7 +1425,7 @@ class M1CQuietStateOptionsV0:
         latest_state = cast(
             JsonValue,
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "baselines": baselines,
                 "d1_context": d1_context,
                 "d1_terminal": d1_terminal,

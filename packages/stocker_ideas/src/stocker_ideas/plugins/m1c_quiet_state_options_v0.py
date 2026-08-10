@@ -219,6 +219,15 @@ def _first_cutoff_event(batch: IdeaBatch, cutoff_at_us: int) -> MarketEvent | No
     return next((event for event in batch.events if _available_at(event) >= cutoff_at_us), None)
 
 
+def _events_before_cutoff(batch: IdeaBatch, cutoff_at_us: int) -> tuple[MarketEvent, ...]:
+    output: list[MarketEvent] = []
+    for event in batch.events:
+        if _available_at(event) >= cutoff_at_us:
+            break
+        output.append(event)
+    return tuple(output)
+
+
 def _terminal_attribution(
     statuses: Mapping[str, object],
     expected: tuple[str, ...],
@@ -262,11 +271,13 @@ def _d1_terminal_payload(
         if _integer(terminal.get(f"{right}_completed")) is not None
     }
     observed = set(statuses.values())
-    if "denied" in observed:
+    if len(observed) > 1:
+        basis = "mixed_terminal_option_evidence"
+    elif observed == {"denied"}:
         basis = "explicit_discovery_denial"
-    elif "late" in observed:
+    elif observed == {"late"}:
         basis = "late_capture"
-    elif "window_elapsed" in observed:
+    elif observed == {"window_elapsed"}:
         basis = "causal_window_elapsed_without_capture"
     else:
         basis = "captured_evidence_invalid"
@@ -610,15 +621,17 @@ def _advance_episode(
     outputs: list[IdeaOutput] = []
     lineages: list[tuple[str, ...]] = []
     interests: list[MarketDataInterest] = []
+    initial_active_stage = active.get("g")
+    started_pending = bool(pending and not active)
 
-    if pending and not active:
+    if started_pending:
         trigger = _integer(pending.get("t"))
         deadline = _integer(pending.get("x"))
         symbol_value = pending.get("y")
         if trigger is not None and deadline is not None and isinstance(symbol_value, str):
             valid = tuple(
                 (event, price)
-                for event in batch.events
+                for event in _events_before_cutoff(batch, deadline)
                 if event.instrument_id == symbol_value
                 and (price := _valid_quote(event, after_us=trigger, before_us=deadline)) is not None
             )
@@ -687,7 +700,7 @@ def _advance_episode(
                     lineages.append(lineage)
                 pending = {}
 
-    if active.get("g") == "entry":
+    if initial_active_stage == "entry" and active.get("g") == "entry":
         expected_value = active.get("k")
         expected = (
             tuple(key for key in expected_value if isinstance(key, str))
@@ -767,7 +780,7 @@ def _advance_episode(
                 lineages.append(lineage)
             active = {}
 
-    if active.get("g") == "streams":
+    if initial_active_stage == "streams" and active.get("g") == "streams":
         deadline = _integer(active.get("x"))
         cutoff_event = None if deadline is None else _first_cutoff_event(batch, deadline)
         if deadline is not None and cutoff_event is not None:
@@ -871,7 +884,126 @@ class M1CQuietStateOptionsV0:
     def select_input_prefix(self, batch: IdeaBatch, state: JsonValue) -> int:
         if batch.continuation_request is not None or not batch.events:
             raise ValueError("Quiet input-prefix selection requires an ordinary batch")
+        prior = _mapping(state)
+        pending = _mapping(prior.get("pending"))
+        active = _mapping(prior.get("active"))
+        pending_trigger = _integer(pending.get("t"))
+        pending_deadline = _integer(pending.get("x"))
+        pending_symbol = pending.get("y")
+        active_deadline = _integer(active.get("x"))
+        active_stage = active.get("g")
+        active_statuses = _mapping(active.get("u"))
+        active_proofs = _mapping(active.get("z"))
+        expected_value = active.get("k")
+        expected_keys = (
+            {key for key in expected_value if isinstance(key, str)}
+            if isinstance(expected_value, list | tuple)
+            else set()
+        )
+        active_episode = active.get("e")
+        terminal_receipt_at: int | None = None
+        for receipt in batch.discovery_receipts:
+            if active_deadline is None or receipt.completed_at_us >= active_deadline:
+                continue
+            if active_stage == "entry":
+                parts = _entry_interest_parts(receipt.interest_key)
+                if (
+                    parts is None
+                    or parts[0] != active_episode
+                    or receipt.interest_key not in expected_keys
+                ):
+                    continue
+                if receipt.status == "denied":
+                    terminal_receipt_at = (
+                        receipt.completed_at_us
+                        if terminal_receipt_at is None
+                        else min(terminal_receipt_at, receipt.completed_at_us)
+                    )
+                elif receipt.status == "resolved" and isinstance(receipt.instrument_id, str):
+                    active_statuses.setdefault(
+                        receipt.interest_key,
+                        {
+                            "status": "resolved",
+                            "instrument_id": receipt.instrument_id,
+                            "completed": receipt.completed_at_us,
+                        },
+                    )
+            elif active_stage == "streams":
+                parts = _stream_interest_parts(receipt.interest_key)
+                expected_instrument = _mapping(active.get("m")).get(receipt.interest_key)
+                if (
+                    parts is not None
+                    and parts[0] == active_episode
+                    and receipt.interest_key in expected_keys
+                    and receipt.status == "resolved"
+                    and receipt.instrument_id == expected_instrument
+                ):
+                    active_statuses.setdefault(
+                        receipt.interest_key,
+                        {
+                            "status": "resolved",
+                            "completed": receipt.completed_at_us,
+                        },
+                    )
+        missing_entry_instruments = {
+            str(status["instrument_id"]): cast(int, status["completed"])
+            for key, value in active_statuses.items()
+            if key not in active_proofs
+            and (status := _mapping(value)).get("status") == "resolved"
+            and isinstance(status.get("instrument_id"), str)
+            and _integer(status.get("completed")) is not None
+        }
+        missing_stream_instruments = {
+            str(instrument_id): cast(int, status["completed"])
+            for key, instrument_id in _mapping(active.get("m")).items()
+            if key not in active_proofs
+            and (status := _mapping(active_statuses.get(key))).get("status") == "resolved"
+            and _integer(status.get("completed")) is not None
+            and isinstance(instrument_id, str)
+        }
         for index, event in enumerate(batch.events):
+            if (
+                pending_trigger is not None
+                and pending_deadline is not None
+                and isinstance(pending_symbol, str)
+                and (
+                    (
+                        event.instrument_id == pending_symbol
+                        and _valid_quote(
+                            event,
+                            after_us=pending_trigger,
+                            before_us=pending_deadline,
+                        )
+                        is not None
+                    )
+                    or _available_at(event) >= pending_deadline
+                )
+            ):
+                return index + 1
+            if active_deadline is not None and _available_at(event) >= active_deadline:
+                return index + 1
+            if terminal_receipt_at is not None and _available_at(event) >= terminal_receipt_at:
+                return index + 1
+            if (
+                active_stage == "entry"
+                and event.event_kind == "option_snapshot_capture"
+                and event.instrument_id in missing_entry_instruments
+                and _available_at(event) >= missing_entry_instruments[event.instrument_id]
+            ):
+                return index + 1
+            if (
+                active_stage == "streams"
+                and event.event_kind == "quote"
+                and event.instrument_id in missing_stream_instruments
+                and active_deadline is not None
+                and _valid_quote(
+                    event,
+                    after_us=missing_stream_instruments[event.instrument_id],
+                    before_us=active_deadline,
+                )
+                is not None
+            ):
+                return index + 1
             if event.event_kind == "bar_5m_session_prefix" and event.instrument_id in COHORT:
                 return index + 1
         return len(batch.events)
@@ -913,26 +1045,30 @@ class M1CQuietStateOptionsV0:
             parts = _d1_interest_parts(receipt.interest_key)
             if parts is not None:
                 session, symbol, right = parts
-                terminal = d1_terminal.get(symbol)
-                if terminal is None or str(terminal.get("s", "")) < session:
-                    terminal = {"s": session}
-                if terminal.get("s") == session and terminal.get(right) not in {
-                    "captured",
-                    "denied",
-                    "late",
-                    "window_elapsed",
-                }:
-                    terminal[right] = receipt.status
-                    terminal[f"{right}_k"] = receipt.interest_key
-                    terminal[f"{right}_completed"] = receipt.completed_at_us
-                    if receipt.reason_code is not None:
-                        terminal[f"{right}_r"] = receipt.reason_code
-                    d1_terminal[symbol] = terminal
+                d1_cutoff = _integer(_mapping(baselines.get(symbol)).get("x"))
+                if d1_cutoff is None or receipt.completed_at_us < d1_cutoff:
+                    terminal = d1_terminal.get(symbol)
+                    if terminal is None or str(terminal.get("s", "")) < session:
+                        terminal = {"s": session}
+                    if terminal.get("s") == session and terminal.get(right) not in {
+                        "captured",
+                        "denied",
+                        "late",
+                        "window_elapsed",
+                    }:
+                        terminal[right] = receipt.status
+                        terminal[f"{right}_k"] = receipt.interest_key
+                        terminal[f"{right}_completed"] = receipt.completed_at_us
+                        if receipt.reason_code is not None:
+                            terminal[f"{right}_r"] = receipt.reason_code
+                        d1_terminal[symbol] = terminal
             entry_parts = _entry_interest_parts(receipt.interest_key)
             if (
                 entry_parts is not None
                 and active.get("g") == "entry"
                 and entry_parts[0] == active.get("e")
+                and (entry_deadline := _integer(active.get("x"))) is not None
+                and receipt.completed_at_us < entry_deadline
             ):
                 expected = active.get("k")
                 if isinstance(expected, list | tuple) and receipt.interest_key in expected:
@@ -955,6 +1091,8 @@ class M1CQuietStateOptionsV0:
                 stream_parts is not None
                 and active.get("g") == "streams"
                 and stream_parts[0] == active.get("e")
+                and (stream_deadline := _integer(active.get("x"))) is not None
+                and receipt.completed_at_us < stream_deadline
             ):
                 expected_streams = active.get("k")
                 if (
@@ -979,6 +1117,15 @@ class M1CQuietStateOptionsV0:
             if receipt.status == "resolved" and receipt.instrument_id is not None:
                 receipts_by_instrument.setdefault(receipt.instrument_id, []).append(receipt)
 
+        initial_active_deadline = _integer(active.get("x"))
+        active_evidence_event_ids = {
+            event.event_id
+            for event in (
+                batch.events
+                if initial_active_deadline is None
+                else _events_before_cutoff(batch, initial_active_deadline)
+            )
+        }
         for event in batch.events:
             if event.event_kind == "session_volume_baseline" and event.instrument_id in COHORT:
                 baseline_session_value = event.payload.get("session")
@@ -1043,6 +1190,8 @@ class M1CQuietStateOptionsV0:
                 continue
 
             if event.event_kind == "quote" and active.get("g") == "streams":
+                if event.event_id not in active_evidence_event_ids:
+                    continue
                 expected_instruments = _mapping(active.get("m"))
                 stream_statuses = _mapping(active.get("u"))
                 quote_proofs = _mapping(active.get("z"))
@@ -1072,7 +1221,11 @@ class M1CQuietStateOptionsV0:
                 continue
 
             if event.event_kind == "option_snapshot_capture":
-                entry_terminal = _mapping(active.get("u")) if active.get("g") == "entry" else {}
+                entry_terminal = (
+                    _mapping(active.get("u"))
+                    if active.get("g") == "entry" and event.event_id in active_evidence_event_ids
+                    else {}
+                )
                 entry_matches = tuple(
                     (key, _mapping(value))
                     for key, value in entry_terminal.items()
@@ -1143,6 +1296,7 @@ class M1CQuietStateOptionsV0:
                     terminal[right] = "late"
                     terminal[f"{right}_k"] = receipt.interest_key
                     terminal[f"{right}_a"] = available
+                    terminal[f"{right}_i"] = event.event_id
                     d1_terminal[symbol] = terminal
                     continue
                 context = d1_context.get(symbol)
@@ -1220,6 +1374,11 @@ class M1CQuietStateOptionsV0:
                                 f"quiet:m1c:d1:{baseline['s']}:{event.instrument_id}:{right}"
                             )
                     d1_terminal[event.instrument_id] = prefix_terminal
+                    selected.update(
+                        cast(str, prefix_terminal[f"{right}_i"])
+                        for right in _RIGHTS
+                        if isinstance(prefix_terminal.get(f"{right}_i"), str)
+                    )
                     if context is not None and context.get("s") == baseline.get("s"):
                         selected.update(
                             cast(str, capture["i"])
@@ -1363,8 +1522,8 @@ class M1CQuietStateOptionsV0:
             active=active,
             existing_interest_count=len(interests),
         )
-        outputs.extend(stage_outputs)
-        output_lineages.extend(stage_lineages)
+        outputs[:0] = stage_outputs
+        output_lineages[:0] = stage_lineages
         interests.extend(stage_interests)
 
         if candidates:
@@ -1409,6 +1568,10 @@ class M1CQuietStateOptionsV0:
                 capture = _mapping(item.get(right))
                 if isinstance(capture.get("i"), str):
                     retained_values.add(cast(str, capture["i"]))
+        for item in d1_terminal.values():
+            for right in _RIGHTS:
+                if isinstance(item.get(f"{right}_i"), str):
+                    retained_values.add(cast(str, item[f"{right}_i"]))
         for item in (pending, active):
             for name in ("i", "q"):
                 if isinstance(item.get(name), str):

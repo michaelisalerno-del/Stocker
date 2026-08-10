@@ -11,7 +11,7 @@ from typing import cast
 import pytest
 
 import stocker_ideas.plugins.m1c_quiet_state_options_v0 as quiet_plugin
-from stocker_ideas.plugins.frozen_m1c_v0 import COHORT
+from stocker_ideas.plugins.frozen_m1c_v0 import CAUSAL_GROUP_I_FEATURES, COHORT, score_m1c
 from stocker_ideas.plugins.m1c_quiet_state_options_v0 import (
     PARAMETERS,
     M1CQuietStateOptionsV0,
@@ -22,6 +22,7 @@ from stocker_ideas.plugins.m1c_quiet_state_v0 import (
     classify_quiet_state,
     select_defined_risk_structures,
 )
+from stocker_research.legacy_prospective.frozen_m1c import FrozenM1CRuntime
 from stocker_runtime.domain import (
     IdeaOutput,
     JsonValue,
@@ -500,6 +501,162 @@ def test_quiet_constants_remain_bound_to_the_frozen_research_contracts() -> None
     assert replay["defined_risk_cases"] == 50
 
 
+def test_frozen_replay_exercises_the_new_quiet_classifier_and_structure_selector() -> None:
+    root = Path("research/prospective/frozen-m1c-microstructure-recorder-v0")
+    replay = json.loads((root / "quiet_state_replay_fixture.json").read_text())
+    artifact_root = Path(
+        "research/directional-readiness/"
+        "20260726-stock-local-directional-archetypes-v0/artifacts/primary"
+    )
+    runtime = FrozenM1CRuntime.from_artifacts(
+        feature_manifest_path=artifact_root / "causal_movement_feature_manifest.json",
+        threshold_path=artifact_root / "causal_movement_threshold.json",
+    )
+
+    def replay_once() -> dict[str, JsonValue]:
+        predictions: list[dict[str, JsonValue]] = []
+        prior_probability: dict[tuple[str, str], float] = {}
+        prior_episode_at: dict[tuple[str, str], int] = {}
+        for fixture_row in replay["prediction_inputs"]:
+            group_o: dict[str, object] = {}
+            group_i: dict[str, object] = {}
+            seed = int(fixture_row["feature_offset_seed"])
+            missing = fixture_row["missing_feature_index"]
+            for index, name in enumerate(runtime.numeric_features):
+                if name.startswith("checkpoint_"):
+                    continue
+                value: object = (
+                    float(runtime.numeric_medians[index])
+                    + (((seed + index) % 9) - 4) * float(runtime.numeric_scales[index]) * 0.025
+                )
+                if missing == index:
+                    value = None
+                target = group_i if name in CAUSAL_GROUP_I_FEATURES else group_o
+                target[name] = value
+            symbol = str(fixture_row["symbol"])
+            session = str(fixture_row["session"])
+            checkpoint = int(fixture_row["checkpoint"])
+            legacy = runtime.score(
+                symbol=symbol,
+                checkpoint=checkpoint,
+                group_o_context=group_o,
+                causal_group_i=group_i,
+            )
+            current = score_m1c(
+                symbol=symbol,
+                checkpoint=checkpoint,
+                group_o=group_o,
+                group_i=group_i,
+            )
+            probability = cast(float, current["probability"])
+            assert probability == pytest.approx(legacy.probability, abs=1e-15)
+            key = (session, symbol)
+            at_us = int(
+                datetime.fromisoformat(str(fixture_row["timestamp_utc"])).timestamp() * 1_000_000
+            )
+            previous_at = prior_episode_at.get(key)
+            quiet = classify_quiet_state(
+                probability=probability,
+                previous_probability=prior_probability.get(key),
+                minutes_since_previous_episode=(
+                    None if previous_at is None else (at_us - previous_at) / 60_000_000.0
+                ),
+            )
+            prior_probability[key] = probability
+            if quiet.fresh_episode:
+                prior_episode_at[key] = at_us
+            predictions.append(
+                {
+                    "row": int(fixture_row["row"]),
+                    "probability": probability,
+                    "bottom_5": quiet.bottom_5,
+                    "bottom_10": quiet.bottom_10,
+                    "bottom_20": quiet.bottom_20,
+                    "fresh_episode": quiet.fresh_episode,
+                }
+            )
+
+        option_cases: list[dict[str, JsonValue]] = []
+        for fixture_case in replay["defined_risk_inputs"]:
+            contracts = tuple(
+                OptionPanelContract(
+                    event_id=f"fixture-{fixture_case['case']}-{item['con_id']}",
+                    interest_key=f"fixture:{fixture_case['case']}:{item['con_id']}",
+                    instrument_id=str(item["con_id"]),
+                    bucket="3_5_dte",
+                    offset=int(float(item["strike"]) - 100.0),
+                    right="call" if item["right"] == "C" else "put",
+                    expiry="20260731",
+                    strike=float(item["strike"]),
+                    multiplier="100",
+                    bid=float(item["entry_bid"]),
+                    ask=float(item["entry_ask"]),
+                    delta=float(item["delta"]),
+                )
+                for item in fixture_case["contracts"]
+            )
+            attempts = select_defined_risk_structures(
+                contracts=contracts,
+                underlying_reference_price=float(fixture_case["underlying_entry"]),
+            )
+            expected = (
+                (
+                    ("short", 100.0, "call"),
+                    ("short", 100.0, "put"),
+                    ("long", 102.0, "call"),
+                    ("long", 98.0, "put"),
+                ),
+                (
+                    ("short", 102.0, "call"),
+                    ("short", 98.0, "put"),
+                    ("long", 105.0, "call"),
+                    ("long", 95.0, "put"),
+                ),
+            )
+            assert (
+                tuple(
+                    tuple(
+                        (leg.side, leg.contract.strike, leg.contract.right) for leg in attempt.legs
+                    )
+                    for attempt in attempts[:2]
+                )
+                == expected
+            )
+            option_cases.append(
+                {
+                    "case": int(fixture_case["case"]),
+                    "attempts": [
+                        {
+                            "structure": attempt.structure_type,
+                            "available": attempt.available,
+                            "reason": attempt.reason,
+                            "opening_credit": attempt.opening_credit,
+                            "legs": [
+                                {
+                                    "side": leg.side,
+                                    "strike": leg.contract.strike,
+                                    "right": leg.contract.right,
+                                }
+                                for leg in attempt.legs
+                            ],
+                        }
+                        for attempt in attempts
+                    ],
+                }
+            )
+        return {"predictions": predictions, "option_cases": option_cases}
+
+    first = replay_once()
+    second = replay_once()
+    assert first == second
+    assert (
+        hashlib.sha256(
+            json.dumps(first, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        == "5359dacc1bf8e793ee2111fc3595a0f0163155e4546405d7bd9fc9a7caf58d53"
+    )
+
+
 def test_quiet_plugin_starts_through_isolated_reviewed_discovery() -> None:
     module = "stocker_ideas.plugins.m1c_quiet_state_options_v0"
     discovered = discover_plugins(
@@ -664,8 +821,79 @@ def test_d1_denial_and_missing_right_keep_exact_terminal_attribution_and_lineage
     }
     assert payload["denial_reasons"] == {"call": "OPTION_PERMISSION_DENIED"}
     assert payload["cutoff_at_us"] == 1_801_000_000
-    assert payload["terminal_basis"] == "explicit_discovery_denial"
+    assert payload["terminal_basis"] == "mixed_terminal_option_evidence"
     assert evaluated.output_input_event_ids == (("baseline-rgti-denial", "prefix-rgti-denied-d1"),)
+
+
+def test_d1_capture_after_cutoff_remains_exactly_attributed_as_late() -> None:
+    plugin = M1CQuietStateOptionsV0()
+    baseline = _event(
+        "baseline-rgti-late",
+        "RGTI",
+        "session_volume_baseline",
+        1_000_000,
+        {
+            "session": "2026-08-07",
+            "complete_session_count": 21,
+            "session_closes": [39.5, 40.0],
+            "realised_volatility_20d": 0.58,
+        },
+    )
+    planned = plugin.evaluate(_ordinary_batch((baseline,)), {})
+    cutoff = 1_801_000_000
+    late_receipt = DiscoveryReceipt(
+        receipt_id="d1-call-late-receipt",
+        interest_id="d1-call-late-interest",
+        interest_key="quiet:m1c:d1:2026-08-07:RGTI:call",
+        instance_id="quiet-1",
+        status="resolved",
+        instrument_id="RGTI-d1-call-late",
+        expiry="20260821",
+        strike=40.0,
+        option_right="call",
+        multiplier="100",
+        candidates_inspected=20,
+        completed_at_us=cutoff + 1,
+    )
+    late_capture = _event(
+        "capture-rgti-call-late",
+        "RGTI-d1-call-late",
+        "option_snapshot_capture",
+        cutoff + 1,
+        {
+            "source_completeness": "complete",
+            "bid": 1.0,
+            "ask": 1.1,
+            "model_implied_volatility": 0.5,
+        },
+    )
+    prefix = _event(
+        "prefix-rgti-after-late-d1",
+        "RGTI",
+        "bar_5m_session_prefix",
+        cutoff + 2,
+        _prefix_payload(symbol="RGTI", session="2026-08-10"),
+    )
+
+    captured = plugin.evaluate(
+        _ordinary_batch(
+            (late_capture,),
+            retained=planned.retained_input_event_ids,
+            receipts=(late_receipt,),
+        ),
+        planned.state,
+    )
+    assert late_capture.event_id in captured.retained_input_event_ids
+    evaluated = M1CQuietStateOptionsV0().evaluate(
+        _ordinary_batch((prefix,), retained=captured.retained_input_event_ids),
+        captured.state,
+    )
+
+    payload = evaluated.outputs[0].payload
+    assert payload["terminal_statuses"] == {"call": "late", "put": "window_elapsed"}
+    assert payload["terminal_basis"] == "mixed_terminal_option_evidence"
+    assert payload["evidence_available_at_us"] == {"call": cutoff + 1}
+    assert late_capture.event_id in evaluated.output_input_event_ids[0]
 
 
 def test_quiet_crossing_waits_for_a_quote_then_requests_the_exact_54_contract_panel() -> None:
@@ -963,6 +1191,91 @@ def test_entry_panel_timeout_uses_exact_cutoff_event_and_stored_score_lineage() 
     assert timed_out.state["active"] == {}
 
 
+def test_entry_receipt_after_cutoff_cannot_override_the_terminal_evidence() -> None:
+    _plugin, planned, _prefix, _quote = _planned_entry_panel()
+    planned_state = cast(Mapping[str, object], planned.state)
+    active = cast(Mapping[str, object], planned_state["active"])
+    deadline = cast(int, active["x"])
+    key = planned.interests[0].interest_key
+    late_denial = DiscoveryReceipt(
+        receipt_id="entry-denial-after-cutoff",
+        interest_id="entry-interest-after-cutoff",
+        interest_key=key,
+        instance_id="quiet-1",
+        status="denied",
+        reason_code="line_capacity",
+        candidates_inspected=0,
+        completed_at_us=deadline + 1,
+    )
+    cutoff = _event(
+        "entry-receipt-cutoff",
+        "RGTI",
+        "quote",
+        deadline,
+        {"bid": 40.0, "ask": 40.2},
+    )
+    after = _event(
+        "entry-receipt-after-cutoff",
+        "RGTI",
+        "quote",
+        deadline + 1,
+        {"bid": 40.0, "ask": 40.2},
+    )
+
+    combined = M1CQuietStateOptionsV0().evaluate(
+        _ordinary_batch(
+            (cutoff, after),
+            retained=planned.retained_input_event_ids,
+            receipts=(late_denial,),
+        ),
+        planned.state,
+    )
+    split = M1CQuietStateOptionsV0().evaluate(
+        _ordinary_batch((cutoff,), retained=planned.retained_input_event_ids),
+        planned.state,
+    )
+
+    assert combined.outputs[0].payload == split.outputs[0].payload
+    assert combined.outputs[0].payload["reason"] == "option_panel_capture_missing"
+    assert combined.outputs[0].payload["interest_statuses"][key] == {
+        "status": "missing",
+        "reason": None,
+        "completed_at_us": None,
+    }
+    assert after.event_id not in combined.output_input_event_ids[0]
+
+
+def test_entry_captures_after_the_cutoff_event_cannot_be_admitted_by_backdating() -> None:
+    _plugin, planned, _prefix, _quote = _planned_entry_panel()
+    receipts, captures = _entry_panel_evidence(planned)
+    planned_state = cast(Mapping[str, object], planned.state)
+    active = cast(Mapping[str, object], planned_state["active"])
+    deadline = cast(int, active["x"])
+    cutoff = _event(
+        "entry-cutoff-before-backdated-captures",
+        "RGTI",
+        "quote",
+        deadline,
+        {"bid": 40.0, "ask": 40.2},
+    )
+
+    rejected = M1CQuietStateOptionsV0().evaluate(
+        _ordinary_batch(
+            (cutoff, *captures),
+            retained=planned.retained_input_event_ids,
+            receipts=receipts,
+        ),
+        planned.state,
+    )
+
+    assert len(rejected.outputs) == 1
+    assert rejected.outputs[0].payload["reason"] == "option_panel_capture_missing"
+    assert rejected.outputs[0].payload["capture_count"] == 0
+    assert rejected.outputs[0].payload["cutoff_crossing_event_id"] == cutoff.event_id
+    assert all(output.kind != "proposed_trade" for output in rejected.outputs)
+    assert rejected.state["active"] == {}
+
+
 def test_partial_panel_resumes_on_a_fresh_plugin_instance_without_duplicate_interests() -> None:
     plugin, planned, _prefix, _quote = _planned_entry_panel()
     receipts, captures = _entry_panel_evidence(planned)
@@ -992,6 +1305,75 @@ def test_partial_panel_resumes_on_a_fresh_plugin_instance_without_duplicate_inte
     assert len(completed.outputs) == 21
     assert len(completed.interests) == 24
     assert all(len(lineage) == 59 for lineage in completed.output_input_event_ids)
+
+
+def test_entry_completion_is_committed_before_a_later_stream_cutoff() -> None:
+    plugin, planned, _prefix, _quote = _planned_entry_panel()
+    receipts, captures = _entry_panel_evidence(planned)
+    planned_active = cast(Mapping[str, object], cast(Mapping[str, object], planned.state)["active"])
+    planned_deadline = cast(int, planned_active["x"])
+    planned_cutoff = _event(
+        "entry-normal-delivery-cutoff",
+        "RGTI",
+        "quote",
+        planned_deadline,
+        {"bid": 40.0, "ask": 40.2},
+    )
+    assert (
+        plugin.select_input_prefix(
+            _ordinary_batch(
+                (*captures, planned_cutoff),
+                retained=planned.retained_input_event_ids,
+                receipts=receipts,
+            ),
+            planned.state,
+        )
+        == 1
+    )
+    partial = plugin.evaluate(
+        _ordinary_batch(
+            captures[:53],
+            retained=planned.retained_input_event_ids,
+            receipts=receipts,
+        ),
+        planned.state,
+    )
+    partial_active = cast(Mapping[str, object], cast(Mapping[str, object], partial.state)["active"])
+    deadline = cast(int, partial_active["x"])
+    cutoff = _event(
+        "stream-cutoff-after-final-entry-capture",
+        "RGTI",
+        "quote",
+        deadline,
+        {"bid": 40.0, "ask": 40.2},
+    )
+    fetched = _ordinary_batch(
+        (captures[53], cutoff),
+        retained=partial.retained_input_event_ids,
+        receipts=receipts,
+    )
+
+    assert plugin.select_input_prefix(fetched, partial.state) == 1
+    completed = plugin.evaluate(
+        _ordinary_batch(
+            (captures[53],),
+            retained=partial.retained_input_event_ids,
+            receipts=receipts,
+        ),
+        partial.state,
+    )
+    assert len(completed.outputs) == 21
+    assert len(completed.interests) == 24
+    assert completed.state["active"]["g"] == "streams"
+
+    terminal = M1CQuietStateOptionsV0().evaluate(
+        _ordinary_batch((cutoff,), retained=completed.retained_input_event_ids),
+        completed.state,
+    )
+    assert len(terminal.outputs) == 1
+    assert terminal.outputs[0].payload["reason"] == "selected_leg_stream_window_incomplete"
+    assert terminal.interests == ()
+    assert terminal.state["active"] == {}
 
 
 def test_all_twenty_simultaneous_crossings_service_one_and_record_the_other_nineteen() -> None:
@@ -1141,12 +1523,24 @@ def test_expired_episode_is_terminalized_before_a_later_candidate_independent_of
         _prefix_payload(symbol="RGTI", session="2026-08-10"),
     )
 
-    combined = M1CQuietStateOptionsV0().evaluate(
+    combined_batch = _ordinary_batch(
+        (clock, rgti_prefix),
+        retained=triggered.retained_input_event_ids,
+    )
+    assert M1CQuietStateOptionsV0().select_input_prefix(combined_batch, triggered.state) == 1
+    combined_clock = M1CQuietStateOptionsV0().evaluate(
         _ordinary_batch(
-            (clock, rgti_prefix),
+            (clock,),
             retained=triggered.retained_input_event_ids,
         ),
         triggered.state,
+    )
+    combined = M1CQuietStateOptionsV0().evaluate(
+        _ordinary_batch(
+            (rgti_prefix,),
+            retained=combined_clock.retained_input_event_ids,
+        ),
+        combined_clock.state,
     )
     split_clock = M1CQuietStateOptionsV0().evaluate(
         _ordinary_batch((clock,), retained=triggered.retained_input_event_ids),
@@ -1163,7 +1557,8 @@ def test_expired_episode_is_terminalized_before_a_later_candidate_independent_of
     assert combined.state == split_prefix.state
     assert combined.state["pending"]["y"] == "RGTI"
     combined_payloads = sorted(
-        (output.subject_instrument_id, output.payload.get("reason")) for output in combined.outputs
+        (output.subject_instrument_id, output.payload.get("reason"))
+        for output in (*combined_clock.outputs, *combined.outputs)
     )
     split_payloads = sorted(
         (output.subject_instrument_id, output.payload.get("reason"))
@@ -1172,10 +1567,10 @@ def test_expired_episode_is_terminalized_before_a_later_candidate_independent_of
     assert combined_payloads == split_payloads
     timeout_index = next(
         index
-        for index, output in enumerate(combined.outputs)
+        for index, output in enumerate(combined_clock.outputs)
         if output.payload.get("reason") == "underlying_reference_quote_unavailable"
     )
-    timeout = combined.outputs[timeout_index]
+    timeout = combined_clock.outputs[timeout_index]
     assert timeout.payload["cutoff_at_us"] == cutoff
     assert timeout.payload["cutoff_crossing_event_id"] == clock.event_id
     assert {
@@ -1184,7 +1579,69 @@ def test_expired_episode_is_terminalized_before_a_later_candidate_independent_of
         "capture-AAL-put",
         aal_prefix.event_id,
         clock.event_id,
-    }.issubset(combined.output_input_event_ids[timeout_index])
+    }.issubset(combined_clock.output_input_event_ids[timeout_index])
+
+    cutoff_prefix = _replace_event(
+        rgti_prefix,
+        event_id="prefix-rgti-at-aal-cutoff",
+        event_at_us=cutoff,
+        received_at_us=cutoff,
+    )
+    same_event = M1CQuietStateOptionsV0().evaluate(
+        _ordinary_batch((cutoff_prefix,), retained=triggered.retained_input_event_ids),
+        triggered.state,
+    )
+    assert tuple(output.subject_instrument_id for output in same_event.outputs) == ("AAL", "RGTI")
+    assert same_event.outputs[0].payload["reason"] == "underlying_reference_quote_unavailable"
+    assert same_event.outputs[1].payload.get("reason") is None
+    assert same_event.state["pending"]["y"] == "RGTI"
+
+
+def test_pending_quote_stage_is_committed_before_a_later_cutoff_in_the_same_fetch() -> None:
+    plugin = M1CQuietStateOptionsV0()
+    state, retained = _prime_low_tail_context(plugin)
+    prefix = _event(
+        "prefix-rgti-pending-stage",
+        "RGTI",
+        "bar_5m_session_prefix",
+        2_000_000_000,
+        _prefix_payload(symbol="RGTI", session="2026-08-10"),
+    )
+    triggered = plugin.evaluate(_ordinary_batch((prefix,), retained=retained), state)
+    quote = _event(
+        "quote-before-panel-cutoff",
+        "RGTI",
+        "quote",
+        2_000_000_001,
+        {"bid": 40.0, "ask": 40.2},
+    )
+    cutoff_event = _event(
+        "clock-after-entry-stage",
+        "AAL",
+        "quote",
+        5_600_000_000,
+        {"bid": 20.0, "ask": 20.2},
+    )
+    fetched = _ordinary_batch(
+        (quote, cutoff_event),
+        retained=triggered.retained_input_event_ids,
+    )
+
+    assert plugin.select_input_prefix(fetched, triggered.state) == 1
+    entry = plugin.evaluate(
+        _ordinary_batch((quote,), retained=triggered.retained_input_event_ids),
+        triggered.state,
+    )
+    assert len(entry.interests) == 54
+    assert entry.state["active"]["g"] == "entry"
+
+    timed_out = M1CQuietStateOptionsV0().evaluate(
+        _ordinary_batch((cutoff_event,), retained=entry.retained_input_event_ids),
+        entry.state,
+    )
+    assert timed_out.interests == ()
+    assert timed_out.outputs[0].payload["reason"] == "option_panel_capture_missing"
+    assert timed_out.state["active"] == {}
 
 
 def test_stream_window_completes_only_with_exact_in_window_quote_proof_after_restart() -> None:
@@ -1239,6 +1696,147 @@ def test_stream_window_completes_only_with_exact_in_window_quote_proof_after_res
         terminal.output_input_event_ids[0]
     )
     assert terminal.state["active"] == {}
+
+
+def test_first_stream_quote_proof_is_checkpointed_without_per_tick_boundaries() -> None:
+    plugin, planned, _prefix, _quote = _planned_entry_panel()
+    receipts, captures = _entry_panel_evidence(planned)
+    completed = plugin.evaluate(
+        _ordinary_batch(
+            captures,
+            retained=planned.retained_input_event_ids,
+            receipts=receipts,
+        ),
+        planned.state,
+    )
+    stream_receipts, quotes, deadline = _stream_evidence(completed)
+    receipt_clock = _event(
+        "stream-receipt-clock",
+        "RGTI",
+        "quote",
+        max(receipt.completed_at_us for receipt in stream_receipts) + 1,
+        {"bid": 40.0, "ask": 40.2},
+    )
+    statuses = plugin.evaluate(
+        _ordinary_batch(
+            (receipt_clock,),
+            retained=completed.retained_input_event_ids,
+            receipts=stream_receipts,
+        ),
+        completed.state,
+    )
+    cutoff = _event(
+        "stream-cutoff-after-first-proof",
+        "RGTI",
+        "quote",
+        deadline,
+        {"bid": 40.0, "ask": 40.2},
+    )
+    assert (
+        plugin.select_input_prefix(
+            _ordinary_batch(
+                (quotes[0], cutoff),
+                retained=completed.retained_input_event_ids,
+                receipts=stream_receipts,
+            ),
+            completed.state,
+        )
+        == 1
+    )
+    fetched = _ordinary_batch(
+        (quotes[0], cutoff),
+        retained=statuses.retained_input_event_ids,
+        receipts=stream_receipts,
+    )
+
+    assert plugin.select_input_prefix(fetched, statuses.state) == 1
+    proved = plugin.evaluate(
+        _ordinary_batch(
+            (quotes[0],),
+            retained=statuses.retained_input_event_ids,
+            receipts=stream_receipts,
+        ),
+        statuses.state,
+    )
+    assert len(proved.state["active"]["z"]) == 1
+
+    duplicates = tuple(
+        _replace_event(
+            quotes[0],
+            event_id=f"duplicate-stream-quote-{index}",
+            event_at_us=quotes[0].event_at_us + index + 1,
+            received_at_us=quotes[0].received_at_us + index + 1,
+        )
+        for index in range(5)
+    )
+    duplicate_batch = _ordinary_batch(
+        duplicates,
+        retained=proved.retained_input_event_ids,
+        receipts=stream_receipts,
+    )
+    assert plugin.select_input_prefix(duplicate_batch, proved.state) == len(duplicates)
+
+
+def test_stream_receipt_after_cutoff_cannot_pollute_terminal_attribution() -> None:
+    plugin, planned, _prefix, _quote = _planned_entry_panel()
+    receipts, captures = _entry_panel_evidence(planned)
+    completed = plugin.evaluate(
+        _ordinary_batch(
+            captures,
+            retained=planned.retained_input_event_ids,
+            receipts=receipts,
+        ),
+        planned.state,
+    )
+    completed_active = cast(
+        Mapping[str, object], cast(Mapping[str, object], completed.state)["active"]
+    )
+    deadline = cast(int, completed_active["x"])
+    stream_receipts, _quotes, _deadline = _stream_evidence(completed)
+    key = stream_receipts[0].interest_key
+    late_receipt = DiscoveryReceipt.model_validate(
+        {
+            **stream_receipts[0].model_dump(mode="python"),
+            "receipt_id": "stream-resolved-after-cutoff",
+            "interest_id": "stream-interest-after-cutoff",
+            "completed_at_us": deadline + 1,
+        }
+    )
+    cutoff = _event(
+        "stream-receipt-cutoff",
+        "RGTI",
+        "quote",
+        deadline,
+        {"bid": 40.0, "ask": 40.2},
+    )
+    after = _event(
+        "stream-receipt-after-cutoff-event",
+        "RGTI",
+        "quote",
+        deadline + 1,
+        {"bid": 40.0, "ask": 40.2},
+    )
+
+    combined = plugin.evaluate(
+        _ordinary_batch(
+            (cutoff, after),
+            retained=completed.retained_input_event_ids,
+            receipts=(late_receipt,),
+        ),
+        completed.state,
+    )
+    split = M1CQuietStateOptionsV0().evaluate(
+        _ordinary_batch((cutoff,), retained=completed.retained_input_event_ids),
+        completed.state,
+    )
+
+    assert combined.outputs[0].payload == split.outputs[0].payload
+    assert combined.outputs[0].payload["stream_interest_statuses"][key] == {
+        "status": "missing",
+        "reason": None,
+        "completed_at_us": None,
+    }
+    assert after.event_id not in combined.output_input_event_ids[0]
 
 
 @pytest.mark.parametrize(
@@ -1300,13 +1898,49 @@ def test_stream_window_rejects_receipt_only_or_invalid_quote_evidence(fault: str
     assert len(terminal.outputs) == 1
     assert terminal.outputs[0].payload["status"] == "incomplete"
     assert terminal.outputs[0].payload["reason"] == "selected_leg_stream_window_incomplete"
-    expected = 0 if fault == "missing" else 23
+    expected = 0 if fault in {"missing", "at_cutoff"} else 23
     assert terminal.outputs[0].payload["resolved_stream_count"] == expected
     assert terminal.outputs[0].payload["cutoff_crossing_event_id"] in {
         clock.event_id,
         first_quote.event_id,
     }
     assert terminal.state["active"] == {}
+
+
+def test_stream_quotes_after_the_cutoff_event_cannot_be_admitted_by_backdating() -> None:
+    plugin, planned, _prefix, _quote = _planned_entry_panel()
+    receipts, captures = _entry_panel_evidence(planned)
+    completed = plugin.evaluate(
+        _ordinary_batch(
+            captures,
+            retained=planned.retained_input_event_ids,
+            receipts=receipts,
+        ),
+        planned.state,
+    )
+    stream_receipts, quotes, deadline = _stream_evidence(completed)
+    cutoff = _event(
+        "stream-cutoff-before-backdated-quotes",
+        "RGTI",
+        "quote",
+        deadline,
+        {"bid": 40.0, "ask": 40.2},
+    )
+
+    rejected = M1CQuietStateOptionsV0().evaluate(
+        _ordinary_batch(
+            (cutoff, *quotes),
+            retained=completed.retained_input_event_ids,
+            receipts=stream_receipts,
+        ),
+        completed.state,
+    )
+
+    assert len(rejected.outputs) == 1
+    assert rejected.outputs[0].payload["status"] == "incomplete"
+    assert rejected.outputs[0].payload["resolved_stream_count"] == 0
+    assert rejected.outputs[0].payload["cutoff_crossing_event_id"] == cutoff.event_id
+    assert rejected.state["active"] == {}
 
 
 def test_denied_selected_leg_stream_is_recorded_once_as_incomplete() -> None:

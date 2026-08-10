@@ -3299,6 +3299,59 @@ def test_prompt_dynamic_pacing_status_is_retried_and_resolved(
     recorder.stop(now_us=event_at_us + 1_000_005)
 
 
+def test_dynamic_retry_does_not_resolve_future_status_diagnostics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-future-status.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _DynamicRecorderAdapter()
+    recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
+    first_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+    future_status_at_us = event_at_us + 2_000_000
+    retry_at_us = event_at_us + 1_000_000
+    recorder.market_data_status(
+        MarketDataStatus(
+            kind="pacing",
+            code=420,
+            request_id=first_fence.request_id,
+            message="future-dated pacing rejection",
+            received_at_us=future_status_at_us,
+        )
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE market_data_interests SET next_attempt_at_us=? WHERE bound_subscription_id=?",
+            (retry_at_us, first_fence.subscription_id),
+        )
+
+    recorder.drain(now_us=retry_at_us)
+
+    with connect_v2(database) as connection:
+        status_gap = connection.execute(
+            "SELECT resolved_at_us FROM gaps WHERE reason='IBKR_STATUS_420_PACING'"
+        ).fetchone()
+        status_incident = connection.execute(
+            "SELECT resolved_at_us FROM incidents WHERE code='IBKR_STATUS_420_PACING'"
+        ).fetchone()
+        active_dynamic = connection.execute(
+            "SELECT count(*) FROM subscriptions WHERE request_id>=2000000 AND lifecycle='active'"
+        ).fetchone()[0]
+    assert status_gap["resolved_at_us"] is None
+    assert status_incident["resolved_at_us"] is None
+    assert active_dynamic == 1
+    assert (
+        len([request_id for request_id in adapter.subscribe_attempts if request_id >= 2_000_000])
+        == 2
+    )
+    recorder.stop(now_us=future_status_at_us + 1)
+
+
 @pytest.mark.parametrize(
     ("kind", "code", "affected", "connection_state", "lifecycle", "reason"),
     (

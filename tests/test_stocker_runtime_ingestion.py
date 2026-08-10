@@ -778,7 +778,12 @@ def test_recorder_recovery_backoff_caps_at_sixty_seconds(tmp_path: Path) -> None
             unresolved_during_outage = connection.execute(
                 "SELECT count(*) FROM gaps WHERE resolved_at_us IS NULL"
             ).fetchone()[0]
+            unresolved_incidents_during_outage = connection.execute(
+                "SELECT count(*) FROM incidents WHERE code='IBKR_CONNECT_FAILED' "
+                "AND resolved_at_us IS NULL"
+            ).fetchone()[0]
         assert unresolved_during_outage <= 2 * len(specs)
+        assert unresolved_incidents_during_outage == 1
         attempt_at_us += delay_seconds * 1_000_000
         assert recorder.recover_connection(now_us=attempt_at_us - 1) is False
         assert adapter.connect_calls == calls_after_attempt
@@ -820,8 +825,114 @@ def test_recorder_recovery_backoff_caps_at_sixty_seconds(tmp_path: Path) -> None
             "('IBKR_CONNECT_FAILED','IBKR_DISCONNECT','IBKR_SUBSCRIBE_FAILED',"
             "'RECONNECT_UNCERTAINTY','STREAM_STALE')"
         ).fetchone()[0]
+        unresolved_incidents = connection.execute(
+            "SELECT count(*) FROM incidents WHERE code='IBKR_CONNECT_FAILED' "
+            "AND resolved_at_us IS NULL"
+        ).fetchone()[0]
+        connect_incidents = connection.execute(
+            "SELECT count(*) FROM incidents WHERE code='IBKR_CONNECT_FAILED'"
+        ).fetchone()[0]
     assert unresolved == 0
+    assert unresolved_incidents == 0
+    assert connect_incidents == 1
     recorder.stop(now_us=attempt_at_us + 3)
+
+
+def test_required_subscribe_retries_keep_bounded_incidents_and_resolve_on_success(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "bounded-subscribe-incidents.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData(fail_subscribe={3})
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    assert recorder.recover_connection(now_us=101) is False
+    with connect_v2(database) as connection:
+        during_outage = tuple(
+            connection.execute(
+                "SELECT subscription_id, resolved_at_us FROM incidents "
+                "WHERE code='IBKR_SUBSCRIBE_FAILED' ORDER BY subscription_id"
+            )
+        )
+    assert len(during_outage) == 2
+    assert all(row["resolved_at_us"] is None for row in during_outage)
+
+    adapter.fail_subscribe.clear()
+    assert recorder.recover_connection(now_us=1_000_101) is True
+    with connect_v2(database) as connection:
+        after_recovery = tuple(
+            connection.execute(
+                "SELECT resolved_at_us FROM incidents WHERE code='IBKR_SUBSCRIBE_FAILED'"
+            )
+        )
+    assert len(after_recovery) == 2
+    assert all(row["resolved_at_us"] == 1_000_101 for row in after_recovery)
+    recorder.stop(now_us=1_000_102)
+
+
+def test_reconnect_does_not_resolve_future_transport_gap(tmp_path: Path) -> None:
+    database = tmp_path / "future-transport-gap.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder.disconnected(now_us=300)
+
+    reconnected = recorder.reconnect(now_us=200)
+
+    with connect_v2(database) as connection:
+        future_gaps = tuple(
+            connection.execute(
+                "SELECT gap.resolved_at_us FROM gaps gap JOIN subscriptions subscription "
+                "USING(subscription_id) WHERE gap.reason='IBKR_DISCONNECT' "
+                "AND subscription.connection_generation=1"
+            )
+        )
+        fresh_uncertainty = connection.execute(
+            "SELECT started_at_us, resolved_at_us FROM gaps gap "
+            "JOIN subscriptions subscription USING(subscription_id) "
+            "WHERE gap.reason='RECONNECT_UNCERTAINTY' "
+            "AND subscription.connection_generation=? ORDER BY gap.started_at_us LIMIT 1",
+            (reconnected.connection_generation,),
+        ).fetchone()
+    assert future_gaps
+    assert all(row["resolved_at_us"] is None for row in future_gaps)
+    assert tuple(fresh_uncertainty) == (200, None)
+    recorder.stop(now_us=301)
+
+
+def test_callback_after_clock_catchup_resolves_future_transport_incident(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "future-transport-incident.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData(fail_connect=True)
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=300, instruments=(instrument,), subscriptions=specs)
+    adapter.fail_connect = False
+    reconnected = recorder.reconnect(now_us=200)
+
+    with connect_v2(database) as connection:
+        before = connection.execute(
+            "SELECT opened_at_us, resolved_at_us FROM incidents WHERE code='IBKR_CONNECT_FAILED'"
+        ).fetchone()
+    assert tuple(before) == (300, None)
+
+    recorder.receive(
+        reconnected.fences[0],
+        MarketDataCallback("quote", 301, 301, {"event_at_us": 301, "bid": 1.0}),
+    )
+    assert recorder.drain(now_us=302) == 1
+    with connect_v2(database) as connection:
+        after = connection.execute(
+            "SELECT opened_at_us, resolved_at_us FROM incidents WHERE code='IBKR_CONNECT_FAILED'"
+        ).fetchone()
+    assert tuple(after) == (300, 302)
+    recorder.stop(now_us=303)
 
 
 def test_staleness_reference_is_clamped_to_current_expected_session(tmp_path: Path) -> None:

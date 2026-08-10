@@ -895,6 +895,25 @@ class CallbackInbox:
                         acknowledged_at_us,
                     ),
                 )
+                connection.execute(
+                    "UPDATE incidents SET resolved_at_us=? WHERE run_id=? "
+                    "AND code IN ('IBKR_CONNECT_FAILED','IBKR_SUBSCRIBE_FAILED') "
+                    "AND opened_at_us<=? AND resolved_at_us IS NULL AND ("
+                    "subscription_id IS NULL OR subscription_id IN ("
+                    "SELECT prior.subscription_id FROM subscriptions prior "
+                    "WHERE prior.run_id=? AND prior.instrument_id=? AND prior.feed_kind=? "
+                    "AND prior.recorder_generation=? AND prior.connection_generation<=?))",
+                    (
+                        acknowledged_at_us,
+                        leased.run_id,
+                        evidence_at_us,
+                        leased.run_id,
+                        str(subscription["instrument_id"]),
+                        str(subscription["feed_kind"]),
+                        leased.recorder_generation,
+                        leased.connection_generation,
+                    ),
+                )
 
     def fail(
         self,

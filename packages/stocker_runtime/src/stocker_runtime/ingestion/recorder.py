@@ -1510,8 +1510,8 @@ class Recorder:
             if plan.required_complete and required_active:
                 connection.execute(
                     "UPDATE incidents SET resolved_at_us=? WHERE incident_id=? "
-                    "AND resolved_at_us IS NULL",
-                    (now_us, incident_id),
+                    "AND opened_at_us<=? AND resolved_at_us IS NULL",
+                    (now_us, incident_id, now_us),
                 )
             else:
                 connection.execute(
@@ -2021,6 +2021,12 @@ class Recorder:
                         *(("closed",) if spec.snapshot else ()),
                     }:
                         raise RecorderFatalError("subscription activation state changed")
+                self._resolve_transport_incident(
+                    connection,
+                    spec,
+                    now_us,
+                    "IBKR_SUBSCRIBE_FAILED",
+                )
                 connection.commit()
             finally:
                 connection.close()
@@ -2112,6 +2118,18 @@ class Recorder:
                         state.recorder_generation,
                     ),
                 )
+                self._resolve_transport_incident(
+                    connection,
+                    None,
+                    now_us,
+                    "IBKR_CONNECT_FAILED",
+                )
+                self._resolve_transport_incident(
+                    connection,
+                    None,
+                    now_us,
+                    "IBKR_SUBSCRIBE_FAILED",
+                )
             connection.commit()
         finally:
             connection.close()
@@ -2168,7 +2186,14 @@ class Recorder:
                 "AND recorder_generation=?",
                 (code, self.config.run_id, self._authority_state().recorder_generation),
             )
-            self._record_incident(connection, None, now_us, code, details)
+            self._record_transport_incident(
+                connection,
+                None,
+                None,
+                now_us,
+                code,
+                details,
+            )
             connection.commit()
         finally:
             connection.close()
@@ -2233,7 +2258,14 @@ class Recorder:
                     code,
                     continuity_required,
                 )
-            self._record_incident(connection, fence.subscription_id, now_us, code, details)
+            self._record_transport_incident(
+                connection,
+                cast(str, fence.subscription_id),
+                spec,
+                now_us,
+                code,
+                details,
+            )
             if not spec.optional:
                 connection.execute(
                     "UPDATE runtime_state SET connection_state='disconnected', "
@@ -2274,6 +2306,66 @@ class Recorder:
             ),
         )
 
+    def _transport_incident_id(
+        self,
+        spec: SubscriptionSpec | None,
+        code: str,
+    ) -> str:
+        semantic_scope = (
+            "connection"
+            if spec is None
+            else (
+                f"subscription|{spec.instrument_id}|{spec.feed_kind}|"
+                f"{'snapshot' if spec.snapshot else 'stream'}"
+            )
+        )
+        return hashlib.sha256(
+            f"{self.config.run_id}|transport|{semantic_scope}|{code}".encode()
+        ).hexdigest()
+
+    def _record_transport_incident(
+        self,
+        connection: sqlite3.Connection,
+        subscription_id: str | None,
+        spec: SubscriptionSpec | None,
+        now_us: int,
+        code: str,
+        details: str,
+    ) -> None:
+        incident_id = self._transport_incident_id(spec, code)
+        details_json = canonical_json_bytes(cast(JsonValue, {"error": details})).decode()
+        connection.execute(
+            "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
+            "subscription_id, opened_at_us, details_json) "
+            "VALUES (?, ?, 'market_data', 'degraded', ?, ?, ?, ?) "
+            "ON CONFLICT(incident_id) DO UPDATE SET "
+            "subscription_id=excluded.subscription_id, "
+            "opened_at_us=CASE WHEN incidents.resolved_at_us IS NULL "
+            "THEN incidents.opened_at_us ELSE excluded.opened_at_us END, "
+            "resolved_at_us=NULL, details_json=excluded.details_json",
+            (
+                incident_id,
+                self.config.run_id,
+                code,
+                subscription_id,
+                now_us,
+                details_json,
+            ),
+        )
+
+    def _resolve_transport_incident(
+        self,
+        connection: sqlite3.Connection,
+        spec: SubscriptionSpec | None,
+        now_us: int,
+        code: str,
+    ) -> None:
+        connection.execute(
+            "UPDATE incidents SET resolved_at_us=? WHERE incident_id=? "
+            "AND opened_at_us<=? AND resolved_at_us IS NULL",
+            (now_us, self._transport_incident_id(spec, code), now_us),
+        )
+
     def _record_dynamic_incident(
         self,
         connection: sqlite3.Connection,
@@ -2312,8 +2404,9 @@ class Recorder:
             f"{self.config.run_id}|{subscription_id}|{code}".encode()
         ).hexdigest()
         connection.execute(
-            "UPDATE incidents SET resolved_at_us=? WHERE incident_id=? AND resolved_at_us IS NULL",
-            (now_us, incident_id),
+            "UPDATE incidents SET resolved_at_us=? WHERE incident_id=? "
+            "AND opened_at_us<=? AND resolved_at_us IS NULL",
+            (now_us, incident_id, now_us),
         )
 
     def _resolve_subscription_status_failures(
@@ -2325,22 +2418,17 @@ class Recorder:
     ) -> None:
         """Resolve prior-incarnation request failures after a fresh start succeeds."""
 
-        parameters = (
-            now_us,
-            self.config.run_id,
-            self.config.run_id,
-            instrument_id,
-            feed_kind,
-        )
         connection.execute(
             "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE run_id=? "
             "AND reason LIKE 'IBKR_STATUS_%' AND resolved_at_us IS NULL "
+            "AND started_at_us<=? "
             "AND subscription_id IN (SELECT subscription_id FROM subscriptions "
             "WHERE run_id=? AND instrument_id=? AND feed_kind=?)",
             (
                 now_us,
                 now_us,
                 self.config.run_id,
+                now_us,
                 self.config.run_id,
                 instrument_id,
                 feed_kind,
@@ -2349,9 +2437,17 @@ class Recorder:
         connection.execute(
             "UPDATE incidents SET resolved_at_us=? WHERE run_id=? "
             "AND code LIKE 'IBKR_STATUS_%' AND resolved_at_us IS NULL "
+            "AND opened_at_us<=? "
             "AND subscription_id IN (SELECT subscription_id FROM subscriptions "
             "WHERE run_id=? AND instrument_id=? AND feed_kind=?)",
-            parameters,
+            (
+                now_us,
+                self.config.run_id,
+                now_us,
+                self.config.run_id,
+                instrument_id,
+                feed_kind,
+            ),
         )
         connection.execute(
             "UPDATE runtime_state SET lifecycle='running', reason=NULL WHERE run_id=? "
@@ -2961,13 +3057,15 @@ class Recorder:
                     "resolved_at_us=max(started_at_us, ?) WHERE run_id=? "
                     "AND resolved_at_us IS NULL AND reason IN ("
                     "'IBKR_CONNECT_FAILED','IBKR_DISCONNECT','IBKR_SUBSCRIBE_FAILED',"
-                    "'RECONNECT_UNCERTAINTY','STREAM_STALE') AND subscription_id IN ("
+                    "'RECONNECT_UNCERTAINTY','STREAM_STALE') AND started_at_us<=? "
+                    "AND subscription_id IN ("
                     "SELECT subscription_id FROM subscriptions WHERE run_id=? "
                     "AND recorder_generation=? AND connection_generation=?)",
                     (
                         now_us,
                         now_us,
                         self.config.run_id,
+                        now_us,
                         self.config.run_id,
                         old.recorder_generation,
                         old.connection_generation,

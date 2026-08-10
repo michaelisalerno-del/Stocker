@@ -6,6 +6,7 @@ import ipaddress
 import threading
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -283,7 +284,20 @@ class _PrivateOfficialBridge:
             if self._active_connection_epoch != connection_epoch:
                 raise OfficialBridgeUnavailable("official IBKR socket closed while connecting")
             self._thread = thread
-        thread.start()
+        try:
+            thread.start()
+        except Exception:
+            with self._connection_state_lock:
+                if self._active_connection_epoch == connection_epoch:
+                    self._active_connection_epoch = None
+                if self._thread is thread:
+                    self._thread = None
+            with suppress(Exception):
+                self.__client.disconnect()
+            self._fences.clear()
+            self._configured.clear()
+            self._contracts.clear()
+            raise
 
     def _run_connection(self, connection_epoch: int) -> None:
         self._callback_context.connection_epoch = connection_epoch
@@ -291,14 +305,15 @@ class _PrivateOfficialBridge:
             self.__client.run()
         finally:
             del self._callback_context.connection_epoch
+            with self._connection_state_lock:
+                if self._thread is threading.current_thread():
+                    self._thread = None
 
     def _callback_is_current_connection(self) -> bool:
         callback_epoch = getattr(self._callback_context, "connection_epoch", None)
         with self._connection_state_lock:
             active_epoch = self._active_connection_epoch
-        return active_epoch is not None and (
-            callback_epoch is None or callback_epoch == active_epoch
-        )
+        return active_epoch is not None and callback_epoch == active_epoch
 
     def disconnect(self) -> None:
         with self._connection_state_lock:
@@ -311,11 +326,12 @@ class _PrivateOfficialBridge:
             self._configured.clear()
             self._contracts.clear()
             if thread is not None and thread is not threading.current_thread():
-                thread.join(timeout=self._THREAD_STOP_TIMEOUT_SECONDS)
-                if thread.is_alive():
-                    raise OfficialBridgeUnavailable(
-                        "official IBKR socket thread did not stop after disconnect"
-                    )
+                if thread.ident is not None:
+                    thread.join(timeout=self._THREAD_STOP_TIMEOUT_SECONDS)
+                    if thread.is_alive():
+                        raise OfficialBridgeUnavailable(
+                            "official IBKR socket thread did not stop after disconnect"
+                        )
                 with self._connection_state_lock:
                     if self._thread is thread:
                         self._thread = None
@@ -641,9 +657,7 @@ class _PrivateOfficialBridge:
         callback_epoch = getattr(self._callback_context, "connection_epoch", None)
         with self._connection_state_lock:
             active_epoch = self._active_connection_epoch
-            if active_epoch is None or (
-                callback_epoch is not None and callback_epoch != active_epoch
-            ):
+            if active_epoch is None or callback_epoch != active_epoch:
                 return
             self._active_connection_epoch = None
             callback = self._disconnect_callback

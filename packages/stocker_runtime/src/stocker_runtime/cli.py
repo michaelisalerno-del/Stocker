@@ -10,9 +10,11 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Annotated, Any, Literal, cast
+from zoneinfo import ZoneInfo
 
 import typer
 
@@ -74,7 +76,47 @@ MAX_REPLAY_SUBSCRIPTIONS = 10_000
 MAX_REPLAY_CALLBACKS = 50_000
 MAX_REPLAY_CALLBACK_BYTES = 65_536
 RECORDER_DRAIN_INTERVAL_SECONDS = 0.05
+RECORDER_HEALTH_INTERVAL_US = 1_000_000
 RECORDER_MAINTENANCE_INTERVAL_US = 60_000_000
+_NEW_YORK = ZoneInfo("America/New_York")
+
+
+@lru_cache(maxsize=32)
+def _xnys_session_window_us(session_date: date) -> tuple[int, int] | None:
+    import pandas_market_calendars as market_calendars
+
+    schedule = market_calendars.get_calendar("NYSE").schedule(
+        start_date=session_date.isoformat(),
+        end_date=session_date.isoformat(),
+    )
+    if schedule.empty:
+        return None
+    row = schedule.iloc[0]
+    market_open = cast(Any, row["market_open"])
+    market_close = cast(Any, row["market_close"])
+    return (
+        int(market_open.timestamp() * 1_000_000),
+        int(market_close.timestamp() * 1_000_000),
+    )
+
+
+def _market_data_expected_since_us(now_us: int) -> int | None:
+    session_date = datetime.fromtimestamp(now_us / 1_000_000, UTC).astimezone(_NEW_YORK).date()
+    window = _xnys_session_window_us(session_date)
+    if window is None:
+        return None
+    opened_at_us, closed_at_us = window
+    return opened_at_us if opened_at_us <= now_us < closed_at_us else None
+
+
+def _recorder_health_tick(recorder: Recorder, *, now_us: int) -> None:
+    expected_since_us = _market_data_expected_since_us(now_us)
+    recorder.mark_stale(
+        now_us=now_us,
+        market_data_expected=expected_since_us is not None,
+        expected_since_us=expected_since_us,
+    )
+    recorder.recover_connection(now_us=now_us)
 
 
 class ReplayBlockedError(RuntimeError):
@@ -476,10 +518,15 @@ def recorder_run_command(
             instruments=instruments,
             subscriptions=subscriptions,
         )
-        next_maintenance_at_us = time.time_ns() // 1_000 + RECORDER_MAINTENANCE_INTERVAL_US
+        started_loop_at_us = time.time_ns() // 1_000
+        next_health_at_us = started_loop_at_us + RECORDER_HEALTH_INTERVAL_US
+        next_maintenance_at_us = started_loop_at_us + RECORDER_MAINTENANCE_INTERVAL_US
         while not shutdown.wait(RECORDER_DRAIN_INTERVAL_SECONDS):
             now_us = time.time_ns() // 1_000
             recorder.drain(now_us=now_us)
+            if now_us >= next_health_at_us:
+                _recorder_health_tick(recorder, now_us=now_us)
+                next_health_at_us = now_us + RECORDER_HEALTH_INTERVAL_US
             if now_us >= next_maintenance_at_us:
                 recorder.maintain(now_us=now_us)
                 next_maintenance_at_us = now_us + RECORDER_MAINTENANCE_INTERVAL_US

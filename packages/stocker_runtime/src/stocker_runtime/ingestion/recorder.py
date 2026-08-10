@@ -255,6 +255,9 @@ class Recorder:
         self._snapshot_handshake_lock = threading.Lock()
         self._adapter_transition_lock = threading.Lock()
         self._subscription_lifecycle_lock = threading.RLock()
+        self._reconnect_lock = threading.RLock()
+        self._reconnect_failures = 0
+        self._next_reconnect_at_us = 0
         self._starting_dynamic_request_ids: set[int] = set()
         self._pending_dynamic_statuses: list[MarketDataStatus] = []
 
@@ -2441,11 +2444,19 @@ class Recorder:
         finally:
             connection.close()
 
-    def mark_stale(self, *, now_us: int, market_data_expected: bool = True) -> int:
+    def mark_stale(
+        self,
+        *,
+        now_us: int,
+        market_data_expected: bool = True,
+        expected_since_us: int | None = None,
+    ) -> int:
         """Open per-subscription gaps; optional staleness never blocks required feeds."""
 
         if self.state is None:
             raise RecorderFatalError("recorder is not started")
+        if expected_since_us is not None and not 0 <= expected_since_us <= now_us:
+            raise ValueError("expected market-data session start is outside the current window")
         if not market_data_expected:
             return 0
         opened = 0
@@ -2469,6 +2480,8 @@ class Recorder:
                 reference = int(
                     row["opened_at_us"] if row["received_at_us"] is None else row["received_at_us"]
                 )
+                if expected_since_us is not None:
+                    reference = max(reference, expected_since_us)
                 if now_us - reference < spec.stale_after_us:
                     continue
                 unresolved = connection.execute(
@@ -2720,8 +2733,8 @@ class Recorder:
                 fence=fence,
                 state=state,
             )
-        updated_plan, _dynamic_specs = self._dynamic_plan(now_us=status.received_at_us)
-        self._sync_interest_lifecycles(updated_plan, now_us=status.received_at_us)
+            updated_plan, _dynamic_specs = self._dynamic_plan(now_us=status.received_at_us)
+            self._sync_interest_lifecycles(updated_plan, now_us=status.received_at_us)
 
     def _market_data_farm_status(self, status: MarketDataStatus) -> None:
         """Scope farm health to affected feeds while the shared socket remains connected."""
@@ -2904,8 +2917,13 @@ class Recorder:
     def reconnect(self, *, now_us: int) -> RecorderState:
         """Fence old requests and reconnect with a new durable socket generation."""
 
-        self._check_owned()
-        with self._adapter_reset_transition(), self._subscription_lifecycle_lock:
+        with self._reconnect_lock:
+            self._check_owned()
+            with self._adapter_reset_transition():
+                return self._reconnect_after_reset(now_us=now_us)
+
+    def _reconnect_after_reset(self, *, now_us: int) -> RecorderState:
+        with self._subscription_lifecycle_lock:
             old = self._authority_state()
             self._expire_interests(now_us=now_us)
             reconnect_plan, dynamic = self._dynamic_plan(now_us=now_us)
@@ -2954,9 +2972,9 @@ class Recorder:
                 connection.execute(
                     "UPDATE runtime_state SET connection_generation=?, "
                     "connection_state='disconnected', lifecycle=CASE WHEN "
-                    "lifecycle='degraded' AND reason='IBKR_DISCONNECT' "
+                    "lifecycle='degraded' AND reason LIKE 'IBKR_%' "
                     "THEN 'recovering' ELSE lifecycle END, reason=CASE WHEN "
-                    "lifecycle='degraded' AND reason='IBKR_DISCONNECT' "
+                    "lifecycle='degraded' AND reason LIKE 'IBKR_%' "
                     "THEN NULL ELSE reason END, process_heartbeat_at_us=? WHERE run_id=?",
                     (generation, now_us, self.config.run_id),
                 )
@@ -3007,50 +3025,72 @@ class Recorder:
         self._connect_subscriptions(now_us=now_us)
         return self.state
 
+    def recover_connection(self, *, now_us: int) -> bool:
+        """Retry a disconnected market-data socket with bounded exponential backoff."""
+
+        with self._reconnect_lock:
+            self._check_owned()
+            if self._connection_is_connected():
+                self._reconnect_failures = 0
+                self._next_reconnect_at_us = 0
+                return False
+            if now_us < self._next_reconnect_at_us:
+                return False
+            self.reconnect(now_us=now_us)
+            if self._connection_is_connected():
+                self._reconnect_failures = 0
+                self._next_reconnect_at_us = 0
+                return True
+            self._reconnect_failures = min(7, self._reconnect_failures + 1)
+            delay_seconds = min(60, 2 ** (self._reconnect_failures - 1))
+            self._next_reconnect_at_us = now_us + delay_seconds * 1_000_000
+            return False
+
     def stop(self, *, now_us: int) -> None:
         """Close subscriptions and the writer generation without changing mode."""
 
+        with self._reconnect_lock:
+            self._stop_serialized(now_us=now_us)
+
+    def _stop_serialized(self, *, now_us: int) -> None:
         if self.state is None:
             if self._idea_runner is not None:
                 self._idea_runner.close()
                 self._idea_runner = None
             return
-        self._check_owned()
-        with suppress(Exception):
-            self.adapter.disconnect()
-        self._check_owned()
-        state = self._authority_state()
-        connection = connect_v2(self.config.database)
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            self._verify_owned(connection)
-            connection.execute(
-                "UPDATE subscriptions SET lifecycle='closed', closed_at_us=? WHERE run_id=? "
-                "AND recorder_generation=? AND lifecycle!='closed'",
-                (now_us, self.config.run_id, state.recorder_generation),
-            )
-            connection.execute(
-                "UPDATE recorder_generations SET ended_at_us=?, clean_stop=1, "
-                "termination_code='CLEAN_STOP' WHERE run_id=? AND generation=?",
-                (
-                    now_us,
-                    self.config.run_id,
-                    state.recorder_generation,
-                ),
-            )
-            connection.execute(
-                "UPDATE runtime_state SET lifecycle='stopped', reason=NULL, "
-                "connection_state='disconnected', process_heartbeat_at_us=? WHERE run_id=?",
-                (now_us, self.config.run_id),
-            )
-            connection.execute(
-                "UPDATE runs SET status='stopped', ended_at_us=? WHERE run_id=?",
-                (now_us, self.config.run_id),
-            )
-            connection.commit()
-        finally:
-            connection.close()
-        self.state = None
+        with self._adapter_reset_transition(), self._subscription_lifecycle_lock:
+            state = self._authority_state()
+            connection = connect_v2(self.config.database)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                self._verify_owned(connection)
+                connection.execute(
+                    "UPDATE subscriptions SET lifecycle='closed', closed_at_us=? WHERE run_id=? "
+                    "AND recorder_generation=? AND lifecycle!='closed'",
+                    (now_us, self.config.run_id, state.recorder_generation),
+                )
+                connection.execute(
+                    "UPDATE recorder_generations SET ended_at_us=?, clean_stop=1, "
+                    "termination_code='CLEAN_STOP' WHERE run_id=? AND generation=?",
+                    (
+                        now_us,
+                        self.config.run_id,
+                        state.recorder_generation,
+                    ),
+                )
+                connection.execute(
+                    "UPDATE runtime_state SET lifecycle='stopped', reason=NULL, "
+                    "connection_state='disconnected', process_heartbeat_at_us=? WHERE run_id=?",
+                    (now_us, self.config.run_id),
+                )
+                connection.execute(
+                    "UPDATE runs SET status='stopped', ended_at_us=? WHERE run_id=?",
+                    (now_us, self.config.run_id),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            self.state = None
         if self._idea_runner is not None:
             self._idea_runner.close()
             self._idea_runner = None

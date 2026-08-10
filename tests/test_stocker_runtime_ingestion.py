@@ -722,6 +722,68 @@ def test_recorder_disconnect_reconnect_and_staleness_are_scoped(tmp_path: Path) 
     assert any(row["resolved_at_us"] == 115 for row in gaps)
 
 
+def test_recorder_recovery_is_automatic_backed_off_and_bounded(tmp_path: Path) -> None:
+    database = tmp_path / "automatic-recovery.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData(fail_connect=True)
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    assert adapter.connect_calls == 1
+
+    assert recorder.recover_connection(now_us=101) is False
+    assert adapter.connect_calls == 2
+    assert recorder.recover_connection(now_us=1_000_100) is False
+    assert adapter.connect_calls == 2
+
+    adapter.fail_connect = False
+    assert recorder.recover_connection(now_us=1_000_101) is True
+    assert adapter.connect_calls == 3
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT connection_generation, connection_state, lifecycle FROM runtime_state"
+        ).fetchone()
+    assert tuple(runtime) == (3, "connected", "running")
+    recorder.stop(now_us=1_000_102)
+
+
+def test_recorder_recovery_backoff_caps_at_sixty_seconds(tmp_path: Path) -> None:
+    database = tmp_path / "bounded-recovery.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData(fail_connect=True)
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    attempt_at_us = 101
+
+    for delay_seconds in (1, 2, 4, 8, 16, 32, 60, 60):
+        assert recorder.recover_connection(now_us=attempt_at_us) is False
+        calls_after_attempt = adapter.connect_calls
+        attempt_at_us += delay_seconds * 1_000_000
+        assert recorder.recover_connection(now_us=attempt_at_us - 1) is False
+        assert adapter.connect_calls == calls_after_attempt
+
+    assert adapter.connect_calls == 9
+    recorder.stop(now_us=attempt_at_us)
+
+
+def test_staleness_reference_is_clamped_to_current_expected_session(tmp_path: Path) -> None:
+    database = tmp_path / "session-clamped-staleness.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    assert recorder.mark_stale(now_us=1_000, expected_since_us=995) == 0
+    assert recorder.mark_stale(now_us=1_006, expected_since_us=995) == 1
+    with connect_v2(database) as connection:
+        gap = connection.execute(
+            "SELECT started_at_us, reason FROM gaps WHERE reason='STREAM_STALE'"
+        ).fetchone()
+    assert tuple(gap) == (1_005, "STREAM_STALE")
+    recorder.stop(now_us=1_007)
+
+
 def test_admission_database_failure_is_fail_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1292,6 +1354,8 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
 
     client = clients[0]
     wrapper = client.wrapper  # type: ignore[attr-defined]
+    private_bridge = cast(Any, bridge)
+    private_bridge._callback_context.connection_epoch = private_bridge._active_connection_epoch
     wrapper.tickPrice(3, 1, 100.0, object())
     wrapper.tickPrice(3, 2, 101.0, object())
     wrapper.tickSize(3, 0, 10)
@@ -1303,6 +1367,7 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
     wrapper.error(-1, 2103, "market farm disconnected")
     wrapper.error(3, 9999, "ignored")
     wrapper.connectionClosed()
+    del private_bridge._callback_context.connection_epoch
 
     assert [(item.callback_kind, item.payload) for _, item in callbacks] == [
         ("quote", {"event_at_us": callbacks[0][1].received_at_us, "bid": 100.0}),
@@ -1339,7 +1404,6 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
         ("pacing", 420, 3),
         ("farm_degraded", 2103, None),
     ]
-    private_bridge = cast(Any, bridge)
     assert private_bridge._fences == {}
     assert private_bridge._configured == {}
     assert private_bridge._contracts == {}
@@ -1349,12 +1413,16 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
 def test_official_bridge_drains_intentional_close_and_fences_old_socket_statuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from stocker_runtime.ingestion import IBKRSubscription
     from stocker_runtime.ingestion.official_bridge import create_official_bridge
 
     clients: list[object] = []
     run_started = (threading.Event(), threading.Event())
     release_run = (threading.Event(), threading.Event())
     run_finished = (threading.Event(), threading.Event())
+    auxiliary_started = threading.Event()
+    release_auxiliary = threading.Event()
+    auxiliary_finished = threading.Event()
 
     class EWrapper:
         pass
@@ -1377,15 +1445,31 @@ def test_official_bridge_drains_intentional_close_and_fences_old_socket_statuses
             self.run_count += 1
             self.active_run = index
             run_started[index].set()
+            if index == 0:
+
+                def delayed_auxiliary_callback() -> None:
+                    auxiliary_started.set()
+                    assert release_auxiliary.wait(timeout=5)
+                    self.wrapper.tickPrice(3, 1, 99.0, object())
+                    self.wrapper.error(-1, 2103, "untagged retired farm status")
+                    self.wrapper.connectionClosed()
+                    auxiliary_finished.set()
+
+                threading.Thread(target=delayed_auxiliary_callback, daemon=True).start()
             assert release_run[index].wait(timeout=5)
             if index == 0:
                 self.wrapper.error(-1, 2103, "late status from intentionally closed socket")
+            else:
+                self.wrapper.tickPrice(3, 1, 101.0, object())
             self.wrapper.connectionClosed()
             run_finished[index].set()
 
         def disconnect(self) -> None:
             if self.active_run >= 0:
                 release_run[self.active_run].set()
+
+        def reqMktData(self, _request_id: int, *_args: object) -> None:  # noqa: N802
+            return None
 
     package = types.ModuleType("ibapi")
     client_module = types.ModuleType("ibapi.client")
@@ -1403,16 +1487,25 @@ def test_official_bridge_drains_intentional_close_and_fences_old_socket_statuses
         lambda: package,
     )
 
+    subscription = IBKRSubscription(3, 123, "AAPL", "STK", "SMART", "USD", "quotes")
     bridge = create_official_bridge(
         host="127.0.0.1",
         port=4001,
         client_id=71,
         read_only=True,
         external_read_only_verified=True,
+        subscriptions=(subscription,),
     )
+    callbacks: list[tuple[CallbackFence, MarketDataCallback]] = []
     statuses: list[MarketDataStatus] = []
     disconnects: list[int] = []
     natural_disconnect_seen = threading.Event()
+    bridge.set_callback(
+        lambda fence, callback: (
+            callbacks.append((fence, callback))
+            or AdmissionResult(len(callbacks), f"event-{len(callbacks)}", True)
+        )
+    )
     bridge.set_status_callback(statuses.append)
 
     def disconnected(at_us: int) -> None:
@@ -1422,6 +1515,8 @@ def test_official_bridge_drains_intentional_close_and_fences_old_socket_statuses
     bridge.set_disconnect_callback(disconnected)
     bridge.connect()
     assert run_started[0].wait(timeout=5)
+    assert auxiliary_started.wait(timeout=5)
+    bridge.subscribe(CallbackFence("run", 1, 1, 3, "subscription-1"))
 
     bridge.disconnect()
 
@@ -1429,13 +1524,85 @@ def test_official_bridge_drains_intentional_close_and_fences_old_socket_statuses
     assert statuses == []
     assert disconnects == []
 
+    bridge.configure_subscriptions((subscription,))
     bridge.connect()
     assert run_started[1].wait(timeout=5)
+    bridge.subscribe(CallbackFence("run", 1, 2, 3, "subscription-2"))
+    release_auxiliary.set()
+    assert auxiliary_finished.wait(timeout=5)
+    assert callbacks == []
+    assert statuses == []
+    assert disconnects == []
     release_run[1].set()
     assert natural_disconnect_seen.wait(timeout=5)
     assert run_finished[1].wait(timeout=5)
+    assert len(callbacks) == 1
+    assert callbacks[0][0] == CallbackFence("run", 1, 2, 3, "subscription-2")
+    assert callbacks[0][1].payload["bid"] == 101.0
     assert len(disconnects) == 1
     bridge.disconnect()
+
+
+def test_official_bridge_unwinds_reader_thread_start_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stocker_runtime.ingestion.official_bridge import create_official_bridge
+
+    class EWrapper:
+        pass
+
+    class Contract:
+        pass
+
+    class EClient:
+        def __init__(self, _wrapper: object) -> None:
+            self.disconnected = False
+
+        def connect(self, _host: str, _port: int, _client_id: int) -> bool:
+            return True
+
+        def run(self) -> None:
+            return None
+
+        def disconnect(self) -> None:
+            self.disconnected = True
+
+    package = types.ModuleType("ibapi")
+    client_module = types.ModuleType("ibapi.client")
+    contract_module = types.ModuleType("ibapi.contract")
+    wrapper_module = types.ModuleType("ibapi.wrapper")
+    client_module.EClient = EClient  # type: ignore[attr-defined]
+    contract_module.Contract = Contract  # type: ignore[attr-defined]
+    wrapper_module.EWrapper = EWrapper  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "ibapi", package)
+    monkeypatch.setitem(sys.modules, "ibapi.client", client_module)
+    monkeypatch.setitem(sys.modules, "ibapi.contract", contract_module)
+    monkeypatch.setitem(sys.modules, "ibapi.wrapper", wrapper_module)
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.official_bridge.require_official_ibkr_api",
+        lambda: package,
+    )
+    bridge = create_official_bridge(
+        host="127.0.0.1",
+        port=4001,
+        client_id=71,
+        read_only=True,
+        external_read_only_verified=True,
+    )
+    original_start = threading.Thread.start
+
+    def fail_start(_thread: threading.Thread) -> None:
+        raise RuntimeError("synthetic reader thread start failure")
+
+    monkeypatch.setattr(threading.Thread, "start", fail_start)
+    with pytest.raises(RuntimeError, match="synthetic reader thread start failure"):
+        bridge.connect()
+
+    private_bridge = cast(Any, bridge)
+    assert private_bridge._active_connection_epoch is None
+    assert private_bridge._thread is None
+    bridge.disconnect()
+    monkeypatch.setattr(threading.Thread, "start", original_start)
 
 
 def test_official_bridge_discovers_one_exact_option_before_dynamic_subscription(
@@ -1528,6 +1695,8 @@ def test_official_bridge_discovers_one_exact_option_before_dynamic_subscription(
     option_bridge = cast(OptionDiscoveryBackend, bridge)
     client = clients[0]
     bridge.connect()
+    private_bridge = cast(Any, bridge)
+    private_bridge._callback_context.connection_epoch = private_bridge._active_connection_epoch
 
     parameters = option_bridge.option_parameters(underlying_con_id=265598, symbol="AAPL")
     contracts = option_bridge.option_contracts(
@@ -1551,12 +1720,12 @@ def test_official_bridge_discovers_one_exact_option_before_dynamic_subscription(
     fence = CallbackFence("run", 1, 1, subscription.request_id, "dynamic")
     bridge.subscribe(fence)
     client.wrapper.tickSnapshotEnd(subscription.request_id)  # type: ignore[attr-defined]
+    del private_bridge._callback_context.connection_epoch
     bridge.cancel(subscription.request_id)
     assert client.market_requests == [(2_000_001, True)]  # type: ignore[attr-defined]
     bridge.disconnect()
     assert client.cancelled == []  # type: ignore[attr-defined]
     assert [status.kind for status in statuses] == ["snapshot_end"]
-    private_bridge = cast(Any, bridge)
     assert private_bridge._configured == {}
     assert private_bridge._contracts == {}
     stream = IBKRSubscription(

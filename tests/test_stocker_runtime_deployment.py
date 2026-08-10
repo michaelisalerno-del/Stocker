@@ -7,8 +7,10 @@ import signal
 import sqlite3
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
+from typing import Any, cast
 
 import pytest
 from typer.testing import CliRunner
@@ -1079,6 +1081,139 @@ class _SignalMarketData:
 
     def cancel(self, _request_id: int) -> None:
         return None
+
+
+def test_recorder_health_window_tracks_exact_xnys_sessions() -> None:
+    from stocker_runtime.cli import _market_data_expected_since_us
+
+    def at_us(year: int, month: int, day: int, hour: int, minute: int) -> int:
+        return int(datetime(year, month, day, hour, minute, tzinfo=UTC).timestamp() * 1_000_000)
+
+    regular_open = at_us(2026, 8, 10, 13, 30)
+    regular_close = at_us(2026, 8, 10, 20, 0)
+    assert _market_data_expected_since_us(regular_open - 1) is None
+    assert _market_data_expected_since_us(regular_open) == regular_open
+    assert _market_data_expected_since_us(regular_close - 1) == regular_open
+    assert _market_data_expected_since_us(regular_close) is None
+
+    thanksgiving_midday = at_us(2026, 11, 26, 17, 0)
+    assert _market_data_expected_since_us(thanksgiving_midday) is None
+
+    early_open = at_us(2026, 11, 27, 14, 30)
+    early_close = at_us(2026, 11, 27, 18, 0)
+    assert _market_data_expected_since_us(early_open) == early_open
+    assert _market_data_expected_since_us(early_close - 1) == early_open
+    assert _market_data_expected_since_us(early_close) is None
+
+
+def test_recorder_health_tick_marks_expected_staleness_and_always_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stocker_runtime.cli import _recorder_health_tick
+
+    class HealthRecorder:
+        def __init__(self) -> None:
+            self.stale_calls: list[tuple[int, bool, int | None]] = []
+            self.recovery_calls: list[int] = []
+
+        def mark_stale(
+            self,
+            *,
+            now_us: int,
+            market_data_expected: bool,
+            expected_since_us: int | None,
+        ) -> int:
+            self.stale_calls.append((now_us, market_data_expected, expected_since_us))
+            return 0
+
+        def recover_connection(self, *, now_us: int) -> bool:
+            self.recovery_calls.append(now_us)
+            return False
+
+    recorder = HealthRecorder()
+    monkeypatch.setattr(
+        "stocker_runtime.cli._market_data_expected_since_us",
+        lambda _now_us: 995,
+    )
+    _recorder_health_tick(cast(Any, recorder), now_us=1_000)
+    monkeypatch.setattr(
+        "stocker_runtime.cli._market_data_expected_since_us",
+        lambda _now_us: None,
+    )
+    _recorder_health_tick(cast(Any, recorder), now_us=2_000)
+
+    assert recorder.stale_calls == [(1_000, True, 995), (2_000, False, None)]
+    assert recorder.recovery_calls == [1_000, 2_000]
+
+
+def test_recorder_service_loop_invokes_bounded_health_tick(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "stocker-v2.sqlite3"
+    initialize_database(database)
+    config = tmp_path / "recorder.json"
+    inputs = tmp_path / "market-data.json"
+    config.write_text(
+        json.dumps(
+            {
+                "database": str(database),
+                "run_id": "run-health-service",
+                "owner_id": "owner-health-service",
+                "mode": "prospective_record",
+                "host": "127.0.0.1",
+                "port": 4003,
+                "client_id": 71,
+                "read_only": True,
+                "external_read_only_verified": True,
+                "config_hash": "c" * 64,
+                "git_commit": "0000000",
+            }
+        ),
+        encoding="utf-8",
+    )
+    inputs.write_text('{"instruments":[],"subscriptions":[]}', encoding="utf-8")
+    handlers: dict[int, object] = {}
+
+    def install_handler(signum: int, handler: object) -> object:
+        previous = handlers.get(signum, signal.SIG_DFL)
+        handlers[signum] = handler
+        return previous
+
+    monkeypatch.setattr("stocker_runtime.cli.signal.signal", install_handler)
+    monkeypatch.setattr("stocker_runtime.cli.time.time_ns", lambda: 1_000_000_000)
+    monkeypatch.setattr("stocker_runtime.cli.RECORDER_HEALTH_INTERVAL_US", 0)
+    monkeypatch.setattr(
+        "stocker_runtime.cli.IBKRMarketData.official",
+        lambda **_kwargs: _SignalMarketData(lambda _signum, _frame: None),
+    )
+    health_calls: list[int] = []
+    monkeypatch.setattr(
+        "stocker_runtime.cli._recorder_health_tick",
+        lambda _recorder, *, now_us: health_calls.append(now_us),
+    )
+    real_drain = Recorder.drain
+    drain_calls = 0
+
+    def drain_then_stop(recorder: Recorder, *, now_us: int, limit: int = 256) -> int:
+        nonlocal drain_calls
+        drain_calls += 1
+        result = real_drain(recorder, now_us=now_us, limit=limit)
+        if drain_calls == 2:
+            handler = handlers[signal.SIGTERM]
+            assert callable(handler)
+            handler(signal.SIGTERM, None)
+        return result
+
+    monkeypatch.setattr(Recorder, "drain", drain_then_stop)
+    result = CliRunner().invoke(
+        app,
+        ["recorder", "run", "--config", str(config), "--inputs", str(inputs)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert health_calls == [1_000_000]
+    assert json.loads(result.stdout)["termination"] == "sigterm"
 
 
 def test_recorder_service_command_handles_sigterm_as_a_clean_stop(

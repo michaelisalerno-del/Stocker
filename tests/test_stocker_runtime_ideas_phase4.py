@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import pytest
 
@@ -2366,6 +2366,21 @@ class _BlockingConfigureAdditiveRecorderAdapter(_AdditiveDynamicRecorderAdapter)
         super().configure_subscriptions(subscriptions)
 
 
+class _BlockingConnectAdditiveRecorderAdapter(_AdditiveDynamicRecorderAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.connect_calls = 0
+        self.first_reconnect_connect_entered = threading.Event()
+        self.release_first_reconnect_connect = threading.Event()
+
+    def connect(self) -> None:
+        self.connect_calls += 1
+        if self.connect_calls == 2:
+            self.first_reconnect_connect_entered.set()
+            if not self.release_first_reconnect_connect.wait(timeout=5):
+                raise RuntimeError("timed out waiting to release first reconnect")
+
+
 def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2447,6 +2462,8 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
     recorder.start(now_us=1, instruments=(), subscriptions=())
     client = clients[0]
     wrapper = client.wrapper  # type: ignore[attr-defined]
+    private_bridge = cast(Any, bridge)
+    private_bridge._callback_context.connection_epoch = private_bridge._active_connection_epoch
     open_seconds = int(datetime(2026, 8, 3, 13, 30, tzinfo=UTC).timestamp())
     callback_count = 0
     for bar_number in range(6 * 60):
@@ -2465,6 +2482,7 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
                 1,
             )
             callback_count += 1
+    del private_bridge._callback_context.connection_epoch
     drain_at = time.time_ns() // 1_000 + 1_000_000
     assert callback_count == 7_200
     drained = 0
@@ -4239,6 +4257,70 @@ def test_dynamic_reconcile_and_direct_reconnect_serialize_adapter_reset(
     recorder.stop(now_us=event_at_us + 4)
 
 
+def test_dynamic_reconnect_is_single_flight_through_subscription_activation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-concurrent-reconnect.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _BlockingConnectAdditiveRecorderAdapter()
+    recorder = _dynamic_recorder(
+        database,
+        idea_path,
+        adapter,
+        owner_id="owner",
+        line_limit=2,
+    )
+    initial = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+    results: dict[str, RecorderState] = {}
+    errors: list[BaseException] = []
+    second_reconnect_started = threading.Event()
+
+    def reconnect(label: str, at_us: int) -> None:
+        try:
+            if label == "second":
+                second_reconnect_started.set()
+            results[label] = recorder.reconnect(now_us=at_us)
+        except BaseException as error:
+            errors.append(error)
+
+    first = threading.Thread(target=reconnect, args=("first", event_at_us + 3))
+    first.start()
+    assert adapter.first_reconnect_connect_entered.wait(timeout=5)
+    second = threading.Thread(target=reconnect, args=("second", event_at_us + 4))
+    second.start()
+    assert second_reconnect_started.wait(timeout=5)
+    assert second.is_alive()
+    adapter.release_first_reconnect_connect.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert results["first"].connection_generation == 2
+    assert results["second"].connection_generation == 3
+    assert initial.request_id not in {fence.request_id for fence in results["second"].fences}
+    current_request_ids = {cast(int, fence.request_id) for fence in results["second"].fences}
+    assert set(adapter.configured_by_request) == current_request_ids
+    assert len(adapter.configured_by_request) == 2
+    current_dynamic_request_id = next(
+        request_id for request_id in current_request_ids if request_id >= 2_000_000
+    )
+    assert adapter.subscribe_attempts.count(current_dynamic_request_id) == 1
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT connection_generation, connection_state, lifecycle FROM runtime_state"
+        ).fetchone()
+    assert tuple(runtime) == (3, "connected", "running")
+    recorder.stop(now_us=event_at_us + 5)
+
+
 def test_reconnect_expires_interest_before_cloning_dynamic_subscription(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4541,6 +4623,84 @@ def test_snapshot_retirement_serializes_concurrent_reconnect(
     assert dynamic_fence.request_id not in {fence.request_id for fence in reconnect_state[0].fences}
     assert adapter.subscribe_attempts.count(cast(int, dynamic_fence.request_id)) == 1
     recorder.stop(now_us=event_at_us + 6)
+
+
+def test_clean_stop_serializes_with_inflight_snapshot_retirement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "dynamic-snapshot-stop-race.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(universe=("AAL",), instruments=_configured_instruments(("AAL",)))
+    discovered = _dynamic_discovered(configured)
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (discovered,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    adapter = _DynamicRecorderAdapter()
+    recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
+    dynamic_fence = _activate_dynamic_interest(recorder, event_at_us=event_at_us)
+    original_retire = recorder._retire_dynamic_snapshot_state
+    retirement_started = threading.Event()
+    release_retirement = threading.Event()
+
+    def pause_retirement(*, request_id: int, fence: CallbackFence, state: RecorderState) -> None:
+        retirement_started.set()
+        assert release_retirement.wait(timeout=5)
+        original_retire(request_id=request_id, fence=fence, state=state)
+
+    monkeypatch.setattr(recorder, "_retire_dynamic_snapshot_state", pause_retirement)
+    completion_errors: list[BaseException] = []
+    stop_errors: list[BaseException] = []
+    stop_started = threading.Event()
+    stop_completed = threading.Event()
+
+    def complete() -> None:
+        try:
+            recorder.market_data_status(
+                MarketDataStatus(
+                    kind="snapshot_end",
+                    code=0,
+                    request_id=dynamic_fence.request_id,
+                    message="complete during clean stop",
+                    received_at_us=event_at_us + 3,
+                )
+            )
+        except BaseException as error:
+            completion_errors.append(error)
+
+    def stop() -> None:
+        try:
+            stop_started.set()
+            recorder.stop(now_us=event_at_us + 4)
+        except BaseException as error:
+            stop_errors.append(error)
+        finally:
+            stop_completed.set()
+
+    completion = threading.Thread(target=complete)
+    completion.start()
+    assert retirement_started.wait(timeout=5)
+    stopping = threading.Thread(target=stop)
+    stopping.start()
+    assert stop_started.wait(timeout=5)
+    stop_won_race = stop_completed.wait(timeout=0.25)
+    release_retirement.set()
+    completion.join(timeout=5)
+    stopping.join(timeout=5)
+
+    assert stop_won_race is False
+    assert not completion.is_alive()
+    assert not stopping.is_alive()
+    assert completion_errors == []
+    assert stop_errors == []
+    assert recorder.state is None
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT lifecycle, connection_state FROM runtime_state"
+        ).fetchone()
+        run = connection.execute("SELECT status FROM runs").fetchone()
+    assert tuple(runtime) == ("stopped", "disconnected")
+    assert run["status"] == "stopped"
 
 
 def test_synthetic_idea_config_adds_subscription_without_core_wiring(

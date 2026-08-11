@@ -5477,6 +5477,59 @@ def test_synthetic_idea_config_adds_subscription_without_core_wiring(
     recorder.stop(now_us=101)
 
 
+def test_synthetic_stream_requirement_adds_subscription_without_manual_wiring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "synthetic-stream-subscription.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    configured = _config(
+        universe=("AAL",),
+        instruments=_configured_instruments(("AAL",)),
+    )
+    stream = replace(
+        _synthetic_discovered(configured),
+        requirements=(
+            MarketDataRequirement(
+                feed_kind="quotes",
+                event_kind="quote",
+                instrument_id="AAL",
+                cadence="stream",
+                gaps_block=True,
+                staleness_block=True,
+            ),
+        ),
+    )
+    monkeypatch.setattr(recorder_module, "discover_plugins", lambda _configs: (stream,))
+    idea_path.write_text(json.dumps([configured.model_dump(mode="json")]), encoding="utf-8")
+    adapter = _RecorderAdapter()
+    recorder = Recorder(
+        RecorderConfig(
+            database=database,
+            run_id="run-synthetic-stream",
+            owner_id="owner",
+            mode="shadow",
+            host="127.0.0.1",
+            port=4002,
+            client_id=1,
+            read_only=True,
+            external_read_only_verified=True,
+            config_hash="a" * 64,
+            git_commit="deadbee",
+            idea_config=idea_path,
+        ),
+        adapter,
+    )
+
+    recorder.start(now_us=100, instruments=(), subscriptions=())
+
+    assert adapter.configured_subscriptions == (
+        IBKRSubscription(1_000_000, 1, "AAL", "STK", "SMART", "USD", "quotes"),
+    )
+    assert recorder._subscriptions[0].stale_after_us == 15_000_000
+    recorder.stop(now_us=101)
+
+
 def test_idea_requirement_without_same_entry_instrument_metadata_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

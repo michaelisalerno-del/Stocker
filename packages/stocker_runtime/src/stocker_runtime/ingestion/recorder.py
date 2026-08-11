@@ -569,7 +569,11 @@ class Recorder:
                 request_id=next_request_id,
                 continuity_required=requirement.gaps_block,
                 optional=not (requirement.gaps_block or requirement.staleness_block),
-                stale_after_us=max(15_000_000, 3 * self._cadence_us(requirement.cadence)),
+                stale_after_us=(
+                    15_000_000
+                    if requirement.cadence == "stream"
+                    else max(15_000_000, 3 * self._cadence_us(requirement.cadence))
+                ),
             )
             subscription_by_key[key] = subscription
             request_ids.add(next_request_id)

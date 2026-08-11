@@ -2747,6 +2747,191 @@ def test_closed_failed_callback_compacts_and_expires_only_with_receipt_proof(
         )
 
 
+def test_tombstone_retention_rolls_receipt_before_deleting_covered_callbacks(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    first_batch_sequences = tuple(
+        _seed_callback_for_retention(
+            database,
+            uid=f"first-tombstone-batch-{index}",
+            received_at_us=1,
+            acknowledged_at_us=1,
+            receipt_batch_id="first-tombstone-receipt",
+        )
+        for index in range(256)
+    )
+    second_sequence = _seed_callback_for_retention(
+        database,
+        uid="second-tombstone-batch",
+        received_at_us=95,
+        acknowledged_at_us=95,
+        receipt_batch_id="second-tombstone-receipt",
+    )
+    first_hash = _insert_receipt(
+        database,
+        batch_id="first-tombstone-receipt",
+        first_sequence=first_batch_sequences[0],
+        last_sequence=first_batch_sequences[-1],
+        created_at_us=99,
+    )
+    _insert_receipt(
+        database,
+        batch_id="second-tombstone-receipt",
+        first_sequence=second_sequence,
+        last_sequence=second_sequence,
+        created_at_us=99,
+        prior_chain_hash=first_hash,
+    )
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE callback_inbox SET payload_json = NULL")
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(callback_payload_us=1_000, receipt_us=1_000, tombstone_us=10),
+    )
+
+    first_pass = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE receipt_batch_id = ?",
+                ("first-tombstone-receipt",),
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT 1 FROM callback_inbox WHERE source_sequence = ?", (second_sequence,)
+            ).fetchone()
+            is not None
+        )
+    second_pass = manager.run(now_us=200, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert first_pass.receipts_rolled == 1
+    assert first_pass.expired_rows_deleted == 256
+    assert second_pass.receipts_rolled == 1
+    assert second_pass.expired_rows_deleted == 1
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 0
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE source_sequence BETWEEN ? AND ?",
+                (first_batch_sequences[0], second_sequence),
+            ).fetchone()[0]
+            == 0
+        )
+        watermark = connection.execute(
+            "SELECT compacted_through_sequence, cumulative_callback_count, "
+            "last_receipt_chain_hash FROM callback_compaction_watermarks "
+            "WHERE run_id = 'retention-run'"
+        ).fetchone()
+    assert tuple(watermark)[:2] == (second_sequence, 257)
+
+
+def test_tombstone_retention_waits_for_the_complete_receipt_batch(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    first_sequence = _seed_callback_for_retention(
+        database,
+        uid="old-in-mixed-batch",
+        received_at_us=1,
+        acknowledged_at_us=1,
+        receipt_batch_id="mixed-tombstone-receipt",
+    )
+    second_sequence = _seed_callback_for_retention(
+        database,
+        uid="recent-in-mixed-batch",
+        received_at_us=95,
+        acknowledged_at_us=95,
+        receipt_batch_id="mixed-tombstone-receipt",
+    )
+    _insert_receipt(
+        database,
+        batch_id="mixed-tombstone-receipt",
+        first_sequence=first_sequence,
+        last_sequence=second_sequence,
+        created_at_us=99,
+    )
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE callback_inbox SET payload_json = NULL")
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(callback_payload_us=1_000, receipt_us=1_000, tombstone_us=10),
+    )
+
+    waiting = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    completed = manager.run(now_us=200, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert waiting.receipts_rolled == 0
+    assert waiting.expired_rows_deleted == 0
+    assert completed.receipts_rolled == 1
+    assert completed.expired_rows_deleted == 2
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE source_sequence IN (?, ?)",
+                (first_sequence, second_sequence),
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_tombstone_retention_waits_for_failed_batch_run_to_be_terminal(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    acknowledged_sequence = _seed_callback_for_retention(
+        database,
+        uid="acknowledged-in-mixed-status-batch",
+        received_at_us=1,
+        acknowledged_at_us=1,
+        receipt_batch_id="mixed-status-receipt",
+    )
+    failed_sequence = _seed_callback_for_retention(
+        database,
+        uid="failed-in-mixed-status-batch",
+        received_at_us=1,
+        lifecycle="failed",
+        normalized_event_id=None,
+        acknowledged_at_us=None,
+        receipt_batch_id="mixed-status-receipt",
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE callback_inbox SET failure_code = 'fixture', payload_json = NULL "
+            "WHERE source_sequence = ?",
+            (failed_sequence,),
+        )
+        connection.execute(
+            "UPDATE callback_inbox SET payload_json = NULL WHERE source_sequence = ?",
+            (acknowledged_sequence,),
+        )
+    _insert_receipt(
+        database,
+        batch_id="mixed-status-receipt",
+        first_sequence=acknowledged_sequence,
+        last_sequence=failed_sequence,
+        created_at_us=99,
+    )
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(callback_payload_us=1_000, receipt_us=1_000, tombstone_us=10),
+    )
+
+    active = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'retention-run'")
+    terminal = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert active.receipts_rolled == 0
+    assert active.expired_rows_deleted == 0
+    assert terminal.receipts_rolled == 1
+    assert terminal.expired_rows_deleted == 2
+
+
 def test_retention_cap_states_fail_stop_without_pruning_unexpired_evidence(
     tmp_path: Path,
 ) -> None:

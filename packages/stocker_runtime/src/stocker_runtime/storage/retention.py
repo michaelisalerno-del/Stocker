@@ -84,6 +84,19 @@ AND (EXISTS (
       AND watermark.compacted_through_sequence >= callback_inbox.source_sequence
 ))
 """
+_WATERMARK_PROOF_SQL = """
+AND receipt_batch_id IS NOT NULL
+AND NOT EXISTS (
+    SELECT 1 FROM callback_receipts receipt
+    WHERE receipt.batch_id = callback_inbox.receipt_batch_id
+      AND receipt.run_id = callback_inbox.run_id
+)
+AND EXISTS (
+    SELECT 1 FROM callback_compaction_watermarks watermark
+    WHERE watermark.run_id = callback_inbox.run_id
+      AND watermark.compacted_through_sequence >= callback_inbox.source_sequence
+)
+"""
 ACK_PAYLOAD_CANDIDATES_SQL = (
     """
 SELECT source_sequence, run_id, receipt_batch_id
@@ -115,7 +128,7 @@ FROM callback_inbox INDEXED BY callback_inbox_ack_tombstone_idx
 WHERE lifecycle = 'acknowledged' AND payload_json IS NULL
   AND acknowledged_at_us IS NOT NULL AND acknowledged_at_us <= ?
 """
-    + _RECEIPT_PROOF_SQL
+    + _WATERMARK_PROOF_SQL
     + " ORDER BY acknowledged_at_us, source_sequence LIMIT ?"
 )
 FAILED_TOMBSTONE_CANDIDATES_SQL = (
@@ -128,7 +141,7 @@ WHERE lifecycle = 'failed' AND payload_json IS NULL
       WHERE terminal_run.run_id = callback_inbox.run_id
         AND terminal_run.status IN ('stopped', 'fatal'))
 """
-    + _RECEIPT_PROOF_SQL
+    + _WATERMARK_PROOF_SQL
     + " ORDER BY received_at_us, source_sequence LIMIT ?"
 )
 
@@ -301,8 +314,47 @@ class RetentionManager:
             expected_after = record.last_source_sequence
             expected_prior = str(linked_receipt["chained_payload_hash"])
 
+    def _receipt_batch_is_tombstone_ready(
+        self,
+        connection: sqlite3.Connection,
+        receipt: sqlite3.Row,
+        cutoff_us: int,
+    ) -> bool:
+        unready = connection.execute(
+            """
+            SELECT 1
+            FROM callback_inbox
+            WHERE run_id = ? AND source_sequence BETWEEN ? AND ?
+              AND (receipt_batch_id IS NOT ? OR payload_json IS NOT NULL OR NOT (
+                  (lifecycle = 'acknowledged' AND acknowledged_at_us IS NOT NULL
+                   AND acknowledged_at_us <= ?)
+                  OR (lifecycle = 'failed' AND failure_code IS NOT NULL
+                      AND received_at_us <= ? AND EXISTS (
+                          SELECT 1 FROM runs terminal_run
+                          WHERE terminal_run.run_id = callback_inbox.run_id
+                            AND terminal_run.status IN ('stopped', 'fatal')
+                      ))
+              ))
+            LIMIT 1
+            """,
+            (
+                str(receipt["run_id"]),
+                int(receipt["first_source_sequence"]),
+                int(receipt["last_source_sequence"]),
+                str(receipt["batch_id"]),
+                cutoff_us,
+                cutoff_us,
+            ),
+        ).fetchone()
+        return unready is None
+
     def _receipt_candidates(
-        self, connection: sqlite3.Connection, run_id: str, cutoff_us: int, remaining: int
+        self,
+        connection: sqlite3.Connection,
+        run_id: str,
+        receipt_cutoff_us: int,
+        tombstone_cutoff_us: int,
+        remaining: int,
     ) -> tuple[sqlite3.Row, ...]:
         total = int(
             connection.execute(
@@ -319,7 +371,11 @@ class RetentionManager:
         )
         candidate_count = 0
         for index, row in enumerate(rows):
-            if int(row["created_at_us"]) <= cutoff_us or index < excess:
+            if (
+                int(row["created_at_us"]) <= receipt_cutoff_us
+                or index < excess
+                or self._receipt_batch_is_tombstone_ready(connection, row, tombstone_cutoff_us)
+            ):
                 candidate_count += 1
             else:
                 break
@@ -455,7 +511,8 @@ class RetentionManager:
     def _roll_receipts(
         self,
         connection: sqlite3.Connection,
-        cutoff_us: int,
+        receipt_cutoff_us: int,
+        tombstone_cutoff_us: int,
         updated_at_us: int,
         limit: int,
     ) -> tuple[int, int]:
@@ -474,7 +531,8 @@ class RetentionManager:
             candidates = self._receipt_candidates(
                 connection,
                 run_id,
-                cutoff_us,
+                receipt_cutoff_us,
+                tombstone_cutoff_us,
                 limit - changed - 1,
             )
             if not candidates:
@@ -623,51 +681,6 @@ class RetentionManager:
             )
         )
         candidates = acknowledged + failed
-        grouped_sequences: dict[tuple[str, str], set[int]] = {}
-        for candidate in candidates:
-            key = (str(candidate["run_id"]), str(candidate["receipt_batch_id"]))
-            grouped_sequences.setdefault(key, set()).add(int(candidate["source_sequence"]))
-        complete_candidates: list[sqlite3.Row] = []
-        for key, sequences in grouped_sequences.items():
-            receipt = connection.execute(
-                "SELECT * FROM callback_receipts WHERE run_id = ? AND batch_id = ?", key
-            ).fetchone()
-            if receipt is None:
-                complete_candidates.extend(
-                    row
-                    for row in candidates
-                    if (str(row["run_id"]), str(row["receipt_batch_id"])) == key
-                )
-                continue
-            authoritative = {
-                int(row[0])
-                for row in connection.execute(
-                    "SELECT source_sequence FROM callback_inbox WHERE run_id = ? "
-                    "AND source_sequence BETWEEN ? AND ?",
-                    (
-                        key[0],
-                        int(receipt["first_source_sequence"]),
-                        int(receipt["last_source_sequence"]),
-                    ),
-                )
-            }
-            if sequences == authoritative:
-                complete_candidates.extend(
-                    row
-                    for row in candidates
-                    if (str(row["run_id"]), str(row["receipt_batch_id"])) == key
-                )
-        candidates = tuple(complete_candidates)
-        verified_batches: set[tuple[str, str]] = set()
-        for candidate in candidates:
-            key = (str(candidate["run_id"]), str(candidate["receipt_batch_id"]))
-            receipt = connection.execute(
-                "SELECT * FROM callback_receipts WHERE run_id = ? AND batch_id = ?",
-                key,
-            ).fetchone()
-            if receipt is not None and key not in verified_batches:
-                self._verify_granular_receipt(connection, receipt)
-                verified_batches.add(key)
         connection.executemany(
             "DELETE FROM callback_inbox WHERE source_sequence = ?",
             ((int(row["source_sequence"]),) for row in candidates),
@@ -1001,7 +1014,11 @@ class RetentionManager:
             check_deadline()
             remaining -= payloads_compacted
             receipts_rolled, receipt_rows_changed = self._roll_receipts(
-                connection, now_us - self.policy.receipt_us, now_us, remaining
+                connection,
+                now_us - self.policy.receipt_us,
+                now_us - self.policy.tombstone_us,
+                now_us,
+                remaining,
             )
             check_deadline()
             remaining -= receipt_rows_changed

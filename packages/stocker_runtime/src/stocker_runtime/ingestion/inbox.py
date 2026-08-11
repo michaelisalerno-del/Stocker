@@ -77,6 +77,7 @@ CALLBACK_RECOVERABLE_GAP_REASONS = frozenset(
     }
 )
 TRANSPORT_INCIDENT_CODES = ("IBKR_CONNECT_FAILED", "IBKR_SUBSCRIBE_FAILED")
+_PROJECTION_TRANSACTION_LIMIT = 32
 CALLBACK_GAP_RECOVERY_SQL = (
     "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE gap_id IN ("
     "SELECT gap.gap_id FROM gaps gap JOIN subscriptions prior "
@@ -166,6 +167,12 @@ class ProjectionResult:
 
 
 @dataclass(frozen=True)
+class ProjectionBatchResult:
+    processed: int
+    causal_now_us: int
+
+
+@dataclass(frozen=True)
 class WriterAuthority:
     run_id: str
     recorder_generation: int
@@ -201,6 +208,9 @@ class CallbackInbox:
         self.database_path = Path(database_path)
         self.max_nonterminal_rows = max_nonterminal_rows
         self._admission_local = threading.local()
+        self._writer_condition = threading.Condition()
+        self._writer_active = False
+        self._admission_waiters = 0
         with connect_v2(self.database_path):
             pass
 
@@ -227,13 +237,44 @@ class CallbackInbox:
             owner.close()
             del self._admission_local.owner
 
+    def _acquire_admission_writer(self) -> None:
+        """Give a waiting synchronous callback priority over projection chunks."""
+
+        with self._writer_condition:
+            self._admission_waiters += 1
+            self._writer_condition.notify_all()
+            try:
+                while self._writer_active:
+                    self._writer_condition.wait()
+                self._writer_active = True
+            finally:
+                self._admission_waiters -= 1
+
+    def _acquire_projection_writer(self) -> None:
+        """Enter one bounded projection transaction without starving admissions."""
+
+        with self._writer_condition:
+            while self._writer_active or self._admission_waiters:
+                self._writer_condition.wait()
+            self._writer_active = True
+
+    def _release_writer(self) -> None:
+        with self._writer_condition:
+            if not self._writer_active:
+                raise RuntimeError("callback writer arbitration is unbalanced")
+            self._writer_active = False
+            self._writer_condition.notify_all()
+
     @contextmanager
     def _connection_scope(
         self, connection: sqlite3.Connection | None
     ) -> Iterator[sqlite3.Connection]:
         if connection is not None:
-            with connection:
+            if connection.in_transaction:
                 yield connection
+            else:
+                with connection:
+                    yield connection
             return
         owned = self._connect()
         try:
@@ -275,6 +316,18 @@ class CallbackInbox:
                 ).fetchone()[0]
             )
 
+    @staticmethod
+    def _refresh_nonterminal_count(connection: sqlite3.Connection, run_ids: set[str]) -> None:
+        nonterminal = int(
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE lifecycle IN ('pending', 'leased')"
+            ).fetchone()[0]
+        )
+        connection.executemany(
+            "UPDATE runtime_state SET inbox_nonterminal_count=? WHERE run_id=?",
+            ((nonterminal, run_id) for run_id in sorted(run_ids)),
+        )
+
     def admit(
         self,
         fence: CallbackFence,
@@ -294,17 +347,21 @@ class CallbackInbox:
             raise InboxAdmissionError(str(error)) from error
         payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
         event_uid = _event_uid(fence, callback, payload_hash)
+        self._acquire_admission_writer()
         try:
             connection = self._admission_connection()
         except (OSError, sqlite3.Error) as error:
+            self._release_writer()
             raise InboxAdmissionError(f"callback durable admission failed: {error}") from error
+        except BaseException:
+            self._release_writer()
+            raise
         try:
             connection.execute("BEGIN IMMEDIATE")
             authoritative = self._authoritative_admission(connection)
             if authority is not None and (
                 authority.run_id != str(authoritative["run_id"])
-                or authority.recorder_generation
-                != int(authoritative["recorder_generation"])
+                or authority.recorder_generation != int(authoritative["recorder_generation"])
                 or authority.owner_id != str(authoritative["owner_id"])
             ):
                 raise InboxAuthorityLost("authoritative writer lease is no longer owned")
@@ -435,6 +492,8 @@ class CallbackInbox:
             finally:
                 self._discard_admission_connection(connection)
             raise
+        finally:
+            self._release_writer()
 
     @staticmethod
     def _authoritative_admission(connection: sqlite3.Connection) -> sqlite3.Row:
@@ -657,6 +716,94 @@ class CallbackInbox:
             lease_owner=owner,
         )
 
+    def project_batch(
+        self,
+        leased_callbacks: tuple[LeasedCallback, ...],
+        *,
+        now_us: int,
+        authority: WriterAuthority,
+    ) -> ProjectionBatchResult:
+        """Durably project, then terminalize a leased prefix in bounded transactions."""
+
+        causal_now_us = now_us
+        processed = 0
+        connection = self._connect()
+        try:
+            for offset in range(0, len(leased_callbacks), _PROJECTION_TRANSACTION_LIMIT):
+                chunk = leased_callbacks[offset : offset + _PROJECTION_TRANSACTION_LIMIT]
+                terminal_actions: list[tuple[LeasedCallback, str | None, int]] = []
+                self._acquire_projection_writer()
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    self.verify_writer(connection, authority)
+                    for leased in chunk:
+                        causal_now_us = max(causal_now_us, leased.received_at_us)
+                        connection.execute("SAVEPOINT callback_projection")
+                        try:
+                            result = self.project(
+                                leased,
+                                authority=authority,
+                                connection=connection,
+                            )
+                        except NormalizationError:
+                            connection.execute("ROLLBACK TO callback_projection")
+                            connection.execute("RELEASE callback_projection")
+                            terminal_actions.append((leased, None, causal_now_us))
+                            continue
+                        connection.execute("RELEASE callback_projection")
+                        terminal_actions.append((leased, result.event_id, causal_now_us))
+                    connection.commit()
+                except BaseException:
+                    if connection.in_transaction:
+                        connection.rollback()
+                    raise
+                finally:
+                    self._release_writer()
+
+                self._acquire_projection_writer()
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    self.verify_writer(connection, authority)
+                    affected_run_ids: set[str] = set()
+                    successful = 0
+                    for leased, event_id, terminal_at_us in terminal_actions:
+                        if event_id is None:
+                            self.fail(
+                                leased,
+                                "MALFORMED_CALLBACK",
+                                failed_at_us=terminal_at_us,
+                                authority=authority,
+                                connection=connection,
+                                _refresh_nonterminal_count=False,
+                            )
+                        else:
+                            self.acknowledge(
+                                leased,
+                                event_id,
+                                acknowledged_at_us=terminal_at_us,
+                                authority=authority,
+                                connection=connection,
+                                _refresh_nonterminal_count=False,
+                            )
+                            successful += 1
+                        affected_run_ids.add(leased.run_id)
+                    self._refresh_nonterminal_count(connection, affected_run_ids)
+                    connection.commit()
+                    processed += successful
+                except BaseException:
+                    if connection.in_transaction:
+                        connection.rollback()
+                    raise
+                finally:
+                    self._release_writer()
+        except BaseException:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return ProjectionBatchResult(processed=processed, causal_now_us=causal_now_us)
+
     @staticmethod
     def _number(payload: Mapping[str, object], name: str) -> float | None:
         value = payload.get(name)
@@ -680,8 +827,10 @@ class CallbackInbox:
         owns_connection = connection is None
         if connection is None:
             connection = self._connect()
+        started_transaction = not connection.in_transaction
         try:
-            connection.execute("BEGIN IMMEDIATE")
+            if started_transaction:
+                connection.execute("BEGIN IMMEDIATE")
             self.verify_writer(connection, authority)
             inbox_row = connection.execute(
                 "SELECT * FROM callback_inbox WHERE source_sequence = ?",
@@ -920,10 +1069,11 @@ class CallbackInbox:
                 "UPDATE runtime_state SET projection_heartbeat_at_us = ? WHERE run_id = ?",
                 (received_at_us, run_id),
             )
-            connection.commit()
+            if started_transaction:
+                connection.commit()
             return ProjectionResult(event_id, inserted)
         except Exception:
-            if connection.in_transaction:
+            if started_transaction and connection.in_transaction:
                 connection.rollback()
             raise
         finally:
@@ -938,11 +1088,13 @@ class CallbackInbox:
         acknowledged_at_us: int,
         authority: WriterAuthority,
         connection: sqlite3.Connection | None = None,
+        _refresh_nonterminal_count: bool = True,
     ) -> None:
         """Mark terminal only after the exact durable projection is present."""
 
         with self._connection_scope(connection) as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            if not connection.in_transaction:
+                connection.execute("BEGIN IMMEDIATE")
             self.verify_writer(connection, authority)
             evidence = connection.execute(
                 "SELECT callback.received_at_us AS callback_received_at_us, "
@@ -988,12 +1140,8 @@ class CallbackInbox:
             )
             if cursor.rowcount != 1:
                 raise InboxAdmissionError("callback acknowledgement lost its lease")
-            connection.execute(
-                "UPDATE runtime_state SET inbox_nonterminal_count = "
-                "(SELECT count(*) FROM callback_inbox WHERE lifecycle IN ('pending','leased')) "
-                "WHERE run_id = ?",
-                (leased.run_id,),
-            )
+            if _refresh_nonterminal_count:
+                self._refresh_nonterminal_count(connection, {leased.run_id})
             subscription = connection.execute(
                 "SELECT subscription_id, instrument_id, feed_kind, snapshot FROM subscriptions "
                 "WHERE run_id=? AND recorder_generation=? "
@@ -1061,13 +1209,16 @@ class CallbackInbox:
         *,
         failed_at_us: int,
         authority: WriterAuthority,
+        connection: sqlite3.Connection | None = None,
+        _refresh_nonterminal_count: bool = True,
     ) -> None:
         """Quarantine one poison callback while leaving later callbacks serviceable."""
 
         if not code:
             raise ValueError("failure code is required")
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+        with self._connection_scope(connection) as connection:
+            if not connection.in_transaction:
+                connection.execute("BEGIN IMMEDIATE")
             self.verify_writer(connection, authority)
             cursor = connection.execute(
                 "UPDATE callback_inbox SET lifecycle = 'failed', lease_owner = NULL, "
@@ -1085,12 +1236,8 @@ class CallbackInbox:
                 "opened_at_us, details_json) VALUES (?, ?, 'callback', 'degraded', ?, ?, '{}')",
                 (incident_id, leased.run_id, code, failed_at_us),
             )
-            connection.execute(
-                "UPDATE runtime_state SET inbox_nonterminal_count = "
-                "(SELECT count(*) FROM callback_inbox WHERE lifecycle IN ('pending','leased')) "
-                "WHERE run_id = ?",
-                (leased.run_id,),
-            )
+            if _refresh_nonterminal_count:
+                self._refresh_nonterminal_count(connection, {leased.run_id})
 
     def create_receipt(
         self,

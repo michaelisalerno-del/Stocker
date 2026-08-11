@@ -54,7 +54,6 @@ from stocker_runtime.ingestion.inbox import (
     InboxAdmissionError,
     InboxAuthorityLost,
     MarketDataCallback,
-    NormalizationError,
     WriterAuthority,
     transport_incident_id,
 )
@@ -2588,41 +2587,25 @@ class Recorder:
         authority = self._authority()
         causal_now_us = now_us
         try:
-            processed = 0
-            processing_connection = connect_v2(self.config.database, verify_schema=False)
-            try:
-                for leased in self.inbox.lease_pending(
-                    self.config.owner_id,
-                    now_us=now_us,
-                    lease_us=self.config.callback_lease_us,
-                    limit=limit,
-                    authority=authority,
-                ):
-                    causal_now_us = max(causal_now_us, leased.received_at_us)
-                    try:
-                        result = self.inbox.project(
-                            leased,
-                            authority=authority,
-                            connection=processing_connection,
-                        )
-                    except NormalizationError:
-                        self.inbox.fail(
-                            leased,
-                            "MALFORMED_CALLBACK",
-                            failed_at_us=causal_now_us,
-                            authority=authority,
-                        )
-                        continue
-                    self.inbox.acknowledge(
-                        leased,
-                        result.event_id,
-                        acknowledged_at_us=causal_now_us,
-                        authority=authority,
-                        connection=processing_connection,
-                    )
-                    processed += 1
-            finally:
-                processing_connection.close()
+            leased_callbacks = self.inbox.lease_pending(
+                self.config.owner_id,
+                now_us=now_us,
+                lease_us=self.config.callback_lease_us,
+                limit=limit,
+                authority=authority,
+            )
+            if leased_callbacks:
+                causal_now_us = max(
+                    causal_now_us,
+                    max(leased.received_at_us for leased in leased_callbacks),
+                )
+            batch = self.inbox.project_batch(
+                leased_callbacks,
+                now_us=now_us,
+                authority=authority,
+            )
+            processed = batch.processed
+            causal_now_us = batch.causal_now_us
             receipts = self.inbox.create_pending_receipts(
                 created_at_us=causal_now_us,
                 limit=limit,

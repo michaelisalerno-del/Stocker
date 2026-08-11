@@ -479,6 +479,165 @@ def test_poison_callback_is_failed_without_blocking_the_next_callback(tmp_path: 
     assert tuple(states[1]) == ("acknowledged", None)
 
 
+def test_projection_batch_isolates_poison_and_acknowledges_later_callback(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    fence = _seed_subscription(database)
+    inbox = CallbackInbox(database)
+    inbox.admit(fence, MarketDataCallback("quote", 10, None, {"bid": "bad"}))
+    good = inbox.admit(
+        fence, MarketDataCallback("quote", 11, None, {"event_at_us": 11, "bid": 1.0})
+    )
+    leased = inbox.lease_pending("worker", now_us=20, lease_us=10, limit=10, authority=_authority())
+
+    result = inbox.project_batch(leased, now_us=20, authority=_authority())
+
+    assert result.processed == 1
+    assert result.causal_now_us == 20
+    with connect_v2(database) as connection:
+        states = tuple(
+            connection.execute(
+                "SELECT lifecycle, failure_code, normalized_event_id FROM callback_inbox "
+                "ORDER BY source_sequence"
+            )
+        )
+    assert tuple(states[0]) == ("failed", "MALFORMED_CALLBACK", None)
+    assert tuple(states[1]) == ("acknowledged", None, good.event_uid)
+
+
+def test_projection_batch_acknowledgement_failure_preserves_durable_projection_for_recovery(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    fence = _seed_subscription(database)
+    inbox = CallbackInbox(database)
+    admitted = inbox.admit(
+        fence,
+        MarketDataCallback("quote", 10, None, {"event_at_us": 10, "bid": 100.0}),
+    )
+    leased = inbox.lease_pending("worker", now_us=11, lease_us=10, limit=1, authority=_authority())
+    with connect_v2(database) as connection:
+        connection.execute(
+            "CREATE TRIGGER fail_batch_acknowledgement BEFORE UPDATE OF lifecycle "
+            "ON callback_inbox WHEN NEW.lifecycle='acknowledged' "
+            "BEGIN SELECT RAISE(ABORT, 'disk full'); END"
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="disk full"):
+        inbox.project_batch(leased, now_us=12, authority=_authority())
+
+    with connect_v2(database, verify_schema=False) as connection:
+        callback = connection.execute(
+            "SELECT lifecycle, payload_json, normalized_event_id FROM callback_inbox "
+            "WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()
+        assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == 1
+        connection.execute("DROP TRIGGER fail_batch_acknowledgement")
+    assert tuple(callback) == ("leased", callback[1], None)
+    assert callback[1] is not None
+
+    result = inbox.project_batch(leased, now_us=13, authority=_authority())
+    assert result.processed == 1
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT lifecycle, normalized_event_id FROM callback_inbox WHERE source_sequence=?",
+                (admitted.source_sequence,),
+            ).fetchone()
+        ) == ("acknowledged", admitted.event_uid)
+
+
+def test_waiting_callback_admission_precedes_the_next_projection_transaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    fence = _seed_subscription(database)
+    inbox = CallbackInbox(database)
+    for received_at_us in range(10, 74):
+        inbox.admit(
+            fence,
+            MarketDataCallback(
+                "quote",
+                received_at_us,
+                None,
+                {"event_at_us": received_at_us, "bid": 100.0},
+            ),
+        )
+    leased = inbox.lease_pending("worker", now_us=80, lease_us=10, limit=64, authority=_authority())
+    first_projection_entered = threading.Event()
+    release_first_projection = threading.Event()
+    original_project = inbox.project
+    original_acquire_projection_writer = inbox._acquire_projection_writer
+    projection_transactions = 0
+
+    def slow_first_projection(*args: object, **kwargs: object) -> object:
+        if not first_projection_entered.is_set():
+            first_projection_entered.set()
+            assert release_first_projection.wait(timeout=5)
+        return original_project(*args, **kwargs)  # type: ignore[arg-type]
+
+    def assert_admission_precedes_next_projection_transaction() -> None:
+        nonlocal projection_transactions
+        original_acquire_projection_writer()
+        projection_transactions += 1
+        if projection_transactions == 2:
+            with connect_v2(database) as connection:
+                assert (
+                    connection.execute(
+                        "SELECT count(*) FROM callback_inbox WHERE received_at_us=1000"
+                    ).fetchone()[0]
+                    == 1
+                )
+
+    monkeypatch.setattr(inbox, "project", slow_first_projection)
+    monkeypatch.setattr(
+        inbox,
+        "_acquire_projection_writer",
+        assert_admission_precedes_next_projection_transaction,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        drain = executor.submit(
+            inbox.project_batch,
+            leased,
+            now_us=80,
+            authority=_authority(),
+        )
+        assert first_projection_entered.wait(timeout=5)
+        admission = executor.submit(
+            inbox.admit,
+            fence,
+            MarketDataCallback("quote", 1000, None, {"event_at_us": 1000, "bid": 101.0}),
+            authority=_authority(),
+        )
+        with inbox._writer_condition:
+            assert inbox._writer_condition.wait_for(
+                lambda: inbox._admission_waiters == 1,
+                timeout=5,
+            )
+        release_first_projection.set()
+        admitted = admission.result(timeout=5)
+        result = drain.result(timeout=5)
+
+    assert result.processed == 64
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT lifecycle FROM callback_inbox WHERE source_sequence=?",
+                (admitted.source_sequence,),
+            ).fetchone()[0]
+            == "pending"
+        )
+
+
 def test_stale_request_generation_is_terminal_evidence_not_active_state(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
@@ -1178,17 +1337,17 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
                 {"event_at_us": 101 + offset, "bid": 100.0 + offset},
             ),
         )
-        for offset in range(40)
+        for offset in range(255)
     ]
     callbacks.append(
         (
             bar_fence,
             MarketDataCallback(
                 "bar",
-                143,
+                357,
                 None,
                 {
-                    "event_at_us": 143,
+                    "event_at_us": 357,
                     "open": 100.0,
                     "high": 101.0,
                     "low": 99.0,
@@ -1209,25 +1368,48 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
 
     real_inbox_connect = inbox_module.connect_v2
     drain_connections = 0
+    drain_transactions: list[str] = []
+    drain_nonterminal_counts = 0
 
-    def connect_during_drain(
-        path: str | Path, *, verify_schema: bool = True
-    ) -> sqlite3.Connection:
+    def trace_transactions(connection: sqlite3.Connection) -> sqlite3.Connection:
+        def trace(statement: str) -> None:
+            nonlocal drain_nonterminal_counts
+            normalized = statement.strip().upper()
+            if normalized == "BEGIN IMMEDIATE" or normalized == "COMMIT":
+                drain_transactions.append(normalized)
+            if normalized.startswith("SELECT COUNT(*) FROM CALLBACK_INBOX") and (
+                "LIFECYCLE IN ('PENDING', 'LEASED')" in normalized
+            ):
+                drain_nonterminal_counts += 1
+
+        connection.set_trace_callback(trace)
+        return connection
+
+    def connect_during_drain(path: str | Path, *, verify_schema: bool = True) -> sqlite3.Connection:
         nonlocal drain_connections
         drain_connections += 1
-        return real_inbox_connect(path, verify_schema=verify_schema)
+        return trace_transactions(real_inbox_connect(path, verify_schema=verify_schema))
+
+    def connect_recorder_during_drain(
+        path: str | Path, *, verify_schema: bool = True
+    ) -> sqlite3.Connection:
+        return trace_transactions(real_connect(path, verify_schema=verify_schema))
 
     with monkeypatch.context() as drain_context:
         drain_context.setattr(inbox_module, "connect_v2", connect_during_drain)
-        assert recorder.drain(now_us=142) == 41
+        drain_context.setattr(recorder_module, "connect_v2", connect_recorder_during_drain)
+        assert recorder.drain(now_us=356) == 256
     assert redundant_owner_connections == []
     assert drain_connections <= 6
+    assert drain_transactions.count("BEGIN IMMEDIATE") <= 24
+    assert drain_transactions.count("COMMIT") <= 24
+    assert drain_nonterminal_counts <= 8
     with connect_v2(database) as connection:
         assert (
             connection.execute(
                 "SELECT count(*) FROM callback_inbox WHERE lifecycle='acknowledged'"
             ).fetchone()[0]
-            == 41
+            == 256
         )
         assert (
             connection.execute(
@@ -1235,9 +1417,12 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
             ).fetchone()[0]
             == 1
         )
-        assert connection.execute(
-            "SELECT acknowledged_at_us FROM callback_inbox WHERE callback_kind='bar'"
-        ).fetchone()[0] == 143
+        assert (
+            connection.execute(
+                "SELECT acknowledged_at_us FROM callback_inbox WHERE callback_kind='bar'"
+            ).fetchone()[0]
+            == 357
+        )
 
 
 def test_admission_connection_closes_on_callback_thread_exit_and_abnormal_exit(
@@ -1689,28 +1874,20 @@ def test_retention_deferral_waits_for_an_existing_degradation_to_clear(
     recorder = Recorder(_config(database), FakeMarketData())
     recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
     with connect_v2(database) as connection:
-        connection.execute(
-            "UPDATE runtime_state SET lifecycle='degraded', reason='OTHER_DEGRADED'"
-        )
+        connection.execute("UPDATE runtime_state SET lifecycle='degraded', reason='OTHER_DEGRADED'")
     recorder._retention_maintenance_deferred = True
 
     recorder._heartbeat(101)
     assert recorder._retention_maintenance_deferred is True
     with connect_v2(database) as connection:
-        blocked = connection.execute(
-            "SELECT lifecycle, reason FROM runtime_state"
-        ).fetchone()
-        connection.execute(
-            "UPDATE runtime_state SET lifecycle='running', reason=NULL"
-        )
+        blocked = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+        connection.execute("UPDATE runtime_state SET lifecycle='running', reason=NULL")
     assert tuple(blocked) == ("degraded", "OTHER_DEGRADED")
 
     recorder._heartbeat(102)
     assert recorder._retention_maintenance_deferred is False
     with connect_v2(database) as connection:
-        published = connection.execute(
-            "SELECT lifecycle, reason FROM runtime_state"
-        ).fetchone()
+        published = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
     assert tuple(published) == ("degraded", "RETENTION_MAINTENANCE_DEFERRED")
 
 
@@ -3252,9 +3429,7 @@ def test_callback_recovery_does_not_cross_snapshot_and_stream_cadence(
 
 
 @pytest.mark.parametrize("with_gap", (False, True))
-def test_callback_receipt_time_advances_drain_causal_clock(
-    tmp_path: Path, with_gap: bool
-) -> None:
+def test_callback_receipt_time_advances_drain_causal_clock(tmp_path: Path, with_gap: bool) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     instrument, specs = _specs()
@@ -3291,8 +3466,7 @@ def test_callback_receipt_time_advances_drain_causal_clock(
             (admitted.source_sequence,),
         ).fetchone()[0]
         runtime = connection.execute(
-            "SELECT lifecycle, reason, connection_state, process_heartbeat_at_us "
-            "FROM runtime_state"
+            "SELECT lifecycle, reason, connection_state, process_heartbeat_at_us FROM runtime_state"
         ).fetchone()
         unresolved_stale = connection.execute(
             "SELECT count(*) FROM gaps WHERE reason='STREAM_STALE' AND resolved_at_us IS NULL"
@@ -3388,7 +3562,7 @@ def test_post_admission_projection_failure_preserves_callback_and_is_fatal(
     state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
     admitted = recorder.receive(
         state.fences[0],
-        MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 1.0}),
+        MarketDataCallback("quote", 150, None, {"event_at_us": 150, "bid": 1.0}),
     )
     monkeypatch.setattr(
         recorder.inbox,
@@ -3405,9 +3579,13 @@ def test_post_admission_projection_failure_preserves_callback_and_is_fatal(
             (admitted.source_sequence,),
         ).fetchone()
         status = connection.execute("SELECT status FROM runs WHERE run_id='run-1'").fetchone()[0]
+        fatal_at_us = connection.execute(
+            "SELECT opened_at_us FROM incidents WHERE code='POST_ADMISSION_PRESERVATION_FAILED'"
+        ).fetchone()[0]
     assert callback[0] == "leased"
     assert callback[1] is not None
     assert status == "fatal"
+    assert fatal_at_us == 150
 
 
 def test_projection_uses_durable_payload_and_rejects_altered_lease_token(tmp_path: Path) -> None:
@@ -3672,7 +3850,7 @@ def _force_recorder_takeover(database: Path) -> None:
         )
 
 
-def test_authority_takeover_during_slow_drain_preserves_lease_and_replacement_state(
+def test_authority_takeover_waits_for_atomic_drain_chunk_and_preserves_replacement_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "v2.sqlite3"
@@ -3687,20 +3865,32 @@ def test_authority_takeover_during_slow_drain_preserves_lease_and_replacement_st
     )
     entered = threading.Event()
     release = threading.Event()
+    takeover_done = threading.Event()
     original_project = recorder.inbox.project
+    original_receipts = recorder.inbox.create_pending_receipts
 
     def slow_project(*args: object, **kwargs: object) -> object:
         entered.set()
         assert release.wait(timeout=5)
         return original_project(*args, **kwargs)  # type: ignore[arg-type]
 
+    def wait_for_takeover(*args: object, **kwargs: object) -> object:
+        assert takeover_done.wait(timeout=5)
+        return original_receipts(*args, **kwargs)  # type: ignore[arg-type]
+
+    def take_over() -> None:
+        _force_recorder_takeover(database)
+        takeover_done.set()
+
     monkeypatch.setattr(recorder.inbox, "project", slow_project)
+    monkeypatch.setattr(recorder.inbox, "create_pending_receipts", wait_for_takeover)
     disconnects = adapter.disconnect_calls
-    with ThreadPoolExecutor(max_workers=1) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         future = executor.submit(recorder.drain, now_us=102)
         assert entered.wait(timeout=5)
-        _force_recorder_takeover(database)
+        takeover = executor.submit(take_over)
         release.set()
+        takeover.result(timeout=5)
         with pytest.raises(AuthoritativeLeaseLost):
             future.result(timeout=5)
 
@@ -3714,7 +3904,7 @@ def test_authority_takeover_during_slow_drain_preserves_lease_and_replacement_st
         replacement = connection.execute(
             "SELECT recorder_generation, lifecycle, reason, connection_state FROM runtime_state"
         ).fetchone()
-    assert callback[0] == "leased" and callback[1] is not None
+    assert callback[0] == "acknowledged" and callback[1] is not None
     assert tuple(replacement) == (2, "running", None, "connected")
 
 

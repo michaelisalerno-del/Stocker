@@ -2584,6 +2584,7 @@ class Recorder:
         """Recover and process one bounded callback batch without blocking on poison."""
 
         authority = self._authority()
+        causal_now_us = now_us
         try:
             processed = 0
             processing_connection = connect_v2(self.config.database, verify_schema=False)
@@ -2595,6 +2596,7 @@ class Recorder:
                     limit=limit,
                     authority=authority,
                 ):
+                    causal_now_us = max(causal_now_us, leased.received_at_us)
                     try:
                         result = self.inbox.project(
                             leased,
@@ -2605,14 +2607,14 @@ class Recorder:
                         self.inbox.fail(
                             leased,
                             "MALFORMED_CALLBACK",
-                            failed_at_us=now_us,
+                            failed_at_us=causal_now_us,
                             authority=authority,
                         )
                         continue
                     self.inbox.acknowledge(
                         leased,
                         result.event_id,
-                        acknowledged_at_us=now_us,
+                        acknowledged_at_us=causal_now_us,
                         authority=authority,
                         connection=processing_connection,
                     )
@@ -2620,7 +2622,7 @@ class Recorder:
             finally:
                 processing_connection.close()
             self.inbox.create_pending_receipts(
-                created_at_us=now_us,
+                created_at_us=causal_now_us,
                 limit=limit,
                 authority=authority,
             )
@@ -2637,22 +2639,22 @@ class Recorder:
                     limit=min(limit, 256),
                 )
                 connection.commit()
-            self._fulfill_snapshot_interests_from_streams(now_us=now_us)
-            self._heartbeat(now_us)
+            self._fulfill_snapshot_interests_from_streams(now_us=causal_now_us)
+            self._heartbeat(causal_now_us)
             if self._idea_runner is not None:
-                self._idea_runner.run_once(now_us=now_us)
+                self._idea_runner.run_once(now_us=causal_now_us)
             if self._connection_is_connected():
-                self._reconcile_dynamic_market_data(now_us=now_us)
+                self._reconcile_dynamic_market_data(now_us=causal_now_us)
             if self._shadow_engine is not None:
-                self._shadow_engine.run_once(now_us=now_us)
+                self._shadow_engine.run_once(now_us=causal_now_us)
             return processed
         except CallbackTimestampOrderingLoss as error:
-            self._fatal("CALLBACK_TIMESTAMP_ORDERING_LOSS", now_us)
+            self._fatal("CALLBACK_TIMESTAMP_ORDERING_LOSS", causal_now_us)
             raise RecorderFatalError("callback timestamp ordering loss") from error
         except AuthoritativeLeaseLost:
             raise
         except Exception as error:
-            self._fatal("POST_ADMISSION_PRESERVATION_FAILED", now_us)
+            self._fatal("POST_ADMISSION_PRESERVATION_FAILED", causal_now_us)
             raise RecorderFatalError("post-admission preservation failed") from error
 
     def _heartbeat(self, now_us: int) -> None:

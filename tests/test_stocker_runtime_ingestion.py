@@ -1177,10 +1177,10 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
             bar_fence,
             MarketDataCallback(
                 "bar",
-                141,
+                143,
                 None,
                 {
-                    "event_at_us": 141,
+                    "event_at_us": 143,
                     "open": 100.0,
                     "high": 101.0,
                     "low": 99.0,
@@ -1225,6 +1225,9 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
             ).fetchone()[0]
             == 1
         )
+        assert connection.execute(
+            "SELECT acknowledged_at_us FROM callback_inbox WHERE callback_kind='bar'"
+        ).fetchone()[0] == 143
 
 
 def test_staleness_reference_is_clamped_to_current_expected_session(tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from functools import cache
 from pathlib import Path
 
@@ -125,11 +126,34 @@ def _is_canonical_json(value: object) -> int:
     return int(canonical == value)
 
 
+def _same_positive_decimal(left: object, right: object) -> int:
+    if not isinstance(left, str) or not isinstance(right, str):
+        return 0
+    try:
+        left_value = Decimal(left)
+        right_value = Decimal(right)
+    except (InvalidOperation, ValueError):
+        return 0
+    return int(
+        left_value.is_finite()
+        and right_value.is_finite()
+        and left_value > 0
+        and right_value > 0
+        and left_value == right_value
+    )
+
+
 def _register_functions(connection: sqlite3.Connection) -> None:
     connection.create_function(
         "stocker_canonical_json",
         1,
         _is_canonical_json,
+        deterministic=True,
+    )
+    connection.create_function(
+        "stocker_same_positive_decimal",
+        2,
+        _same_positive_decimal,
         deterministic=True,
     )
 

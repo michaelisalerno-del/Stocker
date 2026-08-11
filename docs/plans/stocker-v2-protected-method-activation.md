@@ -117,6 +117,16 @@ state and 256-event retained-lineage bounds remain unchanged. The authorised rec
 kinds are generic session-volume baselines, five-minute session prefixes, and
 per-contract option-snapshot captures with exact causal input mappings.
 
+Owner-approved amendment on 2026-08-11: Phase 5 may add one narrow sequential
+migration that permits multiple logical `instrument_id` values to name one IBKR
+contract only when their complete physical contract identity is identical. This is
+required to preserve the imported `legacy-instrument-*` evidence while the four frozen
+plugins continue to use their reviewed symbol identities. The migration may replace
+only the unique conId index and add fail-closed insert/update guards; it must not rewrite
+an imported instrument, subscription, event, hash, plugin identity, or protected result.
+Recorder admission must independently enforce the same physical-identity equality and
+must not hide unrelated constraint failures.
+
 The JSON API remains exactly the existing seven GET routes. No method-specific route,
 schema, screen, renderer, poller, or mutation is added. Unknown plugins continue to
 render through the generic Ideas and Results views.
@@ -281,6 +291,13 @@ Resolved on 2026-08-10:
   in section 4, after the existing schema proved unable to represent the required
   causal receipt chains without payload-only pseudo-lineage or exceeding the retained
   event bound.
+
+Resolved on 2026-08-11:
+
+- authorise the additional generic Phase-5 logical-instrument-alias migration described
+  in section 4 after the attended schema-13 start proved that the imported logical IDs
+  and the reviewed plugin logical IDs share exact IBKR contracts but cannot coexist
+  under the original globally unique conId index.
 
 Remaining attended evidence gates are operational facts, not design discretion:
 

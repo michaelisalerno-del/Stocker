@@ -11,6 +11,7 @@ import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from time import monotonic_ns
 from typing import Literal, Self, cast
@@ -715,6 +716,39 @@ class Recorder:
         )
         return hashlib.sha256(canonical_json_bytes(material)).hexdigest()
 
+    @staticmethod
+    def _physical_instrument_identity(
+        *,
+        ibkr_con_id: int,
+        kind: str,
+        symbol: str,
+        exchange: str,
+        currency: str,
+        option_expiry: str | None,
+        option_strike: str | None,
+        option_right: str | None,
+        option_multiplier: str | None,
+    ) -> tuple[object, ...]:
+        normalized_strike: Decimal | None = None
+        if option_strike is not None:
+            try:
+                normalized_strike = Decimal(option_strike).normalize()
+            except InvalidOperation as error:
+                raise RecorderFatalError("stored IBKR option strike is invalid") from error
+            if not normalized_strike.is_finite() or normalized_strike <= 0:
+                raise RecorderFatalError("stored IBKR option strike is invalid")
+        return (
+            ibkr_con_id,
+            kind,
+            symbol,
+            exchange,
+            currency,
+            option_expiry,
+            normalized_strike,
+            option_right,
+            option_multiplier,
+        )
+
     def _upsert_instruments(
         self, connection: sqlite3.Connection, instruments: tuple[InstrumentSpec, ...]
     ) -> None:
@@ -726,10 +760,55 @@ class Recorder:
             ).fetchone()
             if existing is not None and str(existing[0]) != identity_hash:
                 raise RecorderFatalError("instrument identity changed within the operational store")
+            if spec.ibkr_con_id is not None:
+                candidate_identity = self._physical_instrument_identity(
+                    ibkr_con_id=spec.ibkr_con_id,
+                    kind=spec.kind,
+                    symbol=spec.symbol,
+                    exchange=spec.exchange,
+                    currency=spec.currency,
+                    option_expiry=spec.option_expiry,
+                    option_strike=spec.option_strike,
+                    option_right=spec.option_right,
+                    option_multiplier=spec.option_multiplier,
+                )
+                aliases = connection.execute(
+                    "SELECT ibkr_con_id, kind, symbol, exchange, currency, option_expiry, "
+                    "option_strike, option_right, option_multiplier FROM instruments "
+                    "WHERE ibkr_con_id = ? AND instrument_id <> ?",
+                    (spec.ibkr_con_id, spec.instrument_id),
+                )
+                for alias in aliases:
+                    existing_identity = self._physical_instrument_identity(
+                        ibkr_con_id=int(alias["ibkr_con_id"]),
+                        kind=str(alias["kind"]),
+                        symbol=str(alias["symbol"]),
+                        exchange=str(alias["exchange"]),
+                        currency=str(alias["currency"]),
+                        option_expiry=(
+                            None if alias["option_expiry"] is None else str(alias["option_expiry"])
+                        ),
+                        option_strike=(
+                            None if alias["option_strike"] is None else str(alias["option_strike"])
+                        ),
+                        option_right=(
+                            None if alias["option_right"] is None else str(alias["option_right"])
+                        ),
+                        option_multiplier=(
+                            None
+                            if alias["option_multiplier"] is None
+                            else str(alias["option_multiplier"])
+                        ),
+                    )
+                    if existing_identity != candidate_identity:
+                        raise RecorderFatalError(
+                            "IBKR contract identity conflicts with an existing logical instrument"
+                        )
             connection.execute(
-                "INSERT OR IGNORE INTO instruments(instrument_id, identity_hash, ibkr_con_id, "
+                "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, "
                 "kind, symbol, exchange, currency, option_expiry, option_strike, "
-                "option_right, option_multiplier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "option_right, option_multiplier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(instrument_id) DO NOTHING",
                 (
                     spec.instrument_id,
                     identity_hash,

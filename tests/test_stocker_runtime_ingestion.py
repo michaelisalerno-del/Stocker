@@ -655,6 +655,210 @@ def _specs() -> tuple[InstrumentSpec, tuple[SubscriptionSpec, ...]]:
     return instrument, subscriptions
 
 
+def test_recorder_admits_exact_logical_alias_for_imported_ibkr_contract(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+            "exchange, currency) VALUES "
+            "('legacy-instrument-aal', ?, 123, 'stock', 'AAL', 'SMART', 'USD')",
+            ("b" * 64,),
+        )
+
+    instrument = InstrumentSpec(
+        instrument_id="AAL",
+        ibkr_con_id=123,
+        kind="stock",
+        symbol="AAL",
+        exchange="SMART",
+        currency="USD",
+    )
+    subscription = SubscriptionSpec(
+        name="active-aal-quotes",
+        instrument_id="AAL",
+        feed_kind="quotes",
+        request_id=3,
+        continuity_required=True,
+        optional=False,
+        stale_after_us=15_000_000,
+    )
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+
+    state = recorder.start(
+        now_us=100,
+        instruments=(instrument,),
+        subscriptions=(subscription,),
+    )
+    adapter.emit(
+        state.fences[0],
+        MarketDataCallback(
+            "quote",
+            101,
+            101,
+            {"event_at_us": 101, "bid": 14.9, "ask": 15.1},
+        ),
+    )
+    assert recorder.drain(now_us=102) == 1
+    recorder.stop(now_us=103)
+
+    assert len(state.fences) == 1
+    assert len(adapter.subscriptions) == 1
+    with connect_v2(database) as connection:
+        aliases = tuple(
+            connection.execute(
+                "SELECT instrument_id FROM instruments WHERE ibkr_con_id=123 ORDER BY instrument_id"
+            )
+        )
+        subscription_instrument = connection.execute(
+            "SELECT instrument_id FROM subscriptions WHERE run_id='run-1'"
+        ).fetchone()[0]
+        event_instrument = connection.execute(
+            "SELECT instrument_id FROM market_events WHERE run_id='run-1'"
+        ).fetchone()[0]
+        foreign_keys = tuple(connection.execute("PRAGMA foreign_key_check"))
+    assert [row["instrument_id"] for row in aliases] == ["AAL", "legacy-instrument-aal"]
+    assert subscription_instrument == "AAL"
+    assert event_instrument == "AAL"
+    assert foreign_keys == ()
+
+
+def test_logical_alias_is_idempotent_across_unclean_recorder_restart(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+            "exchange, currency) VALUES "
+            "('legacy-instrument-aal', ?, 123, 'stock', 'AAL', 'SMART', 'USD')",
+            ("b" * 64,),
+        )
+    instrument = InstrumentSpec("AAL", 123, "stock", "AAL", "SMART", "USD")
+    subscription = SubscriptionSpec(
+        name="active-aal-quotes",
+        instrument_id="AAL",
+        feed_kind="quotes",
+        request_id=3,
+        continuity_required=True,
+        optional=False,
+        stale_after_us=15_000_000,
+    )
+    first = Recorder(_config(database), FakeMarketData())
+    first_state = first.start(
+        now_us=100,
+        instruments=(instrument,),
+        subscriptions=(subscription,),
+    )
+
+    second = Recorder(
+        _config(database, owner_id="owner-2", writer_lease_stale_us=15_000_000),
+        FakeMarketData(),
+    )
+    second_state = second.start(
+        now_us=15_000_101,
+        instruments=(instrument,),
+        subscriptions=(subscription,),
+    )
+    second.stop(now_us=15_000_102)
+
+    with connect_v2(database) as connection:
+        aliases = connection.execute(
+            "SELECT count(*) FROM instruments WHERE ibkr_con_id=123"
+        ).fetchone()[0]
+        subscription_instruments = {
+            row["instrument_id"]
+            for row in connection.execute(
+                "SELECT instrument_id FROM subscriptions WHERE run_id='run-1'"
+            )
+        }
+        foreign_keys = tuple(connection.execute("PRAGMA foreign_key_check"))
+    assert first_state.recorder_generation == 1
+    assert second_state.recorder_generation == 2
+    assert aliases == 2
+    assert subscription_instruments == {"AAL"}
+    assert foreign_keys == ()
+
+
+@pytest.mark.parametrize(
+    "changes",
+    (
+        {
+            "kind": "stock",
+            "option_expiry": None,
+            "option_strike": None,
+            "option_right": None,
+            "option_multiplier": None,
+        },
+        {"symbol": "AAOI"},
+        {"exchange": "CBOE"},
+        {"currency": "EUR"},
+        {"option_expiry": "20260815"},
+        {"option_strike": "16"},
+        {"option_right": "put"},
+        {"option_multiplier": "10"},
+    ),
+    ids=("kind", "symbol", "exchange", "currency", "expiry", "strike", "right", "multiplier"),
+)
+def test_recorder_rejects_conflicting_physical_identity_for_logical_alias(
+    tmp_path: Path,
+    changes: dict[str, Any],
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+            "exchange, currency, option_expiry, option_strike, option_right, "
+            "option_multiplier) VALUES "
+            "('legacy-option-aal', ?, 321, 'option', 'AAL', 'SMART', 'USD', "
+            "'20260814', '15.0', 'call', '100')",
+            ("b" * 64,),
+        )
+
+    values: dict[str, Any] = {
+        "instrument_id": "ibkr-option-321",
+        "ibkr_con_id": 321,
+        "kind": "option",
+        "symbol": "AAL",
+        "exchange": "SMART",
+        "currency": "USD",
+        "option_expiry": "20260814",
+        "option_strike": "15",
+        "option_right": "call",
+        "option_multiplier": "100",
+    }
+    values.update(changes)
+    instrument = InstrumentSpec(**values)
+    subscription = SubscriptionSpec(
+        name="active-aal-option",
+        instrument_id=instrument.instrument_id,
+        feed_kind="quotes",
+        request_id=3,
+        continuity_required=True,
+        optional=False,
+        stale_after_us=15_000_000,
+    )
+
+    with pytest.raises(
+        RecorderFatalError,
+        match="IBKR contract identity conflicts with an existing logical instrument",
+    ):
+        Recorder(_config(database), FakeMarketData()).start(
+            now_us=100,
+            instruments=(instrument,),
+            subscriptions=(subscription,),
+        )
+
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM recorder_generations").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM subscriptions").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM instruments").fetchone()[0] == 1
+
+
 def test_recorder_owns_one_writer_and_restart_reclaims_only_after_stale_lease(
     tmp_path: Path,
 ) -> None:

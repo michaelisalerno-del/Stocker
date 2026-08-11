@@ -18,6 +18,9 @@ from typing import Any, Literal, cast
 
 import pytest
 
+import stocker_ideas.plugins.frozen_m1c_signal_v0 as frozen_m1c_plugin
+import stocker_ideas.plugins.m1c_opening_reversal_v1_1 as opening_reversal_plugin
+import stocker_ideas.plugins.m1c_quiet_state_options_v0 as quiet_plugin
 import stocker_runtime.ingestion.recorder as recorder_module
 from stocker_ideas.plugins.opening_leader_continuation_v0 import MANIFEST
 from stocker_runtime.domain import (
@@ -5527,6 +5530,132 @@ def test_synthetic_stream_requirement_adds_subscription_without_manual_wiring(
         IBKRSubscription(1_000_000, 1, "AAL", "STK", "SMART", "USD", "quotes"),
     )
     assert recorder._subscriptions[0].stale_after_us == 15_000_000
+    recorder.stop(now_us=101)
+
+
+@pytest.mark.parametrize("seed_imported", (False, True), ids=("fresh", "imported"))
+def test_exact_four_plugin_activation_shape(
+    tmp_path: Path,
+    seed_imported: bool,
+) -> None:
+    database = tmp_path / "four-plugin.sqlite3"
+    initialize_database(database)
+    idea_path = tmp_path / "ideas.json"
+    universe = (*COHORT, "VTI")
+    instruments = _configured_instruments(universe)
+    if seed_imported:
+        with connect_v2(database) as connection:
+            for instrument in instruments:
+                legacy_id = f"legacy-instrument-{instrument.instrument_id.lower()}"
+                connection.execute(
+                    "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, "
+                    "symbol, exchange, currency) VALUES (?, ?, ?, 'stock', ?, 'SMART', 'USD')",
+                    (
+                        legacy_id,
+                        hashlib.sha256(legacy_id.encode()).hexdigest(),
+                        instrument.ibkr_con_id,
+                        instrument.symbol,
+                    ),
+                )
+
+    configs = (
+        _config(instruments=_configured_instruments()),
+        IdeaConfig(
+            module="stocker_ideas.plugins.frozen_m1c_signal_v0",
+            expected_code_hash=reviewed_code_hash("stocker_ideas.plugins.frozen_m1c_signal_v0"),
+            expected_manifest_hash=hashlib.sha256(
+                frozen_m1c_plugin.MANIFEST.to_canonical_json()
+            ).hexdigest(),
+            parameters=cast(Mapping[str, JsonValue], frozen_m1c_plugin._PARAMETERS),
+            universe=universe,
+            instruments=instruments,
+            enabled=True,
+        ),
+        IdeaConfig(
+            module="stocker_ideas.plugins.m1c_quiet_state_options_v0",
+            expected_code_hash=reviewed_code_hash(
+                "stocker_ideas.plugins.m1c_quiet_state_options_v0"
+            ),
+            expected_manifest_hash=hashlib.sha256(
+                quiet_plugin.MANIFEST.to_canonical_json()
+            ).hexdigest(),
+            parameters=quiet_plugin.PARAMETERS,
+            universe=COHORT,
+            instruments=_configured_instruments(),
+            enabled=True,
+        ),
+        IdeaConfig(
+            module="stocker_ideas.plugins.m1c_opening_reversal_v1_1",
+            expected_code_hash=reviewed_code_hash(
+                "stocker_ideas.plugins.m1c_opening_reversal_v1_1"
+            ),
+            expected_manifest_hash=hashlib.sha256(
+                opening_reversal_plugin.MANIFEST.to_canonical_json()
+            ).hexdigest(),
+            parameters=opening_reversal_plugin.PARAMETERS,
+            universe=universe,
+            instruments=instruments,
+            enabled=True,
+        ),
+    )
+    idea_path.write_text(
+        json.dumps([config.model_dump(mode="json") for config in configs]),
+        encoding="utf-8",
+    )
+    adapter = _RecorderAdapter()
+    recorder = Recorder(
+        RecorderConfig(
+            database=database,
+            run_id="run-imported-four-plugin",
+            owner_id="owner",
+            mode="shadow",
+            host="127.0.0.1",
+            port=4002,
+            client_id=1,
+            read_only=True,
+            external_read_only_verified=True,
+            config_hash="a" * 64,
+            git_commit="deadbee",
+            market_data_line_limit=100,
+            idea_config=idea_path,
+        ),
+        adapter,
+    )
+
+    state = recorder.start(now_us=100, instruments=(), subscriptions=())
+
+    assert len(state.fences) == len(adapter.configured_subscriptions) == 41
+    assert len({item.request_id for item in adapter.configured_subscriptions}) == 41
+    assert sum(item.feed_kind == "bars" for item in adapter.configured_subscriptions) == 21
+    assert sum(item.feed_kind == "quotes" for item in adapter.configured_subscriptions) == 20
+    with connect_v2(database) as connection:
+        alias_counts = tuple(
+            connection.execute(
+                "SELECT ibkr_con_id, count(*) AS aliases FROM instruments "
+                "WHERE ibkr_con_id IS NOT NULL GROUP BY ibkr_con_id ORDER BY ibkr_con_id"
+            )
+        )
+        active_subscriptions = connection.execute(
+            "SELECT count(*) FROM subscriptions WHERE run_id='run-imported-four-plugin' "
+            "AND lifecycle='active'"
+        ).fetchone()[0]
+        plugin_health = tuple(
+            connection.execute(
+                "SELECT idea_id, health FROM idea_instances "
+                "WHERE run_id='run-imported-four-plugin' ORDER BY idea_id"
+            )
+        )
+        foreign_keys = tuple(connection.execute("PRAGMA foreign_key_check"))
+    assert all(row["aliases"] == (2 if seed_imported else 1) for row in alias_counts)
+    assert len(alias_counts) == 21
+    assert active_subscriptions == 41
+    assert [tuple(row) for row in plugin_health] == [
+        ("frozen_m1c_signal", "healthy"),
+        ("m1c_opening_reversal", "healthy"),
+        ("m1c_quiet_state_options", "healthy"),
+        ("opening_leader_continuation", "healthy"),
+    ]
+    assert foreign_keys == ()
     recorder.stop(now_us=101)
 
 

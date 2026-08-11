@@ -72,7 +72,7 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
 
     result = initialize_database(database, applied_at_us=1_700_000_000_000_000)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
     with connect_v2(database) as connection:
         tables = {
             str(row[0])
@@ -89,6 +89,182 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
         assert connection.execute("PRAGMA journal_size_limit").fetchone()[0] == 67_108_864
         assert connection.execute("PRAGMA auto_vacuum").fetchone()[0] == 2
         assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+
+
+def test_instrument_alias_migration_preserves_evidence_and_rejects_physical_mismatch(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "instrument-alias.sqlite3"
+    migration_root = tmp_path / "schema-13-migrations"
+    migration_root.mkdir()
+    for migration in migration_plan()[:13]:
+        (migration_root / migration.name).write_text(migration.sql, encoding="utf-8")
+    initialize_database(database, migration_root=migration_root, applied_at_us=1)
+    with connect_v2(database, verify_schema=False) as connection:
+        connection.execute(
+            "INSERT INTO runs(run_id, mode, source, started_at_us, config_hash, git_commit, "
+            "data_class, status) VALUES "
+            "('legacy-run', 'prospective_record', 'ibkr', 1, ?, 'legacy', "
+            "'prospective_protected', 'stopped')",
+            ("a" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
+            "ended_at_us, clean_stop) VALUES ('legacy-run', 0, 'legacy-import', 1, 2, 1)"
+        )
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+            "exchange, currency) VALUES "
+            "('legacy-instrument-aal', ?, 123, 'stock', 'AAL', 'SMART', 'USD')",
+            ("b" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
+            "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
+            "requirements_hash, opened_at_us, closed_at_us) VALUES "
+            "('legacy-subscription', 'legacy-run', 0, 1, 'legacy-instrument-aal', "
+            "'bars', 3, 'closed', ?, 1, 2)",
+            ("c" * 64,),
+        )
+        legacy_instrument_before = tuple(
+            connection.execute(
+                "SELECT * FROM instruments WHERE instrument_id='legacy-instrument-aal'"
+            ).fetchone()
+        )
+        legacy_subscription_before = tuple(
+            connection.execute(
+                "SELECT * FROM subscriptions WHERE subscription_id='legacy-subscription'"
+            ).fetchone()
+        )
+
+    result = migrate_database(database, applied_at_us=2)
+
+    assert result.applied_versions == (14,)
+    with connect_v2(database) as connection:
+        index = next(
+            row
+            for row in connection.execute("PRAGMA index_list(instruments)")
+            if row["name"] == "instruments_ibkr_con_id_idx"
+        )
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+            "exchange, currency) VALUES ('AAL', ?, 123, 'stock', 'AAL', 'SMART', 'USD')",
+            ("d" * 64,),
+        )
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="instrument_ibkr_physical_identity_mismatch",
+        ):
+            connection.execute(
+                "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, "
+                "symbol, exchange, currency) VALUES "
+                "('wrong-aal', ?, 123, 'stock', 'WRONG', 'SMART', 'USD')",
+                ("e" * 64,),
+            )
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="instrument_ibkr_physical_identity_mismatch",
+        ):
+            connection.execute("UPDATE instruments SET currency='EUR' WHERE instrument_id='AAL'")
+        aliases = tuple(
+            connection.execute(
+                "SELECT instrument_id FROM instruments WHERE ibkr_con_id=123 ORDER BY instrument_id"
+            )
+        )
+        legacy_reference = connection.execute(
+            "SELECT instrument_id FROM subscriptions WHERE subscription_id='legacy-subscription'"
+        ).fetchone()[0]
+        legacy_instrument_after = tuple(
+            connection.execute(
+                "SELECT * FROM instruments WHERE instrument_id='legacy-instrument-aal'"
+            ).fetchone()
+        )
+        legacy_subscription_after = tuple(
+            connection.execute(
+                "SELECT * FROM subscriptions WHERE subscription_id='legacy-subscription'"
+            ).fetchone()
+        )
+        foreign_keys = tuple(connection.execute("PRAGMA foreign_key_check"))
+        quick_check = connection.execute("PRAGMA quick_check").fetchone()[0]
+    assert index["unique"] == 0
+    assert [row["instrument_id"] for row in aliases] == ["AAL", "legacy-instrument-aal"]
+    assert legacy_reference == "legacy-instrument-aal"
+    assert legacy_instrument_after == legacy_instrument_before
+    assert legacy_subscription_after == legacy_subscription_before
+    assert foreign_keys == ()
+    assert quick_check == "ok"
+
+
+def test_instrument_alias_migration_compares_option_strikes_numerically(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "option-alias.sqlite3"
+    initialize_database(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+            "exchange, currency, option_expiry, option_strike, option_right, "
+            "option_multiplier) VALUES "
+            "('legacy-option-aal', ?, 321, 'option', 'AAL', 'SMART', 'USD', "
+            "'20260814', '15.0', 'call', '100')",
+            ("a" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+            "exchange, currency, option_expiry, option_strike, option_right, "
+            "option_multiplier) VALUES "
+            "('option-aal', ?, 321, 'option', 'AAL', 'SMART', 'USD', "
+            "'20260814', '15', 'call', '100')",
+            ("b" * 64,),
+        )
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="instrument_ibkr_physical_identity_mismatch",
+        ):
+            connection.execute(
+                "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, "
+                "symbol, exchange, currency, option_expiry, option_strike, option_right, "
+                "option_multiplier) VALUES "
+                "('wrong-option-aal', ?, 321, 'option', 'AAL', 'SMART', 'USD', "
+                "'20260814', '15.5', 'call', '100')",
+                ("c" * 64,),
+            )
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="instrument_ibkr_physical_identity_mismatch",
+        ):
+            connection.execute(
+                "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, "
+                "symbol, exchange, currency, option_expiry, option_strike, option_right, "
+                "option_multiplier) VALUES "
+                "('invalid-option-aal', ?, 321, 'option', 'AAL', 'SMART', 'USD', "
+                "'20260814', '15oops', 'call', '100')",
+                ("d" * 64,),
+            )
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="instrument_ibkr_physical_identity_mismatch",
+        ):
+            connection.execute(
+                "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, "
+                "symbol, exchange, currency, option_expiry, option_strike, option_right, "
+                "option_multiplier) VALUES "
+                "('precision-option-aal', ?, 321, 'option', 'AAL', 'SMART', 'USD', "
+                "'20260814', '15.0000000000000000001', 'call', '100')",
+                ("e" * 64,),
+            )
+
+        aliases = tuple(
+            connection.execute(
+                "SELECT instrument_id, option_strike FROM instruments WHERE ibkr_con_id=321 "
+                "ORDER BY instrument_id"
+            )
+        )
+
+    assert [tuple(row) for row in aliases] == [
+        ("legacy-option-aal", "15.0"),
+        ("option-aal", "15"),
+    ]
 
 
 def test_shadow_runtime_keeps_only_authoritative_schedule_and_quote_indexes(
@@ -138,7 +314,7 @@ def test_phase2_migration_preserves_dynamic_rows_and_admits_only_causal_derived_
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (13,)
+    assert result.applied_versions == (13, 14)
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -267,7 +443,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (14, '0014_future.sql', ?, 2)",
+            "VALUES (15, '0015_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -349,7 +525,7 @@ def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_h
 
     result = migrate_database(backfill_database, applied_at_us=2)
 
-    assert result.applied_versions == (7, 8, 9, 10, 11, 12, 13)
+    assert result.applied_versions == (7, 8, 9, 10, 11, 12, 13, 14)
     with connect_v2(backfill_database) as connection:
         assert tuple(
             connection.execute(
@@ -442,7 +618,7 @@ def test_expiry_projection_migration_deactivates_terminal_history(tmp_path: Path
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (8, 9, 10, 11, 12, 13)
+    assert result.applied_versions == (8, 9, 10, 11, 12, 13, 14)
     with connect_v2(database) as connection:
         assert tuple(
             connection.execute(
@@ -586,7 +762,14 @@ def test_commit_boundary_migration_rewinds_pending_shadow_to_conservative_run_ma
             ("9" * 64,),
         )
 
-    assert migrate_database(database, applied_at_us=2).applied_versions == (9, 10, 11, 12, 13)
+    assert migrate_database(database, applied_at_us=2).applied_versions == (
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+    )
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -3478,11 +3661,11 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     migration_payload = json.loads(migrated.stdout)
     retention_payload = json.loads(retained.stdout)
     assert init_payload == {
-        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-        "current_version": 13,
+        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+        "current_version": 14,
         "status": "ok",
     }
-    assert migration_payload == {"applied_versions": [], "current_version": 13, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 14, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

@@ -29,6 +29,10 @@ class InboxAdmissionError(RuntimeError):
     """A callback could not be durably admitted without violating an invariant."""
 
 
+class InboxAuthorityLost(InboxAdmissionError):
+    """The caller no longer matches the sole active writer."""
+
+
 class InboxFullError(InboxAdmissionError):
     """The hard nonterminal callback bound has closed admission."""
 
@@ -219,7 +223,13 @@ class CallbackInbox:
                 ).fetchone()[0]
             )
 
-    def admit(self, fence: CallbackFence, callback: MarketDataCallback) -> AdmissionResult:
+    def admit(
+        self,
+        fence: CallbackFence,
+        callback: MarketDataCallback,
+        *,
+        authority: WriterAuthority | None = None,
+    ) -> AdmissionResult:
         """Commit a canonical callback before returning to the external API thread."""
 
         if not callback.callback_kind or callback.received_at_us < 0:
@@ -239,6 +249,13 @@ class CallbackInbox:
         try:
             connection.execute("BEGIN IMMEDIATE")
             authoritative = self._authoritative_admission(connection)
+            if authority is not None and (
+                authority.run_id != str(authoritative["run_id"])
+                or authority.recorder_generation
+                != int(authoritative["recorder_generation"])
+                or authority.owner_id != str(authoritative["owner_id"])
+            ):
+                raise InboxAuthorityLost("authoritative writer lease is no longer owned")
             existing = connection.execute(
                 "SELECT * FROM callback_inbox WHERE event_uid = ?", (event_uid,)
             ).fetchone()
@@ -367,7 +384,7 @@ class CallbackInbox:
     def _authoritative_admission(connection: sqlite3.Connection) -> sqlite3.Row:
         fatal = connection.execute("SELECT 1 FROM runs WHERE status='fatal' LIMIT 1").fetchone()
         if fatal is not None:
-            raise InboxAdmissionError("global fatal state has closed callback admission")
+            raise InboxAuthorityLost("global fatal state has closed callback admission")
         rows = tuple(
             connection.execute(
                 "SELECT state.run_id, state.recorder_generation, generation.owner_id "
@@ -379,7 +396,7 @@ class CallbackInbox:
             )
         )
         if len(rows) != 1:
-            raise InboxAdmissionError("authoritative recorder admission state is absent or split")
+            raise InboxAuthorityLost("authoritative recorder admission state is absent or split")
         return cast(sqlite3.Row, rows[0])
 
     @staticmethod

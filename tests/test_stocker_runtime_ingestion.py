@@ -1140,7 +1140,7 @@ def test_callback_after_clock_catchup_resolves_future_transport_incident(
     recorder.stop(now_us=303)
 
 
-def test_high_rate_callback_path_reuses_verified_schema_and_projects_bar(
+def test_high_rate_callback_path_uses_single_authoritative_admission_and_projects_bar(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "callback-load.sqlite3"
@@ -1152,12 +1152,10 @@ def test_high_rate_callback_path_reuses_verified_schema_and_projects_bar(
     from stocker_runtime.ingestion import recorder as recorder_module
 
     real_connect = recorder_module.connect_v2
-    callback_connection_modes: list[bool] = []
+    redundant_owner_connections: list[bool] = []
 
     def connect_after_start(path: str | Path, *, verify_schema: bool = True) -> sqlite3.Connection:
-        callback_connection_modes.append(verify_schema)
-        if verify_schema:
-            raise AssertionError("callback hot path repeated full schema verification")
+        redundant_owner_connections.append(verify_schema)
         return real_connect(path, verify_schema=False)
 
     quote_fence = next(fence for fence in state.fences if fence.request_id == 3)
@@ -1198,7 +1196,7 @@ def test_high_rate_callback_path_reuses_verified_schema_and_projects_bar(
             recorder.receive(fence, callback)
 
     assert recorder.drain(now_us=142) == 41
-    assert callback_connection_modes == [False] * 41
+    assert redundant_owner_connections == []
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -2550,11 +2548,21 @@ def test_recorder_admission_fatal_is_terminal_and_cleans_private_adapter(
         )
         failing = MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 1.0})
     else:
+        real_admit = recorder.inbox.admit
+        failed_once = False
 
         def fail_database_admission(
-            _fence: CallbackFence, _callback: MarketDataCallback
+            _fence: CallbackFence,
+            _callback: MarketDataCallback,
+            *,
+            authority: WriterAuthority | None = None,
         ) -> AdmissionResult:
-            raise InboxAdmissionError("callback durable admission failed: disk full")
+            nonlocal failed_once
+            assert authority is not None
+            if not failed_once:
+                failed_once = True
+                raise InboxAdmissionError("callback durable admission failed: disk full")
+            return real_admit(_fence, _callback, authority=authority)
 
         monkeypatch.setattr(recorder.inbox, "admit", fail_database_admission)
         failing = MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 1.0})

@@ -52,6 +52,7 @@ from stocker_runtime.ingestion.inbox import (
     CallbackInbox,
     CallbackTimestampOrderingLoss,
     InboxAdmissionError,
+    InboxAuthorityLost,
     MarketDataCallback,
     NormalizationError,
     WriterAuthority,
@@ -2565,8 +2566,10 @@ class Recorder:
         """External callback boundary: durable admission completes before return."""
 
         try:
-            self._check_owned()
-            return self.inbox.admit(fence, callback)
+            return self.inbox.admit(fence, callback, authority=self._authority())
+        except InboxAuthorityLost as error:
+            self._cleanup_private_adapter()
+            raise AuthoritativeLeaseLost(str(error)) from error
         except AuthoritativeLeaseLost:
             self._cleanup_private_adapter()
             raise

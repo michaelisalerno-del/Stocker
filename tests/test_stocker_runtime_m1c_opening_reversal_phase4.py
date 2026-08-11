@@ -8,6 +8,7 @@ from typing import Literal, cast
 
 import pytest
 
+from stocker_ideas.plugins import m1c_opening_reversal_v1_1 as opening_reversal
 from stocker_ideas.plugins.m1c_opening_reversal_v1_1 import (
     COHORT,
     MANIFEST,
@@ -80,6 +81,18 @@ def _event(
         event_at_us=at_us,
         received_at_us=at_us,
         payload=payload,
+    )
+
+
+def _received(event: MarketEvent, received_at_us: int) -> MarketEvent:
+    return MarketEvent(
+        event_id=event.event_id,
+        instrument_id=event.instrument_id,
+        feed_kind=event.feed_kind,
+        event_kind=event.event_kind,
+        event_at_us=event.event_at_us,
+        received_at_us=received_at_us,
+        payload=event.payload,
     )
 
 
@@ -230,7 +243,12 @@ def _advance(
     return evaluation
 
 
-def _pending_primary_episode() -> tuple[M1COpeningReversalV1_1, IdeaEvaluation]:
+def _pending_primary_episode(
+    *,
+    final_vti_received_at_us: int | None = None,
+    checkpoint_received_at_us: Mapping[str, int] | None = None,
+    checkpoint_order: tuple[str, ...] | None = None,
+) -> tuple[M1COpeningReversalV1_1, IdeaEvaluation]:
     plugin = create_plugin()
     evaluation = _advance(
         plugin,
@@ -250,12 +268,21 @@ def _pending_primary_episode() -> tuple[M1COpeningReversalV1_1, IdeaEvaluation]:
         tuple(pair[0] for pair in capture_pairs),
         receipts=tuple(pair[1] for pair in capture_pairs),
     )
-    for index, symbol in enumerate(UNIVERSE):
+    for symbol in checkpoint_order or UNIVERSE:
+        index = UNIVERSE.index(symbol)
+        checkpoint_event = _checkpoint_event(symbol, index)
+        if symbol == "VTI" and final_vti_received_at_us is not None:
+            checkpoint_event = _received(checkpoint_event, final_vti_received_at_us)
+        if checkpoint_received_at_us is not None and symbol in checkpoint_received_at_us:
+            checkpoint_event = _received(
+                checkpoint_event,
+                checkpoint_received_at_us[symbol],
+            )
         evaluation = _advance(
             plugin,
             evaluation.state,
             evaluation.retained_input_event_ids,
-            (_checkpoint_event(symbol, index),),
+            (checkpoint_event,),
         )
     return plugin, evaluation
 
@@ -507,6 +534,12 @@ def test_checkpoint_six_negative_transition_promotes_one_call_episode() -> None:
     assert by_symbol["APLD"].payload["reason"] == "m1c_below_frozen_high_tail"
     assert all("transfer_status" not in output.payload for output in observations)
     assert all("provider" not in output.payload for output in observations)
+    cohort_prefix_ids = {f"prefix-{symbol}-6" for symbol in UNIVERSE}
+    assert all(
+        cohort_prefix_ids.issubset(evaluation.output_input_event_ids[index])
+        for index, output in enumerate(evaluation.outputs)
+        if output.kind == "observation"
+    )
 
     assert not evaluation.interests
 
@@ -536,6 +569,108 @@ def test_checkpoint_six_negative_transition_promotes_one_call_episode() -> None:
     assert {interest.expires_at_us for interest in evaluation.interests} == {
         2_000_000_020 + 15 * 60 * 1_000_000
     }
+
+
+@pytest.mark.parametrize("barrier_lag_us", (0, 1))
+def test_barrier_at_or_after_primary_cutoff_terminalizes_inside_the_signal(
+    barrier_lag_us: int,
+) -> None:
+    cutoff_at_us = 2_000_000_020 + 15 * 60 * 1_000_000
+    plugin, evaluation = _pending_primary_episode(
+        final_vti_received_at_us=cutoff_at_us + barrier_lag_us
+    )
+    observations = tuple(output for output in evaluation.outputs if output.kind == "observation")
+    signals = tuple(output for output in evaluation.outputs if output.kind == "signal")
+
+    assert len(observations) == 20
+    assert len(signals) == 1
+    assert len(evaluation.outputs) == MANIFEST.maximum_outputs_per_batch
+    assert not evaluation.interests
+    signal = signals[0]
+    primary = cast(Mapping[str, JsonValue], signal.payload["primary_pair"])
+    assert signal.payload["action"] == "CALL"
+    assert primary == {
+        "status": "unavailable",
+        "terminal_basis": "barrier_released_at_or_after_primary_cutoff",
+        "cutoff_at_us": cutoff_at_us,
+        "barrier_available_at_us": cutoff_at_us + barrier_lag_us,
+        "terminal_event_id": "prefix-VTI-6",
+        "expected_interest_keys": (
+            "opening-reversal:primary:2026-08-10:AAL:call",
+            "opening-reversal:primary:2026-08-10:AAL:put",
+        ),
+        "interests_issued": False,
+    }
+    signal_index = next(
+        index for index, output in enumerate(evaluation.outputs) if output.kind == "signal"
+    )
+    assert primary["terminal_event_id"] in evaluation.output_input_event_ids[signal_index]
+    state = cast(Mapping[str, JsonValue], evaluation.state)
+    assert state["pending"] == {}
+    assert cast(Mapping[str, JsonValue], state["primary_terminal"])["status"] == ("unavailable")
+
+    late_quote = _event(
+        "late-underlying-after-terminal",
+        "AAL",
+        "quote",
+        cutoff_at_us + barrier_lag_us + 1,
+        {"bid": 100.7, "ask": 100.9},
+    )
+    restarted = _advance(
+        create_plugin(),
+        evaluation.state,
+        evaluation.retained_input_event_ids,
+        (late_quote,),
+    )
+
+    assert not restarted.outputs
+    assert not restarted.interests
+    assert restarted.state == evaluation.state
+
+
+@pytest.mark.parametrize(
+    ("aal_received_at_us", "aaoi_received_at_us", "expected_winner"),
+    (
+        (2_000_000_100, 2_000_000_001, "AAOI"),
+        (2_000_000_100, 2_000_000_100, "AAL"),
+    ),
+)
+def test_equal_probability_promotion_uses_receipt_time_then_ticker(
+    monkeypatch: pytest.MonkeyPatch,
+    aal_received_at_us: int,
+    aaoi_received_at_us: int,
+    expected_winner: str,
+) -> None:
+    def frozen_equal_score(
+        *,
+        symbol: str,
+        checkpoint: int,
+        group_o: Mapping[str, object],
+        group_i: Mapping[str, object],
+    ) -> dict[str, JsonValue]:
+        assert checkpoint == 6
+        assert group_o
+        assert group_i
+        return {
+            "probability": 0.6 if symbol in {"AAL", "AAOI"} else 0.1,
+            "feature_hash": "f" * 64,
+            "model_hash": "m" * 64,
+            "missing_feature_count": 0,
+        }
+
+    monkeypatch.setattr(opening_reversal, "score_m1c", frozen_equal_score)
+    _, evaluation = _pending_primary_episode(
+        checkpoint_received_at_us={
+            "AAL": aal_received_at_us,
+            "AAOI": aaoi_received_at_us,
+        },
+        checkpoint_order=("AAOI", "AAL", *UNIVERSE[2:]),
+    )
+    signal = next(output for output in evaluation.outputs if output.kind == "signal")
+
+    assert signal.subject_instrument_id == expected_winner
+    assert signal.payload["candidate_count"] == 2
+    assert signal.payload["selection_rule"] == ("m1c_probability_desc_receipt_time_asc_ticker_asc")
 
 
 def test_d1_denial_is_auditable_and_cannot_promote_that_stock() -> None:
@@ -597,6 +732,77 @@ def test_d1_denial_is_auditable_and_cannot_promote_that_stock() -> None:
     assert "baseline-AAL" in lineage
     assert "capture-AAL-put" in lineage
     assert "prefix-AAL-6" in lineage
+
+
+@pytest.mark.parametrize("delivery_lag_us", (30 * 60 * 1_000_000, 31 * 60 * 1_000_000))
+def test_delayed_d1_baseline_never_opens_an_expired_snapshot_window(
+    delivery_lag_us: int,
+) -> None:
+    plugin = create_plugin()
+    original = _baseline("AAL", 0)
+    delayed = _received(original, original.event_at_us + delivery_lag_us)
+
+    evaluation = plugin.evaluate(_batch((delayed,)), {})
+
+    assert not evaluation.interests
+    state = cast(Mapping[str, JsonValue], evaluation.state)
+    assert cast(Mapping[str, JsonValue], state["requested"]) == {}
+
+    restarted = create_plugin().evaluate(
+        _batch((delayed,), prior_ids=evaluation.retained_input_event_ids),
+        evaluation.state,
+    )
+
+    assert not restarted.interests
+    assert restarted.state == evaluation.state
+
+
+def test_d1_capture_after_a_source_order_cutoff_is_late_even_if_backdated() -> None:
+    plugin = create_plugin()
+    baseline = _baseline("AAL", 0)
+    evaluation = plugin.evaluate(_batch((baseline,)), {})
+    capture, receipt = _capture("AAL", "call", 0)
+    cutoff_at_us = baseline.event_at_us + 30 * 60 * 1_000_000
+    cutoff = _event(
+        "d1-cutoff-first",
+        "VTI",
+        "quote",
+        cutoff_at_us,
+        {"bid": 249.0, "ask": 249.2},
+    )
+    batch = _batch(
+        (cutoff, capture),
+        prior_ids=evaluation.retained_input_event_ids,
+        receipts=(receipt,),
+    )
+
+    assert plugin.select_input_prefix(batch, evaluation.state) == 2
+
+    evaluation = plugin.evaluate(batch, evaluation.state)
+    state = cast(Mapping[str, JsonValue], evaluation.state)
+    d1_terminal = cast(Mapping[str, Mapping[str, JsonValue]], state["d1_terminal"])
+
+    assert d1_terminal["AAL"]["call"] == "late"
+    assert d1_terminal["AAL"]["call_i"] == capture.event_id
+    assert d1_terminal["AAL"]["call_cutoff_i"] == cutoff.event_id
+    assert {capture.event_id, cutoff.event_id}.issubset(evaluation.retained_input_event_ids)
+
+    restarted = create_plugin().evaluate(
+        _batch(
+            (_checkpoint_event("AAL", 0),),
+            prior_ids=evaluation.retained_input_event_ids,
+        ),
+        evaluation.state,
+    )
+    restarted_state = cast(Mapping[str, JsonValue], restarted.state)
+    cohort = cast(Mapping[str, JsonValue], restarted_state["cohort"])
+    stocks = cast(Mapping[str, Mapping[str, JsonValue]], cohort["stocks"])
+    selected = cast(tuple[str, ...], stocks["AAL"]["l"])
+
+    assert {capture.event_id, cutoff.event_id}.issubset(selected)
+    terminal = cast(Mapping[str, JsonValue], stocks["AAL"]["terminal"])
+    assert terminal["terminal_basis"] == "mixed_terminal_option_evidence"
+    assert cast(Mapping[str, JsonValue], terminal["cutoff_event_ids"])["call"] == (cutoff.event_id)
 
 
 def test_primary_pair_requires_coherent_one_dte_identity_and_in_window_quotes() -> None:

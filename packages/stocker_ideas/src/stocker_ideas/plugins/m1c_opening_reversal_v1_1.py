@@ -192,6 +192,20 @@ def _first_event_at_or_after(batch: IdeaBatch, at_us: int) -> MarketEvent | None
     return next((event for event in batch.events if _available_at(event) >= at_us), None)
 
 
+def _first_prior_event_at_or_after(
+    batch: IdeaBatch,
+    *,
+    event_id: str,
+    at_us: int,
+) -> MarketEvent | None:
+    for event in batch.events:
+        if event.event_id == event_id:
+            return None
+        if _available_at(event) >= at_us:
+            return event
+    raise ValueError("Opening Reversal event is absent from its input batch")
+
+
 def _primary_expected_keys(active: Mapping[str, object]) -> tuple[str, ...]:
     return _string_values(active.get("k"))
 
@@ -435,14 +449,23 @@ def _stock_record(
         terminal_statuses: dict[str, JsonValue] = {}
         interest_keys: dict[str, JsonValue] = {}
         denial_reasons: dict[str, JsonValue] = {}
+        evidence_event_ids: dict[str, JsonValue] = {}
+        cutoff_event_ids: dict[str, JsonValue] = {}
         for right, capture in (("call", call), ("put", put)):
             status = "captured" if capture else None
+            if isinstance(capture.get("i"), str):
+                evidence_event_ids[right] = cast(str, capture["i"])
             if status is None and terminal is not None:
                 raw_status = terminal.get(right)
                 status = raw_status if isinstance(raw_status, str) else None
                 terminal_event_id = terminal.get(f"{right}_i")
                 if isinstance(terminal_event_id, str):
                     selected.add(terminal_event_id)
+                    evidence_event_ids[right] = terminal_event_id
+                cutoff_event_id = terminal.get(f"{right}_cutoff_i")
+                if isinstance(cutoff_event_id, str):
+                    selected.add(cutoff_event_id)
+                    cutoff_event_ids[right] = cutoff_event_id
                 interest_key = terminal.get(f"{right}_k")
                 if isinstance(interest_key, str):
                     interest_keys[right] = interest_key
@@ -470,6 +493,8 @@ def _stock_record(
             "statuses": terminal_statuses,
             "interest_keys": interest_keys,
             "denial_reasons": denial_reasons,
+            "evidence_event_ids": evidence_event_ids,
+            "cutoff_event_ids": cutoff_event_ids,
             "cutoff_at_us": cutoff,
             "cohort_available_at_us": _available_at(event),
             "terminal_basis": terminal_basis,
@@ -522,7 +547,12 @@ def _emit_complete_cohort(
     *,
     batch: IdeaBatch,
     cohort: Mapping[str, object],
-) -> tuple[list[IdeaOutput], list[tuple[str, ...]], dict[str, object]]:
+) -> tuple[
+    list[IdeaOutput],
+    list[tuple[str, ...]],
+    dict[str, object],
+    dict[str, object],
+]:
     session = cohort.get("s")
     stocks = _table(cohort.get("stocks"))
     market = _mapping(cohort.get("market"))
@@ -532,21 +562,32 @@ def _emit_complete_cohort(
     candidates = tuple(
         sorted(
             (
-                (-cast(float, record["p"]), symbol)
+                (
+                    -cast(float, record["p"]),
+                    cast(int, record["a"]),
+                    symbol,
+                )
                 for symbol, record in stocks.items()
                 if record.get("h") is True
                 and isinstance(record.get("p"), float)
                 and market_sign in {-1, 1}
             ),
-            key=lambda item: (item[0], item[1]),
+            key=lambda item: (item[0], item[1], item[2]),
         )
     )
-    winner = None if not candidates else candidates[0][1]
+    winner = None if not candidates else candidates[0][2]
     action = "CALL" if market_sign == -1 else "PUT" if market_sign == 1 else "ABSTAIN"
-    barrier_at_us = max(
-        cast(int, market["a"]),
-        *(cast(int, stocks[symbol]["a"]) for symbol in COHORT),
+    barrier_at_us, barrier_event_id = max(
+        (
+            (cast(int, market["a"]), cast(str, market["i"])),
+            *(
+                (cast(int, stocks[symbol]["a"]), cast(str, stocks[symbol]["i"]))
+                for symbol in COHORT
+            ),
+        ),
+        key=lambda item: (item[0], item[1]),
     )
+    primary_cutoff_at_us = cast(int, market["t"]) + _PRIMARY_WINDOW_US
     transition_id = _stable_id(
         "m1c-opening-reversal-transition-v1.1",
         session,
@@ -561,11 +602,7 @@ def _emit_complete_cohort(
         all_selected.update(_string_values(record.get("l")))
     for symbol in sorted(COHORT):
         record = stocks[symbol]
-        selected = {
-            cast(str, market["i"]),
-            *_string_values(record.get("l")),
-        }
-        lineage = _lineage(batch, selected)
+        lineage = _lineage(batch, all_selected)
         if not lineage:
             raise ValueError("Opening Reversal output lacks causal evidence")
         stock_complete = record.get("status") == "complete"
@@ -635,6 +672,7 @@ def _emit_complete_cohort(
         if symbol == winner:
             winner_payload = payload
     pending: dict[str, object] = {}
+    primary_terminal: dict[str, object] = {}
     if winner is not None and winner_payload is not None:
         signal_lineage = _lineage(batch, all_selected)
         if not signal_lineage:
@@ -646,13 +684,37 @@ def _emit_complete_cohort(
             winner,
             *_string_values(stocks[winner].get("l")),
         )
+        primary_pair_audit: Mapping[str, JsonValue] | None = None
+        if barrier_at_us >= primary_cutoff_at_us:
+            expected_keys = tuple(
+                f"opening-reversal:primary:{session}:{winner}:{right}" for right in _RIGHTS
+            )
+            primary_pair_audit = cast(
+                Mapping[str, JsonValue],
+                {
+                    "status": "unavailable",
+                    "terminal_basis": "barrier_released_at_or_after_primary_cutoff",
+                    "cutoff_at_us": primary_cutoff_at_us,
+                    "barrier_available_at_us": barrier_at_us,
+                    "terminal_event_id": barrier_event_id,
+                    "expected_interest_keys": expected_keys,
+                    "interests_issued": False,
+                },
+            )
+            primary_terminal = {
+                "s": session,
+                "y": winner,
+                "e": episode_id,
+                "status": "unavailable",
+            }
         signal_payload = cast(
             Mapping[str, JsonValue],
             {
                 **winner_payload,
                 "opening_reversal_episode_id": episode_id,
                 "candidate_count": len(candidates),
-                "selection_rule": "m1c_probability_desc_ticker_asc",
+                "selection_rule": "m1c_probability_desc_receipt_time_asc_ticker_asc",
+                **({"primary_pair": primary_pair_audit} if primary_pair_audit else {}),
             },
         )
         outputs.append(
@@ -663,18 +725,19 @@ def _emit_complete_cohort(
             )
         )
         lineages.append(signal_lineage)
-        pending = {
-            "s": session,
-            "y": winner,
-            "e": episode_id,
-            "a": barrier_at_us,
-            "x": cast(int, market["t"]) + _PRIMARY_WINDOW_US,
-            "d": signal_lineage,
-            "b": cast(str, stocks[winner]["i"]),
-            "action": winner_payload["action"],
-            "transition_id": transition_id,
-        }
-    return outputs, lineages, pending
+        if primary_pair_audit is None:
+            pending = {
+                "s": session,
+                "y": winner,
+                "e": episode_id,
+                "a": barrier_at_us,
+                "x": primary_cutoff_at_us,
+                "d": signal_lineage,
+                "b": cast(str, stocks[winner]["i"]),
+                "action": winner_payload["action"],
+                "transition_id": transition_id,
+            }
+    return outputs, lineages, pending, primary_terminal
 
 
 def _emit_incomplete_rollover(
@@ -1016,6 +1079,7 @@ class M1COpeningReversalV1_1:
         cohort = _mapping(prior.get("cohort"))
         pending = _mapping(prior.get("pending"))
         active = _mapping(prior.get("active"))
+        primary_terminal = _mapping(prior.get("primary_terminal"))
         initial_pending = bool(pending)
         initial_active = bool(active)
         outputs: list[IdeaOutput] = []
@@ -1135,6 +1199,12 @@ class M1COpeningReversalV1_1:
                 )
                 outputs.append(observation)
                 lineages.append(lineage)
+                primary_terminal = {
+                    "s": pending.get("s"),
+                    "y": pending.get("y"),
+                    "e": pending.get("e"),
+                    "status": "incomplete",
+                }
                 pending = {}
                 initial_pending = False
             if (
@@ -1150,6 +1220,12 @@ class M1COpeningReversalV1_1:
                 )
                 outputs.append(observation)
                 lineages.append(lineage)
+                primary_terminal = {
+                    "s": active.get("s"),
+                    "y": active.get("y"),
+                    "e": active.get("e"),
+                    "status": observation.payload["status"],
+                }
                 active = {}
                 initial_active = False
             if (
@@ -1227,7 +1303,11 @@ class M1COpeningReversalV1_1:
                     "x": event.event_at_us + _D1_WINDOW_US,
                     "k": count,
                 }
-                if requested.get(event.instrument_id) != baseline_session:
+                cutoff = event.event_at_us + _D1_WINDOW_US
+                if (
+                    requested.get(event.instrument_id) != baseline_session
+                    and _available_at(event) < cutoff
+                ):
                     for right in _RIGHTS:
                         interests.append(
                             MarketDataInterest(
@@ -1243,7 +1323,7 @@ class M1COpeningReversalV1_1:
                                 reference_price=close,
                                 cadence="snapshot",
                                 as_of_at_us=event.event_at_us,
-                                expires_at_us=event.event_at_us + _D1_WINDOW_US,
+                                expires_at_us=cutoff,
                                 required=True,
                                 priority=100,
                                 input_event_id=event.event_id,
@@ -1275,11 +1355,19 @@ class M1COpeningReversalV1_1:
                 terminal = d1_terminal.get(symbol)
                 if terminal is None or terminal.get("s") != baseline_session:
                     terminal = {"s": baseline_session}
-                if available >= cutoff:
+                prior_cutoff_event = _first_prior_event_at_or_after(
+                    batch,
+                    event_id=event.event_id,
+                    at_us=cutoff,
+                )
+                if available >= cutoff or prior_cutoff_event is not None:
+                    cutoff_event = prior_cutoff_event or event
                     terminal[right] = "late"
                     terminal[f"{right}_i"] = event.event_id
                     terminal[f"{right}_a"] = available
                     terminal[f"{right}_x"] = cutoff
+                    terminal[f"{right}_cutoff_i"] = cutoff_event.event_id
+                    terminal[f"{right}_cutoff_a"] = _available_at(cutoff_event)
                     d1_terminal[symbol] = terminal
                     continue
                 context = d1_context.get(symbol)
@@ -1396,14 +1484,17 @@ class M1COpeningReversalV1_1:
         stocks = _table(cohort.get("stocks"))
         market = _mapping(cohort.get("market"))
         if cohort.get("emitted") is not True and set(stocks) == set(COHORT) and market:
-            cohort_outputs, cohort_lineages, next_pending = _emit_complete_cohort(
-                batch=batch,
-                cohort=cohort,
-            )
+            (
+                cohort_outputs,
+                cohort_lineages,
+                next_pending,
+                next_primary_terminal,
+            ) = _emit_complete_cohort(batch=batch, cohort=cohort)
             outputs.extend(cohort_outputs)
             lineages.extend(cohort_lineages)
             cohort = {"s": cohort.get("s"), "emitted": True}
             pending = next_pending
+            primary_terminal = next_primary_terminal
 
         retained_values: set[str] = set()
         for item in baselines.values():
@@ -1416,8 +1507,10 @@ class M1COpeningReversalV1_1:
                     retained_values.add(cast(str, capture["i"]))
         for item in d1_terminal.values():
             for right in _RIGHTS:
-                if isinstance(item.get(f"{right}_i"), str):
-                    retained_values.add(cast(str, item[f"{right}_i"]))
+                for suffix in ("i", "cutoff_i"):
+                    key = f"{right}_{suffix}"
+                    if isinstance(item.get(key), str):
+                        retained_values.add(cast(str, item[key]))
         if cohort.get("emitted") is not True:
             market_item = _mapping(cohort.get("market"))
             if isinstance(market_item.get("i"), str):
@@ -1443,6 +1536,7 @@ class M1COpeningReversalV1_1:
                 "cohort": cohort,
                 "pending": pending,
                 "active": active,
+                "primary_terminal": primary_terminal,
             },
         )
         return IdeaEvaluation(

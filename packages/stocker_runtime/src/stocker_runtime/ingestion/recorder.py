@@ -2586,30 +2586,39 @@ class Recorder:
         authority = self._authority()
         try:
             processed = 0
-            for leased in self.inbox.lease_pending(
-                self.config.owner_id,
-                now_us=now_us,
-                lease_us=self.config.callback_lease_us,
-                limit=limit,
-                authority=authority,
-            ):
-                try:
-                    result = self.inbox.project(leased, authority=authority)
-                except NormalizationError:
-                    self.inbox.fail(
-                        leased,
-                        "MALFORMED_CALLBACK",
-                        failed_at_us=now_us,
-                        authority=authority,
-                    )
-                    continue
-                self.inbox.acknowledge(
-                    leased,
-                    result.event_id,
-                    acknowledged_at_us=now_us,
+            processing_connection = connect_v2(self.config.database, verify_schema=False)
+            try:
+                for leased in self.inbox.lease_pending(
+                    self.config.owner_id,
+                    now_us=now_us,
+                    lease_us=self.config.callback_lease_us,
+                    limit=limit,
                     authority=authority,
-                )
-                processed += 1
+                ):
+                    try:
+                        result = self.inbox.project(
+                            leased,
+                            authority=authority,
+                            connection=processing_connection,
+                        )
+                    except NormalizationError:
+                        self.inbox.fail(
+                            leased,
+                            "MALFORMED_CALLBACK",
+                            failed_at_us=now_us,
+                            authority=authority,
+                        )
+                        continue
+                    self.inbox.acknowledge(
+                        leased,
+                        result.event_id,
+                        acknowledged_at_us=now_us,
+                        authority=authority,
+                        connection=processing_connection,
+                    )
+                    processed += 1
+            finally:
+                processing_connection.close()
             self.inbox.create_pending_receipts(
                 created_at_us=now_us,
                 limit=limit,

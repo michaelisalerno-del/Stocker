@@ -1195,8 +1195,23 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
         for fence, callback in callbacks:
             recorder.receive(fence, callback)
 
-    assert recorder.drain(now_us=142) == 41
+    from stocker_runtime.ingestion import inbox as inbox_module
+
+    real_inbox_connect = inbox_module.connect_v2
+    drain_connections = 0
+
+    def connect_during_drain(
+        path: str | Path, *, verify_schema: bool = True
+    ) -> sqlite3.Connection:
+        nonlocal drain_connections
+        drain_connections += 1
+        return real_inbox_connect(path, verify_schema=verify_schema)
+
+    with monkeypatch.context() as drain_context:
+        drain_context.setattr(inbox_module, "connect_v2", connect_during_drain)
+        assert recorder.drain(now_us=142) == 41
     assert redundant_owner_connections == []
+    assert drain_connections <= 6
     with connect_v2(database) as connection:
         assert (
             connection.execute(

@@ -7,7 +7,8 @@ import json
 import math
 import sqlite3
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -189,6 +190,21 @@ class CallbackInbox:
         """Open after constructor-time schema verification under the sole-writer lease."""
 
         return connect_v2(self.database_path, verify_schema=False)
+
+    @contextmanager
+    def _connection_scope(
+        self, connection: sqlite3.Connection | None
+    ) -> Iterator[sqlite3.Connection]:
+        if connection is not None:
+            with connection:
+                yield connection
+            return
+        owned = self._connect()
+        try:
+            with owned:
+                yield owned
+        finally:
+            owned.close()
 
     @staticmethod
     def verify_writer(connection: sqlite3.Connection, authority: WriterAuthority) -> None:
@@ -613,9 +629,17 @@ class CallbackInbox:
             raise NormalizationError(f"{name} must be a finite number")
         return result
 
-    def project(self, leased: LeasedCallback, *, authority: WriterAuthority) -> ProjectionResult:
+    def project(
+        self,
+        leased: LeasedCallback,
+        *,
+        authority: WriterAuthority,
+        connection: sqlite3.Connection | None = None,
+    ) -> ProjectionResult:
         """Idempotently write one typed event and its latest projection in one transaction."""
-        connection = self._connect()
+        owns_connection = connection is None
+        if connection is None:
+            connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
             self.verify_writer(connection, authority)
@@ -863,7 +887,8 @@ class CallbackInbox:
                 connection.rollback()
             raise
         finally:
-            connection.close()
+            if owns_connection:
+                connection.close()
 
     def acknowledge(
         self,
@@ -872,10 +897,11 @@ class CallbackInbox:
         *,
         acknowledged_at_us: int,
         authority: WriterAuthority,
+        connection: sqlite3.Connection | None = None,
     ) -> None:
         """Mark terminal only after the exact durable projection is present."""
 
-        with self._connect() as connection:
+        with self._connection_scope(connection) as connection:
             connection.execute("BEGIN IMMEDIATE")
             self.verify_writer(connection, authority)
             evidence = connection.execute(

@@ -60,6 +60,7 @@ from stocker_runtime.ingestion.inbox import (
 )
 from stocker_runtime.shadow import ShadowEngine
 from stocker_runtime.storage import (
+    MaintenanceDeadlineExceeded,
     RetentionManager,
     StorageCapState,
     connect_v2,
@@ -263,6 +264,7 @@ class Recorder:
         self._next_reconnect_at_us = 0
         self._starting_dynamic_request_ids: set[int] = set()
         self._pending_dynamic_statuses: list[MarketDataStatus] = []
+        self._retention_maintenance_deferred = False
 
     @contextmanager
     def _adapter_reset_transition(self) -> Iterator[None]:
@@ -2672,7 +2674,22 @@ class Recorder:
                 "AND recorder_generation=?",
                 (now_us, self.config.run_id, self.state.recorder_generation if self.state else -1),
             )
+            deferred_published = False
+            if self._retention_maintenance_deferred:
+                cursor = connection.execute(
+                    "UPDATE runtime_state SET lifecycle='degraded', "
+                    "reason='RETENTION_MAINTENANCE_DEFERRED' WHERE run_id=? "
+                    "AND recorder_generation=? AND lifecycle='running' "
+                    "AND connection_state='connected'",
+                    (
+                        self.config.run_id,
+                        self.state.recorder_generation if self.state else -1,
+                    ),
+                )
+                deferred_published = cursor.rowcount == 1
             connection.commit()
+            if deferred_published:
+                self._retention_maintenance_deferred = False
         finally:
             connection.close()
 
@@ -3430,7 +3447,6 @@ class Recorder:
         """Consume one bounded Phase 2 retention result and apply recorder reactions."""
 
         authority = self._authority()
-        self._check_owned()
         try:
             result = RetentionManager(self.config.database).run(
                 now_us=now_us,
@@ -3440,34 +3456,76 @@ class Recorder:
             raise
         except InboxAdmissionError as error:
             raise AuthoritativeLeaseLost(str(error)) from error
+        except MaintenanceDeadlineExceeded:
+            self._retention_maintenance_deferred = True
+            return StorageCapState.NORMAL
+        except sqlite3.OperationalError as error:
+            if not self._is_sqlite_contention(error):
+                self._fatal("RETENTION_INVARIANT_FAILED", now_us)
+                raise RecorderFatalError("retention invariant failed") from error
+            self._retention_maintenance_deferred = True
+            return StorageCapState.NORMAL
         except Exception as error:
             self._fatal("RETENTION_INVARIANT_FAILED", now_us)
             raise RecorderFatalError("retention invariant failed") from error
-        connection = connect_v2(self.config.database)
+        publication_contended = False
         try:
-            connection.execute("BEGIN IMMEDIATE")
-            self._verify_owned(connection)
-            connection.execute(
-                "UPDATE runtime_state SET database_bytes=?, wal_bytes=? WHERE run_id=? "
-                "AND recorder_generation=?",
-                (
-                    result.database_bytes,
-                    result.wal_bytes,
-                    self.config.run_id,
-                    authority.recorder_generation,
-                ),
-            )
-            connection.commit()
-        finally:
-            connection.close()
-        self._sync_backup_status(now_us=now_us)
+            connection = connect_v2(self.config.database)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                self._verify_owned(connection)
+                connection.execute(
+                    "UPDATE runtime_state SET database_bytes=?, wal_bytes=? WHERE run_id=? "
+                    "AND recorder_generation=?",
+                    (
+                        result.database_bytes,
+                        result.wal_bytes,
+                        self.config.run_id,
+                        authority.recorder_generation,
+                    ),
+                )
+                connection.execute(
+                    "UPDATE runtime_state SET lifecycle='running', reason=NULL, "
+                    "process_heartbeat_at_us=? WHERE run_id=? AND recorder_generation=? "
+                    "AND lifecycle='degraded' AND reason='RETENTION_MAINTENANCE_DEFERRED' "
+                    "AND connection_state='connected'",
+                    (now_us, self.config.run_id, authority.recorder_generation),
+                )
+                connection.commit()
+                self._retention_maintenance_deferred = False
+            finally:
+                connection.close()
+            self._sync_backup_status(now_us=now_us)
+        except AuthoritativeLeaseLost:
+            raise
+        except sqlite3.Error as error:
+            if not isinstance(error, sqlite3.OperationalError) or not self._is_sqlite_contention(
+                error
+            ):
+                self._fatal("RETENTION_INVARIANT_FAILED", now_us)
+                raise RecorderFatalError("retention invariant failed") from error
+            self._retention_maintenance_deferred = True
+            publication_contended = True
         if not result.admission_allowed:
             self._fatal(result.required_action or "STORAGE_CAP_FATAL", now_us)
             raise RecorderFatalError(result.required_action or "storage cap closed admission")
         if not result.optional_feeds_allowed:
+            if publication_contended:
+                return result.cap_state
             self._pause_optional(now_us)
             self._set_lifecycle("degraded", result.required_action, now_us)
         return result.cap_state
+
+    @staticmethod
+    def _is_sqlite_contention(error: sqlite3.OperationalError) -> bool:
+        code = getattr(error, "sqlite_errorcode", None)
+        if code is not None:
+            return int(code) & 0xFF in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+        return str(error).lower() in {
+            "database is busy",
+            "database is locked",
+            "database table is locked",
+        }
 
     def _sync_backup_status(self, *, now_us: int) -> None:
         """Persist backup health through the sole authoritative database writer."""

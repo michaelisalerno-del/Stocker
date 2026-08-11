@@ -38,6 +38,7 @@ from stocker_runtime.ingestion import (
 from stocker_runtime.ingestion.dynamic_market_data import OptionDiscoveryBackend
 from stocker_runtime.ingestion.inbox import transport_incident_id
 from stocker_runtime.storage import (
+    MaintenanceDeadlineExceeded,
     RetentionResult,
     StorageCapState,
     connect_v2,
@@ -1505,6 +1506,271 @@ def test_maintenance_database_failure_preserves_admitted_evidence_and_fails_clos
     assert tuple(runtime) == ("fatal", "RETENTION_INVARIANT_FAILED", "disconnected")
     assert adapter.connected is False
     assert set(adapter.cancelled) == {3, 4}
+
+
+@pytest.mark.parametrize(
+    "failure",
+    (
+        MaintenanceDeadlineExceeded("retention transaction exceeded its configured deadline"),
+        sqlite3.OperationalError("database is locked"),
+    ),
+)
+def test_bounded_retention_contention_degrades_then_recovers_without_stopping_ingestion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    admitted = recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 100.0}),
+    )
+    normal = RetentionResult(
+        cap_state=StorageCapState.NORMAL,
+        database_bytes=100,
+        wal_bytes=1,
+        payloads_compacted=0,
+        receipts_rolled=0,
+        expired_rows_deleted=0,
+        admission_allowed=True,
+        optional_feeds_allowed=True,
+        required_action=None,
+        checkpoint_attempted=True,
+        incremental_vacuum_attempted=True,
+    )
+
+    class DeferredThenSuccessfulRetention:
+        calls = 0
+
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
+            assert callable(precondition)
+            self.__class__.calls += 1
+            if self.calls == 1:
+                raise failure
+            return normal
+
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager",
+        DeferredThenSuccessfulRetention,
+    )
+
+    assert recorder.maintain(now_us=102) is StorageCapState.NORMAL
+    with connect_v2(database) as connection:
+        deferred_runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "running"
+    assert tuple(deferred_runtime) == ("running", None, "connected")
+    assert adapter.connected is True
+    assert adapter.cancelled == []
+
+    assert recorder.drain(now_us=103) == 1
+    with connect_v2(database) as connection:
+        published_runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        first_callback = connection.execute(
+            "SELECT lifecycle, payload_json FROM callback_inbox WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()
+    assert tuple(published_runtime) == (
+        "degraded",
+        "RETENTION_MAINTENANCE_DEFERRED",
+        "connected",
+    )
+    assert first_callback[0] == "acknowledged" and first_callback[1] is not None
+
+    assert recorder.maintain(now_us=104) is StorageCapState.NORMAL
+    with connect_v2(database) as connection:
+        recovered_runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state, database_bytes, wal_bytes "
+            "FROM runtime_state"
+        ).fetchone()
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "running"
+    assert tuple(recovered_runtime) == ("running", None, "connected", 100, 1)
+    assert adapter.connected is True
+
+
+@pytest.mark.parametrize(
+    ("contention_stage", "result_state"),
+    (
+        ("retention", StorageCapState.NORMAL),
+        ("result_publication", StorageCapState.NORMAL),
+        ("result_publication", StorageCapState.DEGRADED),
+    ),
+)
+def test_retention_contention_with_held_writer_never_uses_a_second_writer_transaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    contention_stage: str,
+    result_state: StorageCapState,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    normal = RetentionResult(
+        cap_state=result_state,
+        database_bytes=100,
+        wal_bytes=1,
+        payloads_compacted=0,
+        receipts_rolled=0,
+        expired_rows_deleted=0,
+        admission_allowed=True,
+        optional_feeds_allowed=result_state is StorageCapState.NORMAL,
+        required_action=(
+            None if result_state is StorageCapState.NORMAL else "PAUSE_OPTIONAL_FEEDS"
+        ),
+        checkpoint_attempted=True,
+        incremental_vacuum_attempted=True,
+    )
+
+    class HeldWriterRetention:
+        connection: sqlite3.Connection | None = None
+
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
+            self.__class__.connection = connect_v2(database)
+            self.connection.execute("BEGIN IMMEDIATE")
+            if contention_stage == "retention":
+                raise sqlite3.OperationalError("database is locked")
+            return normal
+
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager",
+        HeldWriterRetention,
+    )
+
+    try:
+        assert recorder.maintain(now_us=102) is result_state
+        with connect_v2(database) as observer:
+            runtime = observer.execute(
+                "SELECT lifecycle, reason, connection_state FROM runtime_state"
+            ).fetchone()
+            assert observer.execute("SELECT status FROM runs").fetchone()[0] == "running"
+        assert tuple(runtime) == ("running", None, "connected")
+        assert adapter.connected is True
+        assert adapter.cancelled == []
+    finally:
+        if HeldWriterRetention.connection is not None:
+            HeldWriterRetention.connection.rollback()
+            HeldWriterRetention.connection.close()
+
+    recorder._heartbeat(103)
+    with connect_v2(database) as connection:
+        published = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+    assert tuple(published) == (
+        "degraded",
+        "RETENTION_MAINTENANCE_DEFERRED",
+        "connected",
+    )
+
+
+def test_retention_deferral_waits_for_an_existing_degradation_to_clear(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE runtime_state SET lifecycle='degraded', reason='OTHER_DEGRADED'"
+        )
+    recorder._retention_maintenance_deferred = True
+
+    recorder._heartbeat(101)
+    assert recorder._retention_maintenance_deferred is True
+    with connect_v2(database) as connection:
+        blocked = connection.execute(
+            "SELECT lifecycle, reason FROM runtime_state"
+        ).fetchone()
+        connection.execute(
+            "UPDATE runtime_state SET lifecycle='running', reason=NULL"
+        )
+    assert tuple(blocked) == ("degraded", "OTHER_DEGRADED")
+
+    recorder._heartbeat(102)
+    assert recorder._retention_maintenance_deferred is False
+    with connect_v2(database) as connection:
+        published = connection.execute(
+            "SELECT lifecycle, reason FROM runtime_state"
+        ).fetchone()
+    assert tuple(published) == ("degraded", "RETENTION_MAINTENANCE_DEFERRED")
+
+
+def test_retention_result_publication_invariant_failure_is_fatal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    normal = RetentionResult(
+        cap_state=StorageCapState.NORMAL,
+        database_bytes=100,
+        wal_bytes=1,
+        payloads_compacted=0,
+        receipts_rolled=0,
+        expired_rows_deleted=0,
+        admission_allowed=True,
+        optional_feeds_allowed=True,
+        required_action=None,
+        checkpoint_attempted=True,
+        incremental_vacuum_attempted=True,
+    )
+
+    class SuccessfulRetention:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
+            return normal
+
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager",
+        SuccessfulRetention,
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_sync_backup_status",
+        lambda *, now_us: (_ for _ in ()).throw(sqlite3.IntegrityError("invariant collision")),
+    )
+
+    with pytest.raises(RecorderFatalError, match="retention invariant failed"):
+        recorder.maintain(now_us=102)
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        run_status = connection.execute("SELECT status FROM runs").fetchone()[0]
+    assert tuple(runtime) == ("fatal", "RETENTION_INVARIANT_FAILED", "disconnected")
+    assert run_status == "fatal"
+    assert adapter.connected is False
+
+
+def test_sqlite_error_code_controls_retention_contention_classification() -> None:
+    error = sqlite3.OperationalError("database is locked")
+    error.sqlite_errorcode = sqlite3.SQLITE_IOERR
+    assert Recorder._is_sqlite_contention(error) is False
 
 
 def test_backward_callback_receive_order_is_a_persisted_global_fatal(tmp_path: Path) -> None:

@@ -1239,6 +1239,70 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
         ).fetchone()[0] == 143
 
 
+def test_admission_connection_closes_on_callback_thread_exit_and_abnormal_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "callback-thread-exit.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    fence = _seed_subscription(database)
+    inbox = CallbackInbox(database)
+    real_connect = inbox._connect
+    closed = threading.Event()
+
+    class TrackingConnection:
+        def __init__(self, connection: sqlite3.Connection) -> None:
+            self.connection = connection
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self.connection, name)
+
+        def close(self) -> None:
+            self.connection.close()
+            closed.set()
+
+    with monkeypatch.context() as successful:
+        successful.setattr(inbox, "_connect", lambda: TrackingConnection(real_connect()))
+        thread = threading.Thread(
+            target=lambda: inbox.admit(
+                fence,
+                MarketDataCallback("quote", 10, None, {"event_at_us": 10, "bid": 1.0}),
+                authority=_authority(),
+            )
+        )
+        thread.start()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert closed.wait(timeout=1)
+
+    abnormal = CallbackInbox(database)
+    exited = threading.Event()
+
+    def abort_after_begin(connection: sqlite3.Connection) -> sqlite3.Row:
+        assert connection.in_transaction
+        raise SystemExit
+
+    def admit_then_exit() -> None:
+        try:
+            abnormal.admit(
+                fence,
+                MarketDataCallback("quote", 11, None, {"event_at_us": 11, "bid": 2.0}),
+                authority=_authority(),
+            )
+        except SystemExit:
+            exited.set()
+
+    monkeypatch.setattr(abnormal, "_authoritative_admission", abort_after_begin)
+    thread = threading.Thread(target=admit_then_exit)
+    thread.start()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert exited.is_set()
+    with connect_v2(database, verify_schema=False) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.rollback()
+
+
 def test_staleness_reference_is_clamped_to_current_expected_session(tmp_path: Path) -> None:
     database = tmp_path / "session-clamped-staleness.sqlite3"
     initialize_database(database)

@@ -9,7 +9,7 @@ import sqlite3
 import threading
 from collections import Counter
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -49,6 +49,22 @@ class CallbackTimestampOrderingLoss(InboxAdmissionError):
 
 class NormalizationError(ValueError):
     """A callback is durable but cannot safely become a typed market event."""
+
+
+class _AdmissionConnectionOwner:
+    """Close a cached SQLite handle deterministically when its callback thread exits."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection: sqlite3.Connection | None = connection
+
+    def close(self) -> None:
+        connection, self.connection = self.connection, None
+        if connection is not None:
+            connection.close()
+
+    def __del__(self) -> None:
+        with suppress(BaseException):
+            self.close()
 
 
 CALLBACK_RECOVERABLE_GAP_REASONS = frozenset(
@@ -196,11 +212,20 @@ class CallbackInbox:
     def _admission_connection(self) -> sqlite3.Connection:
         """Reuse one callback-thread connection while preserving per-callback commits."""
 
-        connection = getattr(self._admission_local, "connection", None)
+        owner = getattr(self._admission_local, "owner", None)
+        if owner is None:
+            owner = _AdmissionConnectionOwner(self._connect())
+            self._admission_local.owner = owner
+        connection = cast(_AdmissionConnectionOwner, owner).connection
         if connection is None:
-            connection = self._connect()
-            self._admission_local.connection = connection
-        return cast(sqlite3.Connection, connection)
+            raise InboxAdmissionError("callback admission connection is closed")
+        return connection
+
+    def _discard_admission_connection(self, connection: sqlite3.Connection) -> None:
+        owner = getattr(self._admission_local, "owner", None)
+        if isinstance(owner, _AdmissionConnectionOwner) and owner.connection is connection:
+            owner.close()
+            del self._admission_local.owner
 
     @contextmanager
     def _connection_scope(
@@ -397,12 +422,18 @@ class CallbackInbox:
         except InboxFullError:
             raise
         except sqlite3.Error as error:
-            if connection.in_transaction:
-                connection.rollback()
+            try:
+                if connection.in_transaction:
+                    connection.rollback()
+            finally:
+                self._discard_admission_connection(connection)
             raise InboxAdmissionError(f"callback durable admission failed: {error}") from error
-        except Exception:
-            if connection.in_transaction:
-                connection.rollback()
+        except BaseException:
+            try:
+                if connection.in_transaction:
+                    connection.rollback()
+            finally:
+                self._discard_admission_connection(connection)
             raise
 
     @staticmethod

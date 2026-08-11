@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import sqlite3
+import threading
 from collections import Counter
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -183,6 +184,7 @@ class CallbackInbox:
             raise ValueError("nonterminal callback bound must be between 1 and 50,000")
         self.database_path = Path(database_path)
         self.max_nonterminal_rows = max_nonterminal_rows
+        self._admission_local = threading.local()
         with connect_v2(self.database_path):
             pass
 
@@ -190,6 +192,15 @@ class CallbackInbox:
         """Open after constructor-time schema verification under the sole-writer lease."""
 
         return connect_v2(self.database_path, verify_schema=False)
+
+    def _admission_connection(self) -> sqlite3.Connection:
+        """Reuse one callback-thread connection while preserving per-callback commits."""
+
+        connection = getattr(self._admission_local, "connection", None)
+        if connection is None:
+            connection = self._connect()
+            self._admission_local.connection = connection
+        return cast(sqlite3.Connection, connection)
 
     @contextmanager
     def _connection_scope(
@@ -259,7 +270,7 @@ class CallbackInbox:
         payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
         event_uid = _event_uid(fence, callback, payload_hash)
         try:
-            connection = self._connect()
+            connection = self._admission_connection()
         except (OSError, sqlite3.Error) as error:
             raise InboxAdmissionError(f"callback durable admission failed: {error}") from error
         try:
@@ -393,8 +404,6 @@ class CallbackInbox:
             if connection.in_transaction:
                 connection.rollback()
             raise
-        finally:
-            connection.close()
 
     @staticmethod
     def _authoritative_admission(connection: sqlite3.Connection) -> sqlite3.Row:

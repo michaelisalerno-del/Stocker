@@ -1153,10 +1153,17 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
 
     real_connect = recorder_module.connect_v2
     redundant_owner_connections: list[bool] = []
+    real_admission_connect = recorder.inbox._connect
+    admission_connections = 0
 
     def connect_after_start(path: str | Path, *, verify_schema: bool = True) -> sqlite3.Connection:
         redundant_owner_connections.append(verify_schema)
         return real_connect(path, verify_schema=False)
+
+    def connect_for_admission() -> sqlite3.Connection:
+        nonlocal admission_connections
+        admission_connections += 1
+        return real_admission_connect()
 
     quote_fence = next(fence for fence in state.fences if fence.request_id == 3)
     bar_fence = next(fence for fence in state.fences if fence.request_id == 4)
@@ -1192,8 +1199,10 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
     )
     with monkeypatch.context() as callback_context:
         callback_context.setattr(recorder_module, "connect_v2", connect_after_start)
+        callback_context.setattr(recorder.inbox, "_connect", connect_for_admission)
         for fence, callback in callbacks:
             recorder.receive(fence, callback)
+    assert admission_connections == 1
 
     from stocker_runtime.ingestion import inbox as inbox_module
 

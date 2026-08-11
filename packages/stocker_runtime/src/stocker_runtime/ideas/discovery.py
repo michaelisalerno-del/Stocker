@@ -54,7 +54,7 @@ FORBIDDEN_ATTRIBUTES = {
     "risk_approval",
 }
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
-DISCOVERY_SECONDS = 2.0
+DISCOVERY_SECONDS = 5.0
 
 
 class IdeaDiscoveryError(ValueError):

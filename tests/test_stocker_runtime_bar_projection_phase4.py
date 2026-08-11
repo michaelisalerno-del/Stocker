@@ -669,6 +669,25 @@ def _crashing_discovery_worker(*_args: object) -> None:
     os._exit(19)
 
 
+def _slow_valid_discovery_worker(*args: object) -> None:
+    time.sleep(2.25)
+    discovery_module._discovery_worker(*args)
+
+
+def test_valid_plugin_discovery_allows_bounded_cold_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        discovery_module,
+        "_discovery_worker",
+        _slow_valid_discovery_worker,
+    )
+
+    discovered = discover_plugins((_config(),))
+
+    assert len(discovered) == 1
+
+
 @pytest.mark.parametrize("worker", (_hanging_discovery_worker, _crashing_discovery_worker))
 def test_discovery_worker_hang_or_crash_is_bounded_and_cleaned_up(
     monkeypatch: pytest.MonkeyPatch, worker: object

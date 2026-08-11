@@ -1025,6 +1025,8 @@ class RetentionManager:
             wal_bytes = measured[1] if measured_wal_bytes is None else measured_wal_bytes
             if database_bytes < 0 or wal_bytes < 0:
                 raise ValueError("measured storage sizes cannot be negative")
+
+            connection.execute("BEGIN IMMEDIATE")
             deadline = self._monotonic() + self.policy.maintenance_transaction_ms / 1_000
 
             def progress() -> int:
@@ -1041,7 +1043,6 @@ class RetentionManager:
                     )
 
             connection.set_progress_handler(progress, 1_000)
-            connection.execute("BEGIN IMMEDIATE")
             if precondition is not None:
                 precondition(connection)
             check_deadline()

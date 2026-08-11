@@ -3068,6 +3068,41 @@ def test_retention_deadline_rolls_back_safely(tmp_path: Path) -> None:
         assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
 
 
+def test_retention_deadline_starts_after_writer_lock_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    now = 0.0
+    original_connect = connect_v2
+
+    class DelayedBeginConnection:
+        def __init__(self, connection: sqlite3.Connection) -> None:
+            self._connection = connection
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._connection, name)
+
+        def execute(self, statement: str, parameters: object = ()) -> sqlite3.Cursor:
+            nonlocal now
+            if statement == "BEGIN IMMEDIATE":
+                now = 1.0
+            return self._connection.execute(statement, parameters)
+
+    def delayed_connect(path: str | Path) -> DelayedBeginConnection:
+        return DelayedBeginConnection(original_connect(path))
+
+    monkeypatch.setattr("stocker_runtime.storage.retention.connect_v2", delayed_connect)
+
+    result = RetentionManager(
+        database,
+        RetentionPolicy(maintenance_transaction_ms=100),
+        monotonic=lambda: now,
+    ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert result.cap_state is StorageCapState.NORMAL
+
+
 def test_retention_deadline_rolls_back_payload_compaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

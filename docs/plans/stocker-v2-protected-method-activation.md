@@ -15,6 +15,9 @@ The approved public test seams are:
 4. `SubscriptionController.apply(plan) -> lifecycle results`.
 5. Fake or replay callbacks through the recorder into the unchanged generic Ideas and
    Results read model.
+6. A bounded mixed quote/bar callback burst through the public recorder lifecycle,
+   proving every callback remains durable and bars make progress without repeating
+   constructor-time schema verification on each callback.
 
 ## 1. Current-state findings
 
@@ -126,6 +129,13 @@ only the unique conId index and add fail-closed insert/update guards; it must no
 an imported instrument, subscription, event, hash, plugin identity, or protected result.
 Recorder admission must independently enforce the same physical-identity equality and
 must not hide unrelated constraint failures.
+
+Owner-approved operational amendment on 2026-08-11: after the recorder constructor
+has verified the immutable V2 schema, the high-rate callback ownership check may open
+its writer connection with repeated schema verification disabled. Durable admission,
+writer-generation ownership, fatal-state absorption, callback fencing, payload hashes,
+source ordering, and full callback preservation remain unchanged. No callback may be
+coalesced or dropped to meet the workload target.
 
 The JSON API remains exactly the existing seven GET routes. No method-specific route,
 schema, screen, renderer, poller, or mutation is added. Unknown plugins continue to

@@ -1140,6 +1140,80 @@ def test_callback_after_clock_catchup_resolves_future_transport_incident(
     recorder.stop(now_us=303)
 
 
+def test_high_rate_callback_path_reuses_verified_schema_and_projects_bar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "callback-load.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    from stocker_runtime.ingestion import recorder as recorder_module
+
+    real_connect = recorder_module.connect_v2
+    callback_connection_modes: list[bool] = []
+
+    def connect_after_start(path: str | Path, *, verify_schema: bool = True) -> sqlite3.Connection:
+        callback_connection_modes.append(verify_schema)
+        if verify_schema:
+            raise AssertionError("callback hot path repeated full schema verification")
+        return real_connect(path, verify_schema=False)
+
+    quote_fence = next(fence for fence in state.fences if fence.request_id == 3)
+    bar_fence = next(fence for fence in state.fences if fence.request_id == 4)
+    callbacks = [
+        (
+            quote_fence,
+            MarketDataCallback(
+                "quote",
+                101 + offset,
+                None,
+                {"event_at_us": 101 + offset, "bid": 100.0 + offset},
+            ),
+        )
+        for offset in range(40)
+    ]
+    callbacks.append(
+        (
+            bar_fence,
+            MarketDataCallback(
+                "bar",
+                141,
+                None,
+                {
+                    "event_at_us": 141,
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": 100.5,
+                    "volume": 10.0,
+                },
+            ),
+        )
+    )
+    with monkeypatch.context() as callback_context:
+        callback_context.setattr(recorder_module, "connect_v2", connect_after_start)
+        for fence, callback in callbacks:
+            recorder.receive(fence, callback)
+
+    assert recorder.drain(now_us=142) == 41
+    assert callback_connection_modes == [False] * 41
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE lifecycle='acknowledged'"
+            ).fetchone()[0]
+            == 41
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM market_events WHERE event_kind='bar'"
+            ).fetchone()[0]
+            == 1
+        )
+
+
 def test_staleness_reference_is_clamped_to_current_expected_session(tmp_path: Path) -> None:
     database = tmp_path / "session-clamped-staleness.sqlite3"
     initialize_database(database)

@@ -286,7 +286,7 @@ class Recorder:
             raise AuthoritativeLeaseLost(str(error)) from error
 
     def _check_owned(self) -> None:
-        connection = connect_v2(self.config.database)
+        connection = connect_v2(self.config.database, verify_schema=False)
         try:
             connection.execute("BEGIN IMMEDIATE")
             self._verify_owned(connection)

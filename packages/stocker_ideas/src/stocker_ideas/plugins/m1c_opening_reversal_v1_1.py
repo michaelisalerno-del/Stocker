@@ -1378,9 +1378,11 @@ class M1COpeningReversalV1_1:
                     causal_horizon=causal_horizon,
                 )
                 cutoff = event.event_at_us + _D1_WINDOW_US
+                horizon_at_us = _integer(causal_horizon.get("a"))
                 if (
                     requested.get(event.instrument_id) != baseline_session
                     and _available_at(event) < cutoff
+                    and (horizon_at_us is None or horizon_at_us < cutoff)
                 ):
                     for right in _RIGHTS:
                         interests.append(

@@ -765,6 +765,46 @@ def test_delayed_d1_baseline_never_opens_an_expired_snapshot_window(
     assert restarted.state == evaluation.state
 
 
+def test_backdated_baseline_after_persisted_horizon_never_opens_d1_window() -> None:
+    baseline = _baseline("AAL", 0)
+    cutoff_at_us = baseline.event_at_us + 30 * 60 * 1_000_000
+    horizon = _event(
+        "future-before-delayed-baseline",
+        "AAL",
+        "quote",
+        cutoff_at_us + 1,
+        {"bid": 100.0, "ask": 100.2},
+    )
+
+    combined = create_plugin().evaluate(_batch((horizon, baseline)), {})
+    horizon_only = create_plugin().evaluate(_batch((horizon,)), {})
+    split = create_plugin().evaluate(
+        _batch((baseline,), prior_ids=horizon_only.retained_input_event_ids),
+        horizon_only.state,
+    )
+
+    for evaluation in (combined, split):
+        state = cast(Mapping[str, JsonValue], evaluation.state)
+        terminal = cast(Mapping[str, Mapping[str, JsonValue]], state["d1_terminal"])["AAL"]
+        assert not evaluation.interests
+        assert state["requested"] == {}
+        assert terminal["call"] == "window_elapsed"
+        assert terminal["put"] == "window_elapsed"
+        assert terminal["call_cutoff_i"] == horizon.event_id
+        assert terminal["put_cutoff_i"] == horizon.event_id
+        assert horizon.event_id in evaluation.retained_input_event_ids
+
+    assert split.state == combined.state
+    assert split.retained_input_event_ids == combined.retained_input_event_ids
+
+    restarted = create_plugin().evaluate(
+        _batch((baseline,), prior_ids=split.retained_input_event_ids),
+        split.state,
+    )
+    assert not restarted.interests
+    assert restarted.state == split.state
+
+
 def test_d1_capture_after_a_source_order_cutoff_is_late_even_if_backdated() -> None:
     plugin = create_plugin()
     baseline = _baseline("AAL", 0)

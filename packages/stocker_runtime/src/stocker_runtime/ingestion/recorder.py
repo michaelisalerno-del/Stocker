@@ -2621,11 +2621,16 @@ class Recorder:
                     processed += 1
             finally:
                 processing_connection.close()
-            self.inbox.create_pending_receipts(
+            receipts = self.inbox.create_pending_receipts(
                 created_at_us=causal_now_us,
                 limit=limit,
                 authority=authority,
             )
+            if receipts:
+                causal_now_us = max(
+                    causal_now_us,
+                    max(receipt.created_at_us for receipt in receipts),
+                )
             from stocker_runtime.ingestion.snapshot_projection import (
                 project_option_snapshot_captures,
             )

@@ -2913,7 +2913,7 @@ def test_callback_recovery_does_not_cross_snapshot_and_stream_cadence(
 
 
 @pytest.mark.parametrize("with_gap", (False, True))
-def test_future_callback_evidence_fails_closed_without_acknowledging_or_resolving(
+def test_callback_receipt_time_advances_drain_causal_clock(
     tmp_path: Path, with_gap: bool
 ) -> None:
     database = tmp_path / "v2.sqlite3"
@@ -2937,11 +2937,10 @@ def test_future_callback_evidence_fails_closed_without_acknowledging_or_resolvin
                 True,
             )
 
-    with pytest.raises(RecorderFatalError, match="timestamp ordering"):
-        recorder.drain(now_us=104)
+    assert recorder.drain(now_us=104) == 1
 
-    assert adapter.connected is False
-    assert set(adapter.cancelled) == {3, 4}
+    assert adapter.connected is True
+    assert adapter.cancelled == []
     with connect_v2(database) as connection:
         callback = connection.execute(
             "SELECT lifecycle, payload_json, normalized_event_id, acknowledged_at_us "
@@ -2953,30 +2952,58 @@ def test_future_callback_evidence_fails_closed_without_acknowledging_or_resolvin
             (admitted.source_sequence,),
         ).fetchone()[0]
         runtime = connection.execute(
-            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+            "SELECT lifecycle, reason, connection_state, process_heartbeat_at_us "
+            "FROM runtime_state"
         ).fetchone()
         unresolved_stale = connection.execute(
             "SELECT count(*) FROM gaps WHERE reason='STREAM_STALE' AND resolved_at_us IS NULL"
         ).fetchone()[0]
-    assert tuple(callback) == (
-        "leased",
-        '{"bid":10.0,"event_at_us":140}',
-        None,
-        None,
-    )
+        receipt = connection.execute(
+            "SELECT created_at_us, last_received_at_us FROM callback_receipts"
+        ).fetchone()
+    assert callback[0] == "acknowledged"
+    assert callback[1] == '{"bid":10.0,"event_at_us":140}'
+    assert callback[2] is not None
+    assert callback[3] == 150
     assert event_count == 1
-    assert tuple(runtime) == (
-        "fatal",
-        "CALLBACK_TIMESTAMP_ORDERING_LOSS",
-        "disconnected",
+    assert tuple(runtime) == ("running", None, "connected", 150)
+    assert tuple(receipt) == (150, 150)
+    assert unresolved_stale == 0
+    assert recorder.inbox.nonterminal_count() == 0
+
+
+def test_direct_terminal_callback_advances_receipt_and_drain_causal_clock(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    stale_fence = replace(
+        state.fences[0],
+        connection_generation=state.fences[0].connection_generation - 1,
     )
-    assert unresolved_stale == int(with_gap)
-    with pytest.raises(AuthoritativeLeaseLost):
-        recorder.receive(
-            state.fences[0],
-            MarketDataCallback("quote", 150, 140, {"event_at_us": 140, "bid": 10.0}),
-        )
-    assert recorder.inbox.nonterminal_count() == 1
+
+    admitted = recorder.receive(
+        stale_fence,
+        MarketDataCallback("quote", 143, 140, {"event_at_us": 140, "bid": 10.0}),
+    )
+    assert recorder.drain(now_us=142) == 0
+
+    with connect_v2(database) as connection:
+        callback = connection.execute(
+            "SELECT lifecycle, received_at_us, failure_code FROM callback_inbox "
+            "WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()
+        receipt = connection.execute(
+            "SELECT created_at_us, last_received_at_us FROM callback_receipts"
+        ).fetchone()
+        heartbeat = connection.execute(
+            "SELECT process_heartbeat_at_us FROM runtime_state"
+        ).fetchone()[0]
+    assert tuple(callback) == ("failed", 143, "STALE_REQUEST_GENERATION")
+    assert tuple(receipt) == (143, 143)
+    assert heartbeat == 143
 
 
 def test_callback_evidence_equal_to_acknowledgement_time_can_resolve_gap(tmp_path: Path) -> None:

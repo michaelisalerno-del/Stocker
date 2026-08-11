@@ -1107,6 +1107,7 @@ class CallbackInbox:
             last = terminal[-1]
             if int(last["received_at_us"]) < int(first["received_at_us"]):
                 raise InboxAdmissionError("receipt callback receive order is reversed")
+            receipt_created_at_us = max(created_at_us, int(last["received_at_us"]))
             row_hash = callback_rows_hash(tuple(dict(row) for row in terminal))
             batch_id = hashlib.sha256(
                 f"{run_id}|{first['source_sequence']}|{last['source_sequence']}|{row_hash}".encode()
@@ -1134,7 +1135,7 @@ class CallbackInbox:
                     if last["normalized_event_id"] is None
                     else str(last["normalized_event_id"])
                 ),
-                created_at_us=created_at_us,
+                created_at_us=receipt_created_at_us,
                 prior_chain_hash=prior_hash,
             )
             connection.execute(

@@ -192,18 +192,66 @@ def _first_event_at_or_after(batch: IdeaBatch, at_us: int) -> MarketEvent | None
     return next((event for event in batch.events if _available_at(event) >= at_us), None)
 
 
-def _first_prior_event_at_or_after(
-    batch: IdeaBatch,
+def _advance_causal_horizon(
+    horizon: Mapping[str, object],
+    event: MarketEvent,
+) -> dict[str, object]:
+    available = _available_at(event)
+    prior_available = _integer(horizon.get("a"))
+    if prior_available is None or available > prior_available:
+        return {"a": available, "i": event.event_id}
+    return dict(horizon)
+
+
+def _terminalize_elapsed_d1_windows(
     *,
-    event_id: str,
-    at_us: int,
-) -> MarketEvent | None:
-    for event in batch.events:
-        if event.event_id == event_id:
-            return None
-        if _available_at(event) >= at_us:
-            return event
-    raise ValueError("Opening Reversal event is absent from its input batch")
+    baselines: Mapping[str, dict[str, object]],
+    d1_context: Mapping[str, dict[str, object]],
+    d1_terminal: dict[str, dict[str, object]],
+    causal_horizon: Mapping[str, object],
+) -> None:
+    horizon_at_us = _integer(causal_horizon.get("a"))
+    horizon_event_id = causal_horizon.get("i")
+    if horizon_at_us is None or not isinstance(horizon_event_id, str):
+        return
+    for symbol, baseline in baselines.items():
+        baseline_session = baseline.get("s")
+        cutoff_at_us = _integer(baseline.get("x"))
+        if (
+            not isinstance(baseline_session, str)
+            or cutoff_at_us is None
+            or horizon_at_us < cutoff_at_us
+        ):
+            continue
+        context = d1_context.get(symbol)
+        terminal = d1_terminal.get(symbol)
+        if terminal is None or terminal.get("s") != baseline_session:
+            terminal = {"s": baseline_session}
+        changed = False
+        for right in _RIGHTS:
+            capture = (
+                _mapping(context.get(right))
+                if context is not None and context.get("s") == baseline_session
+                else {}
+            )
+            if capture or terminal.get(right) in {
+                "captured",
+                "denied",
+                "late",
+                "window_elapsed",
+            }:
+                continue
+            terminal[right] = "window_elapsed"
+            terminal.setdefault(
+                f"{right}_k",
+                f"opening-reversal:m1c:d1:{baseline_session}:{symbol}:{right}",
+            )
+            terminal[f"{right}_x"] = cutoff_at_us
+            terminal[f"{right}_cutoff_i"] = horizon_event_id
+            terminal[f"{right}_cutoff_a"] = horizon_at_us
+            changed = True
+        if changed:
+            d1_terminal[symbol] = terminal
 
 
 def _primary_expected_keys(active: Mapping[str, object]) -> tuple[str, ...]:
@@ -547,6 +595,7 @@ def _emit_complete_cohort(
     *,
     batch: IdeaBatch,
     cohort: Mapping[str, object],
+    causal_horizon: Mapping[str, object],
 ) -> tuple[
     list[IdeaOutput],
     list[tuple[str, ...]],
@@ -577,14 +626,16 @@ def _emit_complete_cohort(
     )
     winner = None if not candidates else candidates[0][2]
     action = "CALL" if market_sign == -1 else "PUT" if market_sign == 1 else "ABSTAIN"
+    barrier_candidates = [
+        (cast(int, market["a"]), cast(str, market["i"])),
+        *((cast(int, stocks[symbol]["a"]), cast(str, stocks[symbol]["i"])) for symbol in COHORT),
+    ]
+    horizon_at_us = _integer(causal_horizon.get("a"))
+    horizon_event_id = causal_horizon.get("i")
+    if horizon_at_us is not None and isinstance(horizon_event_id, str):
+        barrier_candidates.append((horizon_at_us, horizon_event_id))
     barrier_at_us, barrier_event_id = max(
-        (
-            (cast(int, market["a"]), cast(str, market["i"])),
-            *(
-                (cast(int, stocks[symbol]["a"]), cast(str, stocks[symbol]["i"]))
-                for symbol in COHORT
-            ),
-        ),
+        barrier_candidates,
         key=lambda item: (item[0], item[1]),
     )
     primary_cutoff_at_us = cast(int, market["t"]) + _PRIMARY_WINDOW_US
@@ -600,6 +651,7 @@ def _emit_complete_cohort(
     all_selected = {cast(str, market["i"])}
     for record in stocks.values():
         all_selected.update(_string_values(record.get("l")))
+    all_selected.add(barrier_event_id)
     for symbol in sorted(COHORT):
         record = stocks[symbol]
         lineage = _lineage(batch, all_selected)
@@ -1080,6 +1132,7 @@ class M1COpeningReversalV1_1:
         pending = _mapping(prior.get("pending"))
         active = _mapping(prior.get("active"))
         primary_terminal = _mapping(prior.get("primary_terminal"))
+        causal_horizon = _mapping(prior.get("causal_horizon"))
         initial_pending = bool(pending)
         initial_active = bool(active)
         outputs: list[IdeaOutput] = []
@@ -1109,6 +1162,7 @@ class M1COpeningReversalV1_1:
                     "captured",
                     "denied",
                     "late",
+                    "window_elapsed",
                 }:
                     terminal[right] = receipt_status
                     terminal[f"{right}_k"] = receipt.interest_key
@@ -1120,6 +1174,13 @@ class M1COpeningReversalV1_1:
                     )
                     if terminal_reason is not None:
                         terminal[f"{right}_r"] = terminal_reason
+                    d1_terminal[symbol] = terminal
+                elif (
+                    terminal.get("s") == receipt_baseline_session
+                    and terminal.get(right) == "window_elapsed"
+                ):
+                    terminal[f"{right}_k"] = receipt.interest_key
+                    terminal[f"{right}_completed"] = receipt.completed_at_us
                     d1_terminal[symbol] = terminal
             primary_parts = _primary_interest_parts(receipt.interest_key)
             if (
@@ -1179,6 +1240,13 @@ class M1COpeningReversalV1_1:
         )
         active_evidence_event_ids: set[str] = set()
         for event in batch.events:
+            causal_horizon = _advance_causal_horizon(causal_horizon, event)
+            _terminalize_elapsed_d1_windows(
+                baselines=baselines,
+                d1_context=d1_context,
+                d1_terminal=d1_terminal,
+                causal_horizon=causal_horizon,
+            )
             if (
                 active_terminal_event is not None
                 and event.event_id == active_terminal_event.event_id
@@ -1303,6 +1371,12 @@ class M1COpeningReversalV1_1:
                     "x": event.event_at_us + _D1_WINDOW_US,
                     "k": count,
                 }
+                _terminalize_elapsed_d1_windows(
+                    baselines=baselines,
+                    d1_context=d1_context,
+                    d1_terminal=d1_terminal,
+                    causal_horizon=causal_horizon,
+                )
                 cutoff = event.event_at_us + _D1_WINDOW_US
                 if (
                     requested.get(event.instrument_id) != baseline_session
@@ -1355,19 +1429,30 @@ class M1COpeningReversalV1_1:
                 terminal = d1_terminal.get(symbol)
                 if terminal is None or terminal.get("s") != baseline_session:
                     terminal = {"s": baseline_session}
-                prior_cutoff_event = _first_prior_event_at_or_after(
-                    batch,
-                    event_id=event.event_id,
-                    at_us=cutoff,
-                )
-                if available >= cutoff or prior_cutoff_event is not None:
-                    cutoff_event = prior_cutoff_event or event
+                terminal_status = terminal.get(right)
+                if terminal_status in {"captured", "denied"}:
+                    continue
+                if terminal_status == "late":
+                    terminal[f"{right}_i"] = event.event_id
+                    terminal[f"{right}_a"] = available
+                    terminal[f"{right}_x"] = cutoff
+                    if available >= cutoff:
+                        terminal[f"{right}_cutoff_i"] = event.event_id
+                        terminal[f"{right}_cutoff_a"] = available
+                    d1_terminal[symbol] = terminal
+                    continue
+                if available >= cutoff or terminal.get(right) == "window_elapsed":
+                    cutoff_event_id = terminal.get(f"{right}_cutoff_i")
+                    cutoff_event_at = _integer(terminal.get(f"{right}_cutoff_a"))
+                    if not isinstance(cutoff_event_id, str) or cutoff_event_at is None:
+                        cutoff_event_id = event.event_id
+                        cutoff_event_at = available
                     terminal[right] = "late"
                     terminal[f"{right}_i"] = event.event_id
                     terminal[f"{right}_a"] = available
                     terminal[f"{right}_x"] = cutoff
-                    terminal[f"{right}_cutoff_i"] = cutoff_event.event_id
-                    terminal[f"{right}_cutoff_a"] = _available_at(cutoff_event)
+                    terminal[f"{right}_cutoff_i"] = cutoff_event_id
+                    terminal[f"{right}_cutoff_a"] = cutoff_event_at
                     d1_terminal[symbol] = terminal
                     continue
                 context = d1_context.get(symbol)
@@ -1489,7 +1574,11 @@ class M1COpeningReversalV1_1:
                 cohort_lineages,
                 next_pending,
                 next_primary_terminal,
-            ) = _emit_complete_cohort(batch=batch, cohort=cohort)
+            ) = _emit_complete_cohort(
+                batch=batch,
+                cohort=cohort,
+                causal_horizon=causal_horizon,
+            )
             outputs.extend(cohort_outputs)
             lineages.extend(cohort_lineages)
             cohort = {"s": cohort.get("s"), "emitted": True}
@@ -1524,6 +1613,8 @@ class M1COpeningReversalV1_1:
             for proof in _table(lifecycle.get("z")).values():
                 if isinstance(proof.get("i"), str):
                     retained_values.add(cast(str, proof["i"]))
+        if isinstance(causal_horizon.get("i"), str):
+            retained_values.add(cast(str, causal_horizon["i"]))
         retained = _lineage(batch, retained_values)
         latest_state = cast(
             JsonValue,
@@ -1537,6 +1628,7 @@ class M1COpeningReversalV1_1:
                 "pending": pending,
                 "active": active,
                 "primary_terminal": primary_terminal,
+                "causal_horizon": causal_horizon,
             },
         )
         return IdeaEvaluation(

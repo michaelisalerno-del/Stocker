@@ -116,6 +116,8 @@ def _capture(
     symbol: str,
     right: str,
     index: int,
+    *,
+    completed_at_us: int | None = None,
 ) -> tuple[MarketEvent, DiscoveryReceipt]:
     instrument_id = f"option-{symbol}-{right}"
     interest_key = f"opening-reversal:m1c:d1:2026-08-07:{symbol}:{right}"
@@ -131,7 +133,7 @@ def _capture(
         option_right=cast(str, right),
         multiplier="100",
         candidates_inspected=2,
-        completed_at_us=2_000_000 + index,
+        completed_at_us=(2_000_000 + index if completed_at_us is None else completed_at_us),
     )
     event = _event(
         f"capture-{symbol}-{right}",
@@ -625,7 +627,13 @@ def test_barrier_at_or_after_primary_cutoff_terminalizes_inside_the_signal(
 
     assert not restarted.outputs
     assert not restarted.interests
-    assert restarted.state == evaluation.state
+    restarted_state = cast(Mapping[str, JsonValue], restarted.state)
+    assert restarted_state["pending"] == {}
+    assert restarted_state["active"] == {}
+    assert restarted_state["primary_terminal"] == state["primary_terminal"]
+    assert cast(Mapping[str, JsonValue], restarted_state["causal_horizon"])["i"] == (
+        late_quote.event_id
+    )
 
 
 @pytest.mark.parametrize(
@@ -760,7 +768,7 @@ def test_delayed_d1_baseline_never_opens_an_expired_snapshot_window(
 def test_d1_capture_after_a_source_order_cutoff_is_late_even_if_backdated() -> None:
     plugin = create_plugin()
     baseline = _baseline("AAL", 0)
-    evaluation = plugin.evaluate(_batch((baseline,)), {})
+    initial = plugin.evaluate(_batch((baseline,)), {})
     capture, receipt = _capture("AAL", "call", 0)
     cutoff_at_us = baseline.event_at_us + 30 * 60 * 1_000_000
     cutoff = _event(
@@ -772,13 +780,13 @@ def test_d1_capture_after_a_source_order_cutoff_is_late_even_if_backdated() -> N
     )
     batch = _batch(
         (cutoff, capture),
-        prior_ids=evaluation.retained_input_event_ids,
+        prior_ids=initial.retained_input_event_ids,
         receipts=(receipt,),
     )
 
-    assert plugin.select_input_prefix(batch, evaluation.state) == 2
+    assert plugin.select_input_prefix(batch, initial.state) == 2
 
-    evaluation = plugin.evaluate(batch, evaluation.state)
+    evaluation = plugin.evaluate(batch, initial.state)
     state = cast(Mapping[str, JsonValue], evaluation.state)
     d1_terminal = cast(Mapping[str, Mapping[str, JsonValue]], state["d1_terminal"])
 
@@ -787,12 +795,38 @@ def test_d1_capture_after_a_source_order_cutoff_is_late_even_if_backdated() -> N
     assert d1_terminal["AAL"]["call_cutoff_i"] == cutoff.event_id
     assert {capture.event_id, cutoff.event_id}.issubset(evaluation.retained_input_event_ids)
 
+    cutoff_only = create_plugin().evaluate(
+        _batch((cutoff,), prior_ids=initial.retained_input_event_ids),
+        initial.state,
+    )
+    cutoff_state = cast(Mapping[str, JsonValue], cutoff_only.state)
+    cutoff_terminal = cast(Mapping[str, Mapping[str, JsonValue]], cutoff_state["d1_terminal"])
+    assert cutoff_terminal["AAL"]["call"] == "window_elapsed"
+    assert cutoff_terminal["AAL"]["call_cutoff_i"] == cutoff.event_id
+    assert cutoff.event_id in cutoff_only.retained_input_event_ids
+
+    split = create_plugin().evaluate(
+        _batch(
+            (capture,),
+            prior_ids=cutoff_only.retained_input_event_ids,
+            receipts=(receipt,),
+        ),
+        cutoff_only.state,
+    )
+    split_state = cast(Mapping[str, JsonValue], split.state)
+    split_terminal = cast(Mapping[str, Mapping[str, JsonValue]], split_state["d1_terminal"])
+    assert split_terminal["AAL"]["call"] == "late"
+    assert split_terminal["AAL"]["call_i"] == capture.event_id
+    assert split_terminal["AAL"]["call_cutoff_i"] == cutoff.event_id
+    assert split.state == evaluation.state
+    assert split.retained_input_event_ids == evaluation.retained_input_event_ids
+
     restarted = create_plugin().evaluate(
         _batch(
             (_checkpoint_event("AAL", 0),),
-            prior_ids=evaluation.retained_input_event_ids,
+            prior_ids=split.retained_input_event_ids,
         ),
-        evaluation.state,
+        split.state,
     )
     restarted_state = cast(Mapping[str, JsonValue], restarted.state)
     cohort = cast(Mapping[str, JsonValue], restarted_state["cohort"])
@@ -803,6 +837,80 @@ def test_d1_capture_after_a_source_order_cutoff_is_late_even_if_backdated() -> N
     terminal = cast(Mapping[str, JsonValue], stocks["AAL"]["terminal"])
     assert terminal["terminal_basis"] == "mixed_terminal_option_evidence"
     assert cast(Mapping[str, JsonValue], terminal["cutoff_event_ids"])["call"] == (cutoff.event_id)
+
+
+def test_cutoff_before_backdated_final_cohort_never_reopens_primary_window() -> None:
+    _, before_vti = _pending_primary_episode(checkpoint_order=COHORT)
+    vti = _checkpoint_event("VTI", UNIVERSE.index("VTI"))
+    cutoff_at_us = vti.event_at_us + 15 * 60 * 1_000_000
+    cutoff = _event(
+        "primary-cutoff-before-final-cohort",
+        "AAL",
+        "quote",
+        cutoff_at_us,
+        {"bid": 100.0, "ask": 100.2},
+    )
+
+    combined = create_plugin().evaluate(
+        _batch(
+            (cutoff, vti),
+            prior_ids=before_vti.retained_input_event_ids,
+        ),
+        before_vti.state,
+    )
+    cutoff_only = create_plugin().evaluate(
+        _batch((cutoff,), prior_ids=before_vti.retained_input_event_ids),
+        before_vti.state,
+    )
+    split = create_plugin().evaluate(
+        _batch((vti,), prior_ids=cutoff_only.retained_input_event_ids),
+        cutoff_only.state,
+    )
+
+    for evaluation in (combined, split):
+        signal = next(output for output in evaluation.outputs if output.kind == "signal")
+        primary = cast(Mapping[str, JsonValue], signal.payload["primary_pair"])
+        state = cast(Mapping[str, JsonValue], evaluation.state)
+        assert primary["status"] == "unavailable"
+        assert primary["terminal_basis"] == ("barrier_released_at_or_after_primary_cutoff")
+        assert primary["terminal_event_id"] == cutoff.event_id
+        assert not primary["interests_issued"]
+        assert state["pending"] == {}
+        assert not evaluation.interests
+        signal_index = next(
+            index for index, output in enumerate(evaluation.outputs) if output.kind == "signal"
+        )
+        assert cutoff.event_id in evaluation.output_input_event_ids[signal_index]
+
+    assert split.outputs == combined.outputs
+    assert split.output_input_event_ids == combined.output_input_event_ids
+    assert split.state == combined.state
+    assert split.retained_input_event_ids == combined.retained_input_event_ids
+
+
+def test_capture_resolved_after_d1_cutoff_remains_retained_late_evidence() -> None:
+    baseline = _baseline("AAL", 0)
+    initial = create_plugin().evaluate(_batch((baseline,)), {})
+    cutoff_at_us = baseline.event_at_us + 30 * 60 * 1_000_000
+    late_at_us = cutoff_at_us + 1
+    capture, receipt = _capture("AAL", "call", 0, completed_at_us=late_at_us)
+    capture = _received(capture, late_at_us)
+
+    evaluation = create_plugin().evaluate(
+        _batch(
+            (capture,),
+            prior_ids=initial.retained_input_event_ids,
+            receipts=(receipt,),
+        ),
+        initial.state,
+    )
+    state = cast(Mapping[str, JsonValue], evaluation.state)
+    terminal = cast(Mapping[str, Mapping[str, JsonValue]], state["d1_terminal"])["AAL"]
+
+    assert terminal["call"] == "late"
+    assert terminal["call_i"] == capture.event_id
+    assert terminal["call_cutoff_i"] == capture.event_id
+    assert capture.event_id in evaluation.retained_input_event_ids
 
 
 def test_primary_pair_requires_coherent_one_dte_identity_and_in_window_quotes() -> None:

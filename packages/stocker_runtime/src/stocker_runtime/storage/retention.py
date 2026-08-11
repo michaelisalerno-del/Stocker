@@ -86,11 +86,6 @@ AND (EXISTS (
 """
 _WATERMARK_PROOF_SQL = """
 AND receipt_batch_id IS NOT NULL
-AND NOT EXISTS (
-    SELECT 1 FROM callback_receipts receipt
-    WHERE receipt.batch_id = callback_inbox.receipt_batch_id
-      AND receipt.run_id = callback_inbox.run_id
-)
 AND EXISTS (
     SELECT 1 FROM callback_compaction_watermarks watermark
     WHERE watermark.run_id = callback_inbox.run_id
@@ -348,38 +343,76 @@ class RetentionManager:
         ).fetchone()
         return unready is None
 
-    def _receipt_candidates(
+    def _receipt_actions(
         self,
         connection: sqlite3.Connection,
         run_id: str,
+        watermark: sqlite3.Row | None,
         receipt_cutoff_us: int,
         tombstone_cutoff_us: int,
         remaining: int,
-    ) -> tuple[sqlite3.Row, ...]:
+    ) -> tuple[tuple[sqlite3.Row, ...], tuple[sqlite3.Row, ...]]:
         total = int(
             connection.execute(
                 "SELECT count(*) FROM callback_receipts WHERE run_id = ?", (run_id,)
             ).fetchone()[0]
         )
         excess = max(0, total - self.policy.max_receipts_per_run)
-        rows = tuple(
+        oldest = tuple(
             connection.execute(
                 "SELECT * FROM callback_receipts WHERE run_id = ? "
                 "ORDER BY first_source_sequence, batch_id LIMIT ?",
                 (run_id, remaining),
             )
         )
-        candidate_count = 0
-        for index, row in enumerate(rows):
-            if (
-                int(row["created_at_us"]) <= receipt_cutoff_us
-                or index < excess
-                or self._receipt_batch_is_tombstone_ready(connection, row, tombstone_cutoff_us)
-            ):
-                candidate_count += 1
+        deletion_count = 0
+        for index, row in enumerate(oldest):
+            if int(row["created_at_us"]) <= receipt_cutoff_us or index < excess:
+                deletion_count += 1
             else:
                 break
-        return rows[: min(candidate_count, remaining)]
+        deletion_candidates = oldest[:deletion_count]
+
+        verified_through = -1
+        if watermark is not None:
+            verified_through = int(watermark["compacted_through_sequence"])
+            straddled = connection.execute(
+                "SELECT 1 FROM callback_receipts WHERE run_id = ? "
+                "AND first_source_sequence <= ? AND last_source_sequence > ? LIMIT 1",
+                (run_id, verified_through, verified_through),
+            ).fetchone()
+            if straddled is not None:
+                raise RetentionInvariantError("receipt straddles verified watermark")
+        unverified = tuple(
+            connection.execute(
+                "SELECT * FROM callback_receipts WHERE run_id = ? "
+                "AND first_source_sequence > ? "
+                "ORDER BY first_source_sequence, batch_id LIMIT ?",
+                (run_id, verified_through, remaining),
+            )
+        )
+        deletion_ids = {str(row["batch_id"]) for row in deletion_candidates}
+        checkpoint_count = 0
+        for receipt in unverified:
+            if str(receipt["batch_id"]) in deletion_ids or self._receipt_batch_is_tombstone_ready(
+                connection, receipt, tombstone_cutoff_us
+            ):
+                checkpoint_count += 1
+            else:
+                break
+        checkpoint_candidates = unverified[:checkpoint_count]
+        deletion_budget = remaining - int(bool(checkpoint_candidates))
+        if deletion_budget < 0:
+            return (), ()
+        deletion_candidates = deletion_candidates[:deletion_budget]
+        checkpoint_ids = {str(row["batch_id"]) for row in checkpoint_candidates}
+        for receipt in deletion_candidates:
+            if (
+                int(receipt["last_source_sequence"]) > verified_through
+                and str(receipt["batch_id"]) not in checkpoint_ids
+            ):
+                raise RetentionInvariantError("unverified receipt selected for deletion")
+        return checkpoint_candidates, deletion_candidates
 
     def _verified_receipt(
         self,
@@ -516,26 +549,38 @@ class RetentionManager:
         updated_at_us: int,
         limit: int,
     ) -> tuple[int, int]:
+        """Checkpoint verified proof, then rotate only age/count-eligible receipts."""
+
         rolled = 0
         changed = 0
         for run_row in connection.execute(
             "SELECT DISTINCT run_id FROM callback_receipts ORDER BY run_id"
         ):
-            if changed + 1 >= limit:
+            available = limit - changed
+            if available <= 0:
                 break
             run_id = str(run_row[0])
             watermark = connection.execute(
                 "SELECT * FROM callback_compaction_watermarks WHERE run_id = ?",
                 (run_id,),
             ).fetchone()
-            candidates = self._receipt_candidates(
+            checkpoint_candidates, deletion_candidates = self._receipt_actions(
                 connection,
                 run_id,
+                watermark,
                 receipt_cutoff_us,
                 tombstone_cutoff_us,
-                limit - changed - 1,
+                available,
             )
-            if not candidates:
+            if not checkpoint_candidates and not deletion_candidates:
+                continue
+            if not checkpoint_candidates:
+                connection.executemany(
+                    "DELETE FROM callback_receipts WHERE batch_id = ?",
+                    ((str(row["batch_id"]),) for row in deletion_candidates),
+                )
+                rolled += len(deletion_candidates)
+                changed += len(deletion_candidates)
                 continue
             expected_after = -1
             expected_prior_hash = "0" * 64
@@ -544,7 +589,7 @@ class RetentionManager:
                 expected_prior_hash = str(watermark["last_receipt_chain_hash"])
             verified: list[CallbackReceiptRecord] = []
             chain_hashes: list[str] = []
-            for receipt in candidates:
+            for receipt in checkpoint_candidates:
                 record = self._verified_receipt(
                     connection,
                     receipt,
@@ -632,10 +677,10 @@ class RetentionManager:
             )
             connection.executemany(
                 "DELETE FROM callback_receipts WHERE batch_id = ?",
-                ((str(row["batch_id"]),) for row in candidates),
+                ((str(row["batch_id"]),) for row in deletion_candidates),
             )
-            rolled += len(candidates)
-            changed += len(candidates) + 1
+            rolled += len(deletion_candidates)
+            changed += len(deletion_candidates) + 1
         return rolled, changed
 
     def _delete_limited(

@@ -2807,12 +2807,15 @@ def test_tombstone_retention_rolls_receipt_before_deleting_covered_callbacks(
             ).fetchone()
             is not None
         )
+        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 2
     second_pass = manager.run(now_us=200, measured_database_bytes=1, measured_wal_bytes=0)
+    rotation_pass = manager.run(now_us=1_100, measured_database_bytes=1, measured_wal_bytes=0)
 
-    assert first_pass.receipts_rolled == 1
+    assert first_pass.receipts_rolled == 0
     assert first_pass.expired_rows_deleted == 256
-    assert second_pass.receipts_rolled == 1
+    assert second_pass.receipts_rolled == 0
     assert second_pass.expired_rows_deleted == 1
+    assert rotation_pass.receipts_rolled == 2
     with connect_v2(database) as connection:
         assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 0
         assert (
@@ -2830,7 +2833,7 @@ def test_tombstone_retention_rolls_receipt_before_deleting_covered_callbacks(
     assert tuple(watermark)[:2] == (second_sequence, 257)
 
 
-def test_tombstone_retention_waits_for_the_complete_receipt_batch(tmp_path: Path) -> None:
+def test_tombstone_retention_checkpoints_only_a_complete_receipt_batch(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     _seed_output_dependencies(database)
@@ -2863,12 +2866,23 @@ def test_tombstone_retention_waits_for_the_complete_receipt_batch(tmp_path: Path
     )
 
     waiting = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 1
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE source_sequence IN (?, ?)",
+                (first_sequence, second_sequence),
+            ).fetchone()[0]
+            == 2
+        )
     completed = manager.run(now_us=200, measured_database_bytes=1, measured_wal_bytes=0)
+    rotated = manager.run(now_us=1_100, measured_database_bytes=1, measured_wal_bytes=0)
 
     assert waiting.receipts_rolled == 0
     assert waiting.expired_rows_deleted == 0
-    assert completed.receipts_rolled == 1
+    assert completed.receipts_rolled == 0
     assert completed.expired_rows_deleted == 2
+    assert rotated.receipts_rolled == 1
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -2923,13 +2937,73 @@ def test_tombstone_retention_waits_for_failed_batch_run_to_be_terminal(tmp_path:
 
     active = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
     with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT 1 FROM callback_inbox WHERE source_sequence = ?", (failed_sequence,)
+            ).fetchone()
+            is not None
+        )
         connection.execute("UPDATE runs SET status = 'stopped' WHERE run_id = 'retention-run'")
     terminal = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    rotated = manager.run(now_us=1_100, measured_database_bytes=1, measured_wal_bytes=0)
 
     assert active.receipts_rolled == 0
     assert active.expired_rows_deleted == 0
-    assert terminal.receipts_rolled == 1
+    assert terminal.receipts_rolled == 0
     assert terminal.expired_rows_deleted == 2
+    assert rotated.receipts_rolled == 1
+
+
+def test_retention_rejects_a_receipt_straddling_the_verified_watermark(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    first_sequence = _seed_callback_for_retention(
+        database,
+        uid="straddled-first",
+        received_at_us=1,
+        acknowledged_at_us=1,
+        receipt_batch_id="straddled-receipt",
+    )
+    second_sequence = _seed_callback_for_retention(
+        database,
+        uid="straddled-second",
+        received_at_us=1,
+        acknowledged_at_us=1,
+        receipt_batch_id="straddled-receipt",
+    )
+    _insert_receipt(
+        database,
+        batch_id="straddled-receipt",
+        first_sequence=first_sequence,
+        last_sequence=second_sequence,
+        created_at_us=99,
+    )
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE callback_inbox SET payload_json = NULL")
+        connection.execute(
+            "INSERT INTO callback_compaction_watermarks(run_id, compacted_through_sequence, "
+            "cumulative_callback_count, first_received_at_us, last_received_at_us, "
+            "rolled_receipt_chain_hash, last_receipt_chain_hash, updated_at_us) "
+            "VALUES ('retention-run', ?, 1, 1, 1, ?, ?, 1)",
+            (first_sequence, "1" * 64, "2" * 64),
+        )
+
+    with pytest.raises(RetentionInvariantError, match="straddles verified watermark"):
+        RetentionManager(
+            database,
+            RetentionPolicy(callback_payload_us=1_000, receipt_us=1_000, tombstone_us=10),
+        ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE source_sequence IN (?, ?)",
+                (first_sequence, second_sequence),
+            ).fetchone()[0]
+            == 2
+        )
+        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 1
 
 
 def test_retention_cap_states_fail_stop_without_pruning_unexpired_evidence(

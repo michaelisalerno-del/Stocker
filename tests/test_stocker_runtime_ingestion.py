@@ -596,6 +596,12 @@ def test_waiting_callback_admission_precedes_the_next_projection_transaction(
                     ).fetchone()[0]
                     == 1
                 )
+                assert (
+                    connection.execute(
+                        "SELECT count(*) FROM callback_inbox WHERE received_at_us=1001"
+                    ).fetchone()[0]
+                    == 0
+                )
 
     monkeypatch.setattr(inbox, "project", slow_first_projection)
     monkeypatch.setattr(
@@ -612,19 +618,28 @@ def test_waiting_callback_admission_precedes_the_next_projection_transaction(
             authority=_authority(),
         )
         assert first_projection_entered.wait(timeout=5)
-        admission = executor.submit(
-            inbox.admit,
-            fence,
-            MarketDataCallback("quote", 1000, None, {"event_at_us": 1000, "bid": 101.0}),
-            authority=_authority(),
-        )
+
+        def admit_continuously() -> tuple[AdmissionResult, AdmissionResult]:
+            first = inbox.admit(
+                fence,
+                MarketDataCallback("quote", 1000, None, {"event_at_us": 1000, "bid": 101.0}),
+                authority=_authority(),
+            )
+            second = inbox.admit(
+                fence,
+                MarketDataCallback("quote", 1001, None, {"event_at_us": 1001, "bid": 102.0}),
+                authority=_authority(),
+            )
+            return first, second
+
+        admission = executor.submit(admit_continuously)
         with inbox._writer_condition:
             assert inbox._writer_condition.wait_for(
-                lambda: inbox._admission_waiters == 1,
+                lambda: inbox._next_writer_ticket - inbox._serving_writer_ticket >= 2,
                 timeout=5,
             )
         release_first_projection.set()
-        admitted = admission.result(timeout=5)
+        admitted, admitted_after_projection = admission.result(timeout=5)
         result = drain.result(timeout=5)
 
     assert result.processed == 64
@@ -633,6 +648,13 @@ def test_waiting_callback_admission_precedes_the_next_projection_transaction(
             connection.execute(
                 "SELECT lifecycle FROM callback_inbox WHERE source_sequence=?",
                 (admitted.source_sequence,),
+            ).fetchone()[0]
+            == "pending"
+        )
+        assert (
+            connection.execute(
+                "SELECT lifecycle FROM callback_inbox WHERE source_sequence=?",
+                (admitted_after_projection.source_sequence,),
             ).fetchone()[0]
             == "pending"
         )

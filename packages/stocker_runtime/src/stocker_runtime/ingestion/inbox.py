@@ -210,7 +210,8 @@ class CallbackInbox:
         self._admission_local = threading.local()
         self._writer_condition = threading.Condition()
         self._writer_active = False
-        self._admission_waiters = 0
+        self._next_writer_ticket = 0
+        self._serving_writer_ticket = 0
         with connect_v2(self.database_path):
             pass
 
@@ -238,23 +239,22 @@ class CallbackInbox:
             del self._admission_local.owner
 
     def _acquire_admission_writer(self) -> None:
-        """Give a waiting synchronous callback priority over projection chunks."""
+        """Enter the writer queue without starving projection work."""
 
-        with self._writer_condition:
-            self._admission_waiters += 1
-            self._writer_condition.notify_all()
-            try:
-                while self._writer_active:
-                    self._writer_condition.wait()
-                self._writer_active = True
-            finally:
-                self._admission_waiters -= 1
+        self._acquire_writer_ticket()
 
     def _acquire_projection_writer(self) -> None:
-        """Enter one bounded projection transaction without starving admissions."""
+        """Enter one bounded projection transaction in FIFO writer order."""
+
+        self._acquire_writer_ticket()
+
+    def _acquire_writer_ticket(self) -> None:
+        """Serialize admissions and projection chunks in bounded FIFO order."""
 
         with self._writer_condition:
-            while self._writer_active or self._admission_waiters:
+            ticket = self._next_writer_ticket
+            self._next_writer_ticket += 1
+            while self._writer_active or ticket != self._serving_writer_ticket:
                 self._writer_condition.wait()
             self._writer_active = True
 
@@ -263,6 +263,7 @@ class CallbackInbox:
             if not self._writer_active:
                 raise RuntimeError("callback writer arbitration is unbalanced")
             self._writer_active = False
+            self._serving_writer_ticket += 1
             self._writer_condition.notify_all()
 
     @contextmanager

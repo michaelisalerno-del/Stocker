@@ -561,6 +561,49 @@ function renderMicrostructure(items, quoteSeries = [], depth = null) {
   return stack;
 }
 
+function renderMicrostructureDirectionV0(projection) {
+  const methods = projection.methods || [];
+  if (!methods.length) {
+    return node(
+      "div",
+      "empty-state",
+      "No causal Microstructure Direction V0 classifications are recorded.",
+    );
+  }
+  return table(
+    [
+      { label: "Method", value: "direction_method" },
+      { label: "Timing window", value: "window_name" },
+      { label: "Action", value: "action" },
+      { label: "Signed score", value: "signed_score" },
+      { label: "Trade imbalance", value: (row) => row.component_values?.trade_imbalance },
+      { label: "Quote imbalance", value: (row) => row.component_values?.quote_imbalance },
+      { label: "Microprice edge", value: (row) => row.component_values?.microprice_edge },
+      {
+        label: "Probable buyer-initiated volume",
+        value: "probable_buyer_initiated_volume",
+      },
+      {
+        label: "Probable seller-initiated volume",
+        value: "probable_seller_initiated_volume",
+      },
+      {
+        label: "Classification valid",
+        value: "trade_classification_valid_fraction",
+        format: percent,
+      },
+      { label: "Quote count", value: "quote_count" },
+      { label: "Trade count", value: "trade_count" },
+      { label: "Decision", value: "decision_timestamp_utc", format: clock },
+      { label: "Confirmation delay (s)", value: "confirmation_delay_seconds" },
+      { label: "Tick-by-tick", value: "tick_by_tick_status" },
+      { label: "Depth (secondary)", value: "depth_status" },
+      { label: "Quality flags", value: (row) => (row.data_quality_flags || []).join(", ") },
+    ],
+    methods,
+  );
+}
+
 async function loadEpisode(episodeId) {
   if (episodeController) episodeController.abort();
   const controller = new AbortController();
@@ -568,9 +611,12 @@ async function loadEpisode(episodeId) {
   state.selectedEpisode = episodeId;
   replace("signal-evidence", node("div", "empty-state", "Reading causal evidence…"));
   try {
-    const [detail, microstructure, options] = await Promise.all([
+    const [detail, microstructure, microstructureDirection, options] = await Promise.all([
       api(`/api/episodes/${encodeURIComponent(episodeId)}`, { signal: controller.signal }),
       api(`/api/episodes/${encodeURIComponent(episodeId)}/microstructure`, {
+        signal: controller.signal,
+      }),
+      api(`/api/episodes/${encodeURIComponent(episodeId)}/microstructure-direction-v0`, {
         signal: controller.signal,
       }),
       api(`/api/episodes/${encodeURIComponent(episodeId)}/options`, {
@@ -609,6 +655,10 @@ async function loadEpisode(episodeId) {
           microstructure.quote_series || [],
           microstructure.latest_depth_snapshot || null,
         ),
+      ),
+      subsection(
+        "Microstructure Direction V0 — RESEARCH ONLY — NOT VALIDATED — NO RECOMMENDATION",
+        renderMicrostructureDirectionV0(microstructureDirection),
       ),
       subsection("Frozen model input", jsonBlock(episode.feature_values || {})),
     );

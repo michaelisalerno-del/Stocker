@@ -238,6 +238,27 @@ def test_same_provider_timestamp_never_uses_a_quote_received_after_the_trade() -
     assert classification.quote_age_ms == 0.0
 
 
+def test_trade_received_after_window_cutoff_is_never_admitted() -> None:
+    late_received = trade(0, 100.2).model_copy(
+        update={"received_timestamp_utc": START + timedelta(seconds=2)}
+    )
+
+    summary = summarise_microstructure_window(
+        symbol="AAL",
+        window_start=START - timedelta(seconds=1),
+        window_end=START + timedelta(seconds=1),
+        quotes=(quote(0),),
+        trades=(late_received,),
+        maximum_quote_age=timedelta(seconds=2),
+        minimum_classification_valid_fraction=0.5,
+    )
+
+    assert summary.trade_classifications == ()
+    assert summary.trade_flow.probable_buy_trade_count == 0
+    assert summary.trade_flow.probable_sell_trade_count == 0
+    assert summary.trade_flow.unknown_trade_count == 0
+
+
 def test_depth_book_reconstructs_rows_and_fails_closed_across_reset() -> None:
     book = DepthBook(symbol="AAL", con_id=265598, rows_per_side=2)
     book.apply(

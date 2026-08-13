@@ -1359,3 +1359,53 @@ def test_web_fails_closed_when_trading_configuration_is_enabled(tmp_path: Path) 
 
     with pytest.raises(RuntimeError, match="blocked_unsafe_runtime_configuration"):
         create_web_app(unsafe)
+
+
+def test_microstructure_direction_projection_is_get_only_and_permanently_labelled(
+    tmp_path: Path,
+) -> None:
+    client = seeded_app(tmp_path)
+    path = "/api/episodes/example/microstructure-direction-v0"
+
+    response = client.get(path)
+    rejected_write = client.post(path, json={"action": "UP"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "research_only": True,
+        "validated": False,
+        "recommendation": False,
+        "episode_id": "example",
+        "methods": [],
+        "preferred_display": {
+            "method": None,
+            "primary_window": None,
+            "reason": "no method is preferred before independent validation",
+        },
+        "data_quality": {
+            "insufficient_evidence_is_abstain": True,
+            "level_ii_primary": False,
+        },
+        "research_label": (
+            "RESEARCH ONLY — MICROSTRUCTURE DIRECTION V0 — NOT VALIDATED — NO RECOMMENDATION"
+        ),
+        "claims_boundary": response.json()["claims_boundary"],
+    }
+    assert rejected_write.status_code in {404, 405}
+
+
+def test_episode_scope_contains_compact_microstructure_direction_v0_panel(
+    tmp_path: Path,
+) -> None:
+    client = seeded_app(tmp_path)
+
+    html = client.get("/").text
+    script = client.get("/assets/app.js").text
+
+    assert "Microstructure Direction V0" in html
+    assert "RESEARCH ONLY" in html
+    assert "NOT VALIDATED" in html
+    assert "NO RECOMMENDATION" in html
+    assert "/microstructure-direction-v0" in script
+    assert "probable_buyer_initiated_volume" in script
+    assert "probable_seller_initiated_volume" in script

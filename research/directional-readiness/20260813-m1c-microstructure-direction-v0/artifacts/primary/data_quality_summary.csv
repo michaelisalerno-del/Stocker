@@ -1,0 +1,6 @@
+database_identity,eligible_m1c_episodes,microstructure_episodes,episode_microstructure_rows,first_episode_date,last_episode_date,tick_stream_status,depth_status
+prospective-20260806t145500z.sqlite3,0,0,0,,,no episode-linked evidence,not evaluated; secondary only
+prospective-20260806t153100z.sqlite3,0,0,0,,,no episode-linked evidence,not evaluated; secondary only
+prospective-20260806t153800z.sqlite3,0,0,0,,,no episode-linked evidence,not evaluated; secondary only
+prospective-20260806t161000z.sqlite3,0,0,0,,,no episode-linked evidence,not evaluated; secondary only
+prospective-20260806t163100z.sqlite3,0,0,0,,,"raw Level I partitions exist, but no M1C episode rows",not evaluated; secondary only

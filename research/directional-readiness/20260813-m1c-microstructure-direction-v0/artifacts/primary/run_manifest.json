@@ -1,0 +1,38 @@
+{
+  "assessment_claimed": false,
+  "entry_rule": "first valid underlying midpoint strictly after information cutoff",
+  "experiment": "M1C MICROSTRUCTURE DIRECTION V0",
+  "generated_at_utc": "2026-08-13T15:33:40Z",
+  "horizons_minutes": [
+    5,
+    10,
+    15
+  ],
+  "level_ii_primary": false,
+  "methods": [
+    "M01_TRADE_IMBALANCE_SIGN",
+    "M02_QUOTE_IMBALANCE_SIGN",
+    "M03_MICROPRICE_EDGE_SIGN",
+    "M04_MC_MD_DIFFERENCE",
+    "M05_STRICT_CONSENSUS",
+    "M06_MAJORITY_SIGN"
+  ],
+  "primary_display_window": "T0_to_T+15s",
+  "primary_horizon_minutes_from_causal_entry": 15,
+  "research_label": "RESEARCH ONLY \u2014 MICROSTRUCTURE DIRECTION V0 \u2014 NOT VALIDATED \u2014 NO RECOMMENDATION",
+  "return_definition": "gross log return from causal entry midpoint",
+  "source_census_sha256": "0fe772afc3228723e6e5c35e93abb9c4d9a50a4e898d51fc0736759cdb05b0b4",
+  "source_label": "read-only dedicated-server prospective archive census",
+  "split_rule": "chronological assessment requires at least 20 independent episode dates, 100 episodes overall, 5 assessment dates, and 30 assessment episodes",
+  "windows": [
+    "T-60s_to_T0",
+    "T-30s_to_T0",
+    "T-15s_to_T0",
+    "T-5s_to_T0",
+    "T0_to_T+1s",
+    "T0_to_T+5s",
+    "T0_to_T+15s",
+    "T0_to_T+30s",
+    "T0_to_T+60s"
+  ]
+}

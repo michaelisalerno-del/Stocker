@@ -38,6 +38,7 @@ from stocker_prospective.ibkr import (
     IBKRMarketDataAdapter,
     official_ibkr_api_projection,
 )
+from stocker_prospective.microstructure_direction_v0 import RESEARCH_LABEL_V0
 from stocker_prospective.operational_logging import (
     OperationLogFields,
     RequestOperationMetrics,
@@ -1200,6 +1201,27 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             ),
             "label": "microstructure descriptive score",
             "direction_model_fitted": False,
+            "claims_boundary": claims_boundary(),
+        }
+
+    @app.get("/api/episodes/{episode_id}/microstructure-direction-v0")
+    def episode_microstructure_direction_v0(episode_id: str) -> dict[str, Any]:
+        return {
+            "research_only": True,
+            "validated": False,
+            "recommendation": False,
+            "episode_id": episode_id,
+            "methods": store.episode_microstructure_direction_v0(episode_id),
+            "preferred_display": {
+                "method": None,
+                "primary_window": None,
+                "reason": "no method is preferred before independent validation",
+            },
+            "data_quality": {
+                "insufficient_evidence_is_abstain": True,
+                "level_ii_primary": False,
+            },
+            "research_label": RESEARCH_LABEL_V0,
             "claims_boundary": claims_boundary(),
         }
 

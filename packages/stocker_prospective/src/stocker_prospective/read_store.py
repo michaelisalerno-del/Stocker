@@ -1226,6 +1226,26 @@ class ProspectiveReadStore:
             ).fetchall()
         return [self._decoded(row) for row in rows]
 
+    def episode_microstructure_direction_v0(
+        self,
+        episode_id: str,
+    ) -> list[dict[str, Any]]:
+        """Read the bounded, separately persisted V0 research classifications."""
+
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return []
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM microstructure_direction_v0
+                WHERE run_id = ? AND episode_id = ?
+                ORDER BY decision_timestamp_utc, window_name, direction_method
+                """,
+                (run_id, episode_id),
+            ).fetchall()
+        return [self._decoded(row) for row in rows]
+
     def episode_quote_series_v0(
         self,
         episode_id: str,

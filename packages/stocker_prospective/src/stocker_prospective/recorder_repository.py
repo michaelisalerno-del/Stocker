@@ -46,6 +46,7 @@ from stocker_prospective.m1c_prospective_opening_reversal_v1_1 import (
     OpeningReversalCausalBarrierAuditV1_1,
 )
 from stocker_prospective.microstructure import MicrostructureWindowSummary
+from stocker_prospective.microstructure_direction_v0 import MicrostructureDirectionResultV0
 from stocker_prospective.opening_market_transition_v1 import (
     OpeningMarketTransitionStateResultV1,
     OpeningPreEntryWindowV1,
@@ -2343,6 +2344,127 @@ class FrozenRecorderRepository:
             )
             assert cursor.lastrowid is not None
             return int(cursor.lastrowid)
+
+    def record_microstructure_direction_v0(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        microstructure_summary_id: int,
+        results: tuple[MicrostructureDirectionResultV0, ...],
+    ) -> tuple[int, ...]:
+        """Append immutable V0 direction rows linked to one derived summary."""
+
+        self._validate(metadata)
+        if not results:
+            return ()
+        with self.repository._connect() as connection:
+            summary = connection.execute(
+                "SELECT * FROM microstructure_summary_v0 WHERE id = ?",
+                (microstructure_summary_id,),
+            ).fetchone()
+            if summary is None:
+                raise KeyError(microstructure_summary_id)
+            inserted: list[int] = []
+            for result in results:
+                if result.run_id != metadata.run_id:
+                    raise ValueError("microstructure direction run differs from metadata")
+                expected_summary = (
+                    result.run_id,
+                    result.episode_id,
+                    result.symbol,
+                    result.window_name,
+                    result.decision_timestamp_utc.isoformat(),
+                )
+                actual_summary = (
+                    str(summary["run_id"]),
+                    str(summary["episode_id"]),
+                    str(summary["symbol"]),
+                    str(summary["window_name"]),
+                    str(summary["window_end_utc"]),
+                )
+                if actual_summary != expected_summary:
+                    raise ValueError("microstructure direction summary identity differs")
+                payload = _json(result)
+                existing = connection.execute(
+                    """
+                    SELECT id, microstructure_summary_id, payload_json
+                    FROM microstructure_direction_v0
+                    WHERE run_id = ? AND episode_id = ?
+                      AND window_name = ? AND direction_method = ?
+                    """,
+                    (
+                        result.run_id,
+                        result.episode_id,
+                        result.window_name,
+                        result.direction_method.value,
+                    ),
+                ).fetchone()
+                if existing is not None:
+                    if (
+                        int(existing["microstructure_summary_id"]) != microstructure_summary_id
+                        or str(existing["payload_json"]) != payload
+                    ):
+                        raise ValueError("immutable microstructure direction result differs")
+                    inserted.append(int(existing["id"]))
+                    continue
+                envelope_id = self.repository._insert_envelope(connection, metadata)
+                cursor = connection.execute(
+                    """
+                    INSERT INTO microstructure_direction_v0(
+                        envelope_id, microstructure_summary_id, run_id, episode_id,
+                        symbol, trigger_timestamp_utc, decision_timestamp_utc,
+                        information_cutoff_utc, confirmation_delay_seconds,
+                        window_name, direction_method, action, signed_score,
+                        component_values_json, component_validity_json,
+                        quote_count, trade_count, classified_trade_count,
+                        trade_classification_valid_fraction, stale_quote_fraction,
+                        unknown_trade_volume_fraction,
+                        probable_buyer_initiated_volume,
+                        probable_seller_initiated_volume, tick_by_tick_status,
+                        depth_status, market_data_type, data_quality_flags_json,
+                        causal_valid, formulas_version, research_label,
+                        payload_json, claims_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        envelope_id,
+                        microstructure_summary_id,
+                        result.run_id,
+                        result.episode_id,
+                        result.symbol,
+                        result.trigger_timestamp_utc.isoformat(),
+                        result.decision_timestamp_utc.isoformat(),
+                        result.information_cutoff_utc.isoformat(),
+                        result.confirmation_delay_seconds,
+                        result.window_name,
+                        result.direction_method.value,
+                        result.action.value,
+                        result.signed_score,
+                        _json(result.component_values),
+                        _json(result.component_validity),
+                        result.quote_count,
+                        result.trade_count,
+                        result.classified_trade_count,
+                        result.trade_classification_valid_fraction,
+                        result.stale_quote_fraction,
+                        result.unknown_trade_volume_fraction,
+                        result.probable_buyer_initiated_volume,
+                        result.probable_seller_initiated_volume,
+                        result.tick_by_tick_status.value,
+                        result.depth_status.value,
+                        result.market_data_type,
+                        _json(result.data_quality_flags),
+                        int(result.causal_valid),
+                        result.formulas_version,
+                        result.research_label,
+                        payload,
+                        self.claims_json,
+                    ),
+                )
+                assert cursor.lastrowid is not None
+                inserted.append(int(cursor.lastrowid))
+        return tuple(inserted)
 
     def record_quiet_microstructure_summary(
         self,

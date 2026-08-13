@@ -78,6 +78,10 @@ from stocker_prospective.microstructure import (
     standard_window_summaries,
     summarise_microstructure_window,
 )
+from stocker_prospective.microstructure_direction_v0 import (
+    build_microstructure_direction_v0,
+    microstructure_direction_windows_v0,
+)
 from stocker_prospective.opening_leader_continuation_v0 import (
     CausalCheckpointBarV0,
     RankPersistenceV0,
@@ -356,6 +360,7 @@ class FrozenM1CLiveRecorder:
         ] = {}
         self._episode_windows: dict[tuple[str, str], tuple[str, datetime, datetime]] = {}
         self._episode_actions: dict[str, dict[str, str]] = {}
+        self._episode_trigger_timestamps: dict[str, datetime] = {}
         self._opening_reversal_outcome_inputs: dict[
             str,
             tuple[OpeningReversalPredictionReceiptV1, float | None],
@@ -3109,10 +3114,15 @@ class FrozenM1CLiveRecorder:
             model_id: classification.action
             for model_id, classification in result.directional_classifications.items()
         }
-        for name, (start, end) in episode_relative_windows(
-            trigger_timestamp=decision.trigger_bar_end,
-            entry_timestamp=decision.prospective_entry_timestamp,
-        ).items():
+        self._episode_trigger_timestamps[decision.episode_id] = decision.trigger_bar_end
+        windows = {
+            **episode_relative_windows(
+                trigger_timestamp=decision.trigger_bar_end,
+                entry_timestamp=decision.prospective_entry_timestamp,
+            ),
+            **microstructure_direction_windows_v0(decision.trigger_bar_end),
+        }
+        for name, (start, end) in windows.items():
             # Entry is currently the checkpoint boundary for these record-only
             # episodes.  The resulting T-to-entry interval contains no evidence
             # and must not reach the positive-width window summariser.
@@ -3408,6 +3418,9 @@ class FrozenM1CLiveRecorder:
             if identity in self._completed_episode_windows or end > now:
                 continue
             episode_id, name = identity
+            if end <= start:
+                self._completed_episode_windows.add(identity)
+                continue
             metadata = self.metadata_factory(now, (end,))
             summary = summarise_microstructure_window(
                 symbol=symbol,
@@ -3462,7 +3475,7 @@ class FrozenM1CLiveRecorder:
                         quality_flags=path_quality,
                     )
             else:
-                self.repository.record_microstructure_summary(
+                microstructure_summary_id = self.repository.record_microstructure_summary(
                     metadata,
                     episode_id=episode_id,
                     window_name=name,
@@ -3476,6 +3489,60 @@ class FrozenM1CLiveRecorder:
                         summary=summary,
                     ),
                 )
+                trigger_timestamp = self._episode_trigger_timestamps.get(episode_id)
+                if trigger_timestamp is not None and name in microstructure_direction_windows_v0(
+                    trigger_timestamp
+                ):
+                    window_quotes = tuple(
+                        quote
+                        for quote in self._quotes.get(symbol, ())
+                        if start <= quote.ordering_timestamp <= end
+                        and quote.received_timestamp_utc <= end
+                    )
+                    window_trades = tuple(
+                        trade
+                        for trade in self._trades.get(symbol, ())
+                        if start <= trade.ordering_timestamp <= end
+                        and trade.received_timestamp_utc <= end
+                    )
+                    market_data_types = {
+                        event.market_data_type.value for event in (*window_quotes, *window_trades)
+                    }
+                    market_data_type = (
+                        next(iter(market_data_types))
+                        if len(market_data_types) == 1
+                        else ("unknown" if not market_data_types else "mixed")
+                    )
+                    depth_observed_at = self._last_depth_snapshot_at.get(symbol)
+                    depth_present = bool(
+                        symbol in self._books
+                        and depth_observed_at is not None
+                        and depth_observed_at <= end
+                    )
+                    causal_depth_valid = bool(
+                        depth_present and self._last_depth_validity.get(symbol, False)
+                    )
+                    direction_results = build_microstructure_direction_v0(
+                        episode_id=episode_id,
+                        run_id=metadata.run_id,
+                        trigger_timestamp_utc=trigger_timestamp,
+                        window_name=name,
+                        summary=summary,
+                        tick_bidask_present=any(
+                            quote.source == "official_ibkr_tick_by_tick_bidask"
+                            for quote in window_quotes
+                        ),
+                        tick_last_present=bool(window_trades),
+                        depth_present=depth_present,
+                        depth_valid=causal_depth_valid,
+                        market_data_type=market_data_type,
+                        data_quality_flags=quality_flags,
+                    )
+                    self.repository.record_microstructure_direction_v0(
+                        metadata,
+                        microstructure_summary_id=microstructure_summary_id,
+                        results=direction_results,
+                    )
                 if name == "entry_to_+15m":
                     self._record_opening_reversal_outcome_v1(
                         episode_id=episode_id,

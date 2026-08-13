@@ -1,0 +1,16 @@
+{
+  "assessment_claimed": false,
+  "assessment_end_date": null,
+  "assessment_start_date": null,
+  "decision": "D_INSUFFICIENT_PROSPECTIVE_MICROSTRUCTURE_DATA",
+  "development_end_date": null,
+  "development_start_date": null,
+  "eligible_m1c_episodes": 0,
+  "episode_microstructure_rows": 0,
+  "microstructure_episodes": 0,
+  "reason": "No recorded valid M1C episode has episode-linked microstructure evidence.",
+  "recommendation": false,
+  "research_label": "RESEARCH ONLY \u2014 MICROSTRUCTURE DIRECTION V0 \u2014 NOT VALIDATED \u2014 NO RECOMMENDATION",
+  "research_only": true,
+  "validated": false
+}

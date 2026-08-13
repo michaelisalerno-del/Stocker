@@ -1,0 +1,20 @@
+{
+  "allowed_source_hashes": {
+    "group_o": "da6d83939fd0826495ce12be6edc40141ff0f6a66bd547eb38d7c32b7e322449",
+    "group_o_recovery": "1422db83929702d67f3e524ebbe8a1f1167e935866069a1d44eeb81fcd7953a9",
+    "scientific_inputs": "b1a010866e5e5c0f0a188fc2ce003a53c13fe086541749d0b7493769f9c9ca3d"
+  },
+  "authorization_basis": "opening-leader-continuation-deployment-refreeze-v15",
+  "compatibility_receipt_id": "group-o-runtime-compat-321452ad8ba9db7ad0d612a8",
+  "completed_recovery_only": true,
+  "opening_leader_deployment_receipt_id": "olc-deploy-a7b20c3fe9fac56f5271c8a3",
+  "opening_leader_refreeze_receipt_sha256": "dfa6be324e1cfc8f70d2d731034e788bc411a4a02493eabc9a77846e8c68c50c",
+  "order_placement_disabled": true,
+  "original_recovery_evidence_modified": false,
+  "protected_outcomes_accessed": false,
+  "recovery_version": "m1c-group-o-late-revision-v2",
+  "schema_version": "m1c-group-o-recovery-runtime-compatibility-v2",
+  "signature_scheme": "sha256-canonical-self-binding-v0",
+  "signature_sha256": "c2f3eeac595016d467fc026d7f123b32bc2c7e15434890b79c899b242f5eced4",
+  "supersedes_runtime_compatibility_receipt_sha256": "523add0439decf5d477211c92bad14fb26182d7f22fd952d01fcfb017f08a6ca"
+}

@@ -1,6 +1,6 @@
 # Official IBKR API review for the Stocker prospective recorder
 
-Checked: **2026-07-25**
+Checked: **2026-08-03**
 
 Scope: the native TWS API used only for bounded market-data recording on the
 dedicated Stocker server. This review does not authorise order submission,
@@ -17,15 +17,14 @@ not establish an options edge.
   repositories are not hosted, endorsed, or supported by IBKR; a registry
   `pip install ibapi` is therefore not an acceptable provenance path.
 - On the check date, the official page listed Stable API 10.45 (2026-03-30)
-  and Latest API 10.48 (2026-07-07). It listed Python only in the Latest 10.48
+  and Latest API 10.49 (2026-07-31). It listed Python in the Latest 10.49
   Windows and Mac/Unix packages. The Stable Mac/Unix package was listed as Java
   and Posix C++ only. Recheck this page at install time rather than assuming
   that "Stable" contains Python.
-- The official Latest Mac/Unix archive checked and installed for the first
-  server slice was
-  `twsapi_macunix.1048.01.zip` (`API_Version=10.48.01`,
-  Python package `ibapi==10.48.1`) with SHA-256
-  `0446c403cdfd3a059685c5e11814b32e0b811fdf5e1f68564f8e08b655e49547`.
+- The official Latest Mac/Unix archive checked for the current server slice is
+  `twsapi_macunix.1049.01.zip` (`API_Version=10.49.01`,
+  Python package `ibapi==10.49.1`) with SHA-256
+  `f5d31e05f63be0d0fddc13ea8267c3a1625b0783baa17a44832e9151f8402b27`.
 - Install `ibapi` into the Stocker server virtual environment from the extracted
   official archive's `source/pythonclient` directory with
   `uv pip install --python RELEASE/.venv/bin/python SOURCE`. Register immutable

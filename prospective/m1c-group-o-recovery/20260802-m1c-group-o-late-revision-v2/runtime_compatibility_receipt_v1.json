@@ -1,0 +1,19 @@
+{
+  "allowed_source_hashes": {
+    "group_o_recovery": "da8fb6c2c0cc723379ef993bfcacb5c07c95b0b7b7a8404003bda1f426f0694c",
+    "opening_leader_cohort_contract": "16b1df7b3adc865473ccb0cc44b81eb92bb004cad008435b2b5511e3cb2b9cd8"
+  },
+  "authorization_basis": "opening-leader-continuation-deployment-refreeze-v11",
+  "compatibility_receipt_id": "group-o-runtime-compat-e52a0cf8683eebfcf73b6e66",
+  "completed_recovery_only": true,
+  "opening_leader_deployment_receipt_id": "olc-deploy-d790336df8a9539f61ebfaba",
+  "opening_leader_refreeze_receipt_sha256": "9a4d2ef0af7c3422aba017725e12aee3bec126f09332669cda848781262cea6f",
+  "order_placement_disabled": true,
+  "original_recovery_evidence_modified": false,
+  "protected_outcomes_accessed": false,
+  "recovery_version": "m1c-group-o-late-revision-v2",
+  "schema_version": "m1c-group-o-recovery-runtime-compatibility-v1",
+  "signature_scheme": "sha256-canonical-self-binding-v0",
+  "signature_sha256": "7479ac98c254ce908c521aebc60252a64cf0b304dc54f8c1795914c78450a7a2",
+  "supersedes_deployment_receipt_sha256": "6424bf48a65dcffd35510be78067ff37a4e5aeafed05df3690151de37c1dd61d"
+}

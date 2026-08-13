@@ -13,10 +13,11 @@ import pytest
 from stocker_prospective.activation import ActivationRecord
 from stocker_prospective.config import ProspectiveConfig, operational_thresholds
 from stocker_prospective.context import previous_xnys_session
-from stocker_prospective.contract import SECTOR_PROXY_BY_SYMBOL
+from stocker_prospective.contract import M1C_BOTTOM_10_THRESHOLD, SECTOR_PROXY_BY_SYMBOL
 from stocker_prospective.database import ProspectiveRepository
-from stocker_prospective.fake_ibkr import FakeIBKRAdapter, FakeIBKREvent
+from stocker_prospective.fake_ibkr import FakeIBKRAdapter, FakeIBKREvent, FakeRequestResult
 from stocker_prospective.frozen_live_application import (
+    _configuration_hash,
     _require_compatible_existing_activation,
     build_frozen_prospective_application,
 )
@@ -28,6 +29,9 @@ from stocker_prospective.group_o import (
     build_group_o_context,
 )
 from stocker_prospective.live_bars import xnys_session_bounds
+from stocker_prospective.live_subscriptions import LiveSubscriptionController
+from stocker_prospective.market_data import ConnectionState
+from stocker_prospective.operational_state import RecorderOperationalRepository
 from stocker_prospective.read_store import ProspectiveReadStore
 from stocker_prospective.recorder import RecorderDeploymentIdentity
 
@@ -252,6 +256,18 @@ def _completed_bar_events() -> tuple[tuple[FakeIBKREvent, ...], datetime]:
             candidate_session += timedelta(days=1)
     for checkpoint in range(1, 8):
         bar_end = session_open + timedelta(minutes=5 * checkpoint)
+        if checkpoint == 7:
+            quote_at = session_open + timedelta(minutes=30, seconds=-1)
+            events.append(
+                FakeIBKREvent(
+                    sequence=sequence,
+                    scenario="engineering_shadow_checkpoint",
+                    kind="level1_quote",
+                    timestamp_utc=quote_at.isoformat(),
+                    payload={"symbol": "AAL", "bid": 50.0, "ask": 50.02},
+                )
+            )
+            sequence += 1
         for symbol in ("AAL", "VTI"):
             events.append(
                 FakeIBKREvent(
@@ -265,6 +281,137 @@ def _completed_bar_events() -> tuple[tuple[FakeIBKREvent, ...], datetime]:
             sequence += 1
     observed = session_open + timedelta(minutes=35, seconds=1)
     return tuple(events), observed
+
+
+def _delayed_quiet_checkpoint_events(
+    *,
+    boundary_quote_offset_seconds: float | None = -1.0,
+    boundary_bid: float = 50.0,
+    boundary_ask: float = 50.02,
+    boundary_market_data_type: str = "live",
+    processing_bid: float = 50.1,
+    processing_ask: float = 50.12,
+) -> tuple[tuple[FakeIBKREvent, ...], datetime, datetime]:
+    candidate_session = datetime.now(UTC).date() + timedelta(days=1)
+    while True:
+        try:
+            session_open, _session_close = xnys_session_bounds(candidate_session)
+            break
+        except ValueError:
+            candidate_session += timedelta(days=1)
+    trigger_end = session_open + timedelta(minutes=30)
+    events: list[FakeIBKREvent] = []
+
+    def append(
+        *,
+        kind: str,
+        observed_at: datetime,
+        payload: dict[str, object],
+    ) -> None:
+        events.append(
+            FakeIBKREvent(
+                sequence=len(events),
+                scenario="delayed_quiet_checkpoint",
+                kind=kind,
+                timestamp_utc=observed_at.isoformat(),
+                payload=payload,
+            )
+        )
+
+    for checkpoint in range(1, 7):
+        bar_start = session_open + timedelta(minutes=5 * (checkpoint - 1))
+        received_at = bar_start + timedelta(minutes=4, seconds=59)
+        for symbol in ("HIMS", "VTI"):
+            append(
+                kind="five_minute_bar",
+                observed_at=received_at,
+                payload={
+                    "symbol": symbol,
+                    "checkpoint": checkpoint,
+                    "bar_start_utc": bar_start.isoformat(),
+                },
+            )
+    if boundary_quote_offset_seconds is not None:
+        append(
+            kind="level1_quote",
+            observed_at=trigger_end + timedelta(seconds=boundary_quote_offset_seconds),
+            payload={
+                "symbol": "HIMS",
+                "bid": boundary_bid,
+                "ask": boundary_ask,
+                "market_data_type": boundary_market_data_type,
+            },
+        )
+    append(
+        kind="level1_quote",
+        observed_at=trigger_end + timedelta(seconds=9),
+        payload={"symbol": "HIMS", "bid": processing_bid, "ask": processing_ask},
+    )
+    for symbol in ("HIMS", "VTI"):
+        append(
+            kind="five_minute_bar",
+            observed_at=trigger_end + timedelta(seconds=9, milliseconds=698),
+            payload={
+                "symbol": symbol,
+                "checkpoint": 7,
+                "bar_start_utc": trigger_end.isoformat(),
+            },
+        )
+    return tuple(events), trigger_end + timedelta(seconds=10), trigger_end
+
+
+def _install_independent_bar_timestamps(
+    adapter: FakeIBKRAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_translate = adapter._translate
+
+    def translate(event: FakeIBKREvent) -> tuple[dict[str, object], ...]:
+        if event.kind == "level1_quote" and event.payload.get("market_data_type", "live") != "live":
+            received_at = datetime.fromisoformat(event.timestamp_utc.replace("Z", "+00:00"))
+            symbol = str(event.payload["symbol"])
+            request_id = adapter._request_for(symbol, "level1")
+            assert request_id is not None
+            return tuple(
+                {
+                    "kind": "level1_quote_update",
+                    "request_id": request_id,
+                    "field": field,
+                    "value": event.payload[field],
+                    "market_data_type": str(event.payload["market_data_type"]),
+                    "provider_timestamp_utc": received_at.isoformat(),
+                    "received_timestamp_utc": received_at.isoformat(),
+                    "received_monotonic_ns": event.sequence * 10 + offset,
+                    "source_sequence": event.sequence * 10 + offset,
+                }
+                for offset, field in enumerate(("bid", "ask"), start=1)
+            )
+        if event.kind != "five_minute_bar":
+            return original_translate(event)
+        received_at = datetime.fromisoformat(event.timestamp_utc.replace("Z", "+00:00"))
+        symbol = str(event.payload["symbol"])
+        request_id = adapter._request_for(symbol, "bar")
+        assert request_id is not None
+        return (
+            {
+                "kind": "historical_bar_update",
+                "request_id": request_id,
+                "bar_start_utc": str(event.payload["bar_start_utc"]),
+                "open": 100.0,
+                "high": 100.2,
+                "low": 99.9,
+                "close": 100.1,
+                "volume": 1_000.0,
+                "wap": 100.05,
+                "trade_count": 100,
+                "provider_timestamp_utc": received_at.isoformat(),
+                "received_timestamp_utc": received_at.isoformat(),
+                "received_monotonic_ns": event.sequence * 10 + 1,
+                "source_sequence": event.sequence * 10 + 1,
+            },
+        )
+
+    monkeypatch.setattr(adapter, "_translate", translate)
 
 
 def _write_valid_group_o_package(
@@ -306,9 +453,12 @@ def _write_valid_group_o_package(
     output.write_text(package.model_dump_json(indent=2), encoding="utf-8")
 
 
-def test_engineering_transfer_projects_shadow_checkpoint_without_scientific_claim(
+def test_first_ibkr_session_is_authorized_without_transfer_history(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("EODHD_API_TOKEN", raising=False)
+    monkeypatch.delenv("STOCKER_EODHD_TOKEN_CONFIGURED", raising=False)
     events, observed = _completed_bar_events()
     application, config, adapter, symbols = _build_fake_application(
         tmp_path,
@@ -331,8 +481,8 @@ def test_engineering_transfer_projects_shadow_checkpoint_without_scientific_clai
     )
 
     assert application.live_recorder.shadow_evaluation_enabled is True
-    # Runtime artifacts are verified, but the immutable 20-session transfer
-    # cohort still keeps this checkpoint out of scientific evidence.
+    # Runtime artifacts and the IBKR observation itself determine eligibility;
+    # cross-vendor comparison history is diagnostic only.
     assert application.live_recorder.scientific_scoring_enabled is True
     assert len(checkpoint_results) == 1, [
         (
@@ -344,7 +494,7 @@ def test_engineering_transfer_projects_shadow_checkpoint_without_scientific_clai
         )
         for result in results
     ]
-    assert "scientific_recording_not_authorized" in (checkpoint_results[0].rejection_reasons)
+    assert "scientific_recording_not_authorized" not in (checkpoint_results[0].rejection_reasons)
     universe = ProspectiveReadStore(
         config.paths.database,
         run_id=config.runtime.run_id,
@@ -352,8 +502,11 @@ def test_engineering_transfer_projects_shadow_checkpoint_without_scientific_clai
     aal = next(item for item in universe if item["symbol"] == "AAL")
     assert aal["m1c_probability"] is not None
     assert aal["m1c_threshold"] == 0.488333710794033
-    assert aal["m1c_scientific_eligible"] is False
-    assert "scientific_recording_not_authorized" in aal["m1c_rejection_reasons"]
+    # The IBKR signal is usable immediately when its frozen boundary quote is valid.
+    assert aal["m1c_scientific_eligible"] is True
+    assert "scientific_recording_not_authorized" not in aal["m1c_rejection_reasons"]
+    assert "underlying_quote_stale" not in aal["m1c_rejection_reasons"]
+    assert aal["m1c_diagnostic_quality_flags"] == []
     assert ("level1", "AAL") in adapter.active_subscriptions.values()
     with sqlite3.connect(config.paths.database) as connection:
         checkpoint_eligibility = connection.execute(
@@ -372,13 +525,427 @@ def test_engineering_transfer_projects_shadow_checkpoint_without_scientific_clai
             """,
             (config.runtime.run_id,),
         ).fetchone()
-    assert checkpoint_eligibility == (0,)
+    assert checkpoint_eligibility == (1,)
     assert scientific_option_rows == (0,)
 
     application.shutdown(now=observed + timedelta(seconds=1))
 
 
-def test_missing_bar_compatibility_report_keeps_science_blocked_but_not_shadow(
+def test_delayed_checkpoint_uses_fresh_quote_as_of_bar_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events, observed, trigger_end = _delayed_quiet_checkpoint_events()
+    application, config, adapter, symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        complete_activity_baseline=True,
+        bar_compatibility_passed=True,
+        events=events,
+    )
+    _write_valid_group_o_package(
+        config=config,
+        symbols=symbols,
+        signal_session=observed,
+    )
+    _install_independent_bar_timestamps(adapter, monkeypatch)
+    try:
+        results = tuple(
+            application.poll(now=observed + timedelta(seconds=offset)) for offset in range(3)
+        )
+        checkpoints = tuple(
+            checkpoint for result in results for checkpoint in result.checkpoint_results
+        )
+        assert checkpoints, [result.blocked_checkpoints for result in results]
+        checkpoint = next(
+            item
+            for item in checkpoints
+            if item.episode_decision.symbol == "HIMS" and item.episode_decision.checkpoint == 6
+        )
+
+        assert "underlying_quote_stale" not in checkpoint.diagnostic_quality_flags
+        with sqlite3.connect(config.paths.database) as connection:
+            selected_quote = connection.execute(
+                """
+                SELECT selected_underlying_quote_event_id,
+                       selected_underlying_quote_timestamp_utc,
+                       selected_underlying_quote_age_seconds,
+                       underlying_quote_selection_policy
+                FROM quiet_state_checkpoint_v0
+                WHERE run_id = ? AND symbol = 'HIMS' AND checkpoint = 6
+                """,
+                (config.runtime.run_id,),
+            ).fetchone()
+        assert selected_quote is not None
+        assert selected_quote[0]
+        assert selected_quote[1:] == (
+            (trigger_end - timedelta(seconds=1)).isoformat(),
+            1.0,
+            "latest_valid_at_or_before_checkpoint_boundary_v0",
+        )
+        quiet_universe = ProspectiveReadStore(
+            config.paths.database,
+            run_id=config.runtime.run_id,
+        ).quiet_state_universe_v0()
+        hims = next(item for item in quiet_universe if item["symbol"] == "HIMS")
+        assert hims["selected_underlying_quote_event_id"] == selected_quote[0]
+        assert hims["selected_underlying_quote_timestamp_utc"] == selected_quote[1]
+        assert hims["selected_underlying_quote_age_seconds"] == 1.0
+        assert hims["underlying_quote_selection_policy"] == selected_quote[3]
+    finally:
+        application.shutdown(now=observed + timedelta(seconds=1))
+
+
+def test_quiet_checkpoint_without_quote_inside_contract_window_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events, observed, trigger_end = _delayed_quiet_checkpoint_events(
+        boundary_quote_offset_seconds=-3.0,
+    )
+    application, config, adapter, symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        complete_activity_baseline=True,
+        bar_compatibility_passed=True,
+        events=events,
+        run_id="quiet-stale-boundary-v0",
+    )
+    _write_valid_group_o_package(
+        config=config,
+        symbols=symbols,
+        signal_session=observed,
+    )
+    _install_independent_bar_timestamps(adapter, monkeypatch)
+    try:
+        results = tuple(
+            application.poll(now=observed + timedelta(seconds=offset)) for offset in range(3)
+        )
+        checkpoint = next(
+            item
+            for result in results
+            for item in result.checkpoint_results
+            if item.episode_decision.symbol == "HIMS" and item.episode_decision.checkpoint == 6
+        )
+        assert "underlying_quote_stale" in checkpoint.rejection_reasons
+        with sqlite3.connect(config.paths.database) as connection:
+            quiet_checkpoint = connection.execute(
+                """
+                SELECT eligible, data_quality_flags_json,
+                       selected_underlying_quote_age_seconds
+                FROM quiet_state_checkpoint_v0
+                WHERE run_id = ? AND symbol = 'HIMS' AND checkpoint = 6
+                """,
+                (config.runtime.run_id,),
+            ).fetchone()
+            observation_count = connection.execute(
+                """
+                SELECT COUNT(*) FROM quiet_state_observation_v0
+                WHERE run_id = ? AND symbol = 'HIMS'
+                """,
+                (config.runtime.run_id,),
+            ).fetchone()
+        assert quiet_checkpoint == (
+            0,
+            '["underlying_quote_stale"]',
+            3.0,
+        )
+        assert observation_count == (0,)
+    finally:
+        application.shutdown(now=observed + timedelta(seconds=3))
+
+
+@pytest.mark.parametrize(
+    ("case", "boundary_bid", "boundary_ask", "market_data_type", "expected_reason"),
+    [
+        ("invalid", 50.2, 50.1, "live", "underlying_quote_stale"),
+        ("non_primary", 50.0, 50.02, "delayed", "market_data_not_live"),
+    ],
+)
+def test_invalid_or_non_primary_boundary_quote_is_ineligible(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    boundary_bid: float,
+    boundary_ask: float,
+    market_data_type: str,
+    expected_reason: str,
+) -> None:
+    events, observed, trigger_end = _delayed_quiet_checkpoint_events(
+        boundary_bid=boundary_bid,
+        boundary_ask=boundary_ask,
+        boundary_market_data_type=market_data_type,
+    )
+    application, config, adapter, symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        complete_activity_baseline=True,
+        bar_compatibility_passed=True,
+        events=events,
+        run_id=f"quiet-{case}-boundary-v0",
+    )
+    _write_valid_group_o_package(
+        config=config,
+        symbols=symbols,
+        signal_session=observed,
+    )
+    _install_independent_bar_timestamps(adapter, monkeypatch)
+    try:
+        results = tuple(
+            application.poll(now=observed + timedelta(seconds=offset)) for offset in range(3)
+        )
+        checkpoint = next(
+            item
+            for result in results
+            for item in result.checkpoint_results
+            if item.episode_decision.symbol == "HIMS" and item.episode_decision.checkpoint == 6
+        )
+        assert expected_reason in checkpoint.rejection_reasons
+        with sqlite3.connect(config.paths.database) as connection:
+            quiet_checkpoint = connection.execute(
+                """
+                SELECT eligible FROM quiet_state_checkpoint_v0
+                WHERE run_id = ? AND symbol = 'HIMS' AND checkpoint = 6
+                """,
+                (config.runtime.run_id,),
+            ).fetchone()
+            observation_count = connection.execute(
+                """
+                SELECT COUNT(*) FROM quiet_state_observation_v0
+                WHERE run_id = ? AND symbol = 'HIMS'
+                """,
+                (config.runtime.run_id,),
+            ).fetchone()
+        assert quiet_checkpoint == (0,)
+        assert observation_count == (0,)
+    finally:
+        application.shutdown(now=observed + timedelta(seconds=3))
+
+
+def test_valid_bottom_10_crossing_begins_quiet_shadow_option_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events, observed, trigger_end = _delayed_quiet_checkpoint_events(
+        boundary_bid=100.0,
+        boundary_ask=100.02,
+        processing_bid=100.1,
+        processing_ask=100.12,
+    )
+    application, config, adapter, symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        complete_activity_baseline=True,
+        bar_compatibility_passed=True,
+        events=events,
+        run_id="quiet-valid-bottom-10-crossing-v0",
+        include_opening_reversal=True,
+    )
+    _write_valid_group_o_package(
+        config=config,
+        symbols=symbols,
+        signal_session=observed,
+    )
+    _install_independent_bar_timestamps(adapter, monkeypatch)
+
+    def current_option_chain_metadata(**kwargs: object) -> FakeRequestResult:
+        symbol = str(kwargs["underlying_symbol"])
+        con_id = int(str(kwargs["underlying_contract_id"]))
+        expiries = {
+            (trigger_end.date() + timedelta(days=days)).strftime("%Y%m%d") for days in (1, 3)
+        }
+        return FakeRequestResult(
+            adapter.request_ids.next(),
+            (
+                SimpleNamespace(
+                    underlyingConId=con_id,
+                    exchange="SMART",
+                    tradingClass=symbol,
+                    expirations=expiries,
+                    strikes={float(value) for value in range(90, 111)},
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        adapter,
+        "request_option_chain_metadata",
+        current_option_chain_metadata,
+    )
+    runtime = application.live_recorder.engine.m1c_runtime
+    original_score = runtime.score
+
+    def score_bottom_10(**kwargs: object):
+        score = original_score(**kwargs)
+        if kwargs["symbol"] != "HIMS":
+            return score
+        probability = 0.13
+        assert probability < M1C_BOTTOM_10_THRESHOLD
+        return score.model_copy(
+            update={
+                "probability": probability,
+                "threshold_passed": probability >= score.threshold,
+            }
+        )
+
+    monkeypatch.setattr(runtime, "score", score_bottom_10)
+
+    try:
+        results = tuple(
+            application.poll(now=observed + timedelta(seconds=offset)) for offset in range(3)
+        )
+        checkpoint = next(
+            item
+            for result in results
+            for item in result.checkpoint_results
+            if item.episode_decision.symbol == "HIMS" and item.episode_decision.checkpoint == 6
+        )
+        observation_id = checkpoint.quiet_observation_id
+        assert observation_id is not None
+        assert checkpoint.opening_reversal_prediction_v1 is not None
+        assert checkpoint.opening_reversal_prediction_v1.eligibility_v1 is False
+        assert checkpoint.opening_reversal_prediction_v1.prediction_v1 == "ABSTAIN"
+        assert checkpoint.quiet_state.bottom_10 is True
+        assert checkpoint.quiet_episode_decision.fresh_episode is True
+        assert checkpoint.diagnostic_quality_flags == ()
+        assert application.option_discovery.pending_symbol(observation_id) == "HIMS"
+        assert (
+            application.live_recorder.episode_window_completed(
+                observation_id,
+                "T_to_entry",
+            )
+            is False
+        )
+
+        with sqlite3.connect(config.paths.database) as connection:
+            observation = connection.execute(
+                """
+                SELECT observation_kind, completion_status
+                FROM quiet_state_observation_v0
+                WHERE observation_id = ?
+                """,
+                (observation_id,),
+            ).fetchone()
+            schedule = connection.execute(
+                """
+                SELECT symbol, episode_kind, quiet_state, status, degradation_reason
+                FROM option_episode_schedule_v0
+                WHERE episode_id = ?
+                """,
+                (observation_id,),
+            ).fetchone()
+            option_contract_count = connection.execute(
+                """
+                SELECT COUNT(*) FROM quiet_state_option_contract_v0
+                WHERE observation_id = ?
+                """,
+                (observation_id,),
+            ).fetchone()
+        assert observation == ("quiet_bottom_10", "active")
+        assert schedule == ("HIMS", "quiet", 1, "streaming", None), (
+            application.option_discovery.rejections
+        )
+        assert option_contract_count is not None and option_contract_count[0] > 0
+        assert application.subscriptions.budget.snapshot()["active"]["option"] > 0  # type: ignore[index,operator]
+    finally:
+        application.shutdown(now=observed + timedelta(seconds=3))
+
+
+def test_ineligible_opening_reversal_receipt_does_not_suppress_generic_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events, observed, trigger_end = _delayed_quiet_checkpoint_events()
+    application, config, adapter, symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        complete_activity_baseline=True,
+        bar_compatibility_passed=True,
+        events=events,
+        run_id="ineligible-opening-generic-capture-v0",
+        include_opening_reversal=True,
+    )
+    _write_valid_group_o_package(
+        config=config,
+        symbols=symbols,
+        signal_session=observed,
+    )
+    _install_independent_bar_timestamps(adapter, monkeypatch)
+
+    def current_option_chain_metadata(**kwargs: object) -> FakeRequestResult:
+        symbol = str(kwargs["underlying_symbol"])
+        con_id = int(str(kwargs["underlying_contract_id"]))
+        expiries = {
+            (trigger_end.date() + timedelta(days=days)).strftime("%Y%m%d") for days in (1, 3)
+        }
+        return FakeRequestResult(
+            adapter.request_ids.next(),
+            (
+                SimpleNamespace(
+                    underlyingConId=con_id,
+                    exchange="SMART",
+                    tradingClass=symbol,
+                    expirations=expiries,
+                    strikes={float(value) for value in range(90, 111)},
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        adapter,
+        "request_option_chain_metadata",
+        current_option_chain_metadata,
+    )
+    runtime = application.live_recorder.engine.m1c_runtime
+    original_score = runtime.score
+
+    def score_high_tail(**kwargs: object):
+        score = original_score(**kwargs)
+        if kwargs["symbol"] != "HIMS":
+            return score
+        probability = 0.9
+        return score.model_copy(
+            update={
+                "probability": probability,
+                "threshold_passed": probability >= score.threshold,
+            }
+        )
+
+    monkeypatch.setattr(runtime, "score", score_high_tail)
+
+    try:
+        results = tuple(
+            application.poll(now=observed + timedelta(seconds=offset)) for offset in range(3)
+        )
+        checkpoint = next(
+            item
+            for result in results
+            for item in result.checkpoint_results
+            if item.episode_decision.symbol == "HIMS" and item.episode_decision.checkpoint == 6
+        )
+        opening_receipt = checkpoint.opening_reversal_prediction_v1
+        assert opening_receipt is not None
+        assert opening_receipt.eligibility_v1 is False
+        assert opening_receipt.prediction_v1 == "ABSTAIN"
+        assert checkpoint.episode_decision.fresh_episode is True
+        episode_id = checkpoint.episode_decision.episode_id
+        assert episode_id is not None
+        assert application.option_discovery.pending_symbol(episode_id) == "HIMS"
+        with sqlite3.connect(config.paths.database) as connection:
+            schedule = connection.execute(
+                """
+                SELECT symbol, episode_kind, status
+                FROM option_episode_schedule_v0
+                WHERE episode_id = ?
+                """,
+                (episode_id,),
+            ).fetchone()
+        assert schedule == ("HIMS", "high_tail", "streaming")
+    finally:
+        application.shutdown(now=observed + timedelta(seconds=3))
+
+
+def test_missing_bar_compatibility_report_is_diagnostic_not_scientific_gate(
     tmp_path: Path,
 ) -> None:
     events, observed = _completed_bar_events()
@@ -398,7 +965,7 @@ def test_missing_bar_compatibility_report_keeps_science_blocked_but_not_shadow(
         application.poll(now=observed + timedelta(seconds=offset))
 
     assert application.live_recorder.shadow_evaluation_enabled is True
-    assert application.live_recorder.scientific_scoring_enabled is False
+    assert application.live_recorder.scientific_scoring_enabled is True
 
     application.shutdown(now=observed + timedelta(seconds=3))
 
@@ -414,7 +981,7 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
     result = application.poll(now=polled_at)
 
     assert result.checkpoint_results == ()
-    assert config.runtime.callback_inbox_batch_limit == 256
+    assert config.runtime.callback_inbox_batch_limit == 4_096
     assert config.runtime.raw_storage_heartbeat_stale_seconds == 360
     assert operational_thresholds(config).raw_storage_heartbeat_stale_after == timedelta(minutes=6)
     assert (tmp_path / "activation.json").is_file()
@@ -427,8 +994,11 @@ def test_full_recorder_application_starts_and_polls_with_fake_ibkr(
             ).fetchall()
         }
     assert recorded_symbols == {*symbols, "VTI", *SECTOR_PROXY_BY_SYMBOL.values()}
-    assert len(adapter.active_subscriptions) == len(recorded_symbols)
-    assert {kind for kind, _symbol in adapter.active_subscriptions.values()} == {"bar"}
+    active = tuple(adapter.active_subscriptions.values())
+    assert sum(kind == "bar" for kind, _symbol in active) == len(recorded_symbols)
+    assert sum(kind == "level1" for kind, _symbol in active) == len(symbols) + 1
+    assert {symbol for kind, symbol in active if kind == "level1"} == {*symbols, "VTI"}
+    assert {kind for kind, _symbol in active} == {"bar", "level1"}
     assert (tmp_path / "ibkr_runtime_capacity_manifest.json").is_file()
     assert (
         json.loads((tmp_path / "capability.json").read_text(encoding="utf-8"))[
@@ -569,6 +1139,117 @@ def test_release_upgrade_preserves_first_activation_and_run_identity(
     second_application.shutdown(now=datetime.now(UTC))
 
 
+def test_static_artifact_verification_precedes_live_subscription_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_order: list[str] = []
+    original_record = RecorderOperationalRepository.record_artifact_verification
+    original_start = LiveSubscriptionController.start_always_on
+
+    def record_artifact_verification(
+        repository: RecorderOperationalRepository,
+        verification: object,
+    ) -> None:
+        call_order.append("artifact")
+        original_record(repository, verification)  # type: ignore[arg-type]
+
+    def start_always_on(
+        controller: LiveSubscriptionController,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        call_order.append("subscriptions")
+        assert call_order[:-1]
+        assert set(call_order[:-1]) == {"artifact"}
+        original_start(controller, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        RecorderOperationalRepository,
+        "record_artifact_verification",
+        record_artifact_verification,
+    )
+    monkeypatch.setattr(
+        LiveSubscriptionController,
+        "start_always_on",
+        start_always_on,
+    )
+
+    application, _config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        recorder_generation=1,
+    )
+
+    assert call_order[-1] == "subscriptions"
+    assert call_order.count("artifact") > 0
+    application.shutdown(now=datetime.now(UTC))
+
+
+def test_clock_probe_precedes_high_volume_live_subscription_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_order: list[str] = []
+    original_probe = FakeIBKRAdapter.request_current_time
+    original_start = LiveSubscriptionController.start_always_on
+
+    def request_current_time(adapter: FakeIBKRAdapter) -> int:
+        call_order.append("clock")
+        return original_probe(adapter)
+
+    def start_always_on(
+        controller: LiveSubscriptionController,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        call_order.append("subscriptions")
+        original_start(controller, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(FakeIBKRAdapter, "request_current_time", request_current_time)
+    monkeypatch.setattr(
+        LiveSubscriptionController,
+        "start_always_on",
+        start_always_on,
+    )
+
+    application, _config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        recorder_generation=1,
+    )
+
+    assert call_order.index("clock") < call_order.index("subscriptions")
+    application.shutdown(now=datetime.now(UTC))
+
+
+def test_application_rebuilds_actual_subscriptions_after_not_connected_loss(
+    tmp_path: Path,
+) -> None:
+    application, _config, adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        events=(),
+        run_id="not-connected-subscription-rebuild-v0",
+    )
+    original_ids = set(adapter.active_subscriptions)
+    original_streams = sorted(adapter.active_subscriptions.values())
+    assert original_ids
+
+    adapter.connection.connection_lost(code=504, message="Not connected")
+    adapter.active_subscriptions.clear()
+    recovered_at = datetime.now(UTC)
+
+    application._recover_if_required(recovered_at)
+
+    health = adapter.connection.health()
+    assert health.state is ConnectionState.CONNECTED
+    assert health.subscriptions_require_rebuild is False
+    assert sorted(adapter.active_subscriptions.values()) == original_streams
+    assert set(adapter.active_subscriptions).isdisjoint(original_ids)
+    application.shutdown(now=recovered_at + timedelta(seconds=1))
+
+
 def test_pre_hardening_activation_accepts_added_operational_fields(
     tmp_path: Path,
 ) -> None:
@@ -592,6 +1273,10 @@ def test_pre_hardening_activation_accepts_added_operational_fields(
         "callback_acknowledgement_stale_seconds",
         "callback_inbox_healthy_backlog",
         "callback_inbox_oldest_healthy_seconds",
+        "callback_inbox_retention_enabled",
+        "callback_inbox_retention_seconds",
+        "callback_inbox_compaction_interval_seconds",
+        "callback_inbox_compaction_batch_limit",
     ):
         legacy_payload["runtime"].pop(field_name)
     legacy_hash = hashlib.sha256(
@@ -603,6 +1288,61 @@ def test_pre_hardening_activation_accepts_added_operational_fields(
     ).hexdigest()
     legacy_activation = activation.model_copy(update={"configuration_hash": legacy_hash})
     upgraded_config = config.model_copy(
+        update={
+            "runtime": config.runtime.model_copy(
+                update={
+                    "git_commit": "b" * 40,
+                    "callback_inbox_retention_enabled": True,
+                }
+            )
+        }
+    )
+
+    _require_compatible_existing_activation(
+        activation=legacy_activation,
+        config=upgraded_config,
+        artifact_hashes=legacy_activation.model_artifact_hashes,
+        ibkr_api_version=legacy_activation.ibkr_api_version,
+        tws_or_gateway_version=legacy_activation.tws_or_gateway_version,
+    )
+
+
+def test_existing_activation_accepts_only_exact_superseded_diagnostic_claims(
+    tmp_path: Path,
+) -> None:
+    application, config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        git_commit="a" * 40,
+    )
+    activation = ActivationRecord.model_validate_json(
+        (tmp_path / "activation.json").read_text(encoding="utf-8")
+    )
+    application.shutdown(now=datetime.now(UTC))
+
+    legacy_claims = dict(activation.claims_boundary)
+    for field_name in (
+        "market_data_source",
+        "historical_research_source",
+        "cross_vendor_validation_diagnostic_only",
+        "cross_vendor_validation_required_for_science",
+        "prospective_evidence_description",
+    ):
+        legacy_claims.pop(field_name)
+    legacy_claims["engineering_phase_sessions"] = legacy_claims.pop(
+        "historical_engineering_phase_sessions"
+    )
+    legacy_activation = activation.model_copy(
+        update={
+            "claims_boundary": legacy_claims,
+            "configuration_hash": _configuration_hash(
+                config,
+                git_commit=activation.git_sha,
+                web_projection_cache_seconds=60.0,
+            ),
+        }
+    )
+    upgraded_config = config.model_copy(
         update={"runtime": config.runtime.model_copy(update={"git_commit": "b" * 40})}
     )
 
@@ -612,6 +1352,192 @@ def test_pre_hardening_activation_accepts_added_operational_fields(
         artifact_hashes=legacy_activation.model_artifact_hashes,
         ibkr_api_version=legacy_activation.ibkr_api_version,
         tws_or_gateway_version=legacy_activation.tws_or_gateway_version,
+    )
+
+    unsafe_claims = dict(legacy_claims)
+    unsafe_claims["paper_orders_allowed"] = True
+    with pytest.raises(ValueError, match="blocked_existing_activation_claims_boundary_mismatch"):
+        _require_compatible_existing_activation(
+            activation=legacy_activation.model_copy(update={"claims_boundary": unsafe_claims}),
+            config=upgraded_config,
+            artifact_hashes=legacy_activation.model_artifact_hashes,
+            ibkr_api_version=legacy_activation.ibkr_api_version,
+            tws_or_gateway_version=legacy_activation.tws_or_gateway_version,
+        )
+
+
+def test_existing_activation_accepts_verified_api_and_gateway_maintenance(
+    tmp_path: Path,
+) -> None:
+    application, config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        git_commit="a" * 40,
+    )
+    activation = ActivationRecord.model_validate_json(
+        (tmp_path / "activation.json").read_text(encoding="utf-8")
+    )
+    application.shutdown(now=datetime.now(UTC))
+    legacy_payload = config.model_dump(mode="json")
+    for field_name in (
+        "option_commission_per_contract",
+        "option_regulatory_fee_per_contract",
+        "option_exchange_fee_per_contract",
+    ):
+        legacy_payload["ibkr"].pop(field_name)
+    legacy_hash = hashlib.sha256(
+        json.dumps(
+            legacy_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    legacy_activation = activation.model_copy(update={"configuration_hash": legacy_hash})
+    maintained_config = config.model_copy(
+        update={
+            "runtime": config.runtime.model_copy(update={"git_commit": "b" * 40}),
+            "ibkr": config.ibkr.model_copy(
+                update={"tws_or_gateway_version": "10491c-latest-ae1600e7c3a1"}
+            ),
+        }
+    )
+
+    _require_compatible_existing_activation(
+        activation=legacy_activation,
+        config=maintained_config,
+        artifact_hashes=legacy_activation.model_artifact_hashes,
+        ibkr_api_version="10.49.1",
+        tws_or_gateway_version="10491c-latest-ae1600e7c3a1",
+    )
+    assert legacy_activation.ibkr_api_version != "10.49.1"
+    assert legacy_activation.tws_or_gateway_version != "10491c-latest-ae1600e7c3a1"
+
+
+def test_existing_activation_accepts_disabling_optional_cross_vendor_diagnostic(
+    tmp_path: Path,
+) -> None:
+    application, config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+    )
+    activation = ActivationRecord.model_validate_json(
+        (tmp_path / "activation.json").read_text(encoding="utf-8")
+    )
+    application.shutdown(now=datetime.now(UTC))
+    diagnostic_enabled_config = config.model_copy(
+        update={
+            "parallel_validation": config.parallel_validation.model_copy(update={"enabled": True})
+        }
+    )
+    legacy_activation = activation.model_copy(
+        update={
+            "configuration_hash": _configuration_hash(
+                diagnostic_enabled_config,
+                git_commit=activation.git_sha,
+            )
+        }
+    )
+
+    _require_compatible_existing_activation(
+        activation=legacy_activation,
+        config=config,
+        artifact_hashes=legacy_activation.model_artifact_hashes,
+        ibkr_api_version=legacy_activation.ibkr_api_version,
+        tws_or_gateway_version=legacy_activation.tws_or_gateway_version,
+    )
+
+
+def test_existing_activation_accepts_legacy_bounded_inbox_batch_capacity(
+    tmp_path: Path,
+) -> None:
+    application, config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+    )
+    activation = ActivationRecord.model_validate_json(
+        (tmp_path / "activation.json").read_text(encoding="utf-8")
+    )
+    application.shutdown(now=datetime.now(UTC))
+    legacy_config = config.model_copy(
+        update={"runtime": config.runtime.model_copy(update={"callback_inbox_batch_limit": 256})}
+    )
+    legacy_activation = activation.model_copy(
+        update={
+            "configuration_hash": _configuration_hash(
+                legacy_config,
+                git_commit=activation.git_sha,
+            )
+        }
+    )
+
+    _require_compatible_existing_activation(
+        activation=legacy_activation,
+        config=config,
+        artifact_hashes=legacy_activation.model_artifact_hashes,
+        ibkr_api_version=legacy_activation.ibkr_api_version,
+        tws_or_gateway_version=legacy_activation.tws_or_gateway_version,
+    )
+
+
+def test_existing_activation_accepts_legacy_batch_before_retention_controls(
+    tmp_path: Path,
+) -> None:
+    application, config, _adapter, _symbols = _build_fake_application(
+        tmp_path,
+        include_scientific_prerequisites=True,
+        git_commit="a" * 40,
+    )
+    activation = ActivationRecord.model_validate_json(
+        (tmp_path / "activation.json").read_text(encoding="utf-8")
+    )
+    application.shutdown(now=datetime.now(UTC))
+
+    historical_run_id = "historical-retention-upgrade-v0"
+    legacy_payload = config.model_dump(mode="json")
+    legacy_payload["runtime"]["run_id"] = historical_run_id
+    legacy_payload["runtime"]["callback_inbox_batch_limit"] = 256
+    for field_name in (
+        "callback_inbox_retention_enabled",
+        "callback_inbox_retention_seconds",
+        "callback_inbox_compaction_interval_seconds",
+        "callback_inbox_compaction_batch_limit",
+    ):
+        legacy_payload["runtime"].pop(field_name)
+    legacy_payload["web"]["operational_projection_cache_seconds"] = 60.0
+    legacy_payload["parallel_validation"]["enabled"] = True
+    for field_name in (
+        "option_commission_per_contract",
+        "option_regulatory_fee_per_contract",
+        "option_exchange_fee_per_contract",
+    ):
+        legacy_payload["ibkr"].pop(field_name)
+    legacy_hash = hashlib.sha256(
+        json.dumps(
+            legacy_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    legacy_activation = activation.model_copy(update={"configuration_hash": legacy_hash})
+    upgraded_config = config.model_copy(
+        update={
+            "runtime": config.runtime.model_copy(
+                update={
+                    "git_commit": "b" * 40,
+                    "run_id": "replacement-retention-upgrade-v0",
+                    "callback_inbox_retention_enabled": True,
+                }
+            )
+        }
+    )
+
+    _require_compatible_existing_activation(
+        activation=legacy_activation,
+        config=upgraded_config,
+        artifact_hashes=legacy_activation.model_artifact_hashes,
+        ibkr_api_version=legacy_activation.ibkr_api_version,
+        tws_or_gateway_version=legacy_activation.tws_or_gateway_version,
+        historical_run_ids=(historical_run_id,),
     )
 
 
@@ -771,7 +1697,10 @@ def test_missing_scientific_inputs_degrade_to_live_acquisition(
 
     assert result.checkpoint_results == ()
     assert adapter.active_subscriptions
-    assert {kind for kind, _symbol in adapter.active_subscriptions.values()} == {"bar"}
+    assert {kind for kind, _symbol in adapter.active_subscriptions.values()} == {
+        "bar",
+        "level1",
+    }
     with sqlite3.connect(config.paths.database) as connection:
         connection.row_factory = sqlite3.Row
         blockers = {

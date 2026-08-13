@@ -323,15 +323,17 @@ class ParallelSourceCaptureService:
             if self._last_credential_failure_date != session_date:
                 self.repository.record_data_health_event(
                     metadata,
-                    severity="blocker",
-                    blocker_code="blocked_missing_eodhd_server_token",
+                    severity="info",
+                    blocker_code=None,
                     component="parallel_feature_validation",
-                    message="EODHD parallel capture credential is unavailable",
+                    message="cross_vendor_validation_not_configured",
                     details={
                         "provider": "eodhd",
                         "session_date": session_date.isoformat(),
                         "credential_value_exposed": False,
-                        "scoring_allowed": False,
+                        "cross_vendor_validation_status": "not_configured",
+                        "cross_vendor_validation_diagnostic_only": True,
+                        "prospective_ibkr_evidence_allowed": True,
                     },
                 )
                 self._last_credential_failure_date = session_date
@@ -365,13 +367,15 @@ class ParallelSourceCaptureService:
                 self.repository.record_data_health_event(
                     metadata,
                     severity="warning",
-                    blocker_code="blocked_parallel_source_capture",
+                    blocker_code=None,
                     component="parallel_feature_validation",
                     message=f"{symbol}: {type(exc).__name__}",
                     details={
                         "symbol": symbol,
                         "session_date": session_date.isoformat(),
-                        "scoring_allowed": False,
+                        "cross_vendor_validation_status": "failed_diagnostic",
+                        "cross_vendor_validation_diagnostic_only": True,
+                        "prospective_ibkr_evidence_allowed": True,
                     },
                 )
             complete_symbol = (
@@ -393,7 +397,7 @@ class ParallelSourceCaptureService:
                 self.repository.record_data_health_event(
                     metadata,
                     severity="warning",
-                    blocker_code="blocked_parallel_source_capture",
+                    blocker_code=None,
                     component="parallel_feature_validation",
                     message=f"{symbol}: incomplete exact 78-bar session",
                     details={
@@ -401,7 +405,9 @@ class ParallelSourceCaptureService:
                         "session_date": session_date.isoformat(),
                         "observed_bar_count": len(bars),
                         "expected_bar_count": EXPECTED_REGULAR_SESSION_BAR_COUNT,
-                        "scoring_allowed": False,
+                        "cross_vendor_validation_status": "warning",
+                        "cross_vendor_validation_diagnostic_only": True,
+                        "prospective_ibkr_evidence_allowed": True,
                     },
                 )
             for bar in bars:
@@ -463,7 +469,23 @@ class ParallelSourceCaptureService:
             },
         )
         if not missing and self._completion_sink is not None:
-            self._completion_sink(session_date, now.astimezone(UTC))
+            try:
+                self._completion_sink(session_date, now.astimezone(UTC))
+            except Exception as exc:
+                self.repository.record_data_health_event(
+                    metadata,
+                    severity="warning",
+                    blocker_code=None,
+                    component="parallel_feature_validation",
+                    message=f"cross_vendor_validation_failed_diagnostic:{type(exc).__name__}",
+                    details={
+                        "provider": "eodhd",
+                        "session_date": session_date.isoformat(),
+                        "cross_vendor_validation_status": "failed_diagnostic",
+                        "cross_vendor_validation_diagnostic_only": True,
+                        "prospective_ibkr_evidence_allowed": True,
+                    },
+                )
 
 
 def build_parallel_eodhd_service(

@@ -6,13 +6,20 @@ import hashlib
 import json
 import math
 import sqlite3
-from collections.abc import Iterable, Mapping
+import threading
+import time
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from stocker_prospective.sqlite_coordination import CoordinatedSQLiteConnection
+
+_TRANSIENT_WRITER_RETRY_DELAYS_SECONDS = (0.005, 0.01, 0.025, 0.05)
 
 
 class CallbackInboxError(RuntimeError):
@@ -106,6 +113,13 @@ class CallbackInboxEvent(BaseModel):
             "received_monotonic_ns": self.received_monotonic_ns,
             "source_sequence": self.source_sequence,
             "persisted_stream_owner": self.stream_owner,
+            "inbox_event_id": self.inbox_event_id,
+            "callback_classification": self.callback_classification.value,
+            "connection_generation": self.connection_generation,
+            "subscription_owner": self.subscription_owner,
+            "subscription_symbol": self.symbol,
+            "admission_run_id": self.admission_run_id,
+            "admission_recorder_generation": self.admission_recorder_generation,
         }
 
 
@@ -259,6 +273,10 @@ class DurableCallbackInbox:
         self.run_id = run_id
         self.recorder_generation = recorder_generation
         self.owner_id = owner_id
+        self._connection_local = threading.local()
+        self._active_count_run_id: str | None = None
+        self._active_count: int | None = None
+        self._oldest_active_received_at: datetime | None = None
 
     def configure_recorder(
         self,
@@ -272,18 +290,106 @@ class DurableCallbackInbox:
         self.run_id = run_id
         self.recorder_generation = recorder_generation
         self.owner_id = owner_id
+        self._active_count_run_id = None
+        self._active_count = None
+        self._oldest_active_received_at = None
 
     def _connect(self) -> sqlite3.Connection:
+        connection: sqlite3.Connection | None = getattr(
+            self._connection_local,
+            "connection",
+            None,
+        )
+        if connection is not None:
+            return connection
+
         connection = sqlite3.connect(
             self.database_path,
             timeout=self.busy_timeout_ms / 1_000,
+            factory=CoordinatedSQLiteConnection,
         )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA synchronous = FULL")
+        self._connection_local.connection = connection
         return connection
+
+    @staticmethod
+    def _is_transient_writer_contention(error: sqlite3.OperationalError) -> bool:
+        error_code = getattr(error, "sqlite_errorcode", None)
+        if isinstance(error_code, int) and error_code & 0xFF in {
+            sqlite3.SQLITE_BUSY,
+            sqlite3.SQLITE_LOCKED,
+        }:
+            return True
+        message = str(error).lower()
+        return "database is locked" in message or "database is busy" in message
+
+    def _begin_immediate(self, connection: sqlite3.Connection) -> None:
+        """Wait through bounded transient writer contention without losing ingress."""
+
+        for delay_seconds in (*_TRANSIENT_WRITER_RETRY_DELAYS_SECONDS, None):
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                return
+            except sqlite3.OperationalError as error:
+                if delay_seconds is None or not self._is_transient_writer_contention(error):
+                    raise
+                time.sleep(delay_seconds)
+
+    @contextmanager
+    def callback_batch(self) -> Iterator[None]:
+        """Commit several callback state transitions in one durable transaction."""
+
+        connection = self._connect()
+        if connection.in_transaction:
+            raise RuntimeError("callback batch transaction is already active")
+        self._begin_immediate(connection)
+        try:
+            yield
+        except Exception:
+            connection.rollback()
+            self._active_count_run_id = None
+            self._active_count = None
+            self._oldest_active_received_at = None
+            raise
+        else:
+            connection.commit()
+
+    def _ensure_active_accounting(self, connection: sqlite3.Connection) -> None:
+        if self._active_count is not None and self._active_count_run_id == self.run_id:
+            return
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS backlog, MIN(received_utc) AS oldest
+            FROM callback_inbox_v1
+            WHERE admission_run_id IS ?
+              AND status IN (
+                  'provider_pending', 'pending', 'leased', 'quarantined'
+              )
+            """,
+            (self.run_id,),
+        ).fetchone()
+        assert row is not None
+        self._active_count_run_id = self.run_id
+        self._active_count = int(row["backlog"])
+        self._oldest_active_received_at = (
+            None if row["oldest"] is None else datetime.fromisoformat(str(row["oldest"]))
+        )
+
+    def _increment_active_accounting(self, *, received_at: datetime) -> None:
+        assert self._active_count is not None
+        self._active_count += 1
+        if self._oldest_active_received_at is None or received_at < self._oldest_active_received_at:
+            self._oldest_active_received_at = received_at
+
+    def _decrement_active_accounting(self) -> None:
+        assert self._active_count is not None and self._active_count > 0
+        self._active_count -= 1
+        if self._active_count == 0:
+            self._oldest_active_received_at = None
 
     @staticmethod
     def _event(row: sqlite3.Row) -> CallbackInboxEvent:
@@ -440,8 +546,12 @@ class DurableCallbackInbox:
         )
         failure = classification.value if initial_status is InboxStatus.QUARANTINED else None
         acknowledgement = received_encoded if initial_status is InboxStatus.DIAGNOSTIC else None
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+        connection = self._connect()
+        owns_transaction = not connection.in_transaction
+        if owns_transaction:
+            self._begin_immediate(connection)
+        try:
+            self._ensure_active_accounting(connection)
             existing = connection.execute(
                 "SELECT * FROM callback_inbox_v1 WHERE inbox_event_id = ?",
                 (event_id,),
@@ -467,7 +577,8 @@ class DurableCallbackInbox:
                     or existing["stream_owner_json"] != stream_owner_json
                     or not stored_payload_matches
                 ):
-                    connection.rollback()
+                    if owns_transaction:
+                        connection.rollback()
                     raise CallbackIdentityCollision("CALLBACK_IDENTITY_COLLISION")
                 if provider_envelope_event_id is not None:
                     self._complete_provider_envelope_in_transaction(
@@ -476,28 +587,27 @@ class DurableCallbackInbox:
                         canonical_event_id=event_id,
                         completed_at=received,
                     )
-                connection.commit()
+                if owns_transaction:
+                    connection.commit()
                 return InboxAdmissionResult(event=self._event(existing), duplicate=True)
-            unacknowledged = int(
-                connection.execute(
+            referenced_provider_active = (
+                provider_envelope_event_id is not None
+                and connection.execute(
                     """
-                    SELECT COUNT(*)
+                    SELECT 1
                     FROM callback_inbox_v1
-                    WHERE admission_run_id IS ?
-                      AND status IN (
-                          'provider_pending', 'pending', 'leased', 'quarantined'
-                      )
-                      AND (? IS NULL OR inbox_event_id <> ?)
+                    WHERE inbox_event_id = ? AND admission_run_id IS ?
+                      AND status = 'provider_pending'
                     """,
-                    (
-                        self.run_id,
-                        provider_envelope_event_id,
-                        provider_envelope_event_id,
-                    ),
-                ).fetchone()[0]
+                    (provider_envelope_event_id, self.run_id),
+                ).fetchone()
+                is not None
             )
+            assert self._active_count is not None
+            unacknowledged = self._active_count - int(referenced_provider_active)
             if unacknowledged >= self.max_unacknowledged:
-                connection.rollback()
+                if owns_transaction:
+                    connection.rollback()
                 raise CallbackInboxOverflow("CALLBACK_OVERFLOW")
             admitted = datetime.now(UTC)
             admitted_encoded = admitted.isoformat()
@@ -546,16 +656,28 @@ class DurableCallbackInbox:
                     canonical_event_id=event_id,
                     completed_at=received,
                 )
+            if initial_status in {
+                InboxStatus.PROVIDER_PENDING,
+                InboxStatus.PENDING,
+                InboxStatus.LEASED,
+                InboxStatus.QUARANTINED,
+            }:
+                self._increment_active_accounting(received_at=received)
             self._update_callback_heartbeats(
                 connection,
                 received_at=received,
                 admitted_at=admitted,
             )
-            connection.commit()
+            if owns_transaction:
+                connection.commit()
             row = connection.execute(
                 "SELECT * FROM callback_inbox_v1 WHERE source_sequence = ?",
                 (source_sequence,),
             ).fetchone()
+        except Exception:
+            if owns_transaction and connection.in_transaction:
+                connection.rollback()
+            raise
         assert row is not None
         return InboxAdmissionResult(event=self._event(row), duplicate=False)
 
@@ -578,7 +700,7 @@ class DurableCallbackInbox:
         observed = _utc(attached_at, label="stream owner attachment timestamp")
         encoded_owner = _encoded(dict(stream_owner))
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             conflicting = connection.execute(
                 """
                 SELECT inbox_event_id
@@ -626,6 +748,92 @@ class DurableCallbackInbox:
             connection.commit()
             return cursor.rowcount
 
+    def materialize_provider_envelope(
+        self,
+        *,
+        provider_envelope_event_id: str,
+        callback_kind: str,
+        request_id: int,
+        payload: Mapping[str, object],
+        materialized_at: datetime,
+    ) -> CallbackInboxEvent:
+        """Transition one pre-admitted provider delivery into its canonical row."""
+
+        kind = callback_kind.strip()
+        if not kind:
+            raise ValueError("callback kind is required")
+        observed = _utc(materialized_at, label="provider envelope materialization timestamp")
+        payload_json = _encoded(dict(payload))
+        provider = next(
+            (
+                parsed
+                for key in (
+                    "provider_timestamp_utc",
+                    "source_timestamp_utc",
+                    "bar_timestamp_utc",
+                    "timestamp_utc",
+                )
+                if (parsed := _parsed_timestamp(payload.get(key))) is not None
+            ),
+            None,
+        )
+        connection = self._connect()
+        owns_transaction = not connection.in_transaction
+        if owns_transaction:
+            self._begin_immediate(connection)
+        try:
+            row = connection.execute(
+                "SELECT * FROM callback_inbox_v1 WHERE inbox_event_id = ?",
+                (provider_envelope_event_id,),
+            ).fetchone()
+            if row is None:
+                if owns_transaction:
+                    connection.rollback()
+                raise CallbackInboxError("CALLBACK_PROVIDER_ENVELOPE_MISSING")
+            if (
+                not str(row["callback_kind"]).startswith("official_provider_")
+                or int(row["request_id"]) != request_id
+                or row["admission_run_id"] != self.run_id
+                or InboxStatus(str(row["status"])) is not InboxStatus.PROVIDER_PENDING
+            ):
+                if owns_transaction:
+                    connection.rollback()
+                raise CallbackInboxError("CALLBACK_PROVIDER_ENVELOPE_IDENTITY_INVALID")
+            cursor = connection.execute(
+                """
+                UPDATE callback_inbox_v1
+                SET callback_kind = ?, provider_timestamp_utc = ?,
+                    original_payload_json = ?, status = 'pending',
+                    updated_at_utc = ?
+                WHERE inbox_event_id = ? AND status = 'provider_pending'
+                  AND admission_run_id IS ?
+                """,
+                (
+                    kind,
+                    None if provider is None else provider.isoformat(),
+                    payload_json,
+                    observed.isoformat(),
+                    provider_envelope_event_id,
+                    self.run_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                if owns_transaction:
+                    connection.rollback()
+                raise CallbackInboxError("CALLBACK_PROVIDER_ENVELOPE_TRANSITION_CHANGED")
+            if owns_transaction:
+                connection.commit()
+            materialized = connection.execute(
+                "SELECT * FROM callback_inbox_v1 WHERE inbox_event_id = ?",
+                (provider_envelope_event_id,),
+            ).fetchone()
+        except Exception:
+            if owns_transaction and connection.in_transaction:
+                connection.rollback()
+            raise
+        assert materialized is not None
+        return self._event(materialized)
+
     def _complete_provider_envelope_in_transaction(
         self,
         connection: sqlite3.Connection,
@@ -636,6 +844,7 @@ class DurableCallbackInbox:
     ) -> None:
         """Atomically bind the original provider delivery to its canonical row."""
 
+        self._ensure_active_accounting(connection)
         provider = connection.execute(
             """
             SELECT callback_kind, admission_run_id, status
@@ -679,6 +888,7 @@ class DurableCallbackInbox:
         )
         if cursor.rowcount != 1:
             raise CallbackInboxError("CALLBACK_PROVIDER_ENVELOPE_TRANSITION_CHANGED")
+        self._decrement_active_accounting()
 
     def complete_provider_envelope(
         self,
@@ -690,7 +900,7 @@ class DurableCallbackInbox:
 
         observed = _utc(completed_at, label="provider envelope completion timestamp")
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             self._complete_provider_envelope_in_transaction(
                 connection,
                 provider_envelope_event_id=provider_envelope_event_id,
@@ -743,7 +953,7 @@ class DurableCallbackInbox:
             raise ValueError("recorder generation must be positive")
         observed = _utc(observed_at, label="provider envelope recovery timestamp")
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             rows = connection.execute(
                 """
                 SELECT *
@@ -782,17 +992,8 @@ class DurableCallbackInbox:
     ) -> None:
         if self.run_id is None or self.recorder_generation is None:
             return
-        accounting = connection.execute(
-            """
-            SELECT COUNT(*) AS backlog, MIN(received_utc) AS oldest
-            FROM callback_inbox_v1
-            WHERE admission_run_id IS ?
-              AND status IN (
-                  'provider_pending', 'pending', 'leased', 'quarantined'
-              )
-            """,
-            (self.run_id,),
-        ).fetchone()
+        self._ensure_active_accounting(connection)
+        assert self._active_count is not None
         connection.execute(
             """
             UPDATE recorder_operational_state_v1
@@ -807,8 +1008,12 @@ class DurableCallbackInbox:
             (
                 received_at.isoformat(),
                 None if admitted_at is None else admitted_at.isoformat(),
-                int(accounting["backlog"]),
-                accounting["oldest"],
+                self._active_count,
+                (
+                    None
+                    if self._oldest_active_received_at is None
+                    else self._oldest_active_received_at.isoformat()
+                ),
                 received_at.isoformat(),
                 self.run_id,
                 self.recorder_generation,
@@ -840,7 +1045,7 @@ class DurableCallbackInbox:
             )
 
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             # An explicitly abandoned run retains its poison/pending evidence
             # for audit, but it is never part of a different run's backlog.
             # Run identity is the isolation boundary for leasing and health.
@@ -1008,8 +1213,12 @@ class DurableCallbackInbox:
         observed = _utc(materialized_at, label="callback raw materialization timestamp")
         encoded_hashes = _encoded(tuple(sorted(set(raw_partition_hashes))))
         encoded_event_ids = _encoded(tuple(sorted(raw_event_ids)))
+        canonical_event_id = min(
+            batch,
+            key=lambda event: (event.source_sequence, event.inbox_event_id),
+        ).inbox_event_id
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             for event in batch:
                 if event.admission_run_id != run_id:
                     connection.rollback()
@@ -1023,20 +1232,22 @@ class DurableCallbackInbox:
                     """,
                     (event.inbox_event_id,),
                 ).fetchone()
-                expected = (
-                    run_id,
-                    batch_id,
-                    encoded_hashes,
-                    encoded_event_ids,
+                expected_hashes = (
+                    encoded_hashes if event.inbox_event_id == canonical_event_id else "[]"
+                )
+                expected_event_ids = (
+                    encoded_event_ids if event.inbox_event_id == canonical_event_id else "[]"
                 )
                 if existing is not None:
-                    actual = (
-                        str(existing["run_id"]),
-                        str(existing["lease_batch_id"]),
-                        str(existing["raw_partition_hashes_json"]),
-                        str(existing["raw_event_ids_json"]),
-                    )
-                    if actual != expected:
+                    existing_event_ids = str(existing["raw_event_ids_json"])
+                    if (
+                        str(existing["run_id"]) != run_id
+                        or str(existing["lease_batch_id"]) != batch_id
+                        or str(existing["raw_partition_hashes_json"])
+                        not in {encoded_hashes, expected_hashes}
+                        or existing_event_ids
+                        not in {encoded_event_ids, expected_event_ids}
+                    ):
                         connection.rollback()
                         raise CallbackInboxError("CALLBACK_RAW_MATERIALIZATION_DIFFERS")
                     continue
@@ -1055,8 +1266,8 @@ class DurableCallbackInbox:
                         run_id,
                         recorder_generation,
                         batch_id,
-                        encoded_hashes,
-                        encoded_event_ids,
+                        expected_hashes,
+                        expected_event_ids,
                         observed.isoformat(),
                     ),
                 )
@@ -1074,8 +1285,8 @@ class DurableCallbackInbox:
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
-                SELECT inbox_event_id, lease_batch_id, raw_partition_hashes_json,
-                       raw_event_ids_json
+                SELECT inbox_event_id, source_sequence, lease_batch_id,
+                       raw_partition_hashes_json, raw_event_ids_json
                 FROM callback_raw_materialization_v1
                 WHERE inbox_event_id IN ({",".join("?" for _ in batch)})
                 """,
@@ -1086,20 +1297,46 @@ class DurableCallbackInbox:
         if len(rows) != len(batch):
             raise CallbackInboxError("CALLBACK_RAW_MATERIALIZATION_PARTIAL")
         batch_ids = {str(row["lease_batch_id"]) for row in rows}
-        hashes = {str(row["raw_partition_hashes_json"]) for row in rows}
-        event_ids = {str(row["raw_event_ids_json"]) for row in rows}
+        hash_encodings = [str(row["raw_partition_hashes_json"]) for row in rows]
+        populated_hashes = {value for value in hash_encodings if value != "[]"}
+        event_id_encodings = [str(row["raw_event_ids_json"]) for row in rows]
+        populated_event_ids = {value for value in event_id_encodings if value != "[]"}
         expected_batch_ids = {event.lease_batch_id for event in batch}
         if (
             len(batch_ids) != 1
-            or len(hashes) != 1
-            or len(event_ids) != 1
+            or len(populated_hashes) > 1
+            or len(populated_event_ids) > 1
             or None in expected_batch_ids
             or batch_ids != expected_batch_ids
         ):
             raise CallbackInboxError("CALLBACK_RAW_MATERIALIZATION_INCONSISTENT")
+        canonical = min(
+            rows,
+            key=lambda row: (int(row["source_sequence"]), str(row["inbox_event_id"])),
+        )
+        if (
+            populated_hashes
+            and "[]" in hash_encodings
+            and str(canonical["raw_partition_hashes_json"]) == "[]"
+        ) or (
+            populated_event_ids
+            and "[]" in event_id_encodings
+            and str(canonical["raw_event_ids_json"]) == "[]"
+        ):
+                raise CallbackInboxError("CALLBACK_RAW_MATERIALIZATION_INCONSISTENT")
         return RawMaterialization(
-            partition_hashes=tuple(str(item) for item in json.loads(next(iter(hashes)))),
-            raw_event_ids=tuple(str(item) for item in json.loads(next(iter(event_ids)))),
+            partition_hashes=tuple(
+                str(item)
+                for item in json.loads(
+                    "[]" if not populated_hashes else next(iter(populated_hashes))
+                )
+            ),
+            raw_event_ids=tuple(
+                str(item)
+                for item in json.loads(
+                    "[]" if not populated_event_ids else next(iter(populated_event_ids))
+                )
+            ),
         )
 
     def release(
@@ -1113,7 +1350,7 @@ class DurableCallbackInbox:
         observed = _utc(now, label="callback release timestamp")
         released = 0
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             for event in events:
                 cursor = connection.execute(
                     """
@@ -1182,7 +1419,7 @@ class DurableCallbackInbox:
             raise ValueError("quarantine resolution evidence is required")
         observed = _utc(resolved_at, label="quarantine resolution timestamp")
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             cursor = connection.execute(
                 """
                 UPDATE callback_inbox_v1
@@ -1232,7 +1469,7 @@ class DurableCallbackInbox:
             "official_provider_contract_details_end",
         }
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             row = connection.execute(
                 """
                 SELECT *
@@ -1324,6 +1561,8 @@ class DurableCallbackInbox:
                 ),
             )
             connection.commit()
+            self._active_count = None
+            self._oldest_active_received_at = None
 
     def resolve_fatal_latch(
         self,
@@ -1340,7 +1579,7 @@ class DurableCallbackInbox:
             raise ValueError("fatal-latch resolution evidence is required")
         observed = _utc(resolved_at, label="fatal-latch resolution timestamp")
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             if latch_kind == "ingestion":
                 quarantined = int(
                     connection.execute(
@@ -1416,9 +1655,18 @@ class DurableCallbackInbox:
             raise ValueError("blocked raw-only processing cannot claim scientific projection")
         observed = _utc(committed_at, label="callback processing commit timestamp")
         encoded_hashes = _encoded(tuple(sorted(set(raw_partition_hashes))))
+        batch = tuple(events)
+        canonical_event_id = (
+            None
+            if not batch
+            else min(
+                batch,
+                key=lambda event: (event.source_sequence, event.inbox_event_id),
+            ).inbox_event_id
+        )
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            for event in events:
+            self._begin_immediate(connection)
+            for event in batch:
                 if event.admission_run_id != run_id:
                     connection.rollback()
                     raise CallbackInboxError("CALLBACK_PROCESSING_RUN_DIFFERS")
@@ -1431,11 +1679,15 @@ class DurableCallbackInbox:
                     """,
                     (event.inbox_event_id,),
                 ).fetchone()
+                expected_hashes = (
+                    encoded_hashes if event.inbox_event_id == canonical_event_id else "[]"
+                )
                 if existing is not None:
                     if (
                         str(existing["run_id"]) != run_id
                         or int(existing["recorder_generation"]) != recorder_generation
-                        or str(existing["raw_partition_hashes_json"]) != encoded_hashes
+                        or str(existing["raw_partition_hashes_json"])
+                        not in {encoded_hashes, expected_hashes}
                         or str(existing["processing_disposition"]) != processing_disposition
                         or bool(existing["scientific_projection_complete"])
                         is not scientific_projection_complete
@@ -1457,7 +1709,7 @@ class DurableCallbackInbox:
                         event.source_sequence,
                         run_id,
                         recorder_generation,
-                        encoded_hashes,
+                        expected_hashes,
                         processing_disposition,
                         int(scientific_projection_complete),
                         observed.isoformat(),
@@ -1495,10 +1747,19 @@ class DurableCallbackInbox:
 
         observed = _utc(acknowledged_at, label="callback acknowledgement timestamp")
         encoded_hashes = _encoded(tuple(sorted(set(raw_partition_hashes))))
+        batch = tuple(events)
+        canonical_event_id = (
+            None
+            if not batch
+            else min(
+                batch,
+                key=lambda event: (event.source_sequence, event.inbox_event_id),
+            ).inbox_event_id
+        )
         acknowledged = 0
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            for event in events:
+            self._begin_immediate(connection)
+            for event in batch:
                 commit = connection.execute(
                     """
                     SELECT raw_partition_hashes_json
@@ -1510,7 +1771,11 @@ class DurableCallbackInbox:
                 if commit is None:
                     connection.rollback()
                     raise CallbackInboxError("CALLBACK_ACK_BEFORE_PROCESSING_COMMIT")
-                if str(commit["raw_partition_hashes_json"]) != encoded_hashes:
+                expected_hashes = (
+                    encoded_hashes if event.inbox_event_id == canonical_event_id else "[]"
+                )
+                committed_hashes = str(commit["raw_partition_hashes_json"])
+                if committed_hashes not in {encoded_hashes, expected_hashes}:
                     connection.rollback()
                     raise CallbackInboxError("CALLBACK_ACK_PARTITION_HASHES_DIFFER")
                 cursor = connection.execute(
@@ -1526,7 +1791,7 @@ class DurableCallbackInbox:
                     """,
                     (
                         observed.isoformat(),
-                        encoded_hashes,
+                        committed_hashes,
                         observed.isoformat(),
                         event.inbox_event_id,
                         lease_owner,
@@ -1548,6 +1813,14 @@ class DurableCallbackInbox:
                 """,
                 (self.run_id,),
             ).fetchone()
+            assert accounting is not None
+            self._active_count_run_id = self.run_id
+            self._active_count = int(accounting["backlog"])
+            self._oldest_active_received_at = (
+                None
+                if accounting["oldest"] is None
+                else datetime.fromisoformat(str(accounting["oldest"]))
+            )
             if self.run_id is not None and self.recorder_generation is not None:
                 connection.execute(
                     """
@@ -1628,23 +1901,34 @@ class DurableCallbackInbox:
         *,
         before: datetime,
         retention_policy_enabled: bool,
+        limit: int = 4_096,
     ) -> int:
         """Compact terminal payloads while retaining identity and classification."""
 
         if not retention_policy_enabled:
             raise ValueError("callback inbox compaction requires an explicit retention policy")
+        if limit <= 0:
+            raise ValueError("callback inbox compaction limit must be positive")
         cutoff = _utc(before, label="callback retention cutoff")
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             rows = connection.execute(
                 """
-                SELECT inbox_event_id, original_payload_json
-                FROM callback_inbox_v1
-                WHERE admission_run_id IS ?
-                  AND status IN ('acknowledged', 'diagnostic')
-                  AND acknowledgement_timestamp_utc < ?
+                SELECT inbox.inbox_event_id, inbox.original_payload_json
+                FROM callback_inbox_v1 AS inbox
+                JOIN callback_raw_materialization_v1 AS materialization
+                  ON materialization.inbox_event_id = inbox.inbox_event_id
+                JOIN callback_processing_commit_v1 AS processing
+                  ON processing.inbox_event_id = inbox.inbox_event_id
+                 AND processing.raw_partition_hashes_json =
+                     materialization.raw_partition_hashes_json
+                WHERE inbox.admission_run_id IS ?
+                  AND inbox.status = 'acknowledged'
+                  AND inbox.acknowledgement_timestamp_utc < ?
+                ORDER BY inbox.source_sequence
+                LIMIT ?
                 """,
-                (self.run_id, cutoff.isoformat()),
+                (self.run_id, cutoff.isoformat(), limit),
             ).fetchall()
             compacted_at = datetime.now(UTC).isoformat()
             compacted_count = 0
@@ -1664,7 +1948,7 @@ class DurableCallbackInbox:
                     SET original_payload_json = ?,
                         updated_at_utc = ?
                     WHERE inbox_event_id = ?
-                      AND status IN ('acknowledged', 'diagnostic')
+                      AND status = 'acknowledged'
                     """,
                     (
                         _encoded({"__retention_compacted_sha256__": payload_hash}),
@@ -1710,7 +1994,7 @@ class DurableCallbackInbox:
         if not reason:
             raise ValueError("request cancellation reason is required")
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             connection.execute(
                 "DELETE FROM callback_request_tombstone_v1 WHERE expires_at_utc <= ?",
                 (observed.isoformat(),),
@@ -1889,7 +2173,7 @@ class DurableCallbackInbox:
             ).encode()
         ).hexdigest()
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            self._begin_immediate(connection)
             active = connection.execute(
                 """
                 SELECT latch_id

@@ -106,8 +106,8 @@ def _prediction(
         "engineering_transfer",
         "prospective_development",
         "untouched_confirmation",
-    ] = "engineering_transfer",
-    transfer_status: str = "engineering_transfer_pending",
+    ] = "prospective_development",
+    transfer_status: str = "cross_vendor_validation_not_configured",
 ):
     timing = OpeningReversalPredictionTimingEvidenceV1_1(
         timing_addendum_activation_receipt_hash_v1_1=(addendum_activation_hash),
@@ -913,8 +913,8 @@ def test_v1_1_activation_requires_a_fresh_engineering_run(
     source = OpeningReversalPredictionInputV1(
         experiment_version="1",
         activation_timestamp_utc=BASE_ACTIVATION,
-        cohort_phase="engineering_transfer",
-        transfer_status="engineering_transfer_pending",
+        cohort_phase="prospective_development",
+        transfer_status="cross_vendor_validation_not_configured",
         session=SESSION,
         stock="AAL",
         checkpoint=6,
@@ -1097,7 +1097,7 @@ def test_checkpoint_engine_emits_non_scientific_v1_1_shadow_receipt_behind_causa
     assert receipt.experiment_version == "1.1"
     assert receipt.eligibility_v1
     assert receipt.scientific_outcome_eligible_v1 is False
-    assert receipt.scientific_exclusion_reason_v1 == "engineering_transfer"
+    assert receipt.scientific_exclusion_reason_v1 == "scientific_recording_not_authorized"
     assert receipt.receipt_created_at_utc == RECEIPT_CREATED
     assert receipt.timing_evidence_v1_1 is not None
     assert receipt.timing_evidence_v1_1.entry_or_post_entry_data_admitted_before_receipt is False

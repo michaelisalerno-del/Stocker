@@ -33,13 +33,11 @@ from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
 from stocker_prospective.quiet_state import QuietEpisodeTracker
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.transfer import (
-    IBKRCalibrationCandidate,
     M1CTransferMonitor,
     ProviderM1CObservation,
     TransferBar,
     TransferDecision,
     TransferReport,
-    create_ibkr_calibration_candidate,
 )
 
 GroupOProvider = Callable[[str, date], FrozenGroupOContext]
@@ -178,8 +176,7 @@ class SourceTransferCoordinator:
                 if row.checkpoint == 6 and row.high_tail_episode
             }
             operational_evidence = (
-                self.frozen_repository
-                .opening_reversal_engineering_operational_evidence_v1(
+                self.frozen_repository.opening_reversal_engineering_operational_evidence_v1(
                     run_id=self.run_id,
                     session=session,
                 )
@@ -187,12 +184,8 @@ class SourceTransferCoordinator:
             opening_transfer = evaluate_opening_transfer_session_v1(
                 session=session,
                 ibkr_bars=self._opening_ibkr_bars(ibkr_bars),
-                eodhd_bars=self._opening_eodhd_bars(
-                    eodhd_rows.get("VTI", ())
-                ),
-                checkpoint_6_episode_identity_agreement=(
-                    ibkr_high == eodhd_high
-                ),
+                eodhd_bars=self._opening_eodhd_bars(eodhd_rows.get("VTI", ())),
+                checkpoint_6_episode_identity_agreement=(ibkr_high == eodhd_high),
                 stock_probability_rank_comparison_available=(
                     current_session_report.probability_metrics.count > 0
                 ),
@@ -203,9 +196,7 @@ class SourceTransferCoordinator:
                 opening_transfer,
             )
             transfer_decision_receipt = (
-                self.frozen_repository.maybe_record_opening_transfer_decision_v1(
-                    metadata
-                )
+                self.frozen_repository.maybe_record_opening_transfer_decision_v1(metadata)
             )
         else:
             transfer_decision_receipt = None
@@ -228,14 +219,17 @@ class SourceTransferCoordinator:
         payload["generated_at_utc"] = observed.isoformat()
         payload["recommendation"] = self._recommendation(report.decision)
         payload["strategy_profitability_decision_allowed"] = False
+        payload["market_data_source"] = "ibkr"
+        payload["historical_research_source"] = "eodhd"
+        payload["cross_vendor_validation_diagnostic_only"] = True
+        payload["prospective_ibkr_evidence_allowed"] = True
+        payload["recorder_blocking"] = False
         payload["current_session"] = session.isoformat()
         payload["current_session_valid"] = session_valid
         payload["current_session_quality_decision"] = current_session_report.decision
         payload["engineering_recording_summary"] = self._engineering_summary()
         payload["opening_reversal_transfer_v1"] = (
-            None
-            if opening_transfer is None
-            else opening_transfer.model_dump(mode="json")
+            None if opening_transfer is None else opening_transfer.model_dump(mode="json")
         )
         payload["opening_reversal_transfer_decision_receipt_v1"] = (
             None
@@ -251,14 +245,10 @@ class SourceTransferCoordinator:
             report=payload,
         )
         valid_ordinal = self._valid_session_ordinal(session) if session_valid else None
-        phase = (
-            "engineering_transfer"
-            if valid_ordinal is not None and valid_ordinal <= 20
-            else self.frozen_repository.prospective_phase_for_session(
-                run_id=self.run_id,
-                session=session,
-            )[0]
-        )
+        phase = self.frozen_repository.prospective_phase_for_session(
+            run_id=self.run_id,
+            session=session,
+        )[0]
         self.frozen_repository.record_prospective_session_phase(
             metadata,
             session=session,
@@ -272,16 +262,6 @@ class SourceTransferCoordinator:
             json.dumps(payload, sort_keys=True, indent=2) + "\n",
             encoding="utf-8",
         )
-        if (
-            report.valid_session_count >= 20
-            and report.decision is TransferDecision.RANKING_SUPPORTED_SCALE_SHIFTED
-        ):
-            self._freeze_calibration_candidate(
-                create_ibkr_calibration_candidate(
-                    report=report,
-                    ibkr=aggregate_ibkr,
-                )
-            )
         return report
 
     @staticmethod
@@ -323,30 +303,6 @@ class SourceTransferCoordinator:
                 complete=str(row["completeness"]) == "complete",
             )
             for ordinal, row in enumerate(bars[:6])
-        )
-
-    def _freeze_calibration_candidate(
-        self,
-        candidate: IBKRCalibrationCandidate,
-    ) -> None:
-        """Create V1 once from probabilities only; never update it with later rows."""
-
-        path = self.aggregate_report_path.with_name("M1C_IBKR_CALIBRATION_V1_CANDIDATE.json")
-        if path.exists():
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            if (
-                payload.get("candidate_id") != candidate.candidate_id
-                or payload.get("source") != "ibkr_probability_distribution_only"
-                or payload.get("source_valid_sessions") != list(candidate.source_valid_sessions)
-                or payload.get("source_observation_count") != candidate.source_observation_count
-                or payload.get("outcome_fields_used") != []
-                or payload.get("option_pnl_used") is not False
-            ):
-                raise ValueError("frozen IBKR calibration candidate is invalid")
-            return
-        path.write_text(
-            json.dumps(asdict(candidate), sort_keys=True, indent=2) + "\n",
-            encoding="utf-8",
         )
 
     def _engineering_summary(self) -> dict[str, object]:
@@ -463,15 +419,17 @@ class SourceTransferCoordinator:
     @staticmethod
     def _recommendation(decision: TransferDecision) -> str:
         return {
-            TransferDecision.SUPPORTED_WITHOUT_RECALIBRATION: "continue_v0",
+            TransferDecision.SUPPORTED_WITHOUT_RECALIBRATION: "diagnostic_available",
             TransferDecision.RANKING_SUPPORTED_SCALE_SHIFTED: (
-                "create_distribution_only_ibkr_threshold_calibration_candidate"
+                "review_probability_scale_diagnostic"
             ),
-            TransferDecision.MIXED_STOCK_OR_CHECKPOINT_FAILURES: "repair_pipeline",
-            TransferDecision.NOT_SUPPORTED: "stop",
-            TransferDecision.BLOCKED_INSUFFICIENT_VALID_SESSIONS: "continue_v0",
-            TransferDecision.BLOCKED_BAR_SEMANTICS_FAILURE: "repair_pipeline",
-            TransferDecision.BLOCKED_M1C_RUNTIME_PARITY_FAILURE: "stop",
+            TransferDecision.MIXED_STOCK_OR_CHECKPOINT_FAILURES: ("review_cross_vendor_diagnostic"),
+            TransferDecision.NOT_SUPPORTED: "failed_diagnostic",
+            TransferDecision.BLOCKED_INSUFFICIENT_VALID_SESSIONS: (
+                "collect_optional_diagnostic_sessions"
+            ),
+            TransferDecision.BLOCKED_BAR_SEMANTICS_FAILURE: "failed_diagnostic",
+            TransferDecision.BLOCKED_M1C_RUNTIME_PARITY_FAILURE: "failed_diagnostic",
         }[decision]
 
     def _eodhd_rows(self, session: date) -> dict[str, tuple[dict[str, object], ...]]:

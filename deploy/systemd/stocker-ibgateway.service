@@ -12,6 +12,9 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
+# IBKR's authenticated auto-restart hands ownership to an install4j child.
+# Track the whole cgroup so systemd preserves that child and its session token.
+ExitType=cgroup
 User=ibgateway
 Group=ibgateway
 WorkingDirectory=/var/lib/ibgateway
@@ -23,11 +26,10 @@ ExecCondition=+/usr/local/libexec/stocker-verify-ibgateway
 ExecCondition=/usr/bin/test -x /usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 ExecCondition=+/usr/local/libexec/stocker-verify-ibgateway-loopback-boundary
 ExecStart=/opt/ibgateway/current/ibgateway
-# IB Gateway exits successfully during its configured daily auto-restart.
-# Relaunch it so the broker-managed restart session can resume before expiry.
+# If the whole cgroup exits without a handoff child, retain a bounded fallback.
 # An explicit `systemctl stop` still suppresses service restarts.
 Restart=always
-RestartSec=20
+RestartSec=1
 KillSignal=SIGTERM
 SuccessExitStatus=143
 TimeoutStopSec=60

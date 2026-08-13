@@ -180,6 +180,7 @@ def test_fast_summary_queries_have_growth_independent_indexes(tmp_path: Path) ->
         "idx_data_health_event_web_active",
         "idx_web_active_runtime_blocker",
         "idx_subscription_lifecycle_web_active",
+        "idx_web_latest_subscription_active_v0",
         "idx_m1c_checkpoint_web_latest",
         "idx_m1c_checkpoint_web_latest_global",
         "idx_m1c_episode_web_latest_exact",
@@ -196,8 +197,9 @@ def test_fast_summary_queries_have_growth_independent_indexes(tmp_path: Path) ->
                 """
                 EXPLAIN QUERY PLAN
                 SELECT subscription_kind, COUNT(*) AS used
-                FROM subscription_lifecycle_v0
-                WHERE run_id = ? AND cancelled_at_utc IS NULL
+                FROM web_latest_subscription_state_v0
+                WHERE run_id = ?
+                  AND status IN ('pending', 'active', 'cancellation_requested')
                 GROUP BY subscription_kind
                 """,
                 ("synthetic",),
@@ -239,11 +241,233 @@ def test_fast_summary_queries_have_growth_independent_indexes(tmp_path: Path) ->
 
     assert expected_indexes <= indexes.keys()
     assert "WHERE cancelled_at_utc IS NULL" in str(indexes["idx_subscription_lifecycle_web_active"])
-    assert "idx_subscription_lifecycle_web_active" in active_subscription_plan
+    assert "idx_web_latest_subscription_active_v0" in active_subscription_plan
     assert "idx_m1c_checkpoint_web_latest_global" in latest_checkpoint_plan
     assert "idx_m1c_episode_live" in latest_episode_plan
     assert "USE TEMP B-TREE" not in latest_episode_plan
     assert "idx_ibkr_connection_event_web_any_latest" in latest_connection_plan
+
+
+def test_latest_subscription_projection_backfills_existing_restart_events(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "subscription-backfill.sqlite3"
+    repository = ProspectiveRepository(database)
+    repository.migrate()
+    migration = "0028_web_latest_subscription_state_v0.sql"
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP TRIGGER web_latest_subscription_state_insert_v0")
+        connection.execute("DROP TABLE web_latest_subscription_state_v0")
+        connection.execute("DELETE FROM schema_migrations WHERE version = ?", (migration,))
+        connection.execute(
+            """
+            INSERT INTO prospective_run(
+                run_id, prospective_start_utc, app_version, git_commit,
+                model_artifact_id, universe_id, cohort, created_at_utc,
+                mode, status, scientific_classification
+            ) VALUES (
+                'restart-run', '2026-08-01T00:00:00+00:00', 'test', 'deadbeef',
+                'model', 'universe', 'cohort', '2026-08-01T00:00:00+00:00',
+                'record_only', 'active', 'test'
+            )
+            """
+        )
+        envelope_id = int(
+            connection.execute(
+                """
+                INSERT INTO evidence_envelope(
+                    run_id, prospective_start_utc, app_version, git_commit,
+                    model_artifact_id, universe_id, cohort,
+                    source_timestamps_json, recorded_at_utc
+                ) VALUES (
+                    'restart-run', '2026-08-01T00:00:00+00:00', 'test',
+                    'deadbeef', 'model', 'universe', 'cohort', '[]',
+                    '2026-08-01T00:00:00+00:00'
+                )
+                """
+            ).lastrowid
+        )
+        for request_id, status, generation in (
+            (7, "active", 1),
+            (7, "cancelled", 1),
+            (8, "active", 2),
+        ):
+            connection.execute(
+                """
+                INSERT INTO subscription_lifecycle_event_v0(
+                    envelope_id, run_id, occurred_at_utc, subscription_key,
+                    request_id, subscription_kind, subscription_class, symbol,
+                    con_id, status, owner_ids_json, owner_count, generation,
+                    reason, payload_json, claims_json
+                ) VALUES (?, 'restart-run', '2026-08-01T00:00:00+00:00',
+                          'BAR|123|5m|RTH', ?, 'bar', 0, 'AAL', 123, ?,
+                          '["system:AAL"]', 1, ?, NULL, '{}', '{}')
+                """,
+                (envelope_id, request_id, status, generation),
+            )
+
+    repository.migrate()
+
+    with sqlite3.connect(database) as connection:
+        row = connection.execute(
+            """
+            SELECT event_id, subscription_kind, status
+            FROM web_latest_subscription_state_v0
+            WHERE run_id = 'restart-run' AND subscription_key = 'BAR|123|5m|RTH'
+            """
+        ).fetchone()
+        latest_event_id = connection.execute(
+            """
+            SELECT MAX(id)
+            FROM subscription_lifecycle_event_v0
+            WHERE run_id = 'restart-run'
+            """
+        ).fetchone()[0]
+
+    assert row == (latest_event_id, "bar", "active")
+
+
+def test_quiet_quote_audit_migration_preserves_original_evidence(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "quiet-quote-defect-upgrade.sqlite3"
+    _apply_older_fixture(database, through_sequence=21)
+    with sqlite3.connect(database) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        for migration in migration_plan(MIGRATION_ROOT):
+            if not 22 <= migration.sequence <= 29:
+                continue
+            connection.executescript(migration.path.read_text(encoding="utf-8"))
+            connection.execute(
+                "INSERT INTO schema_migrations(version, applied_at_utc) VALUES (?, ?)",
+                (migration.path.name, "2026-08-04T00:00:00+00:00"),
+            )
+        connection.execute(
+            """
+            INSERT INTO prospective_run(
+                run_id, prospective_start_utc, app_version, git_commit,
+                model_artifact_id, universe_id, cohort, created_at_utc,
+                mode, status, scientific_classification
+            ) VALUES (
+                'legacy-quiet-run', '2026-08-03T13:30:00+00:00', 'test',
+                'deadbeef', 'M1C', 'frozen-20', 'anchor_frozen_20',
+                '2026-08-03T13:30:00+00:00', 'record_only', 'active', 'research_only'
+            )
+            """
+        )
+        envelope_id = int(
+            connection.execute(
+                """
+                INSERT INTO evidence_envelope(
+                    run_id, prospective_start_utc, app_version, git_commit,
+                    model_artifact_id, universe_id, cohort,
+                    source_timestamps_json, recorded_at_utc
+                ) VALUES (
+                    'legacy-quiet-run', '2026-08-03T13:30:00+00:00', 'test',
+                    'deadbeef', 'M1C', 'frozen-20', 'anchor_frozen_20', '[]',
+                    '2026-08-03T14:00:10+00:00'
+                )
+                """
+            ).lastrowid
+        )
+        checkpoint_id = int(
+            connection.execute(
+                """
+                INSERT INTO m1c_checkpoint_v0(
+                    envelope_id, run_id, symbol, session_date, checkpoint,
+                    bar_start_utc, bar_end_utc, feature_as_of_utc, model_id,
+                    model_version, model_hash, feature_hash,
+                    session_context_hash, feature_values_json, probability,
+                    threshold, threshold_passed, eligible, feature_freshness,
+                    missing_feature_count, rejection_reasons_json, claims_json
+                ) VALUES (
+                    ?, 'legacy-quiet-run', 'HIMS', '2026-08-03', 6,
+                    '2026-08-03T13:55:00+00:00', '2026-08-03T14:00:00+00:00',
+                    '2026-08-03T14:00:00+00:00', 'M1C', 'frozen-m1c-v0',
+                    ?, ?, ?, '{}', 0.13, 0.488333710794033, 0, 0,
+                    'fresh', 0, '["underlying_quote_stale"]', '{}'
+                )
+                """,
+                (envelope_id, "a" * 64, "b" * 64, "c" * 64),
+            ).lastrowid
+        )
+        quiet_checkpoint_id = int(
+            connection.execute(
+                """
+                INSERT INTO quiet_state_checkpoint_v0(
+                    envelope_id, checkpoint_id, run_id, symbol, session_date,
+                    checkpoint, m1c_probability, previous_m1c_probability,
+                    bottom_5, bottom_10, bottom_20, high_tail,
+                    distance_from_bottom_10, model_hash, feature_hash, eligible,
+                    data_quality_status, data_quality_flags_json, claims_json
+                ) VALUES (
+                    ?, ?, 'legacy-quiet-run', 'HIMS', '2026-08-03', 6,
+                    0.13, 0.20, 0, 1, 1, 0, -0.005896965695626,
+                    ?, ?, 0, 'invalid', '["underlying_quote_stale"]', '{}'
+                )
+                """,
+                (envelope_id, checkpoint_id, "a" * 64, "b" * 64),
+            ).lastrowid
+        )
+        original = connection.execute(
+            """
+            SELECT checkpoint_id, run_id, symbol, session_date, checkpoint,
+                   m1c_probability, eligible, data_quality_status,
+                   data_quality_flags_json
+            FROM quiet_state_checkpoint_v0 WHERE id = ?
+            """,
+            (quiet_checkpoint_id,),
+        ).fetchone()
+
+    ProspectiveRepository(database).migrate()
+
+    with sqlite3.connect(database) as connection:
+        preserved = connection.execute(
+            """
+            SELECT checkpoint_id, run_id, symbol, session_date, checkpoint,
+                   m1c_probability, eligible, data_quality_status,
+                   data_quality_flags_json
+            FROM quiet_state_checkpoint_v0 WHERE id = ?
+            """,
+            (quiet_checkpoint_id,),
+        ).fetchone()
+        quote_audit = connection.execute(
+            """
+            SELECT selected_underlying_quote_event_id,
+                   selected_underlying_quote_timestamp_utc,
+                   selected_underlying_quote_age_seconds,
+                   underlying_quote_selection_policy
+            FROM quiet_state_checkpoint_v0 WHERE id = ?
+            """,
+            (quiet_checkpoint_id,),
+        ).fetchone()
+        defect = connection.execute(
+            """
+            SELECT affected_checkpoint_count, dataset_scope,
+                   original_evidence_modified, recomputation_authorized,
+                   may_create_quiet_observation
+            FROM quiet_quote_instrumentation_defect_v0
+            """
+        ).fetchone()
+        affected = connection.execute(
+            """
+            SELECT quiet_checkpoint_id, original_eligible,
+                   original_data_quality_flags_json
+            FROM quiet_quote_instrumentation_defect_checkpoint_v0
+            """
+        ).fetchone()
+
+    assert preserved == original
+    assert quote_audit == (None, None, None, None)
+    assert defect == (
+        1,
+        "non_prospective_derived_instrumentation_audit",
+        0,
+        0,
+        0,
+    )
+    assert affected == (quiet_checkpoint_id, 0, '["underlying_quote_stale"]')
 
 
 def test_fresh_and_upgrade_migrations_produce_equivalent_schema(tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   DashboardPollCoordinator,
   detailRequestPlan,
+  endpointsForScreen,
 } from "../../packages/stocker_prospective/src/stocker_prospective/web_static/polling.mjs";
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
@@ -99,4 +100,18 @@ test("episode details load only on selection or explicit refresh", () => {
     }),
     null,
   );
+});
+
+test("the universe projection is slow and requested only on its visible screen", () => {
+  assert.deepEqual(endpointsForScreen("fast", "universe-monitor"), [
+    "/api/dashboard/summary",
+  ]);
+  assert.deepEqual(endpointsForScreen("slow", "live-monitor"), [
+    "/api/recorder/status",
+    "/api/recorder/capabilities",
+    "/api/market-data-budget",
+  ]);
+  assert.deepEqual(endpointsForScreen("slow", "universe-monitor"), [
+    "/api/universe/live",
+  ]);
 });

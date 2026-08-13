@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,7 +12,7 @@ from stocker_prospective.ibkr import (
     IBKRMarketDataAdapter,
     require_ibkr_socket_loopback_only,
 )
-from stocker_prospective.market_data import MarketDataBudget, MarketDataType
+from stocker_prospective.market_data import ConnectionState, MarketDataBudget, MarketDataType
 
 
 def _write_proc_table(path: Path, *listeners: tuple[str, int]) -> None:
@@ -150,6 +151,67 @@ def test_market_data_adapter_rechecks_socket_before_start_and_reconnect(
     adapter.stop()
 
     assert preflight_calls == [("127.0.0.1", 4002), ("127.0.0.1", 4002)]
+
+
+def test_not_connected_error_enters_lost_data_recovery_and_reconnects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import stocker_prospective.ibkr as ibkr_module
+
+    monkeypatch.setattr(ibkr_module, "require_official_ibkr_api", lambda: object())
+    adapter = IBKRMarketDataAdapter(
+        config=IBKRConnectionConfig(
+            host="127.0.0.1",
+            port=4002,
+            client_id=71,
+            expected_environment="paper",
+            connect_timeout_seconds=1,
+            request_timeout_seconds=1,
+            quote_capture_timeout_seconds=15,
+            allowed_market_data_types=(MarketDataType.LIVE,),
+        ),
+        budget=MarketDataBudget(
+            line_limit=4,
+            reserved_headroom=1,
+            request_rate_limit=2,
+        ),
+        socket_preflight=lambda _host, _port: ("127.0.0.1",),
+    )
+
+    class FakeClient:
+        def connect(self, *_: object) -> bool:
+            return True
+
+        def disconnect(self) -> None:
+            return None
+
+        def run(self) -> None:
+            adapter.on_connected(MarketDataType.LIVE)
+
+        def reqMktData(self, *_: object) -> None:  # noqa: N802
+            return None
+
+        def cancelMktData(self, *_: object) -> None:  # noqa: N802
+            return None
+
+    adapter.attach_official_client(FakeClient())
+    adapter.start()
+    request_id = adapter.request_market_data(
+        SimpleNamespace(),
+        subscription_key="AAL-underlying-level1",
+    )
+
+    adapter.on_error(request_id, 504, "Not connected")
+
+    health = adapter.connection.health()
+    assert health.state is ConnectionState.DISCONNECTED
+    assert health.last_error_code == 504
+    assert health.subscriptions_require_rebuild is True
+    assert adapter.subscriptions.active_items() == ()
+
+    adapter.reconnect()
+    assert adapter.connection.health().state is ConnectionState.CONNECTED
+    adapter.stop()
 
 
 def test_market_data_adapter_contains_client_loop_error_during_shutdown(

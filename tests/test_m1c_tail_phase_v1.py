@@ -588,7 +588,6 @@ def test_checkpoint_repository_persists_flat_tail_phase_fields(tmp_path: Path) -
         "end": "2024-12-31",
         "predictor_values_only": True,
     }
-
     decision = FreshEpisodeTracker().evaluate(
         symbol="AAL",
         session=SESSION,
@@ -635,7 +634,84 @@ def test_checkpoint_repository_persists_flat_tail_phase_fields(tmp_path: Path) -
     assert json.loads(str(episode["tail_phase_source_v1_json"])) == checkpoint_source
 
 
-def test_live_engine_logs_tail_phase_without_changing_episode_eligibility(
+def test_checkpoint_replay_accepts_legacy_stale_quote_rejection_as_diagnostic(
+    tmp_path: Path,
+) -> None:
+    database = ProspectiveRepository(tmp_path / "legacy-stale-quote.sqlite3")
+    database.migrate()
+    metadata = EvidenceMetadata(
+        run_id="legacy-stale-quote-v0",
+        prospective_start_utc=START,
+        app_version="test",
+        git_commit="a" * 40,
+        model_artifact_id="M1C",
+        universe_id="frozen-20",
+        cohort="anchor_frozen_20",
+        source_timestamps=[START.isoformat()],
+        recorded_at_utc=START,
+    )
+    database.create_run(metadata)
+    repository = FrozenRecorderRepository(database)
+    score = FrozenM1CScore(
+        model_hash="b" * 64,
+        probability=ABOVE,
+        threshold=M1C_FROZEN_THRESHOLD,
+        threshold_passed=True,
+        feature_order=("x",),
+        feature_values=(1.0,),
+        transformed_values=(1.0,),
+        feature_hash="c" * 64,
+        missing_feature_count=0,
+    )
+    checkpoint_id = repository.record_checkpoint(
+        metadata,
+        symbol="AAL",
+        session=SESSION,
+        checkpoint=6,
+        bar_start_utc=START - timedelta(minutes=5),
+        bar_end_utc=START,
+        score=score,
+        session_context_hash="d" * 64,
+        feature_values={"x": 1.0},
+        eligible=False,
+        feature_freshness="fresh",
+        rejection_reasons=("underlying_quote_stale",),
+    )
+
+    replayed_checkpoint_id = repository.record_checkpoint(
+        metadata,
+        symbol="AAL",
+        session=SESSION,
+        checkpoint=6,
+        bar_start_utc=START - timedelta(minutes=5),
+        bar_end_utc=START,
+        score=score,
+        session_context_hash="d" * 64,
+        feature_values={"x": 1.0},
+        eligible=True,
+        feature_freshness="fresh",
+        rejection_reasons=(),
+        diagnostic_quality_flags=("underlying_quote_stale",),
+    )
+
+    assert replayed_checkpoint_id == checkpoint_id
+    with sqlite3.connect(database.database_path) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            """
+            SELECT eligible, rejection_reasons_json, diagnostic_quality_flags_json
+            FROM m1c_checkpoint_v0
+            WHERE id = ?
+            """,
+            (checkpoint_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["eligible"] == 0
+    assert json.loads(str(row["rejection_reasons_json"])) == ["underlying_quote_stale"]
+    assert json.loads(str(row["diagnostic_quality_flags_json"])) == []
+
+
+def test_live_engine_logs_tail_phase_but_stale_quote_blocks_episode(
     tmp_path: Path,
 ) -> None:
     class FakeFeatureBuilder:
@@ -739,30 +815,38 @@ def test_live_engine_logs_tail_phase_without_changing_episode_eligibility(
             m1c_parity_passed=True,
             direction_parity_passed=False,
             clock_drift_within_tolerance=True,
-            underlying_quote_fresh=True,
+            underlying_quote_fresh=False,
             unresolved_bar_gap=False,
             raw_event_storage_writable=True,
             scientific_recording_authorized=True,
         )
     )
 
-    assert result.episode_decision.fresh_episode is True
-    assert result.tail_phase_v1.m1c_tail_phase_v1 == "FIRST_ENTRY"
+    assert result.episode_decision.fresh_episode is False
+    assert "underlying_quote_stale" in result.rejection_reasons
+    assert "underlying_quote_stale" in result.diagnostic_quality_flags
+    assert result.episode_safety is None
+    assert result.tail_phase_v1.m1c_tail_phase_v1 == "UNKNOWN_INCOMPLETE"
     assert result.movement_consumed_state_v1.movement_consumed_complete_v1
     assert result.movement_consumed_bucket_v1 == "LOW_OR_EQUAL"
     with database._connect() as connection:
         checkpoint = connection.execute(
             """
-            SELECT m1c_tail_phase_v1, movement_consumed_bucket_v1,
+            SELECT eligible, rejection_reasons_json, m1c_tail_phase_v1,
+                   phase_missing_reason_v1, movement_consumed_bucket_v1,
                    tail_phase_source_v1_json
             FROM m1c_checkpoint_v0
             """
         ).fetchone()
         episode = connection.execute("SELECT phase_at_trigger_v1 FROM m1c_episode_v0").fetchone()
     assert checkpoint is not None
-    assert episode is not None
-    assert checkpoint["m1c_tail_phase_v1"] == "FIRST_ENTRY"
-    assert episode["phase_at_trigger_v1"] == "FIRST_ENTRY"
+    assert episode is None
+    assert checkpoint["eligible"] == 0
+    assert json.loads(str(checkpoint["rejection_reasons_json"])) == ["underlying_quote_stale"]
+    assert checkpoint["m1c_tail_phase_v1"] == "UNKNOWN_INCOMPLETE"
+    assert checkpoint["phase_missing_reason_v1"] == (
+        "current_checkpoint_invalid:underlying_quote_stale"
+    )
     source = json.loads(str(checkpoint["tail_phase_source_v1_json"]))
     assert source["tail_phase_activation_status_v1"] == "available"
     assert source["previous_close_implied_movement_15m_status"] == "available"

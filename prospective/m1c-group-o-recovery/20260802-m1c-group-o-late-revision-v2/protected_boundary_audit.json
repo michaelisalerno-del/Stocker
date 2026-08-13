@@ -1,0 +1,16 @@
+{
+  "allowed_source_session": "exact_d1_for_a_future_signal_session",
+  "audited_failed_base_hash_bound_in_deployment_freeze": true,
+  "causal_friday_d1_source_rows_accessed_for_v1_failure_diagnosis": true,
+  "historical_signal_sessions_backfilled": false,
+  "monday_2026_08_03_market_data_consumed_before_revision": false,
+  "monday_market_data_prevention": "recorder_startup_blocks_before_ibkr_adapter_construction_until_linked_recovery_evidence_verifies",
+  "opening_leader_historical_outcomes_accessed": false,
+  "protected_outcomes_accessed": false,
+  "recovery_classification": "causal_pre_signal_late_source_observation_v2",
+  "schema_version": "m1c-group-o-recovery-protected-boundary-audit-v2",
+  "target_observation_session": "2026-07-31",
+  "target_signal_session": "2026-08-03",
+  "v1_runtime_attempt_preserved": true,
+  "v1_start_receipt_preserved_and_hash_bound": true
+}

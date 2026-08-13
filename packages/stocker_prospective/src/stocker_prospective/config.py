@@ -65,7 +65,7 @@ class RuntimeConfig(BaseModel):
     recorder_lease_stale_seconds: int = Field(default=60, ge=15)
     heartbeat_seconds: int = Field(default=10, ge=1)
     callback_inbox_max_unacknowledged: int = Field(default=65_536, ge=1)
-    callback_inbox_batch_limit: int = Field(default=256, ge=1, le=65_536)
+    callback_inbox_batch_limit: int = Field(default=4_096, ge=1, le=65_536)
     callback_inbox_lease_seconds: int = Field(default=30, ge=5)
     callback_heartbeat_stale_seconds: int = Field(default=30, ge=5)
     # With only the always-on five-minute bar surface active, a normalised raw
@@ -76,6 +76,10 @@ class RuntimeConfig(BaseModel):
     callback_acknowledgement_stale_seconds: int = Field(default=30, ge=5)
     callback_inbox_healthy_backlog: int = Field(default=5_000, ge=0)
     callback_inbox_oldest_healthy_seconds: int = Field(default=60, ge=1)
+    callback_inbox_retention_enabled: bool = False
+    callback_inbox_retention_seconds: int = Field(default=900, ge=60)
+    callback_inbox_compaction_interval_seconds: int = Field(default=60, ge=10)
+    callback_inbox_compaction_batch_limit: int = Field(default=4_096, ge=1, le=65_536)
 
     @field_validator("prospective_start_utc")
     @classmethod
@@ -118,7 +122,7 @@ class WebConfig(BaseModel):
         ge=1024 * 1024,
         le=512 * 1024 * 1024,
     )
-    operational_projection_cache_seconds: float = Field(default=60.0, ge=0.0, le=300.0)
+    operational_projection_cache_seconds: float = Field(default=300.0, ge=300.0, le=3_600.0)
     allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])
 
     @model_validator(mode="after")
@@ -163,6 +167,9 @@ class IBKRConfig(BaseModel):
     max_concurrent_snapshots: int = Field(default=2, ge=1)
     max_active_option_episodes: int = Field(default=1, ge=1, le=2)
     max_option_lines_per_episode: int = Field(default=8, ge=4, le=16)
+    option_commission_per_contract: float = Field(default=0.65, ge=0.0)
+    option_regulatory_fee_per_contract: float = Field(default=0.0, ge=0.0)
+    option_exchange_fee_per_contract: float = Field(default=0.0, ge=0.0)
     tick_by_tick_active_underlyings: int = Field(default=1, ge=0, le=2)
     level2_active_underlyings: int = Field(default=0, ge=0, le=1)
     max_high_resolution_underlyings: int = Field(default=1, ge=1, le=2)
@@ -436,6 +443,9 @@ def validate_persistent_paths(config: ProspectiveConfig, release_directory: str 
 def public_config(config: ProspectiveConfig) -> dict[str, object]:
     """Return a secret-free public configuration projection."""
 
+    cross_vendor_credential_configured = (
+        os.environ.get(config.parallel_validation.credential_status_env) == "1"
+    )
     return {
         "runtime": {
             "mode": config.runtime.mode,
@@ -485,9 +495,14 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
         "parallel_validation": {
             "enabled": config.parallel_validation.enabled,
             "provider": config.parallel_validation.provider,
-            "credential_configured": (
-                os.environ.get(config.parallel_validation.credential_status_env) == "1"
+            "credential_configured": cross_vendor_credential_configured,
+            "cross_vendor_validation_status": (
+                "pending"
+                if config.parallel_validation.enabled and cross_vendor_credential_configured
+                else "not_configured"
             ),
+            "diagnostic_only": True,
+            "recorder_blocking": False,
             "capture_delay_seconds": config.parallel_validation.capture_delay_seconds,
         },
     }

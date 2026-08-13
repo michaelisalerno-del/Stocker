@@ -53,13 +53,13 @@ class RawMarketEvent(BaseModel):
 
 
 class RawCallbackEnvelopeEvent(BaseModel):
-    """Original callback evidence retained when scientific projection is blocked.
+    """Original callback evidence retained independently of derived projection.
 
-    This deliberately does not inherit ``RawMarketEvent``: official control
-    callbacks may use a negative request ID and an interrupted callback may
-    lack a provider monotonic timestamp.  ``received_monotonic_ns`` is a
-    deterministic ordering surrogate in that case; the original nullable
-    value remains explicit in ``original_received_monotonic_ns``.
+    This deliberately does not inherit ``RawMarketEvent``: provider and control
+    callbacks may use a negative request ID or lack a provider monotonic
+    timestamp. ``received_monotonic_ns`` is a deterministic ordering surrogate
+    in that case; the original nullable value remains explicit in
+    ``original_received_monotonic_ns``.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -84,7 +84,10 @@ class RawCallbackEnvelopeEvent(BaseModel):
     original_payload: dict[str, Any]
     admission_run_id: str | None
     admission_recorder_generation: int | None
-    recovery_disposition: Literal["scientifically_blocked_raw_only"]
+    recovery_disposition: Literal[
+        "original_provider_callback",
+        "scientifically_blocked_raw_only",
+    ]
 
     @field_validator("received_timestamp_utc", "provider_timestamp_utc")
     @classmethod
@@ -238,7 +241,7 @@ class OptionQuoteEvent(RawMarketEvent):
     open_interest: float | None = None
     option_computation_by_source: dict[
         str,
-        dict[str, float | None],
+        dict[str, float | str | None],
     ] = Field(default_factory=dict)
     quote_attributes: dict[str, bool | int | float | str | None] = Field(default_factory=dict)
 

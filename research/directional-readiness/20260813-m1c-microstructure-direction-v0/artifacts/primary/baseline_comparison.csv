@@ -1,0 +1,7 @@
+period,baseline,horizon_minutes,eligible_m1c_episodes,direction_resolved_n,coverage,direction_accuracy,status
+descriptive_development_only,FIRST_BAR_SIGN,15,0,0,,,INSUFFICIENT_DATA
+descriptive_development_only,REFERENCE_RANGE_BREAK,15,0,0,,,INSUFFICIENT_DATA
+descriptive_development_only,A1,15,0,0,,,INSUFFICIENT_DATA
+descriptive_development_only,C1,15,0,0,,,INSUFFICIENT_DATA
+descriptive_development_only,R1,15,0,0,,,INSUFFICIENT_DATA
+descriptive_development_only,UNCONDITIONAL_MAJORITY_DIRECTION,15,0,0,,,INSUFFICIENT_DATA

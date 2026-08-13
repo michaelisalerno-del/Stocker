@@ -332,7 +332,7 @@ def test_contract_discovery_failure_is_persisted_without_live_chain_lines(
     assert stored["missing_reason"] == "primary_1dte_option_pair_unavailable"
 
 
-def test_phase_resolution_excludes_first_twenty_valid_transfer_sessions(
+def test_phase_resolution_does_not_require_transfer_sessions(
     tmp_path: Path,
 ) -> None:
     database = ProspectiveRepository(tmp_path / "opening-reversal.sqlite3")
@@ -346,11 +346,11 @@ def test_phase_resolution_excludes_first_twenty_valid_transfer_sessions(
         session=SESSION,
     )
 
-    assert phase == "engineering_transfer"
-    assert transfer == "engineering_transfer_pending"
+    assert phase == "prospective_development"
+    assert transfer == "cross_vendor_validation_not_configured"
 
 
-def test_phase_requires_immutable_aggregate_transfer_receipt(
+def test_invalid_transfer_receipt_does_not_block_prospective_development(
     tmp_path: Path,
 ) -> None:
     database = ProspectiveRepository(tmp_path / "opening-reversal.sqlite3")
@@ -382,8 +382,8 @@ def test_phase_requires_immutable_aggregate_transfer_receipt(
         session=SESSION + timedelta(days=1),
     )
 
-    assert phase == "engineering_transfer"
-    assert decision == "engineering_transfer_pending"
+    assert phase == "prospective_development"
+    assert decision == "cross_vendor_validation_not_configured"
 
 
 def test_transfer_boundary_receipt_rejects_protected_outcome_access() -> None:

@@ -1,0 +1,12 @@
+{
+  "account_values_accessed": false,
+  "broker_order_methods_reachable": false,
+  "order_construction_allowed": false,
+  "order_placement_allowed": false,
+  "order_preview_allowed": false,
+  "order_simulation_allowed": false,
+  "pre_adapter_recovery_command_uses_ibkr": false,
+  "recovery_scope": "pre_signal_group_o_context_only",
+  "runtime_mode_required": "record_only",
+  "schema_version": "m1c-group-o-recovery-order-disable-audit-v2"
+}

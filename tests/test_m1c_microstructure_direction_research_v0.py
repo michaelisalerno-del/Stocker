@@ -128,6 +128,31 @@ def test_method_summary_keeps_abstentions_in_coverage_denominator() -> None:
     assert summary["joint_rate_over_all_m1c_episodes"] == 0.5
 
 
+def test_joint_metrics_are_unavailable_without_the_canonical_m1c_move_label() -> None:
+    points = (
+        PricePointV0(
+            received_timestamp_utc=T0 + timedelta(seconds=1),
+            midpoint=100.0,
+            event_id="entry",
+        ),
+        PricePointV0(
+            received_timestamp_utc=T0 + timedelta(minutes=15, seconds=1),
+            midpoint=101.0,
+            event_id="terminal",
+        ),
+    )
+    resolved = evaluate_forward_outcomes_v0(direction=_direction(), price_points=points)[2]
+
+    summary = summarise_method_results_v0(
+        rows=(resolved,),
+        eligible_episode_count=1,
+        abstain_episode_count=0,
+    )
+
+    assert summary["useful_joint_rate"] is None
+    assert summary["joint_rate_over_all_m1c_episodes"] is None
+
+
 def test_zero_episode_census_writes_full_artifact_set_and_decision_d(tmp_path) -> None:
     census = tmp_path / "source_census.json"
     census.write_text(

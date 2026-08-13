@@ -94,7 +94,7 @@ class MicrostructureDirectionResultV0(BaseModel):
     probable_seller_initiated_volume: float
     tick_by_tick_status: TickByTickStatusV0
     depth_status: DepthStatusV0
-    market_data_type: str
+    market_data_type: DirectionMarketDataTypeV0
     data_quality_flags: tuple[str, ...]
     causal_valid: bool
     formulas_version: str = FORMULAS_VERSION_V0

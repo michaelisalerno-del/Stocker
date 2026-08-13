@@ -261,8 +261,16 @@ def summarise_method_results_v0(
         for row in resolved
         if row.signed_forward_log_return is not None
     )
-    useful_joint_count = sum(
-        row.m1c_genuine_forward_move is True and row.direction_correct is True for row in resolved
+    joint_labels_complete = bool(resolved) and all(
+        row.m1c_genuine_forward_move is not None for row in resolved
+    )
+    useful_joint_count = (
+        sum(
+            row.m1c_genuine_forward_move is True and row.direction_correct is True
+            for row in resolved
+        )
+        if joint_labels_complete
+        else None
     )
     return {
         "eligible_m1c_episodes": eligible_episode_count,
@@ -287,10 +295,13 @@ def summarise_method_results_v0(
         ),
         "accuracy_ci95_low": interval_low,
         "accuracy_ci95_high": interval_high,
-        "useful_joint_rate": _ratio(useful_joint_count, len(resolved)),
-        "joint_rate_over_all_m1c_episodes": _ratio(
-            useful_joint_count,
-            eligible_episode_count,
+        "useful_joint_rate": (
+            None if useful_joint_count is None else _ratio(useful_joint_count, len(resolved))
+        ),
+        "joint_rate_over_all_m1c_episodes": (
+            None
+            if useful_joint_count is None
+            else _ratio(useful_joint_count, eligible_episode_count)
         ),
     }
 
@@ -329,7 +340,12 @@ def _write_json(path: Path, payload: object) -> None:
 
 def _write_csv(path: Path, fields: Sequence[str], rows: Iterable[Mapping[str, object]]) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=fields,
+            extrasaction="ignore",
+            lineterminator="\n",
+        )
         writer.writeheader()
         writer.writerows(rows)
 

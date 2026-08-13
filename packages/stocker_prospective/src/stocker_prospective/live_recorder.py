@@ -3505,8 +3505,13 @@ class FrozenM1CLiveRecorder:
                         if start <= trade.ordering_timestamp <= end
                         and trade.received_timestamp_utc <= end
                     )
+                    causal_quotes = tuple(
+                        quote
+                        for quote in self._quotes.get(symbol, ())
+                        if quote.ordering_timestamp <= end and quote.received_timestamp_utc <= end
+                    )
                     market_data_types = {
-                        event.market_data_type.value for event in (*window_quotes, *window_trades)
+                        event.market_data_type.value for event in (*causal_quotes, *window_trades)
                     }
                     market_data_type = (
                         next(iter(market_data_types))

@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS microstructure_direction_v0 (
     trade_classification_valid_fraction REAL NOT NULL
         CHECK (trade_classification_valid_fraction BETWEEN 0.0 AND 1.0),
     stale_quote_fraction REAL CHECK (stale_quote_fraction BETWEEN 0.0 AND 1.0),
+    unclassified_trade_fraction REAL CHECK (unclassified_trade_fraction BETWEEN 0.0 AND 1.0),
     unknown_trade_volume_fraction REAL NOT NULL
         CHECK (unknown_trade_volume_fraction BETWEEN 0.0 AND 1.0),
     probable_buyer_initiated_volume REAL NOT NULL,

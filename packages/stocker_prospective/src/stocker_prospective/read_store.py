@@ -1062,6 +1062,12 @@ class ProspectiveReadStore:
         if run_id is None:
             return []
         with self._connection() as connection:
+            table_present = connection.execute(
+                "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?",
+                ("microstructure_direction_v0",),
+            ).fetchone()
+            if table_present is None:
+                return []
             rows = connection.execute(
                 """
                 SELECT * FROM microstructure_direction_v0

@@ -2,6 +2,14 @@
   "observed_at_utc": "2026-08-13T15:33:40Z",
   "source_label": "read-only dedicated-server prospective archive census",
   "server_database_root": "/var/lib/stocker/prospective",
+  "runtime_capacity": {
+    "available_tick_by_tick": 2,
+    "configured_max_tick_by_tick": 2,
+    "paired_bidask_last_underlyings_supported": 1,
+    "available_depth": 0,
+    "market_data_type": "live",
+    "observed_manifest": "/var/lib/stocker/prospective/ibkr_runtime_capacity_manifest.json"
+  },
   "databases": [
     {
       "database_identity": "prospective-20260806t145500z.sqlite3",

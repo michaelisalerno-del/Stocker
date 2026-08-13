@@ -192,6 +192,21 @@ def test_missing_or_invalid_trade_evidence_abstains_without_imputation() -> None
     assert rows[DirectionMethodV0.M01].component_validity["trade_imbalance"] is False
 
 
+def test_carried_causal_quote_can_resolve_quote_and_microprice_without_an_update() -> None:
+    summary = _summary()
+    summary = summary.model_copy(
+        update={
+            "quote_flow": summary.quote_flow.model_copy(update={"quote_update_count": 0}),
+        }
+    )
+
+    rows = _results(summary)
+
+    assert rows[DirectionMethodV0.M02].action is DirectionActionV0.UP
+    assert rows[DirectionMethodV0.M03].action is DirectionActionV0.UP
+    assert rows[DirectionMethodV0.M02].quote_count == 0
+
+
 def test_all_missing_core_evidence_abstains_without_calculating_a_score() -> None:
     rows = _results(
         _summary(
@@ -274,6 +289,30 @@ def test_causal_entry_is_first_valid_quote_strictly_after_information_cutoff() -
     assert entry.timestamp_utc == T0 + timedelta(microseconds=1)
     assert entry.delay_seconds == 0.000001
     assert entry.midpoint == 100.1
+
+
+def test_causal_entry_uses_first_local_receipt_not_earliest_provider_timestamp() -> None:
+    received_later = _quote("provider-first", T0 + timedelta(microseconds=1)).model_copy(
+        update={
+            "received_timestamp_utc": T0 + timedelta(microseconds=3),
+            "received_monotonic_ns": 3,
+        }
+    )
+    received_first = _quote("received-first", T0 + timedelta(microseconds=2)).model_copy(
+        update={
+            "received_timestamp_utc": T0 + timedelta(microseconds=2),
+            "received_monotonic_ns": 2,
+        }
+    )
+
+    entry = select_first_causal_entry_v0(
+        information_cutoff_utc=T0,
+        quotes=(received_later, received_first),
+    )
+
+    assert entry is not None
+    assert entry.event_id == "received-first"
+    assert entry.timestamp_utc == T0 + timedelta(microseconds=2)
 
 
 def test_repeated_direction_builds_are_identical_and_permanently_research_labelled() -> None:

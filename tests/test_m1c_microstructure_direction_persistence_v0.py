@@ -51,7 +51,8 @@ def _result() -> MicrostructureDirectionResultV0:
         trade_count=4,
         classified_trade_count=3,
         trade_classification_valid_fraction=0.75,
-        stale_quote_fraction=0.0,
+        stale_quote_fraction=None,
+        unclassified_trade_fraction=0.25,
         unknown_trade_volume_fraction=0.1,
         probable_buyer_initiated_volume=75.0,
         probable_seller_initiated_volume=25.0,
@@ -137,6 +138,8 @@ def test_additive_direction_rows_are_immutable_and_readable(tmp_path) -> None:
     assert projected[0]["direction_method"] == DirectionMethodV0.M01.value
     assert projected[0]["action"] == "UP"
     assert projected[0]["component_values"] == {"trade_imbalance": 0.5}
+    assert projected[0]["stale_quote_fraction"] is None
+    assert projected[0]["unclassified_trade_fraction"] == 0.25
     assert projected[0]["research_label"] == RESEARCH_LABEL_V0
 
 
@@ -160,3 +163,18 @@ def test_direction_migration_keeps_research_rows_separate(tmp_path) -> None:
     assert "direction_classification_v0" in tables
     assert methods
     assert all("A1" not in sql and "C1" not in sql and "R1" not in sql for sql in methods)
+
+
+def test_read_projection_fails_closed_for_a_pre_direction_schema(tmp_path) -> None:
+    database = ProspectiveRepository(tmp_path / "prospective.sqlite3")
+    database.migrate()
+    database.create_run(_metadata())
+    with sqlite3.connect(database.database_path) as connection:
+        connection.execute("DROP TABLE microstructure_direction_v0")
+
+    projected = ProspectiveReadStore(
+        database.database_path,
+        run_id="run-direction-v0",
+    ).episode_microstructure_direction_v0("episode-direction-v0")
+
+    assert projected == []

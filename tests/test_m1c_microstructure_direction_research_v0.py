@@ -40,7 +40,8 @@ def _direction(action: DirectionActionV0 = DirectionActionV0.UP) -> Microstructu
         trade_count=4,
         classified_trade_count=3,
         trade_classification_valid_fraction=0.75,
-        stale_quote_fraction=0.0,
+        stale_quote_fraction=None,
+        unclassified_trade_fraction=0.25,
         unknown_trade_volume_fraction=0.1,
         probable_buyer_initiated_volume=75.0,
         probable_seller_initiated_volume=25.0,
@@ -54,22 +55,28 @@ def _direction(action: DirectionActionV0 = DirectionActionV0.UP) -> Microstructu
 
 def test_forward_outcome_starts_strictly_after_cutoff_and_uses_log_returns() -> None:
     points = (
-        PricePointV0(timestamp_utc=T0, midpoint=999.0, event_id="at-cutoff"),
-        PricePointV0(timestamp_utc=T0 + timedelta(seconds=1), midpoint=100.0, event_id="entry"),
-        PricePointV0(timestamp_utc=T0 + timedelta(minutes=2), midpoint=102.0, event_id="high"),
-        PricePointV0(timestamp_utc=T0 + timedelta(minutes=3), midpoint=99.0, event_id="low"),
+        PricePointV0(received_timestamp_utc=T0, midpoint=999.0, event_id="at-cutoff"),
         PricePointV0(
-            timestamp_utc=T0 + timedelta(minutes=5, seconds=1),
+            received_timestamp_utc=T0 + timedelta(seconds=1), midpoint=100.0, event_id="entry"
+        ),
+        PricePointV0(
+            received_timestamp_utc=T0 + timedelta(minutes=2), midpoint=102.0, event_id="high"
+        ),
+        PricePointV0(
+            received_timestamp_utc=T0 + timedelta(minutes=3), midpoint=99.0, event_id="low"
+        ),
+        PricePointV0(
+            received_timestamp_utc=T0 + timedelta(minutes=5, seconds=1),
             midpoint=101.0,
             event_id="terminal-5m",
         ),
         PricePointV0(
-            timestamp_utc=T0 + timedelta(minutes=10, seconds=1),
+            received_timestamp_utc=T0 + timedelta(minutes=10, seconds=1),
             midpoint=103.0,
             event_id="terminal-10m",
         ),
         PricePointV0(
-            timestamp_utc=T0 + timedelta(minutes=15, seconds=1),
+            received_timestamp_utc=T0 + timedelta(minutes=15, seconds=1),
             midpoint=104.0,
             event_id="terminal-15m",
         ),
@@ -92,14 +99,20 @@ def test_forward_outcome_starts_strictly_after_cutoff_and_uses_log_returns() -> 
 
 def test_method_summary_keeps_abstentions_in_coverage_denominator() -> None:
     points = (
-        PricePointV0(timestamp_utc=T0 + timedelta(seconds=1), midpoint=100.0, event_id="entry"),
         PricePointV0(
-            timestamp_utc=T0 + timedelta(minutes=15, seconds=1),
+            received_timestamp_utc=T0 + timedelta(seconds=1), midpoint=100.0, event_id="entry"
+        ),
+        PricePointV0(
+            received_timestamp_utc=T0 + timedelta(minutes=15, seconds=1),
             midpoint=101.0,
             event_id="terminal",
         ),
     )
-    resolved = evaluate_forward_outcomes_v0(direction=_direction(), price_points=points)[2]
+    resolved = evaluate_forward_outcomes_v0(
+        direction=_direction(),
+        price_points=points,
+        m1c_genuine_forward_move=True,
+    )[2]
 
     summary = summarise_method_results_v0(
         rows=(resolved,),
@@ -111,6 +124,8 @@ def test_method_summary_keeps_abstentions_in_coverage_denominator() -> None:
     assert summary["direction_resolved_n"] == 1
     assert summary["coverage"] == 0.5
     assert summary["direction_accuracy"] == 1.0
+    assert summary["useful_joint_rate"] == 1.0
+    assert summary["joint_rate_over_all_m1c_episodes"] == 0.5
 
 
 def test_zero_episode_census_writes_full_artifact_set_and_decision_d(tmp_path) -> None:

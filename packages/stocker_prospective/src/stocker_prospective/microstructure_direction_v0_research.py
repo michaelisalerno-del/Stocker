@@ -10,6 +10,7 @@ import math
 import statistics
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -48,10 +49,16 @@ BASELINES_V0 = (
 )
 
 
+class RealizedDirectionV0(StrEnum):
+    UP = "UP"
+    DOWN = "DOWN"
+    FLAT = "FLAT"
+
+
 class PricePointV0(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    timestamp_utc: datetime
+    received_timestamp_utc: datetime
     midpoint: float
     event_id: str
 
@@ -76,18 +83,20 @@ class ForwardDirectionOutcomeV0(BaseModel):
     terminal_timestamp_utc: datetime
     terminal_midpoint: float
     forward_log_return: float
-    realized_direction: str
+    realized_direction: RealizedDirectionV0
     direction_correct: bool | None
     signed_forward_log_return: float | None
     signed_mfe: float | None
     signed_mae: float | None
     confirmation_delay_seconds: float
+    m1c_genuine_forward_move: bool | None
 
 
 def evaluate_forward_outcomes_v0(
     *,
     direction: MicrostructureDirectionResultV0,
     price_points: tuple[PricePointV0, ...],
+    m1c_genuine_forward_move: bool | None = None,
 ) -> tuple[ForwardDirectionOutcomeV0, ...]:
     """Evaluate gross underlying direction from the first post-cutoff midpoint."""
 
@@ -98,28 +107,43 @@ def evaluate_forward_outcomes_v0(
                 for point in price_points
                 if math.isfinite(point.midpoint) and point.midpoint > 0.0
             ),
-            key=lambda point: (point.timestamp_utc, point.event_id),
+            key=lambda point: (point.received_timestamp_utc, point.event_id),
         )
     )
     entry = next(
-        (point for point in ordered if point.timestamp_utc > direction.information_cutoff_utc),
+        (
+            point
+            for point in ordered
+            if point.received_timestamp_utc > direction.information_cutoff_utc
+        ),
         None,
     )
     if entry is None:
         return ()
     outcomes: list[ForwardDirectionOutcomeV0] = []
     for horizon in HORIZONS_MINUTES_V0:
-        target = entry.timestamp_utc + timedelta(minutes=horizon)
-        terminal = next((point for point in ordered if point.timestamp_utc >= target), None)
+        target = entry.received_timestamp_utc + timedelta(minutes=horizon)
+        terminal = next(
+            (point for point in ordered if point.received_timestamp_utc >= target),
+            None,
+        )
         if terminal is None:
             continue
         path = tuple(
             point
             for point in ordered
-            if entry.timestamp_utc <= point.timestamp_utc <= terminal.timestamp_utc
+            if entry.received_timestamp_utc
+            <= point.received_timestamp_utc
+            <= terminal.received_timestamp_utc
         )
         forward_return = math.log(terminal.midpoint / entry.midpoint)
-        realized = "UP" if forward_return > 0.0 else "DOWN" if forward_return < 0.0 else "FLAT"
+        realized = (
+            RealizedDirectionV0.UP
+            if forward_return > 0.0
+            else RealizedDirectionV0.DOWN
+            if forward_return < 0.0
+            else RealizedDirectionV0.FLAT
+        )
         direction_sign = (
             1.0
             if direction.action is DirectionActionV0.UP
@@ -142,15 +166,15 @@ def evaluate_forward_outcomes_v0(
                 action=direction.action,
                 information_cutoff_utc=direction.information_cutoff_utc,
                 entry_event_id=entry.event_id,
-                entry_timestamp_utc=entry.timestamp_utc,
+                entry_timestamp_utc=entry.received_timestamp_utc,
                 entry_delay_seconds=(
-                    entry.timestamp_utc - direction.information_cutoff_utc
+                    entry.received_timestamp_utc - direction.information_cutoff_utc
                 ).total_seconds(),
                 entry_midpoint=entry.midpoint,
                 horizon_minutes=horizon,
                 target_timestamp_utc=target,
                 terminal_event_id=terminal.event_id,
-                terminal_timestamp_utc=terminal.timestamp_utc,
+                terminal_timestamp_utc=terminal.received_timestamp_utc,
                 terminal_midpoint=terminal.midpoint,
                 forward_log_return=forward_return,
                 realized_direction=realized,
@@ -158,8 +182,14 @@ def evaluate_forward_outcomes_v0(
                     None
                     if direction_sign is None
                     else (
-                        (direction.action is DirectionActionV0.UP and realized == "UP")
-                        or (direction.action is DirectionActionV0.DOWN and realized == "DOWN")
+                        (
+                            direction.action is DirectionActionV0.UP
+                            and realized is RealizedDirectionV0.UP
+                        )
+                        or (
+                            direction.action is DirectionActionV0.DOWN
+                            and realized is RealizedDirectionV0.DOWN
+                        )
                     )
                 ),
                 signed_forward_log_return=(
@@ -168,6 +198,7 @@ def evaluate_forward_outcomes_v0(
                 signed_mfe=None if not signed_path else max(signed_path),
                 signed_mae=None if not signed_path else min(signed_path),
                 confirmation_delay_seconds=direction.confirmation_delay_seconds,
+                m1c_genuine_forward_move=m1c_genuine_forward_move,
             )
         )
     return tuple(outcomes)
@@ -212,14 +243,14 @@ def summarise_method_results_v0(
 
     resolved = tuple(row for row in rows if row.action is not DirectionActionV0.ABSTAIN)
     correct = sum(row.direction_correct is True for row in resolved)
-    predictions = ("UP", "DOWN")
-    precision: dict[str, float | None] = {}
-    recall: dict[str, float | None] = {}
+    predictions = (RealizedDirectionV0.UP, RealizedDirectionV0.DOWN)
+    precision: dict[RealizedDirectionV0, float | None] = {}
+    recall: dict[RealizedDirectionV0, float | None] = {}
     for label in predictions:
-        predicted = sum(row.action.value == label for row in resolved)
-        actual = sum(row.realized_direction == label for row in resolved)
+        predicted = sum(row.action.value == label.value for row in resolved)
+        actual = sum(row.realized_direction is label for row in resolved)
         true_positive = sum(
-            row.action.value == label and row.realized_direction == label for row in resolved
+            row.action.value == label.value and row.realized_direction is label for row in resolved
         )
         precision[label] = _ratio(true_positive, predicted)
         recall[label] = _ratio(true_positive, actual)
@@ -229,6 +260,9 @@ def summarise_method_results_v0(
         row.signed_forward_log_return
         for row in resolved
         if row.signed_forward_log_return is not None
+    )
+    useful_joint_count = sum(
+        row.m1c_genuine_forward_move is True and row.direction_correct is True for row in resolved
     )
     return {
         "eligible_m1c_episodes": eligible_episode_count,
@@ -240,10 +274,10 @@ def summarise_method_results_v0(
         ),
         "direction_accuracy": _ratio(correct, len(resolved)),
         "balanced_accuracy": _mean(balanced_values),
-        "up_precision": precision["UP"],
-        "down_precision": precision["DOWN"],
-        "up_recall": recall["UP"],
-        "down_recall": recall["DOWN"],
+        "up_precision": precision[RealizedDirectionV0.UP],
+        "down_precision": precision[RealizedDirectionV0.DOWN],
+        "up_recall": recall[RealizedDirectionV0.UP],
+        "down_recall": recall[RealizedDirectionV0.DOWN],
         "mean_signed_forward_log_return": _mean(signed_returns),
         "median_signed_forward_log_return": _median(signed_returns),
         "mean_signed_mfe": _mean(row.signed_mfe for row in resolved if row.signed_mfe is not None),
@@ -253,8 +287,11 @@ def summarise_method_results_v0(
         ),
         "accuracy_ci95_low": interval_low,
         "accuracy_ci95_high": interval_high,
-        "useful_joint_rate": None,
-        "joint_rate_over_all_m1c_episodes": None,
+        "useful_joint_rate": _ratio(useful_joint_count, len(resolved)),
+        "joint_rate_over_all_m1c_episodes": _ratio(
+            useful_joint_count,
+            eligible_episode_count,
+        ),
     }
 
 
@@ -307,6 +344,7 @@ def run_census_only_research_v0(
     census_bytes = census_path.read_bytes()
     census = json.loads(census_bytes)
     databases = tuple(census.get("databases", ()))
+    runtime_capacity = census.get("runtime_capacity", {})
     eligible = sum(int(item.get("eligible_m1c_episodes", 0)) for item in databases)
     micro_episodes = sum(int(item.get("microstructure_episodes", 0)) for item in databases)
     micro_rows = sum(int(item.get("episode_microstructure_rows", 0)) for item in databases)
@@ -455,10 +493,18 @@ def run_census_only_research_v0(
         ),
         "assessment_claimed": False,
         "level_ii_primary": False,
+        "runtime_capacity": runtime_capacity,
         "research_label": RESEARCH_LABEL_V0,
     }
     _write_json(output_root / "run_manifest.json", manifest)
     _write_json(output_root / "decision.json", decision)
+    reproduce_command = (
+        "PYTHONPATH=packages/stocker_prospective/src python3 -m "
+        "stocker_prospective.microstructure_direction_v0_research --census-json "
+        "research/directional-readiness/20260813-m1c-microstructure-direction-v0/"
+        "source_census.json --output research/directional-readiness/"
+        "20260813-m1c-microstructure-direction-v0/artifacts/primary"
+    )
     report = f"""# M1C Microstructure Direction V0
 
 {RESEARCH_LABEL_V0}
@@ -474,6 +520,17 @@ development/assessment split or directional performance claim is possible.
 All M01–M06 definitions, nine causal timing windows, and +5/+10/+15 minute
 underlying horizons are emitted in the CSV schemas, but metric cells remain
 unestimated rather than being imputed.
+
+The runtime capacity manifest reports {runtime_capacity.get("available_tick_by_tick", "unknown")}
+available tick-by-tick subscriptions, supporting
+{runtime_capacity.get("paired_bidask_last_underlyings_supported", "unknown")} paired BidAsk + Last
+high-resolution underlying. No capacity or Level II configuration change is recommended.
+
+## Reproduce this zero-data assessment
+
+```bash
+{reproduce_command}
+```
 """
     (output_root / "README.md").write_text(report, encoding="utf-8")
     (output_root / "report.md").write_text(report, encoding="utf-8")
@@ -503,6 +560,7 @@ if __name__ == "__main__":
 __all__ = [
     "ForwardDirectionOutcomeV0",
     "PricePointV0",
+    "RealizedDirectionV0",
     "evaluate_forward_outcomes_v0",
     "run_census_only_research_v0",
     "summarise_method_results_v0",

@@ -2320,6 +2320,7 @@ class FrozenRecorderRepository:
                         component_values_json, component_validity_json,
                         quote_count, trade_count, classified_trade_count,
                         trade_classification_valid_fraction, stale_quote_fraction,
+                        unclassified_trade_fraction,
                         unknown_trade_volume_fraction,
                         probable_buyer_initiated_volume,
                         probable_seller_initiated_volume, tick_by_tick_status,
@@ -2327,7 +2328,7 @@ class FrozenRecorderRepository:
                         causal_valid, formulas_version, research_label,
                         payload_json, claims_json
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         envelope_id,
@@ -2350,6 +2351,7 @@ class FrozenRecorderRepository:
                         result.classified_trade_count,
                         result.trade_classification_valid_fraction,
                         result.stale_quote_fraction,
+                        result.unclassified_trade_fraction,
                         result.unknown_trade_volume_fraction,
                         result.probable_buyer_initiated_volume,
                         result.probable_seller_initiated_volume,

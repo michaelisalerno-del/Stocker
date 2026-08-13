@@ -3232,17 +3232,25 @@ class FrozenM1CLiveRecorder:
                     causal_depth_valid = bool(
                         depth_present and self._last_depth_validity.get(symbol, False)
                     )
+                    tick_bidask_present = any(
+                        owner.symbol == symbol and owner.kind is StreamKind.UNDERLYING_TICK_BIDASK
+                        for owner in self.normalizer.owners
+                    ) or any(
+                        quote.source == "official_ibkr_tick_by_tick_bidask"
+                        for quote in window_quotes
+                    )
+                    tick_last_present = any(
+                        owner.symbol == symbol and owner.kind is StreamKind.UNDERLYING_TICK_LAST
+                        for owner in self.normalizer.owners
+                    ) or bool(window_trades)
                     direction_results = build_microstructure_direction_v0(
                         episode_id=episode_id,
                         run_id=metadata.run_id,
                         trigger_timestamp_utc=trigger_timestamp,
                         window_name=name,
                         summary=summary,
-                        tick_bidask_present=any(
-                            quote.source == "official_ibkr_tick_by_tick_bidask"
-                            for quote in window_quotes
-                        ),
-                        tick_last_present=bool(window_trades),
+                        tick_bidask_present=tick_bidask_present,
+                        tick_last_present=tick_last_present,
                         depth_present=depth_present,
                         depth_valid=causal_depth_valid,
                         market_data_type=market_data_type,

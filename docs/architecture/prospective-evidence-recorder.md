@@ -187,6 +187,7 @@ it never downloads or installs broker code.
   - `GET /api/episodes`
   - `GET /api/episodes/{episode_id}`
   - `GET /api/episodes/{episode_id}/microstructure`
+  - `GET /api/episodes/{episode_id}/microstructure-direction-v0`
   - `GET /api/episodes/{episode_id}/options`
   - `GET /api/shadow-outcomes`
 - applies host validation, rate limiting, no-store and browser security

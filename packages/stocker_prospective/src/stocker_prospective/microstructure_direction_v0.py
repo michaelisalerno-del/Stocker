@@ -47,6 +47,15 @@ class DepthStatusV0(StrEnum):
     ABSENT = "ABSENT"
 
 
+class DirectionMarketDataTypeV0(StrEnum):
+    UNKNOWN = MarketDataType.UNKNOWN.value
+    LIVE = MarketDataType.LIVE.value
+    FROZEN = MarketDataType.FROZEN.value
+    DELAYED = MarketDataType.DELAYED.value
+    DELAYED_FROZEN = MarketDataType.DELAYED_FROZEN.value
+    MIXED = "mixed"
+
+
 class CausalEntryV0(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -55,7 +64,7 @@ class CausalEntryV0(BaseModel):
     information_cutoff_utc: datetime
     delay_seconds: float
     midpoint: float
-    market_data_type: str
+    market_data_type: DirectionMarketDataTypeV0
 
 
 class MicrostructureDirectionResultV0(BaseModel):
@@ -79,6 +88,7 @@ class MicrostructureDirectionResultV0(BaseModel):
     classified_trade_count: int
     trade_classification_valid_fraction: float
     stale_quote_fraction: float | None
+    unclassified_trade_fraction: float | None
     unknown_trade_volume_fraction: float
     probable_buyer_initiated_volume: float
     probable_seller_initiated_volume: float
@@ -122,8 +132,7 @@ def select_first_causal_entry_v0(
         (
             quote
             for quote in quotes
-            if quote.ordering_timestamp > information_cutoff_utc
-            and quote.received_timestamp_utc > information_cutoff_utc
+            if quote.received_timestamp_utc > information_cutoff_utc
             and quote.quote_valid
             and quote.bid is not None
             and quote.ask is not None
@@ -132,7 +141,7 @@ def select_first_causal_entry_v0(
             and 0.0 < quote.bid <= quote.ask
         ),
         key=lambda quote: (
-            quote.ordering_timestamp,
+            quote.received_timestamp_utc,
             quote.received_monotonic_ns,
             quote.source_sequence,
             quote.event_id,
@@ -145,9 +154,9 @@ def select_first_causal_entry_v0(
     assert selected.ask is not None
     return CausalEntryV0(
         event_id=selected.event_id,
-        timestamp_utc=selected.ordering_timestamp,
+        timestamp_utc=selected.received_timestamp_utc,
         information_cutoff_utc=information_cutoff_utc,
-        delay_seconds=(selected.ordering_timestamp - information_cutoff_utc).total_seconds(),
+        delay_seconds=(selected.received_timestamp_utc - information_cutoff_utc).total_seconds(),
         midpoint=(selected.bid + selected.ask) / 2.0,
         market_data_type=selected.market_data_type.value,
     )
@@ -200,7 +209,8 @@ def build_microstructure_direction_v0(
     flags = list(data_quality_flags)
     if not causal_valid:
         flags.append("information_after_decision")
-    if market_data_type != MarketDataType.LIVE.value:
+    direction_market_data_type = DirectionMarketDataTypeV0(market_data_type)
+    if direction_market_data_type is not DirectionMarketDataTypeV0.LIVE:
         flags.append("non_live_market_data")
     flags = sorted(set(flags))
     evidence_contract_valid = causal_valid and not {
@@ -228,12 +238,8 @@ def build_microstructure_direction_v0(
         and classified_volume > 0.0
         and _finite(trade)
     )
-    quote_valid = bool(
-        evidence_contract_valid and summary.quote_flow.quote_update_count > 0 and _finite(quote)
-    )
-    micro_valid = bool(
-        evidence_contract_valid and summary.quote_flow.quote_update_count > 0 and _finite(micro)
-    )
+    quote_valid = bool(evidence_contract_valid and _finite(quote))
+    micro_valid = bool(evidence_contract_valid and _finite(micro))
     mc_md_valid = bool(evidence_contract_valid and _finite(mc_md))
     validity = {
         "trade_imbalance": trade_valid,
@@ -283,12 +289,14 @@ def build_microstructure_direction_v0(
             majority_action,
         ),
     }
-    stale_count = sum(
+    unclassified_count = sum(
         classification.side is ProbableTradeSide.UNCLASSIFIED
         for classification in summary.trade_classifications
     )
-    stale_fraction = (
-        stale_count / len(summary.trade_classifications) if summary.trade_classifications else None
+    unclassified_fraction = (
+        unclassified_count / len(summary.trade_classifications)
+        if summary.trade_classifications
+        else None
     )
     trade_count = (
         summary.trade_flow.probable_buy_trade_count
@@ -314,7 +322,10 @@ def build_microstructure_direction_v0(
         "trade_count": trade_count,
         "classified_trade_count": classified_count,
         "trade_classification_valid_fraction": (summary.trade_flow.classification_valid_fraction),
-        "stale_quote_fraction": stale_fraction,
+        # Maximum quote age is not retained in each summary, so exact stale-only
+        # attribution is unavailable; unclassified trades retain the broader signal.
+        "stale_quote_fraction": None,
+        "unclassified_trade_fraction": unclassified_fraction,
         "unknown_trade_volume_fraction": summary.trade_flow.unknown_volume_fraction,
         "probable_buyer_initiated_volume": summary.trade_flow.probable_buy_volume,
         "probable_seller_initiated_volume": summary.trade_flow.probable_sell_volume,
@@ -323,7 +334,7 @@ def build_microstructure_direction_v0(
             last=tick_last_present,
         ),
         "depth_status": _depth_status(present=depth_present, valid=depth_valid),
-        "market_data_type": market_data_type,
+        "market_data_type": direction_market_data_type,
         "data_quality_flags": tuple(flags),
         "causal_valid": causal_valid,
     }
@@ -342,6 +353,7 @@ __all__ = [
     "CausalEntryV0",
     "DepthStatusV0",
     "DirectionActionV0",
+    "DirectionMarketDataTypeV0",
     "DirectionMethodV0",
     "FORMULAS_VERSION_V0",
     "MicrostructureDirectionResultV0",

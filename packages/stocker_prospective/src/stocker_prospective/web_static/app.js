@@ -601,6 +601,11 @@ function renderMicrostructureDirectionV0(projection) {
         value: "trade_classification_valid_fraction",
         format: percent,
       },
+      {
+        label: "Unclassified trades",
+        value: "unclassified_trade_fraction",
+        format: percent,
+      },
       { label: "Quote count", value: "quote_count" },
       { label: "Trade count", value: "trade_count" },
       { label: "Decision", value: "decision_timestamp_utc", format: clock },

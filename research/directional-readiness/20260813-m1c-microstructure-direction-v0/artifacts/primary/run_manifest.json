@@ -21,7 +21,15 @@
   "primary_horizon_minutes_from_causal_entry": 15,
   "research_label": "RESEARCH ONLY \u2014 MICROSTRUCTURE DIRECTION V0 \u2014 NOT VALIDATED \u2014 NO RECOMMENDATION",
   "return_definition": "gross log return from causal entry midpoint",
-  "source_census_sha256": "0fe772afc3228723e6e5c35e93abb9c4d9a50a4e898d51fc0736759cdb05b0b4",
+  "runtime_capacity": {
+    "available_depth": 0,
+    "available_tick_by_tick": 2,
+    "configured_max_tick_by_tick": 2,
+    "market_data_type": "live",
+    "observed_manifest": "/var/lib/stocker/prospective/ibkr_runtime_capacity_manifest.json",
+    "paired_bidask_last_underlyings_supported": 1
+  },
+  "source_census_sha256": "eb4ae2982d63cdf7b42d7eb995c7b8bc8f4b3703bdaae0fce3a11af95234fb60",
   "source_label": "read-only dedicated-server prospective archive census",
   "split_rule": "chronological assessment requires at least 20 independent episode dates, 100 episodes overall, 5 assessment dates, and 30 assessment episodes",
   "windows": [

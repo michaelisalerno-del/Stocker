@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import csv
+import json
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -814,6 +815,21 @@ def test_partial_event_resume_keeps_complete_feed_and_retries_only_blocked_feed(
     assert first["partial_events"] == 1
     assert first["blocked_events"] == 0
     assert [request[0] for request in blocked.requests] == ["TRADES", "BID_ASK"]
+
+    qualification_block = _ContractFailureClient()
+    still_partial = run_download(
+        **common,
+        resume=True,
+        client_factory=lambda: qualification_block,
+    )
+    assert still_partial["partial_events"] == 1
+    event_metadata = json.loads(
+        (
+            event_output_directory(output, _event()) / "metadata.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert event_metadata["TRADES"]["completion_status"] == "COMPLETE"
+    assert event_metadata["BID_ASK"]["completion_status"] == "BLOCKED_CONTRACT"
 
     resumed = _CompleteDownloadClient()
     second = run_download(

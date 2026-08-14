@@ -981,8 +981,6 @@ def write_download_summary(output_root: str | Path) -> list[dict[str, object]]:
 
 
 def _event_status(metadata: dict[str, object]) -> str:
-    if metadata.get("contract_status") != "PASS":
-        return "blocked"
     statuses = [
         details.get("completion_status")
         for feed in ("TRADES", "BID_ASK")
@@ -992,6 +990,8 @@ def _event_status(metadata: dict[str, object]) -> str:
         return "complete"
     if any(status == "COMPLETE" for status in statuses):
         return "partial"
+    if metadata.get("contract_status") != "PASS":
+        return "blocked"
     if any(str(status).startswith("BLOCKED") for status in statuses):
         return "blocked"
     return "partial"
@@ -1165,12 +1165,17 @@ def run_download(
                         message=str(error),
                     )
                 )
+                failed_feeds = {
+                    feed: contract_failure
+                    for feed in ("TRADES", "BID_ASK")
+                    if feed not in completed
+                }
                 metadata = build_event_metadata(
                     event=event,
                     contract=None,
                     requested_start_utc=requested_start,
                     requested_end_utc=requested_end,
-                    feeds={"TRADES": contract_failure, "BID_ASK": contract_failure},
+                    feeds=failed_feeds,
                     ibkr_api_version=api_version or "unknown",
                     server_version=server_version,
                     tws_gateway_version=gateway_version,
@@ -1178,8 +1183,11 @@ def run_download(
                     downloaded_at_utc=now(),
                 )
                 metadata["contract_error"] = str(error)
+                metadata = _merge_event_metadata(previous=previous, current=metadata)
                 write_json_atomic(directory / "metadata.json", metadata)
-                blocked_events += 1
+                status = _event_status(metadata)
+                partial_events += status == "partial"
+                blocked_events += status == "blocked"
                 print(f"[{index}/{len(events)}] {event.symbol} {event.family} BLOCKED contract")
                 continue
 

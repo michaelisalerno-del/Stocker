@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 import os
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -50,6 +50,7 @@ class PathsConfig(BaseModel):
     bar_compatibility_report: Path | None = None
     quiet_state_concentration_audit_root: Path | None = None
     opening_leader_continuation_v0_root: Path | None = None
+    shadow_microstructure_root: Path | None = None
 
 
 class RuntimeConfig(BaseModel):
@@ -265,6 +266,50 @@ class ParallelValidationConfig(BaseModel):
     requests_per_minute: int = Field(default=20, ge=1, le=60)
 
 
+class ShadowMicrostructureConfig(BaseModel):
+    """Fail-closed collection-only contract for the frozen-universe BBO shadow."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    dataset_version: Literal["m1c_microstructure_shadow_v0"] = "m1c_microstructure_shadow_v0"
+    raw_schema_version: Literal["m1c-microstructure-shadow-raw-v0"] = (
+        "m1c-microstructure-shadow-raw-v0"
+    )
+    pilot_mode: bool = False
+    pilot_sessions: Literal[2] = 2
+    eligible_sessions: Literal[20] = 20
+    collect_all_universe_bbo: Literal[True] = True
+    collect_optional_trades: bool = True
+    collect_depth: Literal[False] = False
+    persist_every_bbo_update: Literal[True] = True
+    analysis_enabled: Literal[False] = False
+    direction_scoring_enabled: Literal[False] = False
+    activation_timestamp_utc: datetime | None = None
+    planned_end_session: date | None = None
+    research_contract: Path | None = None
+    pilot_readiness_report: Path | None = None
+
+    @field_validator("activation_timestamp_utc")
+    @classmethod
+    def _shadow_activation_is_aware(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("shadow activation timestamp must be timezone-aware")
+        return value
+
+    @model_validator(mode="after")
+    def _collection_contract_is_closed(self) -> ShadowMicrostructureConfig:
+        if not self.enabled:
+            return self
+        if self.activation_timestamp_utc is None:
+            raise ValueError("enabled shadow collection requires activation_timestamp_utc")
+        if self.research_contract is None:
+            raise ValueError("enabled shadow collection requires research_contract")
+        if not self.pilot_mode and self.pilot_readiness_report is None:
+            raise ValueError("confirmatory shadow collection requires a pilot_readiness_report")
+        return self
+
+
 class ProspectiveConfig(BaseModel):
     """Top-level prospective recorder/web configuration."""
 
@@ -277,6 +322,9 @@ class ProspectiveConfig(BaseModel):
     ibkr: IBKRConfig = Field(default_factory=IBKRConfig)
     context: ContextConfig
     parallel_validation: ParallelValidationConfig = Field(default_factory=ParallelValidationConfig)
+    shadow_microstructure: ShadowMicrostructureConfig = Field(
+        default_factory=ShadowMicrostructureConfig
+    )
 
     @model_validator(mode="after")
     def _ibkr_port_is_explicit(self) -> ProspectiveConfig:
@@ -297,6 +345,11 @@ class ProspectiveConfig(BaseModel):
             raise ValueError(
                 "IBKR timeout plus heartbeat must remain below the stale-lease interval"
             )
+        if self.shadow_microstructure.enabled:
+            if self.runtime.source != "ibkr":
+                raise ValueError("shadow microstructure collection requires IBKR source")
+            if self.paths.shadow_microstructure_root is None:
+                raise ValueError("enabled shadow collection requires shadow_microstructure_root")
         return self
 
 
@@ -430,8 +483,9 @@ def validate_persistent_paths(config: ProspectiveConfig, release_directory: str 
         for name, path in (
             ("database", config.paths.database),
             ("bundle_root", config.paths.bundle_root),
+            ("shadow_microstructure_root", config.paths.shadow_microstructure_root),
         )
-        if _is_within(path, release)
+        if path is not None and _is_within(path, release)
     ]
     if unsafe:
         raise RuntimeSafetyError(
@@ -504,6 +558,22 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
             "diagnostic_only": True,
             "recorder_blocking": False,
             "capture_delay_seconds": config.parallel_validation.capture_delay_seconds,
+        },
+        "shadow_microstructure": {
+            "enabled": config.shadow_microstructure.enabled,
+            "dataset_version": config.shadow_microstructure.dataset_version,
+            "pilot_mode": config.shadow_microstructure.pilot_mode,
+            "pilot_sessions": config.shadow_microstructure.pilot_sessions,
+            "eligible_sessions": config.shadow_microstructure.eligible_sessions,
+            "collect_all_universe_bbo": (
+                config.shadow_microstructure.collect_all_universe_bbo
+            ),
+            "collect_optional_trades": config.shadow_microstructure.collect_optional_trades,
+            "collect_depth": config.shadow_microstructure.collect_depth,
+            "analysis_enabled": config.shadow_microstructure.analysis_enabled,
+            "direction_scoring_enabled": (
+                config.shadow_microstructure.direction_scoring_enabled
+            ),
         },
     }
 

@@ -29,6 +29,7 @@ paths:
   bar_compatibility_report: /var/lib/stocker/prospective/bar_compatibility_report.json
   quiet_state_concentration_audit_root: /opt/stocker/current/research/options-feasibility/20260727-m1c-quiet-state-concentration-audit-v0/artifacts/primary
   opening_leader_continuation_v0_root: /opt/stocker/current/prospective/opening-leader-continuation/20260801-opening-leader-continuation-recorder-v0
+  shadow_microstructure_root: /var/lib/stocker/prospective/shadow-microstructure
 
 runtime:
   # Set both values deliberately before first service start.
@@ -144,3 +145,24 @@ parallel_validation:
   max_retries: 3
   capture_delay_seconds: 7200
   requests_per_minute: 20
+
+# Collection-only and disabled until a bounded pipeline pilot is explicitly activated.
+# This reuses the protected whole-universe Level-I subscriptions above; it does
+# not request another IBKR market-data line.
+shadow_microstructure:
+  enabled: false
+  dataset_version: m1c_microstructure_shadow_v0
+  raw_schema_version: m1c-microstructure-shadow-raw-v0
+  pilot_mode: false
+  pilot_sessions: 2
+  eligible_sessions: 20
+  collect_all_universe_bbo: true
+  collect_optional_trades: true
+  collect_depth: false
+  persist_every_bbo_update: true
+  analysis_enabled: false
+  direction_scoring_enabled: false
+  activation_timestamp_utc: null
+  planned_end_session: null
+  research_contract: /opt/stocker/current/configs/prospective/shadow-microstructure-v0/shadow_research_contract_v0.json
+  pilot_readiness_report: null

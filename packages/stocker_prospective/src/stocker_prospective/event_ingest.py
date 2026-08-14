@@ -571,6 +571,7 @@ class IBKRCallbackNormalizer:
                 payload.get("attributes", {}),
             ),
             halted=(bool(state["halted"]) if state.get("halted") is not None else None),
+            connection_generation=int(payload.get("connection_generation", 0)),
         )
 
     def _bidask(
@@ -591,6 +592,7 @@ class IBKRCallbackNormalizer:
             ask_past_high=cast(bool | None, payload.get("ask_past_high")),
             exchange=owner.exchange,
             market_data_type=_market_data_type(payload.get("market_data_type")),
+            connection_generation=int(payload.get("connection_generation", 0)),
         )
 
     def _trade(
@@ -612,6 +614,7 @@ class IBKRCallbackNormalizer:
             past_limit=cast(bool | None, payload.get("past_limit")),
             unreported=cast(bool | None, payload.get("unreported")),
             halted=cast(bool | None, payload.get("halted")),
+            connection_generation=int(payload.get("connection_generation", 0)),
         )
 
     def _depth(

@@ -122,6 +122,7 @@ class UnderlyingLevel1QuoteEvent(RawMarketEvent):
     exchange: str | None
     quote_attributes: dict[str, bool | int | float | str | None] = Field(default_factory=dict)
     halted: bool | None = None
+    connection_generation: int = Field(default=0, ge=0)
 
 
 class UnderlyingTickBidAskEvent(RawMarketEvent):
@@ -133,6 +134,7 @@ class UnderlyingTickBidAskEvent(RawMarketEvent):
     ask_past_high: bool | None = None
     exchange: str | None = None
     market_data_type: MarketDataType
+    connection_generation: int = Field(default=0, ge=0)
 
 
 class UnderlyingTickTradeEvent(RawMarketEvent):
@@ -144,6 +146,93 @@ class UnderlyingTickTradeEvent(RawMarketEvent):
     past_limit: bool | None = None
     unreported: bool | None = None
     halted: bool | None = None
+    connection_generation: int = Field(default=0, ge=0)
+
+
+class ShadowSessionSegment(StrEnum):
+    PREMARKET = "PREMARKET"
+    RTH = "RTH"
+    AFTER_HOURS = "AFTER_HOURS"
+    CLOSED = "CLOSED"
+
+
+class ShadowMarketEvent(RawMarketEvent):
+    """Identity and collection-boundary fields shared by shadow events."""
+
+    dataset_version: Literal["m1c_microstructure_shadow_v0"]
+    raw_schema_version: Literal["m1c-microstructure-shadow-raw-v0"]
+    activation_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    connection_generation: int = Field(ge=0)
+    session_segment: ShadowSessionSegment
+    historical: Literal[False] = False
+    prospective: Literal[True] = True
+    shadow_collection: Literal[True] = True
+    pipeline_pilot: bool
+    confirmatory_eligible: bool
+
+
+class ShadowBBOEvent(ShadowMarketEvent):
+    """Collection-only copy of one meaningful Level-I BBO callback."""
+
+    source_event_id: str = Field(min_length=1)
+    callback_arrival_sequence: int = Field(gt=0)
+    bid: float | None
+    ask: float | None
+    bid_size: float | None
+    ask_size: float | None
+    changed_field: Literal["bid", "ask", "bid_size", "ask_size"]
+    provider_flags: dict[str, bool | int | float | str | None] = Field(default_factory=dict)
+    market_data_type: MarketDataType
+    exchange: str | None
+    quote_valid: bool
+    stream_availability: Literal["BBO_ONLY", "BBO_PLUS_TRADES"]
+
+
+class ShadowTradeEvent(ShadowMarketEvent):
+    """Optional unclassified Last trade copied only from an existing stream."""
+
+    source_event_id: str = Field(min_length=1)
+    callback_arrival_sequence: int = Field(gt=0)
+    price: float
+    size: float
+    exchange: str | None
+    conditions: tuple[str, ...]
+    provider_flags: dict[str, bool | int | float | str | None] = Field(default_factory=dict)
+    market_data_type: MarketDataType
+    stream_availability: Literal["BBO_PLUS_TRADES"] = "BBO_PLUS_TRADES"
+
+
+class ShadowTradeStreamStateEvent(ShadowMarketEvent):
+    """Lifecycle evidence for an already-existing optional Last stream."""
+
+    stream_kind: Literal["tick_by_tick_last"] = "tick_by_tick_last"
+    stream_state: Literal["active", "inactive"]
+    reason: Literal["existing_subscription_registered", "existing_subscription_removed"]
+
+
+class ShadowGapEvent(ShadowMarketEvent):
+    """Explicit non-price continuity evidence; never interpolates a quote."""
+
+    gap_id: str = Field(min_length=1)
+    gap_kind: Literal[
+        "subscription_started",
+        "connection_lost",
+        "connection_restored",
+        "subscription_rebuilt",
+        "market_data_permission_error",
+    ]
+    gap_start_timestamp_utc: datetime | None
+    gap_end_timestamp_utc: datetime | None
+    reason: str = Field(min_length=1)
+    @field_validator("gap_start_timestamp_utc", "gap_end_timestamp_utc")
+    @classmethod
+    def _gap_timestamps_are_aware(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("gap timestamps must be timezone-aware")
+        return value.astimezone(UTC)
 
 
 class UnderlyingDepthEvent(RawMarketEvent):
@@ -274,6 +363,10 @@ RawEvent = (
     | UnderlyingLevel1QuoteEvent
     | UnderlyingTickBidAskEvent
     | UnderlyingTickTradeEvent
+    | ShadowBBOEvent
+    | ShadowTradeEvent
+    | ShadowTradeStreamStateEvent
+    | ShadowGapEvent
     | UnderlyingDepthEvent
     | UnderlyingDepthSnapshotEvent
     | OptionQuoteEvent

@@ -47,6 +47,7 @@ class QualifiedUnderlying:
     upstream_contract: Any
     exchange: str
     market_proxy: bool = False
+    minimum_tick: float | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ class LiveSubscriptionController:
         enable_depth: bool,
         depth_phase_permitted: Callable[[EvidenceMetadata], bool] | None = None,
         stream_registration_sink: Callable[[StreamOwner], None] | None = None,
+        stream_unregistration_sink: Callable[[StreamOwner], None] | None = None,
         request_pacer: Callable[[], object] | None = None,
         historical_request_pacer: Callable[[], object] | None = None,
     ) -> None:
@@ -100,6 +102,7 @@ class LiveSubscriptionController:
         self.stream_registration_sink = (
             normalizer.register if stream_registration_sink is None else stream_registration_sink
         )
+        self.stream_unregistration_sink = stream_unregistration_sink
         self.request_pacer = request_pacer
         self.historical_request_pacer = historical_request_pacer
         self._owned: dict[str, _OwnedStream] = {}
@@ -826,7 +829,7 @@ class LiveSubscriptionController:
         if owned is None or record is None:
             return
         self._cancel_request(owned.stream_kind, owned.request_id, key)
-        self.normalizer.unregister(owned.request_id)
+        self._unregister_owned_stream(owned)
         if not budget_already_cancelled:
             self.budget.cancel(
                 key,
@@ -834,6 +837,19 @@ class LiveSubscriptionController:
                 now_utc=metadata.recorded_at_utc,
             )
         self.repository.record_subscription(metadata, record)
+
+    def _unregister_owned_stream(self, owned: _OwnedStream) -> None:
+        owner = StreamOwner(
+            request_id=owned.request_id,
+            kind=owned.stream_kind,
+            symbol=owned.symbol,
+            con_id=owned.contract.con_id,
+            exchange=owned.contract.exchange,
+        )
+        if self.stream_unregistration_sink is None:
+            self.normalizer.unregister(owned.request_id)
+        else:
+            self.stream_unregistration_sink(owner)
 
     def cancel_evicted_subscription(
         self,
@@ -895,7 +911,7 @@ class LiveSubscriptionController:
             )
         specifications.sort(key=lambda item: (int(item[3]), item[0].key))
         for owned, _, _, _ in specifications:
-            self.normalizer.unregister(owned.request_id)
+            self._unregister_owned_stream(owned)
             self.budget.cancel(
                 owned.key,
                 reason="data_lost_reconnect",

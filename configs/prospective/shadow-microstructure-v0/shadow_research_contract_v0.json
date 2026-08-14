@@ -1,0 +1,81 @@
+{
+  "analysis_status": "PREREGISTERED_NOT_COMPUTED",
+  "dataset_version": "m1c_microstructure_shadow_v0",
+  "direction_scoring_enabled": false,
+  "hypotheses": {
+    "H1_BBO_IMBALANCE": {
+      "formula": "(bid_size - ask_size) / (bid_size + ask_size)",
+      "observation": "first valid eligible BBO at or after T0",
+      "zero_denominator": "ABSTAIN"
+    },
+    "H2_PRE30_OFI": {
+      "formula": "sum(e_n), where e_n = I(bid_n >= bid_n-1)*bid_size_n - I(bid_n <= bid_n-1)*bid_size_n-1 - I(ask_n <= ask_n-1)*ask_size_n + I(ask_n >= ask_n-1)*ask_size_n-1",
+      "sign_convention": "positive is net displayed bid-side pressure; negative is net displayed ask-side pressure",
+      "transition_rule": "include only consecutive valid BBO observations whose two event timestamps are both in [T0-30s, T0); do not carry in, interpolate, or forward-fill",
+      "window": "[T0-30 seconds, T0)"
+    },
+    "H3_WEIGHTED_MID_DISPLACEMENT": {
+      "displacement_formula": "weighted_mid - midpoint",
+      "midpoint_formula": "(bid + ask) / 2",
+      "name_constraint": "mechanical weighted mid; never Stoikov micro-price",
+      "observation": "same first valid eligible BBO at or after T0 used by H1",
+      "weighted_mid_formula": "(ask * bid_size + bid * ask_size) / (bid_size + ask_size)"
+    },
+    "H4_FLOW_RESPONSE_MISMATCH": {
+      "classification": {
+        "ABSTAIN": "pressure == 0 or pressure/response invalid or the window overlaps a recorded gap",
+        "BUY_FLOW_ABSORBED": "pressure > 0 and response <= 0",
+        "BUY_FLOW_EFFECTIVE": "pressure > 0 and response > 0",
+        "SELL_FLOW_ABSORBED": "pressure < 0 and response >= 0",
+        "SELL_FLOW_EFFECTIVE": "pressure < 0 and response < 0"
+      },
+      "pressure": "H2_PRE30_OFI",
+      "response": "last valid pre-T0 midpoint minus first valid midpoint in [T0-30s, T0)",
+      "window": "[T0-30 seconds, T0)"
+    },
+    "H5_M1C_INTERACTION": {
+      "claim_constraint": "M1C is not directional; never compare a result to the same direction as M1C",
+      "frozen_families": [
+        "R01",
+        "P01_NEAR_M1",
+        "HARD_M1C"
+      ],
+      "test": "whether H1-H4 differ across the already-frozen M1C families"
+    }
+  },
+  "market_structure_strata": {
+    "one_tick_spread": "ask-bid equals the applicable frozen instrument minimum price variation",
+    "unknown_tick_rule": "ABSTAIN from the stratum; never infer from a future sample outcome",
+    "wider_than_one_tick_spread": "ask-bid is greater than the applicable frozen instrument minimum price variation"
+  },
+  "outcomes": {
+    "primary_microstructure_endpoint": "direction of the next non-zero valid midpoint change after T0",
+    "secondary_m1c_relevance_endpoint": "signed underlying return at T0+15 minutes",
+    "secondary_reference_rule": "first valid eligible midpoint at/after T0 to last valid eligible midpoint at/before T0+15m; ABSTAIN when a gap prevents the endpoint",
+    "five_second_endpoint_included": false,
+    "additional_clock_horizons_allowed": false
+  },
+  "raw_collection_exclusions": [
+    "future_return",
+    "next_price_direction",
+    "MFE",
+    "MAE",
+    "OFI",
+    "imbalance",
+    "weighted_mid",
+    "microprice",
+    "absorption_score",
+    "continuation_score",
+    "inferred_aggressor_side"
+  ],
+  "session_scope": {
+    "confirmatory_primary": "RTH",
+    "segments_recorded_separately": [
+      "PREMARKET",
+      "RTH",
+      "AFTER_HOURS"
+    ]
+  },
+  "stopping_rule": "exactly 20 complete eligible XNYS sessions; never extend or stop based on directional results",
+  "version": "shadow_research_contract_v0"
+}

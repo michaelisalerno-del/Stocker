@@ -161,6 +161,10 @@ from stocker_prospective.recorder_v0 import (
     FrozenM1CRecorderEngine,
     RecorderCheckpointResult,
 )
+from stocker_prospective.shadow_microstructure_v0 import (
+    ShadowMicrostructureCollectorV0,
+    canonical_sha256,
+)
 from stocker_prospective.signed_market_shock_v1 import (
     load_signed_market_shock_threshold_manifest_v1,
 )
@@ -694,6 +698,14 @@ class FrozenProspectiveApplication:
                     "event_kind": event.event_kind.value,
                 },
             )
+            collector = self.live_recorder.shadow_microstructure_collector
+            if collector is not None:
+                collector.record_connection_state(
+                    state=event.state.value,
+                    observed_at=event.recorded_at,
+                    connection_generation=self.adapter.connection_generation,
+                    reason=event.message,
+                )
 
     def poll(self, *, now: datetime) -> LivePollResult:
         """Run one callback batch and fail closed across the full application."""
@@ -1272,6 +1284,12 @@ class FrozenProspectiveApplication:
             self.subscriptions.rebuild_after_data_loss(metadata)
             self.option_discovery.rebuild_after_data_loss(metadata)
             self.adapter.connection.subscriptions_rebuilt()
+            collector = self.live_recorder.shadow_microstructure_collector
+            if collector is not None:
+                collector.record_subscriptions_rebuilt(
+                    observed_at=now,
+                    connection_generation=self.adapter.connection_generation,
+                )
         if health.state is ConnectionState.CONNECTED:
             self._reconnect_attempts = 0
             self._next_reconnect_at = None
@@ -1698,7 +1716,7 @@ def build_frozen_prospective_application(
         result = adapter.qualify_exact_contract(stock_contract_factory(symbol))
         pace_request()
         matches = [
-            (_attribute(item, "contract") or item)
+            (item, _attribute(item, "contract") or item)
             for item in result.items
             if str(
                 _attribute(
@@ -1725,7 +1743,13 @@ def build_frozen_prospective_application(
                     "exact_contract_resolution_failed",
                 )
             continue
-        contract = matches[0]
+        contract_details, contract = matches[0]
+        raw_minimum_tick = _attribute(contract_details, "minTick", "min_tick")
+        minimum_tick = (
+            None
+            if raw_minimum_tick is None or float(raw_minimum_tick) <= 0.0
+            else float(raw_minimum_tick)
+        )
         qualified.append(
             QualifiedUnderlying(
                 symbol=symbol,
@@ -1733,6 +1757,7 @@ def build_frozen_prospective_application(
                 upstream_contract=contract,
                 exchange=str(_attribute(contract, "exchange") or "SMART"),
                 market_proxy=symbol in proxy_symbols,
+                minimum_tick=minimum_tick,
             )
         )
         if symbol in identity.symbols:
@@ -1938,6 +1963,22 @@ def build_frozen_prospective_application(
         contract_version=BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
         run_id=config.runtime.run_id,
     )
+    shadow_microstructure_collector: ShadowMicrostructureCollectorV0 | None = None
+    if config.shadow_microstructure.enabled:
+        assert paths.shadow_microstructure_root is not None
+        shadow_microstructure_collector = ShadowMicrostructureCollectorV0(
+            root=paths.shadow_microstructure_root,
+            config=config.shadow_microstructure,
+            run_id=config.runtime.run_id,
+            git_commit=config.runtime.git_commit,
+            universe_hash=identity.universe_hash,
+            m1c_artifact_hash=canonical_sha256(artifact_hashes),
+            m1c_configuration_hash=activation.configuration_hash,
+            contracts=tuple(item for item in qualified if item.symbol in set(identity.symbols)),
+            capacity=runtime_capacity,
+            always_on_bar_lines=len(identity.symbols) + len(proxy_symbols),
+            recorder_version=config.runtime.app_version,
+        )
     if (
         durable_inbox is not None
         and recorder_generation is not None
@@ -2111,6 +2152,7 @@ def build_frozen_prospective_application(
             seconds=config.runtime.callback_inbox_compaction_interval_seconds
         ),
         inbox_compaction_batch_limit=(config.runtime.callback_inbox_compaction_batch_limit),
+        shadow_microstructure_collector=shadow_microstructure_collector,
     )
 
     controller = LiveSubscriptionController(
@@ -2124,6 +2166,7 @@ def build_frozen_prospective_application(
             prospective_phase_at(metadata.recorded_at_utc)[0] != "engineering_transfer"
         ),
         stream_registration_sink=live.register_stream,
+        stream_unregistration_sink=live.unregister_stream,
         request_pacer=pace_request,
         historical_request_pacer=historical_request_pacer.acquire,
     )
@@ -2207,6 +2250,12 @@ def build_frozen_prospective_application(
         tuple(qualified),
         required_level1_symbols=frozenset((*identity.symbols, MARKET_PROXY)),
     )
+    if shadow_microstructure_collector is not None:
+        shadow_microstructure_collector.record_subscriptions_active(
+            symbols=identity.symbols,
+            observed_at=datetime.now(UTC),
+            connection_generation=adapter.connection_generation,
+        )
     option_recorder = BoundedOptionRecorder(
         adapter=adapter,
         subscriptions=controller_budget,

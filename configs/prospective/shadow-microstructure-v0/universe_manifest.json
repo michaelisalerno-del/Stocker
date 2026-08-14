@@ -1,0 +1,28 @@
+{
+  "con_id_resolution": "resolved from exact IBKR contract qualification at activation; null values are not activation-eligible",
+  "dataset_version": "m1c_microstructure_shadow_v0",
+  "symbols": [
+    {"con_id": null, "minimum_tick": null, "symbol": "AAL"},
+    {"con_id": null, "minimum_tick": null, "symbol": "AAOI"},
+    {"con_id": null, "minimum_tick": null, "symbol": "APLD"},
+    {"con_id": null, "minimum_tick": null, "symbol": "ASTS"},
+    {"con_id": null, "minimum_tick": null, "symbol": "CIFR"},
+    {"con_id": null, "minimum_tick": null, "symbol": "HIMS"},
+    {"con_id": null, "minimum_tick": null, "symbol": "IONQ"},
+    {"con_id": null, "minimum_tick": null, "symbol": "IREN"},
+    {"con_id": null, "minimum_tick": null, "symbol": "MARA"},
+    {"con_id": null, "minimum_tick": null, "symbol": "MP"},
+    {"con_id": null, "minimum_tick": null, "symbol": "MRNA"},
+    {"con_id": null, "minimum_tick": null, "symbol": "MSTR"},
+    {"con_id": null, "minimum_tick": null, "symbol": "NVTS"},
+    {"con_id": null, "minimum_tick": null, "symbol": "QBTS"},
+    {"con_id": null, "minimum_tick": null, "symbol": "RGTI"},
+    {"con_id": null, "minimum_tick": null, "symbol": "RIOT"},
+    {"con_id": null, "minimum_tick": null, "symbol": "RIVN"},
+    {"con_id": null, "minimum_tick": null, "symbol": "SMCI"},
+    {"con_id": null, "minimum_tick": null, "symbol": "SOFI"},
+    {"con_id": null, "minimum_tick": null, "symbol": "WULF"}
+  ],
+  "universe_hash": "ab2a55b55329b83e410ebdf46fa5d47f5a75a44798d01374a4d7f072da57b634",
+  "universe_id": "anchor-frozen-20-20260724"
+}

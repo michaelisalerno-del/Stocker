@@ -109,6 +109,7 @@ from stocker_prospective.recorder_v0 import (
     RecorderCheckpointInput,
     RecorderCheckpointResult,
 )
+from stocker_prospective.shadow_microstructure_v0 import ShadowMicrostructureCollectorV0
 from stocker_prospective.signed_market_shock_v1 import MarketShockBarV1
 
 MetadataFactory = Callable[[datetime, tuple[datetime, ...]], EvidenceMetadata]
@@ -267,6 +268,7 @@ class FrozenM1CLiveRecorder:
         inbox_retention_period: timedelta = timedelta(minutes=15),
         inbox_compaction_interval: timedelta = timedelta(minutes=1),
         inbox_compaction_batch_limit: int = 4_096,
+        shadow_microstructure_collector: ShadowMicrostructureCollectorV0 | None = None,
     ) -> None:
         if len(universe_symbols) != 20 or len(set(universe_symbols)) != 20:
             raise ValueError("frozen M1C live recorder requires the exact 20-stock cohort")
@@ -336,6 +338,7 @@ class FrozenM1CLiveRecorder:
         self.inbox_retention_period = inbox_retention_period
         self.inbox_compaction_interval = inbox_compaction_interval
         self.inbox_compaction_batch_limit = inbox_compaction_batch_limit
+        self.shadow_microstructure_collector = shadow_microstructure_collector
         self._last_inbox_compaction_at: datetime | None = None
         self._inflight_durable_events: tuple[CallbackInboxEvent, ...] = ()
         self._finalizer = KeepUpToDateBarFinalizer(
@@ -442,6 +445,17 @@ class FrozenM1CLiveRecorder:
                 stream_owner_payload(owner),
             )
         self.normalizer.register(owner)
+        if (
+            self.shadow_microstructure_collector is not None
+            and owner.kind is StreamKind.UNDERLYING_TICK_LAST
+        ):
+            self.shadow_microstructure_collector.set_optional_trade_stream(
+                symbol=owner.symbol,
+                active=True,
+                request_id=owner.request_id,
+                observed_at=datetime.now(UTC),
+                connection_generation=self.adapter.connection_generation,
+            )
         if owner.kind is StreamKind.UNDERLYING_BAR:
             self._finalizer.register(
                 owner.request_id,
@@ -456,6 +470,20 @@ class FrozenM1CLiveRecorder:
             )
             self._last_depth_snapshot_at.pop(owner.symbol, None)
             self._last_depth_validity.pop(owner.symbol, None)
+
+    def unregister_stream(self, owner: StreamOwner) -> None:
+        self.normalizer.unregister(owner.request_id)
+        if (
+            self.shadow_microstructure_collector is not None
+            and owner.kind is StreamKind.UNDERLYING_TICK_LAST
+        ):
+            self.shadow_microstructure_collector.set_optional_trade_stream(
+                symbol=owner.symbol,
+                active=False,
+                request_id=owner.request_id,
+                observed_at=datetime.now(UTC),
+                connection_generation=self.adapter.connection_generation,
+            )
 
     def mark_gap(
         self,
@@ -1086,6 +1114,8 @@ class FrozenM1CLiveRecorder:
             gap_count=0,
             progress_heartbeat=self.processing_heartbeat,
         )
+        if self.shadow_microstructure_collector is not None:
+            self.shadow_microstructure_collector.persist_raw_events(events)
         for partition in partitions:
             path_parts = {
                 key: value
@@ -2442,6 +2472,13 @@ class FrozenM1CLiveRecorder:
                             recoverability="unknown",
                             severity="optional" if optional_stream else "scientific",
                         )
+                    if self.shadow_microstructure_collector is not None:
+                        self.shadow_microstructure_collector.record_permission_error(
+                            symbol=owner.symbol,
+                            error_code=code,
+                            observed_at=observed_now,
+                            connection_generation=self.adapter.connection_generation,
+                        )
         source_times = tuple(event.ordering_timestamp for event in raw_events)
         metadata = self.metadata_factory(
             max(
@@ -3511,8 +3548,8 @@ class FrozenM1CLiveRecorder:
                         if quote.ordering_timestamp <= end and quote.received_timestamp_utc <= end
                     )
                     market_data_types = {
-                        event.market_data_type.value for event in (*causal_quotes, *window_trades)
-                    }
+                        event.market_data_type.value for event in causal_quotes
+                    } | {event.market_data_type.value for event in window_trades}
                     market_data_type = (
                         next(iter(market_data_types))
                         if len(market_data_types) == 1

@@ -9,10 +9,12 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 from tools.research.download_ibkr_m1c_microstructure import (
     DEFAULT_CANONICAL_SOURCE,
     ConservativeHistoricalPacer,
     ContractIdentity,
+    DownloadClient,
     HistoricalCallbackRegistry,
     HistoricalDataOnlyFacade,
     HistoricalEvent,
@@ -21,6 +23,7 @@ from tools.research.download_ibkr_m1c_microstructure import (
     assign_provider_identities,
     build_event_metadata,
     classify_historical_error,
+    create_historical_stock_contract,
     download_feed_pages,
     event_output_directory,
     event_window,
@@ -203,6 +206,8 @@ def test_frozen_event_loading_separates_periods_and_excludes_2026(tmp_path: Path
                     threshold * 1.1,
                     threshold * 1.2,
                 ],
+                "m1c_high_tail_threshold_v1": [threshold] * 5,
+                "m1c_high_tail_v1": [True, False, False, True, True],
             }
         ),
         source,
@@ -256,8 +261,9 @@ class _OfficialContract:
 
 def test_contract_qualification_requires_one_exact_us_stock() -> None:
     contract = _OfficialContract(conId=265598, symbol="AAPL")
+    unrelated = _OfficialContract(conId=272093, symbol="MSFT")
 
-    identity, retained = qualify_exact_stock("AAPL", [contract])
+    identity, retained = qualify_exact_stock("AAPL", [unrelated, contract])
 
     assert retained is contract
     assert identity == _contract()
@@ -383,6 +389,10 @@ def test_pacing_errors_retry_but_permission_errors_fail_closed() -> None:
     assert result.request_count == 2
     assert sleeps == [2]
     assert classify_historical_error(354, "not subscribed").kind == "permission"
+    assert (
+        classify_historical_error(162, "HMDS query returned no market data permissions").kind
+        == "permission"
+    )
 
     permission_client = _PagedClient(
         [HistoricalRequestError(kind="permission", code=354, message="not subscribed")]
@@ -405,6 +415,7 @@ def test_pacing_errors_retry_but_permission_errors_fail_closed() -> None:
         )
     except HistoricalRequestError as error:
         assert error.kind == "permission"
+        assert error.request_count == 1
     else:
         raise AssertionError("permission failure was retried or ignored")
     assert permission_client.request_count == 1
@@ -455,6 +466,8 @@ def test_parquet_output_is_deterministic_and_resume_validates_interval(tmp_path:
         tws_gateway_version="10.49",
         git_commit="abc123",
         downloaded_at_utc=datetime(2026, 8, 14, 12, 0, tzinfo=UTC),
+        canonical_source_sha256="source-sha",
+        family_definition_sha256="family-sha",
     )
     write_json_atomic(event_dir / "metadata.json", metadata)
 
@@ -463,6 +476,8 @@ def test_parquet_output_is_deterministic_and_resume_validates_interval(tmp_path:
         event=_event(),
         requested_start_utc=start,
         requested_end_utc=end,
+        canonical_source_sha256="source-sha",
+        family_definition_sha256="family-sha",
     ) == {"TRADES"}
     assert (
         resume_completed_feeds(
@@ -470,6 +485,38 @@ def test_parquet_output_is_deterministic_and_resume_validates_interval(tmp_path:
             event=_event(),
             requested_start_utc=start - timedelta(minutes=1),
             requested_end_utc=end,
+            canonical_source_sha256="source-sha",
+            family_definition_sha256="family-sha",
+        )
+        == set()
+    )
+    valid_table = pq.read_table(output)
+    pq.write_table(valid_table.drop_columns(["price"]), output)
+    assert (
+        resume_completed_feeds(
+            event_dir,
+            event=_event(),
+            requested_start_utc=start,
+            requested_end_utc=end,
+            canonical_source_sha256="source-sha",
+            family_definition_sha256="family-sha",
+        )
+        == set()
+    )
+    timestamp_index = valid_table.schema.get_field_index("provider_timestamp_utc")
+    null_timestamps = pa.array([None] * valid_table.num_rows, type=pa.timestamp("us", tz="UTC"))
+    pq.write_table(
+        valid_table.set_column(timestamp_index, "provider_timestamp_utc", null_timestamps),
+        output,
+    )
+    assert (
+        resume_completed_feeds(
+            event_dir,
+            event=_event(),
+            requested_start_utc=start,
+            requested_end_utc=end,
+            canonical_source_sha256="source-sha",
+            family_definition_sha256="family-sha",
         )
         == set()
     )
@@ -480,6 +527,8 @@ def test_parquet_output_is_deterministic_and_resume_validates_interval(tmp_path:
             event=changed_event,
             requested_start_utc=start,
             requested_end_utc=end,
+            canonical_source_sha256="source-sha",
+            family_definition_sha256="family-sha",
         )
         == set()
     )
@@ -505,6 +554,26 @@ def test_development_and_assessment_output_directories_are_physically_separate(
     assert development_dir == tmp_path / "development" / "AAPL" / _event().event_id
     assert assessment_dir == tmp_path / "assessment" / "AAPL" / assessment.event_id
     assert development_dir != assessment_dir
+
+
+def test_output_directory_rejects_absolute_or_nested_source_identities(tmp_path: Path) -> None:
+    for event_id in ("/tmp/escape", "nested/event", "..", r"nested\event"):
+        with pytest.raises(ValueError, match="unsafe event ID"):
+            event_output_directory(tmp_path, replace(_event(), event_id=event_id))
+    with pytest.raises(ValueError, match="unsafe event symbol"):
+        event_output_directory(tmp_path, replace(_event(), symbol="nested/AAPL"))
+
+
+def test_verified_historical_contract_factory_matches_stocker_stock_contract() -> None:
+    class Contract:
+        pass
+
+    contract = create_historical_stock_contract(Contract, "AAPL")
+
+    assert contract.symbol == "AAPL"
+    assert contract.secType == "STK"
+    assert contract.exchange == "SMART"
+    assert contract.currency == "USD"
 
 
 def test_official_historical_callbacks_route_all_three_tick_shapes() -> None:
@@ -630,6 +699,8 @@ def test_complete_run_writes_manifest_summary_and_resumes_without_redownload(
                 "checkpoint": [_event().checkpoint],
                 "signal_timestamp": [_event().t0_utc],
                 "M1C_probability": [threshold * 1.1],
+                "m1c_high_tail_threshold_v1": [threshold],
+                "m1c_high_tail_v1": [True],
             }
         ),
         source,
@@ -667,6 +738,11 @@ def test_complete_run_writes_manifest_summary_and_resumes_without_redownload(
     assert metadata["TRADES"]["final_rows"] == 1
     assert metadata["BID_ASK"]["final_rows"] == 1
     assert manifest["canonical_M1C_source_sha256"] == sha256_file(source)
+    assert (
+        manifest["family_definition"]["authoritative_source"]["git_blob"]
+        == "b78bc00191dd878460b09b5348ffff418c656376"
+    )
+    assert manifest["family_definition"]["rules"]["P01_NEAR_M1"] == "0.8T < score <= T"
     assert manifest["direction_analysis_performed"] is False
     assert manifest["no_order_invariant"] == "PASS"
     summary = (output_root / "download_summary.csv").read_text()
@@ -695,6 +771,24 @@ def test_complete_run_writes_manifest_summary_and_resumes_without_redownload(
     assert resume_client.qualifications == []
     assert resume_client.requests == []
     assert resume_client.closed is False
+
+    with pytest.raises(ValueError, match="incompatible provenance"):
+        run_download(
+            period="development",
+            source=source,
+            output_root=output_root,
+            include_r01=True,
+            resume=True,
+            validation_hard_count=None,
+            event_limit=None,
+            client_factory=lambda: _CompleteDownloadClient(),
+            request_timeout_seconds=1,
+            max_retries=1,
+            retry_backoff_seconds=0,
+            before_request=None,
+            git_commit="abc123",
+            now=lambda: datetime(2026, 8, 14, 12, 1, tzinfo=UTC),
+        )
 
 
 class _PermissionFailureClient(_CompleteDownloadClient):
@@ -741,6 +835,8 @@ def test_contract_block_writes_both_required_summary_feed_rows(tmp_path: Path) -
                 "checkpoint": [_event().checkpoint],
                 "signal_timestamp": [_event().t0_utc],
                 "M1C_probability": [0.61],
+                "m1c_high_tail_threshold_v1": [0.4883337107940334],
+                "m1c_high_tail_v1": [True],
             }
         ),
         source,
@@ -772,6 +868,56 @@ def test_contract_block_writes_both_required_summary_feed_rows(tmp_path: Path) -
     assert {row["contract_status"] for row in rows} == {"BLOCKED"}
 
 
+def test_connection_failure_records_every_selected_event_as_blocked(tmp_path: Path) -> None:
+    source = tmp_path / "events.parquet"
+    threshold = 0.4883337107940334
+    pq.write_table(
+        pa.table(
+            {
+                "row_id": [_event().event_id],
+                "stock": [_event().symbol],
+                "session": [_event().session_date],
+                "partition": [_event().period],
+                "checkpoint": [_event().checkpoint],
+                "signal_timestamp": [_event().t0_utc],
+                "M1C_probability": [0.61],
+                "m1c_high_tail_threshold_v1": [threshold],
+                "m1c_high_tail_v1": [True],
+            }
+        ),
+        source,
+    )
+    output = tmp_path / "dataset"
+
+    def unavailable() -> DownloadClient:
+        raise RuntimeError("official API unavailable")
+
+    result = run_download(
+        period="development",
+        source=source,
+        output_root=output,
+        include_r01=False,
+        resume=False,
+        validation_hard_count=None,
+        event_limit=None,
+        client_factory=unavailable,
+        request_timeout_seconds=1,
+        max_retries=1,
+        retry_backoff_seconds=0,
+        before_request=None,
+        git_commit="abc123",
+        now=lambda: datetime(2026, 8, 14, 12, 0, tzinfo=UTC),
+    )
+
+    assert result["blocked_events"] == 1
+    with (output / "download_summary.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert [row["feed"] for row in rows] == ["BID_ASK", "TRADES"]
+    assert {row["status"] for row in rows} == {"BLOCKED_CONNECTION"}
+    manifest = json.loads((output / "download_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["blocked_events"] == 1
+
+
 def test_partial_event_resume_keeps_complete_feed_and_retries_only_blocked_feed(
     tmp_path: Path,
 ) -> None:
@@ -786,6 +932,8 @@ def test_partial_event_resume_keeps_complete_feed_and_retries_only_blocked_feed(
                 "checkpoint": [_event().checkpoint],
                 "signal_timestamp": [_event().t0_utc],
                 "M1C_probability": [0.61],
+                "m1c_high_tail_threshold_v1": [0.4883337107940334],
+                "m1c_high_tail_v1": [True],
             }
         ),
         source,
@@ -816,6 +964,35 @@ def test_partial_event_resume_keeps_complete_feed_and_retries_only_blocked_feed(
     assert first["blocked_events"] == 0
     assert [request[0] for request in blocked.requests] == ["TRADES", "BID_ASK"]
 
+    def unavailable() -> DownloadClient:
+        raise RuntimeError("official API unavailable")
+
+    connection_args = {
+        **common,
+        "git_commit": "retry-commit",
+        "now": lambda: datetime(2026, 8, 14, 12, 30, tzinfo=UTC),
+    }
+    connection_block = run_download(
+        **connection_args,
+        resume=True,
+        client_factory=unavailable,
+    )
+    assert connection_block["partial_events"] == 1
+    connection_metadata = json.loads(
+        (event_output_directory(output, _event()) / "metadata.json").read_text(encoding="utf-8")
+    )
+    assert connection_metadata["TRADES"]["completion_status"] == "COMPLETE"
+    assert connection_metadata["contract_status"] == "PASS"
+    assert connection_metadata["contract"]["conId"] == _contract().con_id
+    assert connection_metadata["ibkr_api_version"] == "10.49.1"
+    assert connection_metadata["git_commit"] == "abc123"
+    assert connection_metadata["download_timestamp_utc"] == "2026-08-14T12:00:00+00:00"
+    assert (
+        connection_metadata["connection_attempt"]["download_timestamp_utc"]
+        == "2026-08-14T12:30:00+00:00"
+    )
+    assert connection_metadata["connection_attempt"]["status"] == "BLOCKED_CONNECTION"
+
     qualification_block = _ContractFailureClient()
     still_partial = run_download(
         **common,
@@ -824,9 +1001,7 @@ def test_partial_event_resume_keeps_complete_feed_and_retries_only_blocked_feed(
     )
     assert still_partial["partial_events"] == 1
     event_metadata = json.loads(
-        (
-            event_output_directory(output, _event()) / "metadata.json"
-        ).read_text(encoding="utf-8")
+        (event_output_directory(output, _event()) / "metadata.json").read_text(encoding="utf-8")
     )
     assert event_metadata["TRADES"]["completion_status"] == "COMPLETE"
     assert event_metadata["BID_ASK"]["completion_status"] == "BLOCKED_CONTRACT"
@@ -861,6 +1036,19 @@ def test_conservative_pacer_enforces_rate_and_window_bounds() -> None:
 
     assert clock[0] == 10.0
 
+    clock[0] = 0.0
+    weighted = ConservativeHistoricalPacer(
+        requests_per_window=60,
+        window_seconds=600,
+        request_rate_per_second=20,
+        monotonic=lambda: clock[0],
+        sleeper=sleep,
+    )
+    weighted.acquire(weight=2)
+    for _ in range(4):
+        weighted.acquire()
+    assert clock[0] == 2.0
+
 
 def test_source_contains_no_order_api_invocation_or_direction_calculation() -> None:
     source_path = (
@@ -868,6 +1056,18 @@ def test_source_contains_no_order_api_invocation_or_direction_calculation() -> N
     )
     source = source_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
+    error_callbacks = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "error"
+    ]
+    assert [argument.arg for argument in error_callbacks[0].args.args[:5]] == [
+        "self",
+        "reqId",
+        "errorTime",
+        "errorCode",
+        "errorString",
+    ]
     invoked_attributes = {
         node.func.attr
         for node in ast.walk(tree)

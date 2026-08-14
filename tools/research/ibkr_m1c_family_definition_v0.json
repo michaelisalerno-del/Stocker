@@ -1,0 +1,23 @@
+{
+  "schema_version": "ibkr-m1c-family-definition-v0",
+  "source": {
+    "git_commit": "848a376d0157a77e00a56c1b216418ccc6acd5fc",
+    "path": "research/directional-readiness/20260812-m1c-directional-conditionality-v0/artifacts/primary/manifest.json",
+    "git_blob": "b78bc00191dd878460b09b5348ffff418c656376",
+    "sha256": "9285afe58d7f32abe706c63632358914fccf0769222ceebeea3afe35e3b2b534"
+  },
+  "m1c_lineage": {
+    "threshold": 0.4883337107940334,
+    "families": {
+      "HARD_M1C": "score >= T",
+      "P01_NEAR_M1": "0.8T < score <= T",
+      "R01": "0.5T < score <= 0.8T"
+    },
+    "selection_precedence": [
+      "HARD_M1C",
+      "P01_NEAR_M1",
+      "R01"
+    ],
+    "optimised_in_downloader": false
+  }
+}

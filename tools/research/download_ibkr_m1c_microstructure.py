@@ -12,6 +12,7 @@ import argparse
 import collections
 import contextlib
 import csv
+import functools
 import hashlib
 import importlib
 import json
@@ -41,6 +42,7 @@ DEFAULT_CANONICAL_SOURCE = REPOSITORY_ROOT / (
     "research/directional-readiness/20260728-m1c-tail-phase-v1/"
     "artifacts/primary/checkpoint_results_v1.parquet"
 )
+DEFAULT_FAMILY_DEFINITION = Path(__file__).with_name("ibkr_m1c_family_definition_v0.json")
 
 
 @dataclass(frozen=True)
@@ -82,11 +84,23 @@ class HistoricalPage:
 class HistoricalRequestError(RuntimeError):
     """A classified IBKR request failure suitable for bounded retry policy."""
 
-    def __init__(self, *, kind: str, code: int | None, message: str) -> None:
+    def __init__(
+        self,
+        *,
+        kind: str,
+        code: int | None,
+        message: str,
+        request_count: int = 0,
+        raw_rows: int = 0,
+        duplicate_overlap_removed: int = 0,
+    ) -> None:
         super().__init__(f"{kind}:{code}:{message}")
         self.kind = kind
         self.code = code
         self.message = message
+        self.request_count = request_count
+        self.raw_rows = raw_rows
+        self.duplicate_overlap_removed = duplicate_overlap_removed
 
 
 @dataclass(frozen=True)
@@ -275,6 +289,17 @@ class HistoricalDataOnlyFacade:
         return None if value is None else int(value)
 
 
+def create_historical_stock_contract(contract_type: Callable[[], Any], symbol: str) -> Any:
+    """Mirror Stocker's exact stock contract after provenance has been verified."""
+
+    contract = contract_type()
+    contract.symbol = symbol
+    contract.secType = "STK"
+    contract.exchange = "SMART"
+    contract.currency = "USD"
+    return contract
+
+
 def sha256_file(path: str | Path) -> str:
     """Hash one source or output without loading it all into memory."""
 
@@ -283,6 +308,49 @@ def sha256_file(path: str | Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+@functools.lru_cache(maxsize=1)
+def load_family_definition() -> dict[str, object]:
+    payload = json.loads(DEFAULT_FAMILY_DEFINITION.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("frozen M1C family definition must be a JSON object")
+    source = payload.get("source")
+    lineage = payload.get("m1c_lineage")
+    expected_families = {
+        "HARD_M1C": "score >= T",
+        "P01_NEAR_M1": "0.8T < score <= T",
+        "R01": "0.5T < score <= 0.8T",
+    }
+    if (
+        payload.get("schema_version") != "ibkr-m1c-family-definition-v0"
+        or not isinstance(source, dict)
+        or source.get("git_commit") != "848a376d0157a77e00a56c1b216418ccc6acd5fc"
+        or source.get("git_blob") != "b78bc00191dd878460b09b5348ffff418c656376"
+        or source.get("sha256")
+        != "9285afe58d7f32abe706c63632358914fccf0769222ceebeea3afe35e3b2b534"
+        or not isinstance(lineage, dict)
+        or lineage.get("threshold") != M1C_THRESHOLD
+        or lineage.get("families") != expected_families
+        or lineage.get("selection_precedence") != ["HARD_M1C", "P01_NEAR_M1", "R01"]
+        or lineage.get("optimised_in_downloader") is not False
+    ):
+        raise ValueError("frozen M1C family definition failed lineage validation")
+    return payload
+
+
+def family_definition_metadata(sha256: str) -> dict[str, object]:
+    payload = load_family_definition()
+    lineage = cast(dict[str, object], payload["m1c_lineage"])
+    return {
+        "source": str(DEFAULT_FAMILY_DEFINITION.relative_to(REPOSITORY_ROOT)),
+        "sha256": sha256,
+        "authoritative_source": payload["source"],
+        "m1c_threshold": lineage["threshold"],
+        "rules": lineage["families"],
+        "selection_precedence": lineage["selection_precedence"],
+        "optimised_in_downloader": False,
+    }
 
 
 def _m1c_family(probability: float) -> str | None:
@@ -313,6 +381,7 @@ def load_frozen_events(
 ) -> list[HistoricalEvent]:
     """Project immutable M1C checkpoint rows into downloader event records."""
 
+    load_family_definition()
     if period not in PERIOD_BOUNDS:
         raise ValueError(f"unsupported period: {period}")
     source_path = Path(source)
@@ -324,6 +393,8 @@ def load_frozen_events(
         "checkpoint",
         "signal_timestamp",
         "M1C_probability",
+        "m1c_high_tail_threshold_v1",
+        "m1c_high_tail_v1",
     }
     schema_names = set(pq.read_schema(source_path).names)  # type: ignore[no-untyped-call]
     missing = sorted(required - schema_names)
@@ -345,6 +416,11 @@ def load_frozen_events(
         if t0_utc.year >= 2026:
             raise ValueError("protected 2026 M1C row entered an allowed historical period")
         probability = float(row["M1C_probability"])
+        threshold = float(row["m1c_high_tail_threshold_v1"])
+        if abs(threshold - M1C_THRESHOLD) > 1e-12:
+            raise ValueError("canonical M1C row carries an unexpected frozen threshold")
+        if bool(row["m1c_high_tail_v1"]) != (probability >= M1C_THRESHOLD):
+            raise ValueError("canonical M1C row contradicts its frozen high-tail flag")
         family = _m1c_family(probability)
         if family not in allowed:
             continue
@@ -413,15 +489,26 @@ def qualify_exact_stock(
 ) -> tuple[ContractIdentity, object]:
     """Accept exactly one exact USD stock contract and reject ambiguity."""
 
-    if len(candidates) != 1:
-        raise ValueError(f"contract qualification returned {len(candidates)} matches")
-    contract = candidates[0]
+    matches: list[object] = []
+    for candidate in candidates:
+        try:
+            con_id = int(getattr(candidate, "conId", 0))
+        except (TypeError, ValueError):
+            continue
+        if (
+            str(getattr(candidate, "symbol", "")) == symbol
+            and str(getattr(candidate, "secType", "")) == "STK"
+            and str(getattr(candidate, "currency", "")) == "USD"
+            and con_id > 0
+        ):
+            matches.append(candidate)
+    if len(matches) != 1:
+        raise ValueError(f"contract qualification returned {len(matches)} exact matches")
+    contract = matches[0]
     candidate_symbol = str(getattr(contract, "symbol", ""))
     sec_type = str(getattr(contract, "secType", ""))
     currency = str(getattr(contract, "currency", ""))
     con_id = int(getattr(contract, "conId", 0))
-    if candidate_symbol != symbol or sec_type != "STK" or currency != "USD" or con_id <= 0:
-        raise ValueError("qualified contract is not the exact requested USD stock")
     exchange = str(getattr(contract, "exchange", ""))
     local_symbol = str(getattr(contract, "localSymbol", ""))
     if not exchange or not local_symbol:
@@ -447,7 +534,9 @@ def classify_historical_error(code: int, message: str) -> HistoricalRequestError
     normalized = message.casefold()
     if code in {100, 420} or (code == 162 and "pacing" in normalized):
         kind = "pacing"
-    elif code in {354, 10089, 10090, 10186, 10197}:
+    elif code in {354, 10089, 10090, 10186, 10197} or (
+        code == 162 and ("permission" in normalized or "not subscribed" in normalized)
+    ):
         kind = "permission"
     elif code in {200, 321}:
         kind = "contract"
@@ -480,10 +569,10 @@ def download_feed_pages(
     request_timeout_seconds: float = 30.0,
     max_pages: int = 5000,
     max_retries: int = 3,
-    retry_backoff_seconds: float = 5.0,
+    retry_backoff_seconds: float = 15.0,
     use_rth: bool = False,
     sleeper: Callable[[float], None] = time.sleep,
-    before_request: Callable[[], None] | None = None,
+    before_request: Callable[[str], None] | None = None,
 ) -> FeedDownload:
     """Download one complete interval with deterministic whole-second paging."""
 
@@ -508,7 +597,7 @@ def download_feed_pages(
         retries = 0
         while True:
             if before_request is not None:
-                before_request()
+                before_request(feed)
             request_count += 1
             try:
                 page = client.request_historical_ticks(
@@ -522,7 +611,14 @@ def download_feed_pages(
                 break
             except HistoricalRequestError as error:
                 if error.kind != "pacing" or retries >= max_retries:
-                    raise
+                    raise HistoricalRequestError(
+                        kind=error.kind,
+                        code=error.code,
+                        message=error.message,
+                        request_count=request_count,
+                        raw_rows=raw_rows,
+                        duplicate_overlap_removed=overlap_removed,
+                    ) from error
                 sleeper(retry_backoff_seconds * (2**retries))
                 retries += 1
 
@@ -531,12 +627,18 @@ def download_feed_pages(
                 kind="callback",
                 code=None,
                 message=f"unexpected {page.feed} callback for {feed} request",
+                request_count=request_count,
+                raw_rows=raw_rows,
+                duplicate_overlap_removed=overlap_removed,
             )
         if not page.done:
             raise HistoricalRequestError(
                 kind="callback",
                 code=None,
                 message="historical callback ended without done=true",
+                request_count=request_count,
+                raw_rows=raw_rows,
+                duplicate_overlap_removed=overlap_removed,
             )
         raw_rows += len(page.ticks)
         if feed == "TRADES":
@@ -559,6 +661,9 @@ def download_feed_pages(
                 kind="pagination",
                 code=None,
                 message="historical pagination made no forward progress",
+                request_count=request_count,
+                raw_rows=raw_rows,
+                duplicate_overlap_removed=overlap_removed,
             )
         cursor = next_cursor
 
@@ -567,6 +672,9 @@ def download_feed_pages(
             kind="pagination",
             code=None,
             message=f"historical pagination exceeded {max_pages} pages",
+            request_count=request_count,
+            raw_rows=raw_rows,
+            duplicate_overlap_removed=overlap_removed,
         )
 
     bounded = [
@@ -695,9 +803,17 @@ def write_json_atomic(path: str | Path, payload: dict[str, object]) -> None:
 def event_output_directory(output_root: str | Path, event: HistoricalEvent) -> Path:
     if event.period not in PERIOD_BOUNDS:
         raise ValueError("event period is outside the frozen downloader periods")
-    if any(part in {"", ".", ".."} for part in Path(event.event_id).parts):
+    event_id_path = Path(event.event_id)
+    if (
+        not event.event_id
+        or event.event_id in {".", ".."}
+        or event_id_path.is_absolute()
+        or len(event_id_path.parts) != 1
+        or "/" in event.event_id
+        or "\\" in event.event_id
+    ):
         raise ValueError("unsafe event ID")
-    if "/" in event.symbol or event.symbol in {"", ".", ".."}:
+    if "/" in event.symbol or "\\" in event.symbol or event.symbol in {"", ".", ".."}:
         raise ValueError("unsafe event symbol")
     return Path(output_root) / event.period / event.symbol / event.event_id
 
@@ -740,11 +856,16 @@ def build_event_metadata(
     tws_gateway_version: str | None,
     git_commit: str,
     downloaded_at_utc: datetime,
+    canonical_source_sha256: str,
+    family_definition_sha256: str,
 ) -> dict[str, object]:
     """Build the complete event-side provenance record without analysis fields."""
 
     payload: dict[str, object] = {
         "event_id": event.event_id,
+        "dataset_version": DATASET_VERSION,
+        "canonical_M1C_source_sha256": canonical_source_sha256,
+        "family_definition": family_definition_metadata(family_definition_sha256),
         "period": event.period,
         "symbol": event.symbol,
         "session_date": event.session_date,
@@ -794,26 +915,46 @@ def _valid_feed_parquet(
     expected_rows: int,
 ) -> bool:
     try:
-        table = pq.read_table(  # type: ignore[no-untyped-call]
-            path,
-            columns=[
-                "m1c_event_id",
-                "provider_timestamp_utc",
-                "source",
-                "feed",
-            ],
-        )
+        if pq.read_schema(path) != _schema_for_feed(feed):  # type: ignore[no-untyped-call]
+            return False
+        table = pq.read_table(path)  # type: ignore[no-untyped-call]
     except Exception:
         return False
     if table.num_rows != expected_rows:
         return False
     values = table.to_pylist()
-    return all(
-        row["m1c_event_id"] == event.event_id
-        and row["source"] == SOURCE
-        and row["feed"] == feed
-        and requested_start_utc <= row["provider_timestamp_utc"] <= requested_end_utc
-        for row in values
+    try:
+        rebuilt = assign_provider_identities(values, feed=feed, event_id=event.event_id)
+    except (TypeError, ValueError):
+        return False
+    timestamps = [row["provider_timestamp_utc"] for row in values]
+    if not all(
+        isinstance(timestamp, datetime)
+        and timestamp.tzinfo is not None
+        and timestamp.utcoffset() is not None
+        for timestamp in timestamps
+    ):
+        return False
+    return (
+        [row["provider_sequence"] for row in values] == list(range(expected_rows))
+        and timestamps == sorted(timestamps)
+        and [row["provider_event_identity"] for row in values]
+        == [row["provider_event_identity"] for row in rebuilt]
+        and all(
+            row["m1c_event_id"] == event.event_id
+            and row["symbol"] == event.symbol
+            and isinstance(row["con_id"], int)
+            and row["con_id"] > 0
+            and row["m1c_t0_utc"] == event.t0_utc
+            and row["source"] == SOURCE
+            and row["feed"] == feed
+            and isinstance(row["provider_content_occurrence"], int)
+            and row["provider_content_occurrence"] >= 0
+            and isinstance(row["provider_event_identity"], str)
+            and len(row["provider_event_identity"]) == 64
+            and requested_start_utc <= row["provider_timestamp_utc"] <= requested_end_utc
+            for row in values
+        )
     )
 
 
@@ -823,6 +964,8 @@ def resume_completed_feeds(
     event: HistoricalEvent,
     requested_start_utc: datetime,
     requested_end_utc: datetime,
+    canonical_source_sha256: str,
+    family_definition_sha256: str,
 ) -> set[str]:
     """Return only feeds whose metadata, interval, and Parquet all validate."""
 
@@ -833,6 +976,10 @@ def resume_completed_feeds(
         return set()
     if (
         metadata.get("event_id") != event.event_id
+        or metadata.get("dataset_version") != DATASET_VERSION
+        or metadata.get("canonical_M1C_source_sha256") != canonical_source_sha256
+        or not isinstance((family_definition := metadata.get("family_definition")), dict)
+        or family_definition.get("sha256") != family_definition_sha256
         or metadata.get("period") != event.period
         or metadata.get("symbol") != event.symbol
         or metadata.get("session_date") != event.session_date
@@ -889,10 +1036,12 @@ def _failed_feed(error: Exception) -> FeedDownload:
     return FeedDownload(
         rows=(),
         completion_status=f"BLOCKED_{kind.upper()}",
-        request_count=0,
-        raw_rows=0,
+        request_count=(error.request_count if isinstance(error, HistoricalRequestError) else 0),
+        raw_rows=(error.raw_rows if isinstance(error, HistoricalRequestError) else 0),
         final_rows=0,
-        duplicate_overlap_removed=0,
+        duplicate_overlap_removed=(
+            error.duplicate_overlap_removed if isinstance(error, HistoricalRequestError) else 0
+        ),
         earliest_timestamp=None,
         latest_timestamp=None,
         maximum_gap_seconds=None,
@@ -1002,6 +1151,7 @@ def write_download_manifest(
     *,
     canonical_source: Path,
     canonical_source_sha256: str,
+    family_definition_sha256: str,
     families: list[str],
     ibkr_api_version: str | None,
     ibkr_server_version: int | None,
@@ -1046,6 +1196,7 @@ def write_download_manifest(
         "dataset_version": DATASET_VERSION,
         "canonical_M1C_source": source_name,
         "canonical_M1C_source_sha256": canonical_source_sha256,
+        "family_definition": family_definition_metadata(family_definition_sha256),
         "development_dates": {"start": "2024-01-01", "end": "2024-12-31"},
         "assessment_dates": {"start": "2025-01-01", "end": "2025-08-22"},
         "families": families,
@@ -1085,6 +1236,123 @@ def write_download_manifest(
     return manifest
 
 
+def validate_existing_dataset_root(
+    output_root: str | Path,
+    *,
+    canonical_source_sha256: str,
+    family_definition_sha256: str,
+    families: list[str],
+) -> dict[str, object]:
+    """Refuse to mix incompatible frozen inputs in one dataset root."""
+
+    root = Path(output_root)
+    for path in _metadata_paths(root):
+        metadata = _read_metadata(path)
+        if (
+            metadata.get("dataset_version") != DATASET_VERSION
+            or metadata.get("canonical_M1C_source_sha256") != canonical_source_sha256
+            or not isinstance((definition := metadata.get("family_definition")), dict)
+            or definition.get("sha256") != family_definition_sha256
+            or metadata.get("family") not in families
+        ):
+            raise ValueError(f"existing event metadata has incompatible provenance: {path}")
+    manifest = _read_metadata(root / "download_manifest.json")
+    if not manifest:
+        return {}
+    expected = {
+        "dataset_version": DATASET_VERSION,
+        "canonical_M1C_source_sha256": canonical_source_sha256,
+        "family_definition": family_definition_metadata(family_definition_sha256),
+        "families": families,
+    }
+    mismatches = [key for key, value in expected.items() if manifest.get(key) != value]
+    if mismatches:
+        raise ValueError(
+            "existing dataset root has incompatible provenance: " + ", ".join(mismatches)
+        )
+    return manifest
+
+
+def record_connection_blocked_events(
+    *,
+    root: Path,
+    events: list[HistoricalEvent],
+    starting_index: int,
+    total_events: int,
+    resume: bool,
+    source_hash: str,
+    family_definition_hash: str,
+    error: Exception,
+    git_commit: str,
+    now: Callable[[], datetime],
+) -> tuple[int, int, int, int]:
+    """Persist provenance for every remaining event after connection failure."""
+
+    failure = _failed_feed(HistoricalRequestError(kind="connection", code=None, message=str(error)))
+    complete = partial = blocked = skipped = 0
+    for offset, event in enumerate(events):
+        index = starting_index + offset
+        requested_start, requested_end = event_window(event)
+        directory = event_output_directory(root, event)
+        completed = (
+            resume_completed_feeds(
+                directory,
+                event=event,
+                requested_start_utc=requested_start,
+                requested_end_utc=requested_end,
+                canonical_source_sha256=source_hash,
+                family_definition_sha256=family_definition_hash,
+            )
+            if resume
+            else set()
+        )
+        if completed == {"TRADES", "BID_ASK"}:
+            complete += 1
+            skipped += 1
+            continue
+        previous = _read_metadata(directory / "metadata.json")
+        attempted_at = now()
+        metadata = build_event_metadata(
+            event=event,
+            contract=None,
+            requested_start_utc=requested_start,
+            requested_end_utc=requested_end,
+            feeds={feed: failure for feed in ("TRADES", "BID_ASK") if feed not in completed},
+            ibkr_api_version="unknown",
+            server_version=None,
+            tws_gateway_version=None,
+            git_commit=git_commit,
+            downloaded_at_utc=attempted_at,
+            canonical_source_sha256=source_hash,
+            family_definition_sha256=family_definition_hash,
+        )
+        metadata["connection_error"] = str(error)
+        metadata = _merge_event_metadata(previous=previous, current=metadata)
+        metadata["connection_attempt"] = {
+            "status": "BLOCKED_CONNECTION",
+            "download_timestamp_utc": _iso(attempted_at),
+            "provider_error": str(error),
+        }
+        if completed:
+            for key in (
+                "contract",
+                "contract_status",
+                "ibkr_api_version",
+                "ibkr_server_version",
+                "tws_gateway_version",
+                "git_commit",
+                "download_timestamp_utc",
+            ):
+                if key in previous:
+                    metadata[key] = previous[key]
+        write_json_atomic(directory / "metadata.json", metadata)
+        status = _event_status(metadata)
+        partial += status == "partial"
+        blocked += status == "blocked"
+        print(f"[{index}/{total_events}] {event.symbol} {event.family} BLOCKED connection")
+    return complete, partial, blocked, skipped
+
+
 def run_download(
     *,
     period: str,
@@ -1098,7 +1366,7 @@ def run_download(
     request_timeout_seconds: float,
     max_retries: int,
     retry_backoff_seconds: float,
-    before_request: Callable[[], None] | None,
+    before_request: Callable[[str], None] | None,
     git_commit: str,
     now: Callable[[], datetime],
 ) -> dict[str, int]:
@@ -1106,6 +1374,10 @@ def run_download(
 
     source_path = Path(source)
     source_hash = sha256_file(source_path)
+    family_definition_hash = sha256_file(DEFAULT_FAMILY_DEFINITION)
+    families = ["P01_NEAR_M1", "HARD_M1C"]
+    if include_r01:
+        families.append("R01")
     events = load_frozen_events(source_path, period=period, include_r01=include_r01)
     if validation_hard_count is not None:
         events = select_validation_events(events, count=validation_hard_count, family="HARD_M1C")
@@ -1115,6 +1387,12 @@ def run_download(
         events = events[:event_limit]
     root = Path(output_root)
     root.mkdir(parents=True, exist_ok=True)
+    prior_manifest = validate_existing_dataset_root(
+        root,
+        canonical_source_sha256=source_hash,
+        family_definition_sha256=family_definition_hash,
+        families=families,
+    )
     client: DownloadClient | None = None
     contracts: dict[str, tuple[ContractIdentity, object]] = {}
     complete_events = 0
@@ -1134,6 +1412,8 @@ def run_download(
                     event=event,
                     requested_start_utc=requested_start,
                     requested_end_utc=requested_end,
+                    canonical_source_sha256=source_hash,
+                    family_definition_sha256=family_definition_hash,
                 )
                 if resume
                 else set()
@@ -1144,7 +1424,26 @@ def run_download(
                 print(f"[{index}/{len(events)}] {event.symbol} {event.family} SKIP (resume)")
                 continue
             if client is None:
-                client = client_factory()
+                try:
+                    client = client_factory()
+                except Exception as error:
+                    counts = record_connection_blocked_events(
+                        root=root,
+                        events=events[index - 1 :],
+                        starting_index=index,
+                        total_events=len(events),
+                        resume=resume,
+                        source_hash=source_hash,
+                        family_definition_hash=family_definition_hash,
+                        error=error,
+                        git_commit=git_commit,
+                        now=now,
+                    )
+                    complete_events += counts[0]
+                    partial_events += counts[1]
+                    blocked_events += counts[2]
+                    skipped_events += counts[3]
+                    break
                 api_version = client.api_version
                 server_version = client.server_version
                 gateway_version = client.tws_gateway_version
@@ -1181,6 +1480,8 @@ def run_download(
                     tws_gateway_version=gateway_version,
                     git_commit=git_commit,
                     downloaded_at_utc=now(),
+                    canonical_source_sha256=source_hash,
+                    family_definition_sha256=family_definition_hash,
                 )
                 metadata["contract_error"] = str(error)
                 metadata = _merge_event_metadata(previous=previous, current=metadata)
@@ -1225,6 +1526,8 @@ def run_download(
                     tws_gateway_version=gateway_version,
                     git_commit=git_commit,
                     downloaded_at_utc=now(),
+                    canonical_source_sha256=source_hash,
+                    family_definition_sha256=family_definition_hash,
                 )
                 current = _merge_event_metadata(previous=previous, current=current)
                 write_json_atomic(directory / "metadata.json", current)
@@ -1238,10 +1541,6 @@ def run_download(
         if client is not None:
             client.close()
 
-    families = ["P01_NEAR_M1", "HARD_M1C"]
-    if include_r01:
-        families.append("R01")
-    prior_manifest = _read_metadata(root / "download_manifest.json")
     if api_version is None and isinstance(prior_manifest.get("ibkr_api_version"), str):
         api_version = str(prior_manifest["ibkr_api_version"])
     prior_server_version = prior_manifest.get("ibkr_server_version")
@@ -1254,6 +1553,7 @@ def run_download(
         root,
         canonical_source=source_path,
         canonical_source_sha256=source_hash,
+        family_definition_sha256=family_definition_hash,
         families=families,
         ibkr_api_version=api_version,
         ibkr_server_version=server_version,
@@ -1285,27 +1585,37 @@ class ConservativeHistoricalPacer:
             raise ValueError("pacing bounds must be positive")
         self._requests_per_window = requests_per_window
         self._window_seconds = window_seconds
-        self._minimum_interval = 1.0 / request_rate_per_second
+        self._minimum_interval = max(1.0 / request_rate_per_second, 0.4)
         self._monotonic = monotonic
         self._sleep = sleeper
         self._requests: collections.deque[float] = collections.deque()
+        self._burst_requests: collections.deque[float] = collections.deque()
         self._last_request: float | None = None
         self._lock = threading.Lock()
 
-    def acquire(self) -> None:
+    def acquire(self, *, weight: int = 1) -> None:
+        if weight <= 0 or weight > self._requests_per_window:
+            raise ValueError("pacing weight is outside the configured request window")
         with self._lock:
             while True:
                 current = self._monotonic()
                 while self._requests and current - self._requests[0] >= self._window_seconds:
                     self._requests.popleft()
+                while self._burst_requests and current - self._burst_requests[0] >= 2.0:
+                    self._burst_requests.popleft()
                 waits = [0.0]
-                if len(self._requests) >= self._requests_per_window:
-                    waits.append(self._window_seconds - (current - self._requests[0]))
+                if len(self._requests) + weight > self._requests_per_window:
+                    expiry_index = len(self._requests) + weight - self._requests_per_window - 1
+                    waits.append(self._window_seconds - (current - self._requests[expiry_index]))
+                if len(self._burst_requests) + weight > 5:
+                    expiry_index = len(self._burst_requests) + weight - 6
+                    waits.append(2.0 - (current - self._burst_requests[expiry_index]))
                 if self._last_request is not None:
-                    waits.append(self._minimum_interval - (current - self._last_request))
+                    waits.append(self._minimum_interval * weight - (current - self._last_request))
                 wait_seconds = max(waits)
                 if wait_seconds <= 0:
-                    self._requests.append(current)
+                    self._requests.extend(current for _ in range(weight))
+                    self._burst_requests.extend(current for _ in range(weight))
                     self._last_request = current
                     return
                 self._sleep(wait_seconds)
@@ -1327,7 +1637,6 @@ class OfficialHistoricalClient:
             require_ibkr_socket_loopback_only,
             require_official_ibkr_api,
         )
-        from stocker_prospective.ibkr_official import create_official_stock_contract
         from stocker_prospective.market_data import RequestIdAllocator
 
         if not bool(config.read_only):
@@ -1339,6 +1648,7 @@ class OfficialHistoricalClient:
         require_ibkr_socket_loopback_only(str(config.host), int(config.port))
         api = require_official_ibkr_api(provenance_path)
         client_module = importlib.import_module("ibapi.client")
+        contract_module = importlib.import_module("ibapi.contract")
         wrapper_module = importlib.import_module("ibapi.wrapper")
         EClient = client_module.EClient
         EWrapper = wrapper_module.EWrapper
@@ -1378,11 +1688,12 @@ class OfficialHistoricalClient:
             def error(
                 self,
                 reqId: int,
+                errorTime: int,
                 errorCode: int,
                 errorString: str,
                 advancedOrderRejectJson: str = "",
             ) -> None:
-                del advancedOrderRejectJson
+                del errorTime, advancedOrderRejectJson
                 code = int(errorCode)
                 if code in informational_codes:
                     return
@@ -1438,7 +1749,12 @@ class OfficialHistoricalClient:
 
         raw_client = _OfficialHistoricalCallbackClient()
         self._client = HistoricalDataOnlyFacade(raw_client)
-        self._stock_contract_factory = create_official_stock_contract
+        self._stock_contract_factory: Callable[[str], Any] = lambda symbol: (
+            create_historical_stock_contract(
+                contract_module.Contract,
+                symbol,
+            )
+        )
         self.api_version = str(getattr(api, "__version__", "unknown"))
         self.tws_gateway_version = (
             None
@@ -1467,9 +1783,9 @@ class OfficialHistoricalClient:
     def qualify_symbol(
         self, symbol: str, *, timeout_seconds: float
     ) -> tuple[ContractIdentity, object]:
+        contract = self._stock_contract_factory(symbol)
         request_id = self._request_ids.next()
         self._registry.begin(request_id, expected_feed="CONTRACT")
-        contract = self._stock_contract_factory(symbol)
         try:
             self._client.reqContractDetails(request_id, contract)
         except Exception as error:
@@ -1554,7 +1870,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--client-id", type=int)
     parser.add_argument("--request-timeout-seconds", type=float)
     parser.add_argument("--max-retries", type=int, default=3)
-    parser.add_argument("--retry-backoff-seconds", type=float, default=5.0)
+    parser.add_argument("--retry-backoff-seconds", type=float, default=15.0)
     parser.add_argument("--provenance", type=Path)
     return parser
 
@@ -1601,7 +1917,7 @@ def main(arguments: list[str] | None = None) -> int:
         request_timeout_seconds=timeout,
         max_retries=args.max_retries,
         retry_backoff_seconds=args.retry_backoff_seconds,
-        before_request=pacer.acquire,
+        before_request=lambda feed: pacer.acquire(weight=2 if feed == "BID_ASK" else 1),
         git_commit=_git_commit(),
         now=lambda: datetime.now(UTC),
     )
@@ -1717,7 +2033,7 @@ def assign_provider_identities(
         content = _provider_content(row)
         occurrence = occurrences.get(content, 0)
         occurrences[content] = occurrence + 1
-        identity_material = f"{event_id}\0{feed}\0{content}\0{occurrence}".encode()
+        identity_material = f"{event_id}\0{feed}\0{sequence}\0{content}\0{occurrence}".encode()
         row.update(
             {
                 "provider_sequence": sequence,

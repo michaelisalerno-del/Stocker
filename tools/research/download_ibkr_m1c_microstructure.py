@@ -1158,12 +1158,19 @@ def run_download(
                     )
                 contract, provider_contract = contracts[event.symbol]
             except Exception as error:
+                contract_failure = _failed_feed(
+                    HistoricalRequestError(
+                        kind="contract",
+                        code=(error.code if isinstance(error, HistoricalRequestError) else None),
+                        message=str(error),
+                    )
+                )
                 metadata = build_event_metadata(
                     event=event,
                     contract=None,
                     requested_start_utc=requested_start,
                     requested_end_utc=requested_end,
-                    feeds={},
+                    feeds={"TRADES": contract_failure, "BID_ASK": contract_failure},
                     ibkr_api_version=api_version or "unknown",
                     server_version=server_version,
                     tws_gateway_version=gateway_version,

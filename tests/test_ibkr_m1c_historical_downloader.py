@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import csv
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -717,6 +718,57 @@ class _PermissionFailureClient(_CompleteDownloadClient):
             use_rth=use_rth,
             timeout_seconds=timeout_seconds,
         )
+
+
+class _ContractFailureClient(_CompleteDownloadClient):
+    def qualify_symbol(
+        self, symbol: str, *, timeout_seconds: float
+    ) -> tuple[ContractIdentity, object]:
+        del symbol, timeout_seconds
+        raise HistoricalRequestError(kind="contract", code=200, message="ambiguous contract")
+
+
+def test_contract_block_writes_both_required_summary_feed_rows(tmp_path: Path) -> None:
+    source = tmp_path / "events.parquet"
+    pq.write_table(
+        pa.table(
+            {
+                "row_id": [_event().event_id],
+                "stock": [_event().symbol],
+                "session": [_event().session_date],
+                "partition": [_event().period],
+                "checkpoint": [_event().checkpoint],
+                "signal_timestamp": [_event().t0_utc],
+                "M1C_probability": [0.61],
+            }
+        ),
+        source,
+    )
+    output = tmp_path / "dataset"
+    blocked = _ContractFailureClient()
+    result = run_download(
+        period="development",
+        source=source,
+        output_root=output,
+        include_r01=False,
+        resume=False,
+        validation_hard_count=None,
+        event_limit=None,
+        client_factory=lambda: blocked,
+        request_timeout_seconds=1,
+        max_retries=1,
+        retry_backoff_seconds=0,
+        before_request=None,
+        git_commit="abc123",
+        now=lambda: datetime(2026, 8, 14, 12, 0, tzinfo=UTC),
+    )
+
+    assert result["blocked_events"] == 1
+    with (output / "download_summary.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert [row["feed"] for row in rows] == ["BID_ASK", "TRADES"]
+    assert {row["status"] for row in rows} == {"BLOCKED_CONTRACT"}
+    assert {row["contract_status"] for row in rows} == {"BLOCKED"}
 
 
 def test_partial_event_resume_keeps_complete_feed_and_retries_only_blocked_feed(

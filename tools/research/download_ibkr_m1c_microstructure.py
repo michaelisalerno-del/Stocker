@@ -15,8 +15,10 @@ import csv
 import functools
 import hashlib
 import importlib
+import ipaddress
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -43,6 +45,41 @@ DEFAULT_CANONICAL_SOURCE = REPOSITORY_ROOT / (
     "artifacts/primary/checkpoint_results_v1.parquet"
 )
 DEFAULT_FAMILY_DEFINITION = Path(__file__).with_name("ibkr_m1c_family_definition_v0.json")
+
+
+def require_local_ibkr_socket(host: str, port: int) -> None:
+    """Fail closed unless the configured endpoint is a listening loopback socket.
+
+    Stocker's production guard additionally inspects Linux ``/proc/net``.  The
+    standalone downloader can run on macOS through a loopback-only SSH tunnel,
+    where ``/proc/net`` is unavailable, so it proves the local listener with a
+    connection that sends no IBKR protocol data.
+    """
+
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as exc:
+        raise RuntimeError(
+            "blocked_unsafe_runtime_configuration: "
+            f"ibkr host must be a literal loopback address: {host}"
+        ) from exc
+    if not address.is_loopback:
+        raise RuntimeError(
+            "blocked_unsafe_runtime_configuration: "
+            f"ibkr host must be a literal loopback address: {host}"
+        )
+    if sys.platform.startswith("linux"):
+        from stocker_prospective.ibkr import require_ibkr_socket_loopback_only
+
+        require_ibkr_socket_loopback_only(host, port)
+        return
+    try:
+        with socket.create_connection((host, port), timeout=2.0):
+            pass
+    except OSError as exc:
+        raise RuntimeError(
+            f"blocked_ibkr_connection: configured_socket_not_listening:{port}"
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -1634,7 +1671,6 @@ class OfficialHistoricalClient:
         provenance_path: str | Path | None = None,
     ) -> None:
         from stocker_prospective.ibkr import (
-            require_ibkr_socket_loopback_only,
             require_official_ibkr_api,
         )
         from stocker_prospective.market_data import RequestIdAllocator
@@ -1645,7 +1681,7 @@ class OfficialHistoricalClient:
             raise RuntimeError("blocked_unsafe_runtime_configuration: invalid IBKR environment")
         if client_id <= 0:
             raise RuntimeError("blocked_unsafe_runtime_configuration: client ID must be non-zero")
-        require_ibkr_socket_loopback_only(str(config.host), int(config.port))
+        require_local_ibkr_socket(str(config.host), int(config.port))
         api = require_official_ibkr_api(provenance_path)
         client_module = importlib.import_module("ibapi.client")
         contract_module = importlib.import_module("ibapi.contract")

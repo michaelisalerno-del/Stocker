@@ -32,6 +32,7 @@ from tools.research.download_ibkr_m1c_microstructure import (
     normalize_bid_ask_tick,
     normalize_trade_tick,
     qualify_exact_stock,
+    require_local_ibkr_socket,
     resume_completed_feeds,
     run_download,
     select_validation_events,
@@ -39,6 +40,31 @@ from tools.research.download_ibkr_m1c_microstructure import (
     write_feed_parquet,
     write_json_atomic,
 )
+
+
+def test_macos_loopback_guard_rejects_external_host_and_probes_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[tuple[str, int], float]] = []
+
+    class _Connection:
+        def __enter__(self) -> _Connection:
+            return self
+
+        def __exit__(self, *_arguments: object) -> None:
+            return None
+
+    def _connect(address: tuple[str, int], timeout: float) -> _Connection:
+        calls.append((address, timeout))
+        return _Connection()
+
+    monkeypatch.setattr("sys.platform", "darwin")
+    monkeypatch.setattr("socket.create_connection", _connect)
+
+    with pytest.raises(RuntimeError, match="literal loopback"):
+        require_local_ibkr_socket("139.59.178.164", 4003)
+    require_local_ibkr_socket("127.0.0.1", 4003)
+    assert calls == [(('127.0.0.1', 4003), 2.0)]
 
 
 @dataclass

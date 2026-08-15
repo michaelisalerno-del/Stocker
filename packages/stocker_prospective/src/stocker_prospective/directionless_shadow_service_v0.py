@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from stocker_prospective.directionless_shadow_repository_v0 import (
     DirectionlessShadowRepositoryV0,
@@ -48,21 +48,34 @@ class DirectionlessShadowServiceV0:
             m1c_artifact_hash=m1c_artifact_hash,
         )
         self._machines: dict[str, FrozenDirectionlessShadowV0] = {}
+        restarted_at = datetime.now(UTC)
         for episode in repository.load_active():
             machine = FrozenDirectionlessShadowV0(episode)
             # A process restart creates a real observation gap. The first
             # restored quote resolves waiting state conservatively and makes
             # an active path explicitly unresolved.
-            machine.connection_lost(
-                episode.updated_at,
-                generation=episode.gap_connection_generation or 0,
-                gap_id=f"restart-{episode.shadow_episode_id}-{episode.updated_at.isoformat()}",
-            )
-            machine.connection_restored(
-                episode.updated_at,
-                generation=episode.gap_connection_generation or 0,
-                gap_id=f"restart-{episode.shadow_episode_id}-{episode.updated_at.isoformat()}",
-            )
+            if episode.gap_pending and episode.gap_end is None:
+                machine.connection_restored(
+                    restarted_at,
+                    generation=episode.gap_connection_generation or 0,
+                    gap_id=episode.gap_id or f"recovered-{episode.shadow_episode_id}",
+                )
+                repository.save(machine.episode, record_transition=False)
+            elif not episode.gap_pending:
+                restart_gap_id = (
+                    f"restart-{episode.shadow_episode_id}-{episode.updated_at.isoformat()}"
+                )
+                machine.connection_lost(
+                    episode.updated_at,
+                    generation=episode.gap_connection_generation or 0,
+                    gap_id=restart_gap_id,
+                )
+                machine.connection_restored(
+                    restarted_at,
+                    generation=episode.gap_connection_generation or 0,
+                    gap_id=restart_gap_id,
+                )
+                repository.save(machine.episode, record_transition=False)
             self._machines[episode.m1c_episode_id] = machine
 
     def create_hard_episode(
@@ -154,12 +167,18 @@ class DirectionlessShadowServiceV0:
     def connection_lost(self, at: datetime, *, generation: int, gap_id: str) -> None:
         for machine in self._machines.values():
             if not machine.episode.terminal:
+                before = machine.episode
                 machine.connection_lost(at, generation=generation, gap_id=gap_id)
+                if machine.episode != before:
+                    self.repository.save(machine.episode, record_transition=False)
 
     def connection_restored(self, at: datetime, *, generation: int, gap_id: str) -> None:
         for machine in self._machines.values():
             if not machine.episode.terminal:
+                before = machine.episode
                 machine.connection_restored(at, generation=generation, gap_id=gap_id)
+                if machine.episode != before:
+                    self.repository.save(machine.episode, record_transition=False)
 
 
 __all__ = ["DirectionlessShadowServiceV0"]

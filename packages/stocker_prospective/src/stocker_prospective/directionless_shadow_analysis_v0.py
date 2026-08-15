@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import sqlite3
 import statistics
 from collections import defaultdict
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, cast
+
+import pandas_market_calendars as mcal
 
 from stocker_prospective.m1c_directionless_shadow_v0 import DirectionlessShadowEpisodeV0
 
@@ -132,14 +136,48 @@ def analyse_directionless_shadow_v0(
     }
 
 
-def require_analysis_open_receipt(path: Path) -> dict[str, Any]:
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def require_analysis_open_receipt(
+    path: Path,
+    *,
+    database_path: Path,
+    run_id: str,
+) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("directionless shadow analysis receipt must be a JSON object")
+    uri = f"file:{database_path.resolve()}?mode=ro"
+    with sqlite3.connect(uri, uri=True) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only = ON")
+        run = connection.execute(
+            "SELECT * FROM m1c_directionless_shadow_run_v0 WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+    if run is None:
+        raise ValueError("directionless shadow V0 run contract is absent")
+    first_session = str(run["first_eligible_session"])
+    start = date.fromisoformat(first_session)
+    schedule = mcal.get_calendar("XNYS").schedule(
+        start_date=start,
+        end_date=start + timedelta(days=60),
+    )
+    expected_sessions = [index.date().isoformat() for index in schedule.index[:20]]
     if (
         payload.get("analysis_opened") is not True
         or payload.get("strategy_version") != "m1c_directionless_t20_d_v0"
+        or payload.get("run_id") != run_id
+        or payload.get("database_sha256") != _sha256(database_path)
+        or payload.get("contract_sha256") != run["contract_sha256"]
         or int(payload.get("complete_eligible_sessions", 0)) != 20
+        or payload.get("eligible_sessions") != expected_sessions
     ):
         raise ValueError("directionless shadow V0 analysis period is not formally open")
     return cast(dict[str, Any], payload)

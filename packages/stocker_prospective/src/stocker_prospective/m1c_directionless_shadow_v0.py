@@ -143,6 +143,7 @@ class DirectionlessShadowEpisodeV0(BaseModel):
     opposite_within_5m: bool = False
     opposite_before_horizon: bool = False
     gap_id: str | None = None
+    gap_pending: bool = False
     gap_start: datetime | None = None
     gap_end: datetime | None = None
     gap_connection_generation: int | None = None
@@ -243,6 +244,23 @@ class FrozenDirectionlessShadowV0:
                 episode.updated_at.astimezone(UTC),
                 episode.last_source_event_id,
             )
+        if episode.gap_pending and episode.gap_start is not None and not episode.terminal:
+            gap = (
+                episode.gap_start,
+                episode.gap_connection_generation or 0,
+                episode.gap_id or f"recovered-{episode.shadow_episode_id}",
+                episode.last_valid_price_before_gap,
+            )
+            if episode.gap_end is None:
+                self._gap_open = gap
+            else:
+                self._restored_gap = (
+                    gap[0],
+                    episode.gap_end,
+                    gap[1],
+                    gap[2],
+                    gap[3],
+                )
 
     @property
     def episode(self) -> DirectionlessShadowEpisodeV0:
@@ -254,6 +272,8 @@ class FrozenDirectionlessShadowV0:
         if (
             self._episode.state is DirectionlessShadowStateV0.WAITING_FOR_ENTRY
             and now.astimezone(UTC) > self._episode.entry_deadline
+            and self._gap_open is None
+            and self._restored_gap is None
         ):
             self._episode = self._episode.model_copy(
                 update={
@@ -267,8 +287,28 @@ class FrozenDirectionlessShadowV0:
     def connection_lost(self, at: datetime, *, generation: int, gap_id: str) -> None:
         if at.tzinfo is None or at.utcoffset() is None:
             raise ValueError("gap timestamp must be timezone-aware")
-        last_price = self._liquidation_price_from_episode()
-        self._gap_open = (at.astimezone(UTC), generation, gap_id, last_price)
+        observed = at.astimezone(UTC)
+        if self._gap_open is not None:
+            return
+        if self._restored_gap is not None:
+            start, _, first_generation, first_gap_id, last_price = self._restored_gap
+            self._gap_open = (start, first_generation, first_gap_id, last_price)
+            self._restored_gap = None
+        else:
+            last_price = self._liquidation_price_from_episode()
+            self._gap_open = (observed, generation, gap_id, last_price)
+        start, first_generation, first_gap_id, last_price = self._gap_open
+        self._episode = self._episode.model_copy(
+            update={
+                "gap_id": first_gap_id,
+                "gap_pending": True,
+                "gap_start": start,
+                "gap_end": None,
+                "gap_connection_generation": first_generation,
+                "last_valid_price_before_gap": last_price,
+                "updated_at": observed,
+            }
+        )
 
     def connection_restored(self, at: datetime, *, generation: int, gap_id: str) -> None:
         if self._gap_open is None or self._gap_open[2] != gap_id:
@@ -282,6 +322,13 @@ class FrozenDirectionlessShadowV0:
             last_price,
         )
         self._gap_open = None
+        self._episode = self._episode.model_copy(
+            update={
+                "gap_pending": True,
+                "gap_end": at.astimezone(UTC),
+                "updated_at": at.astimezone(UTC),
+            }
+        )
 
     def observe(self, observation: ShadowBBOObservationV0) -> DirectionlessShadowEpisodeV0:
         if self._episode.terminal or observation.event_id in self._seen_event_ids:
@@ -359,13 +406,11 @@ class FrozenDirectionlessShadowV0:
                 "updated_at": observation.receive_timestamp.astimezone(UTC),
             }
         )
-        return self._observe_active(observation, entry_event=True)
+        return self._observe_active(observation)
 
     def _observe_active(
         self,
         observation: ShadowBBOObservationV0,
-        *,
-        entry_event: bool = False,
     ) -> DirectionlessShadowEpisodeV0:
         timestamp = observation.ordering_timestamp.astimezone(UTC)
         direction = self._episode.direction
@@ -472,6 +517,7 @@ class FrozenDirectionlessShadowV0:
         assert self._restored_gap is not None
         start, end, generation, gap_id, last_price = self._restored_gap
         self._restored_gap = None
+        evidence_end = max(end, observation.ordering_timestamp.astimezone(UTC))
         if self._episode.state in {
             DirectionlessShadowStateV0.LONG_ACTIVE,
             DirectionlessShadowStateV0.SHORT_ACTIVE,
@@ -480,9 +526,16 @@ class FrozenDirectionlessShadowV0:
                 observation,
                 state=DirectionlessShadowStateV0.ACTIVE_PATH_UNRESOLVED,
                 reason="SHADOW_PATH_UNRESOLVED_DATA_GAP",
-                gap=(start, end, generation, gap_id, last_price),
+                gap=(start, evidence_end, generation, gap_id, last_price),
             )
         if self._episode.state is DirectionlessShadowStateV0.WAITING_FOR_ENTRY:
+            if evidence_end >= self._episode.entry_deadline:
+                return self._terminal_unresolved(
+                    observation,
+                    state=DirectionlessShadowStateV0.ENTRY_UNRESOLVED,
+                    reason="ENTRY_PATH_UNRESOLVED",
+                    gap=(start, evidence_end, generation, gap_id, last_price),
+                )
             long_touch = observation.ask >= self._episode.upper_trigger
             short_touch = observation.bid <= self._episode.lower_trigger
             if long_touch and short_touch:
@@ -490,7 +543,7 @@ class FrozenDirectionlessShadowV0:
                     observation,
                     state=DirectionlessShadowStateV0.ENTRY_UNRESOLVED,
                     reason="ENTRY_PATH_UNRESOLVED",
-                    gap=(start, end, generation, gap_id, last_price),
+                    gap=(start, evidence_end, generation, gap_id, last_price),
                 )
             # A single-side restored touch has a known side but unknown touch
             # time; V0 records it as a gap entry at the immutable boundary.
@@ -502,14 +555,23 @@ class FrozenDirectionlessShadowV0:
                 self._episode = result.model_copy(
                     update={
                         "entry_gap": True,
+                        "gap_pending": False,
                         "gap_id": gap_id,
                         "gap_start": start,
-                        "gap_end": end,
+                        "gap_end": evidence_end,
                         "gap_connection_generation": generation,
                         "last_valid_price_before_gap": last_price,
                         "first_restored_price": (
                             observation.ask if result.direction == "LONG" else observation.bid
                         ),
+                    }
+                )
+            if not self._episode.terminal:
+                self._episode = self._episode.model_copy(
+                    update={
+                        "gap_pending": False,
+                        "gap_end": evidence_end,
+                        "updated_at": observation.receive_timestamp.astimezone(UTC),
                     }
                 )
             return self._episode
@@ -531,6 +593,7 @@ class FrozenDirectionlessShadowV0:
             "last_source_event_id": observation.event_id,
             "last_ordering_timestamp": observation.ordering_timestamp.astimezone(UTC),
             "last_local_sequence": observation.local_sequence,
+            "gap_pending": False,
             "last_bid": observation.bid,
             "last_ask": observation.ask,
             "updated_at": observation.receive_timestamp.astimezone(UTC),

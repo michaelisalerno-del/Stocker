@@ -158,7 +158,47 @@ def test_gap_does_not_infer_path() -> None:
     assert unresolved_active.state is DirectionlessShadowStateV0.ACTIVE_PATH_UNRESOLVED
     assert unresolved_active.exit_reason == "SHADOW_PATH_UNRESOLVED_DATA_GAP"
     assert unresolved_active.gap_start == T0 + timedelta(seconds=2)
-    assert unresolved_active.gap_end == T0 + timedelta(seconds=3)
+    assert unresolved_active.gap_end == T0 + timedelta(seconds=4)
+
+
+def test_gap_spanning_entry_deadline_cannot_become_clean_no_entry() -> None:
+    machine = FrozenDirectionlessShadowV0(_episode())
+    machine.observe(_quote(1, 100.0, 100.1, "before-gap"))
+    machine.connection_lost(T0 + timedelta(minutes=4), generation=1, gap_id="gap-deadline")
+    machine.connection_lost(
+        T0 + timedelta(minutes=4, seconds=30), generation=1, gap_id="later-notice"
+    )
+    assert machine.advance_time(T0 + timedelta(minutes=6)).state is (
+        DirectionlessShadowStateV0.WAITING_FOR_ENTRY
+    )
+    assert machine.episode.gap_start == T0 + timedelta(minutes=4)
+    machine.connection_restored(T0 + timedelta(minutes=6), generation=2, gap_id="gap-deadline")
+    unresolved = machine.observe(_quote(361, 100.0, 100.1, "restored"))
+    assert unresolved.state is DirectionlessShadowStateV0.ENTRY_UNRESOLVED
+    assert unresolved.exit_reason == "ENTRY_PATH_UNRESOLVED"
+
+
+def test_gap_pending_state_survives_restart_but_consumed_gap_does_not_rehydrate() -> None:
+    machine = FrozenDirectionlessShadowV0(_episode())
+    machine.connection_lost(T0 + timedelta(minutes=4), generation=1, gap_id="persisted")
+    rebuilt = FrozenDirectionlessShadowV0(machine.episode)
+    assert rebuilt.advance_time(T0 + timedelta(minutes=6)).state is (
+        DirectionlessShadowStateV0.WAITING_FOR_ENTRY
+    )
+    rebuilt.connection_restored(T0 + timedelta(minutes=6), generation=2, gap_id="persisted")
+    assert rebuilt.observe(_quote(361, 100.0, 100.1, "after-restart")).state is (
+        DirectionlessShadowStateV0.ENTRY_UNRESOLVED
+    )
+
+    clean = FrozenDirectionlessShadowV0(_episode())
+    clean.connection_lost(T0 + timedelta(seconds=1), generation=1, gap_id="consumed")
+    clean.connection_restored(T0 + timedelta(seconds=2), generation=2, gap_id="consumed")
+    resumed = clean.observe(_quote(3, 100.0, 100.1, "clean-restored"))
+    assert resumed.gap_pending is False
+    assert (
+        FrozenDirectionlessShadowV0(resumed).advance_time(T0 + timedelta(minutes=6)).state
+        is DirectionlessShadowStateV0.NO_ENTRY_TIMEOUT
+    )
 
 
 def test_invalid_quote_is_ignored_and_event_replay_is_idempotent() -> None:
@@ -212,6 +252,24 @@ def test_repository_restart_and_exactly_once_transition(tmp_path: Path) -> None:
     loaded = restarted.load("m1c-hard-1")
     assert loaded == episode
     assert restarted.load_active() == (episode,)
+    with database._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM m1c_directionless_shadow_transition_v0"
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_repository_persists_same_state_extrema_without_transition_spam(tmp_path: Path) -> None:
+    database = ProspectiveRepository(tmp_path / "prospective.sqlite3")
+    database.migrate()
+    repository = DirectionlessShadowRepositoryV0(database, run_id="run-v0")
+    machine = FrozenDirectionlessShadowV0(_episode())
+    repository.save(machine.episode)
+    machine.observe(_quote(1, 100.0, 100.1, "ordinary"))
+    repository.save(machine.episode, record_transition=False)
+    assert repository.load("m1c-hard-1") == machine.episode
     with database._connect() as connection:
         assert (
             connection.execute(

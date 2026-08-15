@@ -88,9 +88,8 @@ class DirectionlessShadowRepositoryV0:
                     raise ValueError("terminal directionless shadow episode is immutable")
                 if episode.updated_at < persisted.updated_at:
                     raise ValueError("directionless shadow state cannot move backwards")
-            if record_transition:
-                connection.execute(
-                    """
+            connection.execute(
+                """
                 INSERT INTO m1c_directionless_shadow_v0 (
                     shadow_episode_id, strategy_version, run_id, m1c_episode_id,
                     symbol, con_id, session_date, t0_utc, p0, movement_price,
@@ -119,75 +118,74 @@ class DirectionlessShadowRepositoryV0:
                     payload_json = excluded.payload_json,
                     updated_at_utc = excluded.updated_at_utc
                 """,
-                    (
-                        episode.shadow_episode_id,
-                        episode.strategy_version,
-                        self.run_id,
-                        episode.m1c_episode_id,
-                        episode.symbol,
-                        episode.con_id,
-                        episode.session.isoformat(),
-                        episode.t0.isoformat(),
-                        episode.p0,
-                        episode.movement_price,
-                        episode.family,
-                        episode.probability,
-                        episode.consumed_ratio,
-                        episode.upper_trigger,
-                        episode.lower_trigger,
-                        episode.state.value,
-                        episode.direction,
-                        None
-                        if episode.entry_timestamp is None
-                        else episode.entry_timestamp.isoformat(),
-                        episode.entry_price,
-                        episode.entry_source_event_id,
-                        episode.stop_price,
-                        episode.target_price,
-                        None
-                        if episode.exit_timestamp is None
-                        else episode.exit_timestamp.isoformat(),
-                        episode.exit_price,
-                        episode.exit_reason,
-                        episode.exit_source_event_id,
-                        payload,
-                        episode.created_at.isoformat(),
-                        timestamp,
-                        episode.code_hash,
-                        episode.config_hash,
-                        episode.m1c_artifact_hash,
-                    ),
-                )
-            connection.execute(
-                """
+                (
+                    episode.shadow_episode_id,
+                    episode.strategy_version,
+                    self.run_id,
+                    episode.m1c_episode_id,
+                    episode.symbol,
+                    episode.con_id,
+                    episode.session.isoformat(),
+                    episode.t0.isoformat(),
+                    episode.p0,
+                    episode.movement_price,
+                    episode.family,
+                    episode.probability,
+                    episode.consumed_ratio,
+                    episode.upper_trigger,
+                    episode.lower_trigger,
+                    episode.state.value,
+                    episode.direction,
+                    None
+                    if episode.entry_timestamp is None
+                    else episode.entry_timestamp.isoformat(),
+                    episode.entry_price,
+                    episode.entry_source_event_id,
+                    episode.stop_price,
+                    episode.target_price,
+                    None if episode.exit_timestamp is None else episode.exit_timestamp.isoformat(),
+                    episode.exit_price,
+                    episode.exit_reason,
+                    episode.exit_source_event_id,
+                    payload,
+                    episode.created_at.isoformat(),
+                    timestamp,
+                    episode.code_hash,
+                    episode.config_hash,
+                    episode.m1c_artifact_hash,
+                ),
+            )
+            if record_transition:
+                connection.execute(
+                    """
                 INSERT OR IGNORE INTO m1c_directionless_shadow_transition_v0 (
                     transition_id, shadow_episode_id, run_id, state,
                     transition_timestamp_utc, source_event_id,
                     source_partition_reference, connection_generation, payload_json
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    transition_id,
-                    episode.shadow_episode_id,
-                    self.run_id,
-                    episode.state.value,
-                    timestamp,
-                    episode.last_source_event_id,
-                    source_partition_reference,
-                    connection_generation,
-                    json.dumps(
-                        {
-                            "state": episode.state.value,
-                            "direction": episode.direction,
-                            "entry_gap": episode.entry_gap,
-                            "exit_reason": episode.exit_reason,
-                            "gap_id": episode.gap_id,
-                        },
-                        sort_keys=True,
-                        separators=(",", ":"),
+                    """,
+                    (
+                        transition_id,
+                        episode.shadow_episode_id,
+                        self.run_id,
+                        episode.state.value,
+                        timestamp,
+                        episode.last_source_event_id,
+                        source_partition_reference,
+                        connection_generation,
+                        json.dumps(
+                            {
+                                "state": episode.state.value,
+                                "direction": episode.direction,
+                                "entry_gap": episode.entry_gap,
+                                "exit_reason": episode.exit_reason,
+                                "gap_id": episode.gap_id,
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
                     ),
-                ),
-            )
+                )
 
     def load(self, m1c_episode_id: str) -> DirectionlessShadowEpisodeV0 | None:
         with self.repository._connect() as connection:

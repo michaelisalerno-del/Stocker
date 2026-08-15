@@ -718,15 +718,17 @@ class FrozenProspectiveApplication:
                     ConnectionState.DEGRADED,
                     ConnectionState.PORT_RESET,
                 }:
-                    gap_id = hashlib.sha256(
-                        f"{event.recorded_at.isoformat()}|{self.adapter.connection_generation}".encode()
-                    ).hexdigest()[:24]
-                    self._directionless_gap_id_v0 = gap_id
-                    directionless.connection_lost(
-                        event.recorded_at,
-                        generation=self.adapter.connection_generation,
-                        gap_id=gap_id,
-                    )
+                    if self._directionless_gap_id_v0 is None:
+                        gap_material = (
+                            f"{event.recorded_at.isoformat()}|{self.adapter.connection_generation}"
+                        )
+                        gap_id = hashlib.sha256(gap_material.encode()).hexdigest()[:24]
+                        self._directionless_gap_id_v0 = gap_id
+                        directionless.connection_lost(
+                            event.recorded_at,
+                            generation=self.adapter.connection_generation,
+                            gap_id=gap_id,
+                        )
                 elif event.state is ConnectionState.CONNECTED and self._directionless_gap_id_v0:
                     directionless.connection_restored(
                         event.recorded_at,
@@ -895,18 +897,17 @@ class FrozenProspectiveApplication:
                 self._eligible_symbols.add(symbol)
             else:
                 self._eligible_symbols.discard(symbol)
-            if checkpoint.episode_decision.fresh_episode and not opening_reversal_candidate:
-                episode_id = checkpoint.episode_decision.episode_id
-                assert episode_id is not None
-                self._episode_results[episode_id] = checkpoint
+            if checkpoint.episode_decision.fresh_episode and checkpoint.score.threshold_passed:
+                hard_episode_id = checkpoint.episode_decision.episode_id
+                assert hard_episode_id is not None
                 directionless = self.live_recorder.directionless_shadow_service_v0
-                if directionless is not None and checkpoint.score.threshold_passed:
-                    anchor = self.live_recorder.directionless_anchor_v0(episode_id)
+                if directionless is not None:
+                    anchor = self.live_recorder.directionless_anchor_v0(hard_episode_id)
                     if anchor is None:
                         raise RuntimeError("blocked_directionless_shadow_anchor_missing")
                     p0, movement_scale = anchor
                     directionless.create_hard_episode(
-                        m1c_episode_id=episode_id,
+                        m1c_episode_id=hard_episode_id,
                         symbol=symbol,
                         session=checkpoint.episode_decision.session,
                         t0=checkpoint.episode_decision.prospective_entry_timestamp,
@@ -923,6 +924,10 @@ class FrozenProspectiveApplication:
                             observed,
                         )
                     )
+            if checkpoint.episode_decision.fresh_episode and not opening_reversal_candidate:
+                episode_id = checkpoint.episode_decision.episode_id
+                assert episode_id is not None
+                self._episode_results[episode_id] = checkpoint
                 metadata = self.metadata_factory(
                     observed,
                     (checkpoint.episode_decision.trigger_bar_end,),
@@ -2049,7 +2054,18 @@ def build_frozen_prospective_application(
         readiness_payload = json.loads(
             config.directionless_shadow_v0.readiness_report.read_text(encoding="utf-8")
         )
-        if readiness_payload.get("classification") != "READY_FOR_DIRECTIONLESS_SHADOW_V0":
+        readiness_conditions = readiness_payload.get("readiness_conditions")
+        if (
+            readiness_payload.get("classification") != "READY_FOR_DIRECTIONLESS_SHADOW_V0"
+            or readiness_payload.get("strategy_version")
+            != config.directionless_shadow_v0.strategy_version
+            or readiness_payload.get("contract_sha256")
+            != config.directionless_shadow_v0.frozen_contract_sha256
+            or readiness_payload.get("no_order_invariant") != "PASS"
+            or not isinstance(readiness_conditions, dict)
+            or not readiness_conditions
+            or any(value != "PASS" for value in readiness_conditions.values())
+        ):
             raise RuntimeError("blocked_directionless_shadow_readiness_not_passed")
         assert config.directionless_shadow_v0.first_eligible_session is not None
         first_shadow_session = config.directionless_shadow_v0.first_eligible_session
@@ -2065,6 +2081,9 @@ def build_frozen_prospective_application(
             or min(eligible_directionless_sessions) != first_shadow_session
         ):
             raise RuntimeError("blocked_directionless_shadow_session_contract_invalid")
+        first_shadow_open, _ = xnys_session_bounds(first_shadow_session)
+        if config.directionless_shadow_v0.activation_timestamp_utc >= first_shadow_open:
+            raise RuntimeError("blocked_directionless_shadow_first_session_incomplete")
         directionless_shadow_service_v0 = DirectionlessShadowServiceV0(
             repository=DirectionlessShadowRepositoryV0(
                 repository,

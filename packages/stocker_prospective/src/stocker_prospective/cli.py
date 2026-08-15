@@ -129,7 +129,11 @@ def analyse_m1c_directionless_shadow_v0_command(
     """Analyse only after an explicit receipt confirms all 20 sessions are complete."""
 
     try:
-        require_analysis_open_receipt(analysis_open_receipt)
+        require_analysis_open_receipt(
+            analysis_open_receipt,
+            database_path=database,
+            run_id=run_id,
+        )
         _emit(analyse_directionless_shadow_v0(database, run_id=run_id))
     except ValueError as exc:
         _fatal(str(exc), exit_code=78)

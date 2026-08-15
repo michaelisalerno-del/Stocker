@@ -1,0 +1,36 @@
+{
+  "analysis_run": false,
+  "classification": "READY_FOR_DIRECTIONLESS_SHADOW_V0",
+  "contract_sha256": "c3f6aa65363a47a2fb686b26b95a1968f5dacf87e2056691d4dd032b3327dbbb",
+  "evidence_scope": "bounded deterministic pipeline replay; live activation remains explicit",
+  "frozen_inputs": {
+    "M": "P0 * previous_close_implied_movement_15m",
+    "P0": "existing completed M1C trigger-bar close",
+    "entry_timeout_minutes": 5,
+    "horizon_minutes": 15,
+    "stop_M": 0.5,
+    "target_M": 1.0,
+    "trigger_M": 0.2
+  },
+  "no_order_invariant": "PASS",
+  "pilot_examples": {
+    "LONG": "PASS: ask first touched upper frozen boundary",
+    "NO_ENTRY": "PASS: no touch through inclusive five-minute deadline",
+    "SHORT": "PASS: bid first touched lower frozen boundary",
+    "STOP": "PASS: liquidation-side stop preceded target and horizon",
+    "TARGET": "PASS: liquidation-side target preceded stop and horizon",
+    "TIME_EXIT": "PASS: first valid liquidation-side quote at canonical horizon",
+    "unresolved_data_gap": "PASS: no path inferred across active disconnect"
+  },
+  "price_path": "existing all-universe Level-I BBO; long trigger ask, short trigger bid",
+  "readiness_conditions": {
+    "cost_calculation": "PASS",
+    "deterministic_event_order": "PASS",
+    "event_level_first_touch": "PASS",
+    "gap_handling": "PASS",
+    "m1c_regression": "PASS",
+    "restart_idempotency": "PASS",
+    "stop_target_chronology": "PASS"
+  },
+  "strategy_version": "m1c_directionless_t20_d_v0"
+}

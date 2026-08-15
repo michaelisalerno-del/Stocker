@@ -310,6 +310,61 @@ class ShadowMicrostructureConfig(BaseModel):
         return self
 
 
+class DirectionlessShadowV0Config(BaseModel):
+    """Fail-closed contract for the frozen HARD_M1C T20/D paper shadow."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    strategy_version: Literal["m1c_directionless_t20_d_v0"] = "m1c_directionless_t20_d_v0"
+    family: Literal["HARD_M1C"] = "HARD_M1C"
+    trigger_M: float = 0.20
+    stop_M: float = 0.50
+    target_M: float = 1.00
+    max_entry_minutes: Literal[5] = 5
+    horizon_minutes: Literal[15] = 15
+    round_trip_cost_bps: float = 10.0
+    planned_sessions: Literal[20] = 20
+    price_path: Literal["LEVEL1_BBO_EXECUTABLE_SIDE"] = "LEVEL1_BBO_EXECUTABLE_SIDE"
+    orders_enabled: Literal[False] = False
+    execution_enabled: Literal[False] = False
+    trading_enabled: Literal[False] = False
+    analysis_enabled: Literal[False] = False
+    activation_timestamp_utc: datetime | None = None
+    first_eligible_session: date | None = None
+    frozen_contract: Path | None = None
+    frozen_contract_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    readiness_report: Path | None = None
+
+    @model_validator(mode="after")
+    def _activation_is_explicit_and_ready(self) -> DirectionlessShadowV0Config:
+        if (
+            self.trigger_M != 0.20
+            or self.stop_M != 0.50
+            or self.target_M != 1.00
+            or self.round_trip_cost_bps != 10.0
+        ):
+            raise ValueError("changed T20/D parameters require a new strategy version")
+        if not self.enabled:
+            return self
+        if self.activation_timestamp_utc is None:
+            raise ValueError("enabled directionless shadow requires activation_timestamp_utc")
+        if (
+            self.activation_timestamp_utc.tzinfo is None
+            or self.activation_timestamp_utc.utcoffset() is None
+        ):
+            raise ValueError("directionless shadow activation must be timezone-aware")
+        if self.first_eligible_session is None:
+            raise ValueError("enabled directionless shadow requires first_eligible_session")
+        if (
+            self.frozen_contract is None
+            or self.frozen_contract_sha256 is None
+            or self.readiness_report is None
+        ):
+            raise ValueError("enabled directionless shadow requires frozen contract and readiness")
+        return self
+
+
 class ProspectiveConfig(BaseModel):
     """Top-level prospective recorder/web configuration."""
 
@@ -324,6 +379,9 @@ class ProspectiveConfig(BaseModel):
     parallel_validation: ParallelValidationConfig = Field(default_factory=ParallelValidationConfig)
     shadow_microstructure: ShadowMicrostructureConfig = Field(
         default_factory=ShadowMicrostructureConfig
+    )
+    directionless_shadow_v0: DirectionlessShadowV0Config = Field(
+        default_factory=DirectionlessShadowV0Config
     )
 
     @model_validator(mode="after")
@@ -350,6 +408,8 @@ class ProspectiveConfig(BaseModel):
                 raise ValueError("shadow microstructure collection requires IBKR source")
             if self.paths.shadow_microstructure_root is None:
                 raise ValueError("enabled shadow collection requires shadow_microstructure_root")
+        if self.directionless_shadow_v0.enabled and self.runtime.source != "ibkr":
+            raise ValueError("directionless shadow V0 requires IBKR source")
         return self
 
 
@@ -565,15 +625,21 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
             "pilot_mode": config.shadow_microstructure.pilot_mode,
             "pilot_sessions": config.shadow_microstructure.pilot_sessions,
             "eligible_sessions": config.shadow_microstructure.eligible_sessions,
-            "collect_all_universe_bbo": (
-                config.shadow_microstructure.collect_all_universe_bbo
-            ),
+            "collect_all_universe_bbo": (config.shadow_microstructure.collect_all_universe_bbo),
             "collect_optional_trades": config.shadow_microstructure.collect_optional_trades,
             "collect_depth": config.shadow_microstructure.collect_depth,
             "analysis_enabled": config.shadow_microstructure.analysis_enabled,
-            "direction_scoring_enabled": (
-                config.shadow_microstructure.direction_scoring_enabled
-            ),
+            "direction_scoring_enabled": (config.shadow_microstructure.direction_scoring_enabled),
+        },
+        "directionless_shadow_v0": {
+            "enabled": config.directionless_shadow_v0.enabled,
+            "strategy_version": config.directionless_shadow_v0.strategy_version,
+            "family": config.directionless_shadow_v0.family,
+            "price_path": config.directionless_shadow_v0.price_path,
+            "planned_sessions": config.directionless_shadow_v0.planned_sessions,
+            "analysis_enabled": config.directionless_shadow_v0.analysis_enabled,
+            "orders_enabled": config.directionless_shadow_v0.orders_enabled,
+            "execution_enabled": config.directionless_shadow_v0.execution_enabled,
         },
     }
 

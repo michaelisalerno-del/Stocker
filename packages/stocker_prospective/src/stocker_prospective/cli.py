@@ -44,6 +44,10 @@ from stocker_prospective.context import (
     load_imported_context,
 )
 from stocker_prospective.database import LeaseRecord, ProspectiveRepository
+from stocker_prospective.directionless_shadow_analysis_v0 import (
+    analyse_directionless_shadow_v0,
+    require_analysis_open_receipt,
+)
 from stocker_prospective.durable_inbox import DurableCallbackInbox
 from stocker_prospective.frozen_artifacts import (
     FrozenArtifactReconstructionError,
@@ -104,6 +108,7 @@ recorder_app = typer.Typer(help="Run the market-data recorder process.")
 scientific_inputs_app = typer.Typer(help="Prepare immutable causal scientific inputs.")
 web_app = typer.Typer(help="Run the read-only web process.")
 ibkr_api_app = typer.Typer(help="Verify first-party IBKR API provenance and check for updates.")
+analysis_app = typer.Typer(help="Run explicitly opened post-period frozen analyses.")
 app.add_typer(bundle_app, name="bundle")
 app.add_typer(context_app, name="context")
 app.add_typer(database_app, name="db")
@@ -112,6 +117,22 @@ app.add_typer(recorder_app, name="recorder")
 app.add_typer(scientific_inputs_app, name="scientific-inputs")
 app.add_typer(web_app, name="web")
 app.add_typer(ibkr_api_app, name="ibkr-api")
+app.add_typer(analysis_app, name="analysis")
+
+
+@analysis_app.command("m1c-directionless-shadow-v0")
+def analyse_m1c_directionless_shadow_v0_command(
+    database: Path = typer.Option(..., exists=True, dir_okay=False),
+    run_id: str = typer.Option(..., min=1),
+    analysis_open_receipt: Path = typer.Option(..., exists=True, dir_okay=False),
+) -> None:
+    """Analyse only after an explicit receipt confirms all 20 sessions are complete."""
+
+    try:
+        require_analysis_open_receipt(analysis_open_receipt)
+        _emit(analyse_directionless_shadow_v0(database, run_id=run_id))
+    except ValueError as exc:
+        _fatal(str(exc), exit_code=78)
 
 
 class _ReplayMarketDataBoundary:

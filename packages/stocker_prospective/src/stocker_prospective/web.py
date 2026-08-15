@@ -1204,6 +1204,14 @@ def create_web_app(config: ProspectiveConfig) -> FastAPI:
             "claims_boundary": claims_boundary(),
         }
 
+    @app.get("/api/episodes/{episode_id}/directionless-shadow-v0")
+    def episode_directionless_shadow_v0(episode_id: str) -> dict[str, Any]:
+        result = store.episode_directionless_shadow_v0(episode_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="not_found")
+        result["claims_boundary"] = claims_boundary()
+        return result
+
     @app.get("/api/episodes/{episode_id}/microstructure-direction-v0")
     def episode_microstructure_direction_v0(episode_id: str) -> dict[str, Any]:
         return {

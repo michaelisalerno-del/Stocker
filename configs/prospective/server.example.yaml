@@ -166,3 +166,28 @@ shadow_microstructure:
   planned_end_session: null
   research_contract: /opt/stocker/current/configs/prospective/shadow-microstructure-v0/shadow_research_contract_v0.json
   pilot_readiness_report: null
+
+# Local paper-shadow state only. It consumes the existing Level-I subscriptions
+# and never sends simulated or real actions to IBKR. Activation is separate from
+# deployment and requires the frozen contract plus a passing readiness receipt.
+directionless_shadow_v0:
+  enabled: false
+  strategy_version: m1c_directionless_t20_d_v0
+  family: HARD_M1C
+  trigger_M: 0.20
+  stop_M: 0.50
+  target_M: 1.00
+  max_entry_minutes: 5
+  horizon_minutes: 15
+  round_trip_cost_bps: 10.0
+  planned_sessions: 20
+  price_path: LEVEL1_BBO_EXECUTABLE_SIDE
+  orders_enabled: false
+  execution_enabled: false
+  trading_enabled: false
+  analysis_enabled: false
+  activation_timestamp_utc: null
+  first_eligible_session: null
+  frozen_contract: /opt/stocker/current/configs/prospective/directionless-shadow-v0/shadow_contract_v0.json
+  frozen_contract_sha256: null
+  readiness_report: null

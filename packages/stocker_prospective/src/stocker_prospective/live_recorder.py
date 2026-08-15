@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict
 from stocker_prospective.context import previous_xnys_session
 from stocker_prospective.database import EvidenceMetadata
 from stocker_prospective.direction_features import DirectionFeatureBar
+from stocker_prospective.directionless_shadow_service_v0 import DirectionlessShadowServiceV0
 from stocker_prospective.durable_inbox import (
     CallbackInboxError,
     CallbackInboxEvent,
@@ -269,6 +270,7 @@ class FrozenM1CLiveRecorder:
         inbox_compaction_interval: timedelta = timedelta(minutes=1),
         inbox_compaction_batch_limit: int = 4_096,
         shadow_microstructure_collector: ShadowMicrostructureCollectorV0 | None = None,
+        directionless_shadow_service_v0: DirectionlessShadowServiceV0 | None = None,
     ) -> None:
         if len(universe_symbols) != 20 or len(set(universe_symbols)) != 20:
             raise ValueError("frozen M1C live recorder requires the exact 20-stock cohort")
@@ -339,6 +341,8 @@ class FrozenM1CLiveRecorder:
         self.inbox_compaction_interval = inbox_compaction_interval
         self.inbox_compaction_batch_limit = inbox_compaction_batch_limit
         self.shadow_microstructure_collector = shadow_microstructure_collector
+        self.directionless_shadow_service_v0 = directionless_shadow_service_v0
+        self._directionless_anchor_by_episode: dict[str, tuple[float, float]] = {}
         self._last_inbox_compaction_at: datetime | None = None
         self._inflight_durable_events: tuple[CallbackInboxEvent, ...] = ()
         self._finalizer = KeepUpToDateBarFinalizer(
@@ -1116,6 +1120,8 @@ class FrozenM1CLiveRecorder:
         )
         if self.shadow_microstructure_collector is not None:
             self.shadow_microstructure_collector.persist_raw_events(events)
+        if self.directionless_shadow_service_v0 is not None:
+            self.directionless_shadow_service_v0.persist_raw_events(events)
         for partition in partitions:
             path_parts = {
                 key: value
@@ -3069,6 +3075,18 @@ class FrozenM1CLiveRecorder:
                         continue
                     self._blocked.pop(key, None)
                     results.append(result)
+                    if (
+                        result.episode_decision.fresh_episode
+                        and result.score.threshold_passed
+                        and result.episode_decision.episode_id is not None
+                        and context.previous_close_implied_movement_15m is not None
+                    ):
+                        self._directionless_anchor_by_episode[
+                            result.episode_decision.episode_id
+                        ] = (
+                            float(feature_bars[-1].close),
+                            float(context.previous_close_implied_movement_15m),
+                        )
                     self._record_standard_windows(
                         symbol=symbol,
                         as_of=feature_bars[-1].bar_complete_timestamp,
@@ -3101,6 +3119,11 @@ class FrozenM1CLiveRecorder:
                     ):
                         self._arm_quiet_windows(result)
         return tuple(results)
+
+    def directionless_anchor_v0(self, episode_id: str) -> tuple[float, float] | None:
+        """Return recorder-side P0 and frozen 15-minute scale without changing M1C."""
+
+        return self._directionless_anchor_by_episode.get(episode_id)
 
     def _record_standard_windows(
         self,

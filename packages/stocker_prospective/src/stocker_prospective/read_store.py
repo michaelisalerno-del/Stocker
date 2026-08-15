@@ -1226,6 +1226,42 @@ class ProspectiveReadStore:
             ).fetchall()
         return [self._decoded(row) for row in rows]
 
+    def episode_directionless_shadow_v0(self, episode_id: str) -> dict[str, Any] | None:
+        """Return operational paper-shadow state and its immutable evidence links."""
+
+        run_id = self._selected_run_id()
+        if run_id is None:
+            return None
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM m1c_directionless_shadow_v0 WHERE run_id = ? AND m1c_episode_id = ?",
+                (run_id, episode_id),
+            ).fetchone()
+            if row is None:
+                return None
+            transitions = connection.execute(
+                "SELECT * FROM m1c_directionless_shadow_transition_v0 "
+                "WHERE shadow_episode_id = ? ORDER BY transition_timestamp_utc, transition_id",
+                (row["shadow_episode_id"],),
+            ).fetchall()
+        result = self._decoded(row)
+        result.pop("payload", None)
+        # Frozen-period UI/API is operational only; conceal outcome aggregates.
+        for name in (
+            "gross_price_return",
+            "gross_M",
+            "gross_R",
+            "cost_price",
+            "cost_M",
+            "net_M",
+            "net_R",
+        ):
+            result.pop(name, None)
+        result["transitions"] = [self._decoded(item) for item in transitions]
+        result["research_only"] = True
+        result["orders_enabled"] = False
+        return result
+
     def episode_microstructure_direction_v0(
         self,
         episode_id: str,

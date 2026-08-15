@@ -43,6 +43,10 @@ from stocker_prospective.database import (
 )
 from stocker_prospective.direction import FrozenDirectionRuntime
 from stocker_prospective.direction_features import FrozenDirectionFeatureBuilder
+from stocker_prospective.directionless_shadow_repository_v0 import (
+    DirectionlessShadowRepositoryV0,
+)
+from stocker_prospective.directionless_shadow_service_v0 import DirectionlessShadowServiceV0
 from stocker_prospective.durable_inbox import DurableCallbackInbox
 from stocker_prospective.event_ingest import IBKRCallbackNormalizer
 from stocker_prospective.frozen_m1c import FrozenM1CRuntime
@@ -662,6 +666,7 @@ class FrozenProspectiveApplication:
             dict[str, OpeningReversalPredictionReceiptV1],
         ] = {}
         self._opening_reversal_finalised_groups: set[tuple[date, int]] = set()
+        self._directionless_gap_id_v0: str | None = None
 
     def process_source_transfer(self, session: date, observed_at: datetime) -> None:
         """Rescore completed EODHD bars without changing live V0 decisions."""
@@ -706,6 +711,29 @@ class FrozenProspectiveApplication:
                     connection_generation=self.adapter.connection_generation,
                     reason=event.message,
                 )
+            directionless = self.live_recorder.directionless_shadow_service_v0
+            if directionless is not None:
+                if event.state in {
+                    ConnectionState.DISCONNECTED,
+                    ConnectionState.DEGRADED,
+                    ConnectionState.PORT_RESET,
+                }:
+                    gap_id = hashlib.sha256(
+                        f"{event.recorded_at.isoformat()}|{self.adapter.connection_generation}".encode()
+                    ).hexdigest()[:24]
+                    self._directionless_gap_id_v0 = gap_id
+                    directionless.connection_lost(
+                        event.recorded_at,
+                        generation=self.adapter.connection_generation,
+                        gap_id=gap_id,
+                    )
+                elif event.state is ConnectionState.CONNECTED and self._directionless_gap_id_v0:
+                    directionless.connection_restored(
+                        event.recorded_at,
+                        generation=self.adapter.connection_generation,
+                        gap_id=self._directionless_gap_id_v0,
+                    )
+                    self._directionless_gap_id_v0 = None
 
     def poll(self, *, now: datetime) -> LivePollResult:
         """Run one callback batch and fail closed across the full application."""
@@ -788,6 +816,8 @@ class FrozenProspectiveApplication:
         self._recover_if_required(observed)
         self._persist_connection_events(observed)
         result = self.live_recorder.poll(now=observed)
+        if self.live_recorder.directionless_shadow_service_v0 is not None:
+            self.live_recorder.directionless_shadow_service_v0.advance_time(observed)
         opening_reversal_seen = False
         promoted_opening_episode_id: str | None = None
         callback_metadata = self.metadata_factory(observed, (observed,))
@@ -869,6 +899,30 @@ class FrozenProspectiveApplication:
                 episode_id = checkpoint.episode_decision.episode_id
                 assert episode_id is not None
                 self._episode_results[episode_id] = checkpoint
+                directionless = self.live_recorder.directionless_shadow_service_v0
+                if directionless is not None and checkpoint.score.threshold_passed:
+                    anchor = self.live_recorder.directionless_anchor_v0(episode_id)
+                    if anchor is None:
+                        raise RuntimeError("blocked_directionless_shadow_anchor_missing")
+                    p0, movement_scale = anchor
+                    directionless.create_hard_episode(
+                        m1c_episode_id=episode_id,
+                        symbol=symbol,
+                        session=checkpoint.episode_decision.session,
+                        t0=checkpoint.episode_decision.prospective_entry_timestamp,
+                        p0=p0,
+                        movement_scale_fraction=movement_scale,
+                        probability=checkpoint.score.probability,
+                        consumed_ratio=(checkpoint.movement_consumed_state_v1.movement_consumed_v1),
+                        created_at=observed,
+                    )
+                    directionless.persist_raw_events(
+                        self.live_recorder.underlying_quote_path(
+                            symbol,
+                            checkpoint.episode_decision.prospective_entry_timestamp,
+                            observed,
+                        )
+                    )
                 metadata = self.metadata_factory(
                     observed,
                     (checkpoint.episode_decision.trigger_bar_end,),
@@ -1979,6 +2033,55 @@ def build_frozen_prospective_application(
             always_on_bar_lines=len(identity.symbols) + len(proxy_symbols),
             recorder_version=config.runtime.app_version,
         )
+    directionless_shadow_service_v0: DirectionlessShadowServiceV0 | None = None
+    if config.directionless_shadow_v0.enabled:
+        import pandas_market_calendars as mcal
+
+        assert config.directionless_shadow_v0.frozen_contract is not None
+        assert config.directionless_shadow_v0.frozen_contract_sha256 is not None
+        assert config.directionless_shadow_v0.readiness_report is not None
+        assert config.directionless_shadow_v0.activation_timestamp_utc is not None
+        if (
+            _sha256(config.directionless_shadow_v0.frozen_contract)
+            != config.directionless_shadow_v0.frozen_contract_sha256
+        ):
+            raise RuntimeError("blocked_directionless_shadow_contract_hash_mismatch")
+        readiness_payload = json.loads(
+            config.directionless_shadow_v0.readiness_report.read_text(encoding="utf-8")
+        )
+        if readiness_payload.get("classification") != "READY_FOR_DIRECTIONLESS_SHADOW_V0":
+            raise RuntimeError("blocked_directionless_shadow_readiness_not_passed")
+        assert config.directionless_shadow_v0.first_eligible_session is not None
+        first_shadow_session = config.directionless_shadow_v0.first_eligible_session
+        shadow_schedule = mcal.get_calendar("XNYS").schedule(
+            start_date=first_shadow_session,
+            end_date=first_shadow_session + timedelta(days=60),
+        )
+        eligible_directionless_sessions = frozenset(
+            index.date() for index in shadow_schedule.index[:20]
+        )
+        if (
+            len(eligible_directionless_sessions) != 20
+            or min(eligible_directionless_sessions) != first_shadow_session
+        ):
+            raise RuntimeError("blocked_directionless_shadow_session_contract_invalid")
+        directionless_shadow_service_v0 = DirectionlessShadowServiceV0(
+            repository=DirectionlessShadowRepositoryV0(
+                repository,
+                run_id=config.runtime.run_id,
+            ),
+            con_id_by_symbol={
+                item.symbol: item.con_id
+                for item in qualified
+                if item.symbol in set(identity.symbols)
+            },
+            code_hash=config.runtime.git_commit,
+            config_hash=canonical_sha256(config.directionless_shadow_v0.model_dump(mode="json")),
+            m1c_artifact_hash=canonical_sha256(artifact_hashes),
+            eligible_sessions=eligible_directionless_sessions,
+            activation_timestamp=config.directionless_shadow_v0.activation_timestamp_utc,
+            contract_sha256=config.directionless_shadow_v0.frozen_contract_sha256,
+        )
     if (
         durable_inbox is not None
         and recorder_generation is not None
@@ -2153,6 +2256,7 @@ def build_frozen_prospective_application(
         ),
         inbox_compaction_batch_limit=(config.runtime.callback_inbox_compaction_batch_limit),
         shadow_microstructure_collector=shadow_microstructure_collector,
+        directionless_shadow_service_v0=directionless_shadow_service_v0,
     )
 
     controller = LiveSubscriptionController(

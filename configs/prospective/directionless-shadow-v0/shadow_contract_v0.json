@@ -1,0 +1,89 @@
+{
+  "analysis_enabled": false,
+  "claims": "research-only local paper shadow; no broker orders or execution claims",
+  "collection": {
+    "automatic_extension": false,
+    "eligible_sessions": 20,
+    "primary_session": "XNYS_RTH",
+    "stopping_rule": "after exactly 20 configured eligible sessions; never results-based"
+  },
+  "cost": {
+    "cost_M": "(entry_price * 0.0010) / M",
+    "cost_price": "entry_price * 10 / 10000",
+    "description": "frozen research assumption, not observed brokerage slippage",
+    "net_M": "gross_M - cost_M",
+    "net_R": "net_M / 0.50",
+    "round_trip_bps": 10.0
+  },
+  "decision_framework_after_authorised_open": [
+    "A_PROSPECTIVE_DIRECTIONLESS_MONETISATION_SUPPORTED",
+    "B_POSITIVE_BUT_MORE_CONFIRMATION_REQUIRED",
+    "C_HISTORICAL_EFFECT_WEAKENED_PROSPECTIVELY",
+    "D_DIRECTIONLESS_MONETISATION_NOT_SUPPORTED",
+    "BLOCKED_INSUFFICIENT_CLEAN_PATH_DATA"
+  ],
+  "entry": {
+    "deadline": "T0 + 5 minutes inclusive",
+    "long": "first valid causally ordered Level-I observation with ask >= P0 + 0.20*M",
+    "long_entry_price": "P0 + 0.20*M",
+    "no_touch": "NO_ENTRY_TIMEOUT",
+    "short": "first valid causally ordered Level-I observation with bid <= P0 - 0.20*M",
+    "short_entry_price": "P0 - 0.20*M",
+    "simultaneous_or_dual_gap_touch": "ENTRY_PATH_UNRESOLVED"
+  },
+  "evidence": {
+    "derived_microstructure_used": false,
+    "ordering": [
+      "provider/event timestamp when supplied by IBKR",
+      "Stocker callback source sequence",
+      "receive timestamp",
+      "stable event identity"
+    ],
+    "price_path": "existing ordinary whole-universe IBKR Level-I BBO callbacks",
+    "raw_partitions_are_authoritative": true,
+    "tick_by_tick_required": false
+  },
+  "exit": {
+    "horizon": "T0 + 15 minutes",
+    "long_liquidation_side": "bid",
+    "long_stop": "entry_price - 0.50*M",
+    "long_target": "entry_price + 1.00*M",
+    "precedence": "stop or target strictly before horizon; otherwise first valid liquidation-side BBO at/after horizon",
+    "short_liquidation_side": "ask",
+    "short_stop": "entry_price + 0.50*M",
+    "short_target": "entry_price - 1.00*M"
+  },
+  "frozen_inputs": {
+    "M": "P0 multiplied by existing previous-close ATM-IV expected absolute 15-minute movement fraction",
+    "P0": "close of the existing completed M1C trigger bar at T0",
+    "T0": "existing M1C episode prospective_entry_timestamp / trigger_bar_end",
+    "consumed_ratio": "existing movement_consumed_v1, recorded only",
+    "family": "HARD_M1C",
+    "m1c_modified": false
+  },
+  "gap_policy": {
+    "active_position_gap": "SHADOW_PATH_UNRESOLVED_DATA_GAP",
+    "interpolation": false,
+    "single_side_restored_entry": "entry at frozen boundary with entry_gap=true",
+    "waiting_gap_spanning_both_triggers": "ENTRY_PATH_UNRESOLVED"
+  },
+  "metrics_recorded_per_entered_episode": [
+    "MFE_price",
+    "MAE_price",
+    "MFE_M",
+    "MAE_M",
+    "MFE_R",
+    "MAE_R",
+    "gross_M",
+    "net_M",
+    "gross_R",
+    "net_R",
+    "opposite_trigger_touched",
+    "opposite_within_1m",
+    "opposite_within_5m",
+    "opposite_before_horizon"
+  ],
+  "orders_enabled": false,
+  "strategy_version": "m1c_directionless_t20_d_v0",
+  "version": 0
+}

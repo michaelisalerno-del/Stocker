@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Literal, cast
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -41,12 +42,21 @@ RETENTION_CONTROLLED_CALLBACK_KINDS = (
     "depth",
     "depth_reset",
 )
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("retention receipt timestamps must be timezone-aware")
     return value.astimezone(UTC)
+
+
+def _session_timestamp_bounds(session: date) -> tuple[str, str]:
+    """Match event ingestion's America/New_York calendar-date session rule."""
+
+    start = datetime.combine(session, datetime.min.time(), tzinfo=NEW_YORK)
+    end = start + timedelta(days=1)
+    return start.astimezone(UTC).isoformat(), end.astimezone(UTC).isoformat()
 
 
 class SourcePartitionV0(BaseModel):
@@ -226,6 +236,7 @@ class EventWindowRetentionRepositoryV0:
         """Require every admitted underlying callback for the UTC session date to settle."""
 
         placeholders = ",".join("?" for _ in RETENTION_CONTROLLED_CALLBACK_KINDS)
+        session_start, session_end = _session_timestamp_bounds(session)
         with self.repository._connect() as connection:
             unsafe = int(
                 connection.execute(
@@ -237,7 +248,8 @@ class EventWindowRetentionRepositoryV0:
                     LEFT JOIN callback_processing_commit_v1 AS processing
                       ON processing.inbox_event_id = inbox.inbox_event_id
                     WHERE inbox.admission_run_id = ?
-                      AND substr(inbox.received_utc, 1, 10) = ?
+                      AND COALESCE(inbox.provider_timestamp_utc, inbox.received_utc) >= ?
+                      AND COALESCE(inbox.provider_timestamp_utc, inbox.received_utc) < ?
                       AND inbox.callback_kind IN ({placeholders})
                       AND (
                         inbox.status <> 'acknowledged'
@@ -249,7 +261,8 @@ class EventWindowRetentionRepositoryV0:
                     """,
                     (
                         self.run_id,
-                        session.isoformat(),
+                        session_start,
+                        session_end,
                         *RETENTION_CONTROLLED_CALLBACK_KINDS,
                     ),
                 ).fetchone()[0]
@@ -499,6 +512,7 @@ class EventWindowRetentionRepositoryV0:
 
         observed = _utc(purged_at)
         placeholders = ",".join("?" for _ in RETENTION_CONTROLLED_CALLBACK_KINDS)
+        session_start, session_end = _session_timestamp_bounds(session)
         with self.repository._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             complete = connection.execute(
@@ -534,12 +548,18 @@ class EventWindowRetentionRepositoryV0:
                  AND processing.raw_partition_hashes_json =
                      materialization.raw_partition_hashes_json
                 WHERE inbox.admission_run_id = ?
-                  AND substr(inbox.received_utc, 1, 10) = ?
+                  AND COALESCE(inbox.provider_timestamp_utc, inbox.received_utc) >= ?
+                  AND COALESCE(inbox.provider_timestamp_utc, inbox.received_utc) < ?
                   AND inbox.callback_kind IN ({placeholders})
                   AND inbox.status = 'acknowledged'
                 ORDER BY inbox.inbox_event_id
                 """,
-                (self.run_id, session.isoformat(), *RETENTION_CONTROLLED_CALLBACK_KINDS),
+                (
+                    self.run_id,
+                    session_start,
+                    session_end,
+                    *RETENTION_CONTROLLED_CALLBACK_KINDS,
+                ),
             ).fetchall()
             identities = tuple(str(row["inbox_event_id"]) for row in rows)
             identity_hash = hashlib.sha256("\n".join(identities).encode()).hexdigest()

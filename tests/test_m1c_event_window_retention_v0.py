@@ -461,6 +461,48 @@ def test_finalizer_blocks_unmaterialized_session_callback(tmp_path: Path) -> Non
     assert source_path.exists()
 
 
+def test_after_hours_callback_after_utc_midnight_still_blocks_prior_ny_session(
+    tmp_path: Path,
+) -> None:
+    database, raw_root, source_path = _database_with_episode_and_partition(tmp_path)
+    # 00:30 UTC on August 18 is still August 17 in America/New_York.
+    received = datetime(2026, 8, 18, 0, 30, tzinfo=UTC).isoformat()
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO callback_inbox_v1(
+                inbox_event_id, callback_kind, request_id, received_utc,
+                received_monotonic_ns, provider_timestamp_utc,
+                original_payload_json, admission_run_id,
+                admission_recorder_generation, connection_generation,
+                subscription_owner, symbol, callback_classification,
+                status, admitted_at_utc, updated_at_utc
+            ) VALUES (
+                'after-midnight-callback', 'level1_quote_update', 10, ?, 1, NULL,
+                '{}', 'run-retention', 1, 1, 'universe:AAL', 'AAL',
+                'accepted_active_callback', 'pending', ?, ?
+            )
+            """,
+            (received, received, received),
+        )
+    finalizer = SessionEventWindowFinalizerV0(
+        database=database,
+        raw_root=raw_root,
+        retained_root=raw_root / "retained",
+        run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
+    )
+
+    with pytest.raises(RuntimeError, match="RETENTION_SESSION_CALLBACK_NOT_TERMINAL"):
+        finalizer.finalize_session(
+            session=SESSION,
+            observed_at=datetime(2026, 8, 18, 2, 0, tzinfo=UTC),
+        )
+
+    assert source_path.exists()
+
+
 def test_completed_session_purges_terminal_high_volume_inbox_rows(tmp_path: Path) -> None:
     database, raw_root, _ = _database_with_episode_and_partition(tmp_path)
     with sqlite3.connect(database) as connection:

@@ -17,6 +17,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from stocker_prospective.event_window_retention_scope_v0 import (
+    RETENTION_CONTROLLED_CALLBACK_KINDS,
+    retention_session,
+)
 from stocker_prospective.sqlite_coordination import CoordinatedSQLiteConnection
 
 _TRANSIENT_WRITER_RETRY_DELAYS_SECONDS = (0.005, 0.01, 0.025, 0.05)
@@ -590,6 +594,21 @@ class DurableCallbackInbox:
                 if owns_transaction:
                     connection.commit()
                 return InboxAdmissionResult(event=self._event(existing), duplicate=True)
+            if kind in RETENTION_CONTROLLED_CALLBACK_KINDS:
+                callback_session = retention_session(provider or received)
+                sealed = connection.execute(
+                    """
+                    SELECT 1
+                    FROM m1c_event_window_retention_session_v0
+                    WHERE run_id = ? AND session_date = ?
+                      AND dataset_version = 'm1c_event_window_retention_v0'
+                    """,
+                    (self.run_id, callback_session.isoformat()),
+                ).fetchone()
+                if sealed is not None:
+                    if owns_transaction:
+                        connection.rollback()
+                    raise CallbackInboxError("CALLBACK_AFTER_RETENTION_SESSION_SEALED")
             referenced_provider_active = (
                 provider_envelope_event_id is not None
                 and connection.execute(

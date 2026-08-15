@@ -8,14 +8,17 @@
   "no_order_invariant": "PASS",
   "pipeline_checks": {
     "acknowledged_callback_gate": "PASS",
+    "atomic_callback_admission_seal": "PASS",
     "all_family_window_union": "PASS",
     "all_row_partition_identity": "PASS",
     "depth_scope": "PASS",
     "fail_closed_hash_verification": "PASS",
     "late_partition_seal": "PASS",
     "raw_write_retirement_fence": "PASS",
+    "provider_envelope_terminal_lifecycle": "PASS",
     "restart_after_unlink": "PASS",
     "terminal_callback_bounded_purge": "PASS",
+    "terminal_callback_purge_restart_retry": "PASS",
     "twenty_session_schedule": "PASS",
     "summary_is_non_directional": "PASS"
   },

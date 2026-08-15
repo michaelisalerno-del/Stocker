@@ -1635,7 +1635,10 @@ unlinking a source partition. A crash resumes from that receipt. Any mismatch
 retains the source and exits 78. Never point it at a completed historical run.
 The recorder and finalizer share an exclusive raw-storage fence spanning file
 creation through manifest commit, so finalization cannot race an unregistered
-partition. After completion, terminal high-volume inbox rows are replaced by a
+partition. The atomic SQLite prepare repeats the terminal callback gate, and
+new callbacks consult the same sealed-session receipt during admission. Official
+provider-envelope diagnostic rows are terminal only when their canonical child
+is fully materialized and committed. After completion, terminal high-volume inbox rows are replaced by a
 durable count and identity-set hash receipt; retained Parquet remains the raw audit.
 
 Install but do not enable the post-after-hours timer until the frozen config,

@@ -207,7 +207,11 @@ def _oldest_pending_completed_retention_session(
         if market_close + POST_EVENT_RETENTION > observed:
             break
         receipt = finalizer.repository.session_receipt(session)
-        if receipt is None or receipt.status != "COMPLETE":
+        if (
+            receipt is None
+            or receipt.status != "COMPLETE"
+            or not finalizer.repository.callback_purge_complete(session)
+        ):
             return session
     raise RuntimeSafetyError("blocked_no_pending_completed_retention_session")
 

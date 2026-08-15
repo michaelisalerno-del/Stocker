@@ -19,9 +19,13 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from stocker_prospective.event_window_retention_scope_v0 import (
+    RETENTION_CONTROLLED_CALLBACK_KINDS,
+    RETENTION_CONTROLLED_EVENT_TYPES,
+    RETENTION_CONTROLLED_STREAM_KINDS,
+)
 from stocker_prospective.live_bars import xnys_session_bounds
 from stocker_prospective.m1c_event_window_retention_repository_v0 import (
-    RETENTION_CONTROLLED_EVENT_TYPES,
     EventWindowRetentionRepositoryV0,
     PreparedRetainedPartitionV0,
     RetainedPartitionReceiptV0,
@@ -33,33 +37,6 @@ from stocker_prospective.raw_storage_fence import RawStorageFence
 
 PRE_EVENT_RETENTION = timedelta(minutes=5)
 POST_EVENT_RETENTION = timedelta(minutes=20)
-
-RETENTION_CONTROLLED_CALLBACK_KINDS = frozenset(
-    {
-        "level1_quote_update",
-        "official_provider_tick_by_tick_bidask",
-        "official_provider_tick_by_tick_trade",
-        "official_provider_tick_price",
-        "official_provider_tick_size",
-        "tick_by_tick_bidask",
-        "tick_by_tick_trade",
-        "tick_price",
-        "tick_size",
-        "depth",
-        "depth_reset",
-        "official_provider_depth",
-        "official_provider_depth_reset",
-    }
-)
-RETENTION_CONTROLLED_STREAM_KINDS = frozenset(
-    {
-        "underlying_level1",
-        "underlying_tick_bidask",
-        "underlying_tick_last",
-        "underlying_depth",
-    }
-)
-
 
 def eligible_retention_sessions(*, first_session: date, count: int = 20) -> tuple[date, ...]:
     """Return the frozen consecutive XNYS-session schedule."""
@@ -702,6 +679,7 @@ class SessionEventWindowFinalizerV0:
             partitions=prepared_tuple,
             summarised_rows_by_source=summarised_rows_by_source,
         )
+        self._checkpoint("before_prepare_session", summary_path)
         self.repository.prepare_session(
             plan_json=plan.model_dump_json(),
             session=session,

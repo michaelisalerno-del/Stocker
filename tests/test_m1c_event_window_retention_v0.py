@@ -10,12 +10,18 @@ import pyarrow.parquet as pq
 import pytest
 from pydantic import ValidationError
 
+from stocker_prospective.cli import _oldest_pending_completed_retention_session
 from stocker_prospective.config import EventWindowRetentionV0Config
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
-from stocker_prospective.events import RawCallbackEnvelopeEvent, UnderlyingLevel1QuoteEvent
-from stocker_prospective.m1c_event_window_retention_repository_v0 import (
+from stocker_prospective.durable_inbox import (
+    CallbackClassification,
+    CallbackInboxError,
+    DurableCallbackInbox,
+)
+from stocker_prospective.event_window_retention_scope_v0 import (
     RETENTION_CONTROLLED_EVENT_TYPES,
 )
+from stocker_prospective.events import RawCallbackEnvelopeEvent, UnderlyingLevel1QuoteEvent
 from stocker_prospective.m1c_event_window_retention_v0 import (
     M1CEventReferenceV0,
     SessionEventWindowFinalizerV0,
@@ -578,6 +584,162 @@ def test_completed_session_purges_terminal_high_volume_inbox_rows(tmp_path: Path
         ).fetchone()
     assert purge == (1,)
 
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "DELETE FROM m1c_event_window_callback_purge_v0 WHERE run_id = 'run-retention'"
+        )
+    assert _oldest_pending_completed_retention_session(
+        finalizer,
+        datetime(2026, 8, 18, 2, 0, tzinfo=UTC),
+    ) == SESSION
+
+
+def test_diagnostic_provider_envelope_is_terminal_and_purged_with_canonical_row(
+    tmp_path: Path,
+) -> None:
+    database, raw_root, _ = _database_with_episode_and_partition(tmp_path)
+    with sqlite3.connect(database) as connection:
+        content_hash = str(
+            connection.execute(
+                "SELECT content_hash FROM raw_partition_manifest_v0"
+            ).fetchone()[0]
+        )
+        observed = datetime(2026, 8, 17, 14, 1, tzinfo=UTC).isoformat()
+        hashes = json.dumps([content_hash])
+        connection.execute(
+            """
+            INSERT INTO callback_inbox_v1(
+                inbox_event_id, callback_kind, request_id, received_utc,
+                received_monotonic_ns, provider_timestamp_utc,
+                original_payload_json, admission_run_id,
+                admission_recorder_generation, connection_generation,
+                subscription_owner, symbol, callback_classification,
+                status, acknowledgement_timestamp_utc, failure_classification,
+                admitted_at_utc, updated_at_utc
+            ) VALUES (
+                'provider-envelope', 'official_provider_tick_by_tick_bidask', 10,
+                ?, 1, ?, '{}', 'run-retention', 1, 1, 'universe:AAL', 'AAL',
+                'accepted_active_callback', 'diagnostic', ?,
+                'PROVIDER_ENVELOPE_MATERIALIZED:canonical-callback', ?, ?
+            )
+            """,
+            (observed, observed, observed, observed, observed),
+        )
+        connection.execute(
+            """
+            INSERT INTO callback_inbox_v1(
+                inbox_event_id, callback_kind, request_id, received_utc,
+                received_monotonic_ns, provider_timestamp_utc,
+                original_payload_json, admission_run_id,
+                admission_recorder_generation, connection_generation,
+                subscription_owner, symbol, callback_classification,
+                provider_envelope_event_id, status,
+                acknowledgement_timestamp_utc, admitted_at_utc, updated_at_utc
+            ) VALUES (
+                'canonical-callback', 'tick_by_tick_bidask', 10, ?, 2, ?, '{}',
+                'run-retention', 1, 1, 'universe:AAL', 'AAL',
+                'accepted_active_callback', 'provider-envelope', 'acknowledged',
+                ?, ?, ?
+            )
+            """,
+            (observed, observed, observed, observed, observed),
+        )
+        connection.execute(
+            """
+            INSERT INTO callback_raw_materialization_v1(
+                inbox_event_id, source_sequence, run_id, recorder_generation,
+                lease_batch_id, raw_partition_hashes_json, raw_event_ids_json,
+                materialized_at_utc
+            ) VALUES ('canonical-callback', 2, 'run-retention', 1, 'batch-1', ?,
+                      '["inside"]', ?)
+            """,
+            (hashes, observed),
+        )
+        connection.execute(
+            """
+            INSERT INTO callback_processing_commit_v1(
+                inbox_event_id, source_sequence, run_id, recorder_generation,
+                raw_partition_hashes_json, committed_at_utc
+            ) VALUES ('canonical-callback', 2, 'run-retention', 1, ?, ?)
+            """,
+            (hashes, observed),
+        )
+    finalizer = SessionEventWindowFinalizerV0(
+        database=database,
+        raw_root=raw_root,
+        retained_root=raw_root / "retained",
+        run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
+    )
+
+    finalizer.finalize_session(
+        session=SESSION,
+        observed_at=datetime(2026, 8, 17, 22, 0, tzinfo=UTC),
+    )
+
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            """
+            SELECT COUNT(*) FROM callback_inbox_v1
+            WHERE inbox_event_id IN ('provider-envelope', 'canonical-callback')
+            """
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            """
+            SELECT purged_callback_count
+            FROM m1c_event_window_callback_purge_v0
+            WHERE run_id = 'run-retention' AND session_date = ?
+            """,
+            (SESSION.isoformat(),),
+        ).fetchone()[0] == 2
+
+
+def test_callback_admitted_during_finalization_blocks_atomic_prepare(tmp_path: Path) -> None:
+    database, raw_root, source_path = _database_with_episode_and_partition(tmp_path)
+
+    def admit_before_prepare(phase: str, _path: Path) -> None:
+        if phase != "before_prepare_session":
+            return
+        observed = datetime(2026, 8, 17, 14, 3, tzinfo=UTC).isoformat()
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                """
+                INSERT INTO callback_inbox_v1(
+                    inbox_event_id, callback_kind, request_id, received_utc,
+                    received_monotonic_ns, provider_timestamp_utc,
+                    original_payload_json, admission_run_id,
+                    admission_recorder_generation, connection_generation,
+                    subscription_owner, symbol, callback_classification,
+                    status, admitted_at_utc, updated_at_utc
+                ) VALUES (
+                    'racing-callback', 'level1_quote_update', 10, ?, 3, ?, '{}',
+                    'run-retention', 1, 1, 'universe:AAL', 'AAL',
+                    'accepted_active_callback', 'pending', ?, ?
+                )
+                """,
+                (observed, observed, observed, observed),
+            )
+
+    finalizer = SessionEventWindowFinalizerV0(
+        database=database,
+        raw_root=raw_root,
+        retained_root=raw_root / "retained",
+        run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
+        failure_injector=admit_before_prepare,
+    )
+
+    with pytest.raises(RuntimeError, match="RETENTION_SESSION_CALLBACK_NOT_TERMINAL"):
+        finalizer.finalize_session(
+            session=SESSION,
+            observed_at=datetime(2026, 8, 17, 22, 0, tzinfo=UTC),
+        )
+
+    assert source_path.exists()
+    assert finalizer.repository.session_receipt(SESSION) is None
+
 
 def test_restart_completes_prepared_retention_after_source_unlink(tmp_path: Path) -> None:
     database, raw_root, source_path = _database_with_episode_and_partition(tmp_path)
@@ -645,6 +807,24 @@ def test_completed_session_rejects_late_market_partition(tmp_path: Path) -> None
             identities=((SESSION, "underlying_level1_quote_event"),),
         )
     assert tuple(sorted(raw_root.rglob("*.parquet"))) == existing_files
+
+    inbox = DurableCallbackInbox(
+        database,
+        run_id="run-retention",
+        recorder_generation=1,
+        owner_id="test-recorder",
+    )
+    with pytest.raises(CallbackInboxError, match="CALLBACK_AFTER_RETENTION_SESSION_SEALED"):
+        inbox.admit(
+            callback_kind="level1_quote_update",
+            request_id=10,
+            payload={"provider_timestamp_utc": "2026-08-17T14:22:00+00:00"},
+            connection_generation=1,
+            classification=CallbackClassification.ACCEPTED_ACTIVE,
+            received_utc=datetime(2026, 8, 17, 14, 22, tzinfo=UTC),
+            received_monotonic_ns=4,
+            symbol="AAL",
+        )
 
 
 def test_raw_callback_compaction_preserves_non_underlying_evidence(tmp_path: Path) -> None:

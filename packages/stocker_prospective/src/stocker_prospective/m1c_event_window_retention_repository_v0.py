@@ -4,59 +4,28 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, date, datetime, timedelta
+import sqlite3
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal, cast
-from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from stocker_prospective.database import ProspectiveRepository
+from stocker_prospective.event_window_retention_scope_v0 import (
+    RETENTION_CONTROLLED_CALLBACK_KINDS,
+    retention_session_timestamp_bounds,
+)
 
 DATASET_VERSION: Literal["m1c_event_window_retention_v0"] = (
     "m1c_event_window_retention_v0"
 )
-RETENTION_CONTROLLED_EVENT_TYPES = (
-    "raw_callback_envelope_event",
-    "underlying_bbo_update",
-    "underlying_level1_quote_event",
-    "underlying_tick_bidask_event",
-    "underlying_tick_trade_event",
-    "underlying_trade_update",
-    "underlying_depth_event",
-    "underlying_depth_snapshot",
-)
-
-RETENTION_CONTROLLED_CALLBACK_KINDS = (
-    "level1_quote_update",
-    "official_provider_tick_by_tick_bidask",
-    "official_provider_tick_by_tick_trade",
-    "official_provider_tick_price",
-    "official_provider_tick_size",
-    "official_provider_depth",
-    "official_provider_depth_reset",
-    "tick_by_tick_bidask",
-    "tick_by_tick_trade",
-    "tick_price",
-    "tick_size",
-    "depth",
-    "depth_reset",
-)
-NEW_YORK = ZoneInfo("America/New_York")
 
 
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("retention receipt timestamps must be timezone-aware")
     return value.astimezone(UTC)
-
-
-def _session_timestamp_bounds(session: date) -> tuple[str, str]:
-    """Match event ingestion's America/New_York calendar-date session rule."""
-
-    start = datetime.combine(session, datetime.min.time(), tzinfo=NEW_YORK)
-    end = start + timedelta(days=1)
-    return start.astimezone(UTC).isoformat(), end.astimezone(UTC).isoformat()
 
 
 class SourcePartitionV0(BaseModel):
@@ -232,41 +201,74 @@ class EventWindowRetentionRepositoryV0:
                 if unsafe:
                     raise RuntimeError("RETENTION_SOURCE_CALLBACK_NOT_TERMINAL")
 
-    def assert_session_callbacks_are_terminal(self, session: date) -> None:
-        """Require every admitted underlying callback for the UTC session date to settle."""
-
+    def _unsafe_session_callback_count(
+        self,
+        connection: sqlite3.Connection,
+        session: date,
+    ) -> int:
         placeholders = ",".join("?" for _ in RETENTION_CONTROLLED_CALLBACK_KINDS)
-        session_start, session_end = _session_timestamp_bounds(session)
-        with self.repository._connect() as connection:
-            unsafe = int(
-                connection.execute(
-                    f"""
-                    SELECT COUNT(*)
-                    FROM callback_inbox_v1 AS inbox
-                    LEFT JOIN callback_raw_materialization_v1 AS materialization
-                      ON materialization.inbox_event_id = inbox.inbox_event_id
-                    LEFT JOIN callback_processing_commit_v1 AS processing
-                      ON processing.inbox_event_id = inbox.inbox_event_id
-                    WHERE inbox.admission_run_id = ?
-                      AND COALESCE(inbox.provider_timestamp_utc, inbox.received_utc) >= ?
-                      AND COALESCE(inbox.provider_timestamp_utc, inbox.received_utc) < ?
-                      AND inbox.callback_kind IN ({placeholders})
-                      AND (
-                        inbox.status <> 'acknowledged'
-                        OR materialization.inbox_event_id IS NULL
-                        OR processing.inbox_event_id IS NULL
-                        OR processing.raw_partition_hashes_json <>
-                           materialization.raw_partition_hashes_json
-                      )
-                    """,
+        session_start, session_end = retention_session_timestamp_bounds(session)
+        return int(
+            connection.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM callback_inbox_v1 AS inbox
+                LEFT JOIN callback_raw_materialization_v1 AS materialization
+                  ON materialization.inbox_event_id = inbox.inbox_event_id
+                LEFT JOIN callback_processing_commit_v1 AS processing
+                  ON processing.inbox_event_id = inbox.inbox_event_id
+                WHERE inbox.admission_run_id = ?
+                  AND COALESCE(inbox.provider_timestamp_utc, inbox.received_utc) >= ?
+                  AND COALESCE(inbox.provider_timestamp_utc, inbox.received_utc) < ?
+                  AND inbox.callback_kind IN ({placeholders})
+                  AND NOT (
                     (
-                        self.run_id,
-                        session_start,
-                        session_end,
-                        *RETENTION_CONTROLLED_CALLBACK_KINDS,
-                    ),
-                ).fetchone()[0]
-            )
+                      inbox.status = 'acknowledged'
+                      AND materialization.inbox_event_id IS NOT NULL
+                      AND processing.inbox_event_id IS NOT NULL
+                      AND processing.raw_partition_hashes_json =
+                          materialization.raw_partition_hashes_json
+                    )
+                    OR
+                    (
+                      inbox.status = 'diagnostic'
+                      AND inbox.callback_kind LIKE 'official_provider_%'
+                      AND (
+                        inbox.failure_classification =
+                            'PROVIDER_ENVELOPE_CONTROL_COMPLETED'
+                        OR EXISTS (
+                          SELECT 1
+                          FROM callback_inbox_v1 AS canonical
+                          JOIN callback_raw_materialization_v1 AS canonical_materialization
+                            ON canonical_materialization.inbox_event_id =
+                               canonical.inbox_event_id
+                          JOIN callback_processing_commit_v1 AS canonical_processing
+                            ON canonical_processing.inbox_event_id =
+                               canonical.inbox_event_id
+                           AND canonical_processing.raw_partition_hashes_json =
+                               canonical_materialization.raw_partition_hashes_json
+                          WHERE canonical.provider_envelope_event_id =
+                                inbox.inbox_event_id
+                            AND canonical.status = 'acknowledged'
+                        )
+                      )
+                    )
+                  )
+                """,
+                (
+                    self.run_id,
+                    session_start,
+                    session_end,
+                    *RETENTION_CONTROLLED_CALLBACK_KINDS,
+                ),
+            ).fetchone()[0]
+        )
+
+    def assert_session_callbacks_are_terminal(self, session: date) -> None:
+        """Require canonical rows and provider envelopes to be terminal."""
+
+        with self.repository._connect() as connection:
+            unsafe = self._unsafe_session_callback_count(connection, session)
         if unsafe:
             raise RuntimeError("RETENTION_SESSION_CALLBACK_NOT_TERMINAL")
 
@@ -288,6 +290,9 @@ class EventWindowRetentionRepositoryV0:
         summarised_rows = sum(item.summarised_row_count for item in partitions)
         with self.repository._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            if self._unsafe_session_callback_count(connection, session):
+                connection.rollback()
+                raise RuntimeError("RETENTION_SESSION_CALLBACK_NOT_TERMINAL")
             event_types = tuple(sorted(set(source_event_types)))
             if event_types:
                 active_rows = connection.execute(
@@ -512,7 +517,7 @@ class EventWindowRetentionRepositoryV0:
 
         observed = _utc(purged_at)
         placeholders = ",".join("?" for _ in RETENTION_CONTROLLED_CALLBACK_KINDS)
-        session_start, session_end = _session_timestamp_bounds(session)
+        session_start, session_end = retention_session_timestamp_bounds(session)
         with self.repository._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             complete = connection.execute(
@@ -541,18 +546,54 @@ class EventWindowRetentionRepositoryV0:
                 f"""
                 SELECT inbox.inbox_event_id
                 FROM callback_inbox_v1 AS inbox
-                JOIN callback_raw_materialization_v1 AS materialization
+                LEFT JOIN callback_raw_materialization_v1 AS materialization
                   ON materialization.inbox_event_id = inbox.inbox_event_id
-                JOIN callback_processing_commit_v1 AS processing
+                LEFT JOIN callback_processing_commit_v1 AS processing
                   ON processing.inbox_event_id = inbox.inbox_event_id
-                 AND processing.raw_partition_hashes_json =
-                     materialization.raw_partition_hashes_json
                 WHERE inbox.admission_run_id = ?
                   AND COALESCE(inbox.provider_timestamp_utc, inbox.received_utc) >= ?
                   AND COALESCE(inbox.provider_timestamp_utc, inbox.received_utc) < ?
                   AND inbox.callback_kind IN ({placeholders})
-                  AND inbox.status = 'acknowledged'
-                ORDER BY inbox.inbox_event_id
+                  AND (
+                    (
+                      inbox.status = 'acknowledged'
+                      AND materialization.inbox_event_id IS NOT NULL
+                      AND processing.inbox_event_id IS NOT NULL
+                      AND processing.raw_partition_hashes_json =
+                          materialization.raw_partition_hashes_json
+                    )
+                    OR
+                    (
+                      inbox.status = 'diagnostic'
+                      AND inbox.callback_kind LIKE 'official_provider_%'
+                      AND (
+                        inbox.failure_classification =
+                            'PROVIDER_ENVELOPE_CONTROL_COMPLETED'
+                        OR EXISTS (
+                          SELECT 1
+                          FROM callback_inbox_v1 AS canonical
+                          JOIN callback_raw_materialization_v1 AS canonical_materialization
+                            ON canonical_materialization.inbox_event_id =
+                               canonical.inbox_event_id
+                          JOIN callback_processing_commit_v1 AS canonical_processing
+                            ON canonical_processing.inbox_event_id =
+                               canonical.inbox_event_id
+                           AND canonical_processing.raw_partition_hashes_json =
+                               canonical_materialization.raw_partition_hashes_json
+                          WHERE canonical.provider_envelope_event_id =
+                                inbox.inbox_event_id
+                            AND canonical.status = 'acknowledged'
+                        )
+                      )
+                    )
+                  )
+                ORDER BY
+                  CASE
+                    WHEN inbox.provider_envelope_event_id IS NOT NULL THEN 0
+                    WHEN inbox.status = 'diagnostic' THEN 2
+                    ELSE 1
+                  END,
+                  inbox.inbox_event_id
                 """,
                 (
                     self.run_id,
@@ -586,6 +627,17 @@ class EventWindowRetentionRepositoryV0:
                 )
             connection.commit()
         return len(identities)
+
+    def callback_purge_complete(self, session: date) -> bool:
+        with self.repository._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1 FROM m1c_event_window_callback_purge_v0
+                WHERE run_id = ? AND session_date = ? AND dataset_version = ?
+                """,
+                (self.run_id, session.isoformat(), DATASET_VERSION),
+            ).fetchone()
+        return row is not None
 
     def session_receipt(self, session: date) -> SessionRetentionReceiptV0 | None:
         with self.repository._connect() as connection:

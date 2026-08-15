@@ -17,6 +17,9 @@ from stocker_prospective.contract import M1C_FROZEN_THRESHOLD, claims_boundary
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.direction import DirectionClassification
 from stocker_prospective.direction_features import DirectionFeatureResult
+from stocker_prospective.event_window_retention_scope_v0 import (
+    RETENTION_CONTROLLED_EVENT_TYPES,
+)
 from stocker_prospective.events import (
     FiveMinuteBarEvent,
     OptionQuoteEvent,
@@ -24,9 +27,6 @@ from stocker_prospective.events import (
 )
 from stocker_prospective.frozen_m1c import EpisodeDecision, FrozenM1CScore
 from stocker_prospective.group_o import FrozenGroupOContext
-from stocker_prospective.m1c_event_window_retention_repository_v0 import (
-    RETENTION_CONTROLLED_EVENT_TYPES,
-)
 from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
     M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID,
     RESERVED_MARKET_DATA_LINES_V1,

@@ -75,6 +75,7 @@ from stocker_prospective.ibkr_api import (
     write_immutable_official_ibkr_api_provenance,
     write_official_ibkr_api_update_status,
 )
+from stocker_prospective.live_bars import xnys_session_bounds
 from stocker_prospective.m1c_event_window_retention_v0 import (
     POST_EVENT_RETENTION,
     SessionEventWindowFinalizerV0,
@@ -151,6 +152,38 @@ def _retention_finalizer(config_path: Path) -> SessionEventWindowFinalizerV0:
         raise RuntimeSafetyError("blocked_event_window_retention_readiness_invalid") from exc
     if readiness.get("classification") != "READY_FOR_EVENT_WINDOW_RETENTION_V0":
         raise RuntimeSafetyError("blocked_event_window_retention_not_ready")
+    if readiness.get("activation_authorized") is not False:
+        raise RuntimeSafetyError("blocked_event_window_retention_readiness_not_pipeline_only")
+    if readiness.get("contract_sha256") != observed_hash:
+        raise RuntimeSafetyError("blocked_event_window_retention_readiness_contract_mismatch")
+    checks = readiness.get("pipeline_checks")
+    if not isinstance(checks, dict) or not checks or set(checks.values()) != {"PASS"}:
+        raise RuntimeSafetyError("blocked_event_window_retention_pipeline_checks")
+    if (
+        retention.activation_authorization is None
+        or not retention.activation_authorization.is_file()
+    ):
+        raise RuntimeSafetyError("blocked_event_window_retention_authorization_missing")
+    try:
+        authorization = json.loads(
+            retention.activation_authorization.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeSafetyError("blocked_event_window_retention_authorization_invalid") from exc
+    assert retention.first_eligible_session is not None
+    assert retention.activation_timestamp_utc is not None
+    expected_authorization = {
+        "activation_authorized": True,
+        "dataset_version": retention.dataset_version,
+        "contract_sha256": observed_hash,
+        "episode_scope": retention.episode_scope,
+        "planned_sessions": retention.planned_sessions,
+        "first_eligible_session": retention.first_eligible_session.isoformat(),
+        "activation_timestamp_utc": retention.activation_timestamp_utc.isoformat(),
+        "no_order_invariant": "PASS",
+    }
+    if any(authorization.get(key) != value for key, value in expected_authorization.items()):
+        raise RuntimeSafetyError("blocked_event_window_retention_not_authorized")
     repository = ProspectiveRepository(config.paths.database)
     repository.migrate()
     return SessionEventWindowFinalizerV0(
@@ -158,28 +191,25 @@ def _retention_finalizer(config_path: Path) -> SessionEventWindowFinalizerV0:
         raw_root=config.paths.raw_event_root,
         retained_root=config.paths.event_window_retained_root,
         run_id=config.runtime.run_id,
+        activation_timestamp_utc=retention.activation_timestamp_utc,
+        first_eligible_session=retention.first_eligible_session,
+        planned_sessions=retention.planned_sessions,
     )
 
 
-def _latest_completed_retention_session(observed_at: datetime) -> date:
-    try:
-        import pandas_market_calendars as mcal
-    except ImportError as exc:
-        raise RuntimeSafetyError("blocked_market_calendar_unavailable") from exc
+def _oldest_pending_completed_retention_session(
+    finalizer: SessionEventWindowFinalizerV0,
+    observed_at: datetime,
+) -> date:
     observed = observed_at.astimezone(UTC)
-    schedule = mcal.get_calendar("XNYS").schedule(
-        start_date=(observed.date() - timedelta(days=14)).isoformat(),
-        end_date=observed.date().isoformat(),
-    )
-    eligible = tuple(
-        date.fromisoformat(str(timestamp.date()))
-        for timestamp, row in schedule.iterrows()
-        if row["market_close"].to_pydatetime().astimezone(UTC) + POST_EVENT_RETENTION
-        <= observed
-    )
-    if not eligible:
-        raise RuntimeSafetyError("blocked_no_completed_retention_session")
-    return max(eligible)
+    for session in finalizer.eligible_sessions:
+        _market_open, market_close = xnys_session_bounds(session)
+        if market_close + POST_EVENT_RETENTION > observed:
+            break
+        receipt = finalizer.repository.session_receipt(session)
+        if receipt is None or receipt.status != "COMPLETE":
+            return session
+    raise RuntimeSafetyError("blocked_no_pending_completed_retention_session")
 
 
 @retention_app.command("finalize-session-v0")
@@ -206,7 +236,7 @@ def finalize_latest_event_window_session_v0_command(
     observed = datetime.now(UTC)
     try:
         finalizer = _retention_finalizer(config_path)
-        session = _latest_completed_retention_session(observed)
+        session = _oldest_pending_completed_retention_session(finalizer, observed)
         _emit(finalizer.finalize_session(session=session, observed_at=observed))
     except (RuntimeSafetyError, RuntimeError, ValueError) as exc:
         _fatal(str(exc), exit_code=78)

@@ -1,7 +1,7 @@
 {
   "activation_authorized": false,
   "classification": "READY_FOR_EVENT_WINDOW_RETENTION_V0",
-  "contract_sha256": "2ccbcf83a36d4109dc85db975a99338c75779ed35d55d25209cc9cfa432863eb",
+  "contract_sha256": "9a22f95a3645db929af6681464fe4d85c091652d857bda503a5df6ad5ca2bcb6",
   "dataset_version": "m1c_event_window_retention_v0",
   "episode_scope": "ALL_M1C_EPISODES",
   "live_source_data_deleted": false,
@@ -9,9 +9,14 @@
   "pipeline_checks": {
     "acknowledged_callback_gate": "PASS",
     "all_family_window_union": "PASS",
+    "all_row_partition_identity": "PASS",
+    "depth_scope": "PASS",
     "fail_closed_hash_verification": "PASS",
     "late_partition_seal": "PASS",
+    "raw_write_retirement_fence": "PASS",
     "restart_after_unlink": "PASS",
+    "terminal_callback_bounded_purge": "PASS",
+    "twenty_session_schedule": "PASS",
     "summary_is_non_directional": "PASS"
   },
   "schema_version": "1"

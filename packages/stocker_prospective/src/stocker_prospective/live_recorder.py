@@ -103,6 +103,7 @@ from stocker_prospective.operational_state import (
 )
 from stocker_prospective.order_book import DepthBook
 from stocker_prospective.partition_store import PartitionedEventStore
+from stocker_prospective.raw_storage_fence import RawStorageFence
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 from stocker_prospective.recorder_v0 import (
     CHECKPOINT_QUOTE_SELECTION_POLICY_V0,
@@ -1109,34 +1110,41 @@ class FrozenM1CLiveRecorder:
     ) -> tuple[str, ...]:
         if not events:
             return ()
-        partitions = self.raw_store.write_grouped(
-            data_source="ibkr",
-            events=events,
-            complete=True,
-            # Retain the legacy manifest column without copying a batch-wide
-            # count into every partition. GapIncident is the canonical tally.
-            gap_count=0,
-            progress_heartbeat=self.processing_heartbeat,
-        )
+        with RawStorageFence(self.raw_store.root).exclusive():
+            self.repository.assert_raw_partition_sessions_open(
+                run_id=metadata.run_id,
+                identities=tuple(
+                    sorted({(event.session, _event_type_name(event)) for event in events})
+                ),
+            )
+            partitions = self.raw_store.write_grouped(
+                data_source="ibkr",
+                events=events,
+                complete=True,
+                # Retain the legacy manifest column without copying a batch-wide
+                # count into every partition. GapIncident is the canonical tally.
+                gap_count=0,
+                progress_heartbeat=self.processing_heartbeat,
+            )
+            for partition in partitions:
+                path_parts = {
+                    key: value
+                    for item in partition.data_path.parts
+                    if "=" in item
+                    for key, value in (item.split("=", maxsplit=1),)
+                }
+                self.repository.record_partition(
+                    metadata,
+                    data_source="ibkr",
+                    session_date=date.fromisoformat(path_parts["session_date"]),
+                    symbol=path_parts["symbol"],
+                    event_type=path_parts["event_type"],
+                    partition=partition,
+                )
         if self.shadow_microstructure_collector is not None:
             self.shadow_microstructure_collector.persist_raw_events(events)
         if self.directionless_shadow_service_v0 is not None:
             self.directionless_shadow_service_v0.persist_raw_events(events)
-        for partition in partitions:
-            path_parts = {
-                key: value
-                for item in partition.data_path.parts
-                if "=" in item
-                for key, value in (item.split("=", maxsplit=1),)
-            }
-            self.repository.record_partition(
-                metadata,
-                data_source="ibkr",
-                session_date=date.fromisoformat(path_parts["session_date"]),
-                symbol=path_parts["symbol"],
-                event_type=path_parts["event_type"],
-                partition=partition,
-            )
         if (
             self.operational_repository is not None
             and self.recorder_generation is not None

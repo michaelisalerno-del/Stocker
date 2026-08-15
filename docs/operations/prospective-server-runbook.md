@@ -1625,7 +1625,7 @@ Event-window retention is disabled by default and applies only to sessions
 recorded after its explicit activation. It selects every `m1c_episode_v0` row,
 without family filtering, and keeps the union of each symbol's inclusive
 `T0 - 5 minutes` through `T0 + 20 minutes` windows. Outside-window underlying
-quotes/trades become non-directional operational summaries. Bars, M1C state,
+quotes/trades/depth become non-directional operational summaries. Bars, M1C state,
 options, subscriptions, permissions, gaps, connection evidence, and run
 manifests remain untouched.
 
@@ -1633,9 +1633,18 @@ The finalizer verifies the source hash, retained Parquet hash, summary hash,
 terminal callback processing, and a committed `PREPARED` SQLite receipt before
 unlinking a source partition. A crash resumes from that receipt. Any mismatch
 retains the source and exits 78. Never point it at a completed historical run.
+The recorder and finalizer share an exclusive raw-storage fence spanning file
+creation through manifest commit, so finalization cannot race an unregistered
+partition. After completion, terminal high-volume inbox rows are replaced by a
+durable count and identity-set hash receipt; retained Parquet remains the raw audit.
 
 Install but do not enable the post-after-hours timer until the frozen config,
-fresh writable database, contract hash, and readiness report are activated:
+fresh writable database, contract hash, readiness report, and a separate explicit
+authorization receipt are activated. The authorization must bind `true` to the
+dataset/contract hashes, activation timestamp, first eligible XNYS session,
+20-session count, all-episode scope, and `no_order_invariant=PASS`. The committed
+pipeline-readiness report deliberately has `activation_authorized=false` and
+cannot authorize deletion by itself:
 
 ```bash
 sudo install -o root -g root -m 0644 \
@@ -1655,12 +1664,13 @@ sudo -u stocker /opt/stocker/current/.venv/bin/stocker-prospective \
   --session YYYY-MM-DD
 ```
 
-The timer runs at 02:30 UTC Tuesday through Saturday, after US after-hours for
-the prior eligible session. A source-set check and sealed-session guard make a
+The timer runs at 02:30 UTC Tuesday through Saturday and retries the oldest
+unfinalized closed session in the fixed 20-session schedule. It stops finding
+eligible work after session 20. A source-set check and sealed-session guard make a
 late market callback visible rather than silently excluding it. Keep
 `runtime.callback_inbox_retention_enabled=true`; acknowledged callback payload
-compaction is required to prevent SQLite from retaining the discarded raw
-payload volume.
+compaction is required while recording, and terminal session rows are purged only
+after the verified session receipt is complete.
 
 ## Replay ownership and dashboard polling
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -21,6 +22,24 @@ RETENTION_CONTROLLED_EVENT_TYPES = (
     "underlying_tick_bidask_event",
     "underlying_tick_trade_event",
     "underlying_trade_update",
+    "underlying_depth_event",
+    "underlying_depth_snapshot",
+)
+
+RETENTION_CONTROLLED_CALLBACK_KINDS = (
+    "level1_quote_update",
+    "official_provider_tick_by_tick_bidask",
+    "official_provider_tick_by_tick_trade",
+    "official_provider_tick_price",
+    "official_provider_tick_size",
+    "official_provider_depth",
+    "official_provider_depth_reset",
+    "tick_by_tick_bidask",
+    "tick_by_tick_trade",
+    "tick_price",
+    "tick_size",
+    "depth",
+    "depth_reset",
 )
 
 
@@ -202,6 +221,41 @@ class EventWindowRetentionRepositoryV0:
                 )
                 if unsafe:
                     raise RuntimeError("RETENTION_SOURCE_CALLBACK_NOT_TERMINAL")
+
+    def assert_session_callbacks_are_terminal(self, session: date) -> None:
+        """Require every admitted underlying callback for the UTC session date to settle."""
+
+        placeholders = ",".join("?" for _ in RETENTION_CONTROLLED_CALLBACK_KINDS)
+        with self.repository._connect() as connection:
+            unsafe = int(
+                connection.execute(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM callback_inbox_v1 AS inbox
+                    LEFT JOIN callback_raw_materialization_v1 AS materialization
+                      ON materialization.inbox_event_id = inbox.inbox_event_id
+                    LEFT JOIN callback_processing_commit_v1 AS processing
+                      ON processing.inbox_event_id = inbox.inbox_event_id
+                    WHERE inbox.admission_run_id = ?
+                      AND substr(inbox.received_utc, 1, 10) = ?
+                      AND inbox.callback_kind IN ({placeholders})
+                      AND (
+                        inbox.status <> 'acknowledged'
+                        OR materialization.inbox_event_id IS NULL
+                        OR processing.inbox_event_id IS NULL
+                        OR processing.raw_partition_hashes_json <>
+                           materialization.raw_partition_hashes_json
+                      )
+                    """,
+                    (
+                        self.run_id,
+                        session.isoformat(),
+                        *RETENTION_CONTROLLED_CALLBACK_KINDS,
+                    ),
+                ).fetchone()[0]
+            )
+        if unsafe:
+            raise RuntimeError("RETENTION_SESSION_CALLBACK_NOT_TERMINAL")
 
     def prepare_session(
         self,
@@ -434,6 +488,84 @@ class EventWindowRetentionRepositoryV0:
                 connection.rollback()
                 raise RuntimeError("RETENTION_SESSION_RECEIPT_MISSING")
             connection.commit()
+
+    def purge_terminal_session_callbacks(
+        self,
+        session: date,
+        *,
+        purged_at: datetime,
+    ) -> int:
+        """Bound the high-volume inbox after durable raw retention is complete."""
+
+        observed = _utc(purged_at)
+        placeholders = ",".join("?" for _ in RETENTION_CONTROLLED_CALLBACK_KINDS)
+        with self.repository._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            complete = connection.execute(
+                """
+                SELECT 1 FROM m1c_event_window_retention_session_v0
+                WHERE run_id = ? AND session_date = ? AND dataset_version = ?
+                  AND status = 'COMPLETE'
+                """,
+                (self.run_id, session.isoformat(), DATASET_VERSION),
+            ).fetchone()
+            if complete is None:
+                connection.rollback()
+                raise RuntimeError("RETENTION_CALLBACK_PURGE_BEFORE_COMPLETE")
+            existing = connection.execute(
+                """
+                SELECT purged_callback_count
+                FROM m1c_event_window_callback_purge_v0
+                WHERE run_id = ? AND session_date = ? AND dataset_version = ?
+                """,
+                (self.run_id, session.isoformat(), DATASET_VERSION),
+            ).fetchone()
+            if existing is not None:
+                connection.rollback()
+                return int(existing["purged_callback_count"])
+            rows = connection.execute(
+                f"""
+                SELECT inbox.inbox_event_id
+                FROM callback_inbox_v1 AS inbox
+                JOIN callback_raw_materialization_v1 AS materialization
+                  ON materialization.inbox_event_id = inbox.inbox_event_id
+                JOIN callback_processing_commit_v1 AS processing
+                  ON processing.inbox_event_id = inbox.inbox_event_id
+                 AND processing.raw_partition_hashes_json =
+                     materialization.raw_partition_hashes_json
+                WHERE inbox.admission_run_id = ?
+                  AND substr(inbox.received_utc, 1, 10) = ?
+                  AND inbox.callback_kind IN ({placeholders})
+                  AND inbox.status = 'acknowledged'
+                ORDER BY inbox.inbox_event_id
+                """,
+                (self.run_id, session.isoformat(), *RETENTION_CONTROLLED_CALLBACK_KINDS),
+            ).fetchall()
+            identities = tuple(str(row["inbox_event_id"]) for row in rows)
+            identity_hash = hashlib.sha256("\n".join(identities).encode()).hexdigest()
+            connection.execute(
+                """
+                INSERT INTO m1c_event_window_callback_purge_v0(
+                    run_id, session_date, dataset_version, purged_callback_count,
+                    callback_identity_set_sha256, purged_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    self.run_id,
+                    session.isoformat(),
+                    DATASET_VERSION,
+                    len(identities),
+                    identity_hash,
+                    observed.isoformat(),
+                ),
+            )
+            if identities:
+                connection.executemany(
+                    "DELETE FROM callback_inbox_v1 WHERE inbox_event_id = ?",
+                    ((identity,) for identity in identities),
+                )
+            connection.commit()
+        return len(identities)
 
     def session_receipt(self, session: date) -> SessionRetentionReceiptV0 | None:
         with self.repository._connect() as connection:

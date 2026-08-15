@@ -1,6 +1,11 @@
 {
   "analysis_enabled": false,
   "dataset_version": "m1c_event_window_retention_v0",
+  "collection_period": {
+    "planned_sessions": 20,
+    "start_rule": "explicit_first_complete_XNYS_session_at_or_after_activation",
+    "stopping_rule": "stop_after_session_20_without_extension"
+  },
   "deletion_boundary": {
     "delete_only_after": [
       "source_hash_verified",
@@ -39,8 +44,11 @@
     "underlying_tick_trade_event",
     "underlying_bbo_update",
     "underlying_trade_update",
+    "underlying_depth_event",
+    "underlying_depth_snapshot",
     "matching raw market-data callback envelopes"
   ],
+  "terminal_callback_retention": "aggregate_identity_hash_receipt_then_delete_operational_rows",
   "research_only": true,
   "schema_version": "1"
 }

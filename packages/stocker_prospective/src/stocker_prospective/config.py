@@ -378,13 +378,16 @@ class EventWindowRetentionV0Config(BaseModel):
     episode_scope: Literal["ALL_M1C_EPISODES"] = "ALL_M1C_EPISODES"
     before_event_minutes: int = 5
     after_event_minutes: int = 20
+    planned_sessions: Literal[20] = 20
     delete_verified_transient_market_data: Literal[True] = True
     preserve_non_market_evidence: Literal[True] = True
     summary_directional_analysis_enabled: Literal[False] = False
     activation_timestamp_utc: datetime | None = None
+    first_eligible_session: date | None = None
     frozen_contract: Path | None = None
     frozen_contract_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     readiness_report: Path | None = None
+    activation_authorization: Path | None = None
 
     @model_validator(mode="after")
     def _frozen_retention_contract(self) -> EventWindowRetentionV0Config:
@@ -394,11 +397,15 @@ class EventWindowRetentionV0Config(BaseModel):
             return self
         if (
             self.activation_timestamp_utc is None
+            or self.first_eligible_session is None
             or self.frozen_contract is None
             or self.frozen_contract_sha256 is None
             or self.readiness_report is None
+            or self.activation_authorization is None
         ):
-            raise ValueError("enabled retention requires activation and frozen contract")
+            raise ValueError(
+                "enabled retention requires schedule, frozen contract, readiness, and authorization"
+            )
         if (
             self.activation_timestamp_utc.tzinfo is None
             or self.activation_timestamp_utc.utcoffset() is None
@@ -460,8 +467,18 @@ class ProspectiveConfig(BaseModel):
                 raise ValueError("event-window retention requires IBKR source")
             if self.paths.raw_event_root is None or self.paths.event_window_retained_root is None:
                 raise ValueError("event-window retention requires raw and retained roots")
+            try:
+                self.paths.event_window_retained_root.resolve().relative_to(
+                    self.paths.raw_event_root.resolve()
+                )
+            except ValueError as exc:
+                raise ValueError("event-window retained root must be inside raw root") from exc
             if not self.runtime.callback_inbox_retention_enabled:
                 raise ValueError("event-window retention requires callback inbox compaction")
+            if self.shadow_microstructure.enabled:
+                raise ValueError(
+                    "event-window retention does not compact the separate shadow dataset"
+                )
         return self
 
 
@@ -699,6 +716,7 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
             "episode_scope": config.event_window_retention_v0.episode_scope,
             "before_event_minutes": config.event_window_retention_v0.before_event_minutes,
             "after_event_minutes": config.event_window_retention_v0.after_event_minutes,
+            "planned_sessions": config.event_window_retention_v0.planned_sessions,
             "summary_directional_analysis_enabled": (
                 config.event_window_retention_v0.summary_directional_analysis_enabled
             ),

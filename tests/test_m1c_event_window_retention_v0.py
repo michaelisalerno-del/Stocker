@@ -13,16 +13,21 @@ from pydantic import ValidationError
 from stocker_prospective.config import EventWindowRetentionV0Config
 from stocker_prospective.database import EvidenceMetadata, ProspectiveRepository
 from stocker_prospective.events import RawCallbackEnvelopeEvent, UnderlyingLevel1QuoteEvent
+from stocker_prospective.m1c_event_window_retention_repository_v0 import (
+    RETENTION_CONTROLLED_EVENT_TYPES,
+)
 from stocker_prospective.m1c_event_window_retention_v0 import (
     M1CEventReferenceV0,
     SessionEventWindowFinalizerV0,
     SessionEventWindowPlanV0,
+    eligible_retention_sessions,
 )
 from stocker_prospective.market_data import MarketDataType
 from stocker_prospective.partition_store import PartitionedEventStore
 from stocker_prospective.recorder_repository import FrozenRecorderRepository
 
 SESSION = date(2026, 8, 17)
+ACTIVATION = datetime(2026, 8, 17, 12, 0, tzinfo=UTC)
 
 
 def _event(episode_id: str, symbol: str, minute: int) -> M1CEventReferenceV0:
@@ -64,10 +69,24 @@ def test_all_m1c_events_create_merged_symbol_windows() -> None:
 
 def test_retention_is_disabled_by_default_and_frozen_when_enabled() -> None:
     assert EventWindowRetentionV0Config().enabled is False
-    with pytest.raises(ValidationError, match="requires activation and frozen contract"):
+    with pytest.raises(ValidationError, match="requires schedule, frozen contract"):
         EventWindowRetentionV0Config(enabled=True)
     with pytest.raises(ValidationError, match="new dataset version"):
         EventWindowRetentionV0Config(before_event_minutes=4)
+
+
+def test_retention_schedule_is_exactly_twenty_xnys_sessions() -> None:
+    sessions = eligible_retention_sessions(first_session=SESSION, count=20)
+
+    assert len(sessions) == 20
+    assert sessions[0] == SESSION
+    assert sessions[-1] > sessions[0]
+    assert len(set(sessions)) == 20
+
+
+def test_depth_is_in_high_volume_retention_scope() -> None:
+    assert "underlying_depth_event" in RETENTION_CONTROLLED_EVENT_TYPES
+    assert "underlying_depth_snapshot" in RETENTION_CONTROLLED_EVENT_TYPES
 
 
 def _metadata() -> EvidenceMetadata:
@@ -144,7 +163,11 @@ def _raw_callback(event_id: str, *, stream_kind: str) -> RawCallbackEnvelopeEven
     )
 
 
-def _database_with_episode_and_partition(tmp_path: Path) -> tuple[Path, Path, Path]:
+def _database_with_episode_and_partition(
+    tmp_path: Path,
+    *,
+    all_inside: bool = False,
+) -> tuple[Path, Path, Path]:
     database = tmp_path / "prospective.sqlite3"
     repository = ProspectiveRepository(database)
     repository.migrate()
@@ -160,7 +183,11 @@ def _database_with_episode_and_partition(tmp_path: Path) -> tuple[Path, Path, Pa
     partition = store.write_events(
         data_source="fake_ibkr",
         events=(
-            _quote("outside", datetime(2026, 8, 17, 14, 21, tzinfo=UTC), 1),
+            _quote(
+                "outside" if not all_inside else "inside-two",
+                datetime(2026, 8, 17, 14, 2 if all_inside else 21, tzinfo=UTC),
+                1,
+            ),
             _quote("inside", datetime(2026, 8, 17, 14, 1, tzinfo=UTC), 2),
         ),
         complete=True,
@@ -219,8 +246,10 @@ def test_finalizer_verifies_retained_rows_before_deleting_source(tmp_path: Path)
     finalizer = SessionEventWindowFinalizerV0(
         database=database,
         raw_root=raw_root,
-        retained_root=tmp_path / "retained",
+        retained_root=raw_root / "retained",
         run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
     )
 
     receipt = finalizer.finalize_session(
@@ -247,6 +276,17 @@ def test_finalizer_verifies_retained_rows_before_deleting_source(tmp_path: Path)
     assert summary[0]["locked_quote_count"] == "0"
     assert summary[0]["crossed_quote_count"] == "0"
     assert summary[0]["invalid_quote_count"] == "0"
+    recovery = PartitionedEventStore(
+        root=raw_root,
+        prospective_collection_start=datetime(2026, 8, 1, tzinfo=UTC),
+        recorder_version="test",
+        contract_version="test",
+        run_id="run-retention",
+    ).recover()
+    assert recovery.fatal_issues == ()
+    assert receipt.partitions[0].retained_content_hash in {
+        partition.content_hash for partition in recovery.valid_partitions
+    }
     assert finalizer.repository.session_receipt(SESSION) == receipt
 
 
@@ -256,8 +296,10 @@ def test_finalizer_keeps_source_when_hash_verification_fails(tmp_path: Path) -> 
     finalizer = SessionEventWindowFinalizerV0(
         database=database,
         raw_root=raw_root,
-        retained_root=tmp_path / "retained",
+        retained_root=raw_root / "retained",
         run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
     )
 
     with pytest.raises(RuntimeError, match="RETENTION_SOURCE_HASH_MISMATCH"):
@@ -277,14 +319,36 @@ def test_finalizer_refuses_to_run_before_every_event_horizon_is_closed(
     finalizer = SessionEventWindowFinalizerV0(
         database=database,
         raw_root=raw_root,
-        retained_root=tmp_path / "retained",
+        retained_root=raw_root / "retained",
         run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
     )
 
     with pytest.raises(RuntimeError, match="RETENTION_SESSION_HORIZON_OPEN"):
         finalizer.finalize_session(
             session=SESSION,
             observed_at=datetime(2026, 8, 17, 20, 10, tzinfo=UTC),
+        )
+
+    assert source_path.exists()
+
+
+def test_finalizer_never_applies_retention_before_activation(tmp_path: Path) -> None:
+    database, raw_root, source_path = _database_with_episode_and_partition(tmp_path)
+    finalizer = SessionEventWindowFinalizerV0(
+        database=database,
+        raw_root=raw_root,
+        retained_root=raw_root / "retained",
+        run_id="run-retention",
+        activation_timestamp_utc=datetime(2026, 8, 18, tzinfo=UTC),
+        first_eligible_session=SESSION,
+    )
+
+    with pytest.raises(RuntimeError, match="RETENTION_SESSION_PRECEDES_ACTIVATION"):
+        finalizer.finalize_session(
+            session=SESSION,
+            observed_at=datetime(2026, 8, 17, 22, 0, tzinfo=UTC),
         )
 
     assert source_path.exists()
@@ -339,17 +403,138 @@ def test_finalizer_never_deletes_partition_referenced_by_pending_callback(
     finalizer = SessionEventWindowFinalizerV0(
         database=database,
         raw_root=raw_root,
-        retained_root=tmp_path / "retained",
+        retained_root=raw_root / "retained",
         run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
     )
 
-    with pytest.raises(RuntimeError, match="RETENTION_SOURCE_CALLBACK_NOT_TERMINAL"):
+    with pytest.raises(RuntimeError, match="RETENTION_SESSION_CALLBACK_NOT_TERMINAL"):
         finalizer.finalize_session(
             session=SESSION,
             observed_at=datetime(2026, 8, 17, 22, 0, tzinfo=UTC),
         )
 
     assert source_path.exists()
+
+
+def test_finalizer_blocks_unmaterialized_session_callback(tmp_path: Path) -> None:
+    database, raw_root, source_path = _database_with_episode_and_partition(tmp_path)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO callback_inbox_v1(
+                inbox_event_id, callback_kind, request_id, received_utc,
+                received_monotonic_ns, provider_timestamp_utc,
+                original_payload_json, admission_run_id,
+                admission_recorder_generation, connection_generation,
+                subscription_owner, symbol, callback_classification,
+                status, admitted_at_utc, updated_at_utc
+            ) VALUES (
+                'unmaterialized-callback', 'level1_quote_update', 10, ?, 1, ?, '{}',
+                'run-retention', 1, 1, 'universe:AAL', 'AAL',
+                'accepted_active_callback', 'pending', ?, ?
+            )
+            """,
+            (
+                datetime(2026, 8, 17, 14, 1, tzinfo=UTC).isoformat(),
+                datetime(2026, 8, 17, 14, 1, tzinfo=UTC).isoformat(),
+                datetime(2026, 8, 17, 14, 1, tzinfo=UTC).isoformat(),
+                datetime(2026, 8, 17, 14, 1, tzinfo=UTC).isoformat(),
+            ),
+        )
+    finalizer = SessionEventWindowFinalizerV0(
+        database=database,
+        raw_root=raw_root,
+        retained_root=raw_root / "retained",
+        run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
+    )
+
+    with pytest.raises(RuntimeError, match="RETENTION_SESSION_CALLBACK_NOT_TERMINAL"):
+        finalizer.finalize_session(
+            session=SESSION,
+            observed_at=datetime(2026, 8, 17, 22, 0, tzinfo=UTC),
+        )
+
+    assert source_path.exists()
+
+
+def test_completed_session_purges_terminal_high_volume_inbox_rows(tmp_path: Path) -> None:
+    database, raw_root, _ = _database_with_episode_and_partition(tmp_path)
+    with sqlite3.connect(database) as connection:
+        content_hash = str(
+            connection.execute(
+                "SELECT content_hash FROM raw_partition_manifest_v0"
+            ).fetchone()[0]
+        )
+        observed = datetime(2026, 8, 17, 14, 1, tzinfo=UTC).isoformat()
+        hashes = json.dumps([content_hash])
+        connection.execute(
+            """
+            INSERT INTO callback_inbox_v1(
+                inbox_event_id, callback_kind, request_id, received_utc,
+                received_monotonic_ns, provider_timestamp_utc,
+                original_payload_json, admission_run_id,
+                admission_recorder_generation, connection_generation,
+                subscription_owner, symbol, callback_classification,
+                status, acknowledgement_timestamp_utc, admitted_at_utc, updated_at_utc
+            ) VALUES (
+                'terminal-callback', 'level1_quote_update', 10, ?, 1, ?, '{}',
+                'run-retention', 1, 1, 'universe:AAL', 'AAL',
+                'accepted_active_callback', 'acknowledged', ?, ?, ?
+            )
+            """,
+            (observed, observed, observed, observed, observed),
+        )
+        connection.execute(
+            """
+            INSERT INTO callback_raw_materialization_v1(
+                inbox_event_id, source_sequence, run_id, recorder_generation,
+                lease_batch_id, raw_partition_hashes_json, raw_event_ids_json,
+                materialized_at_utc
+            ) VALUES ('terminal-callback', 1, 'run-retention', 1, 'batch-1', ?,
+                      '["inside"]', ?)
+            """,
+            (hashes, observed),
+        )
+        connection.execute(
+            """
+            INSERT INTO callback_processing_commit_v1(
+                inbox_event_id, source_sequence, run_id, recorder_generation,
+                raw_partition_hashes_json, committed_at_utc
+            ) VALUES ('terminal-callback', 1, 'run-retention', 1, ?, ?)
+            """,
+            (hashes, observed),
+        )
+    finalizer = SessionEventWindowFinalizerV0(
+        database=database,
+        raw_root=raw_root,
+        retained_root=raw_root / "retained",
+        run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
+    )
+
+    finalizer.finalize_session(
+        session=SESSION,
+        observed_at=datetime(2026, 8, 17, 22, 0, tzinfo=UTC),
+    )
+
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM callback_inbox_v1 WHERE inbox_event_id = 'terminal-callback'"
+        ).fetchone()[0] == 0
+        purge = connection.execute(
+            """
+            SELECT purged_callback_count
+            FROM m1c_event_window_callback_purge_v0
+            WHERE run_id = 'run-retention' AND session_date = ?
+            """,
+            (SESSION.isoformat(),),
+        ).fetchone()
+    assert purge == (1,)
 
 
 def test_restart_completes_prepared_retention_after_source_unlink(tmp_path: Path) -> None:
@@ -362,8 +547,10 @@ def test_restart_completes_prepared_retention_after_source_unlink(tmp_path: Path
     interrupted = SessionEventWindowFinalizerV0(
         database=database,
         raw_root=raw_root,
-        retained_root=tmp_path / "retained",
+        retained_root=raw_root / "retained",
         run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
         failure_injector=crash,
     )
     with pytest.raises(RuntimeError, match="injected-retention-crash"):
@@ -379,8 +566,10 @@ def test_restart_completes_prepared_retention_after_source_unlink(tmp_path: Path
     restarted = SessionEventWindowFinalizerV0(
         database=database,
         raw_root=raw_root,
-        retained_root=tmp_path / "retained",
+        retained_root=raw_root / "retained",
         run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
     )
     completed = restarted.finalize_session(
         session=SESSION,
@@ -396,34 +585,24 @@ def test_completed_session_rejects_late_market_partition(tmp_path: Path) -> None
     finalizer = SessionEventWindowFinalizerV0(
         database=database,
         raw_root=raw_root,
-        retained_root=tmp_path / "retained",
+        retained_root=raw_root / "retained",
         run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
     )
     finalizer.finalize_session(
         session=SESSION,
         observed_at=datetime(2026, 8, 17, 22, 0, tzinfo=UTC),
     )
-    late = PartitionedEventStore(
-        root=raw_root,
-        prospective_collection_start=datetime(2026, 8, 1, tzinfo=UTC),
-        recorder_version="test",
-        contract_version="test",
-        run_id="run-retention",
-    ).write_events(
-        data_source="fake_ibkr",
-        events=(_quote("late", datetime(2026, 8, 17, 14, 22, tzinfo=UTC), 3),),
-        complete=True,
-    )
+    recorder_repository = FrozenRecorderRepository(ProspectiveRepository(database))
+    existing_files = tuple(sorted(raw_root.rglob("*.parquet")))
 
     with pytest.raises(RuntimeError, match="RETENTION_SESSION_ALREADY_SEALED"):
-        FrozenRecorderRepository(ProspectiveRepository(database)).record_partition(
-            _metadata(),
-            data_source="fake_ibkr",
-            session_date=SESSION,
-            symbol="AAL",
-            event_type="underlying_level1_quote_event",
-            partition=late,
+        recorder_repository.assert_raw_partition_sessions_open(
+            run_id="run-retention",
+            identities=((SESSION, "underlying_level1_quote_event"),),
         )
+    assert tuple(sorted(raw_root.rglob("*.parquet"))) == existing_files
 
 
 def test_raw_callback_compaction_preserves_non_underlying_evidence(tmp_path: Path) -> None:
@@ -453,8 +632,10 @@ def test_raw_callback_compaction_preserves_non_underlying_evidence(tmp_path: Pat
     finalizer = SessionEventWindowFinalizerV0(
         database=database,
         raw_root=raw_root,
-        retained_root=tmp_path / "retained",
+        retained_root=raw_root / "retained",
         run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
     )
 
     receipt = finalizer.finalize_session(
@@ -470,3 +651,49 @@ def test_raw_callback_compaction_preserves_non_underlying_evidence(tmp_path: Pat
     }
     assert "option-outside" in event_ids
     assert "underlying-outside" not in event_ids
+
+
+def test_all_rows_in_window_get_distinct_retained_manifest_identity(tmp_path: Path) -> None:
+    database, raw_root, source_path = _database_with_episode_and_partition(
+        tmp_path,
+        all_inside=True,
+    )
+    source_hash = source_path.name.split("-")[1].split(".")[0]
+    finalizer = SessionEventWindowFinalizerV0(
+        database=database,
+        raw_root=raw_root,
+        retained_root=raw_root / "retained",
+        run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=SESSION,
+    )
+
+    receipt = finalizer.finalize_session(
+        session=SESSION,
+        observed_at=datetime(2026, 8, 17, 22, 0, tzinfo=UTC),
+    )
+
+    retained_hash = receipt.partitions[0].retained_content_hash
+    assert receipt.retained_row_count == receipt.source_row_count == 2
+    assert retained_hash is not None
+    assert retained_hash != source_hash
+
+
+def test_finalizer_rejects_session_outside_frozen_twenty_session_schedule(
+    tmp_path: Path,
+) -> None:
+    database, raw_root, _ = _database_with_episode_and_partition(tmp_path)
+    finalizer = SessionEventWindowFinalizerV0(
+        database=database,
+        raw_root=raw_root,
+        retained_root=raw_root / "retained",
+        run_id="run-retention",
+        activation_timestamp_utc=ACTIVATION,
+        first_eligible_session=date(2026, 7, 1),
+    )
+
+    with pytest.raises(RuntimeError, match="RETENTION_SESSION_OUTSIDE_FROZEN_SCHEDULE"):
+        finalizer.finalize_session(
+            session=SESSION,
+            observed_at=datetime(2026, 8, 17, 22, 0, tzinfo=UTC),
+        )

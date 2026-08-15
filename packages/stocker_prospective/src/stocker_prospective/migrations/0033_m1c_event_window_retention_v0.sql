@@ -58,3 +58,18 @@ ON raw_partition_manifest_v0(run_id, session_date, retention_state, event_type);
 
 CREATE INDEX IF NOT EXISTS idx_event_window_retention_session_v0
 ON m1c_event_window_retention_session_v0(run_id, status, session_date);
+
+CREATE TABLE IF NOT EXISTS m1c_event_window_callback_purge_v0 (
+    run_id TEXT NOT NULL,
+    session_date TEXT NOT NULL,
+    dataset_version TEXT NOT NULL CHECK (dataset_version = 'm1c_event_window_retention_v0'),
+    purged_callback_count INTEGER NOT NULL CHECK (purged_callback_count >= 0),
+    callback_identity_set_sha256 TEXT NOT NULL
+        CHECK (length(callback_identity_set_sha256) = 64),
+    purged_at_utc TEXT NOT NULL,
+    PRIMARY KEY (run_id, session_date, dataset_version),
+    FOREIGN KEY (run_id, session_date, dataset_version)
+        REFERENCES m1c_event_window_retention_session_v0(
+            run_id, session_date, dataset_version
+        )
+);

@@ -2662,6 +2662,39 @@ class FrozenRecorderRepository:
             assert cursor.lastrowid is not None
             return int(cursor.lastrowid)
 
+    def assert_raw_partition_sessions_open(
+        self,
+        *,
+        run_id: str,
+        identities: tuple[tuple[date, str], ...],
+    ) -> None:
+        """Pre-write guard preventing an orphan file after a session is sealed."""
+
+        controlled = tuple(
+            sorted(
+                {
+                    (session, event_type)
+                    for session, event_type in identities
+                    if event_type in RETENTION_CONTROLLED_EVENT_TYPES
+                }
+            )
+        )
+        if not controlled:
+            return
+        with self.repository._connect() as connection:
+            for session, _event_type in controlled:
+                row = connection.execute(
+                    """
+                    SELECT 1
+                    FROM m1c_event_window_retention_session_v0
+                    WHERE run_id = ? AND session_date = ?
+                      AND dataset_version = 'm1c_event_window_retention_v0'
+                    """,
+                    (run_id, session.isoformat()),
+                ).fetchone()
+                if row is not None:
+                    raise RuntimeError("RETENTION_SESSION_ALREADY_SEALED")
+
     def verify_partition_hashes(
         self,
         *,

@@ -795,7 +795,12 @@ def summarise_microstructure_window(
     ]
     quote_keys = [_event_order_key(item) for item in ordered_quotes]
     ordered_trades = sorted(
-        (item for item in trades if window_start <= item.ordering_timestamp <= window_end),
+        (
+            item
+            for item in trades
+            if window_start <= item.ordering_timestamp <= window_end
+            and item.received_timestamp_utc <= window_end
+        ),
         key=lambda item: (
             item.ordering_timestamp,
             item.received_monotonic_ns,

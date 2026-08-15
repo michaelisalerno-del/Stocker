@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import statistics
 import tempfile
@@ -20,6 +21,28 @@ ROOT = Path(__file__).parents[1]
 RUN_ID = "synthetic-web-measurement"
 HISTORY_ROWS = 10_000
 SAMPLES = 30
+
+
+class _RequestMetricHandler(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.items: list[dict[str, object]] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            payload = json.loads(record.getMessage())
+        except json.JSONDecodeError:
+            return
+        if (
+            payload.get("event") == "request_completed"
+            and payload.get("route") == "/api/dashboard/summary"
+        ):
+            self.items.append(payload)
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(values)
+    return ordered[int(fraction * (len(ordered) - 1))]
 
 
 def _config(root: Path) -> ProspectiveConfig:
@@ -128,18 +151,42 @@ def _measure(config: ProspectiveConfig) -> dict[str, float | int]:
         response.raise_for_status()
     durations: list[float] = []
     response_size = 0
-    for _ in range(SAMPLES):
-        started = time.perf_counter()
-        response = client.get("/api/dashboard/summary")
-        durations.append((time.perf_counter() - started) * 1_000.0)
-        response.raise_for_status()
-        response_size = len(response.content)
+    logger = logging.getLogger("uvicorn.error.stocker_prospective.web")
+    prior_level = logger.level
+    handler = _RequestMetricHandler()
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        for _ in range(SAMPLES):
+            started = time.perf_counter()
+            response = client.get("/api/dashboard/summary")
+            durations.append((time.perf_counter() - started) * 1_000.0)
+            response.raise_for_status()
+            response_size = len(response.content)
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prior_level)
     ordered = sorted(durations)
+    server_elapsed = [float(item["elapsed_ms"]) for item in handler.items]
+    sqlite_durations = [float(item["sqlite_duration_ms"]) for item in handler.items]
+    sqlite_operations = [int(item["sqlite_operations"]) for item in handler.items]
     return {
         "samples": SAMPLES,
         "median_ms": round(statistics.median(ordered), 3),
-        "p95_ms": round(ordered[int(0.95 * (len(ordered) - 1))], 3),
+        "p95_ms": round(_percentile(ordered, 0.95), 3),
         "maximum_ms": round(max(ordered), 3),
+        "server_median_ms": round(statistics.median(server_elapsed), 3),
+        "server_p95_ms": round(_percentile(server_elapsed, 0.95), 3),
+        "server_maximum_ms": round(max(server_elapsed), 3),
+        "sqlite_operations_median": int(statistics.median(sqlite_operations)),
+        "sqlite_operations_maximum": max(sqlite_operations),
+        "sqlite_duration_median_ms": round(statistics.median(sqlite_durations), 3),
+        "parquet_files_examined_maximum": max(
+            int(item["parquet_files_examined"]) for item in handler.items
+        ),
+        "parquet_input_rows_maximum": max(
+            int(item["parquet_input_rows"]) for item in handler.items
+        ),
         "response_bytes": response_size,
     }
 
@@ -158,7 +205,7 @@ def main() -> None:
             "baseline": _measure(baseline_config),
             "enlarged": _measure(enlarged_config),
             "polling_requests_per_minute_busiest_screen": round(
-                (60_000 / 15_000) + (2 * 60_000 / 90_000) + (5 * 60_000 / 300_000),
+                (60_000 / 15_000) + (3 * 60_000 / 90_000) + (5 * 60_000 / 300_000),
                 3,
             ),
             "replay_default_maximum_records": 250_000,

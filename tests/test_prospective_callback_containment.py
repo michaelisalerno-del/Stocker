@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -41,10 +44,13 @@ def adapter(
     tmp_path: Path,
     *,
     max_unacknowledged: int = 100,
+    busy_timeout_ms: int = 5_000,
+    require_durable_inbox_on_start: bool = False,
 ) -> tuple[IBKRMarketDataAdapter, DurableCallbackInbox]:
     inbox = DurableCallbackInbox(
         database(tmp_path),
         max_unacknowledged=max_unacknowledged,
+        busy_timeout_ms=busy_timeout_ms,
         run_id=RUN_ID,
         recorder_generation=1,
         owner_id="recorder",
@@ -66,6 +72,7 @@ def adapter(
             request_rate_limit=100,
         ),
         durable_inbox=inbox,
+        require_durable_inbox_on_start=require_durable_inbox_on_start,
     )
     value._connection_generation = 1
     return value, inbox
@@ -172,6 +179,129 @@ def test_canonical_event_preserves_external_callback_boundary_timestamps(
     )
 
 
+def test_current_time_request_boundary_is_durably_admitted(tmp_path: Path) -> None:
+    value, inbox = adapter(tmp_path)
+
+    class ClockClient:
+        def reqCurrentTime(self) -> None:  # noqa: N802
+            return None
+
+    value._client = ClockClient()
+    value.request_current_time()
+    provider_at = datetime.now(UTC).replace(microsecond=0)
+    value.contain_official_callback(
+        "current_time",
+        -1,
+        lambda: value.on_current_time(provider_at),
+        provider_arguments=(int(provider_at.timestamp()),),
+    )
+
+    with inbox._connect() as connection:
+        row = connection.execute(
+            """
+            SELECT original_payload_json, received_utc
+            FROM callback_inbox_v1
+            WHERE callback_kind = 'current_time'
+            """
+        ).fetchone()
+
+    assert row is not None
+    payload = json.loads(str(row["original_payload_json"]))
+    assert payload["provider_timestamp_utc"] == provider_at.isoformat()
+    assert datetime.fromisoformat(payload["clock_probe_requested_at_utc"]) <= (
+        datetime.fromisoformat(str(row["received_utc"]))
+    )
+    assert payload["clock_probe_requested_monotonic_ns"] > 0
+
+
+def test_hot_callback_is_durable_before_normalization_or_cache_update(
+    tmp_path: Path,
+) -> None:
+    value, inbox = adapter(tmp_path)
+    activate(value)
+
+    def normalize_after_durable_admission() -> None:
+        with inbox._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT callback_kind, status
+                FROM callback_inbox_v1
+                ORDER BY source_sequence DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        assert row is not None
+        assert row["callback_kind"] == "official_provider_tick_price"
+        assert row["status"] == "provider_pending"
+        assert value.stream_quotes.snapshot(7) == ()
+        value.on_quote_update(7, {"field": "bid", "value": 10.0})
+
+    value.contain_official_callback(
+        "tick_price",
+        7,
+        normalize_after_durable_admission,
+        provider_arguments=(7, 1, 10.0, {}),
+    )
+
+    assert value.fatal_callback_code is None
+    assert scientific_callback_count(inbox) == 1
+    assert value.stream_quotes.snapshot(7) == ({"field": "bid", "value": 10.0},)
+
+
+def test_bounded_quote_request_is_not_deferred_with_stream_batch(
+    tmp_path: Path,
+) -> None:
+    value, _inbox = adapter(tmp_path, require_durable_inbox_on_start=True)
+    value._track_request(29, "temporary_quote:AAL")
+    value.callbacks.begin(29, kind="temporary_quote")
+
+    value.contain_official_callback(
+        "tick_price",
+        29,
+        lambda: value.on_quote_update(
+            29,
+            {"field": "bid", "value": 10.0},
+            complete=True,
+        ),
+        provider_arguments=(29, 1, 10.0, {}),
+    )
+
+    result = value.callbacks.wait(29, timeout_seconds=0.01)
+    assert result.complete is True
+    assert result.items == ({"field": "bid", "value": 10.0},)
+    assert value.fatal_callback_code is None
+
+
+def test_shutdown_materializes_callback_received_during_disconnect(
+    tmp_path: Path,
+) -> None:
+    value, inbox = adapter(tmp_path, require_durable_inbox_on_start=True)
+    activate(value)
+
+    class DisconnectCallbackClient:
+        def disconnect(self) -> None:
+            value.contain_official_callback(
+                "tick_price",
+                7,
+                lambda: value.on_quote_update(
+                    7,
+                    {"field": "bid", "value": 10.0},
+                ),
+                provider_arguments=(7, 1, 10.0, {}),
+            )
+
+        def cancelMktData(self, _request_id: int) -> None:  # noqa: N802
+            return None
+
+    value._client = DisconnectCallbackClient()
+
+    value.stop()
+
+    assert value.fatal_callback_code is None
+    assert scientific_callback_count(inbox) == 1
+    assert inbox.accounting().pending == 1
+
+
 def test_unknown_request_is_quarantined_and_never_escapes_boundary(
     tmp_path: Path,
 ) -> None:
@@ -264,8 +394,124 @@ def test_durable_inbox_exhaustion_latches_fatal_without_silent_drop(
     assert value.fatal_callback_code == "CALLBACK_OVERFLOW"
     assert inbox.has_active_fatal("ingestion")
     accounting = inbox.accounting()
-    assert accounting.admitted == 2
+    assert accounting.admitted == 1
     assert accounting.pending == 1
+
+
+def test_transient_sqlite_writer_contention_does_not_latch_callback_loss(
+    tmp_path: Path,
+) -> None:
+    value, inbox = adapter(tmp_path, busy_timeout_ms=10)
+    activate(value)
+    lock_acquired = threading.Event()
+
+    def hold_writer_lock() -> None:
+        with sqlite3.connect(inbox.database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            lock_acquired.set()
+            time.sleep(0.05)
+
+    lock_thread = threading.Thread(target=hold_writer_lock)
+    lock_thread.start()
+    assert lock_acquired.wait(timeout=1)
+
+    value.contain_official_callback(
+        "tick_price",
+        7,
+        lambda: value.on_quote_update(7, {"field": "bid", "value": 10.0}),
+    )
+    lock_thread.join(timeout=1)
+
+    assert not lock_thread.is_alive()
+    assert value.fatal_callback_code is None
+    assert value.scientific_recording_valid
+    accounting = inbox.accounting()
+    assert accounting.admitted == 1
+    assert accounting.pending == 1
+    assert accounting.diagnostic == 0
+    assert not inbox.has_active_fatal("ingestion")
+
+
+def test_callback_reader_reuses_sqlite_connection_and_keeps_up_with_stream_rate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_connect = sqlite3.connect
+    connection_count = 0
+
+    def slow_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        nonlocal connection_count
+        connection_count += 1
+        time.sleep(0.075)
+        return original_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", slow_connect)
+    value, inbox = adapter(tmp_path)
+    setup_connection_count = connection_count
+    request_ids = tuple(range(100, 108))
+    for request_id in request_ids:
+        activate(value, request_id)
+    payload = {
+        "date": "20260803 14:00:00",
+        "open": 10.0,
+        "high": 10.1,
+        "low": 9.9,
+        "close": 10.05,
+        "volume": 1_000,
+    }
+
+    started = time.perf_counter()
+    for request_id in request_ids:
+        value.contain_official_callback(
+            "historical_data_update",
+            request_id,
+            lambda request_id=request_id: value.on_historical_bar(
+                request_id,
+                payload,
+                update=True,
+            ),
+            provider_arguments=(request_id, payload),
+        )
+    elapsed_seconds = time.perf_counter() - started
+
+    callback_rate_hz = len(request_ids) / elapsed_seconds
+    required_stream_rate_hz = 28 / 5
+    assert callback_rate_hz >= required_stream_rate_hz
+    assert connection_count - setup_connection_count <= 1
+    assert value.fatal_callback_code is None
+    assert scientific_callback_count(inbox) == len(request_ids)
+
+
+def test_cached_inbox_connection_is_owned_by_callback_thread(tmp_path: Path) -> None:
+    value, inbox = adapter(tmp_path)
+    activate(value)
+    payload = {
+        "date": "20260803 14:00:00",
+        "open": 10.0,
+        "high": 10.1,
+        "low": 9.9,
+        "close": 10.05,
+        "volume": 1_000,
+    }
+
+    callback_thread = threading.Thread(
+        target=lambda: value.contain_official_callback(
+            "historical_data_update",
+            7,
+            lambda: value.on_historical_bar(7, payload, update=True),
+            provider_arguments=(7, payload),
+        )
+    )
+    callback_thread.start()
+    callback_thread.join(timeout=1)
+
+    assert not callback_thread.is_alive()
+    assert value.fatal_callback_code is None
+    assert scientific_callback_count(inbox) == 1
+    accounting = inbox.accounting()
+    assert accounting.admitted == 1
+    assert accounting.pending == 1
+    assert accounting.diagnostic == 0
 
 
 @pytest.mark.parametrize(
@@ -472,10 +718,15 @@ def test_official_provider_envelope_is_not_depth_or_collection_truncated(
             """
             SELECT original_payload_json
             FROM callback_inbox_v1
-            WHERE callback_kind = 'official_provider_tick_price'
+            WHERE callback_kind = 'level1_quote_update'
             """
         ).fetchone()
-    encoded = str(row["original_payload_json"])
+    assert row is not None
+    payload = json.loads(str(row["original_payload_json"]))
+    encoded = json.dumps(
+        payload["original_provider_callback"],
+        separators=(",", ":"),
+    )
     assert "__truncated_type__" not in encoded
     assert '"five":"complete"' in encoded
     assert '"items":[0,1,2' in encoded

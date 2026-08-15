@@ -1,0 +1,11 @@
+[Unit]
+Description=Finalize Stocker event-window retention after US after-hours close
+
+[Timer]
+OnCalendar=Tue..Sat *-*-* 02:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+Unit=stocker-event-window-retention-v0.service
+
+[Install]
+WantedBy=timers.target

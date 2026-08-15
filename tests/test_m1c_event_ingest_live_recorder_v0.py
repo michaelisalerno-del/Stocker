@@ -483,13 +483,173 @@ def metadata_factory(
     )
 
 
+class _ProjectionCountingRepository(FrozenRecorderRepository):
+    def __init__(self, repository: ProspectiveRepository) -> None:
+        super().__init__(repository)
+        self.underlying_projection_sequences: list[int] = []
+
+    def update_underlying_live_projection(
+        self,
+        metadata: EvidenceMetadata,
+        event: UnderlyingLevel1QuoteEvent,
+        *,
+        tick_by_tick_status: str,
+        depth_status: str,
+    ) -> None:
+        self.underlying_projection_sequences.append(event.source_sequence)
+        super().update_underlying_live_projection(
+            metadata,
+            event,
+            tick_by_tick_status=tick_by_tick_status,
+            depth_status=depth_status,
+        )
+
+
+def _clock_test_recorder(
+    tmp_path: Path,
+) -> tuple[FrozenM1CLiveRecorder, IBKRMarketDataAdapter]:
+    database = ProspectiveRepository(tmp_path / "prospective.sqlite3")
+    database.migrate()
+    database.create_run(metadata_factory(START, (START,)))
+    market_adapter = adapter()
+    recorder = FrozenM1CLiveRecorder(
+        adapter=market_adapter,
+        normalizer=IBKRCallbackNormalizer(prospective_collection_start=START),
+        raw_store=PartitionedEventStore(
+            root=tmp_path / "raw",
+            prospective_collection_start=START,
+            recorder_version="test",
+            contract_version="frozen-m1c-microstructure-recorder-v0",
+        ),
+        repository=FrozenRecorderRepository(database),
+        engine=cast(FrozenM1CRecorderEngine, object()),
+        activity_baseline=HistoricalActivityBaseline(minimum_sessions=1),
+        group_o_provider=lambda _symbol, _session: (_ for _ in ()).throw(
+            AssertionError("Group O must not be requested without a completed checkpoint")
+        ),
+        metadata_factory=metadata_factory,
+        run_id="live-v0",
+        universe_symbols=COHORT,
+        market_proxy_symbol="VTI",
+        readiness=ScientificReadiness(
+            m1c_parity_passed=True,
+            direction_parity_passed=True,
+            bar_compatibility_passed=True,
+            clock_drift_within_tolerance=True,
+        ),
+        maximum_quote_age=timedelta(seconds=2),
+        maximum_clock_drift_seconds=2.0,
+    )
+    return recorder, market_adapter
+
+
+def test_clock_drift_uses_probe_window_instead_of_response_delay(
+    tmp_path: Path,
+) -> None:
+    recorder, market_adapter = _clock_test_recorder(tmp_path)
+    requested_at = START + timedelta(milliseconds=100)
+    provider_at = START
+    received_at = START + timedelta(seconds=3, milliseconds=100)
+    market_adapter._append_stream_event(
+        "current_time",
+        -1,
+        {
+            "provider_timestamp_utc": provider_at.isoformat(),
+            "clock_probe_requested_at_utc": requested_at.isoformat(),
+            "receive_timestamp_utc": received_at.isoformat(),
+        },
+    )
+
+    recorder.poll(now=received_at + timedelta(seconds=1))
+
+    assert recorder.clock_drift_seconds == pytest.approx(1.1)
+
+
+def test_clock_probe_without_request_boundary_fails_closed(tmp_path: Path) -> None:
+    recorder, market_adapter = _clock_test_recorder(tmp_path)
+    received_at = START + timedelta(milliseconds=250)
+    market_adapter._append_stream_event(
+        "current_time",
+        -1,
+        {
+            "provider_timestamp_utc": START.isoformat(),
+            "receive_timestamp_utc": received_at.isoformat(),
+        },
+    )
+
+    recorder.poll(now=received_at + timedelta(seconds=1))
+
+    assert recorder.clock_drift_seconds is None
+
+
+def test_clock_probe_still_detects_real_clock_offset(tmp_path: Path) -> None:
+    recorder, market_adapter = _clock_test_recorder(tmp_path)
+    requested_at = START + timedelta(seconds=10, milliseconds=100)
+    received_at = requested_at + timedelta(milliseconds=200)
+    market_adapter._append_stream_event(
+        "current_time",
+        -1,
+        {
+            "provider_timestamp_utc": START.isoformat(),
+            "clock_probe_requested_at_utc": requested_at.isoformat(),
+            "receive_timestamp_utc": received_at.isoformat(),
+        },
+    )
+
+    recorder.poll(now=received_at + timedelta(seconds=1))
+
+    assert recorder.clock_drift_seconds == pytest.approx(9.7)
+    assert abs(recorder.clock_drift_seconds) > 2.0
+
+
+def test_late_clock_probe_cannot_overwrite_last_correlated_measurement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorder, market_adapter = _clock_test_recorder(tmp_path)
+    monotonic_times = iter((1_200_000_000, 40_000_000_000))
+    monkeypatch.setattr(
+        "stocker_prospective.ibkr.time.monotonic_ns",
+        lambda: next(monotonic_times),
+    )
+    market_adapter._append_stream_event(
+        "current_time",
+        -1,
+        {
+            "provider_timestamp_utc": START.isoformat(),
+            "clock_probe_requested_at_utc": (
+                START + timedelta(milliseconds=100)
+            ).isoformat(),
+            "clock_probe_requested_monotonic_ns": 1_000_000_000,
+            "receive_timestamp_utc": (START + timedelta(milliseconds=300)).isoformat(),
+        },
+    )
+    recorder.poll(now=START + timedelta(seconds=1))
+    correlated_drift = recorder.clock_drift_seconds
+
+    market_adapter._append_stream_event(
+        "current_time",
+        -1,
+        {
+            "provider_timestamp_utc": START.isoformat(),
+            "clock_probe_requested_at_utc": (START + timedelta(seconds=10)).isoformat(),
+            "clock_probe_requested_monotonic_ns": 10_000_000_000,
+            "receive_timestamp_utc": (START + timedelta(seconds=40)).isoformat(),
+        },
+    )
+    recorder.poll(now=START + timedelta(seconds=41))
+
+    assert correlated_drift == pytest.approx(-0.3)
+    assert recorder.clock_drift_seconds == correlated_drift
+
+
 def test_live_recorder_persists_raw_stream_and_only_bounded_projection(
     tmp_path: Path,
 ) -> None:
     database = ProspectiveRepository(tmp_path / "prospective.sqlite3")
     database.migrate()
     database.create_run(metadata_factory(START, (START,)))
-    repository = FrozenRecorderRepository(database)
+    repository = _ProjectionCountingRepository(database)
     market_adapter = adapter()
     normalizer = IBKRCallbackNormalizer(prospective_collection_start=START)
     recorder = FrozenM1CLiveRecorder(
@@ -554,6 +714,7 @@ def test_live_recorder_persists_raw_stream_and_only_bounded_projection(
 
     assert result.raw_event_count == 4
     assert len(result.partition_hashes) == 1
+    assert repository.underlying_projection_sequences == [4]
     assert list((tmp_path / "raw").rglob("*.parquet"))
     with database._connect() as connection:
         projection = connection.execute(

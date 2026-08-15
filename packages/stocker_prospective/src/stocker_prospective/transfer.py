@@ -1,4 +1,4 @@
-"""Twenty-session EODHD-to-IBKR transfer metrics for frozen M1C V0."""
+"""Optional EODHD-to-IBKR diagnostic metrics for frozen M1C V0."""
 
 from __future__ import annotations
 
@@ -20,6 +20,14 @@ from stocker_prospective.contract import (
 )
 
 ProviderName = Literal["ibkr", "eodhd"]
+CrossVendorValidationStatus = Literal[
+    "not_configured",
+    "pending",
+    "insufficient_sessions",
+    "available",
+    "warning",
+    "failed_diagnostic",
+]
 FROZEN_CHECKPOINTS: Final[tuple[int, ...]] = tuple(range(6, 36, 2))
 
 
@@ -31,6 +39,43 @@ class TransferDecision(StrEnum):
     BLOCKED_INSUFFICIENT_VALID_SESSIONS = "blocked_insufficient_valid_sessions"
     BLOCKED_BAR_SEMANTICS_FAILURE = "blocked_bar_semantics_failure"
     BLOCKED_M1C_RUNTIME_PARITY_FAILURE = "blocked_m1c_runtime_parity_failure"
+
+
+def classify_cross_vendor_validation_status(
+    *,
+    enabled: bool,
+    credential_configured: bool,
+    valid_session_count: int,
+    decision: TransferDecision | str | None,
+    latest_diagnostic_status: str | None = None,
+) -> CrossVendorValidationStatus:
+    """Describe optional diagnostic progress without authorizing IBKR evidence."""
+
+    if not enabled or not credential_configured:
+        return "not_configured"
+    if valid_session_count == 0:
+        if latest_diagnostic_status == "not_configured":
+            return "not_configured"
+        if latest_diagnostic_status == "warning":
+            return "warning"
+        if latest_diagnostic_status == "failed_diagnostic":
+            return "failed_diagnostic"
+        return "pending"
+    if valid_session_count < 20:
+        return "insufficient_sessions"
+
+    decision_value = None if decision is None else str(decision)
+    if decision_value == TransferDecision.SUPPORTED_WITHOUT_RECALIBRATION:
+        return "available"
+    if decision_value in {
+        TransferDecision.RANKING_SUPPORTED_SCALE_SHIFTED,
+        TransferDecision.MIXED_STOCK_OR_CHECKPOINT_FAILURES,
+        TransferDecision.NOT_SUPPORTED,
+    }:
+        return "warning"
+    if decision_value == TransferDecision.BLOCKED_INSUFFICIENT_VALID_SESSIONS:
+        return "insufficient_sessions"
+    return "failed_diagnostic"
 
 
 @dataclass(frozen=True)
@@ -806,6 +851,7 @@ def create_ibkr_calibration_candidate(
 __all__ = [
     "BarComparison",
     "BarSemanticsMetrics",
+    "CrossVendorValidationStatus",
     "EpisodeMetrics",
     "FeatureComparison",
     "FROZEN_CHECKPOINTS",
@@ -818,5 +864,6 @@ __all__ = [
     "TransferBar",
     "TransferDecision",
     "TransferReport",
+    "classify_cross_vendor_validation_status",
     "create_ibkr_calibration_candidate",
 ]

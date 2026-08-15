@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -17,6 +18,8 @@ PROXY_SCRIPT = ROOT / "deploy/scripts/run-ibgateway-loopback-proxy.sh"
 BOUNDARY_SCRIPT = ROOT / "deploy/scripts/verify-ibgateway-loopback-boundary.sh"
 INSTALL_BOUNDARY_SCRIPT = ROOT / "deploy/scripts/install-ibgateway-loopback-boundary.sh"
 NFT_JSON_VERIFIER = ROOT / "deploy/scripts/verify-ibgateway-nft-boundary-json.py"
+READINESS_SCRIPT = ROOT / "deploy/scripts/verify-ibgateway-daily-readiness.sh"
+SESSION_READINESS_VERIFIER = ROOT / "deploy/scripts/verify-recorder-session-readiness.py"
 RUNBOOK = ROOT / "docs/operations/prospective-server-runbook.md"
 SERVER_CONFIG = ROOT / "configs/prospective/server.example.yaml"
 
@@ -61,11 +64,231 @@ def test_gateway_process_uses_installed_official_boundary_without_credentials() 
     assert "ReadWritePaths=/var/lib/stocker" not in unit
     assert "EnvironmentFile=" not in unit
     assert "SuccessExitStatus=143" in unit
+    # IBKR transfers its authenticated auto-restart session to a child process.
+    # The service must remain alive for that child instead of killing its cgroup.
+    assert "ExitType=cgroup" in unit
+    assert "ExitType=main" not in unit
     assert "Restart=always" in unit
+    assert "RestartSec=1" in unit
+    assert "RestartSec=20" not in unit
     assert "Restart=on-failure" not in unit
     assert "username" not in lowered
     assert "password" not in lowered
     assert "2fa" not in lowered
+
+
+def test_gateway_daily_restart_readiness_is_observed_without_mutating_gateway() -> None:
+    service = _unit("stocker-ibgateway-daily-readiness.service")
+    timer = _unit("stocker-ibgateway-daily-readiness.timer")
+    backup_timer = _unit("stocker-backup.timer")
+    verifier = READINESS_SCRIPT.read_text(encoding="utf-8")
+
+    assert "User=ibgateway" in service
+    assert "ExecStart=/usr/local/libexec/stocker-verify-ibgateway-daily-readiness" in service
+    assert "After=stocker-ibgateway.service" in service
+    assert "OnCalendar=*-*-* 23:46:00 UTC" in timer
+    assert "Persistent=true" in timer
+    assert "Unit=stocker-ibgateway-daily-readiness.service" in timer
+    assert "OnCalendar=*-*-* 00:05:00 UTC" in backup_timer
+    assert "OnCalendar=*-*-* 23:45:00 UTC" not in backup_timer
+    assert '"$systemctl_bin" is-active --quiet stocker-ibgateway.service' in verifier
+    assert '"$ss_bin" -H -ltn "sport = :$upstream_port"' in verifier
+    assert '"$systemctl_bin" restart' not in verifier
+    assert '"$systemctl_bin" start' not in verifier
+    assert '"$systemctl_bin" stop' not in verifier
+
+
+def test_market_session_readiness_requires_two_advancing_boundaries() -> None:
+    service = _unit("stocker-recorder-session-readiness.service")
+    timer = _unit("stocker-recorder-session-readiness.timer")
+
+    assert "User=stocker" in service
+    assert "verify-recorder-session-readiness.py" in service
+    assert "--expected-level1 21" in service
+    assert "--expected-bars 28" in service
+    assert "--required-distinct-boundaries 2" in service
+    assert "--maximum-quote-age-seconds 2" in service
+    assert "ReadOnlyPaths=/var/lib/stocker" in service
+    assert "OnCalendar=Mon..Fri *-*-* 09:34:00 America/New_York" in timer
+    assert "Unit=stocker-recorder-session-readiness.service" in timer
+
+
+def test_gateway_daily_restart_readiness_accepts_authenticated_api_port(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "proxy.env"
+    config.write_text("IBGATEWAY_UPSTREAM_PORT=4002\n", encoding="ascii")
+    systemctl = _mock_command(tmp_path / "systemctl", "")
+    ss = _mock_command(
+        tmp_path / "ss",
+        "LISTEN 0 50 *:4002 *:*\n",
+    )
+    sleep = _mock_command(tmp_path / "sleep", "")
+
+    verified = subprocess.run(
+        [str(READINESS_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "IBGATEWAY_PROXY_CONFIG": str(config),
+            "IBGATEWAY_SYSTEMCTL": str(systemctl),
+            "IBGATEWAY_SS": str(ss),
+            "IBGATEWAY_READINESS_ATTEMPTS": "1",
+            "IBGATEWAY_SLEEP": str(sleep),
+        },
+    )
+
+    assert verified.returncode == 0, verified.stderr
+    assert "ibgateway_daily_restart:ready:4002" in verified.stdout
+
+
+def test_gateway_daily_restart_readiness_fails_when_api_port_stays_absent(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "proxy.env"
+    config.write_text("IBGATEWAY_UPSTREAM_PORT=4002\n", encoding="ascii")
+    systemctl = _mock_command(tmp_path / "systemctl", "")
+    ss = _mock_command(tmp_path / "ss", "")
+    sleep = _mock_command(tmp_path / "sleep", "")
+
+    rejected = subprocess.run(
+        [str(READINESS_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "IBGATEWAY_PROXY_CONFIG": str(config),
+            "IBGATEWAY_SYSTEMCTL": str(systemctl),
+            "IBGATEWAY_SS": str(ss),
+            "IBGATEWAY_READINESS_ATTEMPTS": "1",
+            "IBGATEWAY_SLEEP": str(sleep),
+        },
+    )
+
+    assert rejected.returncode == 1
+    assert "ibgateway_daily_restart:api_port_not_ready:4002" in rejected.stderr
+
+
+def _session_readiness_database(
+    path: Path,
+    *,
+    quote_at: str,
+    bar_at: str,
+    level1_count: int = 21,
+    bar_count: int = 28,
+) -> Path:
+    import sqlite3
+
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE recorder_operational_state_v1(
+                run_id TEXT,
+                recorder_generation INTEGER,
+                state TEXT,
+                updated_at_utc TEXT
+            );
+            CREATE TABLE web_latest_subscription_state_v0(
+                run_id TEXT,
+                subscription_key TEXT,
+                subscription_kind TEXT,
+                status TEXT
+            );
+            CREATE TABLE underlying_live_state_v0(
+                run_id TEXT,
+                symbol TEXT,
+                received_timestamp_utc TEXT,
+                market_data_type TEXT,
+                quote_valid INTEGER
+            );
+            CREATE TABLE completed_bar_state_v0(
+                run_id TEXT,
+                symbol TEXT,
+                bar_end_utc TEXT
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO recorder_operational_state_v1 VALUES (?, ?, ?, ?)",
+            ("run-ready", 1, "RECORDING_HEALTHY", quote_at),
+        )
+        connection.executemany(
+            "INSERT INTO web_latest_subscription_state_v0 VALUES (?, ?, ?, ?)",
+            [("run-ready", f"level1:{index}", "level1", "active") for index in range(level1_count)]
+            + [("run-ready", f"bar:{index}", "bar", "active") for index in range(bar_count)],
+        )
+        connection.execute(
+            "INSERT INTO underlying_live_state_v0 VALUES (?, ?, ?, ?, ?)",
+            ("run-ready", "AAL", quote_at, "live", 1),
+        )
+        connection.executemany(
+            "INSERT INTO completed_bar_state_v0 VALUES (?, ?, ?)",
+            [("run-ready", f"B{index:02d}", bar_at) for index in range(bar_count)],
+        )
+    return path
+
+
+def test_session_readiness_verifies_counts_current_quote_and_slowest_bar(
+    tmp_path: Path,
+) -> None:
+    now = "2026-08-05T14:40:00+00:00"
+    database = _session_readiness_database(
+        tmp_path / "readiness.sqlite3",
+        quote_at="2026-08-05T14:39:59+00:00",
+        bar_at="2026-08-05T14:35:00+00:00",
+    )
+
+    verified = subprocess.run(
+        [
+            sys.executable,
+            str(SESSION_READINESS_VERIFIER),
+            "--database",
+            str(database),
+            "--now",
+            now,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert verified.returncode == 0, verified.stderr
+    payload = json.loads(verified.stdout)
+    assert payload["level1_subscription_count"] == 21
+    assert payload["bar_subscription_count"] == 28
+    assert payload["latest_live_quote_at_utc"] == "2026-08-05T14:39:59+00:00"
+    assert payload["slowest_bar_boundary_utc"] == "2026-08-05T14:35:00+00:00"
+
+
+def test_session_readiness_rejects_port_adjacent_state_without_all_bar_streams(
+    tmp_path: Path,
+) -> None:
+    database = _session_readiness_database(
+        tmp_path / "readiness.sqlite3",
+        quote_at="2026-08-05T14:39:59+00:00",
+        bar_at="2026-08-05T14:35:00+00:00",
+        bar_count=27,
+    )
+
+    rejected = subprocess.run(
+        [
+            sys.executable,
+            str(SESSION_READINESS_VERIFIER),
+            "--database",
+            str(database),
+            "--now",
+            "2026-08-05T14:40:00+00:00",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert rejected.returncode == 1
+    assert "required_bar_subscriptions_missing:27/28" in rejected.stderr
 
 
 def test_gateway_vnc_is_loopback_only_and_password_protected() -> None:
@@ -232,7 +455,7 @@ def _mock_command(path: Path, output: str) -> Path:
     return path
 
 
-def _valid_nft_payload(*, port: int = 4002, priority: int = -300) -> dict:
+def _valid_nft_payload(*, port: int = 4002, priority: int = -300) -> dict[str, Any]:
     return {
         "nftables": [
             {
@@ -307,7 +530,7 @@ def _run_boundary_verifier(
     ufw_status: str = "Status: active\n",
     ipv4_rules: str | None = None,
     ipv6_rules: str | None = None,
-    nft_payload: dict | None = None,
+    nft_payload: dict[str, Any] | None = None,
     include_config: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     config = tmp_path / "proxy.env"
@@ -460,6 +683,8 @@ def test_gateway_login_runbook_requires_ssh_tunnel_and_manual_2fa() -> None:
     assert "manual IBKR username, password, and 2FA" in runbook
     assert "never enter the Stocker website" in runbook
     assert "Read-Only API" in runbook
+    assert "ExitType=cgroup" in runbook
+    assert "authenticated handoff child" in runbook
     assert "ufw default deny incoming" in runbook
     assert 'case "$IBKR_GATEWAY_PORT" in' in runbook
     assert "sudo ufw insert 1 deny in" in runbook

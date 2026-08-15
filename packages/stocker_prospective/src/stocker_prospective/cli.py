@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -44,10 +45,19 @@ from stocker_prospective.context import (
     load_imported_context,
 )
 from stocker_prospective.database import LeaseRecord, ProspectiveRepository
+from stocker_prospective.directionless_shadow_analysis_v0 import (
+    analyse_directionless_shadow_v0,
+    require_analysis_open_receipt,
+)
 from stocker_prospective.durable_inbox import DurableCallbackInbox
 from stocker_prospective.frozen_artifacts import (
     FrozenArtifactReconstructionError,
     reconstruct_frozen_artifacts,
+)
+from stocker_prospective.group_o_recovery import (
+    group_o_recovery_result_payload,
+    recover_group_o_exact_chain_until_ready_v2,
+    require_group_o_recovery_ready_before_adapter_v2,
 )
 from stocker_prospective.ibkr import (
     IBKRConnectionConfig,
@@ -64,6 +74,11 @@ from stocker_prospective.ibkr_api import (
     load_official_ibkr_api_provenance,
     write_immutable_official_ibkr_api_provenance,
     write_official_ibkr_api_update_status,
+)
+from stocker_prospective.live_bars import xnys_session_bounds
+from stocker_prospective.m1c_event_window_retention_v0 import (
+    POST_EVENT_RETENTION,
+    SessionEventWindowFinalizerV0,
 )
 from stocker_prospective.market_data import MarketDataBudget, MarketDataType
 from stocker_prospective.operational_state import (
@@ -99,6 +114,8 @@ recorder_app = typer.Typer(help="Run the market-data recorder process.")
 scientific_inputs_app = typer.Typer(help="Prepare immutable causal scientific inputs.")
 web_app = typer.Typer(help="Run the read-only web process.")
 ibkr_api_app = typer.Typer(help="Verify first-party IBKR API provenance and check for updates.")
+analysis_app = typer.Typer(help="Run explicitly opened post-period frozen analyses.")
+retention_app = typer.Typer(help="Finalize verified post-session evidence retention.")
 app.add_typer(bundle_app, name="bundle")
 app.add_typer(context_app, name="context")
 app.add_typer(database_app, name="db")
@@ -107,6 +124,145 @@ app.add_typer(recorder_app, name="recorder")
 app.add_typer(scientific_inputs_app, name="scientific-inputs")
 app.add_typer(web_app, name="web")
 app.add_typer(ibkr_api_app, name="ibkr-api")
+app.add_typer(analysis_app, name="analysis")
+app.add_typer(retention_app, name="retention")
+
+
+def _retention_finalizer(config_path: Path) -> SessionEventWindowFinalizerV0:
+    config = load_prospective_config(config_path)
+    retention = config.event_window_retention_v0
+    if not retention.enabled:
+        raise RuntimeSafetyError("blocked_event_window_retention_not_enabled")
+    if config.runtime.run_id is None:
+        raise RuntimeSafetyError("blocked_event_window_retention_run_id_missing")
+    if config.paths.raw_event_root is None or config.paths.event_window_retained_root is None:
+        raise RuntimeSafetyError("blocked_event_window_retention_paths_missing")
+    if retention.frozen_contract is None or retention.frozen_contract_sha256 is None:
+        raise RuntimeSafetyError("blocked_event_window_retention_contract_missing")
+    if not retention.frozen_contract.is_file():
+        raise RuntimeSafetyError("blocked_event_window_retention_contract_unavailable")
+    observed_hash = hashlib.sha256(retention.frozen_contract.read_bytes()).hexdigest()
+    if observed_hash != retention.frozen_contract_sha256:
+        raise RuntimeSafetyError("blocked_event_window_retention_contract_hash_mismatch")
+    if retention.readiness_report is None or not retention.readiness_report.is_file():
+        raise RuntimeSafetyError("blocked_event_window_retention_readiness_missing")
+    try:
+        readiness = json.loads(retention.readiness_report.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeSafetyError("blocked_event_window_retention_readiness_invalid") from exc
+    if readiness.get("classification") != "READY_FOR_EVENT_WINDOW_RETENTION_V0":
+        raise RuntimeSafetyError("blocked_event_window_retention_not_ready")
+    if readiness.get("activation_authorized") is not False:
+        raise RuntimeSafetyError("blocked_event_window_retention_readiness_not_pipeline_only")
+    if readiness.get("contract_sha256") != observed_hash:
+        raise RuntimeSafetyError("blocked_event_window_retention_readiness_contract_mismatch")
+    checks = readiness.get("pipeline_checks")
+    if not isinstance(checks, dict) or not checks or set(checks.values()) != {"PASS"}:
+        raise RuntimeSafetyError("blocked_event_window_retention_pipeline_checks")
+    if (
+        retention.activation_authorization is None
+        or not retention.activation_authorization.is_file()
+    ):
+        raise RuntimeSafetyError("blocked_event_window_retention_authorization_missing")
+    try:
+        authorization = json.loads(
+            retention.activation_authorization.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeSafetyError("blocked_event_window_retention_authorization_invalid") from exc
+    assert retention.first_eligible_session is not None
+    assert retention.activation_timestamp_utc is not None
+    expected_authorization = {
+        "activation_authorized": True,
+        "dataset_version": retention.dataset_version,
+        "contract_sha256": observed_hash,
+        "episode_scope": retention.episode_scope,
+        "planned_sessions": retention.planned_sessions,
+        "first_eligible_session": retention.first_eligible_session.isoformat(),
+        "activation_timestamp_utc": retention.activation_timestamp_utc.isoformat(),
+        "no_order_invariant": "PASS",
+    }
+    if any(authorization.get(key) != value for key, value in expected_authorization.items()):
+        raise RuntimeSafetyError("blocked_event_window_retention_not_authorized")
+    repository = ProspectiveRepository(config.paths.database)
+    repository.migrate()
+    return SessionEventWindowFinalizerV0(
+        database=config.paths.database,
+        raw_root=config.paths.raw_event_root,
+        retained_root=config.paths.event_window_retained_root,
+        run_id=config.runtime.run_id,
+        activation_timestamp_utc=retention.activation_timestamp_utc,
+        first_eligible_session=retention.first_eligible_session,
+        planned_sessions=retention.planned_sessions,
+    )
+
+
+def _oldest_pending_completed_retention_session(
+    finalizer: SessionEventWindowFinalizerV0,
+    observed_at: datetime,
+) -> date:
+    observed = observed_at.astimezone(UTC)
+    for session in finalizer.eligible_sessions:
+        _market_open, market_close = xnys_session_bounds(session)
+        if market_close + POST_EVENT_RETENTION > observed:
+            break
+        receipt = finalizer.repository.session_receipt(session)
+        if (
+            receipt is None
+            or receipt.status != "COMPLETE"
+            or not finalizer.repository.callback_purge_complete(session)
+        ):
+            return session
+    raise RuntimeSafetyError("blocked_no_pending_completed_retention_session")
+
+
+@retention_app.command("finalize-session-v0")
+def finalize_event_window_session_v0_command(
+    config_path: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
+    session_text: str = typer.Option(..., "--session"),
+) -> None:
+    """Retain all-M1C windows and summarize verified outside-window market data."""
+
+    try:
+        finalizer = _retention_finalizer(config_path)
+        session = date.fromisoformat(session_text)
+        _emit(finalizer.finalize_session(session=session, observed_at=datetime.now(UTC)))
+    except (RuntimeSafetyError, RuntimeError, ValueError) as exc:
+        _fatal(str(exc), exit_code=78)
+
+
+@retention_app.command("finalize-latest-complete-v0")
+def finalize_latest_event_window_session_v0_command(
+    config_path: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
+) -> None:
+    """Finalize the latest XNYS session whose post-event horizon has closed."""
+
+    observed = datetime.now(UTC)
+    try:
+        finalizer = _retention_finalizer(config_path)
+        session = _oldest_pending_completed_retention_session(finalizer, observed)
+        _emit(finalizer.finalize_session(session=session, observed_at=observed))
+    except (RuntimeSafetyError, RuntimeError, ValueError) as exc:
+        _fatal(str(exc), exit_code=78)
+
+
+@analysis_app.command("m1c-directionless-shadow-v0")
+def analyse_m1c_directionless_shadow_v0_command(
+    database: Path = typer.Option(..., exists=True, dir_okay=False),
+    run_id: str = typer.Option(..., min=1),
+    analysis_open_receipt: Path = typer.Option(..., exists=True, dir_okay=False),
+) -> None:
+    """Analyse only after an explicit receipt confirms all 20 sessions are complete."""
+
+    try:
+        require_analysis_open_receipt(
+            analysis_open_receipt,
+            database_path=database,
+            run_id=run_id,
+        )
+        _emit(analyse_directionless_shadow_v0(database, run_id=run_id))
+    except ValueError as exc:
+        _fatal(str(exc), exit_code=78)
 
 
 class _ReplayMarketDataBoundary:
@@ -574,6 +730,31 @@ def build_activity_baseline(
         _fatal(str(exc))
 
 
+@scientific_inputs_app.command("recover-group-o-exact-chain-v2")
+def recover_group_o_exact_chain(
+    config_path: Path = typer.Option(..., "--config", exists=True),
+    release_directory: Path = typer.Option(..., exists=True, file_okay=False),
+) -> None:
+    """Recover the audited Friday exact chain before any IBKR adapter is opened."""
+
+    try:
+        config = load_prospective_config(config_path)
+        if config.runtime.mode != "record_only" or config.risk.trading_enabled:
+            raise RuntimeSafetyError("Group O recovery requires record-only, orders-disabled mode")
+        if config.paths.context_root is None:
+            raise RuntimeSafetyError("Group O recovery requires a persistent context root")
+        verification = load_active_bundle(config.paths.bundle_root)
+        identity = RecorderDeploymentIdentity.from_bundle(verification)
+        result = recover_group_o_exact_chain_until_ready_v2(
+            context_root=config.paths.context_root,
+            release_directory=release_directory,
+            symbols=identity.symbols,
+        )
+        _emit(group_o_recovery_result_payload(result))
+    except Exception as exc:
+        _fatal(str(exc), exit_code=75)
+
+
 @replay_app.command("run")
 def replay_run(config_path: Path = typer.Option(..., "--config", exists=True)) -> None:
     """Run the deterministic fixture and exit."""
@@ -871,6 +1052,15 @@ def recorder_run(
                     "requires the durable raw recorder; legacy memory-drain "
                     "diagnostic mode cannot open a socket"
                 )
+            if config.paths.context_root is None:
+                raise RuntimeSafetyError(
+                    "blocked_pre_adapter_group_o_recovery_missing_context_root"
+                )
+            require_group_o_recovery_ready_before_adapter_v2(
+                context_root=config.paths.context_root,
+                release_directory=release_directory,
+                now=datetime.now(UTC),
+            )
             adapter = _ibkr_adapter(config)
             validate_runtime_safety(config, adapter)
             ibkr_api_module = require_official_ibkr_api()

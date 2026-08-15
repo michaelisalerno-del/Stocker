@@ -81,6 +81,8 @@ from stocker_prospective.tail_phase_v1 import (
     calculate_movement_consumed_v1,
 )
 
+CHECKPOINT_QUOTE_SELECTION_POLICY_V0 = "latest_valid_at_or_before_checkpoint_boundary_v0"
+
 
 def _comparison_sign(value: float | None) -> int | None:
     if value is None:
@@ -309,6 +311,10 @@ class RecorderCheckpointInput:
     opening_reversal_receipt_created_at_utc_v1_1: datetime | None = None
     opening_reversal_first_buffered_event_received_at_utc_v1_1: datetime | None = None
     opening_reversal_entry_data_admitted_before_receipt_v1_1: bool = False
+    selected_underlying_quote_event_id: str | None = None
+    selected_underlying_quote_timestamp_utc: datetime | None = None
+    selected_underlying_quote_age_seconds: float | None = None
+    underlying_quote_selection_policy: str | None = None
 
 
 class RecorderCheckpointResult(BaseModel):
@@ -339,6 +345,7 @@ class RecorderCheckpointResult(BaseModel):
     directional_classifications: dict[str, DirectionClassification]
     direction_display_allowed: bool
     rejection_reasons: tuple[str, ...]
+    diagnostic_quality_flags: tuple[str, ...] = ()
 
 
 class FrozenM1CRecorderEngine:
@@ -447,6 +454,7 @@ class FrozenM1CRecorderEngine:
         stock_opening_response_v1: StockOpeningResponseResultV1,
         classifications: dict[str, DirectionClassification],
         signal_inputs_eligible: bool,
+        scientific_recording_authorized: bool,
     ) -> OpeningReversalPredictionReceiptV1:
         assert self.opening_reversal_activation_v1 is not None
         phase, transfer_status = self.repository.opening_reversal_phase_for_session(
@@ -496,6 +504,7 @@ class FrozenM1CRecorderEngine:
                 experiment_version="1" if addendum is None else "1.1",
                 cohort_phase=phase,
                 transfer_status=transfer_status,
+                scientific_recording_authorized=scientific_recording_authorized,
                 session=item.session,
                 stock=item.symbol,
                 checkpoint=checkpoint,
@@ -957,6 +966,9 @@ class FrozenM1CRecorderEngine:
         missing_group_o_features = self.m1c_runtime.missing_group_o_features(
             item.group_o_context.features
         )
+        diagnostic_quality_flags = (
+            () if item.underlying_quote_fresh else ("underlying_quote_stale",)
+        )
         rejection_reasons = tuple(
             dict.fromkeys(
                 (
@@ -993,6 +1005,9 @@ class FrozenM1CRecorderEngine:
                 )
             )
         )
+        # The frozen safety contract requires a fresh protected Level-I quote
+        # at the completed-bar boundary. Selection is deterministic as-of the
+        # boundary, never against the mutable latest quote at processing time.
         signal_inputs_eligible = (
             item.capability_preflight_passed
             and item.m1c_parity_passed
@@ -1095,6 +1110,7 @@ class FrozenM1CRecorderEngine:
             eligible=scientific_inputs_eligible,
             feature_freshness=item.feature_freshness,
             rejection_reasons=scientific_rejection_reasons,
+            diagnostic_quality_flags=diagnostic_quality_flags,
             tail_phase_v1=tail_phase_v1,
             movement_consumed_v1=movement_consumed_state_v1,
             movement_consumed_bucket_v1=movement_consumed_bucket_v1,
@@ -1133,6 +1149,10 @@ class FrozenM1CRecorderEngine:
             checkpoint=checkpoint,
             snapshot=quiet_state,
             eligible=scientific_inputs_eligible,
+            selected_underlying_quote_event_id=(item.selected_underlying_quote_event_id),
+            selected_underlying_quote_timestamp_utc=(item.selected_underlying_quote_timestamp_utc),
+            selected_underlying_quote_age_seconds=(item.selected_underlying_quote_age_seconds),
+            underlying_quote_selection_policy=(item.underlying_quote_selection_policy),
         )
         quiet_observation_id: str | None = None
         if quiet_episode.fresh_episode:
@@ -1212,7 +1232,13 @@ class FrozenM1CRecorderEngine:
                 decision=episode,
                 scientific_recording_valid=safety.scientific_recording_valid,
                 data_quality_flags=tuple(
-                    dict.fromkeys((*rejection_reasons, *safety.rejection_reasons))
+                    dict.fromkeys(
+                        (
+                            *diagnostic_quality_flags,
+                            *rejection_reasons,
+                            *safety.rejection_reasons,
+                        )
+                    )
                 ),
             )
             if item.direction_parity_passed and item.market_data_type is MarketDataType.LIVE:
@@ -1319,6 +1345,7 @@ class FrozenM1CRecorderEngine:
                     stock_opening_response_v1=stock_opening_response_v1,
                     classifications=classifications,
                     signal_inputs_eligible=signal_inputs_eligible,
+                    scientific_recording_authorized=scientific_recording_authorized,
                 )
                 self.repository.record_opening_reversal_prediction_v1(
                     item.metadata,
@@ -1348,10 +1375,12 @@ class FrozenM1CRecorderEngine:
             directional_classifications=classifications,
             direction_display_allowed=display_allowed,
             rejection_reasons=all_reasons,
+            diagnostic_quality_flags=diagnostic_quality_flags,
         )
 
 
 __all__ = [
+    "CHECKPOINT_QUOTE_SELECTION_POLICY_V0",
     "FrozenM1CRecorderEngine",
     "RecorderCheckpointInput",
     "RecorderCheckpointResult",

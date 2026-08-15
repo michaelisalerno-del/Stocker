@@ -43,6 +43,10 @@ from stocker_prospective.database import (
 )
 from stocker_prospective.direction import FrozenDirectionRuntime
 from stocker_prospective.direction_features import FrozenDirectionFeatureBuilder
+from stocker_prospective.directionless_shadow_repository_v0 import (
+    DirectionlessShadowRepositoryV0,
+)
+from stocker_prospective.directionless_shadow_service_v0 import DirectionlessShadowServiceV0
 from stocker_prospective.durable_inbox import DurableCallbackInbox
 from stocker_prospective.event_ingest import IBKRCallbackNormalizer
 from stocker_prospective.frozen_m1c import FrozenM1CRuntime
@@ -82,9 +86,42 @@ from stocker_prospective.opening_leader_continuation_v0 import (
     M1CContextV0,
     OpeningLeaderContinuationRecorderV0,
     OpeningLeaderEvidenceStoreV0,
+    OpeningLeaderSelectionPromotionV0,
+    checkpoint_timestamp_v0,
 )
 from stocker_prospective.opening_leader_live_v0 import (
     OpeningLeaderDeploymentReceiptV0,
+    OpeningLeaderDeploymentRefreezeReceiptV1,
+    OpeningLeaderDeploymentRefreezeReceiptV2,
+    OpeningLeaderDeploymentRefreezeReceiptV3,
+    OpeningLeaderDeploymentRefreezeReceiptV4,
+    OpeningLeaderDeploymentRefreezeReceiptV5,
+    OpeningLeaderDeploymentRefreezeReceiptV6,
+    OpeningLeaderDeploymentRefreezeReceiptV7,
+    OpeningLeaderDeploymentRefreezeReceiptV8,
+    OpeningLeaderDeploymentRefreezeReceiptV9,
+    OpeningLeaderDeploymentRefreezeReceiptV10,
+    OpeningLeaderDeploymentRefreezeReceiptV11,
+    OpeningLeaderDeploymentRefreezeReceiptV12,
+    OpeningLeaderDeploymentRefreezeReceiptV13,
+    OpeningLeaderDeploymentRefreezeReceiptV14,
+    OpeningLeaderDeploymentRefreezeReceiptV15,
+    OpeningLeaderDeploymentRefreezeReceiptV16,
+    OpeningLeaderDeploymentRefreezeReceiptV17,
+    OpeningLeaderDeploymentRefreezeReceiptV18,
+    OpeningLeaderDeploymentRefreezeReceiptV19,
+    OpeningLeaderDeploymentRefreezeReceiptV20,
+    OpeningLeaderDeploymentRefreezeReceiptV21,
+    OpeningLeaderDeploymentRefreezeReceiptV22,
+    OpeningLeaderDeploymentRefreezeReceiptV23,
+    OpeningLeaderDeploymentRefreezeReceiptV24,
+    OpeningLeaderDeploymentRefreezeReceiptV25,
+    OpeningLeaderDeploymentRefreezeReceiptV26,
+    OpeningLeaderDeploymentRefreezeReceiptV27,
+    OpeningLeaderDeploymentRefreezeReceiptV28,
+    OpeningLeaderDeploymentRefreezeReceiptV29,
+    OpeningLeaderDeploymentRefreezeReceiptV30,
+    OpeningLeaderDeploymentRefreezeReceiptV31,
     OpeningLeaderIBKROptionSnapshotterV0,
     assert_opening_leader_runtime_configuration_v0,
     load_opening_leader_package_v0,
@@ -128,6 +165,10 @@ from stocker_prospective.recorder_v0 import (
     FrozenM1CRecorderEngine,
     RecorderCheckpointResult,
 )
+from stocker_prospective.shadow_microstructure_v0 import (
+    ShadowMicrostructureCollectorV0,
+    canonical_sha256,
+)
 from stocker_prospective.signed_market_shock_v1 import (
     load_signed_market_shock_threshold_manifest_v1,
 )
@@ -149,18 +190,46 @@ _PROMOTION_RECOVERABLE_REJECTIONS = frozenset(
         "underlying_quote_stale",
     }
 )
-_HARDENING_OPERATIONAL_RUNTIME_FIELDS = frozenset(
+_RETENTION_OPERATIONAL_RUNTIME_FIELDS = frozenset(
     {
-        "callback_inbox_max_unacknowledged",
-        "callback_inbox_batch_limit",
-        "callback_inbox_lease_seconds",
-        "callback_heartbeat_stale_seconds",
-        "raw_storage_heartbeat_stale_seconds",
-        "callback_acknowledgement_stale_seconds",
-        "callback_inbox_healthy_backlog",
-        "callback_inbox_oldest_healthy_seconds",
+        "callback_inbox_retention_enabled",
+        "callback_inbox_retention_seconds",
+        "callback_inbox_compaction_interval_seconds",
+        "callback_inbox_compaction_batch_limit",
     }
 )
+_HARDENING_OPERATIONAL_RUNTIME_FIELDS = (
+    frozenset(
+        {
+            "callback_inbox_max_unacknowledged",
+            "callback_inbox_batch_limit",
+            "callback_inbox_lease_seconds",
+            "callback_heartbeat_stale_seconds",
+            "raw_storage_heartbeat_stale_seconds",
+            "callback_acknowledgement_stale_seconds",
+            "callback_inbox_healthy_backlog",
+            "callback_inbox_oldest_healthy_seconds",
+        }
+    )
+    | _RETENTION_OPERATIONAL_RUNTIME_FIELDS
+)
+_POST_ACTIVATION_RECORD_ONLY_IBKR_FIELDS = frozenset(
+    {
+        "option_commission_per_contract",
+        "option_regulatory_fee_per_contract",
+        "option_exchange_fee_per_contract",
+    }
+)
+_POST_ACTIVATION_CROSS_VENDOR_CLAIMS = frozenset(
+    {
+        "market_data_source",
+        "historical_research_source",
+        "cross_vendor_validation_diagnostic_only",
+        "cross_vendor_validation_required_for_science",
+        "prospective_evidence_description",
+    }
+)
+_LEGACY_WEB_PROJECTION_CACHE_SECONDS = 60.0
 
 
 def _operationally_promotable(checkpoint: RecorderCheckpointResult) -> bool:
@@ -183,18 +252,36 @@ def _configuration_hash(
     git_commit: str | None = None,
     app_version: str | None = None,
     run_id: str | None = None,
+    tws_or_gateway_version: str | None = None,
     omitted_runtime_fields: frozenset[str] = frozenset(),
+    omitted_ibkr_fields: frozenset[str] = frozenset(),
+    web_projection_cache_seconds: float | None = None,
+    parallel_validation_enabled: bool | None = None,
+    callback_inbox_batch_limit: int | None = None,
 ) -> str:
     payload: dict[str, Any] = config.model_dump(mode="json")
     runtime_payload = cast(dict[str, Any], payload["runtime"])
+    ibkr_payload = cast(dict[str, Any], payload["ibkr"])
+    web_payload = cast(dict[str, Any], payload["web"])
+    parallel_validation_payload = cast(dict[str, Any], payload["parallel_validation"])
     if git_commit is not None:
         runtime_payload["git_commit"] = git_commit
     if app_version is not None:
         runtime_payload["app_version"] = app_version
     if run_id is not None:
         runtime_payload["run_id"] = run_id
+    if callback_inbox_batch_limit is not None:
+        runtime_payload["callback_inbox_batch_limit"] = callback_inbox_batch_limit
+    if tws_or_gateway_version is not None:
+        ibkr_payload["tws_or_gateway_version"] = tws_or_gateway_version
     for field_name in omitted_runtime_fields:
         runtime_payload.pop(field_name)
+    for field_name in omitted_ibkr_fields:
+        ibkr_payload.pop(field_name)
+    if web_projection_cache_seconds is not None:
+        web_payload["operational_projection_cache_seconds"] = web_projection_cache_seconds
+    if parallel_validation_enabled is not None:
+        parallel_validation_payload["enabled"] = parallel_validation_enabled
     return hashlib.sha256(
         json.dumps(
             payload,
@@ -209,6 +296,7 @@ def _activation_configuration_hash_candidates(
     *,
     activation_git_commit: str,
     activation_app_version: str | None = None,
+    activation_tws_or_gateway_version: str | None = None,
     historical_run_ids: tuple[str, ...] = (),
 ) -> frozenset[str]:
     """Reconstruct supported activation shapes without weakening scientific fields."""
@@ -219,24 +307,64 @@ def _activation_configuration_hash_candidates(
     # reconstructs the exact original configuration hash. This makes run_id an
     # operational lineage boundary while every scientific input remains bound.
     for historical_run_id in (None, *sorted(set(historical_run_ids))):
-        candidates.update(
-            {
-                _configuration_hash(
-                    config,
-                    git_commit=activation_git_commit,
-                    app_version=activation_app_version,
-                    run_id=historical_run_id,
-                ),
-                _configuration_hash(
-                    config,
-                    git_commit=activation_git_commit,
-                    app_version=activation_app_version,
-                    run_id=historical_run_id,
-                    omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
-                ),
-            }
-        )
+        for web_projection_cache_seconds in (None, _LEGACY_WEB_PROJECTION_CACHE_SECONDS):
+            for omitted_ibkr_fields in (
+                frozenset(),
+                _POST_ACTIVATION_RECORD_ONLY_IBKR_FIELDS,
+            ):
+                for parallel_validation_enabled in (None, False, True):
+                    for callback_inbox_batch_limit in (None, 256):
+                        candidates.update(
+                            {
+                                _configuration_hash(
+                                    config,
+                                    git_commit=activation_git_commit,
+                                    app_version=activation_app_version,
+                                    run_id=historical_run_id,
+                                    tws_or_gateway_version=activation_tws_or_gateway_version,
+                                    omitted_ibkr_fields=omitted_ibkr_fields,
+                                    web_projection_cache_seconds=web_projection_cache_seconds,
+                                    parallel_validation_enabled=parallel_validation_enabled,
+                                    callback_inbox_batch_limit=callback_inbox_batch_limit,
+                                ),
+                                _configuration_hash(
+                                    config,
+                                    git_commit=activation_git_commit,
+                                    app_version=activation_app_version,
+                                    run_id=historical_run_id,
+                                    tws_or_gateway_version=activation_tws_or_gateway_version,
+                                    omitted_runtime_fields=(_RETENTION_OPERATIONAL_RUNTIME_FIELDS),
+                                    omitted_ibkr_fields=omitted_ibkr_fields,
+                                    web_projection_cache_seconds=web_projection_cache_seconds,
+                                    parallel_validation_enabled=parallel_validation_enabled,
+                                    callback_inbox_batch_limit=callback_inbox_batch_limit,
+                                ),
+                                _configuration_hash(
+                                    config,
+                                    git_commit=activation_git_commit,
+                                    app_version=activation_app_version,
+                                    run_id=historical_run_id,
+                                    tws_or_gateway_version=activation_tws_or_gateway_version,
+                                    omitted_runtime_fields=_HARDENING_OPERATIONAL_RUNTIME_FIELDS,
+                                    omitted_ibkr_fields=omitted_ibkr_fields,
+                                    web_projection_cache_seconds=web_projection_cache_seconds,
+                                    parallel_validation_enabled=parallel_validation_enabled,
+                                    callback_inbox_batch_limit=callback_inbox_batch_limit,
+                                ),
+                            }
+                        )
     return frozenset(candidates)
+
+
+def _activation_claims_boundary_candidates() -> tuple[Mapping[str, object], ...]:
+    """Return exact current and superseded non-trading activation claim shapes."""
+
+    current = claims_boundary()
+    legacy = dict(current)
+    for field_name in _POST_ACTIVATION_CROSS_VENDOR_CLAIMS:
+        legacy.pop(field_name)
+    legacy["engineering_phase_sessions"] = legacy.pop("historical_engineering_phase_sessions")
+    return current, legacy
 
 
 def _require_compatible_existing_activation(
@@ -253,18 +381,27 @@ def _require_compatible_existing_activation(
 
     if activation.contract_version != CONTRACT_VERSION:
         raise ValueError("blocked_existing_activation_contract_version_mismatch")
-    if activation.claims_boundary != claims_boundary():
+    if all(
+        activation.claims_boundary != candidate
+        for candidate in _activation_claims_boundary_candidates()
+    ):
         raise ValueError("blocked_existing_activation_claims_boundary_mismatch")
     if activation.model_artifact_hashes != dict(sorted(artifact_hashes.items())):
         raise ValueError("blocked_existing_activation_artifact_hash_mismatch")
-    if activation.ibkr_api_version != ibkr_api_version:
-        raise ValueError("blocked_existing_activation_ibkr_api_version_mismatch")
-    if activation.tws_or_gateway_version != tws_or_gateway_version:
-        raise ValueError("blocked_existing_activation_gateway_version_mismatch")
+    # The activation records the dependency baseline used at first collection.
+    # Later official API/Gateway maintenance is operational: current versions
+    # are independently verified and written to capability evidence. Rebuild
+    # the old configuration hash with the baseline Gateway identity so only
+    # that dependency field may roll without changing scientific admission.
+    if not ibkr_api_version or ibkr_api_version == "unknown":
+        raise ValueError("blocked_existing_activation_ibkr_api_version_unavailable")
+    if not tws_or_gateway_version:
+        raise ValueError("blocked_existing_activation_gateway_version_unavailable")
     if activation.configuration_hash not in _activation_configuration_hash_candidates(
         config,
         activation_git_commit=activation.git_sha,
         activation_app_version=activation_app_version,
+        activation_tws_or_gateway_version=activation.tws_or_gateway_version,
         historical_run_ids=historical_run_ids,
     ):
         raise ValueError("blocked_existing_activation_configuration_mismatch")
@@ -529,6 +666,7 @@ class FrozenProspectiveApplication:
             dict[str, OpeningReversalPredictionReceiptV1],
         ] = {}
         self._opening_reversal_finalised_groups: set[tuple[date, int]] = set()
+        self._directionless_gap_id_v0: str | None = None
 
     def process_source_transfer(self, session: date, observed_at: datetime) -> None:
         """Rescore completed EODHD bars without changing live V0 decisions."""
@@ -565,6 +703,39 @@ class FrozenProspectiveApplication:
                     "event_kind": event.event_kind.value,
                 },
             )
+            collector = self.live_recorder.shadow_microstructure_collector
+            if collector is not None:
+                collector.record_connection_state(
+                    state=event.state.value,
+                    observed_at=event.recorded_at,
+                    connection_generation=self.adapter.connection_generation,
+                    reason=event.message,
+                )
+            directionless = self.live_recorder.directionless_shadow_service_v0
+            if directionless is not None:
+                if event.state in {
+                    ConnectionState.DISCONNECTED,
+                    ConnectionState.DEGRADED,
+                    ConnectionState.PORT_RESET,
+                }:
+                    if self._directionless_gap_id_v0 is None:
+                        gap_material = (
+                            f"{event.recorded_at.isoformat()}|{self.adapter.connection_generation}"
+                        )
+                        gap_id = hashlib.sha256(gap_material.encode()).hexdigest()[:24]
+                        self._directionless_gap_id_v0 = gap_id
+                        directionless.connection_lost(
+                            event.recorded_at,
+                            generation=self.adapter.connection_generation,
+                            gap_id=gap_id,
+                        )
+                elif event.state is ConnectionState.CONNECTED and self._directionless_gap_id_v0:
+                    directionless.connection_restored(
+                        event.recorded_at,
+                        generation=self.adapter.connection_generation,
+                        gap_id=self._directionless_gap_id_v0,
+                    )
+                    self._directionless_gap_id_v0 = None
 
     def poll(self, *, now: datetime) -> LivePollResult:
         """Run one callback batch and fail closed across the full application."""
@@ -647,6 +818,8 @@ class FrozenProspectiveApplication:
         self._recover_if_required(observed)
         self._persist_connection_events(observed)
         result = self.live_recorder.poll(now=observed)
+        if self.live_recorder.directionless_shadow_service_v0 is not None:
+            self.live_recorder.directionless_shadow_service_v0.advance_time(observed)
         opening_reversal_seen = False
         promoted_opening_episode_id: str | None = None
         callback_metadata = self.metadata_factory(observed, (observed,))
@@ -694,14 +867,10 @@ class FrozenProspectiveApplication:
                 {},
             )[symbol] = M1CContextV0(
                 probability=checkpoint.score.probability,
-                high_low_state=(
-                    "HIGH" if checkpoint.score.threshold_passed else "LOW"
-                ),
+                high_low_state=("HIGH" if checkpoint.score.threshold_passed else "LOW"),
                 tail_phase=str(checkpoint.tail_phase_v1.m1c_tail_phase_v1),
                 qualified_fresh_event_status=fresh_status,
-                movement_consumed=(
-                    checkpoint.movement_consumed_state_v1.movement_consumed_v1
-                ),
+                movement_consumed=(checkpoint.movement_consumed_state_v1.movement_consumed_v1),
                 source_completeness=(
                     "complete"
                     if checkpoint.score.missing_feature_count == 0
@@ -709,6 +878,11 @@ class FrozenProspectiveApplication:
                 ),
             )
             opening_receipt = checkpoint.opening_reversal_prediction_v1
+            opening_reversal_candidate = bool(
+                opening_receipt is not None
+                and opening_receipt.eligibility_v1
+                and opening_receipt.prediction_v1 != "ABSTAIN"
+            )
             if opening_receipt is not None:
                 opening_reversal_seen = True
                 group_key = (
@@ -723,7 +897,34 @@ class FrozenProspectiveApplication:
                 self._eligible_symbols.add(symbol)
             else:
                 self._eligible_symbols.discard(symbol)
-            if checkpoint.episode_decision.fresh_episode and opening_receipt is None:
+            if checkpoint.episode_decision.fresh_episode and checkpoint.score.threshold_passed:
+                hard_episode_id = checkpoint.episode_decision.episode_id
+                assert hard_episode_id is not None
+                directionless = self.live_recorder.directionless_shadow_service_v0
+                if directionless is not None:
+                    anchor = self.live_recorder.directionless_anchor_v0(hard_episode_id)
+                    if anchor is None:
+                        raise RuntimeError("blocked_directionless_shadow_anchor_missing")
+                    p0, movement_scale = anchor
+                    directionless.create_hard_episode(
+                        m1c_episode_id=hard_episode_id,
+                        symbol=symbol,
+                        session=checkpoint.episode_decision.session,
+                        t0=checkpoint.episode_decision.prospective_entry_timestamp,
+                        p0=p0,
+                        movement_scale_fraction=movement_scale,
+                        probability=checkpoint.score.probability,
+                        consumed_ratio=(checkpoint.movement_consumed_state_v1.movement_consumed_v1),
+                        created_at=observed,
+                    )
+                    directionless.persist_raw_events(
+                        self.live_recorder.underlying_quote_path(
+                            symbol,
+                            checkpoint.episode_decision.prospective_entry_timestamp,
+                            observed,
+                        )
+                    )
+            if checkpoint.episode_decision.fresh_episode and not opening_reversal_candidate:
                 episode_id = checkpoint.episode_decision.episode_id
                 assert episode_id is not None
                 self._episode_results[episode_id] = checkpoint
@@ -741,7 +942,7 @@ class FrozenProspectiveApplication:
                     symbol,
                     checkpoint.episode_decision.prospective_entry_timestamp + timedelta(minutes=60),
                 )
-            if opening_receipt is None:
+            if not opening_reversal_candidate:
                 self.option_discovery.schedule_quiet_state(checkpoint)
             quiet_observations: tuple[
                 tuple[str | None, QuietObservationKind],
@@ -751,7 +952,9 @@ class FrozenProspectiveApplication:
                 (checkpoint.neutral_control_id, "neutral_control"),
                 (checkpoint.high_tail_control_id, "high_tail_control"),
             )
-            for observation_id, kind in quiet_observations if opening_receipt is None else ():
+            for observation_id, kind in (
+                quiet_observations if not opening_reversal_candidate else ()
+            ):
                 if observation_id is None:
                     continue
                 self._quiet_observation_results[observation_id] = (checkpoint, kind)
@@ -770,16 +973,14 @@ class FrozenProspectiveApplication:
                     checkpoint.quiet_episode_decision.prospective_entry_timestamp
                     + timedelta(minutes=60),
                 )
-            if opening_receipt is None:
+            if not opening_reversal_candidate:
                 self.option_discovery.persist_checkpoint_schedules(checkpoint)
             checkpoints_to_complete.append(checkpoint)
         if (
             self.opening_leader_recorder is not None
             and observed >= self.opening_leader_recorder.boundary_utc
         ):
-            for recovery_session in self.opening_leader_recorder.outstanding_sessions(
-                now=observed
-            ):
+            for recovery_session in self.opening_leader_recorder.outstanding_sessions(now=observed):
                 if recovery_session == observed_session:
                     continue
                 self.opening_leader_recorder.poll(
@@ -1142,6 +1343,12 @@ class FrozenProspectiveApplication:
             self.subscriptions.rebuild_after_data_loss(metadata)
             self.option_discovery.rebuild_after_data_loss(metadata)
             self.adapter.connection.subscriptions_rebuilt()
+            collector = self.live_recorder.shadow_microstructure_collector
+            if collector is not None:
+                collector.record_subscriptions_rebuilt(
+                    observed_at=now,
+                    connection_generation=self.adapter.connection_generation,
+                )
         if health.state is ConnectionState.CONNECTED:
             self._reconnect_attempts = 0
             self._next_reconnect_at = None
@@ -1260,7 +1467,41 @@ def build_frozen_prospective_application(
     if config.runtime.run_id is None:
         raise ValueError("frozen M1C application requires runtime.run_id")
     paths = config.paths
-    opening_leader_receipt: OpeningLeaderDeploymentReceiptV0 | None = None
+    opening_leader_receipt: (
+        OpeningLeaderDeploymentReceiptV0
+        | OpeningLeaderDeploymentRefreezeReceiptV1
+        | OpeningLeaderDeploymentRefreezeReceiptV2
+        | OpeningLeaderDeploymentRefreezeReceiptV3
+        | OpeningLeaderDeploymentRefreezeReceiptV4
+        | OpeningLeaderDeploymentRefreezeReceiptV5
+        | OpeningLeaderDeploymentRefreezeReceiptV6
+        | OpeningLeaderDeploymentRefreezeReceiptV7
+        | OpeningLeaderDeploymentRefreezeReceiptV8
+        | OpeningLeaderDeploymentRefreezeReceiptV9
+        | OpeningLeaderDeploymentRefreezeReceiptV10
+        | OpeningLeaderDeploymentRefreezeReceiptV11
+        | OpeningLeaderDeploymentRefreezeReceiptV12
+        | OpeningLeaderDeploymentRefreezeReceiptV13
+        | OpeningLeaderDeploymentRefreezeReceiptV14
+        | OpeningLeaderDeploymentRefreezeReceiptV15
+        | OpeningLeaderDeploymentRefreezeReceiptV16
+        | OpeningLeaderDeploymentRefreezeReceiptV17
+        | OpeningLeaderDeploymentRefreezeReceiptV18
+        | OpeningLeaderDeploymentRefreezeReceiptV19
+        | OpeningLeaderDeploymentRefreezeReceiptV20
+        | OpeningLeaderDeploymentRefreezeReceiptV21
+        | OpeningLeaderDeploymentRefreezeReceiptV22
+        | OpeningLeaderDeploymentRefreezeReceiptV23
+        | OpeningLeaderDeploymentRefreezeReceiptV24
+        | OpeningLeaderDeploymentRefreezeReceiptV25
+        | OpeningLeaderDeploymentRefreezeReceiptV26
+        | OpeningLeaderDeploymentRefreezeReceiptV27
+        | OpeningLeaderDeploymentRefreezeReceiptV28
+        | OpeningLeaderDeploymentRefreezeReceiptV29
+        | OpeningLeaderDeploymentRefreezeReceiptV30
+        | OpeningLeaderDeploymentRefreezeReceiptV31
+        | None
+    ) = None
     if paths.opening_leader_continuation_v0_root is not None:
         assert_opening_leader_runtime_configuration_v0(
             mode=config.runtime.mode,
@@ -1534,7 +1775,7 @@ def build_frozen_prospective_application(
         result = adapter.qualify_exact_contract(stock_contract_factory(symbol))
         pace_request()
         matches = [
-            (_attribute(item, "contract") or item)
+            (item, _attribute(item, "contract") or item)
             for item in result.items
             if str(
                 _attribute(
@@ -1561,7 +1802,13 @@ def build_frozen_prospective_application(
                     "exact_contract_resolution_failed",
                 )
             continue
-        contract = matches[0]
+        contract_details, contract = matches[0]
+        raw_minimum_tick = _attribute(contract_details, "minTick", "min_tick")
+        minimum_tick = (
+            None
+            if raw_minimum_tick is None or float(raw_minimum_tick) <= 0.0
+            else float(raw_minimum_tick)
+        )
         qualified.append(
             QualifiedUnderlying(
                 symbol=symbol,
@@ -1569,6 +1816,7 @@ def build_frozen_prospective_application(
                 upstream_contract=contract,
                 exchange=str(_attribute(contract, "exchange") or "SMART"),
                 market_proxy=symbol in proxy_symbols,
+                minimum_tick=minimum_tick,
             )
         )
         if symbol in identity.symbols:
@@ -1728,7 +1976,7 @@ def build_frozen_prospective_application(
         )
 
     static_scientific_prerequisites_passed = (
-        m1c_parity and direction_parity and bar_compatibility and historical_activity_available
+        m1c_parity and direction_parity and historical_activity_available
     )
 
     def prospective_phase_at(observed_at: datetime) -> tuple[str, bool]:
@@ -1774,6 +2022,85 @@ def build_frozen_prospective_application(
         contract_version=BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
         run_id=config.runtime.run_id,
     )
+    shadow_microstructure_collector: ShadowMicrostructureCollectorV0 | None = None
+    if config.shadow_microstructure.enabled:
+        assert paths.shadow_microstructure_root is not None
+        shadow_microstructure_collector = ShadowMicrostructureCollectorV0(
+            root=paths.shadow_microstructure_root,
+            config=config.shadow_microstructure,
+            run_id=config.runtime.run_id,
+            git_commit=config.runtime.git_commit,
+            universe_hash=identity.universe_hash,
+            m1c_artifact_hash=canonical_sha256(artifact_hashes),
+            m1c_configuration_hash=activation.configuration_hash,
+            contracts=tuple(item for item in qualified if item.symbol in set(identity.symbols)),
+            capacity=runtime_capacity,
+            always_on_bar_lines=len(identity.symbols) + len(proxy_symbols),
+            recorder_version=config.runtime.app_version,
+        )
+    directionless_shadow_service_v0: DirectionlessShadowServiceV0 | None = None
+    if config.directionless_shadow_v0.enabled:
+        import pandas_market_calendars as mcal
+
+        assert config.directionless_shadow_v0.frozen_contract is not None
+        assert config.directionless_shadow_v0.frozen_contract_sha256 is not None
+        assert config.directionless_shadow_v0.readiness_report is not None
+        assert config.directionless_shadow_v0.activation_timestamp_utc is not None
+        if (
+            _sha256(config.directionless_shadow_v0.frozen_contract)
+            != config.directionless_shadow_v0.frozen_contract_sha256
+        ):
+            raise RuntimeError("blocked_directionless_shadow_contract_hash_mismatch")
+        readiness_payload = json.loads(
+            config.directionless_shadow_v0.readiness_report.read_text(encoding="utf-8")
+        )
+        readiness_conditions = readiness_payload.get("readiness_conditions")
+        if (
+            readiness_payload.get("classification") != "READY_FOR_DIRECTIONLESS_SHADOW_V0"
+            or readiness_payload.get("strategy_version")
+            != config.directionless_shadow_v0.strategy_version
+            or readiness_payload.get("contract_sha256")
+            != config.directionless_shadow_v0.frozen_contract_sha256
+            or readiness_payload.get("no_order_invariant") != "PASS"
+            or not isinstance(readiness_conditions, dict)
+            or not readiness_conditions
+            or any(value != "PASS" for value in readiness_conditions.values())
+        ):
+            raise RuntimeError("blocked_directionless_shadow_readiness_not_passed")
+        assert config.directionless_shadow_v0.first_eligible_session is not None
+        first_shadow_session = config.directionless_shadow_v0.first_eligible_session
+        shadow_schedule = mcal.get_calendar("XNYS").schedule(
+            start_date=first_shadow_session,
+            end_date=first_shadow_session + timedelta(days=60),
+        )
+        eligible_directionless_sessions = frozenset(
+            index.date() for index in shadow_schedule.index[:20]
+        )
+        if (
+            len(eligible_directionless_sessions) != 20
+            or min(eligible_directionless_sessions) != first_shadow_session
+        ):
+            raise RuntimeError("blocked_directionless_shadow_session_contract_invalid")
+        first_shadow_open, _ = xnys_session_bounds(first_shadow_session)
+        if config.directionless_shadow_v0.activation_timestamp_utc >= first_shadow_open:
+            raise RuntimeError("blocked_directionless_shadow_first_session_incomplete")
+        directionless_shadow_service_v0 = DirectionlessShadowServiceV0(
+            repository=DirectionlessShadowRepositoryV0(
+                repository,
+                run_id=config.runtime.run_id,
+            ),
+            con_id_by_symbol={
+                item.symbol: item.con_id
+                for item in qualified
+                if item.symbol in set(identity.symbols)
+            },
+            code_hash=config.runtime.git_commit,
+            config_hash=canonical_sha256(config.directionless_shadow_v0.model_dump(mode="json")),
+            m1c_artifact_hash=canonical_sha256(artifact_hashes),
+            eligible_sessions=eligible_directionless_sessions,
+            activation_timestamp=config.directionless_shadow_v0.activation_timestamp_utc,
+            contract_sha256=config.directionless_shadow_v0.frozen_contract_sha256,
+        )
     if (
         durable_inbox is not None
         and recorder_generation is not None
@@ -1861,7 +2188,7 @@ def build_frozen_prospective_application(
     )
     controller_budget = SubscriptionBudgetManager(
         limits={
-            SubscriptionKind.LEVEL1: config.ibkr.max_high_resolution_underlyings,
+            SubscriptionKind.LEVEL1: len(identity.symbols) + 1,
             SubscriptionKind.BAR: len(identity.symbols) + len(proxy_symbols),
             SubscriptionKind.TICK_BY_TICK: min(
                 runtime_capacity.available_tick_by_tick,
@@ -1931,6 +2258,7 @@ def build_frozen_prospective_application(
         ),
         maximum_quote_age=timedelta(seconds=config.ibkr.maximum_quote_age_seconds),
         maximum_clock_drift_seconds=config.ibkr.maximum_clock_drift_seconds,
+        maximum_clock_probe_round_trip_seconds=config.ibkr.request_timeout_seconds,
         depth_rows=config.ibkr.level2_rows,
         durable_inbox=durable_inbox,
         recorder_generation=recorder_generation,
@@ -1940,6 +2268,14 @@ def build_frozen_prospective_application(
         operational_repository=operational_repository,
         operational_thresholds=operational_thresholds(config),
         processing_heartbeat=heartbeat,
+        inbox_retention_enabled=config.runtime.callback_inbox_retention_enabled,
+        inbox_retention_period=timedelta(seconds=config.runtime.callback_inbox_retention_seconds),
+        inbox_compaction_interval=timedelta(
+            seconds=config.runtime.callback_inbox_compaction_interval_seconds
+        ),
+        inbox_compaction_batch_limit=(config.runtime.callback_inbox_compaction_batch_limit),
+        shadow_microstructure_collector=shadow_microstructure_collector,
+        directionless_shadow_service_v0=directionless_shadow_service_v0,
     )
 
     controller = LiveSubscriptionController(
@@ -1953,6 +2289,7 @@ def build_frozen_prospective_application(
             prospective_phase_at(metadata.recorded_at_utc)[0] != "engineering_transfer"
         ),
         stream_registration_sink=live.register_stream,
+        stream_unregistration_sink=live.unregister_stream,
         request_pacer=pace_request,
         historical_request_pacer=historical_request_pacer.acquire,
     )
@@ -1980,11 +2317,68 @@ def build_frozen_prospective_application(
         symbols=identity.symbols,
         operational_status_by_symbol=statuses,
     )
-    controller.start_always_on(initial_metadata, tuple(qualified))
+    if operational_repository is not None:
+        assert recorder_generation is not None
+        activation_receipt_identity = _activation_receipt_identity(activation)
+        loaded_at = datetime.now(UTC)
+        for artifact_name, artifact_path in sorted(artifact_files.items()):
+            expected_hash = activation.model_artifact_hashes[artifact_name]
+            observed_hash = _sha256(artifact_path)
+            verified = observed_hash == expected_hash
+            operational_repository.record_artifact_verification(
+                RuntimeArtifactVerification(
+                    verification_id=stable_artifact_verification_id(
+                        run_id=config.runtime.run_id,
+                        recorder_generation=recorder_generation,
+                        artifact_name=artifact_name,
+                        expected_hash=expected_hash,
+                    ),
+                    run_id=config.runtime.run_id,
+                    recorder_generation=recorder_generation,
+                    artifact_bundle_id=m1c_runtime.model_hash,
+                    artifact_name=artifact_name,
+                    expected_hash=expected_hash,
+                    observed_hash=observed_hash,
+                    feature_contract_version=BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
+                    activation_receipt_identity=activation_receipt_identity,
+                    found=True,
+                    loaded=True,
+                    schema_validated=True,
+                    hash_verified=verified,
+                    contract_compatible=True,
+                    used_by_active_generation=True,
+                    load_timestamp_utc=loaded_at,
+                    verification_result="verified" if verified else "blocked",
+                    blocker=(None if verified else "blocked_frozen_artifact_hash_mismatch"),
+                    details={
+                        "expected_hash_source": "immutable_activation_receipt",
+                        "application_wiring_completed": False,
+                        "static_verification_completed_before_subscription_start": True,
+                        "activation_git_commit": activation.git_sha,
+                        "runtime_git_commit": config.runtime.git_commit,
+                        "activation_app_version": first_activation_app_version,
+                        "runtime_app_version": config.runtime.app_version,
+                    },
+                )
+            )
     # These callbacks are prospective evidence and must be requested only after
-    # the immutable activation boundary and callback normalizer exist.
+    # the immutable activation boundary and callback normalizer exist. Request
+    # low-rate control evidence before high-volume subscriptions so IBKR's
+    # single callback decoder cannot leave clock preflight behind a market-data
+    # burst.
     adapter.request_current_time()
     adapter.request_depth_exchanges()
+    controller.start_always_on(
+        initial_metadata,
+        tuple(qualified),
+        required_level1_symbols=frozenset((*identity.symbols, MARKET_PROXY)),
+    )
+    if shadow_microstructure_collector is not None:
+        shadow_microstructure_collector.record_subscriptions_active(
+            symbols=identity.symbols,
+            observed_at=datetime.now(UTC),
+            connection_generation=adapter.connection_generation,
+        )
     option_recorder = BoundedOptionRecorder(
         adapter=adapter,
         subscriptions=controller_budget,
@@ -1995,7 +2389,11 @@ def build_frozen_prospective_application(
         stream_unregistration_sink=normalizer.unregister,
         request_pacer=pace_request,
         underlying_path_provider=live.underlying_price_path,
+        underlying_quote_provider=live.underlying_quote_path,
         underlying_halt_provider=live.underlying_halted_in_window,
+        configured_commission_per_contract=(config.ibkr.option_commission_per_contract),
+        configured_regulatory_fee_per_contract=(config.ibkr.option_regulatory_fee_per_contract),
+        configured_exchange_fee_per_contract=(config.ibkr.option_exchange_fee_per_contract),
     )
     live.option_quote_sink = option_recorder.record_quote
 
@@ -2165,9 +2563,7 @@ def build_frozen_prospective_application(
         )
         opening_leader_option_snapshotter = OpeningLeaderIBKROptionSnapshotterV0(
             adapter=adapter,
-            underlying_contracts={
-                item.symbol: item for item in qualified if not item.market_proxy
-            },
+            underlying_contracts={item.symbol: item for item in qualified if not item.market_proxy},
             contract_factory=lambda symbol, expiry, strike, right, multiplier, exchange, trading: (
                 option_contract_factory(
                     symbol,
@@ -2182,6 +2578,31 @@ def build_frozen_prospective_application(
             request_heartbeat=pace_request,
             maximum_quote_age_seconds=config.ibkr.maximum_quote_age_seconds,
         )
+
+        def promote_opening_leader_underlying(
+            symbol: str,
+            session: date,
+            checkpoint: int,
+            observed: datetime,
+        ) -> OpeningLeaderSelectionPromotionV0:
+            selection_id = f"opening-leader-continuation-v0:{session.isoformat()}:C{checkpoint}"
+            result = controller.promote_opening_leader_underlying(
+                metadata_factory(
+                    observed,
+                    (checkpoint_timestamp_v0(session, checkpoint),),
+                ),
+                symbol=symbol,
+                selection_id=selection_id,
+            )
+            return OpeningLeaderSelectionPromotionV0(
+                selection_id=selection_id,
+                symbol=result.symbol,
+                level1_started=result.level1_started,
+                approved_keys=result.approved_keys,
+                denied_keys=result.denied_keys,
+                budget_state=result.budget_state.value,
+            )
+
         opening_leader_recorder = OpeningLeaderContinuationRecorderV0(
             store=opening_leader_store,
             freeze_identity=opening_leader_receipt,
@@ -2192,6 +2613,10 @@ def build_frozen_prospective_application(
             option_snapshot_provider=opening_leader_option_snapshotter,
             rank_persistence_provider=live.opening_leader_rank_persistence,
             official_close_provider=live.opening_leader_official_close,
+            selection_promotion_sink=promote_opening_leader_underlying,
+            option_commission_per_contract=config.ibkr.option_commission_per_contract,
+            option_regulatory_fee_per_contract=(config.ibkr.option_regulatory_fee_per_contract),
+            option_exchange_fee_per_contract=config.ibkr.option_exchange_fee_per_contract,
         )
     application = FrozenProspectiveApplication(
         config=config,
@@ -2221,49 +2646,6 @@ def build_frozen_prospective_application(
         session_context_preflight=session_context_preflight,
         opening_leader_recorder=opening_leader_recorder,
     )
-    if operational_repository is not None:
-        assert recorder_generation is not None
-        activation_receipt_identity = _activation_receipt_identity(activation)
-        loaded_at = datetime.now(UTC)
-        for artifact_name, artifact_path in sorted(artifact_files.items()):
-            expected_hash = activation.model_artifact_hashes[artifact_name]
-            observed_hash = _sha256(artifact_path)
-            verified = observed_hash == expected_hash
-            operational_repository.record_artifact_verification(
-                RuntimeArtifactVerification(
-                    verification_id=stable_artifact_verification_id(
-                        run_id=config.runtime.run_id,
-                        recorder_generation=recorder_generation,
-                        artifact_name=artifact_name,
-                        expected_hash=expected_hash,
-                    ),
-                    run_id=config.runtime.run_id,
-                    recorder_generation=recorder_generation,
-                    artifact_bundle_id=m1c_runtime.model_hash,
-                    artifact_name=artifact_name,
-                    expected_hash=expected_hash,
-                    observed_hash=observed_hash,
-                    feature_contract_version=BUDGET_AWARE_RECORDER_CONTRACT_VERSION,
-                    activation_receipt_identity=activation_receipt_identity,
-                    found=True,
-                    loaded=True,
-                    schema_validated=True,
-                    hash_verified=verified,
-                    contract_compatible=True,
-                    used_by_active_generation=True,
-                    load_timestamp_utc=loaded_at,
-                    verification_result="verified" if verified else "blocked",
-                    blocker=(None if verified else "blocked_frozen_artifact_hash_mismatch"),
-                    details={
-                        "expected_hash_source": "immutable_activation_receipt",
-                        "application_wiring_completed": True,
-                        "activation_git_commit": activation.git_sha,
-                        "runtime_git_commit": config.runtime.git_commit,
-                        "activation_app_version": first_activation_app_version,
-                        "runtime_app_version": config.runtime.app_version,
-                    },
-                )
-            )
     return application
 
 

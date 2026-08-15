@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 import os
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -50,6 +50,8 @@ class PathsConfig(BaseModel):
     bar_compatibility_report: Path | None = None
     quiet_state_concentration_audit_root: Path | None = None
     opening_leader_continuation_v0_root: Path | None = None
+    shadow_microstructure_root: Path | None = None
+    event_window_retained_root: Path | None = None
 
 
 class RuntimeConfig(BaseModel):
@@ -65,7 +67,7 @@ class RuntimeConfig(BaseModel):
     recorder_lease_stale_seconds: int = Field(default=60, ge=15)
     heartbeat_seconds: int = Field(default=10, ge=1)
     callback_inbox_max_unacknowledged: int = Field(default=65_536, ge=1)
-    callback_inbox_batch_limit: int = Field(default=256, ge=1, le=65_536)
+    callback_inbox_batch_limit: int = Field(default=4_096, ge=1, le=65_536)
     callback_inbox_lease_seconds: int = Field(default=30, ge=5)
     callback_heartbeat_stale_seconds: int = Field(default=30, ge=5)
     # With only the always-on five-minute bar surface active, a normalised raw
@@ -76,6 +78,10 @@ class RuntimeConfig(BaseModel):
     callback_acknowledgement_stale_seconds: int = Field(default=30, ge=5)
     callback_inbox_healthy_backlog: int = Field(default=5_000, ge=0)
     callback_inbox_oldest_healthy_seconds: int = Field(default=60, ge=1)
+    callback_inbox_retention_enabled: bool = False
+    callback_inbox_retention_seconds: int = Field(default=900, ge=60)
+    callback_inbox_compaction_interval_seconds: int = Field(default=60, ge=10)
+    callback_inbox_compaction_batch_limit: int = Field(default=4_096, ge=1, le=65_536)
 
     @field_validator("prospective_start_utc")
     @classmethod
@@ -118,7 +124,7 @@ class WebConfig(BaseModel):
         ge=1024 * 1024,
         le=512 * 1024 * 1024,
     )
-    operational_projection_cache_seconds: float = Field(default=60.0, ge=0.0, le=300.0)
+    operational_projection_cache_seconds: float = Field(default=300.0, ge=300.0, le=3_600.0)
     allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost"])
 
     @model_validator(mode="after")
@@ -163,6 +169,9 @@ class IBKRConfig(BaseModel):
     max_concurrent_snapshots: int = Field(default=2, ge=1)
     max_active_option_episodes: int = Field(default=1, ge=1, le=2)
     max_option_lines_per_episode: int = Field(default=8, ge=4, le=16)
+    option_commission_per_contract: float = Field(default=0.65, ge=0.0)
+    option_regulatory_fee_per_contract: float = Field(default=0.0, ge=0.0)
+    option_exchange_fee_per_contract: float = Field(default=0.0, ge=0.0)
     tick_by_tick_active_underlyings: int = Field(default=1, ge=0, le=2)
     level2_active_underlyings: int = Field(default=0, ge=0, le=1)
     max_high_resolution_underlyings: int = Field(default=1, ge=1, le=2)
@@ -258,6 +267,153 @@ class ParallelValidationConfig(BaseModel):
     requests_per_minute: int = Field(default=20, ge=1, le=60)
 
 
+class ShadowMicrostructureConfig(BaseModel):
+    """Fail-closed collection-only contract for the frozen-universe BBO shadow."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    dataset_version: Literal["m1c_microstructure_shadow_v0"] = "m1c_microstructure_shadow_v0"
+    raw_schema_version: Literal["m1c-microstructure-shadow-raw-v0"] = (
+        "m1c-microstructure-shadow-raw-v0"
+    )
+    pilot_mode: bool = False
+    pilot_sessions: Literal[2] = 2
+    eligible_sessions: Literal[20] = 20
+    collect_all_universe_bbo: Literal[True] = True
+    collect_optional_trades: bool = True
+    collect_depth: Literal[False] = False
+    persist_every_bbo_update: Literal[True] = True
+    analysis_enabled: Literal[False] = False
+    direction_scoring_enabled: Literal[False] = False
+    activation_timestamp_utc: datetime | None = None
+    planned_end_session: date | None = None
+    research_contract: Path | None = None
+    pilot_readiness_report: Path | None = None
+
+    @field_validator("activation_timestamp_utc")
+    @classmethod
+    def _shadow_activation_is_aware(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("shadow activation timestamp must be timezone-aware")
+        return value
+
+    @model_validator(mode="after")
+    def _collection_contract_is_closed(self) -> ShadowMicrostructureConfig:
+        if not self.enabled:
+            return self
+        if self.activation_timestamp_utc is None:
+            raise ValueError("enabled shadow collection requires activation_timestamp_utc")
+        if self.research_contract is None:
+            raise ValueError("enabled shadow collection requires research_contract")
+        if not self.pilot_mode and self.pilot_readiness_report is None:
+            raise ValueError("confirmatory shadow collection requires a pilot_readiness_report")
+        return self
+
+
+class DirectionlessShadowV0Config(BaseModel):
+    """Fail-closed contract for the frozen HARD_M1C T20/D paper shadow."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    strategy_version: Literal["m1c_directionless_t20_d_v0"] = "m1c_directionless_t20_d_v0"
+    family: Literal["HARD_M1C"] = "HARD_M1C"
+    trigger_M: float = 0.20
+    stop_M: float = 0.50
+    target_M: float = 1.00
+    max_entry_minutes: Literal[5] = 5
+    horizon_minutes: Literal[15] = 15
+    round_trip_cost_bps: float = 10.0
+    planned_sessions: Literal[20] = 20
+    price_path: Literal["LEVEL1_BBO_EXECUTABLE_SIDE"] = "LEVEL1_BBO_EXECUTABLE_SIDE"
+    orders_enabled: Literal[False] = False
+    execution_enabled: Literal[False] = False
+    trading_enabled: Literal[False] = False
+    analysis_enabled: Literal[False] = False
+    activation_timestamp_utc: datetime | None = None
+    first_eligible_session: date | None = None
+    frozen_contract: Path | None = None
+    frozen_contract_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    readiness_report: Path | None = None
+
+    @model_validator(mode="after")
+    def _activation_is_explicit_and_ready(self) -> DirectionlessShadowV0Config:
+        if (
+            self.trigger_M != 0.20
+            or self.stop_M != 0.50
+            or self.target_M != 1.00
+            or self.round_trip_cost_bps != 10.0
+        ):
+            raise ValueError("changed T20/D parameters require a new strategy version")
+        if not self.enabled:
+            return self
+        if self.activation_timestamp_utc is None:
+            raise ValueError("enabled directionless shadow requires activation_timestamp_utc")
+        if (
+            self.activation_timestamp_utc.tzinfo is None
+            or self.activation_timestamp_utc.utcoffset() is None
+        ):
+            raise ValueError("directionless shadow activation must be timezone-aware")
+        if self.first_eligible_session is None:
+            raise ValueError("enabled directionless shadow requires first_eligible_session")
+        if (
+            self.frozen_contract is None
+            or self.frozen_contract_sha256 is None
+            or self.readiness_report is None
+        ):
+            raise ValueError("enabled directionless shadow requires frozen contract and readiness")
+        return self
+
+
+class EventWindowRetentionV0Config(BaseModel):
+    """Fail-closed retention contract for every frozen M1C episode."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    dataset_version: Literal["m1c_event_window_retention_v0"] = (
+        "m1c_event_window_retention_v0"
+    )
+    episode_scope: Literal["ALL_M1C_EPISODES"] = "ALL_M1C_EPISODES"
+    before_event_minutes: int = 5
+    after_event_minutes: int = 20
+    planned_sessions: Literal[20] = 20
+    delete_verified_transient_market_data: Literal[True] = True
+    preserve_non_market_evidence: Literal[True] = True
+    summary_directional_analysis_enabled: Literal[False] = False
+    activation_timestamp_utc: datetime | None = None
+    first_eligible_session: date | None = None
+    frozen_contract: Path | None = None
+    frozen_contract_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    readiness_report: Path | None = None
+    activation_authorization: Path | None = None
+
+    @model_validator(mode="after")
+    def _frozen_retention_contract(self) -> EventWindowRetentionV0Config:
+        if self.before_event_minutes != 5 or self.after_event_minutes != 20:
+            raise ValueError("changed retention windows require a new dataset version")
+        if not self.enabled:
+            return self
+        if (
+            self.activation_timestamp_utc is None
+            or self.first_eligible_session is None
+            or self.frozen_contract is None
+            or self.frozen_contract_sha256 is None
+            or self.readiness_report is None
+            or self.activation_authorization is None
+        ):
+            raise ValueError(
+                "enabled retention requires schedule, frozen contract, readiness, and authorization"
+            )
+        if (
+            self.activation_timestamp_utc.tzinfo is None
+            or self.activation_timestamp_utc.utcoffset() is None
+        ):
+            raise ValueError("retention activation timestamp must be timezone-aware")
+        return self
+
+
 class ProspectiveConfig(BaseModel):
     """Top-level prospective recorder/web configuration."""
 
@@ -270,6 +426,15 @@ class ProspectiveConfig(BaseModel):
     ibkr: IBKRConfig = Field(default_factory=IBKRConfig)
     context: ContextConfig
     parallel_validation: ParallelValidationConfig = Field(default_factory=ParallelValidationConfig)
+    shadow_microstructure: ShadowMicrostructureConfig = Field(
+        default_factory=ShadowMicrostructureConfig
+    )
+    directionless_shadow_v0: DirectionlessShadowV0Config = Field(
+        default_factory=DirectionlessShadowV0Config
+    )
+    event_window_retention_v0: EventWindowRetentionV0Config = Field(
+        default_factory=EventWindowRetentionV0Config
+    )
 
     @model_validator(mode="after")
     def _ibkr_port_is_explicit(self) -> ProspectiveConfig:
@@ -290,6 +455,30 @@ class ProspectiveConfig(BaseModel):
             raise ValueError(
                 "IBKR timeout plus heartbeat must remain below the stale-lease interval"
             )
+        if self.shadow_microstructure.enabled:
+            if self.runtime.source != "ibkr":
+                raise ValueError("shadow microstructure collection requires IBKR source")
+            if self.paths.shadow_microstructure_root is None:
+                raise ValueError("enabled shadow collection requires shadow_microstructure_root")
+        if self.directionless_shadow_v0.enabled and self.runtime.source != "ibkr":
+            raise ValueError("directionless shadow V0 requires IBKR source")
+        if self.event_window_retention_v0.enabled:
+            if self.runtime.source != "ibkr":
+                raise ValueError("event-window retention requires IBKR source")
+            if self.paths.raw_event_root is None or self.paths.event_window_retained_root is None:
+                raise ValueError("event-window retention requires raw and retained roots")
+            try:
+                self.paths.event_window_retained_root.resolve().relative_to(
+                    self.paths.raw_event_root.resolve()
+                )
+            except ValueError as exc:
+                raise ValueError("event-window retained root must be inside raw root") from exc
+            if not self.runtime.callback_inbox_retention_enabled:
+                raise ValueError("event-window retention requires callback inbox compaction")
+            if self.shadow_microstructure.enabled:
+                raise ValueError(
+                    "event-window retention does not compact the separate shadow dataset"
+                )
         return self
 
 
@@ -423,8 +612,9 @@ def validate_persistent_paths(config: ProspectiveConfig, release_directory: str 
         for name, path in (
             ("database", config.paths.database),
             ("bundle_root", config.paths.bundle_root),
+            ("shadow_microstructure_root", config.paths.shadow_microstructure_root),
         )
-        if _is_within(path, release)
+        if path is not None and _is_within(path, release)
     ]
     if unsafe:
         raise RuntimeSafetyError(
@@ -436,6 +626,9 @@ def validate_persistent_paths(config: ProspectiveConfig, release_directory: str 
 def public_config(config: ProspectiveConfig) -> dict[str, object]:
     """Return a secret-free public configuration projection."""
 
+    cross_vendor_credential_configured = (
+        os.environ.get(config.parallel_validation.credential_status_env) == "1"
+    )
     return {
         "runtime": {
             "mode": config.runtime.mode,
@@ -485,10 +678,48 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
         "parallel_validation": {
             "enabled": config.parallel_validation.enabled,
             "provider": config.parallel_validation.provider,
-            "credential_configured": (
-                os.environ.get(config.parallel_validation.credential_status_env) == "1"
+            "credential_configured": cross_vendor_credential_configured,
+            "cross_vendor_validation_status": (
+                "pending"
+                if config.parallel_validation.enabled and cross_vendor_credential_configured
+                else "not_configured"
             ),
+            "diagnostic_only": True,
+            "recorder_blocking": False,
             "capture_delay_seconds": config.parallel_validation.capture_delay_seconds,
+        },
+        "shadow_microstructure": {
+            "enabled": config.shadow_microstructure.enabled,
+            "dataset_version": config.shadow_microstructure.dataset_version,
+            "pilot_mode": config.shadow_microstructure.pilot_mode,
+            "pilot_sessions": config.shadow_microstructure.pilot_sessions,
+            "eligible_sessions": config.shadow_microstructure.eligible_sessions,
+            "collect_all_universe_bbo": (config.shadow_microstructure.collect_all_universe_bbo),
+            "collect_optional_trades": config.shadow_microstructure.collect_optional_trades,
+            "collect_depth": config.shadow_microstructure.collect_depth,
+            "analysis_enabled": config.shadow_microstructure.analysis_enabled,
+            "direction_scoring_enabled": (config.shadow_microstructure.direction_scoring_enabled),
+        },
+        "directionless_shadow_v0": {
+            "enabled": config.directionless_shadow_v0.enabled,
+            "strategy_version": config.directionless_shadow_v0.strategy_version,
+            "family": config.directionless_shadow_v0.family,
+            "price_path": config.directionless_shadow_v0.price_path,
+            "planned_sessions": config.directionless_shadow_v0.planned_sessions,
+            "analysis_enabled": config.directionless_shadow_v0.analysis_enabled,
+            "orders_enabled": config.directionless_shadow_v0.orders_enabled,
+            "execution_enabled": config.directionless_shadow_v0.execution_enabled,
+        },
+        "event_window_retention_v0": {
+            "enabled": config.event_window_retention_v0.enabled,
+            "dataset_version": config.event_window_retention_v0.dataset_version,
+            "episode_scope": config.event_window_retention_v0.episode_scope,
+            "before_event_minutes": config.event_window_retention_v0.before_event_minutes,
+            "after_event_minutes": config.event_window_retention_v0.after_event_minutes,
+            "planned_sessions": config.event_window_retention_v0.planned_sessions,
+            "summary_directional_analysis_enabled": (
+                config.event_window_retention_v0.summary_directional_analysis_enabled
+            ),
         },
     }
 

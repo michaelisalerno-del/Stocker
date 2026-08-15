@@ -52,8 +52,15 @@ CLAIMS_BOUNDARY: Final[dict[str, ClaimValue]] = {
     "frozen_m1c": True,
     "source_transfer_monitoring": True,
     "exact_vendor_bar_equality_required": False,
+    "market_data_source": "ibkr",
+    "historical_research_source": "eodhd",
+    "cross_vendor_validation_diagnostic_only": True,
+    "cross_vendor_validation_required_for_science": False,
+    "prospective_evidence_description": (
+        "prospective evaluation of the frozen implementation using IBKR market data"
+    ),
     "option_shadow_outcomes_only": True,
-    "engineering_phase_sessions": 20,
+    "historical_engineering_phase_sessions": 20,
     "market_data_budget_enforced": True,
     "market_data_limits_runtime_discovered": True,
     "full_option_chain_streaming_allowed": False,

@@ -47,6 +47,7 @@ class QualifiedUnderlying:
     upstream_contract: Any
     exchange: str
     market_proxy: bool = False
+    minimum_tick: float | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ class LiveSubscriptionController:
         enable_depth: bool,
         depth_phase_permitted: Callable[[EvidenceMetadata], bool] | None = None,
         stream_registration_sink: Callable[[StreamOwner], None] | None = None,
+        stream_unregistration_sink: Callable[[StreamOwner], None] | None = None,
         request_pacer: Callable[[], object] | None = None,
         historical_request_pacer: Callable[[], object] | None = None,
     ) -> None:
@@ -100,6 +102,7 @@ class LiveSubscriptionController:
         self.stream_registration_sink = (
             normalizer.register if stream_registration_sink is None else stream_registration_sink
         )
+        self.stream_unregistration_sink = stream_unregistration_sink
         self.request_pacer = request_pacer
         self.historical_request_pacer = historical_request_pacer
         self._owned: dict[str, _OwnedStream] = {}
@@ -257,12 +260,79 @@ class LiveSubscriptionController:
         self,
         metadata: EvidenceMetadata,
         contracts: tuple[QualifiedUnderlying, ...],
+        *,
+        required_level1_symbols: frozenset[str] | None = None,
     ) -> None:
         if len({item.symbol for item in contracts}) != len(contracts):
             raise ValueError("qualified underlying symbols are not unique")
+        contract_symbols = frozenset(item.symbol for item in contracts)
+        required_level1 = (
+            contract_symbols if required_level1_symbols is None else required_level1_symbols
+        )
+        if not required_level1.issubset(contract_symbols):
+            missing = ",".join(sorted(required_level1 - contract_symbols))
+            raise ValueError("required Level-I contract is absent:" + missing)
+        ordered_contracts = tuple(sorted(contracts, key=lambda item: item.symbol))
+        missing_level1 = tuple(
+            contract
+            for contract in ordered_contracts
+            if contract.symbol in required_level1
+            and self.budget.get(
+                canonical_subscription_key(
+                    SubscriptionKind.LEVEL1,
+                    con_id=contract.con_id,
+                )
+            )
+            is None
+        )
+        missing_bars = tuple(
+            contract
+            for contract in ordered_contracts
+            if self.budget.get(
+                canonical_subscription_key(
+                    SubscriptionKind.BAR,
+                    con_id=contract.con_id,
+                    bar_size="5m",
+                    use_rth=True,
+                )
+            )
+            is None
+        )
+        budget_snapshot = self.budget.snapshot()
+        active_by_kind = budget_snapshot["active"]
+        limits_by_kind = budget_snapshot["limits"]
+        assert isinstance(active_by_kind, dict)
+        assert isinstance(limits_by_kind, dict)
+        level1_slots = int(limits_by_kind[SubscriptionKind.LEVEL1.value]) - int(
+            active_by_kind[SubscriptionKind.LEVEL1.value]
+        )
+        if len(missing_level1) > level1_slots:
+            unavailable = missing_level1[max(0, level1_slots) :]
+            raise RuntimeError(
+                "critical_budget_unavailable:required_underlying_level1:"
+                + ",".join(contract.symbol for contract in unavailable)
+            )
+        bar_slots = int(limits_by_kind[SubscriptionKind.BAR.value]) - int(
+            active_by_kind[SubscriptionKind.BAR.value]
+        )
+        if len(missing_bars) > bar_slots:
+            unavailable = missing_bars[max(0, bar_slots) :]
+            raise RuntimeError(
+                "critical_budget_unavailable:required_five_minute_bars:"
+                + ",".join(contract.symbol for contract in unavailable)
+            )
+        required_new_lines = len(missing_level1) + len(missing_bars)
+        available_lines = budget_snapshot["available_research_lines"]
+        assert isinstance(available_lines, int)
+        if required_new_lines > available_lines:
+            raise RuntimeError(
+                "critical_budget_unavailable:required_baseline_market_data_lines:"
+                f"needed={required_new_lines}:available={available_lines}"
+            )
         self._contracts.update({item.symbol: item for item in contracts})
+        failed_level1: list[str] = []
         failed_bars: list[str] = []
-        for contract in sorted(contracts, key=lambda item: item.symbol):
+        for contract in ordered_contracts:
             priority = (
                 SubscriptionPriority.MARKET_PROXY
                 if contract.market_proxy
@@ -273,6 +343,28 @@ class LiveSubscriptionController:
                 if contract.market_proxy
                 else SubscriptionClass.FROZEN_UNIVERSE_SIGNAL
             )
+            if contract.symbol in required_level1:
+                level1 = self._allocate(
+                    metadata,
+                    key=canonical_subscription_key(
+                        SubscriptionKind.LEVEL1,
+                        con_id=contract.con_id,
+                    ),
+                    contract=contract,
+                    budget_kind=SubscriptionKind.LEVEL1,
+                    stream_kind=StreamKind.UNDERLYING_LEVEL1,
+                    priority=priority,
+                    subscription_class=subscription_class,
+                    owner_id=(
+                        f"system:market_proxy:{contract.symbol}"
+                        if contract.market_proxy
+                        else f"universe:{contract.symbol}"
+                    ),
+                    owner_episode=None,
+                    protected=True,
+                )
+                if level1 is None:
+                    failed_level1.append(contract.symbol)
             bar = self._allocate(
                 metadata,
                 key=canonical_subscription_key(
@@ -296,6 +388,11 @@ class LiveSubscriptionController:
             )
             if bar is None:
                 failed_bars.append(contract.symbol)
+        if failed_level1:
+            raise RuntimeError(
+                "critical_budget_unavailable:required_underlying_level1:"
+                + ",".join(sorted(failed_level1))
+            )
         if failed_bars:
             raise RuntimeError(
                 "critical_budget_unavailable:required_five_minute_bars:"
@@ -406,6 +503,59 @@ class LiveSubscriptionController:
                     protected=False,
                     depth_rows=self.depth_rows,
                 )
+
+    def promote_opening_leader_underlying(
+        self,
+        metadata: EvidenceMetadata,
+        *,
+        symbol: str,
+        selection_id: str,
+    ) -> UnderlyingPromotionResult:
+        """Keep one replaceable research owner on protected record-only L1."""
+
+        contract = self._contracts[symbol]
+        owner_id = "research:opening-leader-continuation-v0"
+        level1_key = canonical_subscription_key(
+            SubscriptionKind.LEVEL1,
+            con_id=contract.con_id,
+        )
+        for key, record in tuple(self.budget.records.items()):
+            if record.active and owner_id in record.owners and key != level1_key:
+                self._release_owner(
+                    metadata,
+                    key,
+                    owner_id=owner_id,
+                    reason=f"opening_leader_replaced_by:{selection_id}",
+                )
+        level1 = self._allocate(
+            metadata,
+            key=level1_key,
+            contract=contract,
+            budget_kind=SubscriptionKind.LEVEL1,
+            stream_kind=StreamKind.UNDERLYING_LEVEL1,
+            priority=SubscriptionPriority.ACTIVE_EPISODE,
+            subscription_class=SubscriptionClass.ACTIVE_EPISODE,
+            owner_id=owner_id,
+            owner_episode=selection_id,
+            protected=True,
+        )
+        if level1 is None:
+            return UnderlyingPromotionResult(
+                symbol=symbol,
+                episode_id=selection_id,
+                level1_started=False,
+                approved_keys=(),
+                denied_keys=(level1_key,),
+                budget_state=BudgetState.OPTION_EPISODE_QUEUED,
+            )
+        return UnderlyingPromotionResult(
+            symbol=symbol,
+            episode_id=selection_id,
+            level1_started=True,
+            approved_keys=(level1_key,),
+            denied_keys=(),
+            budget_state=BudgetState.BUDGET_HEALTHY,
+        )
 
     def promote_active_episode(
         self,
@@ -679,7 +829,7 @@ class LiveSubscriptionController:
         if owned is None or record is None:
             return
         self._cancel_request(owned.stream_kind, owned.request_id, key)
-        self.normalizer.unregister(owned.request_id)
+        self._unregister_owned_stream(owned)
         if not budget_already_cancelled:
             self.budget.cancel(
                 key,
@@ -687,6 +837,19 @@ class LiveSubscriptionController:
                 now_utc=metadata.recorded_at_utc,
             )
         self.repository.record_subscription(metadata, record)
+
+    def _unregister_owned_stream(self, owned: _OwnedStream) -> None:
+        owner = StreamOwner(
+            request_id=owned.request_id,
+            kind=owned.stream_kind,
+            symbol=owned.symbol,
+            con_id=owned.contract.con_id,
+            exchange=owned.contract.exchange,
+        )
+        if self.stream_unregistration_sink is None:
+            self.normalizer.unregister(owned.request_id)
+        else:
+            self.stream_unregistration_sink(owner)
 
     def cancel_evicted_subscription(
         self,
@@ -748,7 +911,7 @@ class LiveSubscriptionController:
             )
         specifications.sort(key=lambda item: (int(item[3]), item[0].key))
         for owned, _, _, _ in specifications:
-            self.normalizer.unregister(owned.request_id)
+            self._unregister_owned_stream(owned)
             self.budget.cancel(
                 owned.key,
                 reason="data_lost_reconnect",

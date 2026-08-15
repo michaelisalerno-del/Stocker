@@ -1,0 +1,17 @@
+{
+  "capacity_allowed": null,
+  "classification": "BLOCKED_BBO_SIZE_DATA_MISSING",
+  "continuity_evidence_hash": null,
+  "dataset_version": "m1c_microstructure_shadow_v0",
+  "directional_analysis_performed": false,
+  "frozen_universe_hash": "ab2a55b55329b83e410ebdf46fa5d47f5a75a44798d01374a4d7f072da57b634",
+  "pilot_activation_id": null,
+  "pilot_dataset_root": null,
+  "pilot_manifest_hash": null,
+  "readiness_report_schema_version": "m1c-shadow-pilot-readiness-v0",
+  "research_contract_hash": "b3a314c900cd7e5246957c6194603a32fd64312665c5965c3e03f89abd475d78",
+  "reason": "No live IBKR pipeline pilot has been run in this repository workspace; per-symbol BBO sizes, permissions, coverage, gap behavior, and data volume remain unverified.",
+  "required_next_mode": "pipeline_pilot=true",
+  "subscription_start_evidence_hash": null,
+  "safe_to_start_confirmatory_collection": false
+}

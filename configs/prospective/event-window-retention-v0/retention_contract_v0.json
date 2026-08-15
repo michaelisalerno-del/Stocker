@@ -1,0 +1,54 @@
+{
+  "analysis_enabled": false,
+  "dataset_version": "m1c_event_window_retention_v0",
+  "collection_period": {
+    "planned_sessions": 20,
+    "start_rule": "explicit_first_complete_XNYS_session_at_or_after_activation",
+    "stopping_rule": "stop_after_session_20_without_extension"
+  },
+  "deletion_boundary": {
+    "delete_only_after": [
+      "source_hash_verified",
+      "retained_parquet_hash_verified",
+      "quality_summary_hash_verified",
+      "sqlite_prepared_receipt_committed",
+      "referencing_callbacks_acknowledged_and_processing_committed"
+    ],
+    "failure_rule": "RETAIN_ALL_SOURCE_DATA",
+    "historical_data_eligible_for_deletion": false
+  },
+  "episode_scope": "ALL_M1C_EPISODES",
+  "event_window": {
+    "end": "T0_PLUS_20_MINUTES_INCLUSIVE",
+    "merge_rule": "UNION_OVERLAPPING_WINDOWS_PER_SYMBOL_AND_SESSION",
+    "start": "T0_MINUS_5_MINUTES_INCLUSIVE",
+    "t0_source": "m1c_episode_v0.trigger_bar_end_utc"
+  },
+  "families_included": [
+    "R01",
+    "P01_NEAR_M1",
+    "HARD_M1C"
+  ],
+  "outside_window_product": "NON_DIRECTIONAL_OPERATIONAL_QUALITY_SUMMARY_ONLY",
+  "preserved_without_compaction": [
+    "M1C checkpoints and episode records",
+    "five-minute bars",
+    "connection and gap evidence",
+    "subscription and permission evidence",
+    "option evidence",
+    "run and activation manifests"
+  ],
+  "raw_market_event_types_subject_to_retention": [
+    "underlying_level1_quote_event",
+    "underlying_tick_bidask_event",
+    "underlying_tick_trade_event",
+    "underlying_bbo_update",
+    "underlying_trade_update",
+    "underlying_depth_event",
+    "underlying_depth_snapshot",
+    "matching raw market-data callback envelopes"
+  ],
+  "terminal_callback_retention": "aggregate_identity_hash_receipt_then_delete_operational_rows",
+  "research_only": true,
+  "schema_version": "1"
+}

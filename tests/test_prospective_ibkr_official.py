@@ -8,6 +8,16 @@ import pytest
 import stocker_prospective.ibkr_official as ibkr_official_module
 
 
+def test_disconnected_official_client_reports_missing_server_version() -> None:
+    class DisconnectedClient:
+        def serverVersion(self) -> None:  # noqa: N802
+            return None
+
+    client = ibkr_official_module.OfficialMarketDataOnlyClient(DisconnectedClient())
+
+    assert client.serverVersion() is None
+
+
 def test_current_official_error_callback_accepts_error_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

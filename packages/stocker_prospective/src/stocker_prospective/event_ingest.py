@@ -465,7 +465,7 @@ class IBKRCallbackNormalizer:
             source = str(payload.get("computation_source", "unknown"))
             if source in {"model", "last", "bid", "ask"}:
                 source_values = cast(
-                    dict[str, dict[str, float | None]],
+                    dict[str, dict[str, float | str | None]],
                     state.setdefault("option_computation_by_source", {}),
                 )
                 snapshot = dict(source_values.get(source, {}))
@@ -482,6 +482,14 @@ class IBKRCallbackNormalizer:
                     snapshot[source_name] = value
                     if source == "model":
                         state[target_name] = value
+                snapshot["greek_timestamp_utc"] = received.astimezone(UTC).isoformat()
+                source_market_data_type = payload.get(
+                    "market_data_type",
+                    state.get("market_data_type"),
+                )
+                snapshot["market_data_status"] = (
+                    None if source_market_data_type is None else str(source_market_data_type)
+                )
                 source_values[source] = snapshot
         elif field == "market_data_type":
             state["market_data_type"] = payload.get("value")
@@ -527,7 +535,7 @@ class IBKRCallbackNormalizer:
                     )
                 ),
                 option_computation_by_source=cast(
-                    dict[str, dict[str, float | None]],
+                    dict[str, dict[str, float | str | None]],
                     state.get("option_computation_by_source", {}),
                 ),
                 quote_attributes=cast(
@@ -563,6 +571,7 @@ class IBKRCallbackNormalizer:
                 payload.get("attributes", {}),
             ),
             halted=(bool(state["halted"]) if state.get("halted") is not None else None),
+            connection_generation=int(payload.get("connection_generation", 0)),
         )
 
     def _bidask(
@@ -583,6 +592,7 @@ class IBKRCallbackNormalizer:
             ask_past_high=cast(bool | None, payload.get("ask_past_high")),
             exchange=owner.exchange,
             market_data_type=_market_data_type(payload.get("market_data_type")),
+            connection_generation=int(payload.get("connection_generation", 0)),
         )
 
     def _trade(
@@ -604,6 +614,7 @@ class IBKRCallbackNormalizer:
             past_limit=cast(bool | None, payload.get("past_limit")),
             unreported=cast(bool | None, payload.get("unreported")),
             halted=cast(bool | None, payload.get("halted")),
+            connection_generation=int(payload.get("connection_generation", 0)),
         )
 
     def _depth(

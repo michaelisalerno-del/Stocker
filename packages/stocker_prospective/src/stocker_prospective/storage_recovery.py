@@ -220,6 +220,7 @@ class CrossStoreReconciler:
                 """
                 SELECT run_id, file_path, content_hash
                 FROM raw_partition_manifest_v0
+                WHERE retention_state <> 'RETIRED'
                 ORDER BY run_id, content_hash, file_path
                 """
             ).fetchall()

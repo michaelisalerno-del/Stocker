@@ -24,6 +24,9 @@ from stocker_prospective.events import (
 )
 from stocker_prospective.frozen_m1c import EpisodeDecision, FrozenM1CScore
 from stocker_prospective.group_o import FrozenGroupOContext
+from stocker_prospective.m1c_event_window_retention_repository_v0 import (
+    RETENTION_CONTROLLED_EVENT_TYPES,
+)
 from stocker_prospective.m1c_prospective_opening_reversal_v1 import (
     M1C_PROSPECTIVE_OPENING_REVERSAL_V1_ID,
     RESERVED_MARKET_DATA_LINES_V1,
@@ -2605,6 +2608,18 @@ class FrozenRecorderRepository:
     ) -> int:
         self._validate(metadata)
         with self.repository._connect() as connection:
+            if event_type in RETENTION_CONTROLLED_EVENT_TYPES:
+                retention = connection.execute(
+                    """
+                    SELECT status
+                    FROM m1c_event_window_retention_session_v0
+                    WHERE run_id = ? AND session_date = ?
+                      AND dataset_version = 'm1c_event_window_retention_v0'
+                    """,
+                    (metadata.run_id, session_date.isoformat()),
+                ).fetchone()
+                if retention is not None:
+                    raise RuntimeError("RETENTION_SESSION_ALREADY_SEALED")
             existing = connection.execute(
                 """
                 SELECT id FROM raw_partition_manifest_v0
@@ -2664,6 +2679,7 @@ class FrozenRecorderRepository:
                 SELECT content_hash, file_path
                 FROM raw_partition_manifest_v0
                 WHERE run_id = ?
+                  AND retention_state <> 'RETIRED'
                   AND content_hash IN ({",".join("?" for _ in expected)})
                 """,
                 (run_id, *expected),

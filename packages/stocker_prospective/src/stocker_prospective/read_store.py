@@ -1326,6 +1326,7 @@ class ProspectiveReadStore:
                 SELECT file_path, event_type
                 FROM raw_partition_manifest_v0
                 WHERE run_id = ? AND symbol = ?
+                  AND retention_state <> 'RETIRED'
                   AND event_type IN (
                     'underlying_level1_quote_event',
                     'underlying_tick_bidask_event'
@@ -1466,6 +1467,7 @@ class ProspectiveReadStore:
                 """
                 SELECT file_path FROM raw_partition_manifest_v0
                 WHERE run_id = ? AND symbol = ?
+                  AND retention_state <> 'RETIRED'
                   AND event_type = 'underlying_depth_snapshot'
                   AND maximum_timestamp_utc >= ?
                   AND minimum_timestamp_utc <= ?
@@ -1985,6 +1987,7 @@ class ProspectiveReadStore:
                        complete, gap_count
                 FROM raw_partition_manifest_v0
                 WHERE run_id = ? AND content_hash = ?
+                  AND retention_state <> 'RETIRED'
                 """,
                 (run_id, content_hash),
             ).fetchone()

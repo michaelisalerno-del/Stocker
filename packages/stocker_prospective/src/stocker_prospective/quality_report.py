@@ -106,6 +106,7 @@ def build_session_quality_report(
             SELECT symbol, MIN(minimum_timestamp_utc), MAX(maximum_timestamp_utc)
             FROM raw_partition_manifest_v0
             WHERE run_id = ? AND session_date = ?
+              AND retention_state <> 'RETIRED'
               AND event_type IN ({placeholders})
               AND symbol IN (
                   SELECT symbol FROM universe_membership
@@ -191,6 +192,7 @@ def build_session_quality_report(
         SELECT content_hash, complete, gap_count
         FROM raw_partition_manifest_v0
         WHERE run_id = ? AND session_date = ?
+          AND retention_state <> 'RETIRED'
         ORDER BY content_hash
         """,
         (run_id, session),

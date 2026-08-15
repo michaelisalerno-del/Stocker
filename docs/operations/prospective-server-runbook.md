@@ -1619,6 +1619,49 @@ sudo systemctl start stocker-web.service stocker-recorder.service
 
 Retain `pre-restore.sqlite3` until the restored run is independently audited.
 
+## 18. Finalize all-M1C event-window retention
+
+Event-window retention is disabled by default and applies only to sessions
+recorded after its explicit activation. It selects every `m1c_episode_v0` row,
+without family filtering, and keeps the union of each symbol's inclusive
+`T0 - 5 minutes` through `T0 + 20 minutes` windows. Outside-window underlying
+quotes/trades become non-directional operational summaries. Bars, M1C state,
+options, subscriptions, permissions, gaps, connection evidence, and run
+manifests remain untouched.
+
+The finalizer verifies the source hash, retained Parquet hash, summary hash,
+terminal callback processing, and a committed `PREPARED` SQLite receipt before
+unlinking a source partition. A crash resumes from that receipt. Any mismatch
+retains the source and exits 78. Never point it at a completed historical run.
+
+Install but do not enable the post-after-hours timer until the frozen config,
+fresh writable database, contract hash, and readiness report are activated:
+
+```bash
+sudo install -o root -g root -m 0644 \
+  /opt/stocker/current/deploy/systemd/stocker-event-window-retention-v0.service \
+  /opt/stocker/current/deploy/systemd/stocker-event-window-retention-v0.timer \
+  /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now stocker-event-window-retention-v0.timer
+```
+
+For a bounded operator invocation after a session has closed:
+
+```bash
+sudo -u stocker /opt/stocker/current/.venv/bin/stocker-prospective \
+  retention finalize-session-v0 \
+  --config /etc/stocker/prospective.yaml \
+  --session YYYY-MM-DD
+```
+
+The timer runs at 02:30 UTC Tuesday through Saturday, after US after-hours for
+the prior eligible session. A source-set check and sealed-session guard make a
+late market callback visible rather than silently excluding it. Keep
+`runtime.callback_inbox_retention_enabled=true`; acknowledged callback payload
+compaction is required to prevent SQLite from retaining the discarded raw
+payload volume.
+
 ## Replay ownership and dashboard polling
 
 Each replay start has a UUID execution ID and monotonic generation. `stop`

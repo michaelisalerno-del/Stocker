@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -74,6 +75,10 @@ from stocker_prospective.ibkr_api import (
     write_immutable_official_ibkr_api_provenance,
     write_official_ibkr_api_update_status,
 )
+from stocker_prospective.m1c_event_window_retention_v0 import (
+    POST_EVENT_RETENTION,
+    SessionEventWindowFinalizerV0,
+)
 from stocker_prospective.market_data import MarketDataBudget, MarketDataType
 from stocker_prospective.operational_state import (
     GapIncident,
@@ -109,6 +114,7 @@ scientific_inputs_app = typer.Typer(help="Prepare immutable causal scientific in
 web_app = typer.Typer(help="Run the read-only web process.")
 ibkr_api_app = typer.Typer(help="Verify first-party IBKR API provenance and check for updates.")
 analysis_app = typer.Typer(help="Run explicitly opened post-period frozen analyses.")
+retention_app = typer.Typer(help="Finalize verified post-session evidence retention.")
 app.add_typer(bundle_app, name="bundle")
 app.add_typer(context_app, name="context")
 app.add_typer(database_app, name="db")
@@ -118,6 +124,92 @@ app.add_typer(scientific_inputs_app, name="scientific-inputs")
 app.add_typer(web_app, name="web")
 app.add_typer(ibkr_api_app, name="ibkr-api")
 app.add_typer(analysis_app, name="analysis")
+app.add_typer(retention_app, name="retention")
+
+
+def _retention_finalizer(config_path: Path) -> SessionEventWindowFinalizerV0:
+    config = load_prospective_config(config_path)
+    retention = config.event_window_retention_v0
+    if not retention.enabled:
+        raise RuntimeSafetyError("blocked_event_window_retention_not_enabled")
+    if config.runtime.run_id is None:
+        raise RuntimeSafetyError("blocked_event_window_retention_run_id_missing")
+    if config.paths.raw_event_root is None or config.paths.event_window_retained_root is None:
+        raise RuntimeSafetyError("blocked_event_window_retention_paths_missing")
+    if retention.frozen_contract is None or retention.frozen_contract_sha256 is None:
+        raise RuntimeSafetyError("blocked_event_window_retention_contract_missing")
+    if not retention.frozen_contract.is_file():
+        raise RuntimeSafetyError("blocked_event_window_retention_contract_unavailable")
+    observed_hash = hashlib.sha256(retention.frozen_contract.read_bytes()).hexdigest()
+    if observed_hash != retention.frozen_contract_sha256:
+        raise RuntimeSafetyError("blocked_event_window_retention_contract_hash_mismatch")
+    if retention.readiness_report is None or not retention.readiness_report.is_file():
+        raise RuntimeSafetyError("blocked_event_window_retention_readiness_missing")
+    try:
+        readiness = json.loads(retention.readiness_report.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeSafetyError("blocked_event_window_retention_readiness_invalid") from exc
+    if readiness.get("classification") != "READY_FOR_EVENT_WINDOW_RETENTION_V0":
+        raise RuntimeSafetyError("blocked_event_window_retention_not_ready")
+    repository = ProspectiveRepository(config.paths.database)
+    repository.migrate()
+    return SessionEventWindowFinalizerV0(
+        database=config.paths.database,
+        raw_root=config.paths.raw_event_root,
+        retained_root=config.paths.event_window_retained_root,
+        run_id=config.runtime.run_id,
+    )
+
+
+def _latest_completed_retention_session(observed_at: datetime) -> date:
+    try:
+        import pandas_market_calendars as mcal
+    except ImportError as exc:
+        raise RuntimeSafetyError("blocked_market_calendar_unavailable") from exc
+    observed = observed_at.astimezone(UTC)
+    schedule = mcal.get_calendar("XNYS").schedule(
+        start_date=(observed.date() - timedelta(days=14)).isoformat(),
+        end_date=observed.date().isoformat(),
+    )
+    eligible = tuple(
+        date.fromisoformat(str(timestamp.date()))
+        for timestamp, row in schedule.iterrows()
+        if row["market_close"].to_pydatetime().astimezone(UTC) + POST_EVENT_RETENTION
+        <= observed
+    )
+    if not eligible:
+        raise RuntimeSafetyError("blocked_no_completed_retention_session")
+    return max(eligible)
+
+
+@retention_app.command("finalize-session-v0")
+def finalize_event_window_session_v0_command(
+    config_path: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
+    session_text: str = typer.Option(..., "--session"),
+) -> None:
+    """Retain all-M1C windows and summarize verified outside-window market data."""
+
+    try:
+        finalizer = _retention_finalizer(config_path)
+        session = date.fromisoformat(session_text)
+        _emit(finalizer.finalize_session(session=session, observed_at=datetime.now(UTC)))
+    except (RuntimeSafetyError, RuntimeError, ValueError) as exc:
+        _fatal(str(exc), exit_code=78)
+
+
+@retention_app.command("finalize-latest-complete-v0")
+def finalize_latest_event_window_session_v0_command(
+    config_path: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
+) -> None:
+    """Finalize the latest XNYS session whose post-event horizon has closed."""
+
+    observed = datetime.now(UTC)
+    try:
+        finalizer = _retention_finalizer(config_path)
+        session = _latest_completed_retention_session(observed)
+        _emit(finalizer.finalize_session(session=session, observed_at=observed))
+    except (RuntimeSafetyError, RuntimeError, ValueError) as exc:
+        _fatal(str(exc), exit_code=78)
 
 
 @analysis_app.command("m1c-directionless-shadow-v0")

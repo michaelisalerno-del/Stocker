@@ -384,7 +384,7 @@ def _estimated_record_count(connection: sqlite3.Connection, *, run_id: str) -> i
         """
         SELECT COALESCE(SUM(row_count), 0)
         FROM raw_partition_manifest_v0
-        WHERE run_id = ?
+        WHERE run_id = ? AND retention_state <> 'RETIRED'
         """,
         (run_id,),
     ).fetchone()
@@ -438,7 +438,7 @@ def _load_raw_records(
         """
         SELECT event_type, file_path, content_hash
         FROM raw_partition_manifest_v0
-        WHERE run_id = ?
+        WHERE run_id = ? AND retention_state <> 'RETIRED'
         ORDER BY minimum_timestamp_utc, content_hash
         """,
         (run_id,),

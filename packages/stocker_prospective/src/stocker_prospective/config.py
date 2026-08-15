@@ -51,6 +51,7 @@ class PathsConfig(BaseModel):
     quiet_state_concentration_audit_root: Path | None = None
     opening_leader_continuation_v0_root: Path | None = None
     shadow_microstructure_root: Path | None = None
+    event_window_retained_root: Path | None = None
 
 
 class RuntimeConfig(BaseModel):
@@ -365,6 +366,47 @@ class DirectionlessShadowV0Config(BaseModel):
         return self
 
 
+class EventWindowRetentionV0Config(BaseModel):
+    """Fail-closed retention contract for every frozen M1C episode."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    dataset_version: Literal["m1c_event_window_retention_v0"] = (
+        "m1c_event_window_retention_v0"
+    )
+    episode_scope: Literal["ALL_M1C_EPISODES"] = "ALL_M1C_EPISODES"
+    before_event_minutes: int = 5
+    after_event_minutes: int = 20
+    delete_verified_transient_market_data: Literal[True] = True
+    preserve_non_market_evidence: Literal[True] = True
+    summary_directional_analysis_enabled: Literal[False] = False
+    activation_timestamp_utc: datetime | None = None
+    frozen_contract: Path | None = None
+    frozen_contract_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    readiness_report: Path | None = None
+
+    @model_validator(mode="after")
+    def _frozen_retention_contract(self) -> EventWindowRetentionV0Config:
+        if self.before_event_minutes != 5 or self.after_event_minutes != 20:
+            raise ValueError("changed retention windows require a new dataset version")
+        if not self.enabled:
+            return self
+        if (
+            self.activation_timestamp_utc is None
+            or self.frozen_contract is None
+            or self.frozen_contract_sha256 is None
+            or self.readiness_report is None
+        ):
+            raise ValueError("enabled retention requires activation and frozen contract")
+        if (
+            self.activation_timestamp_utc.tzinfo is None
+            or self.activation_timestamp_utc.utcoffset() is None
+        ):
+            raise ValueError("retention activation timestamp must be timezone-aware")
+        return self
+
+
 class ProspectiveConfig(BaseModel):
     """Top-level prospective recorder/web configuration."""
 
@@ -382,6 +424,9 @@ class ProspectiveConfig(BaseModel):
     )
     directionless_shadow_v0: DirectionlessShadowV0Config = Field(
         default_factory=DirectionlessShadowV0Config
+    )
+    event_window_retention_v0: EventWindowRetentionV0Config = Field(
+        default_factory=EventWindowRetentionV0Config
     )
 
     @model_validator(mode="after")
@@ -410,6 +455,13 @@ class ProspectiveConfig(BaseModel):
                 raise ValueError("enabled shadow collection requires shadow_microstructure_root")
         if self.directionless_shadow_v0.enabled and self.runtime.source != "ibkr":
             raise ValueError("directionless shadow V0 requires IBKR source")
+        if self.event_window_retention_v0.enabled:
+            if self.runtime.source != "ibkr":
+                raise ValueError("event-window retention requires IBKR source")
+            if self.paths.raw_event_root is None or self.paths.event_window_retained_root is None:
+                raise ValueError("event-window retention requires raw and retained roots")
+            if not self.runtime.callback_inbox_retention_enabled:
+                raise ValueError("event-window retention requires callback inbox compaction")
         return self
 
 
@@ -640,6 +692,16 @@ def public_config(config: ProspectiveConfig) -> dict[str, object]:
             "analysis_enabled": config.directionless_shadow_v0.analysis_enabled,
             "orders_enabled": config.directionless_shadow_v0.orders_enabled,
             "execution_enabled": config.directionless_shadow_v0.execution_enabled,
+        },
+        "event_window_retention_v0": {
+            "enabled": config.event_window_retention_v0.enabled,
+            "dataset_version": config.event_window_retention_v0.dataset_version,
+            "episode_scope": config.event_window_retention_v0.episode_scope,
+            "before_event_minutes": config.event_window_retention_v0.before_event_minutes,
+            "after_event_minutes": config.event_window_retention_v0.after_event_minutes,
+            "summary_directional_analysis_enabled": (
+                config.event_window_retention_v0.summary_directional_analysis_enabled
+            ),
         },
     }
 

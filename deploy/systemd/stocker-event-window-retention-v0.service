@@ -1,0 +1,26 @@
+[Unit]
+Description=Stocker verified all-M1C event-window retention finalizer
+Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
+After=stocker-recorder.service
+ConditionPathExists=/etc/stocker/prospective.yaml
+
+[Service]
+Type=oneshot
+User=stocker
+Group=stocker
+WorkingDirectory=/opt/stocker/current
+EnvironmentFile=/etc/stocker/stocker.env
+ExecStart=/opt/stocker/current/.venv/bin/stocker-prospective retention finalize-latest-complete-v0 --config /etc/stocker/prospective.yaml
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/stocker
+

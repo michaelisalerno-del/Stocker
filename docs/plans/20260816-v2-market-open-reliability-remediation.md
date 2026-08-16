@@ -284,6 +284,30 @@ The 5,000-row replay/readiness threshold is 10% of the 50,000-row hard inbox cap
 represents 25 seconds at the accepted 200/s ingress. It is an early operational
 degradation threshold, not a new admission latch.
 
+### Unmodified baseline
+
+The fixed larger replay was run before any production-code change on the local macOS
+development host against `37715c4` plus this plan-only commit. The harness used a
+temporary SQLite database and fake market-data adapter; neither was committed.
+
+| Measurement | Baseline |
+| --- | ---: |
+| Presented / admitted / projected | 12,132 / 12,132 / 12,132 |
+| Missing / duplicate / provenance violations | 0 / 0 / 0 |
+| Escaped SQLite busy/locked errors | 0 |
+| Admission p50 / p95 / p99 | 0.111 / 0.154 / 0.286 ms |
+| Measured admission throughput | 1,327 callbacks/s |
+| Maximum / final nonterminal backlog | 219 / 0 |
+| Final drain time | 0.052 s |
+| Effective process-heartbeat delay | 0 s |
+| Required feeds fresh | 100 / 100 |
+| Peak RSS growth | 16,842,752 bytes |
+
+The temporary harness advanced the final heartbeat one simulated second beyond the
+end-of-burst measurement timestamp; the reported effective delay is therefore clamped
+to zero. These local fake-adapter results prove no real IBKR or production-host
+performance.
+
 Focused and failure-oriented tests cover every item in the user request, including
 clean/crash restart, duplicate writer, generation provenance, historical fatal
 isolation, migration from schema 15, callback ordering/duplicates/gaps, XNYS-only
@@ -327,4 +351,3 @@ implementation.
   boundedness, and readiness behavior under the defined load. It cannot prove real
   IBKR entitlements, exchange-farm behavior, pacing behavior, or actual market-open
   host/storage performance. Those remain attended operational evidence after rollout.
-

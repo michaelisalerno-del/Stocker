@@ -294,12 +294,8 @@ class CallbackInbox:
             "WHERE state.run_id=? AND state.recorder_generation=?",
             (authority.run_id, authority.recorder_generation),
         ).fetchone()
-        global_fatal = connection.execute(
-            "SELECT 1 FROM runs WHERE status='fatal' LIMIT 1"
-        ).fetchone()
         if (
             row is None
-            or global_fatal is not None
             or str(row["status"]) != "running"
             or str(row["owner_id"]) != authority.owner_id
             or row["ended_at_us"] is not None
@@ -498,9 +494,6 @@ class CallbackInbox:
 
     @staticmethod
     def _authoritative_admission(connection: sqlite3.Connection) -> sqlite3.Row:
-        fatal = connection.execute("SELECT 1 FROM runs WHERE status='fatal' LIMIT 1").fetchone()
-        if fatal is not None:
-            raise InboxAuthorityLost("global fatal state has closed callback admission")
         rows = tuple(
             connection.execute(
                 "SELECT state.run_id, state.recorder_generation, generation.owner_id "
@@ -614,7 +607,7 @@ class CallbackInbox:
             if str(current["lifecycle"]) == "fatal" and current["reason"] is not None
             else code
         )
-        incident_id = hashlib.sha256(f"{run_id}|{terminal_code}".encode()).hexdigest()
+        incident_id = hashlib.sha256(f"{run_id}|{generation}|{terminal_code}".encode()).hexdigest()
         connection.execute("UPDATE runs SET status = 'fatal' WHERE run_id = ?", (run_id,))
         connection.execute(
             "UPDATE subscriptions SET lifecycle='disconnected' WHERE run_id=? "

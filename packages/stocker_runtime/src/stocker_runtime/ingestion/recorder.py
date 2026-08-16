@@ -49,6 +49,7 @@ from stocker_runtime.ingestion.ibkr_market_data import (
 from stocker_runtime.ingestion.inbox import (
     AdmissionResult,
     CallbackFence,
+    CallbackIdentityCollision,
     CallbackInbox,
     CallbackTimestampOrderingLoss,
     InboxAdmissionError,
@@ -56,6 +57,11 @@ from stocker_runtime.ingestion.inbox import (
     MarketDataCallback,
     WriterAuthority,
     transport_incident_id,
+)
+from stocker_runtime.ingestion.lifecycle import (
+    OWNERSHIP_PROTOCOL,
+    LocalWriterLock,
+    LocalWriterLockError,
 )
 from stocker_runtime.shadow import ShadowEngine
 from stocker_runtime.storage import (
@@ -163,6 +169,51 @@ class SubscriptionSpec:
             raise ValueError("subscription identity and staleness bound are required")
 
 
+def market_data_input_hash(
+    instruments: tuple[InstrumentSpec, ...],
+    subscriptions: tuple[SubscriptionSpec, ...],
+) -> str:
+    """Hash the caller-owned desired market-data set independent of file ordering."""
+
+    material = cast(
+        JsonValue,
+        {
+            "instruments": [
+                {
+                    "currency": item.currency,
+                    "exchange": item.exchange,
+                    "ibkr_con_id": item.ibkr_con_id,
+                    "instrument_id": item.instrument_id,
+                    "kind": item.kind,
+                    "option_expiry": item.option_expiry,
+                    "option_multiplier": item.option_multiplier,
+                    "option_right": item.option_right,
+                    "option_strike": item.option_strike,
+                    "symbol": item.symbol,
+                }
+                for item in sorted(instruments, key=lambda candidate: candidate.instrument_id)
+            ],
+            "subscriptions": [
+                {
+                    "continuity_required": item.continuity_required,
+                    "feed_kind": item.feed_kind,
+                    "instrument_id": item.instrument_id,
+                    "name": item.name,
+                    "optional": item.optional,
+                    "request_id": item.request_id,
+                    "snapshot": item.snapshot,
+                    "stale_after_us": item.stale_after_us,
+                }
+                for item in sorted(
+                    subscriptions,
+                    key=lambda candidate: (candidate.request_id, candidate.name),
+                )
+            ],
+        },
+    )
+    return hashlib.sha256(canonical_json_bytes(material)).hexdigest()
+
+
 @dataclass(frozen=True)
 class RecorderState:
     run_id: str
@@ -265,6 +316,7 @@ class Recorder:
         self._pending_dynamic_statuses: list[MarketDataStatus] = []
         self._retention_maintenance_deferred = False
         self._pending_callback_wakeup = threading.Event()
+        self._writer_lock = LocalWriterLock.for_database(config.database)
 
     @contextmanager
     def _adapter_reset_transition(self) -> Iterator[None]:
@@ -283,6 +335,10 @@ class Recorder:
         )
 
     def _verify_owned(self, connection: sqlite3.Connection) -> None:
+        try:
+            self._writer_lock.verify_held()
+        except LocalWriterLockError as error:
+            raise AuthoritativeLeaseLost(str(error)) from error
         try:
             CallbackInbox.verify_writer(connection, self._authority())
         except InboxAdmissionError as error:
@@ -308,6 +364,33 @@ class Recorder:
 
         if self.state is not None:
             raise DuplicateWriterError("this recorder is already started")
+        try:
+            self._writer_lock.acquire()
+        except LocalWriterLockError as error:
+            raise DuplicateWriterError(str(error)) from error
+        try:
+            return self._start_locked(
+                now_us=now_us,
+                instruments=instruments,
+                subscriptions=subscriptions,
+            )
+        except BaseException:
+            if self.state is None:
+                self._writer_lock.release()
+            else:
+                self.abandon_unclean()
+            raise
+
+    def _start_locked(
+        self,
+        *,
+        now_us: int,
+        instruments: tuple[InstrumentSpec, ...],
+        subscriptions: tuple[SubscriptionSpec, ...],
+    ) -> RecorderState:
+        """Start after the process-lifetime local writer lock is held."""
+
+        input_hash = market_data_input_hash(instruments, subscriptions)
         instruments, subscriptions, generated_idea_subscriptions = self._prepare_inputs(
             instruments, subscriptions
         )
@@ -322,18 +405,13 @@ class Recorder:
         connection = connect_v2(self.config.database)
         try:
             connection.execute("BEGIN IMMEDIATE")
-            if (
-                connection.execute("SELECT 1 FROM runs WHERE status='fatal' LIMIT 1").fetchone()
-                is not None
-            ):
-                raise RecorderFatalError(
-                    "persisted global fatal state requires explicit future operator recovery"
-                )
             active_rows = tuple(
                 connection.execute(
                     "SELECT state.run_id, state.recorder_generation, "
-                    "state.process_heartbeat_at_us, run.status "
+                    "state.process_heartbeat_at_us, run.status, generation.ownership_protocol "
                     "FROM runtime_state state JOIN runs run ON run.run_id = state.run_id "
+                    "JOIN recorder_generations generation ON generation.run_id=state.run_id "
+                    "AND generation.generation=state.recorder_generation "
                     "WHERE state.lifecycle IN "
                     "('starting','recovering','connecting','running','degraded') "
                     "ORDER BY state.run_id"
@@ -344,13 +422,15 @@ class Recorder:
             active = None if not active_rows else active_rows[0]
             if active is not None:
                 heartbeat = active["process_heartbeat_at_us"]
-                fresh = (
+                lock_protected = str(active["ownership_protocol"]) == OWNERSHIP_PROTOCOL
+                fresh = not lock_protected and (
                     heartbeat is None
                     or now_us - int(heartbeat) <= self.config.writer_lease_stale_us
                 )
                 if fresh:
                     raise DuplicateWriterError(
-                        f"authoritative writer lease is held by run {active['run_id']}"
+                        "legacy authoritative writer lease is still fresh for run "
+                        f"{active['run_id']}"
                     )
                 gap_start = (
                     now_us
@@ -394,9 +474,21 @@ class Recorder:
             elif str(run["status"]) == "fatal":
                 raise RecorderFatalError("persisted fatal recorder state requires operator action")
             elif str(run["status"]) == "stopped":
-                raise RecorderFatalError(
-                    "a cleanly stopped run cannot be restarted; use a new run_id"
+                connection.execute(
+                    "UPDATE runs SET status='running', ended_at_us=NULL WHERE run_id=?",
+                    (self.config.run_id,),
                 )
+            previous_input = connection.execute(
+                "SELECT input_hash FROM recorder_generations WHERE run_id=? "
+                "ORDER BY generation DESC LIMIT 1",
+                (self.config.run_id,),
+            ).fetchone()
+            if (
+                previous_input is not None
+                and previous_input["input_hash"] is not None
+                and str(previous_input["input_hash"]) != input_hash
+            ):
+                raise RecorderFatalError("frozen market-data input changed")
             previous_state = connection.execute(
                 "SELECT recorder_generation, connection_generation FROM runtime_state "
                 "WHERE run_id = ?",
@@ -413,9 +505,17 @@ class Recorder:
                 1 if previous_state is None else int(previous_state["connection_generation"]) + 1
             )
             connection.execute(
-                "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us) "
-                "VALUES (?, ?, ?, ?)",
-                (self.config.run_id, generation, self.config.owner_id, now_us),
+                "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
+                "ownership_protocol, git_commit, input_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    self.config.run_id,
+                    generation,
+                    self.config.owner_id,
+                    now_us,
+                    OWNERSHIP_PROTOCOL,
+                    self.config.git_commit,
+                    input_hash,
+                ),
             )
             connection.execute(
                 "INSERT INTO runtime_state(run_id, recorder_generation, lifecycle, reason, "
@@ -844,8 +944,9 @@ class Recorder:
             connection.execute(
                 "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
                 "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
-                "continuity_required, optional, requirements_hash, opened_at_us, snapshot) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, 'connecting', ?, ?, ?, ?, ?)",
+                "continuity_required, optional, requirements_hash, opened_at_us, snapshot, "
+                "stale_after_us, last_attempt_at_us) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'connecting', ?, ?, ?, ?, ?, ?, ?)",
                 (
                     subscription_id,
                     self.config.run_id,
@@ -859,6 +960,8 @@ class Recorder:
                     requirements_hash,
                     now_us,
                     int(spec.snapshot),
+                    spec.stale_after_us,
+                    now_us,
                 ),
             )
             fences.append(
@@ -2684,6 +2787,14 @@ class Recorder:
         except CallbackTimestampOrderingLoss as error:
             self._fatal("CALLBACK_TIMESTAMP_ORDERING_LOSS", causal_now_us)
             raise RecorderFatalError("callback timestamp ordering loss") from error
+        except CallbackIdentityCollision as error:
+            self._fatal("CALLBACK_PROVENANCE_CORRUPTION", causal_now_us)
+            raise RecorderFatalError("callback provenance corruption") from error
+        except InboxAuthorityLost as error:
+            raise AuthoritativeLeaseLost(str(error)) from error
+        except InboxAdmissionError as error:
+            self._fatal("CALLBACK_DURABLE_EVIDENCE_INVARIANT", causal_now_us)
+            raise RecorderFatalError("callback durable-evidence invariant failed") from error
         except AuthoritativeLeaseLost:
             raise
         except Exception as error:
@@ -3343,8 +3454,11 @@ class Recorder:
     def stop(self, *, now_us: int) -> None:
         """Close subscriptions and the writer generation without changing mode."""
 
-        with self._reconnect_lock:
-            self._stop_serialized(now_us=now_us)
+        try:
+            with self._reconnect_lock:
+                self._stop_serialized(now_us=now_us)
+        finally:
+            self._writer_lock.release()
 
     def _stop_serialized(self, *, now_us: int) -> None:
         if self.state is None:
@@ -3377,10 +3491,6 @@ class Recorder:
                     "connection_state='disconnected', process_heartbeat_at_us=? WHERE run_id=?",
                     (now_us, self.config.run_id),
                 )
-                connection.execute(
-                    "UPDATE runs SET status='stopped', ended_at_us=? WHERE run_id=?",
-                    (now_us, self.config.run_id),
-                )
                 connection.commit()
             finally:
                 connection.close()
@@ -3398,6 +3508,7 @@ class Recorder:
         if self._idea_runner is not None:
             self._idea_runner.close()
             self._idea_runner = None
+        self._writer_lock.release()
 
     def _pause_optional(self, now_us: int) -> None:
         if self.state is None:

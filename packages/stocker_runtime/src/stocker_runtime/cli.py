@@ -30,6 +30,7 @@ from stocker_runtime.ingestion import (
     Recorder,
     SubscriptionSpec,
     load_recorder_config,
+    market_data_input_hash,
 )
 from stocker_runtime.ingestion.ibkr_api import (
     OfficialIBKRApiProvenanceError,
@@ -41,6 +42,7 @@ from stocker_runtime.ingestion.ibkr_api import (
     write_immutable_official_ibkr_api_provenance,
     write_official_ibkr_api_update_status,
 )
+from stocker_runtime.ingestion.lifecycle import recover_fatal_generation
 from stocker_runtime.storage import (
     BackupError,
     BackupPolicy,
@@ -337,6 +339,48 @@ def validate_recorder_command(config: Annotated[Path, typer.Argument()]) -> None
             "host": loaded.host,
             "mode": loaded.mode,
             "read_only": loaded.read_only,
+            "status": "ok",
+        }
+    )
+
+
+@recorder_app.command("recover-fatal-generation")
+def recover_fatal_generation_command(
+    config: Annotated[Path, typer.Option("--config", exists=True, dir_okay=False)],
+    inputs: Annotated[Path, typer.Option("--inputs", exists=True, dir_okay=False)],
+    generation: Annotated[int, typer.Option("--generation", min=1)],
+    fatal_code: Annotated[str, typer.Option("--fatal-code", min=1, max=256)],
+    operator: Annotated[str, typer.Option("--operator", min=1, max=256)],
+    reason: Annotated[str, typer.Option("--reason", min=1, max=1_024)],
+    authorized_at_us: Annotated[int | None, typer.Option("--authorized-at-us", min=0)] = None,
+) -> None:
+    """Authorize one exact eligible fatal generation for audited same-run restart."""
+
+    try:
+        loaded = load_recorder_config(config)
+        instruments, subscriptions = _load_recorder_inputs(inputs)
+        timestamp = time.time_ns() // 1_000 if authorized_at_us is None else authorized_at_us
+        recover_fatal_generation(
+            database=loaded.database,
+            run_id=loaded.run_id,
+            generation=generation,
+            mode=loaded.mode,
+            config_hash=loaded.config_hash,
+            input_hash=market_data_input_hash(instruments, subscriptions),
+            fatal_code=fatal_code,
+            operator=operator,
+            reason=reason,
+            authorized_at_us=timestamp,
+        )
+    except (OSError, ValueError, RuntimeError, sqlite3.Error, SchemaError) as error:
+        _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
+        raise typer.Exit(code=1) from error
+    _emit(
+        {
+            "authorized_at_us": timestamp,
+            "fatal_code": fatal_code,
+            "generation": generation,
+            "run_id": loaded.run_id,
             "status": "ok",
         }
     )

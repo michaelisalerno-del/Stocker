@@ -1312,8 +1312,7 @@ def test_recorder_service_command_handles_sigterm_as_a_clean_stop(
             "SELECT scope, severity, code, details_json FROM incidents "
             "WHERE run_id='run-service' AND code='BACKUP_DEGRADED'"
         ).fetchone()
-    assert tuple(run) == ("stopped", run["ended_at_us"])
-    assert run["ended_at_us"] is not None
+    assert tuple(run) == ("running", None)
     assert tuple(generation) == (1, "CLEAN_STOP")
     assert tuple(incident) == (
         "storage",

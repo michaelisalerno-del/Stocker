@@ -94,8 +94,10 @@ a process-long SQLite transaction, or add a distributed lease.
 
 A clean stop closes subscriptions and the current generation only. It leaves the run
 lineage resumable (`runs.status='running'`, no lineage end time, runtime lifecycle
-`stopped`). Existing/imported `runs.status='stopped'` lineages remain historical and
-non-resumable; no finalisation workflow is added.
+`stopped`). Because schema 15 had no distinct finalisation state, its cleanly stopped
+lineages are also resumable with the exact run/mode/config identity; the first schema-16
+generation binds the separately validated market-data input hash. No finalisation
+workflow is added.
 
 ### Fatal recovery
 
@@ -144,6 +146,8 @@ Minimal generation fields:
 
 - `ownership_protocol` (nullable for legacy rows);
 - generation `git_commit`;
+- canonical caller-owned market-data `input_hash` (nullable for legacy rows and bound
+  on their first schema-16 restart);
 - fatal-recovery authorization timestamp, operator/reason, and recovered fatal code.
 
 Minimal subscription fields:

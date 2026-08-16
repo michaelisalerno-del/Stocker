@@ -88,7 +88,24 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
 
     result = initialize_database(database, applied_at_us=1_700_000_000_000_000)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
+    assert result.applied_versions == (
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+    )
     with connect_v2(database) as connection:
         tables = {
             str(row[0])
@@ -105,6 +122,71 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
         assert connection.execute("PRAGMA journal_size_limit").fetchone()[0] == 67_108_864
         assert connection.execute("PRAGMA auto_vacuum").fetchone()[0] == 2
         assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+
+
+def test_market_open_reliability_migration_preserves_deployed_v2_evidence(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "schema-15.sqlite3"
+    migration_root = tmp_path / "schema-15-migrations"
+    migration_root.mkdir()
+    for migration in migration_plan()[:15]:
+        (migration_root / migration.name).write_text(migration.sql, encoding="utf-8")
+    initialize_database(database, migration_root=migration_root, applied_at_us=1)
+    with connect_v2(database, verify_schema=False) as connection:
+        connection.execute(
+            "INSERT INTO runs(run_id, mode, source, started_at_us, config_hash, git_commit, "
+            "data_class, status) VALUES "
+            "('preserved-run', 'prospective_record', 'ibkr', 10, ?, 'old-commit', "
+            "'prospective_protected', 'fatal')",
+            ("a" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
+            "ended_at_us, clean_stop, termination_code) VALUES "
+            "('preserved-run', 7, 'old-owner', 10, 20, 0, 'OLD_FATAL')"
+        )
+        connection.execute(
+            "INSERT INTO instruments(instrument_id, identity_hash, ibkr_con_id, kind, symbol, "
+            "exchange, currency) VALUES "
+            "('instrument-1', ?, 123, 'stock', 'AAPL', 'SMART', 'USD')",
+            ("b" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
+            "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
+            "requirements_hash, opened_at_us, closed_at_us) VALUES "
+            "('subscription-1', 'preserved-run', 7, 3, 'instrument-1', 'quotes', 41, "
+            "'closed', ?, 10, 20)",
+            ("c" * 64,),
+        )
+
+    result = migrate_database(database, applied_at_us=2)
+
+    assert result.applied_versions == (16,)
+    with connect_v2(database) as connection:
+        generation = connection.execute(
+            "SELECT run_id, generation, owner_id, termination_code, ownership_protocol, "
+            "input_hash, fatal_recovery_authorized_at_us FROM recorder_generations"
+        ).fetchone()
+        subscription = connection.execute(
+            "SELECT subscription_id, lifecycle, retry_count, permanent_failure, "
+            "stale_after_us, last_error_code FROM subscriptions"
+        ).fetchone()
+        run = connection.execute(
+            "SELECT status, config_hash, git_commit FROM runs WHERE run_id='preserved-run'"
+        ).fetchone()
+    assert tuple(generation) == (
+        "preserved-run",
+        7,
+        "old-owner",
+        "OLD_FATAL",
+        None,
+        None,
+        None,
+    )
+    assert tuple(subscription) == ("subscription-1", "closed", 0, 0, None, None)
+    assert tuple(run) == ("fatal", "a" * 64, "old-commit")
 
 
 def test_callback_receipt_frontier_index_migration_preserves_rows_and_is_used(
@@ -149,7 +231,7 @@ def test_callback_receipt_frontier_index_migration_preserves_rows_and_is_used(
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (15,)
+    assert result.applied_versions == (15, 16)
     with connect_v2(database) as connection:
         after = tuple(connection.execute("SELECT * FROM callback_inbox ORDER BY source_sequence"))
         index_sql = connection.execute(
@@ -224,7 +306,7 @@ def test_instrument_alias_migration_preserves_evidence_and_rejects_physical_mism
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (14, 15)
+    assert result.applied_versions == (14, 15, 16)
     with connect_v2(database) as connection:
         index = next(
             row
@@ -275,7 +357,17 @@ def test_instrument_alias_migration_preserves_evidence_and_rejects_physical_mism
     assert [row["instrument_id"] for row in aliases] == ["AAL", "legacy-instrument-aal"]
     assert legacy_reference == "legacy-instrument-aal"
     assert legacy_instrument_after == legacy_instrument_before
-    assert legacy_subscription_after == legacy_subscription_before
+    assert (
+        legacy_subscription_after[: len(legacy_subscription_before)] == legacy_subscription_before
+    )
+    assert legacy_subscription_after[len(legacy_subscription_before) :] == (
+        None,
+        0,
+        None,
+        None,
+        None,
+        0,
+    )
     assert foreign_keys == ()
     assert quick_check == "ok"
 
@@ -399,7 +491,7 @@ def test_phase2_migration_preserves_dynamic_rows_and_admits_only_causal_derived_
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (13, 14, 15)
+    assert result.applied_versions == (13, 14, 15, 16)
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -528,7 +620,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (16, '0016_future.sql', ?, 2)",
+            "VALUES (17, '0017_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -637,7 +729,7 @@ def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_h
 
     result = migrate_database(backfill_database, applied_at_us=2)
 
-    assert result.applied_versions == (7, 8, 9, 10, 11, 12, 13, 14, 15)
+    assert result.applied_versions == (7, 8, 9, 10, 11, 12, 13, 14, 15, 16)
     with connect_v2(backfill_database) as connection:
         assert tuple(
             connection.execute(
@@ -730,7 +822,7 @@ def test_expiry_projection_migration_deactivates_terminal_history(tmp_path: Path
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (8, 9, 10, 11, 12, 13, 14, 15)
+    assert result.applied_versions == (8, 9, 10, 11, 12, 13, 14, 15, 16)
     with connect_v2(database) as connection:
         assert tuple(
             connection.execute(
@@ -882,6 +974,7 @@ def test_commit_boundary_migration_rewinds_pending_shadow_to_conservative_run_ma
         13,
         14,
         15,
+        16,
     )
     with connect_v2(database) as connection:
         assert (
@@ -1410,7 +1503,9 @@ def _seed_output_dependencies(database: Path, *, verify_schema: bool = True) -> 
             ("run-1", "shadow", "ibkr", 10, "a" * 64, "deadbee", "shadow_protected", "created"),
         )
         connection.execute(
-            "INSERT INTO recorder_generations VALUES (?, ?, ?, ?, NULL, 0, NULL)",
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
+            "ended_at_us, clean_stop, termination_code) "
+            "VALUES (?, ?, ?, ?, NULL, 0, NULL)",
             ("run-1", 1, "fixture", 10),
         )
         connection.execute(
@@ -1427,7 +1522,9 @@ def _seed_output_dependencies(database: Path, *, verify_schema: bool = True) -> 
             ),
         )
         connection.execute(
-            "INSERT INTO recorder_generations VALUES (?, ?, ?, ?, NULL, 0, NULL)",
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
+            "ended_at_us, clean_stop, termination_code) "
+            "VALUES (?, ?, ?, ?, NULL, 0, NULL)",
             ("retention-run", 1, "retention-fixture", 10),
         )
         connection.execute(
@@ -2227,7 +2324,9 @@ def test_repository_and_schema_reject_cross_run_provenance(tmp_path: Path) -> No
             ),
         )
         connection.execute(
-            "INSERT INTO recorder_generations VALUES (?, ?, ?, ?, NULL, 0, NULL)",
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
+            "ended_at_us, clean_stop, termination_code) "
+            "VALUES (?, ?, ?, ?, NULL, 0, NULL)",
             ("run-2", 1, "fixture", 10),
         )
         connection.execute(
@@ -4438,11 +4537,11 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     migration_payload = json.loads(migrated.stdout)
     retention_payload = json.loads(retained.stdout)
     assert init_payload == {
-        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-        "current_version": 15,
+        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+        "current_version": 16,
         "status": "ok",
     }
-    assert migration_payload == {"applied_versions": [], "current_version": 15, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 16, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

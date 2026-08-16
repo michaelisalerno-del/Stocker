@@ -43,6 +43,7 @@ from stocker_runtime.ingestion.recorder import (
     RecorderState,
     SubscriptionSpec,
     load_recorder_config,
+    market_data_input_hash,
 )
 
 __all__ = [
@@ -81,5 +82,6 @@ __all__ = [
     "SubscriptionController",
     "SubscriptionLifecycleResult",
     "load_recorder_config",
+    "market_data_input_hash",
     "plan_market_data",
 ]

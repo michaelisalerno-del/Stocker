@@ -4,6 +4,7 @@ import hashlib
 import inspect
 import json
 import sqlite3
+import subprocess
 import sys
 import threading
 import types
@@ -16,11 +17,13 @@ import pytest
 from pydantic import ValidationError
 from typer.testing import CliRunner
 
+import stocker_runtime.ingestion.lifecycle as lifecycle_module
 from stocker_runtime.cli import app
 from stocker_runtime.ingestion import (
     AdmissionResult,
     AuthoritativeLeaseLost,
     CallbackFence,
+    CallbackIdentityCollision,
     CallbackInbox,
     DuplicateWriterError,
     InboxAdmissionError,
@@ -34,6 +37,7 @@ from stocker_runtime.ingestion import (
     RecorderFatalError,
     SubscriptionSpec,
     WriterAuthority,
+    market_data_input_hash,
 )
 from stocker_runtime.ingestion.dynamic_market_data import OptionDiscoveryBackend
 from stocker_runtime.ingestion.inbox import (
@@ -41,12 +45,19 @@ from stocker_runtime.ingestion.inbox import (
     ProjectionBatchResult,
     transport_incident_id,
 )
+from stocker_runtime.ingestion.lifecycle import (
+    LocalWriterLockError,
+    recover_fatal_generation,
+)
 from stocker_runtime.storage import (
     MaintenanceDeadlineExceeded,
+    RetentionPolicy,
     RetentionResult,
     StorageCapState,
     connect_v2,
     initialize_database,
+    migrate_database,
+    migration_plan,
 )
 
 
@@ -299,7 +310,7 @@ def test_validate_config_cli_is_offline_and_machine_readable(tmp_path: Path) -> 
 
     result = CliRunner().invoke(app, ["validate-recorder", str(config_path)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
     assert json.loads(result.stdout) == {
         "host": "127.0.0.1",
         "mode": "prospective_record",
@@ -953,6 +964,7 @@ def test_logical_alias_is_idempotent_across_unclean_recorder_restart(tmp_path: P
         instruments=(instrument,),
         subscriptions=(subscription,),
     )
+    first.abandon_unclean()
 
     second = Recorder(
         _config(database, owner_id="owner-2", writer_lease_stale_us=15_000_000),
@@ -1060,7 +1072,7 @@ def test_recorder_rejects_conflicting_physical_identity_for_logical_alias(
         assert connection.execute("SELECT count(*) FROM instruments").fetchone()[0] == 1
 
 
-def test_recorder_owns_one_writer_and_restart_reclaims_only_after_stale_lease(
+def test_recorder_rejects_concurrent_writer_and_recovers_immediately_after_crash(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "v2.sqlite3"
@@ -1074,10 +1086,11 @@ def test_recorder_owns_one_writer_and_restart_reclaims_only_after_stale_lease(
             now_us=101, instruments=(instrument,), subscriptions=specs
         )
 
+    first.abandon_unclean()
     restarted = Recorder(
         _config(database, owner_id="owner-2", writer_lease_stale_us=15_000_000),
         FakeMarketData(),
-    ).start(now_us=15_000_101, instruments=(instrument,), subscriptions=specs)
+    ).start(now_us=102, instruments=(instrument,), subscriptions=specs)
 
     assert started.recorder_generation == 1
     assert restarted.recorder_generation == 2
@@ -1093,7 +1106,275 @@ def test_recorder_owns_one_writer_and_restart_reclaims_only_after_stale_lease(
             ).fetchone()[0]
             == 2
         )
-    assert tuple(old) == (15_000_101, 0)
+    assert tuple(old) == (102, 0)
+
+
+def test_clean_stop_restarts_same_run_with_generation_and_callback_continuity(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    first_adapter = FakeMarketData()
+    first = Recorder(_config(database), first_adapter)
+    first_state = first.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    first_result = first_adapter.emit(
+        first_state.fences[0],
+        MarketDataCallback("quote", 101, 101, {"event_at_us": 101, "bid": 100.0}),
+    )
+    first.drain(now_us=102)
+    first.stop(now_us=103)
+
+    second_adapter = FakeMarketData()
+    second = Recorder(_config(database, owner_id="owner-2"), second_adapter)
+    second_state = second.start(now_us=104, instruments=(instrument,), subscriptions=specs)
+    second_result = second_adapter.emit(
+        second_state.fences[0],
+        MarketDataCallback("quote", 105, 105, {"event_at_us": 105, "bid": 101.0}),
+    )
+    second.drain(now_us=106)
+
+    assert first_state.recorder_generation == 1
+    assert second_state.recorder_generation == 2
+    assert second_state.connection_generation == 2
+    assert first_result.source_sequence < second_result.source_sequence
+    with connect_v2(database) as connection:
+        generations = tuple(
+            connection.execute(
+                "SELECT generation, clean_stop, termination_code, ownership_protocol, git_commit "
+                "FROM recorder_generations WHERE run_id='run-1' ORDER BY generation"
+            )
+        )
+        provenance = tuple(
+            connection.execute(
+                "SELECT source_sequence, recorder_generation, connection_generation "
+                "FROM callback_inbox ORDER BY source_sequence"
+            )
+        )
+        run = connection.execute(
+            "SELECT status, ended_at_us FROM runs WHERE run_id='run-1'"
+        ).fetchone()
+    assert [tuple(row) for row in generations] == [
+        (1, 1, "CLEAN_STOP", "local_flock_v1", "deadbee"),
+        (2, 0, None, "local_flock_v1", "deadbee"),
+    ]
+    assert [tuple(row) for row in provenance] == [
+        (first_result.source_sequence, 1, 1),
+        (second_result.source_sequence, 2, 2),
+    ]
+    assert tuple(run) == ("running", None)
+
+
+def test_clean_restart_rejects_incompatible_frozen_configuration(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    first = Recorder(_config(database), FakeMarketData())
+    first.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    first.stop(now_us=101)
+
+    with pytest.raises(RecorderFatalError, match="frozen configuration changed"):
+        Recorder(_config(database, config_hash="b" * 64), FakeMarketData()).start(
+            now_us=102,
+            instruments=(instrument,),
+            subscriptions=specs,
+        )
+
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM recorder_generations WHERE run_id='run-1'"
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_clean_restart_rejects_changed_market_data_input(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    first = Recorder(_config(database), FakeMarketData())
+    first.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    first.stop(now_us=101)
+
+    changed = (replace(specs[0], stale_after_us=11), specs[1])
+    with pytest.raises(RecorderFatalError, match="frozen market-data input changed"):
+        Recorder(_config(database, owner_id="owner-2"), FakeMarketData()).start(
+            now_us=102,
+            instruments=(instrument,),
+            subscriptions=changed,
+        )
+
+    with connect_v2(database) as connection:
+        generation = connection.execute(
+            "SELECT input_hash FROM recorder_generations WHERE run_id='run-1'"
+        ).fetchone()
+    assert generation["input_hash"] == market_data_input_hash((instrument,), specs)
+
+
+def test_schema_15_clean_stop_can_bind_inputs_and_restart_same_run(tmp_path: Path) -> None:
+    database = tmp_path / "schema-15.sqlite3"
+    migration_root = tmp_path / "schema-15-migrations"
+    migration_root.mkdir()
+    for migration in migration_plan()[:15]:
+        (migration_root / migration.name).write_text(migration.sql, encoding="utf-8")
+    initialize_database(database, migration_root=migration_root, applied_at_us=1)
+    with connect_v2(database, verify_schema=False) as connection:
+        connection.execute(
+            "INSERT INTO runs(run_id, mode, source, started_at_us, ended_at_us, config_hash, "
+            "git_commit, data_class, status) VALUES "
+            "('run-1', 'prospective_record', 'ibkr', 1, 2, ?, 'old-code', "
+            "'prospective_protected', 'stopped')",
+            ("a" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
+            "ended_at_us, clean_stop, termination_code) VALUES "
+            "('run-1', 1, 'old-owner', 1, 2, 1, 'CLEAN_STOP')"
+        )
+        connection.execute(
+            "INSERT INTO runtime_state(run_id, recorder_generation, lifecycle, reason, "
+            "process_heartbeat_at_us, connection_state, connection_generation) VALUES "
+            "('run-1', 1, 'stopped', NULL, 2, 'disconnected', 1)"
+        )
+    assert migrate_database(database, applied_at_us=3).applied_versions == (16,)
+    instrument, specs = _specs()
+
+    restarted = Recorder(_config(database, owner_id="new-owner"), FakeMarketData()).start(
+        now_us=4,
+        instruments=(instrument,),
+        subscriptions=specs,
+    )
+
+    assert restarted.recorder_generation == 2
+    with connect_v2(database) as connection:
+        run = connection.execute(
+            "SELECT status, ended_at_us FROM runs WHERE run_id='run-1'"
+        ).fetchone()
+        generations = tuple(
+            connection.execute(
+                "SELECT generation, input_hash FROM recorder_generations "
+                "WHERE run_id='run-1' ORDER BY generation"
+            )
+        )
+    assert tuple(run) == ("running", None)
+    assert [tuple(row) for row in generations] == [
+        (1, None),
+        (2, market_data_input_hash((instrument,), specs)),
+    ]
+
+
+def test_database_symlink_alias_cannot_bypass_local_writer_lock(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    alias = tmp_path / "database-alias.sqlite3"
+    initialize_database(database)
+    alias.symlink_to(database)
+    instrument, specs = _specs()
+    first = Recorder(_config(database), FakeMarketData())
+    first.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    with pytest.raises(DuplicateWriterError, match="writer lock is held"):
+        Recorder(_config(alias, owner_id="owner-2"), FakeMarketData()).start(
+            now_us=101,
+            instruments=(instrument,),
+            subscriptions=specs,
+        )
+
+
+def test_subprocess_writer_is_rejected_and_kill_releases_lock_immediately(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    child_script = """
+import sys
+from pathlib import Path
+from stocker_runtime.ingestion import InstrumentSpec, Recorder, RecorderConfig, SubscriptionSpec
+
+class Adapter:
+    connected = False
+    def set_callback(self, callback): self.callback = callback
+    def set_disconnect_callback(self, callback): self.disconnect_callback = callback
+    def set_status_callback(self, callback): self.status_callback = callback
+    def connect(self): self.connected = True
+    def disconnect(self): self.connected = False
+    def subscribe(self, fence): pass
+    def cancel(self, request_id): pass
+
+database = Path(sys.argv[1])
+config = RecorderConfig(
+    database=database, run_id="run-1", owner_id="child-owner",
+    mode="prospective_record", host="127.0.0.1", port=4001, client_id=71,
+    read_only=True, external_read_only_verified=True, config_hash="a" * 64,
+    git_commit="deadbee",
+)
+instrument = InstrumentSpec("instrument-1", 123, "stock", "AAPL", "SMART", "USD")
+subscription = SubscriptionSpec("required-quotes", "instrument-1", "quotes", 3, True, False, 10)
+Recorder(config, Adapter()).start(
+    now_us=100, instruments=(instrument,), subscriptions=(subscription,)
+)
+print("READY", flush=True)
+sys.stdin.read()
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", child_script, str(database)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert process.stdout is not None
+        assert process.stdout.readline().strip() == "READY"
+        instrument = InstrumentSpec("instrument-1", 123, "stock", "AAPL", "SMART", "USD")
+        subscription = SubscriptionSpec(
+            "required-quotes", "instrument-1", "quotes", 3, True, False, 10
+        )
+        with pytest.raises(DuplicateWriterError, match="writer lock is held"):
+            Recorder(_config(database, owner_id="parent-owner"), FakeMarketData()).start(
+                now_us=101,
+                instruments=(instrument,),
+                subscriptions=(subscription,),
+            )
+
+        process.kill()
+        process.wait(timeout=5)
+        replacement = Recorder(_config(database, owner_id="parent-owner"), FakeMarketData()).start(
+            now_us=102,
+            instruments=(instrument,),
+            subscriptions=(subscription,),
+        )
+        assert replacement.recorder_generation == 2
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+
+def test_legacy_database_lease_requires_expiry_without_local_lock_evidence(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    instrument, specs = _specs()
+
+    with pytest.raises(DuplicateWriterError, match="legacy authoritative writer lease"):
+        Recorder(_config(database, owner_id="owner-2"), FakeMarketData()).start(
+            now_us=2,
+            instruments=(instrument,),
+            subscriptions=specs,
+        )
+
+    restarted = Recorder(
+        _config(database, owner_id="owner-2", writer_lease_stale_us=15_000_000),
+        FakeMarketData(),
+    ).start(
+        now_us=15_000_002,
+        instruments=(instrument,),
+        subscriptions=specs,
+    )
+    assert restarted.recorder_generation == 2
 
 
 def test_recorder_disconnect_reconnect_and_staleness_are_scoped(tmp_path: Path) -> None:
@@ -1839,7 +2120,7 @@ def test_replay_cli_runs_one_offline_recorder_lifecycle(
     }
     assert drain_results[-1] == (1, False)
     with connect_v2(database) as connection:
-        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "stopped"
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "running"
         assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == 1
 
 
@@ -2254,9 +2535,9 @@ def test_stale_writer_from_another_run_is_closed_before_takeover(tmp_path: Path)
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     instrument, specs = _specs()
-    Recorder(_config(database), FakeMarketData()).start(
-        now_us=100, instruments=(instrument,), subscriptions=specs
-    )
+    first = Recorder(_config(database), FakeMarketData())
+    first.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    first.abandon_unclean()
 
     second = Recorder(
         _config(
@@ -2297,9 +2578,8 @@ def test_stale_takeover_closes_every_owned_subscription_and_scopes_uncertainty(
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     instrument, specs = _specs()
-    Recorder(_config(database), FakeMarketData()).start(
-        now_us=100, instruments=(instrument,), subscriptions=specs
-    )
+    first = Recorder(_config(database), FakeMarketData())
+    first.start(now_us=100, instruments=(instrument,), subscriptions=specs)
     with connect_v2(database) as connection:
         if stale_lifecycle == "paused":
             connection.execute("UPDATE subscriptions SET lifecycle='paused' WHERE request_id=4")
@@ -2319,6 +2599,7 @@ def test_stale_takeover_closes_every_owned_subscription_and_scopes_uncertainty(
             "EXISTING_SCIENTIFIC_GAP",
             True,
         )
+    first.abandon_unclean()
 
     replacement = Recorder(
         _config(database, owner_id="owner-2", writer_lease_stale_us=15_000_000),
@@ -2375,11 +2656,11 @@ def test_stale_takeover_closure_is_idempotent_and_old_rows_are_retention_prunabl
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     instrument, specs = _specs()
-    Recorder(_config(database), FakeMarketData()).start(
-        now_us=100, instruments=(instrument,), subscriptions=specs
-    )
+    first = Recorder(_config(database), FakeMarketData())
+    first.start(now_us=100, instruments=(instrument,), subscriptions=specs)
     with connect_v2(database) as connection:
         connection.execute("UPDATE subscriptions SET lifecycle='disconnected'")
+    first.abandon_unclean()
 
     class RepeatedCloseRecorder(Recorder):
         def _close_stale_writer(self, *args: object, **kwargs: object) -> None:
@@ -2424,9 +2705,9 @@ def test_late_prior_run_callback_is_failed_and_receipted_by_current_recorder(
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     instrument, specs = _specs()
-    prior = Recorder(_config(database), FakeMarketData()).start(
-        now_us=100, instruments=(instrument,), subscriptions=specs
-    )
+    prior_recorder = Recorder(_config(database), FakeMarketData())
+    prior = prior_recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    prior_recorder.abandon_unclean()
     current_recorder = Recorder(
         _config(
             database,
@@ -3284,7 +3565,7 @@ def test_stale_recorder_object_cannot_mutate_or_touch_adapter_after_takeover(
     assert tuple(state) == (2, "running")
 
 
-def test_persisted_fatal_is_absorbing_for_same_object_and_future_start(tmp_path: Path) -> None:
+def test_persisted_fatal_blocks_same_run_but_not_an_unrelated_new_run(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     instrument, specs = _specs()
@@ -3298,10 +3579,293 @@ def test_persisted_fatal_is_absorbing_for_same_object_and_future_start(tmp_path:
             state.fences[0],
             MarketDataCallback("quote", 102, None, {"event_at_us": 102}),
         )
-    with pytest.raises(Exception, match="fatal"):
-        Recorder(_config(database, run_id="run-2"), FakeMarketData()).start(
+    recorder.abandon_unclean()
+    with pytest.raises(RecorderFatalError, match="operator action"):
+        Recorder(_config(database, owner_id="owner-2"), FakeMarketData()).start(
             now_us=103, instruments=(instrument,), subscriptions=specs
         )
+    unrelated = Recorder(
+        _config(database, run_id="run-2", owner_id="owner-2"), FakeMarketData()
+    ).start(now_us=104, instruments=(instrument,), subscriptions=specs)
+    assert unrelated.run_id == "run-2"
+    with connect_v2(database) as connection:
+        runs = dict(connection.execute("SELECT run_id, status FROM runs ORDER BY run_id"))
+        fatal_incident = connection.execute(
+            "SELECT code, resolved_at_us FROM incidents WHERE run_id='run-1' AND severity='fatal'"
+        ).fetchone()
+    assert runs == {"run-1": "fatal", "run-2": "running"}
+    assert tuple(fatal_incident) == ("TEST_FATAL", None)
+
+
+def test_recoverable_fatal_generation_restart_is_explicit_audited_and_preserves_evidence(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    failed = Recorder(_config(database), FakeMarketData())
+    failed.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    failed._fatal("POST_ADMISSION_PRESERVATION_FAILED", 101)
+    with pytest.raises(LocalWriterLockError, match="writer lock is held"):
+        recover_fatal_generation(
+            database=database,
+            run_id="run-1",
+            generation=1,
+            mode="prospective_record",
+            config_hash="a" * 64,
+            input_hash=market_data_input_hash((instrument,), specs),
+            fatal_code="POST_ADMISSION_PRESERVATION_FAILED",
+            operator="operator@example.invalid",
+            reason="must not override a live local process",
+            authorized_at_us=102,
+        )
+    failed.abandon_unclean()
+
+    with pytest.raises(LocalWriterLockError, match="market-data input is incompatible"):
+        recover_fatal_generation(
+            database=database,
+            run_id="run-1",
+            generation=1,
+            mode="prospective_record",
+            config_hash="a" * 64,
+            input_hash="b" * 64,
+            fatal_code="POST_ADMISSION_PRESERVATION_FAILED",
+            operator="operator@example.invalid",
+            reason="must not change the frozen input",
+            authorized_at_us=102,
+        )
+    recover_fatal_generation(
+        database=database,
+        run_id="run-1",
+        generation=1,
+        mode="prospective_record",
+        config_hash="a" * 64,
+        input_hash=market_data_input_hash((instrument,), specs),
+        fatal_code="POST_ADMISSION_PRESERVATION_FAILED",
+        operator="operator@example.invalid",
+        reason="verified durable evidence and restored maintenance dependency",
+        authorized_at_us=102,
+    )
+    restarted = Recorder(_config(database, owner_id="owner-2"), FakeMarketData()).start(
+        now_us=103,
+        instruments=(instrument,),
+        subscriptions=specs,
+    )
+
+    assert restarted.recorder_generation == 2
+    with connect_v2(database) as connection:
+        failed_generation = connection.execute(
+            "SELECT termination_code, fatal_recovery_authorized_at_us, "
+            "fatal_recovery_operator, recovered_fatal_code FROM recorder_generations "
+            "WHERE run_id='run-1' AND generation=1"
+        ).fetchone()
+        incidents = tuple(
+            connection.execute(
+                "SELECT severity, code, resolved_at_us FROM incidents WHERE run_id='run-1' "
+                "ORDER BY opened_at_us, code"
+            )
+        )
+    assert tuple(failed_generation) == (
+        "POST_ADMISSION_PRESERVATION_FAILED",
+        102,
+        "operator@example.invalid",
+        "POST_ADMISSION_PRESERVATION_FAILED",
+    )
+    assert [tuple(row) for row in incidents] == [
+        ("fatal", "POST_ADMISSION_PRESERVATION_FAILED", None),
+        ("info", "FATAL_GENERATION_RECOVERY_AUTHORIZED", None),
+    ]
+
+
+def test_fatal_generation_recovery_respects_storage_hard_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    failed = Recorder(_config(database), FakeMarketData())
+    failed.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    failed._fatal("POST_ADMISSION_PRESERVATION_FAILED", 101)
+    failed.abandon_unclean()
+    monkeypatch.setattr(
+        lifecycle_module,
+        "RetentionPolicy",
+        lambda: RetentionPolicy(database_cap_bytes=1, wal_cap_bytes=1),
+    )
+
+    with pytest.raises(LocalWriterLockError, match="database hard cap"):
+        recover_fatal_generation(
+            database=database,
+            run_id="run-1",
+            generation=1,
+            mode="prospective_record",
+            config_hash="a" * 64,
+            input_hash=market_data_input_hash((instrument,), specs),
+            fatal_code="POST_ADMISSION_PRESERVATION_FAILED",
+            operator="operator@example.invalid",
+            reason="capacity must remain fail closed",
+            authorized_at_us=102,
+        )
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute("SELECT status FROM runs WHERE run_id='run-1'").fetchone()[0]
+            == "fatal"
+        )
+
+
+def test_callback_identity_corruption_is_fatal_and_never_recoverable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 101, 101, {"event_at_us": 101, "bid": 100.0}),
+    )
+
+    def fail_projection(*_args: object, **_kwargs: object) -> None:
+        raise CallbackIdentityCollision("durable callback payload hash mismatch")
+
+    monkeypatch.setattr(recorder.inbox, "project_batch", fail_projection)
+    with pytest.raises(RecorderFatalError, match="callback provenance corruption"):
+        recorder.drain(now_us=102)
+    recorder.abandon_unclean()
+
+    with pytest.raises(LocalWriterLockError, match="not recoverable"):
+        recover_fatal_generation(
+            database=database,
+            run_id="run-1",
+            generation=1,
+            mode="prospective_record",
+            config_hash="a" * 64,
+            input_hash=market_data_input_hash((instrument,), specs),
+            fatal_code="CALLBACK_PROVENANCE_CORRUPTION",
+            operator="operator@example.invalid",
+            reason="semantic evidence corruption must stay closed",
+            authorized_at_us=103,
+        )
+    with connect_v2(database) as connection:
+        generation = connection.execute(
+            "SELECT termination_code FROM recorder_generations "
+            "WHERE run_id='run-1' AND generation=1"
+        ).fetchone()
+        incident = connection.execute(
+            "SELECT code FROM incidents WHERE run_id='run-1' AND severity='fatal'"
+        ).fetchone()
+    assert generation["termination_code"] == "CALLBACK_PROVENANCE_CORRUPTION"
+    assert incident["code"] == "CALLBACK_PROVENANCE_CORRUPTION"
+
+
+@pytest.mark.parametrize("fatal_code", ("INBOX_FULL", "RETENTION_INVARIANT_FAILED"))
+def test_hard_or_ambiguous_fatal_generation_cannot_be_recovered(
+    tmp_path: Path,
+    fatal_code: str,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    failed = Recorder(_config(database), FakeMarketData())
+    failed.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    failed._fatal(fatal_code, 101)
+    failed.abandon_unclean()
+
+    with pytest.raises(LocalWriterLockError, match="not recoverable"):
+        recover_fatal_generation(
+            database=database,
+            run_id="run-1",
+            generation=1,
+            mode="prospective_record",
+            config_hash="a" * 64,
+            input_hash=market_data_input_hash((instrument,), specs),
+            fatal_code=fatal_code,
+            operator="operator@example.invalid",
+            reason="must remain blocked",
+            authorized_at_us=102,
+        )
+    with pytest.raises(RecorderFatalError, match="operator action"):
+        Recorder(_config(database, owner_id="owner-2"), FakeMarketData()).start(
+            now_us=103,
+            instruments=(instrument,),
+            subscriptions=specs,
+        )
+
+
+def test_fatal_generation_recovery_cli_is_machine_readable(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    config_path = tmp_path / "recorder.json"
+    inputs_path = tmp_path / "market-data.json"
+    initialize_database(database)
+    config_path.write_text(
+        json.dumps(_config(database).model_dump(mode="json")),
+        encoding="utf-8",
+    )
+    instrument, specs = _specs()
+    inputs_path.write_text(
+        json.dumps(
+            {
+                "instruments": [
+                    {
+                        key: value
+                        for key, value in instrument.__dict__.items()
+                        if key
+                        in {
+                            "instrument_id",
+                            "ibkr_con_id",
+                            "kind",
+                            "symbol",
+                            "exchange",
+                            "currency",
+                        }
+                    }
+                ],
+                "subscriptions": [
+                    {key: value for key, value in item.__dict__.items() if key != "snapshot"}
+                    for item in specs
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    failed = Recorder(_config(database), FakeMarketData())
+    failed.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    failed._fatal("POST_ADMISSION_PRESERVATION_FAILED", 101)
+    failed.abandon_unclean()
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "recorder",
+            "recover-fatal-generation",
+            "--config",
+            str(config_path),
+            "--inputs",
+            str(inputs_path),
+            "--generation",
+            "1",
+            "--fatal-code",
+            "POST_ADMISSION_PRESERVATION_FAILED",
+            "--operator",
+            "on-call",
+            "--reason",
+            "maintenance dependency restored",
+            "--authorized-at-us",
+            "102",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == {
+        "authorized_at_us": 102,
+        "fatal_code": "POST_ADMISSION_PRESERVATION_FAILED",
+        "generation": 1,
+        "run_id": "run-1",
+        "status": "ok",
+    }
 
 
 @pytest.mark.parametrize(
@@ -4054,7 +4618,7 @@ def test_replay_rejects_oversized_callback_and_cleans_started_writer(tmp_path: P
         assert tuple(
             connection.execute("SELECT lifecycle, connection_state FROM runtime_state").fetchone()
         ) == ("stopped", "disconnected")
-        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "stopped"
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "running"
 
 
 def test_receipts_accept_interleaved_global_sequences_without_skipping_same_run(
@@ -4291,6 +4855,7 @@ def test_market_latest_resets_across_runs_and_tracks_each_field_source(tmp_path:
         MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 100.0}),
     )
     first.drain(now_us=102)
+    first.abandon_unclean()
     second = Recorder(
         _config(
             database,
@@ -4431,7 +4996,7 @@ def test_replay_malformed_callback_after_start_cleans_up_writer(tmp_path: Path) 
     )
     assert result.exit_code == 1
     with connect_v2(database) as connection:
-        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "stopped"
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "running"
         assert connection.execute("SELECT lifecycle FROM runtime_state").fetchone()[0] == "stopped"
 
 
@@ -4467,7 +5032,7 @@ def test_replay_foreign_unexpired_lease_errors_bounded_and_stops_current_writer(
     assert result.exit_code == 1
     assert payload["error"] == "ReplayBlockedError"
     with connect_v2(database) as connection:
-        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "stopped"
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "running"
         assert connection.execute("SELECT lifecycle FROM runtime_state").fetchone()[0] == "stopped"
 
 

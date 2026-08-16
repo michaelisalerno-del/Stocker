@@ -188,8 +188,10 @@ def _schema_digest(connection: sqlite3.Connection) -> str:
 
 
 @cache
-def _expected_schema_digest(migration_fingerprints: tuple[tuple[str, str], ...]) -> str:
-    plan = migration_plan()
+def _expected_schema_digest(
+    plan: tuple[Migration, ...],
+    migration_fingerprints: tuple[tuple[str, str], ...],
+) -> str:
     expected_prefix = tuple(
         (item.name, item.sha256) for item in plan[: len(migration_fingerprints)]
     )
@@ -212,19 +214,21 @@ def _verify_schema_structure(
     connection: sqlite3.Connection,
     migrations: tuple[Migration, ...],
     applied: set[int],
+    *,
+    default_plan: tuple[Migration, ...] | None = None,
 ) -> None:
+    expected_default_plan = default_plan if default_plan is not None else migration_plan()
+    if migrations != expected_default_plan:
+        return
     if (
-        migrations == migration_plan()
-        and applied == {item.version for item in migrations}
+        applied == {item.version for item in migrations}
         and _schema_tables(connection) != EXPECTED_TABLES
     ):
         raise SchemaError("database table set is incompatible with immediate V2")
-    default_plan = migration_plan()
-    if migrations == default_plan:
-        prefix = tuple(item for item in migrations if item.version in applied)
-        fingerprints = tuple((item.name, item.sha256) for item in prefix)
-        if _schema_digest(connection) != _expected_schema_digest(fingerprints):
-            raise SchemaError("database schema structure does not match the migration checksums")
+    prefix = tuple(item for item in migrations if item.version in applied)
+    fingerprints = tuple((item.name, item.sha256) for item in prefix)
+    if _schema_digest(connection) != _expected_schema_digest(migrations, fingerprints):
+        raise SchemaError("database schema structure does not match the migration checksums")
 
 
 def _read_only_connect(database_path: Path) -> sqlite3.Connection:
@@ -241,10 +245,16 @@ def _probe_v2(
     migrations: tuple[Migration, ...],
     *,
     verify_integrity: bool,
+    default_plan: tuple[Migration, ...] | None = None,
 ) -> set[int]:
     with _read_only_connect(database_path) as connection:
         applied = _verify_applied_migrations(connection, migrations)
-        _verify_schema_structure(connection, migrations, applied)
+        _verify_schema_structure(
+            connection,
+            migrations,
+            applied,
+            default_plan=default_plan,
+        )
         if verify_integrity and tuple(connection.execute("PRAGMA foreign_key_check")):
             raise SchemaError("database contains foreign-key violations")
         return applied
@@ -386,7 +396,16 @@ def connect_v2(database_path: str | Path, *, verify_schema: bool = True) -> sqli
     if not path.is_file():
         raise SchemaError("V2 database does not exist")
     migrations = migration_plan()
-    applied = _probe_v2(path, migrations, verify_integrity=False) if verify_schema else set()
+    applied = (
+        _probe_v2(
+            path,
+            migrations,
+            verify_integrity=False,
+            default_plan=migrations,
+        )
+        if verify_schema
+        else set()
+    )
     if verify_schema and applied != {item.version for item in migrations}:
         raise SchemaError("database schema is older than this runtime; run migrate")
     connection = _raw_connect(path)
@@ -395,7 +414,12 @@ def connect_v2(database_path: str | Path, *, verify_schema: bool = True) -> sqli
             applied = _verify_applied_migrations(connection, migrations)
             if applied != {item.version for item in migrations}:
                 raise SchemaError("database schema is older than this runtime; run migrate")
-            _verify_schema_structure(connection, migrations, applied)
+            _verify_schema_structure(
+                connection,
+                migrations,
+                applied,
+                default_plan=migrations,
+            )
         return connection
     except Exception:
         connection.close()

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+import stocker_runtime.storage.connection as connection_module
 from stocker_runtime import ProposedTradeLeg
 from stocker_runtime.cli import app as runtime_app
 from stocker_runtime.ingestion.inbox import (
@@ -524,6 +525,32 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
         connection.execute("UPDATE schema_migrations SET sha256 = ?", ("0" * 64,))
     with pytest.raises(SchemaError, match="checksum"):
         connect_v2(tampered)
+
+
+def test_connect_v2_reads_default_migration_plan_once_per_verified_connection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "verified.sqlite3"
+    initialize_database(database, applied_at_us=1)
+    migration_root = Path(connection_module.__file__).with_name("migrations")
+    expected_names = tuple(migration.name for migration in migration_plan())
+    migration_reads: list[str] = []
+    real_read_text = Path.read_text
+    connection_module._expected_schema_digest.cache_clear()
+
+    def count_migration_read(path: Path, *args: object, **kwargs: object) -> str:
+        if path.parent == migration_root and path.suffix == ".sql":
+            migration_reads.append(path.name)
+        return real_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", count_migration_read)
+    with connect_v2(database):
+        pass
+    with connect_v2(database):
+        pass
+
+    assert tuple(migration_reads) == expected_names * 2
 
 
 def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_history(

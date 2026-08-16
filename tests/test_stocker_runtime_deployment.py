@@ -565,11 +565,14 @@ def test_cutover_verifier_bootstrap_rejects_trust_boundary_mutations(
     compatibility_prefix = """
 import os
 import pathlib
+import stat
 
 _real_lstat = pathlib.Path.lstat
 def _controlled_test_lstat(path):
     metadata = _real_lstat(path)
     values = list(metadata)
+    if stat.S_ISDIR(metadata.st_mode):
+        values[0] &= ~(stat.S_IWGRP | stat.S_IWOTH)
     values[4] = 1 if os.environ.get("WRONG_OWNER") == str(path) else 0
     values[5] = 0
     return os.stat_result(values)

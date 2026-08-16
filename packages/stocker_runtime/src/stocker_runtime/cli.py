@@ -75,7 +75,7 @@ MAX_REPLAY_INSTRUMENTS = 10_000
 MAX_REPLAY_SUBSCRIPTIONS = 10_000
 MAX_REPLAY_CALLBACKS = 50_000
 MAX_REPLAY_CALLBACK_BYTES = 65_536
-RECORDER_DRAIN_INTERVAL_SECONDS = 0.05
+RECORDER_IDLE_WAIT_SECONDS = 1.0
 RECORDER_HEALTH_INTERVAL_US = 1_000_000
 RECORDER_MAINTENANCE_INTERVAL_US = 10_000_000
 _NEW_YORK = ZoneInfo("America/New_York")
@@ -499,6 +499,8 @@ def recorder_run_command(
         nonlocal termination
         termination = "sigterm" if signum == signal.SIGTERM else "sigint"
         shutdown.set()
+        if recorder is not None:
+            recorder.wake_pending_callback_drain()
 
     previous_sigterm = signal.signal(signal.SIGTERM, request_shutdown)
     previous_sigint = signal.signal(signal.SIGINT, request_shutdown)
@@ -521,7 +523,18 @@ def recorder_run_command(
         started_loop_at_us = time.time_ns() // 1_000
         next_health_at_us = started_loop_at_us + RECORDER_HEALTH_INTERVAL_US
         next_maintenance_at_us = started_loop_at_us + RECORDER_MAINTENANCE_INTERVAL_US
-        while not shutdown.wait(RECORDER_DRAIN_INTERVAL_SECONDS):
+        while not shutdown.is_set():
+            before_wait_us = time.time_ns() // 1_000
+            wait_until_us = min(next_health_at_us, next_maintenance_at_us)
+            recorder.wait_for_pending_callbacks(
+                timeout=min(
+                    RECORDER_IDLE_WAIT_SECONDS,
+                    max(0, wait_until_us - before_wait_us) / 1_000_000,
+                )
+            )
+            if shutdown.is_set():
+                break
+            recorder.prepare_pending_callback_drain()
             now_us = time.time_ns() // 1_000
             health_due = now_us >= next_health_at_us
             recorder.drain(now_us=now_us, run_downstream_when_idle=health_due)

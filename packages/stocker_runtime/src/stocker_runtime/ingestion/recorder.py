@@ -264,6 +264,7 @@ class Recorder:
         self._starting_dynamic_request_ids: set[int] = set()
         self._pending_dynamic_statuses: list[MarketDataStatus] = []
         self._retention_maintenance_deferred = False
+        self._pending_callback_wakeup = threading.Event()
 
     @contextmanager
     def _adapter_reset_transition(self) -> Iterator[None]:
@@ -2567,7 +2568,9 @@ class Recorder:
         """External callback boundary: durable admission completes before return."""
 
         try:
-            return self.inbox.admit(fence, callback, authority=self._authority())
+            result = self.inbox.admit(fence, callback, authority=self._authority())
+            self._pending_callback_wakeup.set()
+            return result
         except InboxAuthorityLost as error:
             self._cleanup_private_adapter()
             raise AuthoritativeLeaseLost(str(error)) from error
@@ -2580,6 +2583,21 @@ class Recorder:
             except AuthoritativeLeaseLost:
                 self._cleanup_private_adapter()
             raise
+
+    def wait_for_pending_callbacks(self, *, timeout: float) -> bool:
+        """Sleep until durable callback admission or the next scheduled health task."""
+
+        return self._pending_callback_wakeup.wait(timeout)
+
+    def prepare_pending_callback_drain(self) -> None:
+        """Consume the wakeup before polling; concurrent admissions set it again."""
+
+        self._pending_callback_wakeup.clear()
+
+    def wake_pending_callback_drain(self) -> None:
+        """Wake the recorder loop for shutdown without touching callback evidence."""
+
+        self._pending_callback_wakeup.set()
 
     def drain(
         self,
@@ -2601,6 +2619,8 @@ class Recorder:
                 limit=limit,
                 authority=authority,
             )
+            if len(leased_callbacks) == limit:
+                self._pending_callback_wakeup.set()
             if not leased_callbacks and not run_downstream_when_idle:
                 return 0
             if leased_callbacks:

@@ -78,7 +78,7 @@ def test_retention_checkpoint_capacity_exceeds_observed_ingestion_rate() -> None
     )
 
     assert callback_capacity_per_second >= 100
-    assert receipt_capacity_per_second >= 1 / cli_module.RECORDER_DRAIN_INTERVAL_SECONDS
+    assert receipt_capacity_per_second >= 100
 
 
 def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
@@ -542,7 +542,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
         connect_v2(tampered)
 
 
-def test_connect_v2_reads_default_migration_plan_once_per_verified_connection(
+def test_connect_v2_reuses_one_immutable_default_migration_plan_per_process(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -560,12 +560,13 @@ def test_connect_v2_reads_default_migration_plan_once_per_verified_connection(
         return real_read_text(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", count_migration_read)
+    connection_module._default_migration_plan.cache_clear()
     with connect_v2(database):
         pass
     with connect_v2(database):
         pass
 
-    assert tuple(migration_reads) == expected_names * 2
+    assert tuple(migration_reads) == expected_names
 
 
 def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_history(

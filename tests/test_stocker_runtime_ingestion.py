@@ -1527,6 +1527,54 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
         )
 
 
+def test_durable_callback_admission_wakes_the_idle_drain_without_polling(tmp_path: Path) -> None:
+    database = tmp_path / "callback-wakeup.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    fence = next(item for item in state.fences if item.request_id == 3)
+
+    assert recorder.wait_for_pending_callbacks(timeout=0) is False
+    recorder.receive(
+        fence,
+        MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 100.0}),
+    )
+    assert recorder.wait_for_pending_callbacks(timeout=0) is True
+
+    recorder.prepare_pending_callback_drain()
+    assert recorder.wait_for_pending_callbacks(timeout=0) is False
+    assert recorder.drain(now_us=102, run_downstream_when_idle=False) == 1
+    recorder.stop(now_us=103)
+
+
+def test_full_drain_batch_rearms_wakeup_for_preexisting_backlog(tmp_path: Path) -> None:
+    database = tmp_path / "callback-backlog-wakeup.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    fence = next(item for item in state.fences if item.request_id == 3)
+    for offset in range(257):
+        recorder.receive(
+            fence,
+            MarketDataCallback(
+                "quote",
+                101 + offset,
+                None,
+                {"event_at_us": 101 + offset, "bid": 100.0 + offset},
+            ),
+        )
+
+    recorder.prepare_pending_callback_drain()
+    assert recorder.drain(now_us=358, run_downstream_when_idle=False) == 256
+    assert recorder.wait_for_pending_callbacks(timeout=0) is True
+
+    recorder.prepare_pending_callback_drain()
+    assert recorder.drain(now_us=359, run_downstream_when_idle=False) == 1
+    recorder.stop(now_us=360)
+
+
 def test_full_batch_defers_only_when_each_leased_callback_is_receipted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

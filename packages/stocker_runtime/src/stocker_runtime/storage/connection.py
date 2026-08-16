@@ -72,10 +72,7 @@ EXPECTED_TABLES = frozenset(
 )
 
 
-def migration_plan(root: Path | None = None) -> tuple[Migration, ...]:
-    """Load a contiguous, uniquely numbered migration plan."""
-
-    migration_root = root or Path(__file__).with_name("migrations")
+def _load_migration_plan(migration_root: Path) -> tuple[Migration, ...]:
     migrations: list[Migration] = []
     for path in sorted(migration_root.glob("*.sql")):
         match = MIGRATION_PATTERN.fullmatch(path.name)
@@ -98,6 +95,19 @@ def migration_plan(root: Path | None = None) -> tuple[Migration, ...]:
     if len({item.name for item in migrations}) != len(migrations):
         raise SchemaError("duplicate migration names")
     return tuple(migrations)
+
+
+@cache
+def _default_migration_plan() -> tuple[Migration, ...]:
+    """Snapshot the artifact-verified, immutable release migrations once per process."""
+
+    return _load_migration_plan(Path(__file__).with_name("migrations"))
+
+
+def migration_plan(root: Path | None = None) -> tuple[Migration, ...]:
+    """Load a contiguous, uniquely numbered migration plan."""
+
+    return _default_migration_plan() if root is None else _load_migration_plan(root)
 
 
 def _apply_pragmas(connection: sqlite3.Connection) -> None:

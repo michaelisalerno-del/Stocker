@@ -28,7 +28,7 @@ from stocker_runtime.storage.shadow import (
 DAY_US = 86_400_000_000
 MAX_MAINTENANCE_BATCH_ROWS = 10_000
 DEFAULT_MAINTENANCE_BATCH_ROWS = 2_000
-MAX_RECEIPT_CHECKPOINTS_PER_PASS = 1_000
+MAX_RECEIPT_CHECKPOINTS_PER_PASS = 1_200
 MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS = 1_200
 # Bounded forensic headroom lets ShadowEngine persist the reason it rejects >8-leg proposals.
 MAX_STORED_IDEA_OUTPUT_LEGS = 16

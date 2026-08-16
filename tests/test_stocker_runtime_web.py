@@ -36,6 +36,7 @@ EXPECTED_API_ROUTES = {
     "/api/v2/results",
     "/api/v2/results/{position_id}",
     "/api/v2/diagnostics",
+    "/api/v2/ready",
 }
 
 
@@ -90,9 +91,10 @@ def _seed_live(database: Path) -> None:
         )
         connection.execute(
             "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
-            "recorder_generation, connection_generation, callback_kind, received_at_us, "
+            "recorder_generation, connection_generation, request_id, callback_kind, "
+            "received_at_us, "
             "payload_sha256, lifecycle) VALUES "
-            "(1, 'quote-aapl', 'run-live', 2, 4, 'quote', 190, ?, 'pending')",
+            "(1, 'quote-aapl', 'run-live', 2, 4, 7, 'quote', 190, ?, 'pending')",
             (_hash(payload),),
         )
         connection.execute(
@@ -110,6 +112,38 @@ def _seed_live(database: Path) -> None:
             "last_source_event_id) VALUES "
             "('run-live', 'AAPL', 'quotes', 'quote-aapl', 189, 190, 'quote', 0, "
             "101.25, 'quote-aapl', 101.30, 'quote-aapl', 101.27, 'quote-aapl')"
+        )
+
+
+def _make_live_ready(database: Path, *, now_us: int) -> None:
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE runtime_state SET lifecycle='running', reason=NULL, "
+            "process_heartbeat_at_us=?, connection_state='connected', "
+            "inbox_nonterminal_count=0 WHERE run_id='run-live'",
+            (now_us,),
+        )
+        connection.execute(
+            "UPDATE subscriptions SET lifecycle='active', optional=0, stale_after_us=15000000 "
+            "WHERE run_id='run-live'"
+        )
+        connection.execute(
+            "UPDATE callback_inbox SET received_at_us=?, lifecycle='acknowledged', "
+            "normalized_event_id='quote-aapl', acknowledged_at_us=? "
+            "WHERE event_uid='quote-aapl'",
+            (now_us, now_us),
+        )
+
+
+def _add_required_trade_feed(database: Path, *, opened_at_us: int, lifecycle: str) -> None:
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
+            "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
+            "continuity_required, optional, requirements_hash, opened_at_us, stale_after_us) "
+            "VALUES ('sub-aapl-trades', 'run-live', 2, 4, 'AAPL', 'trades', 8, ?, 1, 0, ?, ?, "
+            "15000000)",
+            (lifecycle, "8" * 64, opened_at_us),
         )
 
 
@@ -356,7 +390,7 @@ def _seed_results(database: Path) -> None:
         )
 
 
-def test_openapi_contains_exactly_seven_get_routes(tmp_path: Path) -> None:
+def test_openapi_contains_exactly_eight_get_routes(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     client = TestClient(create_web_app(_config(database)))
@@ -410,6 +444,211 @@ def test_live_reads_current_runtime_active_feeds_and_latest_values(tmp_path: Pat
     assert payload["gaps"] == {"unresolved": 0, "data_loss_possible": 0}
     assert payload["backup"] == {"available": False, "entries": 0, "latest": None}
     assert "order_capability" not in json.dumps(payload)
+
+
+def test_readiness_is_green_outside_regular_session_without_recent_ticks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "ready-outside.sqlite3"
+    _seed_live(database)
+    sunday_us = 1_786_881_600_000_000
+    _make_live_ready(database, now_us=sunday_us)
+    _add_required_trade_feed(database, opened_at_us=100, lifecycle="active")
+    monkeypatch.setattr(web_queries.time, "time_ns", lambda: sunday_us * 1_000)
+
+    response = TestClient(create_web_app(_config(database))).get("/api/v2/ready")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is True
+    assert payload["selection_reason"] == "fresh_recorder_generation"
+    assert payload["selected_run"] == "run-live"
+    assert payload["recorder_generation"] == 2
+    assert payload["session"]["state"] == "outside_regular_session"
+    assert payload["reasons"] == []
+    assert len(payload["feeds"]) == 2
+    assert all(feed["stale"] is False for feed in payload["feeds"])
+
+
+def test_readiness_is_per_feed_and_busy_quote_cannot_hide_dead_required_trade(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "ready-per-feed.sqlite3"
+    _seed_live(database)
+    now_us = 1_786_881_600_000_000
+    _make_live_ready(database, now_us=now_us)
+    _add_required_trade_feed(database, opened_at_us=now_us, lifecycle="disconnected")
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE subscriptions SET retry_count=2, next_retry_at_us=?, "
+            "last_attempt_at_us=?, last_error_code='IBKR_STATUS_162_REQUEST_REJECTED' "
+            "WHERE subscription_id='sub-aapl-trades'",
+            (now_us + 2_000_000, now_us),
+        )
+        connection.execute(
+            "INSERT INTO incidents(incident_id, run_id, scope, severity, code, subscription_id, "
+            "opened_at_us, details_json) VALUES ('trade-dead', 'run-live', 'market_data', "
+            "'degraded', 'IBKR_STATUS_162_REQUEST_REJECTED', 'sub-aapl-trades', ?, '{}')",
+            (now_us,),
+        )
+    monkeypatch.setattr(web_queries.time, "time_ns", lambda: now_us * 1_000)
+
+    response = TestClient(create_web_app(_config(database))).get("/api/v2/ready")
+
+    assert response.status_code == 503
+    payload = response.json()
+    by_kind = {feed["feed_kind"]: feed for feed in payload["feeds"]}
+    assert by_kind["quotes"]["active"] is True
+    assert by_kind["trades"]["active"] is False
+    assert by_kind["trades"]["retrying"] is True
+    assert by_kind["trades"]["incident"] == "IBKR_STATUS_162_REQUEST_REJECTED"
+    assert any(
+        reason.startswith("REQUIRED_SUBSCRIPTION_INACTIVE:AAPL:trades")
+        for reason in payload["reasons"]
+    )
+
+
+def test_regular_session_readiness_uses_each_required_feed_freshness(tmp_path: Path) -> None:
+    database = tmp_path / "ready-session-freshness.sqlite3"
+    _seed_live(database)
+    regular_now_us = 1_786_372_200_000_000
+    _make_live_ready(database, now_us=regular_now_us)
+    _add_required_trade_feed(
+        database,
+        opened_at_us=regular_now_us - 30_000_000,
+        lifecycle="active",
+    )
+
+    payload = ReadModel(_config(database)).ready(now_us=regular_now_us)
+
+    assert payload["ready"] is False
+    assert payload["session"]["state"] == "regular_session"
+    by_kind = {feed["feed_kind"]: feed for feed in payload["feeds"]}
+    assert by_kind["quotes"]["stale"] is False
+    assert by_kind["trades"]["stale"] is True
+    assert any(
+        reason.startswith("REQUIRED_FEED_STALE:AAPL:trades") for reason in payload["reasons"]
+    )
+
+
+def test_readiness_excludes_completed_dynamic_snapshot_from_expected_set(tmp_path: Path) -> None:
+    database = tmp_path / "ready-completed-snapshot.sqlite3"
+    _seed_live(database)
+    now_us = 1_786_881_600_000_000
+    _make_live_ready(database, now_us=now_us)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO subscriptions(subscription_id, run_id, recorder_generation, "
+            "connection_generation, instrument_id, feed_kind, request_id, lifecycle, "
+            "continuity_required, optional, requirements_hash, opened_at_us, closed_at_us, "
+            "snapshot, stale_after_us) VALUES ('completed-option-snapshot', 'run-live', 2, 4, "
+            "'AAPL', 'option_greeks', 9, 'closed', 1, 0, ?, ?, ?, 1, 15000000)",
+            ("9" * 64, now_us - 2_000_000, now_us - 1_000_000),
+        )
+
+    payload = ReadModel(_config(database)).ready(now_us=now_us)
+
+    assert payload["ready"] is True
+    assert [feed["identity"] for feed in payload["feeds"]] == ["AAPL:quotes:7"]
+
+
+def test_readiness_run_selection_ignores_newer_failed_attempt_and_pinning_is_exact(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "ready-selection.sqlite3"
+    _seed_live(database)
+    now_us = 1_786_881_600_000_000
+    _make_live_ready(database, now_us=now_us)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO runs VALUES ('newer-failed', 'prospective_record', 'ibkr', ?, ?, ?, "
+            "'deadbee', 'prospective_protected', 'fatal', NULL)",
+            (now_us + 1, now_us + 2, "9" * 64),
+        )
+
+    selected = ReadModel(_config(database)).ready(now_us=now_us)
+    missing = ReadModel(_config(database, run_id="missing-run")).ready(now_us=now_us)
+    failed = ReadModel(_config(database, run_id="newer-failed")).ready(now_us=now_us)
+
+    assert selected["selected_run"] == "run-live"
+    assert selected["selection_reason"] == "fresh_recorder_generation"
+    assert selected["ready"] is False
+    assert selected["newer_nonoperational_run"]["run_id"] == "newer-failed"
+    assert "NEWER_NONOPERATIONAL_RUN_PRESENT" in selected["reasons"]
+    assert missing["ready"] is False
+    assert missing["selection_reason"] == "pinned_run_unavailable"
+    assert failed["selected_run"] == "newer-failed"
+    assert failed["ready"] is False
+    assert "RUN_NOT_OPERATIONAL" in failed["reasons"]
+
+
+def test_readiness_rejects_stale_process_heartbeat_and_excess_backlog(tmp_path: Path) -> None:
+    database = tmp_path / "ready-recorder-health.sqlite3"
+    _seed_live(database)
+    now_us = 1_786_881_600_000_000
+    _make_live_ready(database, now_us=now_us)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE runtime_state SET process_heartbeat_at_us=?, inbox_nonterminal_count=5001",
+            (now_us - 5_000_001,),
+        )
+
+    payload = ReadModel(_config(database)).ready(now_us=now_us)
+
+    assert payload["ready"] is False
+    assert payload["selection_reason"] == "stale_recorder_generation"
+    assert "RECORDER_HEARTBEAT_STALE" in payload["reasons"]
+    assert "DURABLE_INBOX_BACKLOG_HIGH" in payload["reasons"]
+    assert payload["inbox"]["threshold"] == 5_000
+
+
+def test_readiness_reports_no_active_run_and_keeps_stopped_run_pinning_exact(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "ready-no-active.sqlite3"
+    _seed_live(database)
+    now_us = 1_786_881_600_000_000
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE recorder_generations SET ended_at_us=?, clean_stop=1, "
+            "termination_code='clean_stop' WHERE run_id='run-live' AND generation=2",
+            (now_us,),
+        )
+        connection.execute(
+            "UPDATE runtime_state SET lifecycle='stopped', connection_state='disconnected' "
+            "WHERE run_id='run-live'"
+        )
+        connection.execute(
+            "UPDATE runs SET status='stopped', ended_at_us=? WHERE run_id='run-live'",
+            (now_us,),
+        )
+
+    unpinned = ReadModel(_config(database)).ready(now_us=now_us)
+    pinned = ReadModel(_config(database, run_id="run-live")).ready(now_us=now_us)
+
+    assert unpinned["selected_run"] is None
+    assert unpinned["selection_reason"] == "no_active_operational_run"
+    assert pinned["selected_run"] == "run-live"
+    assert pinned["selection_reason"] == "pinned_run"
+    assert pinned["ready"] is False
+    assert "RUN_NOT_OPERATIONAL" in pinned["reasons"]
+
+
+def test_readiness_reports_database_unreadable_without_affecting_liveness(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.sqlite3"
+    client = TestClient(create_web_app(_config(missing)))
+
+    assert client.get("/").status_code == 200
+    response = client.get("/api/v2/ready")
+
+    assert response.status_code == 503
+    assert response.json()["reasons"] == ["DATABASE_UNREADABLE"]
+    assert response.json()["database"] == {
+        "readable": False,
+        "writer_admission_healthy": False,
+    }
 
 
 def test_live_uses_the_configured_or_latest_shadow_recorder(tmp_path: Path) -> None:
@@ -958,6 +1197,10 @@ def test_web_config_fails_closed_for_unsafe_network_and_auth_settings(
     )
     with pytest.raises(RuntimeError, match="authentication token is absent"):
         create_web_app(missing_token)
+    assert _config(database).query_budget_ms == 250
+    assert _config(database, query_budget_ms=500).query_budget_ms == 500
+    with pytest.raises(ValidationError):
+        _config(database, query_budget_ms=501)
 
 
 def test_runtime_cli_owns_the_v2_web_entrypoint(

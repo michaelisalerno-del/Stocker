@@ -10,11 +10,9 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import asdict
-from datetime import UTC, date, datetime
-from functools import lru_cache
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
-from zoneinfo import ZoneInfo
+from typing import Annotated, Literal, cast
 
 import typer
 
@@ -44,6 +42,9 @@ from stocker_runtime.ingestion.ibkr_api import (
     write_official_ibkr_api_update_status,
 )
 from stocker_runtime.ingestion.lifecycle import recover_fatal_generation
+from stocker_runtime.market_session import (
+    market_data_expected_since_us as _market_data_expected_since_us,
+)
 from stocker_runtime.storage import (
     BackupError,
     BackupPolicy,
@@ -81,35 +82,6 @@ MAX_REPLAY_CALLBACK_BYTES = 65_536
 RECORDER_IDLE_WAIT_SECONDS = 1.0
 RECORDER_HEALTH_INTERVAL_US = 1_000_000
 RECORDER_MAINTENANCE_INTERVAL_US = 10_000_000
-_NEW_YORK = ZoneInfo("America/New_York")
-
-
-@lru_cache(maxsize=32)
-def _xnys_session_window_us(session_date: date) -> tuple[int, int] | None:
-    import pandas_market_calendars as market_calendars
-
-    schedule = market_calendars.get_calendar("NYSE").schedule(
-        start_date=session_date.isoformat(),
-        end_date=session_date.isoformat(),
-    )
-    if schedule.empty:
-        return None
-    row = schedule.iloc[0]
-    market_open = cast(Any, row["market_open"])
-    market_close = cast(Any, row["market_close"])
-    return (
-        int(market_open.timestamp() * 1_000_000),
-        int(market_close.timestamp() * 1_000_000),
-    )
-
-
-def _market_data_expected_since_us(now_us: int) -> int | None:
-    session_date = datetime.fromtimestamp(now_us / 1_000_000, UTC).astimezone(_NEW_YORK).date()
-    window = _xnys_session_window_us(session_date)
-    if window is None:
-        return None
-    opened_at_us, closed_at_us = window
-    return opened_at_us if opened_at_us <= now_us < closed_at_us else None
 
 
 def _recorder_health_tick(recorder: Recorder, *, now_us: int) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import sqlite3
 import time
 import uuid
 from collections import OrderedDict, deque
@@ -176,6 +177,32 @@ def create_web_app(config: WebConfig) -> FastAPI:
     @app.get("/api/v2/meta")
     def meta() -> dict[str, Any]:
         return read_model.meta()
+
+    @app.get("/api/v2/ready")
+    def ready() -> JSONResponse:
+        try:
+            projection = read_model.ready()
+        except QueryTimeoutError:
+            projection = {
+                "ready": False,
+                "selection_reason": "web_query_timeout",
+                "selected_run": config.run_id,
+                "recorder_generation": None,
+                "reasons": ["WEB_QUERY_TIMEOUT"],
+                "feeds": [],
+                "database": {"readable": False, "writer_admission_healthy": False},
+            }
+        except (OSError, sqlite3.Error):
+            projection = {
+                "ready": False,
+                "selection_reason": "database_unreadable",
+                "selected_run": config.run_id,
+                "recorder_generation": None,
+                "reasons": ["DATABASE_UNREADABLE"],
+                "feeds": [],
+                "database": {"readable": False, "writer_admission_healthy": False},
+            }
+        return JSONResponse(status_code=200 if projection["ready"] else 503, content=projection)
 
     @app.get("/api/v2/live")
     def live(

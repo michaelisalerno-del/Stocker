@@ -258,6 +258,22 @@ class RetentionManager:
         wal_path = Path(f"{self.database_path}-wal")
         return page_count * page_size, wal_path.stat().st_size if wal_path.exists() else 0
 
+    def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+        """Measure hard-cap state without running or bypassing retention work."""
+
+        connection = connect_v2(self.database_path)
+        try:
+            database_bytes, wal_bytes = self._measured_sizes(connection)
+        finally:
+            connection.close()
+        state = _cap_state(database_bytes, self.policy.database_cap_bytes)
+        required_action = "STORAGE_CAP_FATAL" if state is StorageCapState.FATAL else None
+        if wal_bytes >= self.policy.wal_cap_bytes:
+            state = StorageCapState.FATAL
+            if required_action is None:
+                required_action = "WAL_CAP_FATAL"
+        return state, database_bytes, wal_bytes, required_action
+
     def _compact_payloads(
         self,
         connection: sqlite3.Connection,

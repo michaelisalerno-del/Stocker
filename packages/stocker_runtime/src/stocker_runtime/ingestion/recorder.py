@@ -69,6 +69,7 @@ from stocker_runtime.ingestion.subscription_supervisor import retry_disposition
 from stocker_runtime.shadow import ShadowEngine
 from stocker_runtime.storage import (
     MaintenanceDeadlineExceeded,
+    RetentionInvariantError,
     RetentionManager,
     StorageCapState,
     connect_v2,
@@ -179,6 +180,20 @@ def validate_market_data_inputs(
     subscriptions: tuple[SubscriptionSpec, ...],
 ) -> None:
     """Reject a production desired set with no usable, unambiguous required work."""
+
+    _validate_market_data_inputs(instruments, subscriptions)
+    if any(item.snapshot for item in subscriptions):
+        raise RecorderFatalError(
+            "market-data input cannot configure base snapshot subscriptions; "
+            "snapshots are recorder-managed dynamic work"
+        )
+
+
+def _validate_market_data_inputs(
+    instruments: tuple[InstrumentSpec, ...],
+    subscriptions: tuple[SubscriptionSpec, ...],
+) -> None:
+    """Validate the complete internal desired set, including managed snapshots."""
 
     if not instruments:
         raise RecorderFatalError("market-data input has zero instruments")
@@ -352,6 +367,10 @@ class Recorder:
         self._starting_dynamic_request_ids: set[int] = set()
         self._pending_dynamic_statuses: list[MarketDataStatus] = []
         self._retention_maintenance_deferred = False
+        self._component_failures: dict[str, tuple[int, int]] = {}
+        self._component_first_failure_at_us: dict[str, int] = {}
+        self._component_pending_incidents: dict[str, str] = {}
+        self._component_observations: set[str] = set()
         self._pending_callback_wakeup = threading.Event()
         self._writer_lock = LocalWriterLock.for_database(config.database)
 
@@ -432,7 +451,7 @@ class Recorder:
         instruments, subscriptions, generated_idea_subscriptions = self._prepare_inputs(
             instruments, subscriptions
         )
-        validate_market_data_inputs(instruments, subscriptions)
+        _validate_market_data_inputs(instruments, subscriptions)
         self._instruments = instruments
         self._base_subscriptions = subscriptions
         self._subscriptions = subscriptions
@@ -2706,6 +2725,207 @@ class Recorder:
 
         return self._pending_callback_wakeup.wait(timeout)
 
+    @staticmethod
+    def _hard_component_error(error: BaseException) -> bool:
+        if not isinstance(error, sqlite3.Error):
+            return False
+        code = getattr(error, "sqlite_errorcode", None)
+        if code is None:
+            message = str(error).lower()
+            return any(
+                marker in message
+                for marker in ("malformed", "not a database", "readonly", "disk i/o", "full")
+            )
+        return int(code) & 0xFF in {
+            sqlite3.SQLITE_CORRUPT,
+            sqlite3.SQLITE_NOTADB,
+            sqlite3.SQLITE_READONLY,
+            sqlite3.SQLITE_IOERR,
+            sqlite3.SQLITE_FULL,
+        }
+
+    @staticmethod
+    def _component_code(component: str) -> str:
+        return f"COMPONENT_{component.upper()}_FAILED"
+
+    def _component_failure(
+        self,
+        component: str,
+        *,
+        now_us: int,
+        error_name: str,
+    ) -> bool:
+        failures, _retry_at_us = self._component_failures.get(component, (0, 0))
+        failures += 1
+        delay_us = min(60_000_000, 1_000_000 * 2 ** min(failures - 1, 6))
+        retry_at_us = now_us + delay_us
+        self._component_first_failure_at_us.setdefault(component, now_us)
+        self._component_failures[component] = (failures, retry_at_us)
+        self._component_pending_incidents[component] = error_name
+        if self._persist_component_incident(component, now_us=now_us):
+            self._component_pending_incidents.pop(component, None)
+            return True
+        # Do not honor a process-local backoff until its incident is durable.
+        # The next ordinary recorder pass retries publication immediately.
+        self._component_failures[component] = (failures, now_us)
+        return False
+
+    def _persist_component_incident(self, component: str, *, now_us: int) -> bool:
+        failures, retry_at_us = self._component_failures[component]
+        error_name = self._component_pending_incidents[component]
+        opened_at_us = self._component_first_failure_at_us[component]
+        code = self._component_code(component)
+        generation = self._authority_state().recorder_generation
+        incident_id = hashlib.sha256(
+            f"{self.config.run_id}|{generation}|component|{component}|{opened_at_us}".encode()
+        ).hexdigest()
+        details_json = canonical_json_bytes(
+            cast(
+                JsonValue,
+                {
+                    "component": component,
+                    "consecutive_failures": failures,
+                    "error": error_name,
+                    "next_retry_at_us": retry_at_us,
+                },
+            )
+        ).decode()
+        try:
+            with connect_v2(self.config.database) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._verify_owned(connection)
+                connection.execute(
+                    "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
+                    "opened_at_us, details_json) VALUES (?, ?, 'component', 'degraded', ?, ?, ?) "
+                    "ON CONFLICT(incident_id) DO UPDATE SET resolved_at_us=NULL, "
+                    "details_json=excluded.details_json",
+                    (incident_id, self.config.run_id, code, opened_at_us, details_json),
+                )
+                connection.execute(
+                    "UPDATE runtime_state SET lifecycle='degraded', reason=? WHERE run_id=? "
+                    "AND recorder_generation=? AND lifecycle='running'",
+                    (code, self.config.run_id, generation),
+                )
+                connection.commit()
+            return True
+        except sqlite3.OperationalError as error:
+            if not self._is_sqlite_contention(error):
+                raise
+            return False
+
+    def _component_recovered(self, component: str, *, now_us: int) -> bool:
+        if component in self._component_pending_incidents:
+            if not self._persist_component_incident(component, now_us=now_us):
+                failures, _retry_at_us = self._component_failures[component]
+                self._component_failures[component] = (failures, now_us + 1_000_000)
+                return False
+            self._component_pending_incidents.pop(component, None)
+        opened_at_us = self._component_first_failure_at_us.get(component, now_us)
+        incident_id = hashlib.sha256(
+            f"{self.config.run_id}|{self._authority_state().recorder_generation}|component|"
+            f"{component}|{opened_at_us}".encode()
+        ).hexdigest()
+        recovery_details_json = canonical_json_bytes(
+            cast(JsonValue, {"component": component, "recovered": True})
+        ).decode()
+        try:
+            with connect_v2(self.config.database) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._verify_owned(connection)
+                connection.execute(
+                    "INSERT OR IGNORE INTO incidents(incident_id, run_id, scope, severity, code, "
+                    "opened_at_us, details_json) VALUES (?, ?, 'component', 'degraded', ?, ?, ?)",
+                    (
+                        incident_id,
+                        self.config.run_id,
+                        self._component_code(component),
+                        opened_at_us,
+                        recovery_details_json,
+                    ),
+                )
+                connection.execute(
+                    "UPDATE incidents SET resolved_at_us=? WHERE incident_id=? "
+                    "AND opened_at_us<=? AND resolved_at_us IS NULL",
+                    (now_us, incident_id, now_us),
+                )
+                unresolved_components = connection.execute(
+                    "SELECT 1 FROM incidents WHERE run_id=? AND scope='component' "
+                    "AND resolved_at_us IS NULL AND incident_id!=? LIMIT 1",
+                    (self.config.run_id, incident_id),
+                ).fetchone()
+                required_incomplete = connection.execute(
+                    "SELECT 1 FROM subscriptions WHERE run_id=? AND recorder_generation=? "
+                    "AND connection_generation=? AND optional=0 AND lifecycle!='active' "
+                    "AND NOT (snapshot=1 AND lifecycle='closed') LIMIT 1",
+                    (
+                        self.config.run_id,
+                        self._authority_state().recorder_generation,
+                        self._authority_state().connection_generation,
+                    ),
+                ).fetchone()
+                if unresolved_components is None and required_incomplete is None:
+                    connection.execute(
+                        "UPDATE runtime_state SET lifecycle='running', reason=NULL WHERE run_id=? "
+                        "AND recorder_generation=? AND connection_state='connected' "
+                        "AND lifecycle='degraded' AND reason LIKE 'COMPONENT_%'",
+                        (self.config.run_id, self._authority_state().recorder_generation),
+                    )
+                connection.commit()
+        except sqlite3.OperationalError as error:
+            if not self._is_sqlite_contention(error):
+                raise
+            failures, _retry_at_us = self._component_failures.get(component, (1, 0))
+            self._component_failures[component] = (failures, now_us + 1_000_000)
+            return False
+        self._component_failures.pop(component, None)
+        self._component_first_failure_at_us.pop(component, None)
+        self._component_pending_incidents.pop(component, None)
+        return True
+
+    def _component_observation_failure(
+        self,
+        component: str,
+        *,
+        now_us: int,
+        error_name: str,
+    ) -> None:
+        """Persist a poison-input incident without pausing unrelated callbacks."""
+
+        if self._component_failure(component, now_us=now_us, error_name=error_name):
+            self._component_failures.pop(component, None)
+        self._component_observations.add(component)
+
+    def _run_component(
+        self,
+        component: str,
+        *,
+        now_us: int,
+        operation: Callable[[], object],
+    ) -> bool:
+        failures, retry_at_us = self._component_failures.get(component, (0, 0))
+        if failures and now_us < retry_at_us:
+            return False
+        try:
+            operation()
+        except AuthoritativeLeaseLost:
+            raise
+        except RecorderFatalError:
+            raise
+        except InboxAdmissionError as error:
+            raise AuthoritativeLeaseLost(str(error)) from error
+        except Exception as error:
+            if self._hard_component_error(error):
+                raise
+            self._component_failure(
+                component,
+                now_us=now_us,
+                error_name=type(error).__name__,
+            )
+            return False
+        if failures:
+            self._component_recovered(component, now_us=now_us)
+        return True
+
     def prepare_pending_callback_drain(self) -> None:
         """Consume the wakeup before polling; concurrent admissions set it again."""
 
@@ -2729,6 +2949,14 @@ class Recorder:
         authority = self._authority()
         causal_now_us = now_us
         try:
+            projection_failures, projection_retry_at_us = self._component_failures.get(
+                "canonical_projection", (0, 0)
+            )
+            if projection_failures and now_us < projection_retry_at_us:
+                self._heartbeat(now_us)
+                return 0
+            if projection_failures:
+                self.inbox.reclaim_expired_leases(now_us=now_us, authority=authority)
             leased_callbacks = self.inbox.lease_pending(
                 self.config.owner_id,
                 now_us=now_us,
@@ -2745,13 +2973,58 @@ class Recorder:
                     causal_now_us,
                     max(leased.received_at_us for leased in leased_callbacks),
                 )
-            batch = self.inbox.project_batch(
-                leased_callbacks,
-                now_us=now_us,
-                authority=authority,
-            )
+            try:
+                batch = self.inbox.project_batch(
+                    leased_callbacks,
+                    now_us=now_us,
+                    authority=authority,
+                )
+            except (
+                CallbackTimestampOrderingLoss,
+                CallbackIdentityCollision,
+                InboxAuthorityLost,
+                InboxAdmissionError,
+                AuthoritativeLeaseLost,
+            ):
+                raise
+            except Exception as error:
+                if self._hard_component_error(error):
+                    raise
+                self._component_failure(
+                    "canonical_projection",
+                    now_us=causal_now_us,
+                    error_name=type(error).__name__,
+                )
+                self._heartbeat(causal_now_us)
+                return 0
             processed = batch.processed
             causal_now_us = batch.causal_now_us
+            if leased_callbacks:
+                with connect_v2(self.config.database) as connection:
+                    malformed = connection.execute(
+                        "SELECT count(*) FROM callback_inbox WHERE source_sequence IN ("
+                        + ",".join("?" for _item in leased_callbacks)
+                        + ") AND lifecycle='failed' AND failure_code='MALFORMED_CALLBACK'",
+                        tuple(item.source_sequence for item in leased_callbacks),
+                    ).fetchone()[0]
+                if malformed:
+                    self._component_observation_failure(
+                        "canonical_callback",
+                        now_us=causal_now_us,
+                        error_name="MALFORMED_CALLBACK",
+                    )
+                elif "canonical_callback" in self._component_observations:
+                    recovered = self._component_recovered(
+                        "canonical_callback",
+                        now_us=causal_now_us,
+                    )
+                    if recovered:
+                        self._component_observations.discard("canonical_callback")
+                if "canonical_projection" in self._component_failures:
+                    self._component_recovered(
+                        "canonical_projection",
+                        now_us=causal_now_us,
+                    )
             self._mark_projected_subscription_recovery(
                 leased_callbacks,
                 now_us=causal_now_us,
@@ -2781,26 +3054,48 @@ class Recorder:
                 )
             ):
                 return processed
-            from stocker_runtime.ingestion.snapshot_projection import (
-                project_option_snapshot_captures,
-            )
 
-            with connect_v2(self.config.database) as connection:
-                connection.execute("BEGIN IMMEDIATE")
-                self._verify_owned(connection)
-                project_option_snapshot_captures(
-                    connection,
-                    run_id=self.config.run_id,
-                    limit=min(limit, 256),
+            def project_options() -> None:
+                from stocker_runtime.ingestion.snapshot_projection import (
+                    project_option_snapshot_captures,
                 )
-                connection.commit()
-            self._fulfill_snapshot_interests_from_streams(now_us=causal_now_us)
-            if self._idea_runner is not None:
-                self._idea_runner.run_once(now_us=causal_now_us)
+
+                with connect_v2(self.config.database) as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    self._verify_owned(connection)
+                    project_option_snapshot_captures(
+                        connection,
+                        run_id=self.config.run_id,
+                        limit=min(limit, 256),
+                    )
+                    connection.commit()
+                self._fulfill_snapshot_interests_from_streams(now_us=causal_now_us)
+
+            self._run_component(
+                "option_projection",
+                now_us=causal_now_us,
+                operation=project_options,
+            )
+            idea_runner = self._idea_runner
+            if idea_runner is not None:
+                self._run_component(
+                    "idea_runner",
+                    now_us=causal_now_us,
+                    operation=lambda: idea_runner.run_once(now_us=causal_now_us),
+                )
             if self._connection_is_connected():
-                self._reconcile_dynamic_market_data(now_us=causal_now_us)
-            if self._shadow_engine is not None:
-                self._shadow_engine.run_once(now_us=causal_now_us)
+                self._run_component(
+                    "option_discovery",
+                    now_us=causal_now_us,
+                    operation=lambda: self._reconcile_dynamic_market_data(now_us=causal_now_us),
+                )
+            shadow_engine = self._shadow_engine
+            if shadow_engine is not None:
+                self._run_component(
+                    "shadow_evaluation",
+                    now_us=causal_now_us,
+                    operation=lambda: shadow_engine.run_once(now_us=causal_now_us),
+                )
             return processed
         except CallbackTimestampOrderingLoss as error:
             self._fatal("CALLBACK_TIMESTAMP_ORDERING_LOSS", causal_now_us)
@@ -3734,36 +4029,45 @@ class Recorder:
     def _pause_optional(self, now_us: int) -> None:
         if self.state is None:
             return
-        self._check_owned()
-        optional = {spec.request_id: spec for spec in self._subscriptions if spec.optional}
-        for fence in self._authority_state().fences:
-            if fence.request_id is None:
-                continue
-            spec = optional.get(fence.request_id)
-            if spec is None:
-                continue
+        with self._subscription_lifecycle_lock:
             self._check_owned()
-            self.adapter.cancel(fence.request_id)
-            self._check_owned()
-            connection = connect_v2(self.config.database)
-            try:
-                connection.execute("BEGIN IMMEDIATE")
-                self._verify_owned(connection)
-                connection.execute(
-                    "UPDATE subscriptions SET lifecycle='paused', closed_at_us=? "
-                    "WHERE subscription_id=? AND lifecycle!='closed'",
-                    (now_us, fence.subscription_id),
-                )
-                self._open_gap(
-                    connection,
-                    cast(str, fence.subscription_id),
-                    now_us,
-                    "STORAGE_DEGRADED_OPTIONAL_PAUSED",
-                    spec.continuity_required,
-                )
-                connection.commit()
-            finally:
-                connection.close()
+            optional = {spec.request_id: spec for spec in self._subscriptions if spec.optional}
+            for fence in self._authority_state().fences:
+                if fence.request_id is None:
+                    continue
+                spec = optional.get(fence.request_id)
+                if spec is None:
+                    continue
+                with connect_v2(self.config.database) as connection:
+                    lifecycle = connection.execute(
+                        "SELECT lifecycle FROM subscriptions WHERE subscription_id=?",
+                        (fence.subscription_id,),
+                    ).fetchone()
+                if lifecycle is None or str(lifecycle[0]) in {"paused", "closed"}:
+                    continue
+                self._check_owned()
+                self.adapter.cancel(fence.request_id)
+                self._check_owned()
+                connection = connect_v2(self.config.database)
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    self._verify_owned(connection)
+                    changed = connection.execute(
+                        "UPDATE subscriptions SET lifecycle='paused', closed_at_us=? "
+                        "WHERE subscription_id=? AND lifecycle NOT IN ('paused','closed')",
+                        (now_us, fence.subscription_id),
+                    ).rowcount
+                    if changed:
+                        self._open_gap(
+                            connection,
+                            cast(str, fence.subscription_id),
+                            now_us,
+                            "STORAGE_DEGRADED_OPTIONAL_PAUSED",
+                            spec.continuity_required,
+                        )
+                    connection.commit()
+                finally:
+                    connection.close()
 
     def _fatal(self, code: str, now_us: int) -> None:
         try:
@@ -3805,6 +4109,20 @@ class Recorder:
         """Consume one bounded Phase 2 retention result and apply recorder reactions."""
 
         authority = self._authority()
+        retention_failures, retention_retry_at_us = self._component_failures.get(
+            "retention_maintenance", (0, 0)
+        )
+        if retention_failures and now_us < retention_retry_at_us:
+            cap_state, _database_bytes, _wal_bytes, required_action = RetentionManager(
+                self.config.database
+            ).measure_cap_state()
+            if cap_state is StorageCapState.FATAL:
+                self._fatal(required_action or "STORAGE_CAP_FATAL", now_us)
+                raise RecorderFatalError(required_action or "storage cap closed admission")
+            if cap_state is StorageCapState.DEGRADED:
+                self._pause_optional(now_us)
+                self._set_lifecycle("degraded", "PAUSE_OPTIONAL_FEEDS", now_us)
+            return cap_state
         try:
             result = RetentionManager(self.config.database).run(
                 now_us=now_us,
@@ -3816,16 +4134,36 @@ class Recorder:
             raise AuthoritativeLeaseLost(str(error)) from error
         except MaintenanceDeadlineExceeded:
             self._retention_maintenance_deferred = True
+            self._component_failure(
+                "retention_maintenance",
+                now_us=now_us,
+                error_name="MaintenanceDeadlineExceeded",
+            )
             return StorageCapState.NORMAL
+        except RetentionInvariantError as error:
+            self._fatal("RETENTION_INVARIANT_FAILED", now_us)
+            raise RecorderFatalError("retention invariant failed") from error
         except sqlite3.OperationalError as error:
-            if not self._is_sqlite_contention(error):
+            if self._hard_component_error(error):
                 self._fatal("RETENTION_INVARIANT_FAILED", now_us)
                 raise RecorderFatalError("retention invariant failed") from error
             self._retention_maintenance_deferred = True
+            self._component_failure(
+                "retention_maintenance",
+                now_us=now_us,
+                error_name=type(error).__name__,
+            )
             return StorageCapState.NORMAL
         except Exception as error:
-            self._fatal("RETENTION_INVARIANT_FAILED", now_us)
-            raise RecorderFatalError("retention invariant failed") from error
+            self._retention_maintenance_deferred = True
+            self._component_failure(
+                "retention_maintenance",
+                now_us=now_us,
+                error_name=type(error).__name__,
+            )
+            return StorageCapState.NORMAL
+        if retention_failures:
+            self._component_recovered("retention_maintenance", now_us=now_us)
         publication_contended = False
         try:
             connection = connect_v2(self.config.database)
@@ -3853,7 +4191,6 @@ class Recorder:
                 self._retention_maintenance_deferred = False
             finally:
                 connection.close()
-            self._sync_backup_status(now_us=now_us)
         except AuthoritativeLeaseLost:
             raise
         except sqlite3.Error as error:
@@ -3864,6 +4201,16 @@ class Recorder:
                 raise RecorderFatalError("retention invariant failed") from error
             self._retention_maintenance_deferred = True
             publication_contended = True
+            self._component_failure(
+                "retention_maintenance",
+                now_us=now_us,
+                error_name=type(error).__name__,
+            )
+        self._run_component(
+            "backup_maintenance",
+            now_us=now_us,
+            operation=lambda: self._sync_backup_status(now_us=now_us),
+        )
         if not result.admission_allowed:
             self._fatal(result.required_action or "STORAGE_CAP_FATAL", now_us)
             raise RecorderFatalError(result.required_action or "storage cap closed admission")

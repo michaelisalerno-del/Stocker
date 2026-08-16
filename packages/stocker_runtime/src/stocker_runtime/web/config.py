@@ -22,7 +22,7 @@ class WebConfig(BaseModel):
     app_version: str = Field(default="0.1.0", min_length=1, max_length=64)
     git_commit: str = Field(pattern=r"^[a-f0-9]{7,64}$")
     config_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
-    query_budget_ms: int = Field(default=100, ge=1, le=100)
+    query_budget_ms: int = Field(default=250, ge=1, le=500)
     maximum_response_bytes: int = Field(default=512 * 1024, ge=1_024, le=512 * 1024)
     trust_proxy_headers: bool = False
     trusted_proxy_ips: list[str] = Field(default_factory=list)

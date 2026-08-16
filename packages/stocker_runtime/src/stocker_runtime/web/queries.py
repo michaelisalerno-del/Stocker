@@ -16,6 +16,7 @@ from typing import Any, cast
 
 from stocker_runtime.storage import read_backup_manifests
 from stocker_runtime.web.config import WebConfig
+from stocker_runtime.web.readiness import calculate_readiness, select_operational_run
 
 API_ROUTES = (
     "/api/v2/meta",
@@ -25,6 +26,7 @@ API_ROUTES = (
     "/api/v2/results",
     "/api/v2/results/{position_id}",
     "/api/v2/diagnostics",
+    "/api/v2/ready",
 )
 BANNER = "PROSPECTIVE / SHADOW ONLY — NO APPROVAL OR EXECUTION"
 DATABASE_CAP_BYTES = 8 * 1024**3
@@ -195,17 +197,24 @@ class ReadModel:
         return None if row is None else dict(row)
 
     def _latest_run(self, connection: sqlite3.Connection) -> dict[str, Any] | None:
-        if self.config.run_id is not None:
-            row = connection.execute(
-                "SELECT run_id, mode, status, started_at_us FROM runs WHERE run_id = ?",
-                (self.config.run_id,),
-            ).fetchone()
-        else:
-            row = connection.execute(
-                "SELECT run_id, mode, status, started_at_us FROM runs "
-                "ORDER BY started_at_us DESC, run_id DESC LIMIT 1"
-            ).fetchone()
-        return self._dictionary(row)
+        selected, _reason = select_operational_run(
+            connection,
+            pinned_run_id=self.config.run_id,
+            now_us=time.time_ns() // 1_000,
+        )
+        if selected is None:
+            return None
+        return {key: selected[key] for key in ("run_id", "mode", "status", "started_at_us")}
+
+    def ready(self, *, now_us: int | None = None) -> dict[str, Any]:
+        """Return current recorder readiness without touching writer state."""
+
+        with self._connection() as connection:
+            return calculate_readiness(
+                connection,
+                pinned_run_id=self.config.run_id,
+                now_us=time.time_ns() // 1_000 if now_us is None else now_us,
+            )
 
     def _backup_projection(self, *, limit: int) -> dict[str, Any]:
         root = self.config.backup_directory

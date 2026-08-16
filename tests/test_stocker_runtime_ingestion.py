@@ -365,6 +365,7 @@ def test_validate_config_cli_is_offline_and_machine_readable(tmp_path: Path) -> 
         ("missing_instrument", "reference missing instruments"),
         ("contradictory_feed", "contradictory feed definitions"),
         ("malformed_identity", "request_id must be a nonnegative integer"),
+        ("base_snapshot", "cannot configure base snapshot subscriptions"),
     ),
 )
 def test_production_preflight_rejects_invalid_market_data_input_before_connect(
@@ -421,6 +422,8 @@ def test_production_preflight_rejects_invalid_market_data_input_before_connect(
         subscriptions = [subscription, {**subscription, "name": "duplicate", "request_id": 4}]
     elif mutation == "malformed_identity":
         subscriptions = [{**subscription, "request_id": -1}]
+    elif mutation == "base_snapshot":
+        subscriptions = [{**subscription, "snapshot": True}]
     inputs_path.write_text(
         json.dumps({"instruments": instruments, "subscriptions": subscriptions}),
         encoding="utf-8",
@@ -2564,7 +2567,11 @@ def test_bounded_retention_contention_degrades_then_recovers_without_stopping_in
             "SELECT lifecycle, reason, connection_state FROM runtime_state"
         ).fetchone()
         assert connection.execute("SELECT status FROM runs").fetchone()[0] == "running"
-    assert tuple(deferred_runtime) == ("running", None, "connected")
+    assert tuple(deferred_runtime) == (
+        "degraded",
+        "COMPONENT_RETENTION_MAINTENANCE_FAILED",
+        "connected",
+    )
     assert adapter.connected is True
     assert adapter.cancelled == []
 
@@ -2579,12 +2586,12 @@ def test_bounded_retention_contention_degrades_then_recovers_without_stopping_in
         ).fetchone()
     assert tuple(published_runtime) == (
         "degraded",
-        "RETENTION_MAINTENANCE_DEFERRED",
+        "COMPONENT_RETENTION_MAINTENANCE_FAILED",
         "connected",
     )
     assert first_callback[0] == "acknowledged" and first_callback[1] is not None
 
-    assert recorder.maintain(now_us=104) is StorageCapState.NORMAL
+    assert recorder.maintain(now_us=1_000_102) is StorageCapState.NORMAL
     with connect_v2(database) as connection:
         recovered_runtime = connection.execute(
             "SELECT lifecycle, reason, connection_state, database_bytes, wal_bytes "
@@ -2702,7 +2709,7 @@ def test_retention_deferral_waits_for_an_existing_degradation_to_clear(
     assert tuple(published) == ("degraded", "RETENTION_MAINTENANCE_DEFERRED")
 
 
-def test_retention_result_publication_invariant_failure_is_fatal(
+def test_backup_status_failure_is_degraded_and_recovers_without_stopping_ingestion(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2743,16 +2750,33 @@ def test_retention_result_publication_invariant_failure_is_fatal(
         lambda *, now_us: (_ for _ in ()).throw(sqlite3.IntegrityError("invariant collision")),
     )
 
-    with pytest.raises(RecorderFatalError, match="retention invariant failed"):
-        recorder.maintain(now_us=102)
+    assert recorder.maintain(now_us=102) is StorageCapState.NORMAL
     with connect_v2(database) as connection:
         runtime = connection.execute(
             "SELECT lifecycle, reason, connection_state FROM runtime_state"
         ).fetchone()
         run_status = connection.execute("SELECT status FROM runs").fetchone()[0]
-    assert tuple(runtime) == ("fatal", "RETENTION_INVARIANT_FAILED", "disconnected")
-    assert run_status == "fatal"
-    assert adapter.connected is False
+        incident = connection.execute(
+            "SELECT resolved_at_us FROM incidents WHERE code='COMPONENT_BACKUP_MAINTENANCE_FAILED'"
+        ).fetchone()
+    assert tuple(runtime) == (
+        "degraded",
+        "COMPONENT_BACKUP_MAINTENANCE_FAILED",
+        "connected",
+    )
+    assert run_status == "running"
+    assert incident[0] is None
+    assert adapter.connected is True
+
+    monkeypatch.setattr(recorder, "_sync_backup_status", lambda *, now_us: None)
+    assert recorder.maintain(now_us=1_000_102) is StorageCapState.NORMAL
+    with connect_v2(database) as connection:
+        recovered = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+        resolved = connection.execute(
+            "SELECT resolved_at_us FROM incidents WHERE code='COMPONENT_BACKUP_MAINTENANCE_FAILED'"
+        ).fetchone()[0]
+    assert tuple(recovered) == ("running", None)
+    assert resolved == 1_000_102
 
 
 def test_sqlite_error_code_controls_retention_contention_classification() -> None:
@@ -4678,7 +4702,7 @@ def test_callback_evidence_equal_to_acknowledgement_time_can_resolve_gap(tmp_pat
     assert tuple(gap) == (150, 150)
 
 
-def test_post_admission_projection_failure_preserves_callback_and_is_fatal(
+def test_canonical_projection_failure_preserves_raw_callback_and_degrades_locally(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "v2.sqlite3"
@@ -4690,6 +4714,7 @@ def test_post_admission_projection_failure_preserves_callback_and_is_fatal(
         state.fences[0],
         MarketDataCallback("quote", 150, None, {"event_at_us": 150, "bid": 1.0}),
     )
+    real_project = recorder.inbox.project
     monkeypatch.setattr(
         recorder.inbox,
         "project",
@@ -4697,21 +4722,443 @@ def test_post_admission_projection_failure_preserves_callback_and_is_fatal(
             sqlite3.OperationalError("injected projection failure")
         ),
     )
-    with pytest.raises(Exception, match="post-admission"):
-        recorder.drain(now_us=102)
+    assert recorder.drain(now_us=102) == 0
     with connect_v2(database) as connection:
         callback = connection.execute(
             "SELECT lifecycle, payload_json FROM callback_inbox WHERE source_sequence=?",
             (admitted.source_sequence,),
         ).fetchone()
         status = connection.execute("SELECT status FROM runs WHERE run_id='run-1'").fetchone()[0]
-        fatal_at_us = connection.execute(
-            "SELECT opened_at_us FROM incidents WHERE code='POST_ADMISSION_PRESERVATION_FAILED'"
-        ).fetchone()[0]
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        incident = connection.execute(
+            "SELECT opened_at_us, resolved_at_us FROM incidents "
+            "WHERE code='COMPONENT_CANONICAL_PROJECTION_FAILED'"
+        ).fetchone()
     assert callback[0] == "leased"
     assert callback[1] is not None
-    assert status == "fatal"
-    assert fatal_at_us == 150
+    assert status == "running"
+    assert tuple(runtime) == (
+        "degraded",
+        "COMPONENT_CANONICAL_PROJECTION_FAILED",
+        "connected",
+    )
+    assert tuple(incident) == (150, None)
+
+    monkeypatch.setattr(recorder.inbox, "project", real_project)
+    recovered_callback = recorder.receive(
+        state.fences[0],
+        MarketDataCallback(
+            "quote",
+            30_000_150,
+            None,
+            {"event_at_us": 30_000_150, "bid": 2.0},
+        ),
+    )
+    assert recorder.drain(now_us=30_000_151) == 2
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT lifecycle FROM callback_inbox WHERE source_sequence=?",
+                (recovered_callback.source_sequence,),
+            ).fetchone()[0]
+            == "acknowledged"
+        )
+        recovered_runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        resolved_at_us = connection.execute(
+            "SELECT resolved_at_us FROM incidents "
+            "WHERE code='COMPONENT_CANONICAL_PROJECTION_FAILED'"
+        ).fetchone()[0]
+    assert tuple(recovered_runtime) == ("running", None, "connected")
+    assert resolved_at_us == 30_000_151
+
+
+def test_optional_downstream_components_fail_independently_and_recover(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "downstream-boundaries.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    assert recorder._idea_runner is not None
+    failing = True
+    successful_calls: list[str] = []
+
+    def component(name: str) -> None:
+        if failing:
+            raise RuntimeError(f"injected {name} failure")
+        successful_calls.append(name)
+
+    from stocker_runtime.ingestion import snapshot_projection
+
+    monkeypatch.setattr(
+        snapshot_projection,
+        "project_option_snapshot_captures",
+        lambda *_args, **_kwargs: component("option_projection"),
+    )
+    monkeypatch.setattr(
+        recorder._idea_runner,
+        "run_once",
+        lambda *, now_us: component("idea_runner"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_reconcile_dynamic_market_data",
+        lambda *, now_us: component("option_discovery"),
+    )
+    recorder._shadow_engine = types.SimpleNamespace(
+        run_once=lambda *, now_us: component("shadow_evaluation")
+    )
+
+    first = recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 150, None, {"event_at_us": 150, "bid": 1.0}),
+    )
+    assert recorder.drain(now_us=150) == 1
+    second = recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 151, None, {"event_at_us": 151, "bid": 2.0}),
+    )
+    assert recorder.drain(now_us=151) == 1
+    with connect_v2(database) as connection:
+        callbacks = dict(
+            connection.execute(
+                "SELECT source_sequence, lifecycle FROM callback_inbox "
+                "WHERE source_sequence IN (?, ?)",
+                (first.source_sequence, second.source_sequence),
+            )
+        )
+        incidents = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT code FROM incidents WHERE scope='component' AND resolved_at_us IS NULL"
+            )
+        }
+        runtime = connection.execute(
+            "SELECT lifecycle, connection_state FROM runtime_state"
+        ).fetchone()
+    assert callbacks == {
+        first.source_sequence: "acknowledged",
+        second.source_sequence: "acknowledged",
+    }
+    assert incidents == {
+        "COMPONENT_OPTION_PROJECTION_FAILED",
+        "COMPONENT_IDEA_RUNNER_FAILED",
+        "COMPONENT_OPTION_DISCOVERY_FAILED",
+        "COMPONENT_SHADOW_EVALUATION_FAILED",
+    }
+    assert tuple(runtime) == ("degraded", "connected")
+    assert adapter.connected is True
+
+    failing = False
+    assert recorder.drain(now_us=1_000_150) == 0
+    with connect_v2(database) as connection:
+        unresolved = connection.execute(
+            "SELECT count(*) FROM incidents WHERE scope='component' AND resolved_at_us IS NULL"
+        ).fetchone()[0]
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+    assert unresolved == 0
+    assert tuple(runtime) == ("running", None, "connected")
+    assert set(successful_calls) == {
+        "option_projection",
+        "idea_runner",
+        "option_discovery",
+        "shadow_evaluation",
+    }
+
+
+def test_component_boundary_never_downgrades_recorder_fatal_error(tmp_path: Path) -> None:
+    database = tmp_path / "component-fatal.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    def fatal_identity_invariant() -> None:
+        raise RecorderFatalError("dynamic subscription identity changed")
+
+    with pytest.raises(RecorderFatalError, match="identity changed"):
+        recorder._run_component(
+            "option_discovery",
+            now_us=101,
+            operation=fatal_identity_invariant,
+        )
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM incidents WHERE scope='component'"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_component_incident_backoff_starts_only_after_durable_publication(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "component-incident-contention.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    blocker = connect_v2(database)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        assert recorder._component_failure(
+            "backup_maintenance",
+            now_us=101,
+            error_name="OperationalError",
+        ) is False
+        assert recorder._component_failures["backup_maintenance"] == (1, 101)
+    finally:
+        blocker.rollback()
+        blocker.close()
+
+    assert recorder._component_failure(
+        "backup_maintenance",
+        now_us=102,
+        error_name="OperationalError",
+    ) is True
+    with connect_v2(database) as connection:
+        incident = connection.execute(
+            "SELECT opened_at_us, resolved_at_us FROM incidents "
+            "WHERE code='COMPONENT_BACKUP_MAINTENANCE_FAILED'"
+        ).fetchone()
+    assert tuple(incident) == (101, None)
+
+
+def test_component_recovery_contention_remains_degraded_and_raw_admission_resumes(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "component-recovery-contention.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    assert recorder._component_failure(
+        "backup_maintenance",
+        now_us=101,
+        error_name="OSError",
+    ) is True
+    blocker = connect_v2(database)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        assert recorder._run_component(
+            "backup_maintenance",
+            now_us=1_000_101,
+            operation=lambda: None,
+        ) is True
+        assert "backup_maintenance" in recorder._component_failures
+    finally:
+        blocker.rollback()
+        blocker.close()
+
+    admitted = recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 2_000_101, None, {"event_at_us": 2_000_101, "bid": 1.0}),
+    )
+    assert recorder.drain(now_us=2_000_101) == 1
+    assert recorder._component_recovered("backup_maintenance", now_us=2_000_102) is True
+    with connect_v2(database) as connection:
+        callback_lifecycle = connection.execute(
+            "SELECT lifecycle FROM callback_inbox WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()[0]
+        run_status = connection.execute("SELECT status FROM runs").fetchone()[0]
+        incident = connection.execute(
+            "SELECT details_json, resolved_at_us FROM incidents "
+            "WHERE code='COMPONENT_BACKUP_MAINTENANCE_FAILED'"
+        ).fetchone()
+    assert callback_lifecycle == "acknowledged"
+    assert run_status == "running"
+    assert json.loads(incident[0])["error"] == "OSError"
+    assert incident[1] == 2_000_102
+
+
+def test_canonical_observation_recovery_retries_after_incident_write_contention(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "canonical-observation-recovery.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 101, None, {"bid": 1.0}),
+    )
+    assert recorder.drain(now_us=101) == 0
+    assert "canonical_callback" in recorder._component_observations
+
+    real_recovered = recorder._component_recovered
+
+    def recover_while_contended(component: str, *, now_us: int) -> bool:
+        blocker = connect_v2(database)
+        blocker.execute("BEGIN IMMEDIATE")
+        try:
+            return real_recovered(component, now_us=now_us)
+        finally:
+            blocker.rollback()
+            blocker.close()
+
+    monkeypatch.setattr(recorder, "_component_recovered", recover_while_contended)
+    recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 1_000_101, None, {"event_at_us": 1_000_101, "bid": 2.0}),
+    )
+    assert recorder.drain(now_us=1_000_101) == 1
+    assert "canonical_callback" in recorder._component_observations
+    with connect_v2(database) as connection:
+        unresolved = connection.execute(
+            "SELECT resolved_at_us FROM incidents "
+            "WHERE code='COMPONENT_CANONICAL_CALLBACK_FAILED'"
+        ).fetchone()[0]
+    assert unresolved is None
+
+    monkeypatch.setattr(recorder, "_component_recovered", real_recovered)
+    recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 2_000_101, None, {"event_at_us": 2_000_101, "bid": 3.0}),
+    )
+    assert recorder.drain(now_us=2_000_101) == 1
+    assert "canonical_callback" not in recorder._component_observations
+    with connect_v2(database) as connection:
+        resolved = connection.execute(
+            "SELECT resolved_at_us FROM incidents "
+            "WHERE code='COMPONENT_CANONICAL_CALLBACK_FAILED'"
+        ).fetchone()[0]
+    assert resolved == 2_000_101
+
+
+def test_component_recovery_preserves_prior_episode_history(tmp_path: Path) -> None:
+    database = tmp_path / "component-episodes.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    recorder._run_component(
+        "backup_maintenance",
+        now_us=101,
+        operation=lambda: (_ for _ in ()).throw(RuntimeError("first")),
+    )
+    recorder._run_component(
+        "backup_maintenance",
+        now_us=1_000_101,
+        operation=lambda: None,
+    )
+    recorder._run_component(
+        "backup_maintenance",
+        now_us=2_000_101,
+        operation=lambda: (_ for _ in ()).throw(RuntimeError("second")),
+    )
+
+    with connect_v2(database) as connection:
+        episodes = tuple(
+            connection.execute(
+                "SELECT opened_at_us, resolved_at_us FROM incidents "
+                "WHERE code='COMPONENT_BACKUP_MAINTENANCE_FAILED' ORDER BY opened_at_us"
+            )
+        )
+    assert [tuple(row) for row in episodes] == [
+        (101, 1_000_101),
+        (2_000_101, None),
+    ]
+
+
+def test_retention_backoff_still_fails_closed_at_storage_hard_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "retention-backoff-cap.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder._component_failures["retention_maintenance"] = (1, 2_000_000)
+
+    class FatalCapMeasurement:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+            return StorageCapState.FATAL, 9_000_000_000, 0, "STORAGE_CAP_FATAL"
+
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager",
+        FatalCapMeasurement,
+    )
+
+    with pytest.raises(RecorderFatalError, match="STORAGE_CAP_FATAL"):
+        recorder.maintain(now_us=101)
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "fatal"
+
+
+def test_retention_backoff_still_pauses_optional_feeds_at_degraded_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "retention-backoff-degraded.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder._component_failures["retention_maintenance"] = (1, 2_000_000)
+
+    class DegradedCapMeasurement:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+            return StorageCapState.DEGRADED, 7_700_000_000, 0, None
+
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager",
+        DegradedCapMeasurement,
+    )
+
+    assert recorder.maintain(now_us=101) is StorageCapState.DEGRADED
+    assert recorder.maintain(now_us=102) is StorageCapState.DEGRADED
+    with connect_v2(database) as connection:
+        optional_lifecycle = connection.execute(
+            "SELECT lifecycle FROM subscriptions WHERE request_id=4"
+        ).fetchone()[0]
+        gap_count = connection.execute(
+            "SELECT count(*) FROM gaps WHERE reason='STORAGE_DEGRADED_OPTIONAL_PAUSED' "
+            "AND resolved_at_us IS NULL"
+        ).fetchone()[0]
+    assert optional_lifecycle == "paused"
+    assert adapter.cancelled == [4]
+    assert gap_count == 1
+
+
+def test_production_base_snapshot_is_rejected_before_broker_connect(tmp_path: Path) -> None:
+    database = tmp_path / "base-snapshot.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    snapshot = replace(specs[0], snapshot=True)
+    adapter = FakeMarketData()
+
+    with pytest.raises(RecorderFatalError, match="cannot configure base snapshot"):
+        Recorder(_config(database), adapter).start(
+            now_us=100,
+            instruments=(instrument,),
+            subscriptions=(snapshot,),
+        )
+
+    assert adapter.connected is False
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
 
 
 def test_projection_uses_durable_payload_and_rejects_altered_lease_token(tmp_path: Path) -> None:

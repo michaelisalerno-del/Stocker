@@ -1245,13 +1245,13 @@ class CallbackInbox:
         run_id: str,
         *,
         created_at_us: int,
-        limit: int = 10_000,
+        limit: int = 256,
         authority: WriterAuthority,
     ) -> CallbackReceiptRecord | None:
         """Receipt one contiguous terminal prefix using the Phase 2 evidence contract."""
 
-        if not 1 <= limit <= 10_000:
-            raise ValueError("receipt limit must be between 1 and 10,000")
+        if not 1 <= limit <= 256:
+            raise ValueError("receipt limit must be between 1 and 256")
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -1399,7 +1399,7 @@ class CallbackInbox:
             receipt = self.create_receipt(
                 run_id,
                 created_at_us=created_at_us,
-                limit=remaining,
+                limit=min(remaining, 256),
                 authority=authority,
             )
             if receipt is None:

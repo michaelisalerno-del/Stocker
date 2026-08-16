@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+import stocker_runtime.cli as cli_module
 import stocker_runtime.storage.connection as connection_module
+import stocker_runtime.storage.retention as retention_module
 from stocker_runtime import ProposedTradeLeg
 from stocker_runtime.cli import app as runtime_app
 from stocker_runtime.ingestion.inbox import (
@@ -64,6 +66,19 @@ def _proposal_legs() -> tuple[ProposedTradeLeg, ...]:
             currency="USD",
         ),
     )
+
+
+def test_retention_checkpoint_capacity_exceeds_observed_ingestion_rate() -> None:
+    passes_per_second = 1_000_000 / cli_module.RECORDER_MAINTENANCE_INTERVAL_US
+    callback_capacity_per_second = (
+        retention_module.MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS * passes_per_second
+    )
+    receipt_capacity_per_second = (
+        retention_module.MAX_RECEIPT_CHECKPOINTS_PER_PASS * passes_per_second
+    )
+
+    assert callback_capacity_per_second >= 100
+    assert receipt_capacity_per_second >= 1 / cli_module.RECORDER_DRAIN_INTERVAL_SECONDS
 
 
 def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
@@ -2480,6 +2495,266 @@ def test_retention_compacts_only_durably_projected_acknowledged_receipted_payloa
     assert payloads[recent] is not None
 
 
+def test_retention_reuses_shared_receipt_proof_within_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    first = _seed_callback_for_retention(
+        database,
+        uid="shared-proof-1",
+        received_at_us=1,
+        receipt_batch_id="shared-proof",
+    )
+    second = _seed_callback_for_retention(
+        database,
+        uid="shared-proof-2",
+        received_at_us=2,
+        acknowledged_at_us=2,
+        receipt_batch_id="shared-proof",
+    )
+    _insert_receipt(
+        database,
+        batch_id="shared-proof",
+        first_sequence=first,
+        last_sequence=second,
+        created_at_us=3,
+    )
+    logical_time = 0.0
+    receipt_verifications = 0
+    real_connect = retention_module.connect_v2
+
+    def traced_connect(path: str | Path) -> sqlite3.Connection:
+        connection = real_connect(path)
+
+        def trace(statement: str) -> None:
+            nonlocal logical_time, receipt_verifications
+            if statement.startswith("SELECT event_uid, payload_sha256, run_id"):
+                logical_time += 0.06
+                receipt_verifications += 1
+
+        connection.set_trace_callback(trace)
+        return connection
+
+    monkeypatch.setattr(retention_module, "connect_v2", traced_connect)
+    result = RetentionManager(
+        database,
+        RetentionPolicy(
+            callback_payload_us=10,
+            receipt_us=1_000,
+            tombstone_us=1_000,
+            maintenance_transaction_ms=100,
+        ),
+        monotonic=lambda: logical_time,
+    ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert result.payloads_compacted == 2
+    assert receipt_verifications == 1
+
+
+def test_retention_bulk_verifies_receipt_prefix_within_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    first = _seed_callback_for_retention(
+        database,
+        uid="chain-proof-1",
+        received_at_us=1,
+        receipt_batch_id="chain-proof-1",
+    )
+    second = _seed_callback_for_retention(
+        database,
+        uid="chain-proof-2",
+        received_at_us=2,
+        acknowledged_at_us=2,
+        receipt_batch_id="chain-proof-2",
+    )
+    first_hash = _insert_receipt(
+        database,
+        batch_id="chain-proof-1",
+        first_sequence=first,
+        last_sequence=first,
+        created_at_us=3,
+    )
+    _insert_receipt(
+        database,
+        batch_id="chain-proof-2",
+        first_sequence=second,
+        last_sequence=second,
+        created_at_us=4,
+        prior_chain_hash=first_hash,
+    )
+    logical_time = 0.0
+    receipt_verifications = 0
+    real_connect = retention_module.connect_v2
+
+    def traced_connect(path: str | Path) -> sqlite3.Connection:
+        connection = real_connect(path)
+
+        def trace(statement: str) -> None:
+            nonlocal logical_time, receipt_verifications
+            if statement.startswith("SELECT event_uid, payload_sha256, run_id"):
+                logical_time += 0.04
+                receipt_verifications += 1
+
+        connection.set_trace_callback(trace)
+        return connection
+
+    monkeypatch.setattr(retention_module, "connect_v2", traced_connect)
+    result = RetentionManager(
+        database,
+        RetentionPolicy(
+            callback_payload_us=10,
+            receipt_us=1_000,
+            tombstone_us=1_000,
+            maintenance_transaction_ms=100,
+        ),
+        monotonic=lambda: logical_time,
+    ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert result.payloads_compacted == 2
+    assert receipt_verifications == 1
+
+
+def test_retention_advances_receipt_proof_in_bounded_committed_passes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    first = _seed_callback_for_retention(
+        database,
+        uid="chain-scan-1",
+        received_at_us=1,
+        acknowledged_at_us=1_000,
+        receipt_batch_id="chain-scan-1",
+    )
+    second = _seed_callback_for_retention(
+        database,
+        uid="chain-scan-2",
+        received_at_us=2,
+        acknowledged_at_us=2,
+        receipt_batch_id="chain-scan-2",
+    )
+    first_hash = _insert_receipt(
+        database,
+        batch_id="chain-scan-1",
+        first_sequence=first,
+        last_sequence=first,
+        created_at_us=3,
+    )
+    _insert_receipt(
+        database,
+        batch_id="chain-scan-2",
+        first_sequence=second,
+        last_sequence=second,
+        created_at_us=4,
+        prior_chain_hash=first_hash,
+    )
+    logical_time = 0.0
+    authoritative_row_scans = 0
+    real_connect = retention_module.connect_v2
+
+    def traced_connect(path: str | Path) -> sqlite3.Connection:
+        connection = real_connect(path)
+
+        def trace(statement: str) -> None:
+            nonlocal logical_time, authoritative_row_scans
+            if statement.startswith("SELECT event_uid, payload_sha256, run_id"):
+                logical_time += 0.06
+                authoritative_row_scans += 1
+
+        connection.set_trace_callback(trace)
+        return connection
+
+    monkeypatch.setattr(retention_module, "connect_v2", traced_connect)
+    monkeypatch.setattr(retention_module, "MAX_RECEIPT_CHECKPOINTS_PER_PASS", 1)
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(
+            callback_payload_us=10,
+            receipt_us=1_000,
+            tombstone_us=1_000,
+            maintenance_transaction_ms=100,
+        ),
+        monotonic=lambda: logical_time,
+    )
+    first_result = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    with connect_v2(database) as connection:
+        first_watermark = connection.execute(
+            "SELECT compacted_through_sequence FROM callback_compaction_watermarks "
+            "WHERE run_id = 'retention-run'"
+        ).fetchone()
+    second_result = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert first_result.payloads_compacted == 0
+    assert first_watermark["compacted_through_sequence"] == first
+    assert second_result.payloads_compacted == 1
+    assert authoritative_row_scans == 2
+    with connect_v2(database) as connection:
+        payloads = tuple(
+            connection.execute(
+                "SELECT payload_json FROM callback_inbox WHERE source_sequence IN (?, ?) "
+                "ORDER BY source_sequence",
+                (first, second),
+            )
+        )
+    assert payloads[0]["payload_json"] is not None
+    assert payloads[1]["payload_json"] is None
+
+
+def test_retention_defers_a_receipt_larger_than_the_proof_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    first = _seed_callback_for_retention(
+        database,
+        uid="oversized-proof-1",
+        received_at_us=1,
+        receipt_batch_id="oversized-proof",
+    )
+    second = _seed_callback_for_retention(
+        database,
+        uid="oversized-proof-2",
+        received_at_us=2,
+        acknowledged_at_us=2,
+        receipt_batch_id="oversized-proof",
+    )
+    _insert_receipt(
+        database,
+        batch_id="oversized-proof",
+        first_sequence=first,
+        last_sequence=second,
+        created_at_us=3,
+    )
+    monkeypatch.setattr(retention_module, "MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS", 1)
+
+    with pytest.raises(MaintenanceDeadlineExceeded, match="verification capacity"):
+        RetentionManager(
+            database,
+            RetentionPolicy(callback_payload_us=10, receipt_us=1_000),
+        ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    with connect_v2(database) as connection:
+        assert connection.execute(
+            "SELECT 1 FROM callback_compaction_watermarks WHERE run_id = 'retention-run'"
+        ).fetchone() is None
+        assert connection.execute(
+            "SELECT count(*) FROM callback_inbox WHERE source_sequence IN (?, ?) "
+            "AND payload_json IS NOT NULL",
+            (first, second),
+        ).fetchone()[0] == 2
+
+
 def test_compaction_rejects_a_corrupt_recent_receipt_before_payload_deletion(
     tmp_path: Path,
 ) -> None:
@@ -2606,7 +2881,7 @@ def test_receipt_rotation_rolls_permanent_watermark_before_deletion(tmp_path: Pa
         created_at_us=40,
         prior_chain_hash=first_hash,
     )
-    _insert_receipt(
+    third_hash = _insert_receipt(
         database,
         batch_id="r3",
         first_sequence=105,
@@ -2635,9 +2910,9 @@ def test_receipt_rotation_rolls_permanent_watermark_before_deletion(tmp_path: Pa
             "FROM callback_compaction_watermarks WHERE run_id = ?",
             ("retention-run",),
         ).fetchone()
-    assert tuple(watermark)[:2] == (104, 4)
-    assert watermark["last_receipt_chain_hash"] == second_hash
-    assert watermark["rolled_receipt_chain_hash"] != second_hash
+    assert tuple(watermark)[:2] == (106, 6)
+    assert watermark["last_receipt_chain_hash"] == third_hash
+    assert watermark["rolled_receipt_chain_hash"] != third_hash
 
 
 def test_receipt_rotation_continues_from_the_permanent_watermark(tmp_path: Path) -> None:
@@ -2702,25 +2977,35 @@ def test_receipt_rotation_continues_from_the_permanent_watermark(tmp_path: Path)
         ).fetchone()
     assert tuple(watermark)[:2] == (104, 4)
     assert watermark["last_receipt_chain_hash"] == second_hash
-    assert watermark["rolled_receipt_chain_hash"] != first_rollup_hash
+    assert watermark["rolled_receipt_chain_hash"] == first_rollup_hash
 
 
-def test_rolled_watermark_authorizes_later_payload_compaction(tmp_path: Path) -> None:
+def test_rolled_watermark_authorizes_later_payload_compaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     _seed_output_dependencies(database)
-    sequence = _seed_callback_for_retention(
+    first_sequence = _seed_callback_for_retention(
         database,
-        uid="watermark-payload",
+        uid="watermark-payload-1",
         received_at_us=1,
         acknowledged_at_us=1,
+        receipt_batch_id="watermark-proof",
+    )
+    second_sequence = _seed_callback_for_retention(
+        database,
+        uid="watermark-payload-2",
+        received_at_us=2,
+        acknowledged_at_us=2,
         receipt_batch_id="watermark-proof",
     )
     _insert_receipt(
         database,
         batch_id="watermark-proof",
-        first_sequence=sequence,
-        last_sequence=sequence,
+        first_sequence=first_sequence,
+        last_sequence=second_sequence,
         created_at_us=1,
     )
     manager = RetentionManager(
@@ -2729,6 +3014,31 @@ def test_rolled_watermark_authorizes_later_payload_compaction(tmp_path: Path) ->
     )
 
     rolled = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+    uncovered_sequence = _seed_callback_for_retention(
+        database,
+        uid="watermark-payload-uncovered",
+        received_at_us=3,
+        acknowledged_at_us=3,
+        receipt_batch_id="watermark-proof",
+    )
+    receipt_lookups = 0
+    real_connect = retention_module.connect_v2
+
+    def traced_connect(path: str | Path) -> sqlite3.Connection:
+        connection = real_connect(path)
+
+        def trace(statement: str) -> None:
+            nonlocal receipt_lookups
+            if (
+                statement.startswith("SELECT * FROM callback_receipts WHERE run_id =")
+                and "AND batch_id =" in statement
+            ):
+                receipt_lookups += 1
+
+        connection.set_trace_callback(trace)
+        return connection
+
+    monkeypatch.setattr(retention_module, "connect_v2", traced_connect)
     compacting_manager = RetentionManager(
         database,
         RetentionPolicy(callback_payload_us=10, receipt_us=10, tombstone_us=1_000),
@@ -2740,7 +3050,8 @@ def test_rolled_watermark_authorizes_later_payload_compaction(tmp_path: Path) ->
     )
 
     assert rolled.receipts_rolled == 1
-    assert compacted.payloads_compacted == 1
+    assert compacted.payloads_compacted == 2
+    assert receipt_lookups == 0
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -2748,12 +3059,17 @@ def test_rolled_watermark_authorizes_later_payload_compaction(tmp_path: Path) ->
             ).fetchone()
             is None
         )
-        assert (
-            connection.execute(
-                "SELECT payload_json FROM callback_inbox WHERE source_sequence = ?", (sequence,)
-            ).fetchone()[0]
-            is None
-        )
+        payloads = {
+            int(row["source_sequence"]): row["payload_json"]
+            for row in connection.execute(
+                "SELECT source_sequence, payload_json FROM callback_inbox "
+                "WHERE source_sequence IN (?, ?, ?)",
+                (first_sequence, second_sequence, uncovered_sequence),
+            )
+        }
+        assert payloads[first_sequence] is None
+        assert payloads[second_sequence] is None
+        assert payloads[uncovered_sequence] is not None
 
 
 def test_malformed_receipt_rolls_back_without_deleting_any_proof(tmp_path: Path) -> None:
@@ -2970,15 +3286,15 @@ def test_tombstone_retention_checkpoints_only_a_complete_receipt_batch(tmp_path:
                 "SELECT count(*) FROM callback_inbox WHERE source_sequence IN (?, ?)",
                 (first_sequence, second_sequence),
             ).fetchone()[0]
-            == 2
+            == 1
         )
     completed = manager.run(now_us=200, measured_database_bytes=1, measured_wal_bytes=0)
     rotated = manager.run(now_us=1_100, measured_database_bytes=1, measured_wal_bytes=0)
 
     assert waiting.receipts_rolled == 0
-    assert waiting.expired_rows_deleted == 0
+    assert waiting.expired_rows_deleted == 1
     assert completed.receipts_rolled == 0
-    assert completed.expired_rows_deleted == 2
+    assert completed.expired_rows_deleted == 1
     assert rotated.receipts_rolled == 1
     with connect_v2(database) as connection:
         assert (
@@ -3045,9 +3361,9 @@ def test_tombstone_retention_waits_for_failed_batch_run_to_be_terminal(tmp_path:
     rotated = manager.run(now_us=1_100, measured_database_bytes=1, measured_wal_bytes=0)
 
     assert active.receipts_rolled == 0
-    assert active.expired_rows_deleted == 0
+    assert active.expired_rows_deleted == 1
     assert terminal.receipts_rolled == 0
-    assert terminal.expired_rows_deleted == 2
+    assert terminal.expired_rows_deleted == 1
     assert rotated.receipts_rolled == 1
 
 
@@ -3231,9 +3547,15 @@ def test_retention_deadline_rolls_back_payload_compaction(
     )
     original_compact = manager._compact_payloads
 
-    def compact_then_expire(connection: sqlite3.Connection, cutoff_us: int, limit: int) -> int:
+    def compact_then_expire(
+        connection: sqlite3.Connection,
+        cutoff_us: int,
+        limit: int,
+        *,
+        run_id: str | None,
+    ) -> int:
         nonlocal compacted
-        result = original_compact(connection, cutoff_us, limit)
+        result = original_compact(connection, cutoff_us, limit, run_id=run_id)
         compacted = True
         return result
 
@@ -3246,8 +3568,62 @@ def test_retention_deadline_rolls_back_payload_compaction(
         payload = connection.execute(
             "SELECT payload_json FROM callback_inbox WHERE source_sequence = ?", (sequence,)
         ).fetchone()[0]
+        watermark = connection.execute(
+            "SELECT compacted_through_sequence FROM callback_compaction_watermarks "
+            "WHERE run_id = 'retention-run'"
+        ).fetchone()
     assert compacted is True
     assert payload is not None
+    assert watermark["compacted_through_sequence"] == sequence
+
+
+def test_retention_rechecks_writer_authority_after_checkpoint_commit(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    sequence = _seed_callback_for_retention(
+        database,
+        uid="authority-between-transactions",
+        received_at_us=1,
+        receipt_batch_id="authority-between-transactions",
+    )
+    _insert_receipt(
+        database,
+        batch_id="authority-between-transactions",
+        first_sequence=sequence,
+        last_sequence=sequence,
+        created_at_us=99,
+    )
+    precondition_calls = 0
+
+    def precondition(_connection: sqlite3.Connection) -> None:
+        nonlocal precondition_calls
+        precondition_calls += 1
+        if precondition_calls == 2:
+            raise RuntimeError("writer authority lost")
+
+    with pytest.raises(RuntimeError, match="authority lost"):
+        RetentionManager(
+            database,
+            RetentionPolicy(callback_payload_us=10, receipt_us=1_000),
+        ).run(
+            now_us=100,
+            measured_database_bytes=1,
+            measured_wal_bytes=0,
+            precondition=precondition,
+        )
+
+    with connect_v2(database) as connection:
+        payload = connection.execute(
+            "SELECT payload_json FROM callback_inbox WHERE source_sequence = ?", (sequence,)
+        ).fetchone()[0]
+        watermark = connection.execute(
+            "SELECT compacted_through_sequence FROM callback_compaction_watermarks "
+            "WHERE run_id = 'retention-run'"
+        ).fetchone()
+    assert precondition_calls == 2
+    assert payload is not None
+    assert watermark["compacted_through_sequence"] == sequence
 
 
 def test_default_100ms_retention_pass_makes_progress_on_expired_rows(tmp_path: Path) -> None:
@@ -3706,7 +4082,7 @@ def test_inbox_tombstone_expires_while_its_market_event_remains(tmp_path: Path) 
         )
 
 
-def test_granular_receipt_tombstones_expire_as_a_complete_batch(tmp_path: Path) -> None:
+def test_verified_receipt_tombstones_expire_at_their_individual_cutoffs(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     _seed_output_dependencies(database)
@@ -3744,8 +4120,8 @@ def test_granular_receipt_tombstones_expire_as_a_complete_batch(tmp_path: Path) 
     partial = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
     complete = manager.run(now_us=200, measured_database_bytes=1, measured_wal_bytes=0)
 
-    assert partial.expired_rows_deleted == 0
-    assert complete.expired_rows_deleted == 2
+    assert partial.expired_rows_deleted == 1
+    assert complete.expired_rows_deleted == 1
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -3861,21 +4237,20 @@ def test_receipt_cannot_skip_same_run_callback_after_permanent_watermark(tmp_pat
         database,
         RetentionPolicy(callback_payload_us=1_000, receipt_us=50, tombstone_us=1_000),
     )
-    first_pass = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
-    assert first_pass.receipts_rolled == 1
     with pytest.raises(RetentionInvariantError, match="skipped"):
-        manager.run(now_us=200, measured_database_bytes=1, measured_wal_bytes=0)
+        manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
     with connect_v2(database) as connection:
         watermark = connection.execute(
             "SELECT compacted_through_sequence, cumulative_callback_count "
             "FROM callback_compaction_watermarks WHERE run_id='retention-run'"
         ).fetchone()
-        assert tuple(watermark) == (101, 1)
+        assert watermark is None
         assert (
             connection.execute(
-                "SELECT count(*) FROM callback_receipts WHERE batch_id='later-proof'"
+                "SELECT count(*) FROM callback_receipts WHERE batch_id IN "
+                "('first-proof', 'later-proof')"
             ).fetchone()[0]
-            == 1
+            == 2
         )
 
 
@@ -3957,16 +4332,12 @@ def test_planned_ui_projection_queries_use_declared_indexes(tmp_path: Path) -> N
             "AND resolved_at_us <= ? ORDER BY resolved_at_us, gap_id LIMIT ?",
             (100, 10_000),
         ),
-        "callback_inbox_terminal_idx": (
+        "callback_inbox_run_sequence_idx": (
             ACK_PAYLOAD_CANDIDATES_SQL,
-            (100, 10_000),
+            ("run-1", 100, 100, 10_000),
         ),
         "callback_inbox_ack_tombstone_idx": (
             ACK_TOMBSTONE_CANDIDATES_SQL,
-            (100, 10_000),
-        ),
-        "callback_inbox_failed_payload_idx": (
-            FAILED_PAYLOAD_CANDIDATES_SQL,
             (100, 10_000),
         ),
         "callback_inbox_failed_tombstone_idx": (
@@ -3989,6 +4360,14 @@ def test_planned_ui_projection_queries_use_declared_indexes(tmp_path: Path) -> N
             if expected_index == "shadow_positions_retention_idx":
                 assert "sqlite_autoindex_shadow_progress_1" in plan
                 assert "sqlite_autoindex_shadow_quote_state_1" in plan
+        failed_payload_plan = " ".join(
+            str(row["detail"])
+            for row in connection.execute(
+                f"EXPLAIN QUERY PLAN {FAILED_PAYLOAD_CANDIDATES_SQL}",
+                ("run-1", 100, 100, 10_000),
+            )
+        )
+        assert "callback_inbox_run_sequence_idx" in failed_payload_plan
 
 
 def test_callback_recovery_uses_bounded_unresolved_gap_plan(tmp_path: Path) -> None:

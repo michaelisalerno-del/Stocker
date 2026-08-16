@@ -762,6 +762,21 @@ def test_receipt_write_failure_preserves_terminal_payload_and_unassigned_evidenc
     assert receipt is not None and receipt.callback_count == 1
 
 
+def test_receipt_creation_rejects_batches_larger_than_the_recorder_drain(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_generation(database)
+    inbox = CallbackInbox(database)
+
+    with pytest.raises(ValueError, match="between 1 and 256"):
+        inbox.create_receipt(
+            "run-1",
+            created_at_us=13,
+            limit=257,
+            authority=_authority(),
+        )
+
+
 class FakeMarketData:
     def __init__(
         self, *, fail_connect: bool = False, fail_subscribe: set[int] | None = None
@@ -4038,10 +4053,12 @@ def test_receipts_accept_interleaved_global_sequences_without_skipping_same_run(
     ) == (2, 4, 2)
     with connect_v2(database) as connection:
         connection.execute("UPDATE runs SET status='stopped', ended_at_us=11 WHERE run_id='run-1'")
-    result = RetentionManager(
+    manager = RetentionManager(
         database, RetentionPolicy(callback_payload_us=1, receipt_us=1_000, tombstone_us=1_000)
-    ).run(now_us=12, measured_database_bytes=1, measured_wal_bytes=0)
-    assert result.payloads_compacted == 4
+    )
+    first_result = manager.run(now_us=12, measured_database_bytes=1, measured_wal_bytes=0)
+    second_result = manager.run(now_us=12, measured_database_bytes=1, measured_wal_bytes=0)
+    assert first_result.payloads_compacted + second_result.payloads_compacted == 4
 
 
 def _force_recorder_takeover(database: Path) -> None:

@@ -888,7 +888,7 @@ def test_recorder_admits_exact_logical_alias_for_imported_ibkr_contract(
             {"event_at_us": 101, "bid": 14.9, "ask": 15.1},
         ),
     )
-    assert recorder.drain(now_us=102) == 1
+    assert recorder.drain(now_us=102, run_downstream_when_idle=False) == 1
     recorder.stop(now_us=103)
 
     assert len(state.fences) == 1
@@ -1455,10 +1455,16 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
         )
         assert recorder.drain(now_us=356) == 256
         assert downstream_calls == []
-        assert recorder.drain(now_us=358) == 0
+        connections_after_full_batch = drain_connections
+        transactions_after_full_batch = len(drain_transactions)
+        assert recorder.drain(now_us=358, run_downstream_when_idle=False) == 0
+        assert downstream_calls == []
+        assert drain_connections == connections_after_full_batch + 1
+        assert len(drain_transactions) <= transactions_after_full_batch + 2
+        assert recorder.drain(now_us=359, run_downstream_when_idle=True) == 0
     assert downstream_calls == ["snapshot", "interests", "ideas", "dynamic", "shadow"]
     assert redundant_owner_connections == []
-    assert drain_connections <= 7
+    assert drain_connections <= 8
     assert drain_transactions.count("BEGIN IMMEDIATE") <= 24
     assert drain_transactions.count("COMMIT") <= 24
     assert drain_nonterminal_counts <= 8
@@ -1502,7 +1508,7 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
             connection.execute(
                 "SELECT process_heartbeat_at_us FROM runtime_state WHERE run_id='run-1'"
             ).fetchone()[0]
-            == 358
+            == 359
         )
 
 

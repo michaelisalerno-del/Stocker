@@ -2587,6 +2587,7 @@ class Recorder:
         now_us: int,
         limit: int = 256,
         defer_downstream_when_full: bool = True,
+        run_downstream_when_idle: bool = True,
     ) -> int:
         """Recover and process one bounded callback batch without blocking on poison."""
 
@@ -2600,6 +2601,8 @@ class Recorder:
                 limit=limit,
                 authority=authority,
             )
+            if not leased_callbacks and not run_downstream_when_idle:
+                return 0
             if leased_callbacks:
                 causal_now_us = max(
                     causal_now_us,

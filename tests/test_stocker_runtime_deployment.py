@@ -1191,8 +1191,10 @@ def test_recorder_service_loop_invokes_bounded_health_tick(
         return previous
 
     monkeypatch.setattr("stocker_runtime.cli.signal.signal", install_handler)
-    monkeypatch.setattr("stocker_runtime.cli.time.time_ns", lambda: 1_000_000_000)
-    monkeypatch.setattr("stocker_runtime.cli.RECORDER_HEALTH_INTERVAL_US", 0)
+    clock_ns = {"value": 1_000_000_000}
+    monkeypatch.setattr(
+        "stocker_runtime.cli.time.time_ns", lambda: clock_ns["value"]
+    )
     monkeypatch.setattr(
         "stocker_runtime.cli.IBKRMarketData.official",
         lambda **_kwargs: _SignalMarketData(lambda _signum, _frame: None),
@@ -1204,12 +1206,27 @@ def test_recorder_service_loop_invokes_bounded_health_tick(
     )
     real_drain = Recorder.drain
     drain_calls = 0
+    idle_work_flags: list[bool] = []
 
-    def drain_then_stop(recorder: Recorder, *, now_us: int, limit: int = 256) -> int:
+    def drain_then_stop(
+        recorder: Recorder,
+        *,
+        now_us: int,
+        limit: int = 256,
+        run_downstream_when_idle: bool = True,
+    ) -> int:
         nonlocal drain_calls
         drain_calls += 1
-        result = real_drain(recorder, now_us=now_us, limit=limit)
+        idle_work_flags.append(run_downstream_when_idle)
+        result = real_drain(
+            recorder,
+            now_us=now_us,
+            limit=limit,
+            run_downstream_when_idle=run_downstream_when_idle,
+        )
         if drain_calls == 2:
+            clock_ns["value"] = 2_000_000_000
+        if drain_calls == 3:
             handler = handlers[signal.SIGTERM]
             assert callable(handler)
             handler(signal.SIGTERM, None)
@@ -1222,7 +1239,8 @@ def test_recorder_service_loop_invokes_bounded_health_tick(
     )
 
     assert result.exit_code == 0, result.output
-    assert health_calls == [1_000_000]
+    assert idle_work_flags == [True, False, True]
+    assert health_calls == [2_000_000]
     assert json.loads(result.stdout)["termination"] == "sigterm"
 
 

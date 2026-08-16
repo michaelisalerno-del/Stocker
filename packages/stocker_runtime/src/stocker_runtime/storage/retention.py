@@ -361,10 +361,7 @@ class RetentionManager:
                         "receipt exceeds bounded verification capacity"
                     )
                 break
-            if (
-                checkpoint_callbacks + callback_count
-                > MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS
-            ):
+            if checkpoint_callbacks + callback_count > MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS:
                 break
             checkpoint_rows.append(receipt)
             checkpoint_callbacks += callback_count
@@ -572,14 +569,10 @@ class RetentionManager:
             receipt_callback_rows = callback_rows[callback_offset:next_offset]
             if len(receipt_callback_rows) != int(receipt["callback_count"]):
                 raise RetentionInvariantError("receipt sequence/count invariant failed")
-            if (
-                receipt_callback_rows
-                and int(receipt_callback_rows[0]["source_sequence"])
-                < int(receipt["first_source_sequence"])
+            if receipt_callback_rows and int(receipt_callback_rows[0]["source_sequence"]) < int(
+                receipt["first_source_sequence"]
             ):
-                raise RetentionInvariantError(
-                    "receipt skipped an authoritative same-run callback"
-                )
+                raise RetentionInvariantError("receipt skipped an authoritative same-run callback")
             record = self._verified_receipt(
                 connection,
                 receipt,
@@ -612,9 +605,7 @@ class RetentionManager:
         run_rows: tuple[sqlite3.Row, ...]
         if target_run_id is None:
             run_rows = tuple(
-                connection.execute(
-                    "SELECT DISTINCT run_id FROM callback_receipts ORDER BY run_id"
-                )
+                connection.execute("SELECT DISTINCT run_id FROM callback_receipts ORDER BY run_id")
             )
         else:
             run_rows = tuple(
@@ -1112,12 +1103,8 @@ class RetentionManager:
             checkpoint_runs = tuple(
                 row
                 for row in (
-                    connection.execute(
-                        ACK_CHECKPOINT_RUN_SQL, (payload_cutoff_us,)
-                    ).fetchone(),
-                    connection.execute(
-                        FAILED_CHECKPOINT_RUN_SQL, (payload_cutoff_us,)
-                    ).fetchone(),
+                    connection.execute(ACK_CHECKPOINT_RUN_SQL, (payload_cutoff_us,)).fetchone(),
+                    connection.execute(FAILED_CHECKPOINT_RUN_SQL, (payload_cutoff_us,)).fetchone(),
                 )
                 if row is not None
             )
@@ -1134,9 +1121,7 @@ class RetentionManager:
                 now_us - self.policy.receipt_us,
                 now_us,
                 self.policy.maintenance_batch_rows,
-                target_run_id=(
-                    None if checkpoint_run is None else str(checkpoint_run["run_id"])
-                ),
+                target_run_id=(None if checkpoint_run is None else str(checkpoint_run["run_id"])),
             )
             check_deadline()
             connection.commit()

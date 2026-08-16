@@ -2746,14 +2746,20 @@ def test_retention_defers_a_receipt_larger_than_the_proof_cap(
         ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
 
     with connect_v2(database) as connection:
-        assert connection.execute(
-            "SELECT 1 FROM callback_compaction_watermarks WHERE run_id = 'retention-run'"
-        ).fetchone() is None
-        assert connection.execute(
-            "SELECT count(*) FROM callback_inbox WHERE source_sequence IN (?, ?) "
-            "AND payload_json IS NOT NULL",
-            (first, second),
-        ).fetchone()[0] == 2
+        assert (
+            connection.execute(
+                "SELECT 1 FROM callback_compaction_watermarks WHERE run_id = 'retention-run'"
+            ).fetchone()
+            is None
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE source_sequence IN (?, ?) "
+                "AND payload_json IS NOT NULL",
+                (first, second),
+            ).fetchone()[0]
+            == 2
+        )
 
 
 def test_compaction_rejects_a_corrupt_recent_receipt_before_payload_deletion(

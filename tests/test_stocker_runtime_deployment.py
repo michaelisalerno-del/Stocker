@@ -1192,9 +1192,7 @@ def test_recorder_service_loop_invokes_bounded_health_tick(
 
     monkeypatch.setattr("stocker_runtime.cli.signal.signal", install_handler)
     clock_ns = {"value": 1_000_000_000}
-    monkeypatch.setattr(
-        "stocker_runtime.cli.time.time_ns", lambda: clock_ns["value"]
-    )
+    monkeypatch.setattr("stocker_runtime.cli.time.time_ns", lambda: clock_ns["value"])
     monkeypatch.setattr(
         "stocker_runtime.cli.IBKRMarketData.official",
         lambda **_kwargs: _SignalMarketData(lambda _signum, _frame: None),

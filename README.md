@@ -25,6 +25,10 @@ disprove while keeping future execution outside the current runtime.
 - `packages/stocker_research/legacy_prospective/`: frozen calculations retained only to
   reproduce historical research; it has no recorder, database, broker, or web surface.
 
+V2 recorder restart, recovery, readiness, migration, and opening-replay operations are
+documented in
+[`docs/operations/stocker-v2-market-open-reliability.md`](docs/operations/stocker-v2-market-open-reliability.md).
+
 ## Python And Dependency Management
 
 Stocker targets Python 3.12 because it is the stable choice for the current quant

@@ -2045,6 +2045,8 @@ def test_duplicate_proposal_retry_repeated_runs_and_open_recovery_are_idempotent
 
 
 class _MarketDataOnlyFake:
+    capabilities = frozenset({"market_data"})
+
     def set_callback(self, callback: Any) -> None:
         self.callback = callback
 
@@ -2064,6 +2066,9 @@ class _MarketDataOnlyFake:
         del subscriptions
 
     def subscribe(self, fence: Any) -> None:
+        del fence
+
+    def retry_subscription(self, fence: Any) -> None:
         del fence
 
     def cancel(self, request_id: int) -> None:
@@ -2109,7 +2114,7 @@ def test_recorder_invokes_shadow_engine_only_in_shadow_mode(
         database = tmp_path / f"{mode}.sqlite3"
         initialize_database(database)
         recorder = Recorder(_recorder_config(database, mode=mode), _MarketDataOnlyFake())
-        recorder.start(now_us=100, instruments=(), subscriptions=())
+        recorder._start_test_only_allow_empty_inputs(now_us=100, instruments=(), subscriptions=())
         assert recorder.drain(now_us=101) == 0
         recorder.stop(now_us=102)
 

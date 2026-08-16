@@ -39,6 +39,10 @@ to identify the complete, runnable V1 release throughout the rollback window. Pr
 the installed V1 units, V1 configuration, V1 database, and recovery set for the same
 period; do not copy them into the V2 release tree.
 
+For schema-16 upgrades, restarts, fatal-generation recovery, readiness interpretation,
+and the fixed opening replay, also follow
+[`stocker-v2-market-open-reliability.md`](stocker-v2-market-open-reliability.md).
+
 ## 1. Approval and preflight
 
 Record the owner approval, release commit, operator, UTC window, all three V1 paths,
@@ -783,16 +787,19 @@ Start the V2 web first:
 sudo systemctl start stocker-v2-web.service
 ```
 
-Authenticate over the loopback/reverse-proxy boundary. Verify the exact seven GET API
+Authenticate over the loopback/reverse-proxy boundary. Verify the eight GET API
 routes, three primary views, diagnostics drawer, 512 KiB response cap, rate limiting,
-and the fixed prospective/shadow banner. Attempt a write through the web service
+the `/api/v2/ready` machine-readiness response, and the fixed prospective/shadow banner.
+Attempt a write through the web service
 identity and require SQLite query-only rejection. The database hash and row counts must
 not change while exercising the web UI.
 
 ## 6. Admit new V2 data
 
-Create a new V2 run identifier and recorder generation; never resume an imported V1
-run. Verify the official IBKR API provenance record and loopback/read-only boundary,
+Create a new V2 run identifier and recorder generation for the one-way V1 cutover;
+never resume an imported V1 run. Later clean V2 service restarts resume that exact V2
+run with a new generation as described in the reliability runbook. Verify the official
+IBKR API provenance record and loopback/read-only boundary,
 then start the V2 recorder:
 
 ```bash

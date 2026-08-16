@@ -8,7 +8,7 @@
   "app_version": "0.1.0",
   "git_commit": "0000000",
   "config_hash": "0000000000000000000000000000000000000000000000000000000000000000",
-  "query_budget_ms": 250,
+  "query_budget_ms": 300,
   "maximum_response_bytes": 524288,
   "trust_proxy_headers": false,
   "trusted_proxy_ips": [],

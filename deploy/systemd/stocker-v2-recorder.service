@@ -1,6 +1,6 @@
 [Unit]
 Description=Stocker V2 market-data-only recorder
-Documentation=file:/opt/stocker/v2-current/docs/plans/stocker-v2-platform.md
+Documentation=file:/opt/stocker/v2-current/docs/operations/stocker-v2-market-open-reliability.md
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300

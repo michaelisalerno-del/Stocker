@@ -697,7 +697,7 @@ def test_v2_deployment_examples_validate_with_only_record_shadow_authority() -> 
     assert recorder.external_read_only_verified is True
     assert str(recorder.database) == "/var/lib/stocker/v2/stocker-v2.sqlite3"
     assert web.host == "127.0.0.1"
-    assert web.query_budget_ms == 250
+    assert web.query_budget_ms == 300
     assert str(web.database) == "/var/lib/stocker/v2/stocker-v2.sqlite3"
     assert str(web.backup_directory) == "/var/lib/stocker/backups-v2"
     assert len(market_data["instruments"]) == 1

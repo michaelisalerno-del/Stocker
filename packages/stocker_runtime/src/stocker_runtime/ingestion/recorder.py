@@ -418,6 +418,39 @@ class Recorder:
     ) -> RecorderState:
         """Acquire the writer generation, recover the inbox, then connect."""
 
+        return self._start_with_input_policy(
+            now_us=now_us,
+            instruments=instruments,
+            subscriptions=subscriptions,
+            allow_empty_test_inputs=False,
+        )
+
+    def _start_test_only_allow_empty_inputs(
+        self,
+        *,
+        now_us: int,
+        instruments: tuple[InstrumentSpec, ...],
+        subscriptions: tuple[SubscriptionSpec, ...],
+    ) -> RecorderState:
+        """Start a test fixture that intentionally lacks production-valid inputs."""
+
+        return self._start_with_input_policy(
+            now_us=now_us,
+            instruments=instruments,
+            subscriptions=subscriptions,
+            allow_empty_test_inputs=True,
+        )
+
+    def _start_with_input_policy(
+        self,
+        *,
+        now_us: int,
+        instruments: tuple[InstrumentSpec, ...],
+        subscriptions: tuple[SubscriptionSpec, ...],
+        allow_empty_test_inputs: bool,
+    ) -> RecorderState:
+        """Acquire ownership and start under the selected input-validation policy."""
+
         if self.state is not None:
             raise DuplicateWriterError("this recorder is already started")
         try:
@@ -429,6 +462,7 @@ class Recorder:
                 now_us=now_us,
                 instruments=instruments,
                 subscriptions=subscriptions,
+                allow_empty_test_inputs=allow_empty_test_inputs,
             )
         except BaseException:
             if self.state is None:
@@ -443,15 +477,18 @@ class Recorder:
         now_us: int,
         instruments: tuple[InstrumentSpec, ...],
         subscriptions: tuple[SubscriptionSpec, ...],
+        allow_empty_test_inputs: bool,
     ) -> RecorderState:
         """Start after the process-lifetime local writer lock is held."""
 
-        validate_market_data_inputs(instruments, subscriptions)
+        if not allow_empty_test_inputs:
+            validate_market_data_inputs(instruments, subscriptions)
         input_hash = market_data_input_hash(instruments, subscriptions)
         instruments, subscriptions, generated_idea_subscriptions = self._prepare_inputs(
             instruments, subscriptions
         )
-        _validate_market_data_inputs(instruments, subscriptions)
+        if not allow_empty_test_inputs:
+            _validate_market_data_inputs(instruments, subscriptions)
         self._instruments = instruments
         self._base_subscriptions = subscriptions
         self._subscriptions = subscriptions

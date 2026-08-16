@@ -604,6 +604,25 @@ def test_readiness_rejects_stale_process_heartbeat_and_excess_backlog(tmp_path: 
     assert payload["inbox"]["threshold"] == 5_000
 
 
+def test_readiness_rejects_future_process_heartbeat(tmp_path: Path) -> None:
+    database = tmp_path / "ready-future-heartbeat.sqlite3"
+    _seed_live(database)
+    now_us = 1_786_881_600_000_000
+    _make_live_ready(database, now_us=now_us)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE runtime_state SET process_heartbeat_at_us=?",
+            (now_us + 1,),
+        )
+
+    payload = ReadModel(_config(database)).ready(now_us=now_us)
+
+    assert payload["ready"] is False
+    assert payload["selection_reason"] == "stale_recorder_generation"
+    assert payload["reasons"] == ["RECORDER_HEARTBEAT_IN_FUTURE"]
+    assert payload["database"]["writer_admission_healthy"] is False
+
+
 def test_readiness_reports_no_active_run_and_keeps_stopped_run_pinning_exact(
     tmp_path: Path,
 ) -> None:
@@ -1197,7 +1216,7 @@ def test_web_config_fails_closed_for_unsafe_network_and_auth_settings(
     )
     with pytest.raises(RuntimeError, match="authentication token is absent"):
         create_web_app(missing_token)
-    assert _config(database).query_budget_ms == 250
+    assert _config(database).query_budget_ms == 300
     assert _config(database, query_budget_ms=500).query_budget_ms == 500
     with pytest.raises(ValidationError):
         _config(database, query_budget_ms=501)

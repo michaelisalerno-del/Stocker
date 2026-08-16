@@ -4893,9 +4893,9 @@ def test_component_boundary_never_downgrades_recorder_fatal_error(tmp_path: Path
         )
     with connect_v2(database) as connection:
         assert (
-            connection.execute(
-                "SELECT count(*) FROM incidents WHERE scope='component'"
-            ).fetchone()[0]
+            connection.execute("SELECT count(*) FROM incidents WHERE scope='component'").fetchone()[
+                0
+            ]
             == 0
         )
 
@@ -4911,21 +4911,27 @@ def test_component_incident_backoff_starts_only_after_durable_publication(
     blocker = connect_v2(database)
     blocker.execute("BEGIN IMMEDIATE")
     try:
-        assert recorder._component_failure(
-            "backup_maintenance",
-            now_us=101,
-            error_name="OperationalError",
-        ) is False
+        assert (
+            recorder._component_failure(
+                "backup_maintenance",
+                now_us=101,
+                error_name="OperationalError",
+            )
+            is False
+        )
         assert recorder._component_failures["backup_maintenance"] == (1, 101)
     finally:
         blocker.rollback()
         blocker.close()
 
-    assert recorder._component_failure(
-        "backup_maintenance",
-        now_us=102,
-        error_name="OperationalError",
-    ) is True
+    assert (
+        recorder._component_failure(
+            "backup_maintenance",
+            now_us=102,
+            error_name="OperationalError",
+        )
+        is True
+    )
     with connect_v2(database) as connection:
         incident = connection.execute(
             "SELECT opened_at_us, resolved_at_us FROM incidents "
@@ -4942,19 +4948,25 @@ def test_component_recovery_contention_remains_degraded_and_raw_admission_resume
     instrument, specs = _specs()
     recorder = Recorder(_config(database), FakeMarketData())
     state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
-    assert recorder._component_failure(
-        "backup_maintenance",
-        now_us=101,
-        error_name="OSError",
-    ) is True
+    assert (
+        recorder._component_failure(
+            "backup_maintenance",
+            now_us=101,
+            error_name="OSError",
+        )
+        is True
+    )
     blocker = connect_v2(database)
     blocker.execute("BEGIN IMMEDIATE")
     try:
-        assert recorder._run_component(
-            "backup_maintenance",
-            now_us=1_000_101,
-            operation=lambda: None,
-        ) is True
+        assert (
+            recorder._run_component(
+                "backup_maintenance",
+                now_us=1_000_101,
+                operation=lambda: None,
+            )
+            is True
+        )
         assert "backup_maintenance" in recorder._component_failures
     finally:
         blocker.rollback()
@@ -5018,8 +5030,7 @@ def test_canonical_observation_recovery_retries_after_incident_write_contention(
     assert "canonical_callback" in recorder._component_observations
     with connect_v2(database) as connection:
         unresolved = connection.execute(
-            "SELECT resolved_at_us FROM incidents "
-            "WHERE code='COMPONENT_CANONICAL_CALLBACK_FAILED'"
+            "SELECT resolved_at_us FROM incidents WHERE code='COMPONENT_CANONICAL_CALLBACK_FAILED'"
         ).fetchone()[0]
     assert unresolved is None
 
@@ -5032,8 +5043,7 @@ def test_canonical_observation_recovery_retries_after_incident_write_contention(
     assert "canonical_callback" not in recorder._component_observations
     with connect_v2(database) as connection:
         resolved = connection.execute(
-            "SELECT resolved_at_us FROM incidents "
-            "WHERE code='COMPONENT_CANONICAL_CALLBACK_FAILED'"
+            "SELECT resolved_at_us FROM incidents WHERE code='COMPONENT_CANONICAL_CALLBACK_FAILED'"
         ).fetchone()[0]
     assert resolved == 2_000_101
 

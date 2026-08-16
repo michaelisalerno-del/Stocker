@@ -176,11 +176,11 @@ writer/admission health, configuration, socket, and subscription lifecycle remai
 visible. No secret, credential, client account, or broker account identifier is
 returned.
 
-Set the web query default/example to 250 ms, the smallest requested value, and the hard
-maximum to 500 ms. Preserve progress-handler interruption, SQLite busy bounds,
-query-only mode, and the stable `query_timeout` 503. Increase the default within the
-250–500 ms range only if the unchanged opening replay/query tests prove 250 ms
-unreliable.
+Set the web query default/example within 250–500 ms and retain a hard maximum of 500
+ms. Preserve progress-handler interruption, SQLite busy bounds, query-only mode, and
+the stable `query_timeout` 503. Final replay measurements selected 300 ms: four
+readiness queries ranged from 218.4 ms to 246.1 ms, so 250 ms had insufficient
+operational headroom even though every run completed within that stronger bound.
 
 ## 5. Migration and rollback
 
@@ -238,7 +238,8 @@ commit.
 ### Phase 3 — Downstream isolation and truthful web health
 
 Add component-specific retry/incident boundaries, shared XNYS session calculation,
-current-run selection, readiness, per-feed diagnostics, and the 250 ms query budget.
+current-run selection, readiness, per-feed diagnostics, and a bounded 250–500 ms query
+budget selected by the final replay.
 Keep `/` as liveness. Run failure-injection and web tests, then commit.
 
 ### Phase 4 — Opening replay, justified optimization, docs/deployment
@@ -307,10 +308,35 @@ temporary SQLite database and fake market-data adapter; neither was committed.
 | Required feeds fresh | 100 / 100 |
 | Peak RSS growth | 16,842,752 bytes |
 
-The temporary harness advanced the final heartbeat one simulated second beyond the
-end-of-burst measurement timestamp; the reported effective delay is therefore clamped
-to zero. These local fake-adapter results prove no real IBKR or production-host
-performance.
+The temporary baseline harness advanced the final heartbeat one simulated second
+beyond the end-of-burst measurement timestamp; its reported effective delay is
+therefore clamped to zero. These local fake-adapter results prove no real IBKR or
+production-host performance.
+
+### Final unchanged-threshold replay
+
+The final code ran the identical 60-second scenario six times. All runs passed every
+pre-baseline ingestion threshold, so no ingestion optimization, queue, batching layer,
+or new storage mechanism was justified or added. The final post-format run is the
+comparison result below; earlier runs and the independent Reviewer confirmed the same
+bounded behavior.
+
+| Measurement | Final |
+| --- | ---: |
+| Presented / admitted / projected | 12,132 / 12,132 / 12,132 |
+| Missing / duplicate / provenance violations | 0 / 0 / 0 |
+| Ordering violations / escaped SQLite busy/locked | 0 / 0 |
+| Admission p50 / p95 / p99 | 0.146 / 0.261 / 9.691 ms |
+| Admission / projection throughput | 426.23 / 1,510.64 callbacks/s |
+| Maximum / final nonterminal backlog | 219 / 0 |
+| Backlog drain to zero | 0.154 s |
+| Effective process-heartbeat delay | 0 s |
+| Required feeds fresh / active | 100 / 100 |
+| Readiness result / query time | ready / 228.5 ms |
+| Peak RSS growth | 23,445,504 bytes |
+
+The final harness derives its heartbeat from the last projected callback; no timestamp
+advance or clamping was used for the final result.
 
 Focused and failure-oriented tests cover every item in the user request, including
 clean/crash restart, duplicate writer, generation provenance, historical fatal

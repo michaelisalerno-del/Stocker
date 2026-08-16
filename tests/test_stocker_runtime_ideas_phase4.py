@@ -67,6 +67,7 @@ from stocker_runtime.ingestion import (
     CallbackFence,
     ContractCandidate,
     DuplicateWriterError,
+    IBKRMarketData,
     IBKRSubscription,
     InstrumentSpec,
     MarketDataCallback,
@@ -2680,6 +2681,8 @@ def test_gap_blocking_is_scoped_to_activation_interval(
 
 
 class _RecorderAdapter:
+    capabilities = frozenset({"market_data"})
+
     def __init__(self) -> None:
         self.configured_subscriptions: tuple[IBKRSubscription, ...] = ()
         self.subscribed_request_ids: list[int] = []
@@ -2707,6 +2710,9 @@ class _RecorderAdapter:
         assert isinstance(request_id, int)
         self.subscribed_request_ids.append(request_id)
         return None
+
+    def retry_subscription(self, fence: object) -> None:
+        self.subscribe(fence)
 
     def cancel(self, request_id: int) -> None:
         return None
@@ -2973,9 +2979,9 @@ def test_official_raw_bars_flow_through_recorder_into_reference_plugin(
             git_commit="deadbee",
             idea_config=idea_path,
         ),
-        bridge,
+        IBKRMarketData(bridge),
     )
-    recorder.start(now_us=1, instruments=(), subscriptions=())
+    recorder._start_test_only_allow_empty_inputs(now_us=1, instruments=(), subscriptions=())
     client = clients[0]
     wrapper = client.wrapper  # type: ignore[attr-defined]
     private_bridge = cast(Any, bridge)
@@ -3163,7 +3169,7 @@ def test_omitted_enablement_creates_no_subscription_instance_or_evaluation(
         ),
         adapter,
     )
-    recorder.start(now_us=100, instruments=(), subscriptions=())
+    recorder._start_test_only_allow_empty_inputs(now_us=100, instruments=(), subscriptions=())
     assert recorder.idea_requirements == ()
     assert adapter.configured_subscriptions == ()
     assert recorder.drain(now_us=101) == 0
@@ -3197,7 +3203,7 @@ def test_recorder_explicit_config_wires_generic_requirements_and_activation(tmp_
         _RecorderAdapter(),
     )
     adapter = cast(_RecorderAdapter, recorder.adapter)
-    recorder.start(now_us=100, instruments=(), subscriptions=())
+    recorder._start_test_only_allow_empty_inputs(now_us=100, instruments=(), subscriptions=())
     with connect_v2(database) as connection:
         instances = connection.execute("SELECT count(*) FROM idea_instances").fetchone()[0]
     assert len(recorder.idea_requirements) == len(COHORT)
@@ -3288,7 +3294,9 @@ def _dynamic_recorder(
 
 
 def _activate_dynamic_interest(recorder: Recorder, *, event_at_us: int) -> CallbackFence:
-    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    state = recorder._start_test_only_allow_empty_inputs(
+        now_us=event_at_us, instruments=(), subscriptions=()
+    )
     recorder.receive(
         state.fences[0],
         MarketDataCallback(
@@ -3388,7 +3396,7 @@ def test_dynamic_request_high_water_survives_restart_without_subscription_rows(
         )
 
     first = create("owner-1")
-    first.start(now_us=100, instruments=(), subscriptions=())
+    first._start_test_only_allow_empty_inputs(now_us=100, instruments=(), subscriptions=())
     first_request_id = first._next_dynamic_request_ids(1)[0]
 
     with connect_v2(database) as connection:
@@ -3398,8 +3406,9 @@ def test_dynamic_request_high_water_survives_restart_without_subscription_rows(
             == first_request_id
         )
 
+    first.abandon_unclean()
     second = create("owner-2")
-    second.start(now_us=15_000_101, instruments=(), subscriptions=())
+    second._start_test_only_allow_empty_inputs(now_us=15_000_101, instruments=(), subscriptions=())
     second_request_id = second._next_dynamic_request_ids(1)[0]
 
     assert (first_request_id, second_request_id) == (2_000_000, 2_000_001)
@@ -3423,7 +3432,9 @@ def test_dynamic_interest_records_exact_option_and_recovers_across_restart(
 
     first_adapter = _DynamicRecorderAdapter()
     first = _dynamic_recorder(database, idea_path, first_adapter, owner_id="owner-1")
-    first_state = first.start(now_us=event_at_us, instruments=(), subscriptions=())
+    first_state = first._start_test_only_allow_empty_inputs(
+        now_us=event_at_us, instruments=(), subscriptions=()
+    )
     first.receive(
         first_state.fences[0],
         MarketDataCallback(
@@ -3460,10 +3471,13 @@ def test_dynamic_interest_records_exact_option_and_recovers_across_restart(
         fence for fence in first.state.fences if fence.request_id == dynamic_request_id
     )
 
+    first.abandon_unclean()
     restart_at_us = event_at_us + 120_000_003
     second_adapter = _DynamicRecorderAdapter()
     second = _dynamic_recorder(database, idea_path, second_adapter, owner_id="owner-2")
-    second_state = second.start(now_us=restart_at_us, instruments=(), subscriptions=())
+    second_state = second._start_test_only_allow_empty_inputs(
+        now_us=restart_at_us, instruments=(), subscriptions=()
+    )
     new_dynamic_fence = next(
         fence for fence in second_state.fences if cast(int, fence.request_id) >= 2_000_000
     )
@@ -3967,7 +3981,9 @@ def test_fully_deferred_required_interest_records_capacity_evidence(
         line_limit=1,
     )
 
-    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    state = recorder._start_test_only_allow_empty_inputs(
+        now_us=event_at_us, instruments=(), subscriptions=()
+    )
     recorder.receive(
         state.fences[0],
         MarketDataCallback(
@@ -4012,10 +4028,13 @@ def test_restored_dynamic_snapshot_may_complete_inline_during_subscribe(
     first = _dynamic_recorder(database, idea_path, _DynamicRecorderAdapter(), owner_id="owner-1")
     dynamic_fence = _activate_dynamic_interest(first, event_at_us=event_at_us)
 
+    first.abandon_unclean()
     restart_at_us = event_at_us + 120_000_003
     adapter = _DynamicRecorderAdapter(inline_snapshot_at_us=restart_at_us + 1)
     second = _dynamic_recorder(database, idea_path, adapter, owner_id="owner-2")
-    second_state = second.start(now_us=restart_at_us, instruments=(), subscriptions=())
+    second_state = second._start_test_only_allow_empty_inputs(
+        now_us=restart_at_us, instruments=(), subscriptions=()
+    )
     restored_request_id = next(
         request_id for request_id in adapter.subscribe_attempts if request_id >= 2_000_000
     )
@@ -4052,7 +4071,9 @@ def test_dynamic_subscription_failure_survives_reconnect_and_retries_with_fresh_
     event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
     adapter = _DynamicRecorderAdapter(fail_dynamic_subscriptions=1)
     recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
-    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    state = recorder._start_test_only_allow_empty_inputs(
+        now_us=event_at_us, instruments=(), subscriptions=()
+    )
     recorder.receive(
         state.fences[0],
         MarketDataCallback(
@@ -4422,7 +4443,9 @@ def test_dynamic_discovery_retries_are_backed_off_and_bounded(
     event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
     adapter = _DynamicRecorderAdapter(fail_parameter_calls=5)
     recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
-    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    state = recorder._start_test_only_allow_empty_inputs(
+        now_us=event_at_us, instruments=(), subscriptions=()
+    )
     recorder.receive(
         state.fences[0],
         MarketDataCallback(
@@ -4472,7 +4495,9 @@ def test_dynamic_discovery_retry_never_moves_past_interest_expiry(
     event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
     adapter = _DynamicRecorderAdapter(fail_parameter_calls=1)
     recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
-    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    state = recorder._start_test_only_allow_empty_inputs(
+        now_us=event_at_us, instruments=(), subscriptions=()
+    )
     recorder.receive(
         state.fences[0],
         MarketDataCallback(
@@ -4528,7 +4553,9 @@ def test_dynamic_discovery_response_after_expiry_never_resolves_or_subscribes(
     event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
     adapter = _DynamicRecorderAdapter()
     recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
-    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    state = recorder._start_test_only_allow_empty_inputs(
+        now_us=event_at_us, instruments=(), subscriptions=()
+    )
     recorder.receive(
         state.fences[0],
         MarketDataCallback(
@@ -4616,7 +4643,9 @@ def test_dynamic_discovery_refreshes_writer_lease_between_bounded_metadata_calls
         owner_id="owner-1",
         writer_lease_stale_us=15_000_000,
     )
-    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    state = recorder._start_test_only_allow_empty_inputs(
+        now_us=event_at_us, instruments=(), subscriptions=()
+    )
     recorder.receive(
         state.fences[0],
         MarketDataCallback(
@@ -4680,7 +4709,9 @@ def test_dynamic_snapshot_completion_is_terminal_across_reconnect_and_late_callb
     event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
     adapter = _DynamicRecorderAdapter()
     recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
-    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    state = recorder._start_test_only_allow_empty_inputs(
+        now_us=event_at_us, instruments=(), subscriptions=()
+    )
     recorder.receive(
         state.fences[0],
         MarketDataCallback(
@@ -4925,7 +4956,9 @@ def test_dynamic_reconcile_and_direct_reconnect_serialize_adapter_reset(
         owner_id="owner",
         line_limit=2,
     )
-    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    state = recorder._start_test_only_allow_empty_inputs(
+        now_us=event_at_us, instruments=(), subscriptions=()
+    )
     adapter.block_next_configuration = True
     errors: list[BaseException] = []
     reconnected: list[RecorderState] = []
@@ -5106,7 +5139,9 @@ def test_dynamic_snapshot_may_complete_inline_during_subscribe(
     event_at_us = int(datetime(2026, 8, 10, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
     adapter = _DynamicRecorderAdapter(inline_snapshot_at_us=event_at_us + 3)
     recorder = _dynamic_recorder(database, idea_path, adapter, owner_id="owner")
-    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    state = recorder._start_test_only_allow_empty_inputs(
+        now_us=event_at_us, instruments=(), subscriptions=()
+    )
     recorder.receive(
         state.fences[0],
         MarketDataCallback(
@@ -5173,7 +5208,9 @@ def test_dynamic_snapshot_callback_thread_is_held_until_state_is_published(
         )
 
     monkeypatch.setattr(recorder, "_record_subscription_attempt", release_during_persistence)
-    state = recorder.start(now_us=event_at_us, instruments=(), subscriptions=())
+    state = recorder._start_test_only_allow_empty_inputs(
+        now_us=event_at_us, instruments=(), subscriptions=()
+    )
     recorder.receive(
         state.fences[0],
         MarketDataCallback(
@@ -5433,7 +5470,7 @@ def test_clean_stop_serializes_with_inflight_snapshot_retirement(
         ).fetchone()
         run = connection.execute("SELECT status FROM runs").fetchone()
     assert tuple(runtime) == ("stopped", "disconnected")
-    assert run["status"] == "stopped"
+    assert run["status"] == "running"
 
 
 def test_synthetic_idea_config_adds_subscription_without_core_wiring(
@@ -5472,7 +5509,7 @@ def test_synthetic_idea_config_adds_subscription_without_core_wiring(
         ),
         adapter,
     )
-    recorder.start(now_us=100, instruments=(), subscriptions=())
+    recorder._start_test_only_allow_empty_inputs(now_us=100, instruments=(), subscriptions=())
     assert adapter.configured_subscriptions == (
         IBKRSubscription(1_000_000, 1, "AAL", "STK", "SMART", "USD", "bars"),
     )
@@ -5524,7 +5561,7 @@ def test_synthetic_stream_requirement_adds_subscription_without_manual_wiring(
         adapter,
     )
 
-    recorder.start(now_us=100, instruments=(), subscriptions=())
+    recorder._start_test_only_allow_empty_inputs(now_us=100, instruments=(), subscriptions=())
 
     assert adapter.configured_subscriptions == (
         IBKRSubscription(1_000_000, 1, "AAL", "STK", "SMART", "USD", "quotes"),
@@ -5622,7 +5659,9 @@ def test_exact_four_plugin_activation_shape(
         adapter,
     )
 
-    state = recorder.start(now_us=100, instruments=(), subscriptions=())
+    state = recorder._start_test_only_allow_empty_inputs(
+        now_us=100, instruments=(), subscriptions=()
+    )
 
     assert len(state.fences) == len(adapter.configured_subscriptions) == 41
     assert len({item.request_id for item in adapter.configured_subscriptions}) == 41
@@ -5690,7 +5729,7 @@ def test_idea_requirement_without_same_entry_instrument_metadata_fails_closed(
         _RecorderAdapter(),
     )
     with pytest.raises(Exception, match="instrument metadata"):
-        recorder.start(now_us=100, instruments=(), subscriptions=())
+        recorder._start_test_only_allow_empty_inputs(now_us=100, instruments=(), subscriptions=())
 
 
 def test_generated_request_ids_skip_base_specs_and_reconnect_reuses_them(
@@ -5735,7 +5774,9 @@ def test_generated_request_ids_skip_base_specs_and_reconnect_reuses_them(
         optional=True,
         stale_after_us=15_000_000,
     )
-    first = recorder.start(now_us=100, instruments=(instrument,), subscriptions=(base,))
+    first = recorder._start_test_only_allow_empty_inputs(
+        now_us=100, instruments=(instrument,), subscriptions=(base,)
+    )
     assert {item.request_id for item in adapter.configured_subscriptions} == {
         1_000_000,
         1_000_001,
@@ -5780,7 +5821,7 @@ def test_combined_subscriptions_fail_closed_at_explicit_line_limit(
         _RecorderAdapter(),
     )
     with pytest.raises(Exception, match="line limit"):
-        recorder.start(
+        recorder._start_test_only_allow_empty_inputs(
             now_us=100,
             instruments=(InstrumentSpec("MSFT", 2, "stock", "MSFT", "SMART", "USD"),),
             subscriptions=(

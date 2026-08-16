@@ -11,6 +11,13 @@ RECORDER_HEARTBEAT_FRESH_US = 5_000_000
 READINESS_INBOX_BACKLOG_LIMIT = 5_000
 
 
+def _heartbeat_is_fresh(heartbeat: int | None, *, now_us: int) -> bool:
+    if heartbeat is None:
+        return False
+    age_us = now_us - int(heartbeat)
+    return 0 <= age_us <= RECORDER_HEARTBEAT_FRESH_US
+
+
 def select_operational_run(
     connection: sqlite3.Connection,
     *,
@@ -45,7 +52,7 @@ def select_operational_run(
         return None, "no_active_operational_run"
     selected = dict(row)
     heartbeat = selected["process_heartbeat_at_us"]
-    fresh = heartbeat is not None and now_us - int(heartbeat) <= RECORDER_HEARTBEAT_FRESH_US
+    fresh = _heartbeat_is_fresh(heartbeat, now_us=now_us)
     return selected, "fresh_recorder_generation" if fresh else "stale_recorder_generation"
 
 
@@ -98,6 +105,7 @@ def calculate_readiness(
     generation = selected["recorder_generation"]
     connection_generation = selected["connection_generation"]
     heartbeat = selected["process_heartbeat_at_us"]
+    heartbeat_fresh = _heartbeat_is_fresh(heartbeat, now_us=now_us)
     if selected["status"] != "running":
         reasons.append("RUN_NOT_OPERATIONAL")
     if selected["ended_at_us"] is not None or selected["lifecycle"] in {"stopped", "fatal"}:
@@ -106,8 +114,11 @@ def calculate_readiness(
         reasons.append("RECORDER_LIFECYCLE_NOT_RUNNING")
         if selected["reason"] is not None:
             reasons.append(f"RECORDER_DEGRADED:{selected['reason']}")
-    if heartbeat is None or now_us - int(heartbeat) > RECORDER_HEARTBEAT_FRESH_US:
-        reasons.append("RECORDER_HEARTBEAT_STALE")
+    if not heartbeat_fresh:
+        reason = "RECORDER_HEARTBEAT_STALE"
+        if heartbeat is not None and int(heartbeat) > now_us:
+            reason = "RECORDER_HEARTBEAT_IN_FUTURE"
+        reasons.append(reason)
     if selected["connection_state"] != "connected":
         reasons.append("IBKR_SOCKET_NOT_CONNECTED")
     backlog = int(selected["inbox_nonterminal_count"] or 0)
@@ -224,8 +235,7 @@ def calculate_readiness(
                 selected["status"] == "running"
                 and selected["ended_at_us"] is None
                 and selected["lifecycle"] in {"running", "degraded"}
-                and heartbeat is not None
-                and 0 <= now_us - int(heartbeat) <= RECORDER_HEARTBEAT_FRESH_US
+                and heartbeat_fresh
             ),
             "database_bytes": selected["database_bytes"],
             "wal_bytes": selected["wal_bytes"],

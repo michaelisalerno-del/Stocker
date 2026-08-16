@@ -36,7 +36,11 @@ from stocker_runtime.ingestion import (
     WriterAuthority,
 )
 from stocker_runtime.ingestion.dynamic_market_data import OptionDiscoveryBackend
-from stocker_runtime.ingestion.inbox import transport_incident_id
+from stocker_runtime.ingestion.inbox import (
+    LeasedCallback,
+    ProjectionBatchResult,
+    transport_incident_id,
+)
 from stocker_runtime.storage import (
     MaintenanceDeadlineExceeded,
     RetentionResult,
@@ -1417,12 +1421,44 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
     ) -> sqlite3.Connection:
         return trace_transactions(real_connect(path, verify_schema=verify_schema))
 
+    from stocker_runtime.ingestion import snapshot_projection
+
+    downstream_calls: list[str] = []
+    assert recorder._idea_runner is not None
     with monkeypatch.context() as drain_context:
         drain_context.setattr(inbox_module, "connect_v2", connect_during_drain)
         drain_context.setattr(recorder_module, "connect_v2", connect_recorder_during_drain)
+        drain_context.setattr(
+            snapshot_projection,
+            "project_option_snapshot_captures",
+            lambda *_args, **_kwargs: downstream_calls.append("snapshot"),
+        )
+        drain_context.setattr(
+            recorder,
+            "_fulfill_snapshot_interests_from_streams",
+            lambda *, now_us: downstream_calls.append("interests"),
+        )
+        drain_context.setattr(
+            recorder._idea_runner,
+            "run_once",
+            lambda *, now_us: downstream_calls.append("ideas"),
+        )
+        drain_context.setattr(
+            recorder,
+            "_reconcile_dynamic_market_data",
+            lambda *, now_us: downstream_calls.append("dynamic"),
+        )
+        drain_context.setattr(
+            recorder,
+            "_shadow_engine",
+            types.SimpleNamespace(run_once=lambda *, now_us: downstream_calls.append("shadow")),
+        )
         assert recorder.drain(now_us=356) == 256
+        assert downstream_calls == []
+        assert recorder.drain(now_us=358) == 0
+    assert downstream_calls == ["snapshot", "interests", "ideas", "dynamic", "shadow"]
     assert redundant_owner_connections == []
-    assert drain_connections <= 6
+    assert drain_connections <= 7
     assert drain_transactions.count("BEGIN IMMEDIATE") <= 24
     assert drain_transactions.count("COMMIT") <= 24
     assert drain_nonterminal_counts <= 8
@@ -1433,6 +1469,23 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
             ).fetchone()[0]
             == 256
         )
+        assert tuple(
+            connection.execute(
+                "SELECT count(*), count(DISTINCT receipt_batch_id) FROM callback_inbox "
+                "WHERE run_id='run-1' AND receipt_batch_id IS NOT NULL"
+            ).fetchone()
+        ) == (256, 1)
+        assert (
+            connection.execute(
+                "SELECT callback_count FROM callback_receipts WHERE run_id='run-1'"
+            ).fetchone()[0]
+            == 256
+        )
+        assert tuple(
+            connection.execute(
+                "SELECT count(*), sum(callback_count) FROM callback_receipts"
+            ).fetchone()
+        ) == (1, 256)
         assert (
             connection.execute(
                 "SELECT count(*) FROM market_events WHERE event_kind='bar'"
@@ -1445,6 +1498,108 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
             ).fetchone()[0]
             == 357
         )
+        assert (
+            connection.execute(
+                "SELECT process_heartbeat_at_us FROM runtime_state WHERE run_id='run-1'"
+            ).fetchone()[0]
+            == 358
+        )
+
+
+def test_full_batch_defers_only_when_each_leased_callback_is_receipted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "mixed-run-receipts.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    leased = tuple(
+        LeasedCallback(
+            source_sequence=sequence,
+            event_uid=f"event-{sequence}",
+            run_id=run_id,
+            recorder_generation=1,
+            connection_generation=1,
+            request_id=None,
+            callback_kind="quote",
+            received_at_us=100 + sequence,
+            provider_at_us=None,
+            payload={},
+            payload_sha256=f"{sequence:064x}",
+            lease_owner="owner-1",
+        )
+        for sequence, run_id in ((10, "prior-run"), (11, "run-1"), (12, "prior-run"))
+    )
+    current_receipt = types.SimpleNamespace(
+        run_id="run-1",
+        first_source_sequence=11,
+        last_source_sequence=11,
+        created_at_us=111,
+    )
+    prior_receipts = (
+        types.SimpleNamespace(
+            run_id="prior-run",
+            first_source_sequence=1,
+            last_source_sequence=10,
+            created_at_us=111,
+        ),
+        types.SimpleNamespace(
+            run_id="prior-run",
+            first_source_sequence=12,
+            last_source_sequence=12,
+            created_at_us=111,
+        ),
+    )
+    receipt_sets = [(current_receipt, *prior_receipts), (current_receipt,)]
+    downstream_calls: list[str] = []
+
+    monkeypatch.setattr(recorder.inbox, "lease_pending", lambda *_args, **_kwargs: leased)
+    monkeypatch.setattr(
+        recorder.inbox,
+        "project_batch",
+        lambda *_args, **_kwargs: ProjectionBatchResult(processed=3, causal_now_us=111),
+    )
+    monkeypatch.setattr(
+        recorder.inbox,
+        "create_pending_receipts",
+        lambda **_kwargs: receipt_sets.pop(0),
+    )
+    monkeypatch.setattr(recorder, "_heartbeat", lambda _now_us: None)
+    from stocker_runtime.ingestion import snapshot_projection
+
+    monkeypatch.setattr(
+        snapshot_projection,
+        "project_option_snapshot_captures",
+        lambda *_args, **_kwargs: downstream_calls.append("snapshot"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_fulfill_snapshot_interests_from_streams",
+        lambda *, now_us: downstream_calls.append("interests"),
+    )
+    assert recorder._idea_runner is not None
+    monkeypatch.setattr(
+        recorder._idea_runner,
+        "run_once",
+        lambda *, now_us: downstream_calls.append("ideas"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_reconcile_dynamic_market_data",
+        lambda *, now_us: downstream_calls.append("dynamic"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_shadow_engine",
+        types.SimpleNamespace(run_once=lambda *, now_us: downstream_calls.append("shadow")),
+    )
+
+    assert recorder.drain(now_us=110, limit=3) == 3
+    assert downstream_calls == []
+    assert recorder.drain(now_us=111, limit=3) == 3
+    assert downstream_calls == ["snapshot", "interests", "ideas", "dynamic", "shadow"]
+    recorder.stop(now_us=112)
 
 
 def test_admission_connection_closes_on_callback_thread_exit_and_abnormal_exit(
@@ -1553,7 +1708,9 @@ def test_unsafe_adapter_capability_is_rejected_before_connection(tmp_path: Path)
         Recorder(_config(tmp_path / "v2.sqlite3"), UnsafeMarketData())
 
 
-def test_replay_cli_runs_one_offline_recorder_lifecycle(tmp_path: Path) -> None:
+def test_replay_cli_runs_one_offline_recorder_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     config_path = tmp_path / "runtime.json"
@@ -1579,6 +1736,26 @@ def test_replay_cli_runs_one_offline_recorder_lifecycle(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
+    real_drain = Recorder.drain
+    drain_results: list[tuple[int, bool]] = []
+
+    def observe_drain(
+        self: Recorder,
+        *,
+        now_us: int,
+        limit: int = 256,
+        defer_downstream_when_full: bool = True,
+    ) -> int:
+        processed = real_drain(
+            self,
+            now_us=now_us,
+            limit=limit,
+            defer_downstream_when_full=defer_downstream_when_full,
+        )
+        drain_results.append((processed, defer_downstream_when_full))
+        return processed
+
+    monkeypatch.setattr(Recorder, "drain", observe_drain)
     result = CliRunner().invoke(
         app,
         ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "100"],
@@ -1591,6 +1768,7 @@ def test_replay_cli_runs_one_offline_recorder_lifecycle(tmp_path: Path) -> None:
         "projected": 1,
         "status": "ok",
     }
+    assert drain_results[-1] == (1, False)
     with connect_v2(database) as connection:
         assert connection.execute("SELECT status FROM runs").fetchone()[0] == "stopped"
         assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == 1

@@ -676,9 +676,11 @@ def replay_recorder_command(
                 now_us=pass_now_us,
                 authority=recorder._authority(),
             )
+            drain_limit = min(10_000, max(1, backlog))
             processed = recorder.drain(
                 now_us=pass_now_us,
-                limit=min(10_000, max(1, backlog)),
+                limit=drain_limit,
+                defer_downstream_when_full=False,
             )
             projected += processed
             after = recorder.inbox.nonterminal_count()

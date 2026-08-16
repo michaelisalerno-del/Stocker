@@ -1385,7 +1385,9 @@ class CallbackInbox:
             run_ids = tuple(
                 str(row[0])
                 for row in connection.execute(
-                    "SELECT run_id FROM callback_inbox WHERE receipt_batch_id IS NULL "
+                    "SELECT run_id FROM callback_inbox "
+                    "INDEXED BY callback_inbox_unreceipted_terminal_idx "
+                    "WHERE receipt_batch_id IS NULL "
                     "AND lifecycle IN ('acknowledged','failed') GROUP BY run_id "
                     "ORDER BY MIN(source_sequence) LIMIT ?",
                     (limit,),

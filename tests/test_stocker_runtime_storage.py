@@ -72,7 +72,7 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
 
     result = initialize_database(database, applied_at_us=1_700_000_000_000_000)
 
-    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
+    assert result.applied_versions == (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
     with connect_v2(database) as connection:
         tables = {
             str(row[0])
@@ -89,6 +89,75 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
         assert connection.execute("PRAGMA journal_size_limit").fetchone()[0] == 67_108_864
         assert connection.execute("PRAGMA auto_vacuum").fetchone()[0] == 2
         assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+
+
+def test_callback_receipt_frontier_index_migration_preserves_rows_and_is_used(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "receipt-frontier.sqlite3"
+    migration_root = tmp_path / "schema-14-migrations"
+    migration_root.mkdir()
+    for migration in migration_plan()[:14]:
+        (migration_root / migration.name).write_text(migration.sql, encoding="utf-8")
+    initialize_database(database, migration_root=migration_root, applied_at_us=1)
+    with connect_v2(database, verify_schema=False) as connection:
+        connection.execute(
+            "INSERT INTO runs(run_id, mode, source, started_at_us, config_hash, git_commit, "
+            "data_class, status) VALUES ('run-1', 'prospective_record', 'ibkr', 1, ?, "
+            "'deadbee', 'prospective_protected', 'running')",
+            ("a" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us) "
+            "VALUES ('run-1', 1, 'owner-1', 1)"
+        )
+        connection.executemany(
+            "INSERT INTO callback_inbox(source_sequence,event_uid,run_id,"
+            "recorder_generation,connection_generation,callback_kind,received_at_us,"
+            "payload_json,payload_sha256,lifecycle,receipt_batch_id) VALUES "
+            "(?,?,'run-1',1,1,'quote',?,'{}',?,'failed','prior-receipt')",
+            (
+                (sequence, f"receipted-{sequence}", sequence, f"{sequence:064x}")
+                for sequence in range(1, 1_001)
+            ),
+        )
+        for sequence, lifecycle in enumerate(("failed", "pending"), start=1_001):
+            connection.execute(
+                "INSERT INTO callback_inbox(source_sequence,event_uid,run_id,"
+                "recorder_generation,connection_generation,callback_kind,received_at_us,"
+                "payload_json,payload_sha256,lifecycle) VALUES "
+                "(?,?,'run-1',1,1,'quote',?,'{}',?,?)",
+                (sequence, f"event-{sequence}", sequence, f"{sequence:064x}", lifecycle),
+            )
+        before = tuple(connection.execute("SELECT * FROM callback_inbox ORDER BY source_sequence"))
+
+    result = migrate_database(database, applied_at_us=2)
+
+    assert result.applied_versions == (15,)
+    with connect_v2(database) as connection:
+        after = tuple(connection.execute("SELECT * FROM callback_inbox ORDER BY source_sequence"))
+        index_sql = connection.execute(
+            "SELECT sql FROM sqlite_schema "
+            "WHERE type='index' AND name='callback_inbox_unreceipted_terminal_idx'"
+        ).fetchone()[0]
+        plan = tuple(
+            str(row[3])
+            for row in connection.execute(
+                "EXPLAIN QUERY PLAN SELECT run_id FROM callback_inbox "
+                "INDEXED BY callback_inbox_unreceipted_terminal_idx "
+                "WHERE receipt_batch_id IS NULL "
+                "AND lifecycle IN ('acknowledged','failed') GROUP BY run_id "
+                "ORDER BY MIN(source_sequence) LIMIT ?",
+                (256,),
+            )
+        )
+        foreign_keys = tuple(connection.execute("PRAGMA foreign_key_check"))
+        quick_check = connection.execute("PRAGMA quick_check").fetchone()[0]
+    assert after == before
+    assert "WHERE receipt_batch_id IS NULL" in index_sql
+    assert any("callback_inbox_unreceipted_terminal_idx" in step for step in plan), plan
+    assert foreign_keys == ()
+    assert quick_check == "ok"
 
 
 def test_instrument_alias_migration_preserves_evidence_and_rejects_physical_mismatch(
@@ -139,7 +208,7 @@ def test_instrument_alias_migration_preserves_evidence_and_rejects_physical_mism
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (14,)
+    assert result.applied_versions == (14, 15)
     with connect_v2(database) as connection:
         index = next(
             row
@@ -314,7 +383,7 @@ def test_phase2_migration_preserves_dynamic_rows_and_admits_only_causal_derived_
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (13, 14)
+    assert result.applied_versions == (13, 14, 15)
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -443,7 +512,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (15, '0015_future.sql', ?, 2)",
+            "VALUES (16, '0016_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -525,7 +594,7 @@ def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_h
 
     result = migrate_database(backfill_database, applied_at_us=2)
 
-    assert result.applied_versions == (7, 8, 9, 10, 11, 12, 13, 14)
+    assert result.applied_versions == (7, 8, 9, 10, 11, 12, 13, 14, 15)
     with connect_v2(backfill_database) as connection:
         assert tuple(
             connection.execute(
@@ -618,7 +687,7 @@ def test_expiry_projection_migration_deactivates_terminal_history(tmp_path: Path
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (8, 9, 10, 11, 12, 13, 14)
+    assert result.applied_versions == (8, 9, 10, 11, 12, 13, 14, 15)
     with connect_v2(database) as connection:
         assert tuple(
             connection.execute(
@@ -769,6 +838,7 @@ def test_commit_boundary_migration_rewinds_pending_shadow_to_conservative_run_ma
         12,
         13,
         14,
+        15,
     )
     with connect_v2(database) as connection:
         assert (
@@ -3955,11 +4025,11 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     migration_payload = json.loads(migrated.stdout)
     retention_payload = json.loads(retained.stdout)
     assert init_payload == {
-        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
-        "current_version": 14,
+        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        "current_version": 15,
         "status": "ok",
     }
-    assert migration_payload == {"applied_versions": [], "current_version": 14, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 15, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

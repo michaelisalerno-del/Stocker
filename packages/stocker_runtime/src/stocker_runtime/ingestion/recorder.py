@@ -2581,7 +2581,13 @@ class Recorder:
                 self._cleanup_private_adapter()
             raise
 
-    def drain(self, *, now_us: int, limit: int = 256) -> int:
+    def drain(
+        self,
+        *,
+        now_us: int,
+        limit: int = 256,
+        defer_downstream_when_full: bool = True,
+    ) -> int:
         """Recover and process one bounded callback batch without blocking on poison."""
 
         authority = self._authority()
@@ -2616,6 +2622,21 @@ class Recorder:
                     causal_now_us,
                     max(receipt.created_at_us for receipt in receipts),
                 )
+            self._heartbeat(causal_now_us)
+            if (
+                defer_downstream_when_full
+                and len(leased_callbacks) == limit
+                and all(
+                    any(
+                        receipt.run_id == callback.run_id
+                        and receipt.first_source_sequence <= callback.source_sequence
+                        and receipt.last_source_sequence >= callback.source_sequence
+                        for receipt in receipts
+                    )
+                    for callback in leased_callbacks
+                )
+            ):
+                return processed
             from stocker_runtime.ingestion.snapshot_projection import (
                 project_option_snapshot_captures,
             )
@@ -2630,7 +2651,6 @@ class Recorder:
                 )
                 connection.commit()
             self._fulfill_snapshot_interests_from_streams(now_us=causal_now_us)
-            self._heartbeat(causal_now_us)
             if self._idea_runner is not None:
                 self._idea_runner.run_once(now_us=causal_now_us)
             if self._connection_is_connected():

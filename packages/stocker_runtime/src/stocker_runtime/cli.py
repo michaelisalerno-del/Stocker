@@ -31,6 +31,7 @@ from stocker_runtime.ingestion import (
     SubscriptionSpec,
     load_recorder_config,
     market_data_input_hash,
+    validate_market_data_inputs,
 )
 from stocker_runtime.ingestion.ibkr_api import (
     OfficialIBKRApiProvenanceError,
@@ -119,6 +120,7 @@ def _recorder_health_tick(recorder: Recorder, *, now_us: int) -> None:
         expected_since_us=expected_since_us,
     )
     recorder.recover_connection(now_us=now_us)
+    recorder.recover_subscriptions(now_us=now_us)
 
 
 class ReplayBlockedError(RuntimeError):
@@ -326,12 +328,22 @@ def retain_command(
 
 
 @app.command("validate-recorder")
-def validate_recorder_command(config: Annotated[Path, typer.Argument()]) -> None:
-    """Validate recorder safety configuration without connecting to IBKR."""
+def validate_recorder_command(
+    config: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    inputs: Annotated[Path, typer.Option("--inputs", exists=True, dir_okay=False)],
+) -> None:
+    """Validate recorder and desired market-data input without connecting to IBKR."""
 
     try:
         loaded = load_recorder_config(config)
-    except (OSError, ValueError) as error:
+        instruments, subscriptions = _load_recorder_inputs(inputs)
+        validate_market_data_inputs(instruments, subscriptions)
+        if len(subscriptions) > loaded.market_data_line_limit:
+            raise ValueError(
+                f"invalid market-data input {inputs}: subscriptions exceed recorder "
+                "market_data_line_limit"
+            )
+    except (OSError, ValueError, RuntimeError) as error:
         _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
         raise typer.Exit(code=78) from error
     _emit(
@@ -339,7 +351,9 @@ def validate_recorder_command(config: Annotated[Path, typer.Argument()]) -> None
             "host": loaded.host,
             "mode": loaded.mode,
             "read_only": loaded.read_only,
+            "required_subscriptions": sum(not item.optional for item in subscriptions),
             "status": "ok",
+            "subscriptions": len(subscriptions),
         }
     )
 
@@ -458,11 +472,27 @@ def _bounded_nonempty_text(value: object, *, field: str) -> str:
 def _load_recorder_inputs(
     path: Path,
 ) -> tuple[tuple[InstrumentSpec, ...], tuple[SubscriptionSpec, ...]]:
+    try:
+        return _load_recorder_inputs_unscoped(path)
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        TypeError,
+        ValueError,
+        RuntimeError,
+    ) as error:
+        raise ValueError(f"invalid market-data input {path}: {error}") from error
+
+
+def _load_recorder_inputs_unscoped(
+    path: Path,
+) -> tuple[tuple[InstrumentSpec, ...], tuple[SubscriptionSpec, ...]]:
     if path.stat().st_size > MAX_REPLAY_FILE_BYTES:
-        raise ValueError("recorder input exceeds the 8 MiB input limit")
+        raise ValueError("file exceeds the 8 MiB input limit")
     payload = json.loads(path.read_bytes().decode("utf-8"))
     if not isinstance(payload, dict) or set(payload) != {"instruments", "subscriptions"}:
-        raise ValueError("recorder input requires exactly instruments and subscriptions")
+        raise ValueError("requires exactly instruments and subscriptions")
     raw_instruments = payload["instruments"]
     raw_subscriptions = payload["subscriptions"]
     if not isinstance(raw_instruments, list) or len(raw_instruments) > MAX_REPLAY_INSTRUMENTS:
@@ -471,8 +501,24 @@ def _load_recorder_inputs(
         raise ValueError("recorder subscriptions must be a bounded list")
     instruments: list[InstrumentSpec] = []
     for item in raw_instruments:
-        fields = {"instrument_id", "ibkr_con_id", "kind", "symbol", "exchange", "currency"}
-        if not isinstance(item, dict) or set(item) != fields:
+        base_fields = {
+            "instrument_id",
+            "ibkr_con_id",
+            "kind",
+            "symbol",
+            "exchange",
+            "currency",
+        }
+        option_fields = {
+            "option_expiry",
+            "option_strike",
+            "option_right",
+            "option_multiplier",
+        }
+        if not isinstance(item, dict) or frozenset(item) not in {
+            frozenset(base_fields),
+            frozenset(base_fields | option_fields),
+        }:
             raise ValueError("recorder instrument has invalid fields")
         con_id = item["ibkr_con_id"]
         if isinstance(con_id, bool) or not isinstance(con_id, int) or con_id <= 0:
@@ -485,6 +531,28 @@ def _load_recorder_inputs(
                 symbol=_bounded_nonempty_text(item["symbol"], field="symbol"),
                 exchange=_bounded_nonempty_text(item["exchange"], field="exchange"),
                 currency=_bounded_nonempty_text(item["currency"], field="currency"),
+                option_expiry=(
+                    None
+                    if "option_expiry" not in item
+                    else _bounded_nonempty_text(item["option_expiry"], field="option_expiry")
+                ),
+                option_strike=(
+                    None
+                    if "option_strike" not in item
+                    else _bounded_nonempty_text(item["option_strike"], field="option_strike")
+                ),
+                option_right=(
+                    None
+                    if "option_right" not in item
+                    else _bounded_nonempty_text(item["option_right"], field="option_right")
+                ),
+                option_multiplier=(
+                    None
+                    if "option_multiplier" not in item
+                    else _bounded_nonempty_text(
+                        item["option_multiplier"], field="option_multiplier"
+                    )
+                ),
             )
         )
     subscriptions: list[SubscriptionSpec] = []
@@ -498,12 +566,16 @@ def _load_recorder_inputs(
             "optional",
             "stale_after_us",
         }
-        if not isinstance(item, dict) or set(item) != fields:
+        if not isinstance(item, dict) or frozenset(item) not in {
+            frozenset(fields),
+            frozenset(fields | {"snapshot"}),
+        }:
             raise ValueError("recorder subscription has invalid fields")
         request_id = item["request_id"]
         stale_after_us = item["stale_after_us"]
         continuity_required = item["continuity_required"]
         optional = item["optional"]
+        snapshot = item.get("snapshot", False)
         if isinstance(request_id, bool) or not isinstance(request_id, int) or request_id < 0:
             raise ValueError("recorder subscription request_id must be a nonnegative integer")
         if (
@@ -512,7 +584,11 @@ def _load_recorder_inputs(
             or stale_after_us <= 0
         ):
             raise ValueError("recorder subscription stale_after_us must be a positive integer")
-        if not isinstance(continuity_required, bool) or not isinstance(optional, bool):
+        if (
+            not isinstance(continuity_required, bool)
+            or not isinstance(optional, bool)
+            or not isinstance(snapshot, bool)
+        ):
             raise ValueError("recorder subscription flags must be booleans")
         subscriptions.append(
             SubscriptionSpec(
@@ -523,9 +599,12 @@ def _load_recorder_inputs(
                 continuity_required=continuity_required,
                 optional=optional,
                 stale_after_us=stale_after_us,
+                snapshot=snapshot,
             )
         )
-    return tuple(instruments), tuple(subscriptions)
+    result = (tuple(instruments), tuple(subscriptions))
+    validate_market_data_inputs(*result)
+    return result
 
 
 @recorder_app.command("run")
@@ -628,6 +707,8 @@ def web_run_command(config: Annotated[Path, typer.Option("--config", exists=True
 class _ReplayMarketData:
     """Offline adapter used only by the explicit replay CLI."""
 
+    capabilities = frozenset({"market_data"})
+
     def __init__(self) -> None:
         self.callback: Callable[[CallbackFence, MarketDataCallback], AdmissionResult] | None = None
 
@@ -652,6 +733,9 @@ class _ReplayMarketData:
         return None
 
     def subscribe(self, _fence: CallbackFence) -> None:
+        return None
+
+    def retry_subscription(self, _fence: CallbackFence) -> None:
         return None
 
     def cancel(self, _request_id: int) -> None:

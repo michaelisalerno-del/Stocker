@@ -42,6 +42,7 @@ from stocker_runtime.ingestion.dynamic_market_data import (
     plan_market_data,
 )
 from stocker_runtime.ingestion.ibkr_market_data import (
+    MARKET_DATA_ONLY_CAPABILITIES,
     IBKRSubscription,
     MarketDataAdapter,
     MarketDataStatus,
@@ -54,6 +55,7 @@ from stocker_runtime.ingestion.inbox import (
     CallbackTimestampOrderingLoss,
     InboxAdmissionError,
     InboxAuthorityLost,
+    LeasedCallback,
     MarketDataCallback,
     WriterAuthority,
     transport_incident_id,
@@ -63,6 +65,7 @@ from stocker_runtime.ingestion.lifecycle import (
     LocalWriterLock,
     LocalWriterLockError,
 )
+from stocker_runtime.ingestion.subscription_supervisor import retry_disposition
 from stocker_runtime.shadow import ShadowEngine
 from stocker_runtime.storage import (
     MaintenanceDeadlineExceeded,
@@ -161,12 +164,52 @@ class SubscriptionSpec:
         if (
             not self.name
             or not self.instrument_id
-            or not self.feed_kind
+            or self.feed_kind not in {"quotes", "trades", "bars"}
             or self.request_id < 0
             or self.request_id > 1_499_999_999
             or self.stale_after_us <= 0
         ):
             raise ValueError("subscription identity and staleness bound are required")
+        if self.snapshot and self.feed_kind == "bars":
+            raise ValueError("bar subscriptions cannot use snapshot mode")
+
+
+def validate_market_data_inputs(
+    instruments: tuple[InstrumentSpec, ...],
+    subscriptions: tuple[SubscriptionSpec, ...],
+) -> None:
+    """Reject a production desired set with no usable, unambiguous required work."""
+
+    if not instruments:
+        raise RecorderFatalError("market-data input has zero instruments")
+    if not subscriptions:
+        raise RecorderFatalError("market-data input has zero subscriptions")
+    if not any(not item.optional for item in subscriptions):
+        raise RecorderFatalError("market-data input has zero required subscriptions")
+    instrument_ids = [item.instrument_id for item in instruments]
+    if len(set(instrument_ids)) != len(instrument_ids):
+        raise RecorderFatalError("market-data input has duplicate instrument identities")
+    known_instruments = set(instrument_ids)
+    request_ids = [item.request_id for item in subscriptions]
+    names = [item.name for item in subscriptions]
+    semantic_keys = [(item.instrument_id, item.feed_kind) for item in subscriptions]
+    if len(set(request_ids)) != len(request_ids):
+        raise RecorderFatalError("market-data input has duplicate request identities")
+    if len(set(names)) != len(names):
+        raise RecorderFatalError("market-data input has duplicate subscription identities")
+    if len(set(semantic_keys)) != len(semantic_keys):
+        raise RecorderFatalError("market-data input has contradictory feed definitions")
+    missing = sorted(
+        {
+            item.instrument_id
+            for item in subscriptions
+            if item.instrument_id not in known_instruments
+        }
+    )
+    if missing:
+        raise RecorderFatalError(
+            f"market-data subscriptions reference missing instruments: {missing}"
+        )
 
 
 def market_data_input_hash(
@@ -262,16 +305,9 @@ def load_recorder_config(path: str | Path) -> RecorderConfig:
 
 
 def _safe_adapter(adapter: object) -> None:
-    forbidden = ("order", "account", "position", "execution", "pnl", "fill", "portfolio")
-    unsafe = sorted(
-        name
-        for name in dir(adapter)
-        if not name.startswith("_")
-        and callable(getattr(adapter, name, None))
-        and any(term in name.lower() for term in forbidden)
-    )
-    if unsafe:
-        raise RecorderFatalError(f"unsafe broker capability is public: {','.join(unsafe)}")
+    capabilities = getattr(adapter, "capabilities", None)
+    if capabilities != MARKET_DATA_ONLY_CAPABILITIES:
+        raise RecorderFatalError("adapter must declare exactly market-data-only capability")
     required = {
         "set_callback",
         "set_disconnect_callback",
@@ -279,6 +315,7 @@ def _safe_adapter(adapter: object) -> None:
         "connect",
         "disconnect",
         "subscribe",
+        "retry_subscription",
         "cancel",
     }
     missing = sorted(name for name in required if not callable(getattr(adapter, name, None)))
@@ -390,10 +427,12 @@ class Recorder:
     ) -> RecorderState:
         """Start after the process-lifetime local writer lock is held."""
 
+        validate_market_data_inputs(instruments, subscriptions)
         input_hash = market_data_input_hash(instruments, subscriptions)
         instruments, subscriptions, generated_idea_subscriptions = self._prepare_inputs(
             instruments, subscriptions
         )
+        validate_market_data_inputs(instruments, subscriptions)
         self._instruments = instruments
         self._base_subscriptions = subscriptions
         self._subscriptions = subscriptions
@@ -597,8 +636,6 @@ class Recorder:
         """Merge core-owned idea requirements into the recorder's exact request set."""
 
         instrument_by_id = {item.instrument_id: item for item in instruments}
-        if len(instrument_by_id) != len(instruments):
-            raise RecorderFatalError("instrument identities must be unique")
         caller_instrument_ids = frozenset(instrument_by_id)
         for plugin in self._ideas:
             own_instrument_ids = {item.instrument_id for item in plugin.config.instruments}
@@ -639,16 +676,6 @@ class Recorder:
         names: set[str] = set()
         for subscription in subscriptions:
             key = (subscription.instrument_id, subscription.feed_kind)
-            if key in subscription_by_key:
-                raise RecorderFatalError(f"duplicate subscription requirement for {key}")
-            if subscription.request_id in request_ids or subscription.name in names:
-                raise RecorderFatalError(
-                    "subscription request identifiers and names must be unique"
-                )
-            if subscription.instrument_id not in instrument_by_id:
-                raise RecorderFatalError(
-                    f"subscription lacks instrument metadata: {subscription.instrument_id}"
-                )
             subscription_by_key[key] = subscription
             request_ids.add(subscription.request_id)
             names.add(subscription.name)
@@ -2195,17 +2222,6 @@ class Recorder:
                     with suppress(Exception):
                         self.adapter.disconnect()
                     raise
-                if not spec.optional:
-                    try:
-                        self._persist_connection_failure(
-                            now_us=now_us,
-                            code="IBKR_SUBSCRIBE_FAILED",
-                            details="required subscription aborted remaining requests",
-                        )
-                    finally:
-                        with suppress(Exception):
-                            self.adapter.disconnect()
-                    return
                 continue
             connection = connect_v2(self.config.database)
             try:
@@ -2216,11 +2232,26 @@ class Recorder:
                     "AND reason LIKE 'IBKR_FARM_%' AND resolved_at_us IS NULL LIMIT 1",
                     (self.config.run_id, fence.subscription_id),
                 ).fetchone()
-                target_lifecycle = "degraded" if unresolved_farm is not None else "active"
+                retry_state = connection.execute(
+                    "SELECT last_error_code FROM subscriptions WHERE subscription_id=?",
+                    (fence.subscription_id,),
+                ).fetchone()
+                target_lifecycle = (
+                    "degraded"
+                    if unresolved_farm is not None
+                    or (retry_state is not None and retry_state["last_error_code"] is not None)
+                    else "active"
+                )
                 cursor = connection.execute(
-                    "UPDATE subscriptions SET lifecycle=?, closed_at_us=NULL "
+                    "UPDATE subscriptions SET lifecycle=?, closed_at_us=NULL, "
+                    "next_retry_at_us=CASE WHEN last_error_code IS NULL THEN NULL "
+                    "ELSE ? END "
                     "WHERE subscription_id=? AND lifecycle='connecting'",
-                    (target_lifecycle, fence.subscription_id),
+                    (
+                        target_lifecycle,
+                        now_us + spec.stale_after_us,
+                        fence.subscription_id,
+                    ),
                 )
                 if cursor.rowcount != 1:
                     current = connection.execute(
@@ -2235,12 +2266,6 @@ class Recorder:
                         *(("closed",) if spec.snapshot else ()),
                     }:
                         raise RecorderFatalError("subscription activation state changed")
-                self._resolve_transport_incident(
-                    connection,
-                    spec,
-                    now_us,
-                    "IBKR_SUBSCRIBE_FAILED",
-                )
                 connection.commit()
             finally:
                 connection.close()
@@ -2420,58 +2445,47 @@ class Recorder:
         now_us: int,
         code: str,
         details: str,
+        retry_kind: str = "subscribe_failed",
+        status_code: int | None = None,
     ) -> None:
         connection = connect_v2(self.config.database)
         try:
             connection.execute("BEGIN IMMEDIATE")
             self._verify_owned(connection)
-            affected: tuple[tuple[str, bool], ...]
-            if spec.optional:
-                connection.execute(
-                    "UPDATE subscriptions SET lifecycle='paused' WHERE subscription_id=?",
-                    (fence.subscription_id,),
-                )
-                affected = ((cast(str, fence.subscription_id), spec.continuity_required),)
-            else:
-                state = self._authority_state()
-                continuity = {
-                    item.request_id: item.continuity_required for item in self._subscriptions
-                }
-                affected_by_id = {
-                    str(row["subscription_id"]): continuity[int(row["request_id"])]
-                    for row in connection.execute(
-                        "SELECT subscription_id, request_id FROM subscriptions WHERE run_id=? "
-                        "AND recorder_generation=? AND connection_generation=? "
-                        "AND lifecycle IN ('connecting','active','degraded')",
-                        (
-                            self.config.run_id,
-                            state.recorder_generation,
-                            state.connection_generation,
-                        ),
-                    )
-                }
-                affected_by_id.setdefault(
-                    cast(str, fence.subscription_id), spec.continuity_required
-                )
-                affected = tuple(affected_by_id.items())
-                connection.execute(
-                    "UPDATE subscriptions SET lifecycle='disconnected' WHERE run_id=? "
-                    "AND recorder_generation=? AND connection_generation=? "
-                    "AND lifecycle IN ('connecting','active','degraded')",
-                    (
-                        self.config.run_id,
-                        state.recorder_generation,
-                        state.connection_generation,
-                    ),
-                )
-            for subscription_id, continuity_required in affected:
-                self._open_gap(
-                    connection,
-                    subscription_id,
+            current = connection.execute(
+                "SELECT retry_count FROM subscriptions WHERE subscription_id=?",
+                (fence.subscription_id,),
+            ).fetchone()
+            if current is None:
+                raise RecorderFatalError("failed subscription is unavailable")
+            retry_count = int(current["retry_count"]) + 1
+            retry = retry_disposition(
+                kind=retry_kind,
+                code=status_code,
+                retry_count=retry_count,
+                failed_at_us=now_us,
+            )
+            connection.execute(
+                "UPDATE subscriptions SET lifecycle=?, retry_count=?, next_retry_at_us=?, "
+                "last_attempt_at_us=?, last_error_code=?, permanent_failure=? "
+                "WHERE subscription_id=?",
+                (
+                    "degraded" if retry.permanent else "disconnected",
+                    retry_count,
+                    retry.next_retry_at_us,
                     now_us,
                     code,
-                    continuity_required,
-                )
+                    int(retry.permanent),
+                    fence.subscription_id,
+                ),
+            )
+            self._open_gap(
+                connection,
+                cast(str, fence.subscription_id),
+                now_us,
+                code,
+                spec.continuity_required,
+            )
             self._record_transport_incident(
                 connection,
                 cast(str, fence.subscription_id),
@@ -2482,8 +2496,8 @@ class Recorder:
             )
             if not spec.optional:
                 connection.execute(
-                    "UPDATE runtime_state SET connection_state='disconnected', "
-                    "lifecycle=CASE WHEN lifecycle IN ('recovering','connecting','running') "
+                    "UPDATE runtime_state SET lifecycle=CASE WHEN lifecycle IN "
+                    "('recovering','connecting','running') "
                     "OR (lifecycle='degraded' AND reason LIKE 'IBKR_FARM_%') "
                     "THEN 'degraded' ELSE lifecycle END, reason=CASE WHEN lifecycle IN "
                     "('recovering','connecting','running') OR (lifecycle='degraded' "
@@ -2738,6 +2752,10 @@ class Recorder:
             )
             processed = batch.processed
             causal_now_us = batch.causal_now_us
+            self._mark_projected_subscription_recovery(
+                leased_callbacks,
+                now_us=causal_now_us,
+            )
             receipts = self.inbox.create_pending_receipts(
                 created_at_us=causal_now_us,
                 limit=limit,
@@ -2854,7 +2872,7 @@ class Recorder:
             rows = tuple(
                 connection.execute(
                     "SELECT subscription.subscription_id, subscription.request_id, "
-                    "subscription.opened_at_us, event.received_at_us "
+                    "subscription.opened_at_us, subscription.retry_count, event.received_at_us "
                     "FROM subscriptions subscription LEFT JOIN market_events event "
                     "ON event.event_id=subscription.latest_event_id WHERE subscription.run_id=? "
                     "AND subscription.connection_generation=? AND subscription.lifecycle='active'",
@@ -2883,11 +2901,230 @@ class Recorder:
                         "STREAM_STALE",
                         spec.continuity_required,
                     )
+                    retry_count = int(row["retry_count"]) + 1
+                    retry = retry_disposition(
+                        kind="stale",
+                        code=None,
+                        retry_count=retry_count,
+                        failed_at_us=now_us,
+                    )
+                    connection.execute(
+                        "UPDATE subscriptions SET lifecycle='disconnected', retry_count=?, "
+                        "next_retry_at_us=?, last_error_code='STREAM_STALE', "
+                        "permanent_failure=0 WHERE subscription_id=?",
+                        (retry_count, retry.next_retry_at_us, row["subscription_id"]),
+                    )
+                    self._record_transport_incident(
+                        connection,
+                        str(row["subscription_id"]),
+                        spec,
+                        now_us,
+                        "STREAM_STALE",
+                        "required callback freshness exceeded",
+                    )
+                    if not spec.optional:
+                        connection.execute(
+                            "UPDATE runtime_state SET lifecycle='degraded', "
+                            "reason='STREAM_STALE' WHERE run_id=? AND recorder_generation=? "
+                            "AND connection_state='connected'",
+                            (
+                                self.config.run_id,
+                                self.state.recorder_generation,
+                            ),
+                        )
                     opened += 1
             connection.commit()
             return opened
         finally:
             connection.close()
+
+    def recover_subscriptions(self, *, now_us: int) -> int:
+        """Retry only due unhealthy requests while the shared socket stays connected."""
+
+        with self._subscription_lifecycle_lock:
+            self._check_owned()
+            if not self._connection_is_connected():
+                return 0
+            state = self._authority_state()
+            with connect_v2(self.config.database) as connection:
+                due = tuple(
+                    connection.execute(
+                        "SELECT subscription_id, request_id FROM subscriptions "
+                        "WHERE run_id=? AND recorder_generation=? AND connection_generation=? "
+                        "AND lifecycle IN ('connecting','disconnected','degraded') "
+                        "AND permanent_failure=0 AND last_error_code IS NOT NULL "
+                        "AND next_retry_at_us IS NOT NULL AND next_retry_at_us<=? "
+                        "AND NOT EXISTS (SELECT 1 FROM gaps gap WHERE "
+                        "gap.run_id=subscriptions.run_id "
+                        "AND gap.subscription_id=subscriptions.subscription_id "
+                        "AND gap.reason LIKE 'IBKR_FARM_%' AND gap.resolved_at_us IS NULL) "
+                        "ORDER BY next_retry_at_us, subscription_id",
+                        (
+                            self.config.run_id,
+                            state.recorder_generation,
+                            state.connection_generation,
+                            now_us,
+                        ),
+                    )
+                )
+            fences = {
+                fence.request_id: fence for fence in state.fences if fence.request_id is not None
+            }
+            specs = {item.request_id: item for item in self._subscriptions}
+            attempted = 0
+            for row in due:
+                request_id = int(row["request_id"])
+                fence = fences.get(request_id)
+                spec = specs.get(request_id)
+                if fence is None or spec is None or fence.subscription_id != row["subscription_id"]:
+                    raise RecorderFatalError("retryable subscription fence is incompatible")
+                with connect_v2(self.config.database) as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    self._verify_owned(connection)
+                    claimed = connection.execute(
+                        "UPDATE subscriptions SET lifecycle='connecting', "
+                        "next_retry_at_us=NULL, last_attempt_at_us=? "
+                        "WHERE subscription_id=? AND permanent_failure=0 "
+                        "AND next_retry_at_us IS NOT NULL AND next_retry_at_us<=?",
+                        (now_us, fence.subscription_id, now_us),
+                    )
+                    connection.commit()
+                if claimed.rowcount != 1:
+                    continue
+                attempted += 1
+                try:
+                    self._check_owned()
+                    self.adapter.retry_subscription(fence)
+                    self._check_owned()
+                except AuthoritativeLeaseLost:
+                    with suppress(Exception):
+                        self.adapter.disconnect()
+                    raise
+                except Exception as error:
+                    self._persist_subscription_failure(
+                        fence,
+                        spec,
+                        now_us=now_us,
+                        code="IBKR_SUBSCRIBE_RETRY_FAILED",
+                        details=type(error).__name__,
+                    )
+                    continue
+                with connect_v2(self.config.database) as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    self._verify_owned(connection)
+                    connection.execute(
+                        "UPDATE subscriptions SET lifecycle='connecting', next_retry_at_us=? "
+                        "WHERE subscription_id=? AND lifecycle='connecting' "
+                        "AND last_error_code IS NOT NULL",
+                        (now_us + spec.stale_after_us, fence.subscription_id),
+                    )
+                    connection.commit()
+            return attempted
+
+    def _mark_projected_subscription_recovery(
+        self,
+        callbacks: tuple[LeasedCallback, ...],
+        *,
+        now_us: int,
+    ) -> None:
+        state = self._authority_state()
+        specs = {item.request_id: item for item in self._subscriptions}
+        with connect_v2(self.config.database) as connection:
+            request_ids = sorted(
+                {
+                    int(callback.request_id)
+                    for callback in callbacks
+                    if callback.run_id == self.config.run_id
+                    and callback.request_id is not None
+                    and connection.execute(
+                        "SELECT 1 FROM callback_inbox WHERE source_sequence=? "
+                        "AND lifecycle='acknowledged' AND normalized_event_id IS NOT NULL",
+                        (callback.source_sequence,),
+                    ).fetchone()
+                    is not None
+                }
+            )
+            if not request_ids:
+                return
+            placeholders = ",".join("?" for _item in request_ids)
+            candidate = connection.execute(
+                "SELECT 1 FROM subscriptions WHERE run_id=? AND recorder_generation=? "
+                "AND connection_generation=? AND last_error_code IS NOT NULL "
+                f"AND request_id IN ({placeholders}) LIMIT 1",
+                (
+                    self.config.run_id,
+                    state.recorder_generation,
+                    state.connection_generation,
+                    *request_ids,
+                ),
+            ).fetchone()
+            if candidate is None:
+                return
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            for request_id in request_ids:
+                spec = specs.get(request_id)
+                if spec is None:
+                    continue
+                row = connection.execute(
+                    "SELECT subscription_id, last_error_code, permanent_failure "
+                    "FROM subscriptions WHERE run_id=? AND recorder_generation=? "
+                    "AND connection_generation=? AND request_id=?",
+                    (
+                        self.config.run_id,
+                        state.recorder_generation,
+                        state.connection_generation,
+                        request_id,
+                    ),
+                ).fetchone()
+                if row is None or row["last_error_code"] is None or bool(row["permanent_failure"]):
+                    continue
+                subscription_id = str(row["subscription_id"])
+                unresolved_farm = connection.execute(
+                    "SELECT 1 FROM gaps WHERE run_id=? AND subscription_id=? "
+                    "AND reason LIKE 'IBKR_FARM_%' AND resolved_at_us IS NULL LIMIT 1",
+                    (self.config.run_id, subscription_id),
+                ).fetchone()
+                connection.execute(
+                    "UPDATE subscriptions SET lifecycle=?, retry_count=0, "
+                    "next_retry_at_us=NULL, last_error_code=NULL, permanent_failure=0 "
+                    "WHERE subscription_id=?",
+                    ("degraded" if unresolved_farm is not None else "active", subscription_id),
+                )
+                connection.execute(
+                    "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE run_id=? "
+                    "AND subscription_id=? AND started_at_us<=? AND resolved_at_us IS NULL "
+                    "AND (reason='STREAM_STALE' OR reason LIKE 'IBKR_STATUS_%' "
+                    "OR reason IN ('IBKR_SUBSCRIBE_FAILED','IBKR_SUBSCRIBE_RETRY_FAILED'))",
+                    (now_us, now_us, self.config.run_id, subscription_id, now_us),
+                )
+                connection.execute(
+                    "UPDATE incidents SET resolved_at_us=? WHERE run_id=? "
+                    "AND subscription_id=? AND opened_at_us<=? AND resolved_at_us IS NULL "
+                    "AND (code='STREAM_STALE' OR code LIKE 'IBKR_STATUS_%' "
+                    "OR code IN ('IBKR_SUBSCRIBE_FAILED','IBKR_SUBSCRIBE_RETRY_FAILED'))",
+                    (now_us, self.config.run_id, subscription_id, now_us),
+                )
+            required_incomplete = connection.execute(
+                "SELECT 1 FROM subscriptions WHERE run_id=? AND recorder_generation=? "
+                "AND connection_generation=? AND optional=0 AND lifecycle!='active' "
+                "AND NOT (snapshot=1 AND lifecycle='closed') LIMIT 1",
+                (
+                    self.config.run_id,
+                    state.recorder_generation,
+                    state.connection_generation,
+                ),
+            ).fetchone()
+            if required_incomplete is None:
+                connection.execute(
+                    "UPDATE runtime_state SET lifecycle='running', reason=NULL WHERE run_id=? "
+                    "AND recorder_generation=? AND connection_state='connected' "
+                    "AND lifecycle='degraded' AND (reason='STREAM_STALE' "
+                    "OR reason LIKE 'IBKR_STATUS_%' "
+                    "OR reason IN ('IBKR_SUBSCRIBE_FAILED','IBKR_SUBSCRIBE_RETRY_FAILED'))",
+                    (self.config.run_id, state.recorder_generation),
+                )
+            connection.commit()
 
     def disconnected(self, *, now_us: int) -> None:
         """Treat a temporary socket loss as recoverable degraded state."""
@@ -2980,40 +3217,22 @@ class Recorder:
             if spec is not None and spec.request_id not in self._base_request_ids()
             else None
         )
-        connection = connect_v2(self.config.database)
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            self._verify_owned(connection)
-            if status.kind == "recovered":
-                if fence is not None:
-                    connection.execute(
-                        "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE run_id=? "
-                        "AND subscription_id=? AND started_at_us<=? "
-                        "AND resolved_at_us IS NULL",
-                        (
-                            status.received_at_us,
-                            status.received_at_us,
-                            self.config.run_id,
-                            fence.subscription_id,
-                            status.received_at_us,
-                        ),
-                    )
-                self._record_incident(
-                    connection,
-                    None if fence is None else cast(str, fence.subscription_id),
-                    status.received_at_us,
-                    f"IBKR_STATUS_{status.code}_RECOVERED",
-                    status.message,
+        if status.kind in {"temporary_disconnect", "pacing", "request_rejected"}:
+            code = f"IBKR_STATUS_{status.code}_{status.kind.upper()}"
+            if fence is not None and spec is not None:
+                self._persist_subscription_failure(
+                    fence,
+                    spec,
+                    now_us=status.received_at_us,
+                    code=code,
+                    details=status.message,
+                    retry_kind=status.kind,
+                    status_code=status.code,
                 )
-            else:
-                code = f"IBKR_STATUS_{status.code}_{status.kind.upper()}"
-                if fence is not None and spec is not None:
-                    lifecycle = "paused" if spec.optional else "disconnected"
-                    connection.execute(
-                        "UPDATE subscriptions SET lifecycle=? WHERE subscription_id=?",
-                        (lifecycle, fence.subscription_id),
-                    )
-                    if dynamic_plan is not None:
+                if dynamic_plan is not None:
+                    with connect_v2(self.config.database) as connection:
+                        connection.execute("BEGIN IMMEDIATE")
+                        self._verify_owned(connection)
                         self._record_subscription_attempt(
                             connection,
                             dynamic_plan,
@@ -3021,38 +3240,39 @@ class Recorder:
                             succeeded=False,
                             now_us=status.received_at_us,
                         )
-                    self._open_gap(
-                        connection,
-                        cast(str, fence.subscription_id),
-                        status.received_at_us,
-                        code,
-                        spec.continuity_required,
+                        connection.commit()
+                    self._sync_interest_lifecycles(
+                        dynamic_plan,
+                        now_us=status.received_at_us,
                     )
-                    if not spec.optional:
-                        connection.execute(
-                            "UPDATE runtime_state SET lifecycle=CASE WHEN lifecycle IN "
-                            "('recovering','connecting','running') OR (lifecycle='degraded' "
-                            "AND reason LIKE 'IBKR_FARM_%') THEN 'degraded' ELSE lifecycle END, "
-                            "reason=CASE WHEN lifecycle IN ('recovering','connecting','running') "
-                            "OR (lifecycle='degraded' AND reason LIKE 'IBKR_FARM_%') "
-                            "THEN ? ELSE reason END WHERE run_id=? AND recorder_generation=?",
-                            (code, self.config.run_id, state.recorder_generation),
-                        )
+                return
+            with connect_v2(self.config.database) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._verify_owned(connection)
+                self._record_incident(
+                    connection,
+                    None,
+                    status.received_at_us,
+                    code,
+                    status.message,
+                )
+                connection.commit()
+            return
+        connection = connect_v2(self.config.database)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._verify_owned(connection)
+            if status.kind == "recovered":
                 self._record_incident(
                     connection,
                     None if fence is None else cast(str, fence.subscription_id),
                     status.received_at_us,
-                    code,
+                    f"IBKR_STATUS_{status.code}_RECOVERED",
                     status.message,
                 )
             connection.commit()
         finally:
             connection.close()
-        if dynamic_plan is not None and status.kind != "recovered":
-            self._sync_interest_lifecycles(
-                dynamic_plan,
-                now_us=status.received_at_us,
-            )
 
     def _retire_dynamic_snapshot_state(
         self,
@@ -3249,7 +3469,8 @@ class Recorder:
                     if activation_allowed and unresolved_for_subscription is None:
                         connection.execute(
                             "UPDATE subscriptions SET lifecycle='active' "
-                            "WHERE subscription_id=? AND lifecycle='degraded'",
+                            "WHERE subscription_id=? AND lifecycle='degraded' "
+                            "AND permanent_failure=0 AND last_error_code IS NULL",
                             (fence.subscription_id,),
                         )
                 required_degraded = connection.execute(

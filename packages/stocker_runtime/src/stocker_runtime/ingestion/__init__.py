@@ -15,6 +15,7 @@ from stocker_runtime.ingestion.dynamic_market_data import (
     plan_market_data,
 )
 from stocker_runtime.ingestion.ibkr_market_data import (
+    MARKET_DATA_ONLY_CAPABILITIES,
     IBKRMarketData,
     IBKRSubscription,
     MarketDataAdapter,
@@ -44,6 +45,7 @@ from stocker_runtime.ingestion.recorder import (
     SubscriptionSpec,
     load_recorder_config,
     market_data_input_hash,
+    validate_market_data_inputs,
 )
 
 __all__ = [
@@ -54,6 +56,7 @@ __all__ = [
     "CallbackInbox",
     "IBKRMarketData",
     "IBKRSubscription",
+    "MARKET_DATA_ONLY_CAPABILITIES",
     "InboxAdmissionError",
     "InboxFullError",
     "LeasedCallback",
@@ -83,5 +86,6 @@ __all__ = [
     "SubscriptionLifecycleResult",
     "load_recorder_config",
     "market_data_input_hash",
+    "validate_market_data_inputs",
     "plan_market_data",
 ]

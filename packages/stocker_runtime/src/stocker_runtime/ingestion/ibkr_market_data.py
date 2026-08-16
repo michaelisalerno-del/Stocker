@@ -17,6 +17,7 @@ from stocker_runtime.ingestion.inbox import (
 )
 
 MAX_MARKET_DATA_REQUEST_ID = 1_499_999_999
+MARKET_DATA_ONLY_CAPABILITIES = frozenset({"market_data"})
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,8 @@ class MarketDataStatus:
 class MarketDataAdapter(Protocol):
     """Only capabilities the recorder may request from an external adapter."""
 
+    capabilities: frozenset[str]
+
     def set_callback(
         self, callback: Callable[[CallbackFence, MarketDataCallback], AdmissionResult]
     ) -> None: ...
@@ -61,6 +64,8 @@ class MarketDataAdapter(Protocol):
     def configure_subscriptions(self, subscriptions: tuple[IBKRSubscription, ...]) -> None: ...
 
     def subscribe(self, fence: CallbackFence) -> None: ...
+
+    def retry_subscription(self, fence: CallbackFence) -> None: ...
 
     def cancel(self, request_id: int) -> None: ...
 
@@ -113,6 +118,7 @@ class IBKRMarketData:
     """Narrow facade over the private official API bridge."""
 
     __slots__ = ("_bridge",)
+    capabilities = MARKET_DATA_ONLY_CAPABILITIES
 
     def __init__(self, bridge: _OptionMarketDataBridge) -> None:
         self._bridge = bridge
@@ -164,6 +170,9 @@ class IBKRMarketData:
 
     def subscribe(self, fence: CallbackFence) -> None:
         self._bridge.subscribe(fence)
+
+    def retry_subscription(self, fence: CallbackFence) -> None:
+        self._bridge.retry_subscription(fence)
 
     def cancel(self, request_id: int) -> None:
         self._bridge.cancel(request_id)

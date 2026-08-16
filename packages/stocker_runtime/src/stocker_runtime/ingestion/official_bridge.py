@@ -21,6 +21,7 @@ from stocker_runtime.ingestion.ibkr_api import (
     require_official_ibkr_api,
 )
 from stocker_runtime.ingestion.ibkr_market_data import (
+    MAX_MARKET_DATA_REQUEST_ID,
     IBKRSubscription,
     MarketDataAdapter,
     MarketDataStatus,
@@ -269,6 +270,10 @@ class _PrivateOfficialBridge:
         self._contract_factory = contract_factory
         self._metadata_contract_factory = metadata_contract_factory
         self._fences: dict[int, CallbackFence] = {}
+        self._logical_transport_ids: dict[int, int] = {}
+        self._transport_logical_ids: dict[int, int] = {}
+        self._retired_transport_ids: dict[int, int] = {}
+        self._next_retry_transport_id = MAX_MARKET_DATA_REQUEST_ID
         self._callback: Callable[[CallbackFence, MarketDataCallback], AdmissionResult] | None = None
         self._disconnect_callback: Callable[[int], None] | None = None
         self._status_callback: Callable[[MarketDataStatus], None] | None = None
@@ -339,6 +344,9 @@ class _PrivateOfficialBridge:
             with suppress(Exception):
                 self.__client.disconnect()
             self._fences.clear()
+            self._logical_transport_ids.clear()
+            self._transport_logical_ids.clear()
+            self._retired_transport_ids.clear()
             self._configured.clear()
             self._contracts.clear()
             raise
@@ -391,6 +399,9 @@ class _PrivateOfficialBridge:
             self.__client.disconnect()
         finally:
             self._fences.clear()
+            self._logical_transport_ids.clear()
+            self._transport_logical_ids.clear()
+            self._retired_transport_ids.clear()
             self._configured.clear()
             self._contracts.clear()
             if thread is not None and thread is not threading.current_thread():
@@ -587,13 +598,25 @@ class _PrivateOfficialBridge:
     def subscribe(self, fence: CallbackFence) -> None:
         if fence.request_id is None or fence.request_id not in self._configured:
             raise OfficialBridgeUnavailable("subscription request is not configured")
-        request_id = fence.request_id
-        item = self._configured[request_id]
-        self._fences[request_id] = fence
+        logical_request_id = fence.request_id
+        if logical_request_id in self._logical_transport_ids:
+            raise OfficialBridgeUnavailable("subscription request is already active")
+        self._start_transport_request(logical_request_id, logical_request_id, fence)
+
+    def _start_transport_request(
+        self,
+        logical_request_id: int,
+        transport_request_id: int,
+        fence: CallbackFence,
+    ) -> None:
+        item = self._configured[logical_request_id]
+        self._logical_transport_ids[logical_request_id] = transport_request_id
+        self._transport_logical_ids[transport_request_id] = logical_request_id
+        self._fences[transport_request_id] = fence
         if item.feed_kind == "bars":
             self.__client.reqRealTimeBars(
-                request_id,
-                self._contracts[request_id],
+                transport_request_id,
+                self._contracts[logical_request_id],
                 5,
                 "TRADES",
                 False,
@@ -601,25 +624,67 @@ class _PrivateOfficialBridge:
             )
         else:
             self.__client.reqMktData(
-                request_id,
-                self._contracts[request_id],
+                transport_request_id,
+                self._contracts[logical_request_id],
                 "100,101" if item.security_type == "OPT" else "",
                 item.snapshot,
                 False,
                 [],
             )
 
+    def retry_subscription(self, fence: CallbackFence) -> None:
+        """Cancel and replace one configured request without disturbing healthy requests."""
+
+        if fence.request_id is None or fence.request_id not in self._configured:
+            raise OfficialBridgeUnavailable("subscription retry request is not configured")
+        request_id = fence.request_id
+        configured = self._configured[request_id]
+        transport_request_id = self._logical_transport_ids.pop(
+            request_id,
+            self._retired_transport_ids.get(request_id),
+        )
+        if transport_request_id is None:
+            raise OfficialBridgeUnavailable("subscription retry request is not active")
+        self._fences.pop(transport_request_id, None)
+        self._transport_logical_ids.pop(transport_request_id, None)
+        self._retired_transport_ids[request_id] = transport_request_id
+        if configured.feed_kind == "bars":
+            self.__client.cancelRealTimeBars(transport_request_id)
+        else:
+            self.__client.cancelMktData(transport_request_id)
+        self._retired_transport_ids.pop(request_id, None)
+        while (
+            self._next_retry_transport_id in self._configured
+            or self._next_retry_transport_id in self._transport_logical_ids
+            or self._next_retry_transport_id in self._retired_transport_ids.values()
+        ):
+            self._next_retry_transport_id -= 1
+        if self._next_retry_transport_id < 0:
+            raise OfficialBridgeUnavailable("IBKR retry request id range exhausted")
+        replacement_request_id = self._next_retry_transport_id
+        self._next_retry_transport_id -= 1
+        self._start_transport_request(request_id, replacement_request_id, fence)
+
     def cancel(self, request_id: int) -> None:
         configured = self._configured.get(request_id)
         if configured is None:
             return
+        transport_request_id = self._logical_transport_ids.get(request_id)
+        if transport_request_id is None:
+            return
         if configured.feed_kind == "bars":
-            self.__client.cancelRealTimeBars(request_id)
+            self.__client.cancelRealTimeBars(transport_request_id)
         else:
-            self.__client.cancelMktData(request_id)
-        self._fences.pop(request_id, None)
+            self.__client.cancelMktData(transport_request_id)
+        self._fences.pop(transport_request_id, None)
+        self._transport_logical_ids.pop(transport_request_id, None)
+        self._logical_transport_ids.pop(request_id, None)
         self._configured.pop(request_id, None)
         self._contracts.pop(request_id, None)
+
+    def _configured_for_transport(self, request_id: int) -> IBKRSubscription | None:
+        logical_request_id = self._transport_logical_ids.get(request_id)
+        return None if logical_request_id is None else self._configured.get(logical_request_id)
 
     def emit(self, request_id: int, kind: str, values: dict[str, object]) -> None:
         if not self._callback_is_current_connection():
@@ -641,7 +706,7 @@ class _PrivateOfficialBridge:
         )
 
     def tick_price(self, request_id: int, tick_type: int, price: float) -> None:
-        configured = self._configured.get(request_id)
+        configured = self._configured_for_transport(request_id)
         if configured is None:
             return
         projection = _price_tick_projection(configured.feed_kind, tick_type)
@@ -650,7 +715,7 @@ class _PrivateOfficialBridge:
             self.emit(request_id, kind, {name: price})
 
     def tick_size(self, request_id: int, tick_type: int, size: float) -> None:
-        configured = self._configured.get(request_id)
+        configured = self._configured_for_transport(request_id)
         if configured is None:
             return
         if tick_type in {27, 28, 29, 30} and configured.security_type != "OPT":
@@ -674,7 +739,7 @@ class _PrivateOfficialBridge:
         theta: float,
         underlying_price: float,
     ) -> None:
-        configured = self._configured.get(request_id)
+        configured = self._configured_for_transport(request_id)
         if (
             configured is None
             or configured.feed_kind != "quotes"
@@ -700,20 +765,23 @@ class _PrivateOfficialBridge:
     def snapshot_end(self, request_id: int) -> None:
         if not self._callback_is_current_connection():
             return
-        configured = self._configured.get(request_id)
+        configured = self._configured_for_transport(request_id)
         if configured is None or not configured.snapshot:
             return
+        logical_request_id = self._transport_logical_ids[request_id]
         self.emit(request_id, "option_snapshot_end", {"complete": True})
         self._fences.pop(request_id, None)
-        self._configured.pop(request_id, None)
-        self._contracts.pop(request_id, None)
+        self._transport_logical_ids.pop(request_id, None)
+        self._logical_transport_ids.pop(logical_request_id, None)
+        self._configured.pop(logical_request_id, None)
+        self._contracts.pop(logical_request_id, None)
         callback = self._status_callback
         if callback is not None:
             callback(
                 MarketDataStatus(
                     kind="snapshot_end",
                     code=0,
-                    request_id=request_id,
+                    request_id=logical_request_id,
                     message="option snapshot completed",
                     received_at_us=time.time_ns() // 1_000,
                 )
@@ -747,11 +815,14 @@ class _PrivateOfficialBridge:
             kind = "request_rejected"
         else:
             return
+        logical_request_id = None if request_id < 0 else self._transport_logical_ids.get(request_id)
+        if request_id >= 0 and logical_request_id is None:
+            return
         callback(
             MarketDataStatus(
                 kind=cast(Any, kind),
                 code=code,
-                request_id=None if request_id < 0 else request_id,
+                request_id=logical_request_id,
                 message=message,
                 received_at_us=time.time_ns() // 1_000,
                 affected_feed_kinds=cast(
@@ -772,5 +843,8 @@ class _PrivateOfficialBridge:
             self._session_ready_event.set()
             callback = self._disconnect_callback
         self._fences.clear()
+        self._logical_transport_ids.clear()
+        self._transport_logical_ids.clear()
+        self._retired_transport_ids.clear()
         if callback is not None:
             callback(time.time_ns() // 1_000)

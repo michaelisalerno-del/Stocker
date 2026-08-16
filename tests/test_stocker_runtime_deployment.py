@@ -17,7 +17,13 @@ import pytest
 from typer.testing import CliRunner
 
 from stocker_runtime.cli import app
-from stocker_runtime.ingestion import CallbackFence, Recorder, load_recorder_config
+from stocker_runtime.ingestion import (
+    CallbackFence,
+    InstrumentSpec,
+    Recorder,
+    SubscriptionSpec,
+    load_recorder_config,
+)
 from stocker_runtime.storage import connect_v2, initialize_database
 from stocker_runtime.web import WebConfig
 
@@ -40,6 +46,10 @@ def test_v2_services_have_distinct_least_privilege_filesystem_boundaries() -> No
     assert "User=stocker-backup" in daily
     assert "User=stocker-backup" in weekly
     assert "ExecStart=/opt/stocker/v2-current/.venv/bin/stocker-runtime recorder run" in recorder
+    assert (
+        "validate-recorder /etc/stocker/recorder.json --inputs /etc/stocker/market-data.json"
+        in recorder
+    )
     assert "ExecStart=/opt/stocker/v2-current/.venv/bin/stocker-runtime web run" in web
     for unit in (recorder, web, daily, weekly):
         assert "/opt/stocker/current" not in unit
@@ -689,7 +699,10 @@ def test_v2_deployment_examples_validate_with_only_record_shadow_authority() -> 
     assert web.host == "127.0.0.1"
     assert str(web.database) == "/var/lib/stocker/v2/stocker-v2.sqlite3"
     assert str(web.backup_directory) == "/var/lib/stocker/backups-v2"
-    assert market_data == {"instruments": [], "subscriptions": []}
+    assert len(market_data["instruments"]) == 1
+    assert len(market_data["subscriptions"]) == 2
+    assert all("EXAMPLE_ONLY" in item["name"] for item in market_data["subscriptions"])
+    assert any(not item["optional"] for item in market_data["subscriptions"])
 
 
 def test_gateway_units_are_conspicuously_market_data_only_without_capability_change() -> None:
@@ -1057,6 +1070,8 @@ def test_installable_release_has_no_v1_runtime_or_entrypoint() -> None:
 
 
 class _SignalMarketData:
+    capabilities = frozenset({"market_data"})
+
     def __init__(self, on_connect: object) -> None:
         self.on_connect = on_connect
         self.callback = None
@@ -1083,8 +1098,39 @@ class _SignalMarketData:
     def subscribe(self, _fence: CallbackFence) -> None:
         return None
 
+    def retry_subscription(self, _fence: CallbackFence) -> None:
+        return None
+
     def cancel(self, _request_id: int) -> None:
         return None
+
+
+def _market_data_input_json() -> str:
+    return json.dumps(
+        {
+            "instruments": [
+                {
+                    "instrument_id": "instrument-1",
+                    "ibkr_con_id": 123,
+                    "kind": "stock",
+                    "symbol": "AAPL",
+                    "exchange": "SMART",
+                    "currency": "USD",
+                }
+            ],
+            "subscriptions": [
+                {
+                    "name": "required-quotes",
+                    "instrument_id": "instrument-1",
+                    "feed_kind": "quotes",
+                    "request_id": 3,
+                    "continuity_required": True,
+                    "optional": False,
+                    "stale_after_us": 15_000_000,
+                }
+            ],
+        }
+    )
 
 
 def test_recorder_health_window_tracks_exact_xnys_sessions() -> None:
@@ -1128,6 +1174,7 @@ def test_recorder_health_tick_marks_expected_staleness_and_always_recovers(
         def __init__(self) -> None:
             self.stale_calls: list[tuple[int, bool, int | None]] = []
             self.recovery_calls: list[int] = []
+            self.subscription_recovery_calls: list[int] = []
 
         def mark_stale(
             self,
@@ -1143,6 +1190,10 @@ def test_recorder_health_tick_marks_expected_staleness_and_always_recovers(
             self.recovery_calls.append(now_us)
             return False
 
+        def recover_subscriptions(self, *, now_us: int) -> int:
+            self.subscription_recovery_calls.append(now_us)
+            return 0
+
     recorder = HealthRecorder()
     monkeypatch.setattr(
         "stocker_runtime.cli._market_data_expected_since_us",
@@ -1157,6 +1208,7 @@ def test_recorder_health_tick_marks_expected_staleness_and_always_recovers(
 
     assert recorder.stale_calls == [(1_000, True, 995), (2_000, False, None)]
     assert recorder.recovery_calls == [1_000, 2_000]
+    assert recorder.subscription_recovery_calls == [1_000, 2_000]
 
 
 def test_recorder_service_loop_invokes_bounded_health_tick(
@@ -1185,7 +1237,7 @@ def test_recorder_service_loop_invokes_bounded_health_tick(
         ),
         encoding="utf-8",
     )
-    inputs.write_text('{"instruments":[],"subscriptions":[]}', encoding="utf-8")
+    inputs.write_text(_market_data_input_json(), encoding="utf-8")
     handlers: dict[int, object] = {}
 
     def install_handler(signum: int, handler: object) -> object:
@@ -1279,7 +1331,7 @@ def test_recorder_service_command_handles_sigterm_as_a_clean_stop(
         ),
         encoding="utf-8",
     )
-    inputs.write_text('{"instruments":[],"subscriptions":[]}', encoding="utf-8")
+    inputs.write_text(_market_data_input_json(), encoding="utf-8")
     handlers: dict[int, object] = {}
 
     def install_handler(signum: int, handler: object) -> object:
@@ -1356,7 +1408,7 @@ def test_recorder_service_failure_leaves_an_unclean_generation_for_restart(
         ),
         encoding="utf-8",
     )
-    inputs.write_text('{"instruments":[],"subscriptions":[]}', encoding="utf-8")
+    inputs.write_text(_market_data_input_json(), encoding="utf-8")
     monkeypatch.setattr(
         "stocker_runtime.cli.signal.signal",
         lambda _signum, _handler: signal.SIG_DFL,
@@ -1395,6 +1447,20 @@ def test_recorder_service_failure_leaves_an_unclean_generation_for_restart(
         load_recorder_config(config),
         _SignalMarketData(lambda _signum, _frame: None),
     )
-    state = restarted.start(now_us=62_000_000, instruments=(), subscriptions=())
+    state = restarted.start(
+        now_us=62_000_000,
+        instruments=(InstrumentSpec("instrument-1", 123, "stock", "AAPL", "SMART", "USD"),),
+        subscriptions=(
+            SubscriptionSpec(
+                "required-quotes",
+                "instrument-1",
+                "quotes",
+                3,
+                True,
+                False,
+                15_000_000,
+            ),
+        ),
+    )
     assert state.recorder_generation == 2
     restarted.stop(now_us=63_000_000)

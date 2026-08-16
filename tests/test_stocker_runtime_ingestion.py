@@ -303,20 +303,179 @@ def test_public_ingestion_surface_has_no_broker_authority() -> None:
 
 def test_validate_config_cli_is_offline_and_machine_readable(tmp_path: Path) -> None:
     config_path = tmp_path / "runtime.json"
+    inputs_path = tmp_path / "market-data.json"
     config_path.write_text(
         json.dumps(_config(tmp_path / "v2.sqlite3").model_dump(mode="json")),
         encoding="utf-8",
     )
+    inputs_path.write_text(
+        json.dumps(
+            {
+                "instruments": [
+                    {
+                        "instrument_id": "instrument-1",
+                        "ibkr_con_id": 123,
+                        "kind": "stock",
+                        "symbol": "AAPL",
+                        "exchange": "SMART",
+                        "currency": "USD",
+                    }
+                ],
+                "subscriptions": [
+                    {
+                        "name": "required-quotes",
+                        "instrument_id": "instrument-1",
+                        "feed_kind": "quotes",
+                        "request_id": 3,
+                        "continuity_required": True,
+                        "optional": False,
+                        "stale_after_us": 15_000_000,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    result = CliRunner().invoke(app, ["validate-recorder", str(config_path)])
+    result = CliRunner().invoke(
+        app,
+        ["validate-recorder", str(config_path), "--inputs", str(inputs_path)],
+    )
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout) == {
         "host": "127.0.0.1",
         "mode": "prospective_record",
         "read_only": True,
+        "required_subscriptions": 1,
         "status": "ok",
+        "subscriptions": 1,
     }
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    (
+        ("zero_instruments", "zero instruments"),
+        ("zero_subscriptions", "zero subscriptions"),
+        ("zero_required", "zero required subscriptions"),
+        ("duplicate_instrument", "duplicate instrument identities"),
+        ("duplicate_request", "duplicate request identities"),
+        ("duplicate_subscription", "duplicate subscription identities"),
+        ("missing_instrument", "reference missing instruments"),
+        ("contradictory_feed", "contradictory feed definitions"),
+        ("malformed_identity", "request_id must be a nonnegative integer"),
+    ),
+)
+def test_production_preflight_rejects_invalid_market_data_input_before_connect(
+    tmp_path: Path,
+    mutation: str,
+    reason: str,
+) -> None:
+    config_path = tmp_path / "runtime.json"
+    inputs_path = tmp_path / "market-data.json"
+    config_path.write_text(
+        json.dumps(_config(tmp_path / "v2.sqlite3").model_dump(mode="json")),
+        encoding="utf-8",
+    )
+    instrument = {
+        "instrument_id": "instrument-1",
+        "ibkr_con_id": 123,
+        "kind": "stock",
+        "symbol": "AAPL",
+        "exchange": "SMART",
+        "currency": "USD",
+    }
+    subscription = {
+        "name": "required-quotes",
+        "instrument_id": "instrument-1",
+        "feed_kind": "quotes",
+        "request_id": 3,
+        "continuity_required": True,
+        "optional": False,
+        "stale_after_us": 15_000_000,
+    }
+    instruments = [instrument]
+    subscriptions = [subscription]
+    if mutation == "zero_instruments":
+        instruments = []
+    elif mutation == "zero_subscriptions":
+        subscriptions = []
+    elif mutation == "zero_required":
+        subscriptions = [{**subscription, "optional": True}]
+    elif mutation == "duplicate_instrument":
+        instruments = [instrument, dict(instrument)]
+    elif mutation == "duplicate_request":
+        subscriptions = [
+            subscription,
+            {**subscription, "name": "required-trades", "feed_kind": "trades"},
+        ]
+    elif mutation == "duplicate_subscription":
+        subscriptions = [
+            subscription,
+            {**subscription, "request_id": 4, "feed_kind": "trades"},
+        ]
+    elif mutation == "missing_instrument":
+        subscriptions = [{**subscription, "instrument_id": "missing"}]
+    elif mutation == "contradictory_feed":
+        subscriptions = [subscription, {**subscription, "name": "duplicate", "request_id": 4}]
+    elif mutation == "malformed_identity":
+        subscriptions = [{**subscription, "request_id": -1}]
+    inputs_path.write_text(
+        json.dumps({"instruments": instruments, "subscriptions": subscriptions}),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["validate-recorder", str(config_path), "--inputs", str(inputs_path)],
+    )
+
+    assert result.exit_code == 78
+    payload = json.loads(result.stdout)
+    assert str(inputs_path) in payload["message"]
+    assert reason in payload["message"]
+
+
+def test_empty_recorder_input_fails_before_adapter_connect(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    adapter = FakeMarketData()
+
+    with pytest.raises(RecorderFatalError, match="zero instruments"):
+        Recorder(_config(database), adapter).start(
+            now_us=100,
+            instruments=(),
+            subscriptions=(),
+        )
+
+    assert adapter.connect_calls == 0
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
+
+
+def test_production_preflight_rejects_input_above_configured_line_cap(tmp_path: Path) -> None:
+    config_path = tmp_path / "runtime.json"
+    inputs_path = tmp_path / "market-data.json"
+    config_path.write_text(
+        json.dumps(
+            _config(tmp_path / "v2.sqlite3", market_data_line_limit=1).model_dump(mode="json")
+        ),
+        encoding="utf-8",
+    )
+    input_payload = _replay_fixture_without_callbacks()
+    input_payload.pop("callbacks")
+    inputs_path.write_text(json.dumps(input_payload), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        ["validate-recorder", str(config_path), "--inputs", str(inputs_path)],
+    )
+
+    assert result.exit_code == 78
+    payload = json.loads(result.stdout)
+    assert str(inputs_path) in payload["message"]
+    assert "market_data_line_limit" in payload["message"]
 
 
 def test_lease_projects_in_source_order_and_acknowledges_only_after_projection(
@@ -789,6 +948,8 @@ def test_receipt_creation_rejects_batches_larger_than_the_recorder_drain(tmp_pat
 
 
 class FakeMarketData:
+    capabilities = frozenset({"market_data"})
+
     def __init__(
         self, *, fail_connect: bool = False, fail_subscribe: set[int] | None = None
     ) -> None:
@@ -797,6 +958,9 @@ class FakeMarketData:
         self.status_callback = None
         self.connected = False
         self.subscriptions: list[CallbackFence] = []
+        self.subscribe_attempts: list[int] = []
+        self.active_request_ids: set[int] = set()
+        self.retry_calls: list[int] = []
         self.cancelled: list[int] = []
         self.fail_connect = fail_connect
         self.fail_subscribe = set() if fail_subscribe is None else fail_subscribe
@@ -821,14 +985,27 @@ class FakeMarketData:
     def disconnect(self) -> None:
         self.disconnect_calls += 1
         self.connected = False
+        self.active_request_ids.clear()
 
     def subscribe(self, fence: CallbackFence) -> None:
+        assert fence.request_id is not None
+        self.subscribe_attempts.append(fence.request_id)
         if fence.request_id in self.fail_subscribe:
             raise RuntimeError("subscribe failed")
+        if fence.request_id in self.active_request_ids:
+            raise RuntimeError("duplicate active request")
         self.subscriptions.append(fence)
+        self.active_request_ids.add(fence.request_id)
+
+    def retry_subscription(self, fence: CallbackFence) -> None:
+        assert fence.request_id is not None
+        self.retry_calls.append(fence.request_id)
+        self.active_request_ids.discard(fence.request_id)
+        self.subscribe(fence)
 
     def cancel(self, request_id: int) -> None:
         self.cancelled.append(request_id)
+        self.active_request_ids.discard(request_id)
 
     def emit(self, fence: CallbackFence, callback: MarketDataCallback) -> object:
         assert callable(self.callback)
@@ -865,6 +1042,33 @@ def _specs() -> tuple[InstrumentSpec, tuple[SubscriptionSpec, ...]]:
         ),
     )
     return instrument, subscriptions
+
+
+def _replay_fixture_without_callbacks() -> dict[str, object]:
+    instrument, subscriptions = _specs()
+    return {
+        "instruments": [
+            {key: value for key, value in instrument.__dict__.items() if value is not None}
+        ],
+        "subscriptions": [item.__dict__ for item in subscriptions],
+        "callbacks": [],
+    }
+
+
+def _three_required_specs() -> tuple[InstrumentSpec, tuple[SubscriptionSpec, ...]]:
+    instrument, _ = _specs()
+    return instrument, tuple(
+        SubscriptionSpec(
+            name=f"required-{feed_kind}",
+            instrument_id=instrument.instrument_id,
+            feed_kind=feed_kind,
+            request_id=request_id,
+            continuity_required=True,
+            optional=False,
+            stale_after_us=10,
+        )
+        for request_id, feed_kind in ((3, "quotes"), (4, "trades"), (5, "bars"))
+    )
 
 
 def test_recorder_admits_exact_logical_alias_for_imported_ibkr_contract(
@@ -1292,6 +1496,7 @@ from pathlib import Path
 from stocker_runtime.ingestion import InstrumentSpec, Recorder, RecorderConfig, SubscriptionSpec
 
 class Adapter:
+    capabilities = frozenset({"market_data"})
     connected = False
     def set_callback(self, callback): self.callback = callback
     def set_disconnect_callback(self, callback): self.disconnect_callback = callback
@@ -1299,6 +1504,7 @@ class Adapter:
     def connect(self): self.connected = True
     def disconnect(self): self.connected = False
     def subscribe(self, fence): pass
+    def retry_subscription(self, fence): pass
     def cancel(self, request_id): pass
 
 database = Path(sys.argv[1])
@@ -1411,7 +1617,6 @@ def test_recorder_disconnect_reconnect_and_staleness_are_scoped(tmp_path: Path) 
     assert any(row["resolved_at_us"] == 115 for row in gaps)
     quote_gaps = tuple(row for row in gaps if row["feed_kind"] == "quotes")
     assert {row["reason"] for row in quote_gaps} == {
-        "IBKR_DISCONNECT",
         "RECONNECT_UNCERTAINTY",
         "STREAM_STALE",
     }
@@ -1543,20 +1748,34 @@ def test_required_subscribe_retries_keep_bounded_incidents_and_resolve_on_succes
                 "WHERE code='IBKR_SUBSCRIBE_FAILED' ORDER BY subscription_id"
             )
         )
-    assert len(during_outage) == 2
+    assert len(during_outage) == 1
     assert all(row["resolved_at_us"] is None for row in during_outage)
 
     adapter.fail_subscribe.clear()
-    assert recorder.recover_connection(now_us=1_000_101) is True
+    assert recorder.recover_subscriptions(now_us=1_000_101) == 1
     with connect_v2(database) as connection:
         after_recovery = tuple(
             connection.execute(
                 "SELECT resolved_at_us FROM incidents WHERE code='IBKR_SUBSCRIBE_FAILED'"
             )
         )
-    assert len(after_recovery) == 2
-    assert all(row["resolved_at_us"] == 1_000_101 for row in after_recovery)
-    recorder.stop(now_us=1_000_102)
+    assert len(after_recovery) == 1
+    assert after_recovery[0]["resolved_at_us"] is None
+    state = recorder.state
+    assert state is not None
+    adapter.emit(
+        state.fences[0],
+        MarketDataCallback("quote", 1_000_102, None, {"event_at_us": 1_000_102, "bid": 1.0}),
+    )
+    assert recorder.drain(now_us=1_000_103) == 1
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT resolved_at_us FROM incidents WHERE code='IBKR_SUBSCRIBE_FAILED'"
+            ).fetchone()[0]
+            == 1_000_103
+        )
+    recorder.stop(now_us=1_000_104)
 
 
 def test_reconnect_does_not_resolve_future_transport_gap(tmp_path: Path) -> None:
@@ -2033,6 +2252,46 @@ def test_staleness_reference_is_clamped_to_current_expected_session(tmp_path: Pa
     recorder.stop(now_us=1_007)
 
 
+def test_stale_feed_recovers_independently_only_when_regular_session_expects_data(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "session-stale-recovery.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    assert recorder.mark_stale(now_us=10_000, market_data_expected=False) == 0
+    assert recorder.recover_subscriptions(now_us=10_000) == 0
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM gaps").fetchone()[0] == 0
+        assert dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions")) == {
+            3: "active",
+            4: "active",
+        }
+
+    assert recorder.mark_stale(now_us=10_001, expected_since_us=100) == 2
+    with connect_v2(database) as connection:
+        assert dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions")) == {
+            3: "disconnected",
+            4: "disconnected",
+        }
+    assert recorder.recover_subscriptions(now_us=1_010_001) == 2
+    assert set(adapter.retry_calls) == {3, 4}
+    quote_fence = next(item for item in state.fences if item.request_id == 3)
+    adapter.emit(
+        quote_fence,
+        MarketDataCallback("quote", 1_010_002, None, {"event_at_us": 1_010_002, "bid": 1.0}),
+    )
+    assert recorder.drain(now_us=1_010_003) == 1
+    with connect_v2(database) as connection:
+        assert dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions")) == {
+            3: "active",
+            4: "connecting",
+        }
+
+
 def test_admission_database_failure_is_fail_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2051,10 +2310,12 @@ def test_admission_database_failure_is_fail_closed(
 
 def test_unsafe_adapter_capability_is_rejected_before_connection(tmp_path: Path) -> None:
     class UnsafeMarketData(FakeMarketData):
+        capabilities = frozenset({"market_data", "orders"})
+
         def place_order(self) -> None:
             raise AssertionError("must never be called")
 
-    with pytest.raises(Exception, match="unsafe broker capability"):
+    with pytest.raises(Exception, match="exactly market-data-only capability"):
         Recorder(_config(tmp_path / "v2.sqlite3"), UnsafeMarketData())
 
 
@@ -2820,6 +3081,7 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
             self.generic_ticks: dict[int, str] = {}
             self.cancelled: list[tuple[str, int]] = []
             self.disconnected = False
+            self.fail_next_cancel = False
             clients.append(self)
 
         def connect(self, host: str, port: int, client_id: int) -> bool:
@@ -2849,6 +3111,11 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
 
         def cancelMktData(self, request_id: int) -> None:  # noqa: N802
             self.cancelled.append(("market", request_id))
+            self.wrapper.tickPrice(request_id, 1, 998.0, object())
+            self.wrapper.error(request_id, 420, "synchronous pacing during cancel")
+            if self.fail_next_cancel:
+                self.fail_next_cancel = False
+                raise RuntimeError("injected cancel failure")
 
         def cancelRealTimeBars(self, request_id: int) -> None:  # noqa: N802
             self.cancelled.append(("bars", request_id))
@@ -2920,6 +3187,24 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
     wrapper.error(3, 420, "pacing")
     wrapper.error(-1, 2103, "market farm disconnected")
     wrapper.error(3, 9999, "ignored")
+    callbacks_before_retry_evidence = len(callbacks)
+    statuses_before_retry_evidence = len(statuses)
+    client.fail_next_cancel = True  # type: ignore[attr-defined]
+    with pytest.raises(RuntimeError, match="injected cancel failure"):
+        bridge.retry_subscription(CallbackFence("run-1", 1, 1, 3, "sub-3"))
+    assert len(callbacks) == callbacks_before_retry_evidence
+    assert len(statuses) == statuses_before_retry_evidence
+    bridge.retry_subscription(CallbackFence("run-1", 1, 1, 3, "sub-3"))
+    assert len(callbacks) == callbacks_before_retry_evidence
+    assert len(statuses) == statuses_before_retry_evidence
+    wrapper.tickPrice(3, 1, 999.0, object())
+    wrapper.error(3, 420, "late pacing from canceled request")
+    assert len(callbacks) == callbacks_before_retry_evidence
+    assert len(statuses) == statuses_before_retry_evidence
+    wrapper.tickPrice(1_499_999_999, 1, 102.0, object())
+    replacement_callback = callbacks.pop()
+    assert replacement_callback[0] == CallbackFence("run-1", 1, 1, 3, "sub-3")
+    assert replacement_callback[1].payload["bid"] == 102.0
     wrapper.connectionClosed()
     del private_bridge._callback_context.connection_epoch
 
@@ -2976,8 +3261,16 @@ def test_official_wrapper_translates_realistic_market_data_sequence_without_brok
         ("market", 4),
         ("bars", 5),
         ("market", 6),
+        ("market", 1_499_999_999),
     ]
-    assert client.generic_ticks == {3: "", 4: "", 6: "100,101"}  # type: ignore[attr-defined]
+    assert client.cancelled == [("market", 3), ("market", 3)]  # type: ignore[attr-defined]
+    assert client.requests.count(("market", 4)) == 1  # type: ignore[attr-defined]
+    assert client.generic_ticks == {  # type: ignore[attr-defined]
+        3: "",
+        4: "",
+        6: "100,101",
+        1_499_999_999: "",
+    }
     bridge.disconnect()
     wrapper.tickSnapshotEnd(6)
     assert [(status.kind, status.code, status.request_id) for status in statuses] == [
@@ -4448,7 +4741,7 @@ def test_projection_uses_durable_payload_and_rejects_altered_lease_token(tmp_pat
 
 @pytest.mark.parametrize(
     ("failed_request", "runtime_lifecycle", "required_lifecycle", "optional_lifecycle"),
-    ((3, "degraded", "disconnected", "disconnected"), (4, "running", "active", "paused")),
+    ((3, "degraded", "disconnected", "active"), (4, "running", "active", "disconnected")),
 )
 def test_subscription_state_is_truthful_when_subscribe_fails(
     tmp_path: Path,
@@ -4468,6 +4761,266 @@ def test_subscription_state_is_truthful_when_subscribe_fails(
         states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
     assert runtime == runtime_lifecycle
     assert states == {3: required_lifecycle, 4: optional_lifecycle}
+
+
+@pytest.mark.parametrize("failed_request", (3, 4, 5))
+def test_startup_attempts_every_required_subscription_and_recovers_only_failure(
+    tmp_path: Path,
+    failed_request: int,
+) -> None:
+    database = tmp_path / f"startup-failure-{failed_request}.sqlite3"
+    initialize_database(database)
+    instrument, specs = _three_required_specs()
+    adapter = FakeMarketData(fail_subscribe={failed_request})
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    assert adapter.subscribe_attempts == [3, 4, 5]
+    assert adapter.active_request_ids == {3, 4, 5} - {failed_request}
+    assert adapter.connected is True
+    with connect_v2(database) as connection:
+        lifecycles = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+    assert lifecycles[failed_request] == "disconnected"
+    assert all(
+        lifecycle == "active"
+        for request_id, lifecycle in lifecycles.items()
+        if request_id != failed_request
+    )
+
+    adapter.fail_subscribe.clear()
+    assert recorder.recover_subscriptions(now_us=1_000_100) == 1
+    assert adapter.retry_calls == [failed_request]
+    assert adapter.active_request_ids == {3, 4, 5}
+    fence = next(item for item in state.fences if item.request_id == failed_request)
+    callback_kind = {3: "quote", 4: "trade", 5: "bar"}[failed_request]
+    payloads = {
+        3: {"event_at_us": 1_000_101, "bid": 1.0},
+        4: {"event_at_us": 1_000_101, "last": 1.0},
+        5: {
+            "event_at_us": 1_000_101,
+            "open": 1.0,
+            "high": 1.0,
+            "low": 1.0,
+            "close": 1.0,
+            "volume": 1.0,
+        },
+    }
+    adapter.emit(
+        fence,
+        MarketDataCallback(callback_kind, 1_000_101, None, payloads[failed_request]),
+    )
+    assert recorder.drain(now_us=1_000_102) == 1
+    with connect_v2(database) as connection:
+        lifecycles = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
+        runtime = connection.execute(
+            "SELECT lifecycle, connection_state FROM runtime_state"
+        ).fetchone()
+    assert lifecycles == {3: "active", 4: "active", 5: "active"}
+    assert tuple(runtime) == ("running", "connected")
+
+
+def test_request_pacing_uses_bounded_backoff_and_callback_evidence_for_recovery(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "request-pacing.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    recorder.market_data_status(MarketDataStatus("pacing", 420, 3, "paced", 101))
+    recorder.market_data_status(MarketDataStatus("pacing", 420, 3, "paced again", 102))
+    with connect_v2(database) as connection:
+        retry = connection.execute(
+            "SELECT lifecycle, retry_count, next_retry_at_us, permanent_failure "
+            "FROM subscriptions WHERE request_id=3"
+        ).fetchone()
+        healthy = connection.execute(
+            "SELECT lifecycle FROM subscriptions WHERE request_id=4"
+        ).fetchone()[0]
+    assert tuple(retry) == ("disconnected", 2, 10_000_102, 0)
+    assert healthy == "active"
+    assert recorder.recover_subscriptions(now_us=10_000_101) == 0
+    assert recorder.recover_subscriptions(now_us=10_000_102) == 1
+    assert adapter.retry_calls == [3]
+    assert adapter.active_request_ids == {3, 4}
+
+    recorder.market_data_status(MarketDataStatus("recovered", 1102, 3, "request accepted", 103))
+    with connect_v2(database) as connection:
+        before_callback = connection.execute(
+            "SELECT lifecycle, last_error_code FROM subscriptions WHERE request_id=3"
+        ).fetchone()
+        unresolved = connection.execute(
+            "SELECT count(*) FROM incidents WHERE subscription_id=? AND resolved_at_us IS NULL",
+            (state.fences[0].subscription_id,),
+        ).fetchone()[0]
+    assert tuple(before_callback) == ("connecting", "IBKR_STATUS_420_PACING")
+    assert unresolved >= 1
+
+    adapter.emit(
+        state.fences[0],
+        MarketDataCallback("quote", 10_000_103, None, {"event_at_us": 10_000_103, "bid": 1.0}),
+    )
+    assert recorder.drain(now_us=10_000_104) == 1
+    with connect_v2(database) as connection:
+        recovered = connection.execute(
+            "SELECT lifecycle, retry_count, next_retry_at_us, last_error_code "
+            "FROM subscriptions WHERE request_id=3"
+        ).fetchone()
+        pacing_incidents = connection.execute(
+            "SELECT count(*) FROM incidents WHERE subscription_id=? "
+            "AND code='IBKR_STATUS_420_PACING' AND resolved_at_us IS NULL",
+            (state.fences[0].subscription_id,),
+        ).fetchone()[0]
+    assert tuple(recovered) == ("active", 0, None, None)
+    assert pacing_incidents == 0
+
+
+@pytest.mark.parametrize(
+    ("request_id", "expected_runtime"),
+    ((3, "degraded"), (4, "running")),
+)
+def test_permanent_rejection_stays_visible_without_tight_loop(
+    tmp_path: Path,
+    request_id: int,
+    expected_runtime: str,
+) -> None:
+    database = tmp_path / f"permanent-{request_id}.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    recorder.market_data_status(
+        MarketDataStatus("request_rejected", 200, request_id, "contract rejected", 101)
+    )
+    with connect_v2(database) as connection:
+        rejected = connection.execute(
+            "SELECT lifecycle, next_retry_at_us, permanent_failure FROM subscriptions "
+            "WHERE request_id=?",
+            (request_id,),
+        ).fetchone()
+        runtime = connection.execute("SELECT lifecycle FROM runtime_state").fetchone()[0]
+    assert tuple(rejected) == ("degraded", None, 1)
+    assert runtime == expected_runtime
+    assert recorder.recover_subscriptions(now_us=100_000_000) == 0
+    assert adapter.retry_calls == []
+
+
+def test_subscription_recovery_resolves_only_the_feed_with_callback_evidence(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "scoped-request-recovery.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder.market_data_status(MarketDataStatus("pacing", 420, 3, "quotes paced", 101))
+    recorder.market_data_status(
+        MarketDataStatus("temporary_disconnect", 2110, 4, "bars disconnected", 101)
+    )
+
+    assert recorder.recover_subscriptions(now_us=1_000_101) == 1
+    assert adapter.retry_calls == [4]
+    optional_fence = next(item for item in state.fences if item.request_id == 4)
+    adapter.emit(
+        optional_fence,
+        MarketDataCallback(
+            "bar",
+            1_000_102,
+            None,
+            {
+                "event_at_us": 1_000_102,
+                "open": 1.0,
+                "high": 1.0,
+                "low": 1.0,
+                "close": 1.0,
+                "volume": 1.0,
+            },
+        ),
+    )
+    assert recorder.drain(now_us=1_000_103) == 1
+    with connect_v2(database) as connection:
+        states = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions ORDER BY request_id"
+            )
+        )
+        open_codes = {
+            str(row[0])
+            for row in connection.execute("SELECT code FROM incidents WHERE resolved_at_us IS NULL")
+        }
+    assert states == {3: "disconnected", 4: "active"}
+    assert "IBKR_STATUS_420_PACING" in open_codes
+    assert "IBKR_STATUS_2110_TEMPORARY_DISCONNECT" not in open_codes
+
+
+def test_malformed_callback_does_not_claim_subscription_recovery(tmp_path: Path) -> None:
+    database = tmp_path / "malformed-recovery-evidence.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder.market_data_status(MarketDataStatus("pacing", 420, 3, "paced", 101))
+    assert recorder.recover_subscriptions(now_us=5_000_101) == 1
+
+    adapter.emit(
+        state.fences[0],
+        MarketDataCallback(
+            "quote",
+            5_000_102,
+            None,
+            {"event_at_us": 5_000_102, "bid": "not-a-number"},
+        ),
+    )
+    assert recorder.drain(now_us=5_000_103) == 0
+    with connect_v2(database) as connection:
+        subscription = connection.execute(
+            "SELECT lifecycle, last_error_code FROM subscriptions WHERE request_id=3"
+        ).fetchone()
+        callback = connection.execute(
+            "SELECT lifecycle, failure_code FROM callback_inbox "
+            "ORDER BY source_sequence DESC LIMIT 1"
+        ).fetchone()
+        unresolved = connection.execute(
+            "SELECT count(*) FROM incidents WHERE code='IBKR_STATUS_420_PACING' "
+            "AND resolved_at_us IS NULL"
+        ).fetchone()[0]
+    assert tuple(subscription) == ("connecting", "IBKR_STATUS_420_PACING")
+    assert tuple(callback) == ("failed", "MALFORMED_CALLBACK")
+    assert unresolved == 1
+
+
+def test_farm_recovery_cannot_override_permanent_request_rejection(tmp_path: Path) -> None:
+    database = tmp_path / "farm-request-ordering.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    recorder.market_data_status(
+        MarketDataStatus("request_rejected", 200, 3, "contract rejected", 101)
+    )
+    recorder.market_data_status(
+        MarketDataStatus("farm_degraded", 2103, None, "quotes farm lost", 102, ("quotes",))
+    )
+    recorder.market_data_status(
+        MarketDataStatus("farm_recovered", 2104, None, "quotes farm restored", 103, ("quotes",))
+    )
+
+    with connect_v2(database) as connection:
+        rejected = connection.execute(
+            "SELECT lifecycle, last_error_code, permanent_failure FROM subscriptions "
+            "WHERE request_id=3"
+        ).fetchone()
+        rejection_incident = connection.execute(
+            "SELECT resolved_at_us FROM incidents WHERE code='IBKR_STATUS_200_REQUEST_REJECTED'"
+        ).fetchone()[0]
+    assert tuple(rejected) == ("degraded", "IBKR_STATUS_200_REQUEST_REJECTED", 1)
+    assert rejection_incident is None
 
 
 def test_partial_quote_callbacks_merge_into_latest_projection(tmp_path: Path) -> None:
@@ -4535,7 +5088,7 @@ def test_typed_optional_status_does_not_stop_required_feed(tmp_path: Path) -> No
         gap = connection.execute(
             "SELECT continuity_required FROM gaps WHERE reason LIKE 'IBKR_STATUS_420_%'"
         ).fetchone()[0]
-    assert (runtime, optional, gap) == ("running", "paused", 0)
+    assert (runtime, optional, gap) == ("running", "disconnected", 0)
 
 
 def test_replay_rejects_oversized_fixture_before_starting_run(tmp_path: Path) -> None:
@@ -4827,7 +5380,7 @@ def test_external_failure_after_takeover_disconnects_only_stale_adapter(
     assert tuple(replacement) == (2, "running", None, "connected")
 
 
-def test_required_subscribe_failure_disconnects_earlier_optional_success(tmp_path: Path) -> None:
+def test_required_subscribe_failure_preserves_earlier_optional_success(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     instrument, specs = _specs()
@@ -4839,9 +5392,9 @@ def test_required_subscribe_failure_disconnects_earlier_optional_success(tmp_pat
     with connect_v2(database) as connection:
         states = dict(connection.execute("SELECT request_id, lifecycle FROM subscriptions"))
         runtime = connection.execute("SELECT lifecycle FROM runtime_state").fetchone()[0]
-    assert states == {3: "disconnected", 4: "disconnected"}
+    assert states == {3: "disconnected", 4: "active"}
     assert runtime == "degraded"
-    assert adapter.connected is False
+    assert adapter.connected is True
 
 
 def test_market_latest_resets_across_runs_and_tracks_each_field_source(tmp_path: Path) -> None:
@@ -5021,9 +5574,7 @@ def test_replay_foreign_unexpired_lease_errors_bounded_and_stops_current_writer(
         json.dumps(_config(database, writer_lease_stale_us=15_000_000).model_dump(mode="json")),
         encoding="utf-8",
     )
-    fixture_path.write_text(
-        json.dumps({"instruments": [], "subscriptions": [], "callbacks": []}), encoding="utf-8"
-    )
+    fixture_path.write_text(json.dumps(_replay_fixture_without_callbacks()), encoding="utf-8")
     result = CliRunner().invoke(
         app,
         ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "15000002"],
@@ -5055,9 +5606,7 @@ def test_replay_budget_uses_preexisting_backlog_not_fixture_count(tmp_path: Path
         json.dumps(_config(database, writer_lease_stale_us=15_000_000).model_dump(mode="json")),
         encoding="utf-8",
     )
-    fixture_path.write_text(
-        json.dumps({"instruments": [], "subscriptions": [], "callbacks": []}), encoding="utf-8"
-    )
+    fixture_path.write_text(json.dumps(_replay_fixture_without_callbacks()), encoding="utf-8")
     result = CliRunner().invoke(
         app,
         ["replay-recorder", str(config_path), str(fixture_path), "--now-us", "15000002"],
@@ -5110,9 +5659,9 @@ def test_replay_cleanup_does_not_mutate_replacement_after_authority_loss(
     assert status == "running"
 
 
-@pytest.mark.parametrize("second_failure", ("takeover", "database"))
-def test_required_abort_disconnects_when_second_failure_persistence_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, second_failure: str
+@pytest.mark.parametrize("persistence_failure", ("takeover", "database"))
+def test_subscription_failure_disconnects_when_failure_persistence_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, persistence_failure: str
 ) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
@@ -5120,8 +5669,8 @@ def test_required_abort_disconnects_when_second_failure_persistence_fails(
     adapter = FakeMarketData(fail_subscribe={3})
     recorder = Recorder(_config(database), adapter)
 
-    def fail_second_persistence(**_kwargs: object) -> None:
-        if second_failure == "takeover":
+    def fail_persistence(*_args: object, **_kwargs: object) -> None:
+        if persistence_failure == "takeover":
             _force_recorder_takeover(database)
             with connect_v2(database) as connection:
                 connection.execute(
@@ -5131,7 +5680,7 @@ def test_required_abort_disconnects_when_second_failure_persistence_fails(
             raise AuthoritativeLeaseLost("replacement took authority")
         raise sqlite3.OperationalError("injected second persistence failure")
 
-    monkeypatch.setattr(recorder, "_persist_connection_failure", fail_second_persistence)
+    monkeypatch.setattr(recorder, "_persist_subscription_failure", fail_persistence)
     with pytest.raises((AuthoritativeLeaseLost, sqlite3.OperationalError)):
         recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
     assert adapter.connected is False
@@ -5157,14 +5706,14 @@ def test_required_abort_disconnects_when_second_failure_persistence_fails(
                 "WHERE gap.reason='IBKR_SUBSCRIBE_FAILED'"
             )
         }
-    assert scoped == 1
+    assert scoped == 0
     assert fabricated_global == 0
-    assert states == {3: "disconnected", 4: "disconnected"}
-    assert gap_requests == {3, 4}
-    if second_failure == "takeover":
+    assert gap_requests == set()
+    if persistence_failure == "takeover":
         assert tuple(runtime) == (2, "running", "REPLACEMENT_OWNS_STATE", "connected")
     else:
-        assert tuple(runtime) == (1, "degraded", "IBKR_SUBSCRIBE_FAILED", "disconnected")
+        assert tuple(runtime) == (1, "connecting", None, "connecting")
+        assert states == {3: "connecting", 4: "connecting"}
 
 
 def test_optional_subscribe_failure_remains_isolated_and_connected(tmp_path: Path) -> None:
@@ -5189,7 +5738,7 @@ def test_optional_subscribe_failure_remains_isolated_and_connected(tmp_path: Pat
             "SELECT count(*) FROM incidents WHERE code='IBKR_SUBSCRIBE_FAILED' "
             "AND subscription_id IS NULL"
         ).fetchone()[0]
-    assert states == {3: "active", 4: "paused"}
+    assert states == {3: "active", 4: "disconnected"}
     assert tuple(runtime) == ("running", None, "connected")
     assert (scoped, global_incident) == (1, 0)
     assert adapter.connected is True

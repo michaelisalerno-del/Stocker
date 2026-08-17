@@ -165,6 +165,47 @@ unable to persist a component incident, the process retains and republishes it b
 normal recovery; a process crash in that narrow interval can lose the in-memory health
 marker, but never the already durable raw callback or writer evidence.
 
+## Schema-19 retention backlog recovery
+
+Repeated `COMPONENT_RETENTION_MAINTENANCE_FAILED` incidents may leave durable raw
+admission healthy while an old payload backlog cannot drain. Do not suppress the
+incident, increase the 100 ms writer-transaction deadline, or manually edit SQLite.
+The current schema-19 release uses at most two bounded set-based payload updates per
+pass while retaining receipt/watermark proof, acknowledged-first ordering, the shared
+2,000-row cap, and atomic rollback.
+
+Use an attended offline recovery only after the incident has been diagnosed:
+
+1. Stop recorder and web, verify no recorder process remains, and acquire the existing
+   writer lock nonblockingly for the whole procedure.
+2. Create a fresh checked compressed schema-19 backup and restore-check it to a
+   disposable path. Record callback, receipt, and watermark counts/hashes plus
+   `quick_check` and `foreign_key_check`.
+3. Verify the exact release artifacts, recorder/input preflight, and schema 19. Run
+   `stocker-runtime retain /var/lib/stocker/v2/stocker-v2.sqlite3` in an explicitly
+   capped loop. Stop on any nonzero exit, invalid JSON, non-`ok` status, more than 2,000
+   compacted payloads, or unexplained receipt/expiry mutation.
+4. Continue until a full zero-work pass is repeated once. The second zero proves a
+   stable frontier because callback admission remains stopped.
+5. Recompute the evidence hashes. Callback row count and all immutable callback,
+   receipt, and watermark evidence must match; the non-null payload reduction must
+   equal the sum of successful compactions. Require schema 19, `quick_check=ok`, zero
+   foreign-key violations, and bounded DB/WAL.
+6. Restart the same `run_id`, creating a new recorder generation. Require a fresh
+   heartbeat, connected market-data socket, every exact identity from validated input
+   active without duplicates, growing raw sequence, and no new generation-scoped
+   retention incident across at least three maintenance opportunities. Then start web
+   and require truthful readiness.
+
+A successful full command may exceed 100 ms because one pass contains two separately
+bounded writer transactions plus checkpoint/vacuum work; that is not a transaction-
+deadline violation. This recovery nulls only proven eligible `payload_json`; callback
+identity/provenance, payload hashes, receipts, and watermarks remain. If release
+rollback is needed while evidence is valid, preserve the current schema-19 database
+and roll back only the binary. Restore the checked pre-drain backup only for actual
+corruption found before callback admission resumes. After any new callback is admitted,
+never restore the older backup.
+
 ## Opening replay
 
 Run the fixed larger fake-adapter simulation from the release root:

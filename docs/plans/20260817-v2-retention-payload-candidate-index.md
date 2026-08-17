@@ -366,3 +366,39 @@ This addendum affects only prospective-record/shadow market-data retention and
 readiness availability. It does not affect risk, execution, reconciliation, accounts,
 credentials, broker/order capability, paper/live trading, subscription semantics, or
 XNYS calendar behavior.
+
+### Accepted operational amendment after prior-release drain failure
+
+The attended production procedure proved that the planned prior-release drain was not
+dependable enough to complete. With recorder and web stopped, the schema-19 writer lock
+available, and the checked pre-drain backup already restored successfully, the
+per-row release completed 23 batches and a second bounded segment completed 21 batches,
+all at exactly 2,000 payloads. One intervening manual pass also completed 2,000. The
+first remote session then closed and the detached segment exited before producing its
+next valid pass record. A manual retry succeeded, confirming rollback/evidence safety,
+but the requirement that every prior-release pass succeed was not met. The 45 valid
+batches remain legitimate policy compaction and reduced non-null payloads from 651,498
+to 561,498 without callback admission.
+
+The Architect therefore superseded only the prior-release drain ordering: do not keep
+retrying the measured per-row implementation. Install the exact reviewed set-based
+candidate offline while both services remain stopped, verify release artifacts,
+configuration, schema 19, and exclusive writer ownership, then run the same explicitly
+capped drain with the candidate until two consecutive zero-work passes. Every pass
+must exit zero, return valid JSON, report `status=ok`, compact at most 2,000 payloads,
+and report no unexplained receipt or expiry mutation. Any failure stops the procedure.
+
+This amendment is supported by two independent candidate measurements. The original
+mature copy completed 12 consecutive 2,000-row passes in 0.783–1.198 seconds. A fresh
+restore of the production pre-drain backup completed another 12 in 0.745–1.295 seconds.
+Across the fresh-copy run, callback row count and the non-payload callback hash,
+receipt count/hash, and watermark count/hash were identical; only 24,000 eligible
+payloads became null. Both before and after reported schema 19, `quick_check=ok`, and
+zero foreign-key violations.
+
+There is no migration rollback. An ordinary candidate failure with intact evidence
+keeps the current database and permits binary rollback to the matching prior schema-19
+release, but the flaky drain must not then be resumed as a dependable recovery path.
+Actual corruption detected before services resume permits restoring the already checked
+pre-drain schema-19 backup because no callback admission occurred after it. Once a new
+callback is admitted, never restore that backup; preserve evidence and roll forward.

@@ -30,6 +30,10 @@ MAX_MAINTENANCE_BATCH_ROWS = 10_000
 DEFAULT_MAINTENANCE_BATCH_ROWS = 2_000
 MAX_RECEIPT_CHECKPOINTS_PER_PASS = 1_200
 MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS = 1_200
+RECEIPT_CHECKPOINT_TRANSACTIONS_PER_PASS = 2
+RECEIPT_CHECKPOINT_CALLBACKS_PER_TRANSACTION = (
+    MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS // RECEIPT_CHECKPOINT_TRANSACTIONS_PER_PASS
+)
 # Bounded forensic headroom lets ShadowEngine persist the reason it rejects >8-leg proposals.
 MAX_STORED_IDEA_OUTPUT_LEGS = 16
 MAX_IDEA_OUTPUT_CASCADE_ROWS = 1 + 256 + MAX_STORED_IDEA_OUTPUT_LEGS + 1 + 1 + 1
@@ -169,6 +173,23 @@ WHERE inbox.lifecycle = 'failed' AND inbox.payload_json IS NOT NULL
         AND terminal_run.status IN ('stopped', 'fatal')
   )
 ORDER BY inbox.received_at_us, inbox.source_sequence
+LIMIT 1
+"""
+RECEIPT_WORK_RUN_SQL = """
+SELECT receipt.run_id
+FROM callback_receipts AS receipt INDEXED BY callback_receipts_run_sequence_idx
+LEFT JOIN callback_compaction_watermarks AS watermark
+  ON watermark.run_id = receipt.run_id
+GROUP BY receipt.run_id
+HAVING watermark.run_id IS NULL
+    OR max(receipt.first_source_sequence > watermark.compacted_through_sequence) = 1
+    OR max(
+        receipt.first_source_sequence <= watermark.compacted_through_sequence
+        AND receipt.last_source_sequence > watermark.compacted_through_sequence
+    ) = 1
+    OR min(receipt.created_at_us) <= ?
+    OR count(*) > ?
+ORDER BY CASE WHEN receipt.run_id = ? THEN 0 ELSE 1 END, receipt.run_id
 LIMIT 1
 """
 ACK_TOMBSTONE_CANDIDATES_SQL = (
@@ -366,6 +387,7 @@ class RetentionManager:
         watermark: sqlite3.Row | None,
         receipt_cutoff_us: int,
         remaining: int,
+        checkpoint_callback_limit: int = MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS,
     ) -> tuple[tuple[sqlite3.Row, ...], tuple[sqlite3.Row, ...]]:
         total = int(
             connection.execute(
@@ -375,7 +397,8 @@ class RetentionManager:
         excess = max(0, total - self.policy.max_receipts_per_run)
         oldest = tuple(
             connection.execute(
-                "SELECT * FROM callback_receipts WHERE run_id = ? "
+                "SELECT batch_id, run_id, first_source_sequence, last_source_sequence, "
+                "created_at_us FROM callback_receipts WHERE run_id = ? "
                 "ORDER BY first_source_sequence, batch_id LIMIT ?",
                 (run_id, remaining),
             )
@@ -414,13 +437,13 @@ class RetentionManager:
         checkpoint_callbacks = 0
         for receipt in unverified_pool[:MAX_RECEIPT_CHECKPOINTS_PER_PASS]:
             callback_count = int(receipt["callback_count"])
-            if callback_count > MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS:
+            if callback_count > checkpoint_callback_limit:
                 if not checkpoint_rows:
                     raise MaintenanceDeadlineExceeded(
                         "receipt exceeds bounded verification capacity"
                     )
                 break
-            if checkpoint_callbacks + callback_count > MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS:
+            if checkpoint_callbacks + callback_count > checkpoint_callback_limit:
                 break
             checkpoint_rows.append(receipt)
             checkpoint_callbacks += callback_count
@@ -656,6 +679,7 @@ class RetentionManager:
         limit: int,
         *,
         target_run_id: str | None = None,
+        checkpoint_callback_limit: int = MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS,
     ) -> tuple[int, int]:
         """Checkpoint verified proof, then rotate only age/count-eligible receipts."""
 
@@ -689,6 +713,7 @@ class RetentionManager:
                 watermark,
                 receipt_cutoff_us,
                 available,
+                checkpoint_callback_limit,
             )
             if not checkpoint_candidates and not deletion_candidates:
                 continue
@@ -1116,6 +1141,45 @@ class RetentionManager:
         )
         return deleted
 
+    def _select_receipt_work_run(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        payload_cutoff_us: int,
+        receipt_cutoff_us: int,
+    ) -> str | None:
+        """Return only a non-authoritative run hint for the next receipt transaction."""
+
+        checkpoint_runs = tuple(
+            row
+            for row in (
+                connection.execute(ACK_CHECKPOINT_RUN_SQL, (payload_cutoff_us,)).fetchone(),
+                connection.execute(FAILED_CHECKPOINT_RUN_SQL, (payload_cutoff_us,)).fetchone(),
+            )
+            if row is not None
+        )
+        checkpoint_run = (
+            None
+            if not checkpoint_runs
+            else min(
+                checkpoint_runs,
+                key=lambda row: (
+                    int(row["terminal_at_us"]),
+                    int(row["source_sequence"]),
+                ),
+            )
+        )
+        preferred_run_id = None if checkpoint_run is None else str(checkpoint_run["run_id"])
+        receipt_run = connection.execute(
+            RECEIPT_WORK_RUN_SQL,
+            (
+                receipt_cutoff_us,
+                self.policy.max_receipts_per_run,
+                preferred_run_id,
+            ),
+        ).fetchone()
+        return None if receipt_run is None else str(receipt_run["run_id"])
+
     def run(
         self,
         *,
@@ -1128,8 +1192,10 @@ class RetentionManager:
 
         connection = connect_v2(self.database_path)
         payloads_compacted = receipts_rolled = expired_rows_deleted = 0
+        receipt_transactions_committed = 0
         deadline_hit = False
         deadline = 0.0
+        phase = "storage_measurement"
         try:
             measured = self._measured_sizes(connection)
             database_bytes = (
@@ -1149,43 +1215,57 @@ class RetentionManager:
                 deadline_hit = self._monotonic() >= deadline
                 if deadline_hit:
                     raise MaintenanceDeadlineExceeded(
-                        "retention transaction exceeded its configured deadline"
+                        f"retention {phase} exceeded its configured deadline"
                     )
 
-            connection.execute("BEGIN IMMEDIATE")
-            deadline = self._monotonic() + self.policy.maintenance_transaction_ms / 1_000
-            connection.set_progress_handler(progress, 1_000)
-            if precondition is not None:
-                precondition(connection)
-            check_deadline()
             payload_cutoff_us = now_us - self.policy.callback_payload_us
-            checkpoint_runs = tuple(
-                row
-                for row in (
-                    connection.execute(ACK_CHECKPOINT_RUN_SQL, (payload_cutoff_us,)).fetchone(),
-                    connection.execute(FAILED_CHECKPOINT_RUN_SQL, (payload_cutoff_us,)).fetchone(),
-                )
-                if row is not None
-            )
-            checkpoint_run = (
-                None
-                if not checkpoint_runs
-                else min(
-                    checkpoint_runs,
-                    key=lambda row: (int(row["terminal_at_us"]), int(row["source_sequence"])),
-                )
-            )
-            receipts_rolled, _ = self._roll_receipts(
-                connection,
-                now_us - self.policy.receipt_us,
-                now_us,
-                self.policy.maintenance_batch_rows,
-                target_run_id=(None if checkpoint_run is None else str(checkpoint_run["run_id"])),
-            )
-            check_deadline()
-            connection.commit()
+            receipt_cutoff_us = now_us - self.policy.receipt_us
+            receipt_change_budget = self.policy.maintenance_batch_rows
+            for receipt_transaction in range(RECEIPT_CHECKPOINT_TRANSACTIONS_PER_PASS):
+                phase = "receipt_work_selection"
+                deadline_hit = False
+                deadline = self._monotonic() + self.policy.maintenance_transaction_ms / 1_000
+                connection.set_progress_handler(progress, 1_000)
+                try:
+                    receipt_run_id = self._select_receipt_work_run(
+                        connection,
+                        payload_cutoff_us=payload_cutoff_us,
+                        receipt_cutoff_us=receipt_cutoff_us,
+                    )
+                    check_deadline()
+                finally:
+                    connection.set_progress_handler(None, 0)
+                if receipt_run_id is None:
+                    break
 
-            connection.set_progress_handler(None, 0)
+                phase = f"receipt_transaction_{receipt_transaction + 1}"
+                deadline_hit = False
+                connection.execute("BEGIN IMMEDIATE")
+                deadline = self._monotonic() + self.policy.maintenance_transaction_ms / 1_000
+                connection.set_progress_handler(progress, 1_000)
+                if precondition is not None:
+                    precondition(connection)
+                check_deadline()
+                rolled, receipt_changes = self._roll_receipts(
+                    connection,
+                    receipt_cutoff_us,
+                    now_us,
+                    receipt_change_budget,
+                    target_run_id=receipt_run_id,
+                    checkpoint_callback_limit=RECEIPT_CHECKPOINT_CALLBACKS_PER_TRANSACTION,
+                )
+                if precondition is not None:
+                    precondition(connection)
+                check_deadline()
+                connection.commit()
+                receipt_transactions_committed += 1
+                connection.set_progress_handler(None, 0)
+                receipts_rolled += rolled
+                receipt_change_budget -= receipt_changes
+                if receipt_change_budget <= 0:
+                    break
+
+            phase = "terminalization_payload_compaction_and_pruning"
             deadline_hit = False
             connection.execute("BEGIN IMMEDIATE")
             deadline = self._monotonic() + self.policy.maintenance_transaction_ms / 1_000
@@ -1201,6 +1281,25 @@ class RetentionManager:
             )
             check_deadline()
             remaining -= len(terminalized)
+            checkpoint_runs = tuple(
+                row
+                for row in (
+                    connection.execute(ACK_CHECKPOINT_RUN_SQL, (payload_cutoff_us,)).fetchone(),
+                    connection.execute(FAILED_CHECKPOINT_RUN_SQL, (payload_cutoff_us,)).fetchone(),
+                )
+                if row is not None
+            )
+            checkpoint_run = (
+                None
+                if not checkpoint_runs
+                else min(
+                    checkpoint_runs,
+                    key=lambda row: (
+                        int(row["terminal_at_us"]),
+                        int(row["source_sequence"]),
+                    ),
+                )
+            )
             payloads_compacted = self._compact_payloads(
                 connection,
                 now_us - self.policy.callback_payload_us,
@@ -1210,6 +1309,8 @@ class RetentionManager:
             check_deadline()
             remaining -= payloads_compacted
             expired_rows_deleted = self._prune_expired(connection, now_us, remaining)
+            if precondition is not None:
+                precondition(connection)
             check_deadline()
             connection.commit()
             connection.set_progress_handler(None, 0)
@@ -1223,10 +1324,27 @@ class RetentionManager:
         except Exception as error:
             if connection.in_transaction:
                 connection.rollback()
+            error.__dict__.update(
+                retention_phase=phase,
+                receipt_transactions_committed=receipt_transactions_committed,
+                receipt_rows_rolled_committed=receipts_rolled,
+            )
+            if isinstance(error, MaintenanceDeadlineExceeded):
+                reported = MaintenanceDeadlineExceeded(
+                    f"{error}; phase={phase}; "
+                    f"receipt_transactions_committed={receipt_transactions_committed}; "
+                    f"receipt_rows_rolled_committed={receipts_rolled}"
+                )
+                reported.__dict__.update(error.__dict__)
+                raise reported from error
             if deadline_hit and isinstance(error, sqlite3.OperationalError):
-                raise MaintenanceDeadlineExceeded(
-                    "retention transaction exceeded its configured deadline"
-                ) from error
+                reported = MaintenanceDeadlineExceeded(
+                    f"retention {phase} exceeded its configured deadline; "
+                    f"receipt_transactions_committed={receipt_transactions_committed}; "
+                    f"receipt_rows_rolled_committed={receipts_rolled}"
+                )
+                reported.__dict__.update(error.__dict__)
+                raise reported from error
             raise
         finally:
             connection.set_progress_handler(None, 0)

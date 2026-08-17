@@ -174,6 +174,17 @@ The current schema-19 release uses at most two bounded set-based payload updates
 pass while retaining receipt/watermark proof, acknowledged-first ordering, the shared
 2,000-row cap, and atomic rollback.
 
+Normal schema-19 maintenance first performs a separately bounded read-only selector,
+then at most two receipt-proof writer transactions. Each writer transaction verifies
+no more than 600 callbacks and has its own unchanged 100 ms deadline; together they
+retain the existing 1,200-callback proof ceiling and carry the existing shared 2,000
+receipt-change budget. Receipt IDs, hashes, watermark bounds, and deletions are always
+re-read and validated after `BEGIN IMMEDIATE`; the outside selector supplies only a
+run-ID hint. Writer authority is checked after begin and immediately before every
+commit. If transaction two fails, transaction one's watermark/rollup remains valid,
+the current incident stays degraded, and retry resumes from durable evidence. Do not
+manually alter a watermark or retry by suppressing the incident.
+
 Use an attended offline recovery only after the incident has been diagnosed:
 
 1. Stop recorder and web, runtime-mask both units, and verify they are inactive with no
@@ -229,8 +240,10 @@ Use an attended offline recovery only after the incident has been diagnosed:
 6. Restart the same `run_id`, creating a new recorder generation. Require a fresh
    heartbeat, connected market-data socket, every exact identity from validated input
    active without duplicates, growing raw sequence, and no new generation-scoped
-   retention incident across at least three maintenance opportunities. Then start web
-   and require truthful readiness.
+   retention incident across at least 12 consecutive scheduled maintenance
+   opportunities under callback traffic. Then start web and require truthful HTTP 200
+   readiness. If one of those passes fails, keep the incident visible and diagnose the
+   reported phase; do not raise the deadline or rotate the run ID merely to clear it.
 
 A successful full command may exceed 100 ms because it contains many separately
 bounded payload transactions plus passive WAL checkpoints; that is not a transaction-

@@ -471,3 +471,130 @@ readiness. Real market-open host-I/O observation remains separate.
 This addendum affects prospective/shadow market-data retention and readiness only.
 Risk, execution, reconciliation, accounts, credentials, paper/live/order capability,
 subscription semantics, and XNYS regular-session behavior remain unchanged.
+
+## Accepted implementation addendum: bound receipt proof without reducing capacity
+
+The required phase measurement on the post-drain schema-19 disposable copy identified
+transaction A, not payload compaction or pruning, as the remaining deadline source.
+Across 12 baseline full-retention passes, 8 exceeded the unchanged 100 ms writer
+deadline and 4 succeeded. Nineteen no-work `_receipt_actions` scans consumed 55–70 ms
+before the one useful `_verified_receipt_prefix` consumed another 48–70 ms. Direct
+child timings kept `_prune_expired` at 15–32 ms, derivation pruning at 13–26 ms, raw
+market-event pruning at no more than 1.4 ms, and completed-event pruning at no more
+than 0.5 ms. The expired-payload candidate work was already exhausted by the bounded
+payload-only drain.
+
+The first measured query correction adds one read-only aggregate
+`RECEIPT_WORK_RUN_SQL`. It selects exactly one lexicographically first run with real
+work: no watermark, an unverified receipt suffix, a receipt straddling the watermark,
+an age-expired receipt, or receipt count above the configured cap. A fully verified,
+non-straddling, recent run at or below the cap does not match. An expired-payload run
+has priority only when that run also has actual receipt work. The selector uses the
+existing receipt sequence and watermark indexes and supplies only a run-ID hint;
+`_receipt_actions` and `_verified_receipt_prefix` remain authoritative inside the
+writer transaction. Direct `_roll_receipts(target_run_id=None)` fallback behavior is
+unchanged.
+
+The exact 1,200-callback proof still failed 12 of 12 mature-copy passes under the
+measured production-host load when kept in one transaction. A provisional 600-callback
+transaction succeeded 10 of 12 because the 34 ms aggregate selector work still ran
+inside its deadline; successful proof/commit work was otherwise within the bound. A
+400-callback transaction succeeded 12 of 12, establishing a safe fallback but requiring
+three writer transactions. The accepted smaller design therefore performs read-only
+run selection immediately before `BEGIN IMMEDIATE` under its own 100 ms progress
+deadline, clears that handler, and then runs at most two authoritative 600-callback
+writer transactions. Each writer deadline begins only after `BEGIN IMMEDIATE` acquires
+the transaction. The recorder's process-lifetime `LocalWriterLock` remains held,
+writer authority is checked after each begin and immediately before each commit, and
+SQLite excludes concurrent writers while proof is validated.
+
+The hint may become stale between selection and begin, but it cannot authorize a
+mutation. The transaction rereads current receipt and watermark state and recomputes
+callback hashes/counts. New same-run work may be included within 600 or deferred; new
+work on another run waits only until the second selection or next pass. A stale no-work
+hint commits no mutation. A newly introduced straddle or corrupt receipt still fails
+closed. Reselect before transaction two. Re-select the payload-compaction run inside
+transaction B rather than carrying a stale receipt hint.
+
+Keep the existing aggregate ceilings unchanged: no more than 1,200 proof callbacks and
+2,000 receipt changes per normal pass. Carry the one 2,000 change budget across both
+receipt transactions; do not add an unmeasured per-transaction deletion slice. If
+transaction one commits and transaction two fails, the first watermark/rollup and any
+authorized receipt deletions remain valid. The second transaction rolls back, the
+generation-scoped retention incident remains degraded, and the exception reports the
+bounded phase plus committed transaction/rolled-row counts. Retry must resume strictly
+after the authoritative committed watermark without duplicate rollup, deletion, skip,
+or chain divergence. Transaction B keeps its independent existing 2,000-row budget.
+
+Required deterministic tests cover the 19-run red seam; all exact selector classes and
+priority; no-work skip; 1,200 callbacks proven across two no-larger-than-600
+transactions at receipt boundaries no larger than the runtime's 256-callback creation
+limit; the shared 2,000 change budget; reselection of the same and another run; writer
+authority before every commit; transaction-two failure with transaction-one evidence
+preserved and exact retry; selector timeout before mutation; work added to the selected
+or a higher-priority run between selection and begin; a selector becoming no-work;
+straddle/corruption introduced between phases; current-transaction deadline rollback;
+receipt chain/corruption/skip invariants; unchanged transaction-B behavior; payload
+drain safety; and component failure isolation.
+
+The deployment gate is fixed before final measurement. On the same mature schema-19
+copy under the measured production-host pressure, the exact outside-selection/two-by-
+600 implementation must complete at least 12 consecutive full normal-retention passes
+with both writer transactions below 100 ms, no `MaintenanceDeadlineExceeded`, exact
+receipt/watermark mutations, `quick_check=ok`, and zero foreign-key violations. It must
+also pass the unchanged 2,022 and 12,132 opening replays, including their admission
+latency thresholds. If even one mature pass or opening threshold fails, do not deploy
+this design; use the already measured three-by-400 fallback and rerun the identical
+gate. Do not alter deadline, cadence, capacity, schema, or market-hours behavior to
+make the result pass.
+
+Rollout remains serial on schema 19: keep the current generation recording only while
+durable admission, ownership, integrity, socket/subscriptions, WAL, database cap, and
+inbox bounds remain healthy; then stop recorder/web, take and restore-check a fresh
+post-drain backup, deploy the reviewed release, run one offline full pass and integrity
+checks, and restart the same run as a new generation. Require 12 consecutive scheduled
+normal-maintenance successes under actual callbacks, no unresolved current-generation
+retention incident, fresh heartbeat, growing raw sequence, every exact configured
+identity active without duplicates, bounded DB/WAL/inbox, and truthful HTTP 200
+readiness. Binary rollback remains schema-19-compatible and must preserve committed
+evidence. A real regular-session observation remains required for host/IBKR market-open
+proof.
+
+This change affects prospective-record/shadow market-data receipt retention and the
+readiness it degrades. It does not affect risk, execution, reconciliation, accounts,
+credentials, paper/live/order capability, subscription semantics, or XNYS regular-
+session behavior.
+
+### Fixed-gate evidence for the exact two-by-600 implementation
+
+The exact implementation passed the frozen mature-host gate while the production
+recorder continued at approximately 98% CPU. Twelve consecutive full normal-retention
+passes completed without an error. The two per-pass receipt proofs produced 24
+successful `_roll_receipts` measurements of 28.583–52.438 ms; their authoritative
+`_receipt_actions` work took 8.756–16.307 ms, proof verification took 17.926–34.171 ms,
+and the corresponding commits took 1.531–5.013 ms. The independently bounded read-only
+selectors took 10.532–23.618 ms. Pruning remained 13.169–29.525 ms. Overall manager
+wall time was 119.562–324.924 ms, which is intentionally reported separately from the
+unchanged per-writer-transaction 100 ms contract.
+
+A second 12-pass exact sample also completed 12/12. Callback count (1,542,306), maximum
+source sequence (1,542,586), non-null payload count (50,981), receipt count (9,846),
+receipt callback total (1,321,955), and the complete ordered receipt hash
+`f88aec07e06ae5abd38a8f35322526efbb8e9dc9d3261679692fa0c4d98a9c68` were unchanged.
+The authoritative watermark callback total advanced from 1,516,706 to 1,530,398
+callbacks; the non-round 13,692 delta is expected because receipt boundaries are
+atomic and each transaction stops before exceeding 600. The watermark hash changed as
+expected from proof advancement. Schema remained 19. Final integrity/FK verification
+is retained as a stopped-service cutover gate because a concurrent read-only
+`quick_check` over the 3.5 GB disposable copy exceeded the attended 90-second
+diagnostic window under live recorder CPU pressure and was interrupted without a
+result or mutation.
+
+The unchanged deterministic 10-second replay admitted, durably stored, and projected
+all 2,022 callbacks with no acceptance failure. The unchanged 60-second replay passed
+with 12,132 presented/admitted/durable/projected callbacks, zero missing or duplicate
+callbacks, zero ordering/provenance violations, zero escaped busy/locked errors,
+maximum/final backlog 219/0, backlog drain 0.180 seconds, p50/p95/p99 admission latency
+0.156/0.306/9.660 ms, admission/projection throughput 407.49/1,433.68 callbacks per
+second, zero heartbeat delay, 100/100 required feeds fresh and active, readiness true
+in 2.344 ms, and RSS growth 34,029,568 bytes. No acceptance threshold was changed.

@@ -164,6 +164,74 @@ orders, fills, positions, accounts, credentials, paper/live trading, broker capa
 subscription behavior, or XNYS regular-session semantics. No live order test is
 authorised.
 
+## Accepted deployment addendum: bounded per-feed readiness lookup
+
+After schema 18 restored truthful generation health, production readiness still timed
+out after approximately 3.88 seconds on about 1.5 million callbacks. The current query
+performs one correlated `max(received_at_us)` lookup for every desired subscription, but
+the best available callback index begins with only `(run_id, source_sequence)`. Each of
+the 41 lookups can therefore scan a large run prefix; a missing feed is the worst case.
+The 224 ms opening replay used a small temporary database and did not prove
+mature-history lookup behavior.
+
+The accepted schema-19 correction is one partial covering index:
+
+```sql
+CREATE INDEX callback_inbox_readiness_latest_idx
+    ON callback_inbox(
+        run_id,
+        recorder_generation,
+        connection_generation,
+        request_id,
+        received_at_us DESC
+    )
+    WHERE lifecycle = 'acknowledged';
+```
+
+Replace the aggregate subquery with an explicitly indexed `ORDER BY received_at_us DESC
+LIMIT 1` seek for the exact run, recorder generation, connection generation, and request
+identity. Keep the correlated shape: 41–100 bounded B-tree seeks are preferable to a
+grouped scan of the active generation. Do not increase the 300 ms web query budget.
+
+Rejected alternatives are a grouped/window scan, scanning the run/sequence index
+backwards, using a derived market projection, persisting another latest-time projection
+on subscriptions, using a global maximum, increasing the timeout, or adding a cache or
+background service. These are unbounded, can conceal a dead feed, can diverge from raw
+callback evidence, or add unnecessary state/infrastructure.
+
+Migration and query acceptance require schema-18-to-19 evidence preservation, exact
+index SQL/predicate, atomic failure, `quick_check`, zero foreign-key violations, and an
+`EXPLAIN` plan that uses the new index without a temporary B-tree, including an index
+miss. Fixtures must distinguish old recorder/connection generations, other requests,
+and newer pending/failed callbacks. Only the latest acknowledged callback for the exact
+identity may establish freshness. Work must scale with subscription count and B-tree
+depth rather than callback history. Existing per-feed, busy-versus-dead-feed, timeout,
+ordering, duplicate, gap, admission, generation-provenance, retention, and capability
+tests remain unchanged.
+
+The mature-copy performance threshold is frozen before the fix: ten sequential
+production-shaped 41-feed readiness calculations must all finish within 300 ms and p95
+must be at most 275 ms, returning the full diagnostics. Record index build time,
+database/index size, before/after timings, and rerun the unchanged 2,022- and
+12,132-callback opening replays without relaxing any acceptance threshold.
+
+Roll out serially: stop recorder and web; verify space; create and restore-check a fresh
+schema-18 backup; apply schema 19 offline; verify ledger, exact index SQL, integrity,
+foreign keys, and query plan; run the ten-query mature acceptance measurement; then
+restart the same run ID as a new generation. Require fresh heartbeat, connected socket,
+every exact required identity reported by validated preflight active, healthy admission,
+raw sequence growth, no duplicate active request, and `/api/v2/ready` inside 300 ms.
+Outside XNYS regular hours the response must explicitly report quiet-session state and
+must contain no stale-feed reason. Before schema-19 admission the checked schema-18
+backup and matching release may be restored; afterward roll forward to avoid evidence
+loss.
+
+This addendum affects prospective-record and shadow callback projection index
+maintenance and read-only readiness. Pending durable admission does not enter the
+partial index. No callback evidence or lifecycle is rewritten. Risk, execution,
+reconciliation, paper/live enablement, orders, accounts, credentials, IBKR subscription
+behavior, and XNYS calendar semantics are unaffected.
+
 ## Final unchanged-threshold schema-18 replay
 
 The post-schema-18 60-second replay passed all frozen thresholds with 12,132 presented,
@@ -173,3 +241,14 @@ provenance, or escaped SQLite busy/locked failures; admission p50/p95/p99 of
 second; maximum/final backlog of 219/0; zero seconds to the 256-row safe range and
 0.169 seconds to drain; heartbeat delay 0 seconds; 100/100 feeds active and fresh;
 readiness true in 224.24 ms; and RSS growth of 27,639,808 bytes.
+
+## Unchanged-threshold schema-19 replay
+
+The post-schema-19 60-second replay passed all frozen thresholds with 12,132 presented,
+admitted, durable, and projected callbacks; zero missing, duplicate, ordering,
+provenance, or escaped SQLite busy/locked failures; admission p50/p95/p99 of
+0.166/0.372/9.866 ms; admission/projection throughput of 388.01/1,341.14 callbacks per
+second; maximum/final backlog of 219/0; zero seconds to the 256-row safe range and
+0.158 seconds to drain; heartbeat delay 0 seconds; 100/100 feeds active and fresh;
+readiness true in 2.19 ms; and RSS growth of 20,234,240 bytes. The deterministic
+2,022-callback CI replay also passed unchanged.

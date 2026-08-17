@@ -9,6 +9,41 @@ from stocker_runtime.market_session import market_data_expected_since_us
 
 RECORDER_HEARTBEAT_FRESH_US = 5_000_000
 READINESS_INBOX_BACKLOG_LIMIT = 5_000
+READINESS_LATEST_CALLBACK_SEEK_SQL = (
+    "SELECT callback.received_at_us FROM callback_inbox AS callback "
+    "INDEXED BY callback_inbox_readiness_latest_idx "
+    "WHERE callback.run_id=? AND callback.recorder_generation=? "
+    "AND callback.connection_generation=? AND callback.request_id=? "
+    "AND callback.lifecycle='acknowledged' "
+    "ORDER BY callback.received_at_us DESC LIMIT 1"
+)
+
+READINESS_FEEDS_SQL = (
+    "SELECT subscription.subscription_id, subscription.instrument_id, "
+    "subscription.feed_kind, subscription.request_id, subscription.lifecycle, "
+    "subscription.optional, subscription.snapshot, subscription.stale_after_us, "
+    "subscription.opened_at_us, subscription.retry_count, "
+    "subscription.next_retry_at_us, subscription.last_attempt_at_us, "
+    "subscription.last_error_code, subscription.permanent_failure, "
+    "(SELECT callback.received_at_us FROM callback_inbox AS callback "
+    "INDEXED BY callback_inbox_readiness_latest_idx "
+    "WHERE callback.run_id=subscription.run_id "
+    "AND callback.recorder_generation=subscription.recorder_generation "
+    "AND callback.connection_generation=subscription.connection_generation "
+    "AND callback.request_id=subscription.request_id "
+    "AND callback.lifecycle='acknowledged' "
+    "ORDER BY callback.received_at_us DESC LIMIT 1) AS latest_callback_at_us, "
+    "(SELECT incident.code FROM incidents incident "
+    "WHERE incident.run_id=subscription.run_id "
+    "AND incident.subscription_id=subscription.subscription_id "
+    "AND incident.resolved_at_us IS NULL "
+    "ORDER BY incident.opened_at_us DESC, incident.incident_id DESC LIMIT 1) "
+    "AS incident_code FROM subscriptions subscription WHERE subscription.run_id=? "
+    "AND subscription.recorder_generation=? AND subscription.connection_generation=? "
+    "AND subscription.lifecycle!='closed' "
+    "ORDER BY subscription.optional, subscription.instrument_id, "
+    "subscription.feed_kind, subscription.request_id"
+)
 
 
 def _heartbeat_is_fresh(heartbeat: int | None, *, now_us: int) -> bool:
@@ -126,28 +161,7 @@ def calculate_readiness(
         reasons.append("DURABLE_INBOX_BACKLOG_HIGH")
 
     rows = connection.execute(
-        "SELECT subscription.subscription_id, subscription.instrument_id, "
-        "subscription.feed_kind, subscription.request_id, subscription.lifecycle, "
-        "subscription.optional, subscription.snapshot, subscription.stale_after_us, "
-        "subscription.opened_at_us, subscription.retry_count, "
-        "subscription.next_retry_at_us, subscription.last_attempt_at_us, "
-        "subscription.last_error_code, subscription.permanent_failure, "
-        "(SELECT max(callback.received_at_us) FROM callback_inbox callback "
-        "WHERE callback.run_id=subscription.run_id "
-        "AND callback.recorder_generation=subscription.recorder_generation "
-        "AND callback.connection_generation=subscription.connection_generation "
-        "AND callback.request_id=subscription.request_id "
-        "AND callback.lifecycle='acknowledged') AS latest_callback_at_us, "
-        "(SELECT incident.code FROM incidents incident "
-        "WHERE incident.run_id=subscription.run_id "
-        "AND incident.subscription_id=subscription.subscription_id "
-        "AND incident.resolved_at_us IS NULL "
-        "ORDER BY incident.opened_at_us DESC, incident.incident_id DESC LIMIT 1) "
-        "AS incident_code FROM subscriptions subscription WHERE subscription.run_id=? "
-        "AND subscription.recorder_generation=? AND subscription.connection_generation=? "
-        "AND subscription.lifecycle!='closed' "
-        "ORDER BY subscription.optional, subscription.instrument_id, "
-        "subscription.feed_kind, subscription.request_id",
+        READINESS_FEEDS_SQL,
         (run_id, generation, connection_generation),
     ).fetchall()
     feeds: list[dict[str, Any]] = []

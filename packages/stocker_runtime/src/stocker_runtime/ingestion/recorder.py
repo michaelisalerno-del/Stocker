@@ -372,7 +372,6 @@ class Recorder:
         self._component_pending_incidents: dict[str, tuple[str, dict[str, JsonValue]]] = {}
         self._component_observations: set[str] = set()
         self._pending_callback_wakeup = threading.Event()
-        self._next_downstream_component = 0
         self._writer_lock = LocalWriterLock.for_database(config.database)
 
     @contextmanager
@@ -2995,7 +2994,12 @@ class Recorder:
         *,
         now_us: int,
         operation: Callable[[], object],
+        completion_clock_us: Callable[[], int] | None = None,
     ) -> bool:
+        def publish_completion_heartbeat() -> None:
+            if completion_clock_us is not None and not self._component_pending_incidents:
+                self._heartbeat(max(now_us, completion_clock_us()))
+
         failures, retry_at_us = self._component_failures.get(component, (0, 0))
         if failures and now_us < retry_at_us:
             return False
@@ -3015,9 +3019,11 @@ class Recorder:
                 now_us=now_us,
                 error_name=type(error).__name__,
             )
+            publish_completion_heartbeat()
             return False
         if failures:
             self._component_recovered(component, now_us=now_us)
+        publish_completion_heartbeat()
         return True
 
     def prepare_pending_callback_drain(self) -> None:
@@ -3037,6 +3043,7 @@ class Recorder:
         limit: int = 256,
         defer_downstream_when_full: bool = True,
         run_downstream_when_idle: bool = True,
+        component_completion_clock_us: Callable[[], int] | None = None,
     ) -> int:
         """Recover and process one bounded callback batch without blocking on poison."""
 
@@ -3153,43 +3160,35 @@ class Recorder:
                     connection.commit()
                 self._fulfill_snapshot_interests_from_streams(now_us=causal_now_us)
 
-            idea_runner = self._idea_runner
-            shadow_engine = self._shadow_engine
-            downstream_components: tuple[tuple[str, Callable[[], object] | None], ...] = (
-                ("option_projection", project_options),
-                (
-                    "idea_runner",
-                    None
-                    if idea_runner is None
-                    else lambda: idea_runner.run_once(now_us=causal_now_us),
-                ),
-                (
-                    "option_discovery",
-                    None
-                    if not self._connection_is_connected()
-                    else lambda: self._reconcile_dynamic_market_data(now_us=causal_now_us),
-                ),
-                (
-                    "shadow_evaluation",
-                    None
-                    if shadow_engine is None
-                    else lambda: shadow_engine.run_once(now_us=causal_now_us),
-                ),
+            self._run_component(
+                "option_projection",
+                now_us=causal_now_us,
+                operation=project_options,
+                completion_clock_us=component_completion_clock_us,
             )
-            for component_offset in range(len(downstream_components)):
-                component_index = (self._next_downstream_component + component_offset) % len(
-                    downstream_components
-                )
-                component, operation = downstream_components[component_index]
-                if operation is None:
-                    continue
-                self._next_downstream_component = (component_index + 1) % len(downstream_components)
+            idea_runner = self._idea_runner
+            if idea_runner is not None:
                 self._run_component(
-                    component,
+                    "idea_runner",
                     now_us=causal_now_us,
-                    operation=operation,
+                    operation=lambda: idea_runner.run_once(now_us=causal_now_us),
+                    completion_clock_us=component_completion_clock_us,
                 )
-                break
+            if self._connection_is_connected():
+                self._run_component(
+                    "option_discovery",
+                    now_us=causal_now_us,
+                    operation=lambda: self._reconcile_dynamic_market_data(now_us=causal_now_us),
+                    completion_clock_us=component_completion_clock_us,
+                )
+            shadow_engine = self._shadow_engine
+            if shadow_engine is not None:
+                self._run_component(
+                    "shadow_evaluation",
+                    now_us=causal_now_us,
+                    operation=lambda: shadow_engine.run_once(now_us=causal_now_us),
+                    completion_clock_us=component_completion_clock_us,
+                )
             return processed
         except CallbackTimestampOrderingLoss as error:
             self._fatal("CALLBACK_TIMESTAMP_ORDERING_LOSS", causal_now_us)

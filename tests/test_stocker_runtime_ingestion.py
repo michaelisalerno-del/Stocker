@@ -1984,7 +1984,7 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
         assert drain_connections == connections_after_full_batch + 1
         assert len(drain_transactions) <= transactions_after_full_batch + 2
         assert recorder.drain(now_us=359, run_downstream_when_idle=True) == 0
-    assert downstream_calls == ["ideas"]
+    assert downstream_calls == ["snapshot", "interests", "ideas", "dynamic", "shadow"]
     assert redundant_owner_connections == []
     assert drain_connections <= 8
     assert drain_transactions.count("BEGIN IMMEDIATE") <= 24
@@ -2180,7 +2180,7 @@ def test_full_batch_defers_downstream_after_receipt_attempt_even_with_receipt_la
     assert recorder.drain(now_us=111, limit=3) == 3
     assert downstream_calls == []
     assert recorder.drain(now_us=112, limit=3, defer_downstream_when_full=False) == 3
-    assert downstream_calls == ["ideas"]
+    assert downstream_calls == ["snapshot", "interests", "ideas", "dynamic", "shadow"]
     recorder.stop(now_us=113)
 
 
@@ -2280,7 +2280,7 @@ def test_production_shaped_receipt_lag_does_not_starve_full_callback_batches(
 
     recorder.prepare_pending_callback_drain()
     assert recorder.drain(now_us=20_002) == 1
-    assert downstream_calls == ["ideas"]
+    assert downstream_calls == ["snapshot", "interests", "ideas", "dynamic", "shadow"]
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -2298,7 +2298,7 @@ def test_production_shaped_receipt_lag_does_not_starve_full_callback_batches(
     recorder.stop(now_us=20_003)
 
 
-def test_idle_drains_rotate_one_optional_downstream_component_at_a_time(
+def test_idle_drain_preserves_same_call_optional_downstream_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "downstream-round-robin.sqlite3"
@@ -2338,31 +2338,19 @@ def test_idle_drains_rotate_one_optional_downstream_component_at_a_time(
         ),
     )
 
-    for ordinal, expected in enumerate(
-        (
-            "idea_runner",
-            "option_discovery",
-            "shadow_evaluation",
-            "option_projection",
-        )
-    ):
-        recorder.prepare_pending_callback_drain()
-        assert recorder.drain(now_us=110 + ordinal) == 0
-        assert (
-            downstream_calls
-            == [
-                "idea_runner",
-                "option_discovery",
-                "shadow_evaluation",
-                "option_projection",
-            ][: ordinal + 1]
-        )
-        assert downstream_calls[-1] == expected
+    recorder.prepare_pending_callback_drain()
+    assert recorder.drain(now_us=110) == 0
+    assert downstream_calls == [
+        "option_projection",
+        "idea_runner",
+        "option_discovery",
+        "shadow_evaluation",
+    ]
 
     recorder.stop(now_us=120)
 
 
-def test_optional_downstream_failure_is_persisted_and_rotation_continues(
+def test_optional_downstream_failure_is_persisted_and_later_components_continue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "downstream-failure-rotation.sqlite3"
@@ -2397,19 +2385,15 @@ def test_optional_downstream_failure_is_persisted_and_rotation_continues(
             "WHERE run_id='run-1' AND scope='component' AND resolved_at_us IS NULL"
         ).fetchone()
     assert tuple(incident) == ("COMPONENT_IDEA_RUNNER_FAILED", 1, None)
+    assert later_components == ["option_discovery"]
 
     assert recorder.drain(now_us=111) == 0
-    assert later_components == ["option_discovery"]
-    assert recorder.drain(now_us=112) == 0
-    assert recorder.drain(now_us=113) == 0
-    assert recorder.drain(now_us=114) == 0
     assert idea_attempts == 1
-    assert recorder.drain(now_us=115) == 0
     assert later_components == ["option_discovery", "option_discovery"]
     recorder.stop(now_us=120)
 
 
-def test_downstream_rotation_keeps_fixed_slots_when_socket_availability_changes(
+def test_same_call_downstream_skips_discovery_only_while_socket_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "downstream-fixed-slots.sqlite3"
@@ -2454,16 +2438,14 @@ def test_downstream_rotation_keeps_fixed_slots_when_socket_availability_changes(
     for ordinal in range(4):
         assert recorder.drain(now_us=110 + ordinal) == 0
 
-    assert downstream_calls == [
-        "idea_runner",
-        "option_discovery",
-        "shadow_evaluation",
-        "option_projection",
-    ]
+    assert downstream_calls.count("option_projection") == 4
+    assert downstream_calls.count("idea_runner") == 4
+    assert downstream_calls.count("option_discovery") == 2
+    assert downstream_calls.count("shadow_evaluation") == 4
     recorder.stop(now_us=120)
 
 
-def test_callback_arriving_during_downstream_is_projected_before_next_component(
+def test_callback_arriving_during_downstream_is_projected_on_next_drain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "downstream-callback-priority.sqlite3"
@@ -2510,11 +2492,11 @@ def test_callback_arriving_during_downstream_is_projected_before_next_component(
     assert recorder.drain(now_us=110) == 0
     assert recorder.wait_for_pending_callbacks(timeout=0) is True
     assert recorder.drain(now_us=201) == 1
-    assert observed_lifecycles == ["acknowledged"]
+    assert observed_lifecycles == ["pending", "acknowledged"]
     recorder.stop(now_us=210)
 
 
-def test_downstream_rotation_bounds_aggregate_heartbeat_gap_but_not_a_slow_component(
+def test_without_completion_clock_aggregate_downstream_gap_remains_visible(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from stocker_runtime.ingestion import snapshot_projection
@@ -2555,35 +2537,311 @@ def test_downstream_rotation_bounds_aggregate_heartbeat_gap_but_not_a_slow_compo
     )
 
     started_at_us = clock_us
-    for _ordinal in range(4):
-        assert recorder.drain(now_us=clock_us) == 0
-        with connect_v2(database) as connection:
-            readiness = calculate_readiness(
-                connection,
-                pinned_run_id="run-1",
-                now_us=clock_us,
-                expected_since_us=None,
-            )
-        assert readiness["ready"] is True
-        assert "RECORDER_HEARTBEAT_STALE" not in readiness["reasons"]
-    assert clock_us - started_at_us == 8_000_000
-
-    monkeypatch.setattr(
-        recorder._idea_runner,
-        "run_once",
-        lambda *, now_us: advance_clock(6_000_000),
-    )
     assert recorder.drain(now_us=clock_us) == 0
+    assert clock_us - started_at_us == 8_000_000
     with connect_v2(database) as connection:
-        slow_readiness = calculate_readiness(
+        readiness = calculate_readiness(
             connection,
             pinned_run_id="run-1",
             now_us=clock_us,
             expected_since_us=None,
         )
-    assert slow_readiness["ready"] is False
-    assert "RECORDER_HEARTBEAT_STALE" in slow_readiness["reasons"]
+    assert readiness["ready"] is False
+    assert "RECORDER_HEARTBEAT_STALE" in readiness["reasons"]
     recorder.stop(now_us=clock_us)
+
+
+def test_downstream_components_publish_completion_heartbeats_in_same_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "downstream-completion-heartbeats.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    from stocker_runtime.ingestion import snapshot_projection
+
+    component_calls: list[str] = []
+    completion_clock_us = 1_000
+
+    def complete(component: str) -> None:
+        nonlocal completion_clock_us
+        completion_clock_us += 2_000_000
+        component_calls.append(component)
+
+    monkeypatch.setattr(
+        snapshot_projection,
+        "project_option_snapshot_captures",
+        lambda *_args, **_kwargs: complete("option_projection"),
+    )
+    monkeypatch.setattr(recorder, "_fulfill_snapshot_interests_from_streams", lambda **_: None)
+    assert recorder._idea_runner is not None
+    monkeypatch.setattr(
+        recorder._idea_runner,
+        "run_once",
+        lambda *, now_us: complete("idea_runner"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_reconcile_dynamic_market_data",
+        lambda *, now_us: complete("option_discovery"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_shadow_engine",
+        types.SimpleNamespace(run_once=lambda *, now_us: complete("shadow_evaluation")),
+    )
+    heartbeats: list[int] = []
+    real_heartbeat = recorder._heartbeat
+
+    def record_heartbeat(now_us: int) -> None:
+        heartbeats.append(now_us)
+        real_heartbeat(now_us)
+
+    monkeypatch.setattr(recorder, "_heartbeat", record_heartbeat)
+
+    assert (
+        recorder.drain(
+            now_us=1_000,
+            component_completion_clock_us=lambda: completion_clock_us,
+        )
+        == 0
+    )
+    assert component_calls == [
+        "option_projection",
+        "idea_runner",
+        "option_discovery",
+        "shadow_evaluation",
+    ]
+    assert heartbeats == [1_000, 2_001_000, 4_001_000, 6_001_000, 8_001_000]
+    recorder.stop(now_us=8_001_001)
+
+
+def test_blocked_downstream_component_stays_stale_until_it_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from stocker_runtime.ingestion import snapshot_projection
+    from stocker_runtime.web.readiness import calculate_readiness
+
+    database = tmp_path / "blocked-downstream-heartbeat.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    assert recorder._idea_runner is not None
+    monkeypatch.setattr(
+        snapshot_projection,
+        "project_option_snapshot_captures",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(recorder, "_fulfill_snapshot_interests_from_streams", lambda **_: None)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocked_idea(*, now_us: int) -> None:
+        entered.set()
+        assert release.wait(timeout=5)
+
+    monkeypatch.setattr(recorder._idea_runner, "run_once", blocked_idea)
+    monkeypatch.setattr(recorder, "_reconcile_dynamic_market_data", lambda **_: None)
+    monkeypatch.setattr(
+        recorder,
+        "_shadow_engine",
+        types.SimpleNamespace(run_once=lambda **_: None),
+    )
+    completion_clock_us = 1_000
+    errors: list[BaseException] = []
+
+    def run_drain() -> None:
+        try:
+            recorder.drain(
+                now_us=1_000,
+                component_completion_clock_us=lambda: completion_clock_us,
+            )
+        except BaseException as error:  # pragma: no cover - asserted below
+            errors.append(error)
+
+    thread = threading.Thread(target=run_drain)
+    thread.start()
+    assert entered.wait(timeout=5)
+    completion_clock_us = 6_001_001
+    with connect_v2(database) as connection:
+        blocked_readiness = calculate_readiness(
+            connection,
+            pinned_run_id="run-1",
+            now_us=completion_clock_us,
+            expected_since_us=None,
+        )
+    assert "RECORDER_HEARTBEAT_STALE" in blocked_readiness["reasons"]
+
+    release.set()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert errors == []
+    with connect_v2(database) as connection:
+        recovered_readiness = calculate_readiness(
+            connection,
+            pinned_run_id="run-1",
+            now_us=completion_clock_us,
+            expected_since_us=None,
+        )
+    assert recovered_readiness["ready"] is True
+    recorder.stop(now_us=completion_clock_us + 1)
+
+
+def test_recoverable_component_failure_publishes_completion_and_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from stocker_runtime.ingestion import snapshot_projection
+
+    database = tmp_path / "failed-downstream-completion-heartbeat.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    monkeypatch.setattr(
+        snapshot_projection,
+        "project_option_snapshot_captures",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(recorder, "_fulfill_snapshot_interests_from_streams", lambda **_: None)
+    assert recorder._idea_runner is not None
+    monkeypatch.setattr(
+        recorder._idea_runner,
+        "run_once",
+        lambda **_: (_ for _ in ()).throw(RuntimeError("plugin failed")),
+    )
+    later_components: list[str] = []
+    monkeypatch.setattr(
+        recorder,
+        "_reconcile_dynamic_market_data",
+        lambda **_: later_components.append("option_discovery"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_shadow_engine",
+        types.SimpleNamespace(run_once=lambda **_: later_components.append("shadow_evaluation")),
+    )
+    heartbeats: list[int] = []
+    real_heartbeat = recorder._heartbeat
+
+    def record_heartbeat(now_us: int) -> None:
+        heartbeats.append(now_us)
+        real_heartbeat(now_us)
+
+    monkeypatch.setattr(recorder, "_heartbeat", record_heartbeat)
+    completion_times = iter((1_001, 1_002, 1_003, 1_004))
+
+    assert (
+        recorder.drain(
+            now_us=1_000,
+            component_completion_clock_us=lambda: next(completion_times),
+        )
+        == 0
+    )
+    assert heartbeats == [1_000, 1_001, 1_002, 1_003, 1_004]
+    assert later_components == ["option_discovery", "shadow_evaluation"]
+    with connect_v2(database) as connection:
+        incident = connection.execute(
+            "SELECT code, resolved_at_us FROM incidents WHERE run_id='run-1' "
+            "AND scope='component' AND resolved_at_us IS NULL"
+        ).fetchone()
+    assert tuple(incident) == ("COMPONENT_IDEA_RUNNER_FAILED", None)
+    recorder.stop(now_us=1_005)
+
+
+def test_completion_heartbeats_wait_for_durable_component_incident(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from stocker_runtime.web.readiness import calculate_readiness
+
+    database = tmp_path / "contended-downstream-completion-heartbeat.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    persist_incident = recorder._persist_component_incident
+    publication_attempts = 0
+
+    def contend_once(component: str, *, now_us: int) -> bool:
+        nonlocal publication_attempts
+        publication_attempts += 1
+        if publication_attempts == 1:
+            return False
+        return persist_incident(component, now_us=now_us)
+
+    monkeypatch.setattr(recorder, "_persist_component_incident", contend_once)
+    heartbeats: list[int] = []
+    real_heartbeat = recorder._heartbeat
+
+    def record_heartbeat(now_us: int) -> None:
+        heartbeats.append(now_us)
+        real_heartbeat(now_us)
+
+    monkeypatch.setattr(recorder, "_heartbeat", record_heartbeat)
+
+    assert (
+        recorder._run_component(
+            "idea_runner",
+            now_us=6_000_101,
+            operation=lambda: (_ for _ in ()).throw(RuntimeError("plugin failed")),
+            completion_clock_us=lambda: 6_000_102,
+        )
+        is False
+    )
+    assert "idea_runner" in recorder._component_pending_incidents
+    assert (
+        recorder._run_component(
+            "shadow_evaluation",
+            now_us=6_000_102,
+            operation=lambda: None,
+            completion_clock_us=lambda: 6_000_103,
+        )
+        is True
+    )
+    assert heartbeats == []
+    with connect_v2(database) as connection:
+        unpublished = calculate_readiness(
+            connection,
+            pinned_run_id="run-1",
+            now_us=6_000_103,
+            expected_since_us=None,
+        )
+        assert (
+            connection.execute("SELECT count(*) FROM incidents WHERE scope='component'").fetchone()[
+                0
+            ]
+            == 0
+        )
+    assert unpublished["ready"] is False
+    assert "RECORDER_HEARTBEAT_STALE" in unpublished["reasons"]
+
+    assert (
+        recorder._run_component(
+            "idea_runner",
+            now_us=6_000_104,
+            operation=lambda: (_ for _ in ()).throw(RuntimeError("plugin failed again")),
+            completion_clock_us=lambda: 6_000_105,
+        )
+        is False
+    )
+    assert heartbeats == [6_000_105]
+    assert "idea_runner" not in recorder._component_pending_incidents
+    with connect_v2(database) as connection:
+        published = calculate_readiness(
+            connection,
+            pinned_run_id="run-1",
+            now_us=6_000_105,
+            expected_since_us=None,
+        )
+        incident = connection.execute(
+            "SELECT code, resolved_at_us FROM incidents WHERE run_id='run-1' "
+            "AND scope='component' AND resolved_at_us IS NULL"
+        ).fetchone()
+    assert published["ready"] is False
+    assert "RECORDER_DEGRADED:COMPONENT_IDEA_RUNNER_FAILED" in published["reasons"]
+    assert tuple(incident) == ("COMPONENT_IDEA_RUNNER_FAILED", None)
+    recorder.stop(now_us=6_000_106)
 
 
 def test_receipt_failure_prevents_full_batch_downstream_deferral(
@@ -6549,7 +6807,9 @@ def test_optional_downstream_components_fail_independently_and_recover(
     }
 
 
-def test_component_boundary_never_downgrades_recorder_fatal_error(tmp_path: Path) -> None:
+def test_component_boundary_never_downgrades_recorder_fatal_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     database = tmp_path / "component-fatal.sqlite3"
     initialize_database(database)
     instrument, specs = _specs()
@@ -6559,12 +6819,64 @@ def test_component_boundary_never_downgrades_recorder_fatal_error(tmp_path: Path
     def fatal_identity_invariant() -> None:
         raise RecorderFatalError("dynamic subscription identity changed")
 
+    completion_heartbeats: list[int] = []
+    monkeypatch.setattr(
+        recorder,
+        "_heartbeat",
+        lambda now_us: completion_heartbeats.append(now_us),
+    )
     with pytest.raises(RecorderFatalError, match="identity changed"):
         recorder._run_component(
             "option_discovery",
             now_us=101,
             operation=fatal_identity_invariant,
+            completion_clock_us=lambda: 102,
         )
+    assert completion_heartbeats == []
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute("SELECT count(*) FROM incidents WHERE scope='component'").fetchone()[
+                0
+            ]
+            == 0
+        )
+
+
+@pytest.mark.parametrize(
+    "component_error",
+    (
+        AuthoritativeLeaseLost("writer ownership lost"),
+        InboxAdmissionError("durable inbox authority lost"),
+    ),
+)
+def test_component_boundary_never_heartbeats_after_authority_loss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    component_error: Exception,
+) -> None:
+    database = tmp_path / f"component-authority-{type(component_error).__name__}.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    completion_heartbeats: list[int] = []
+    monkeypatch.setattr(
+        recorder,
+        "_heartbeat",
+        lambda now_us: completion_heartbeats.append(now_us),
+    )
+
+    def lose_authority() -> None:
+        raise component_error
+
+    with pytest.raises(AuthoritativeLeaseLost):
+        recorder._run_component(
+            "option_discovery",
+            now_us=101,
+            operation=lose_authority,
+            completion_clock_us=lambda: 102,
+        )
+    assert completion_heartbeats == []
     with connect_v2(database) as connection:
         assert (
             connection.execute("SELECT count(*) FROM incidents WHERE scope='component'").fetchone()[

@@ -682,7 +682,11 @@ def recorder_run_command(
             recorder.prepare_pending_callback_drain()
             now_us = time.time_ns() // 1_000
             health_due = now_us >= next_health_at_us
-            recorder.drain(now_us=now_us, run_downstream_when_idle=health_due)
+            recorder.drain(
+                now_us=now_us,
+                run_downstream_when_idle=health_due,
+                component_completion_clock_us=lambda: time.time_ns() // 1_000,
+            )
             if health_due:
                 _recorder_health_tick(recorder, now_us=now_us)
                 next_health_at_us = now_us + RECORDER_HEALTH_INTERVAL_US

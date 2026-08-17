@@ -1089,3 +1089,92 @@ frontiers progressing, 41/41 fresh active feeds, and zero order capability. This
 affects prospective/shadow downstream scheduling and readiness only; XNYS hours,
 subscriptions, risk, execution, reconciliation, accounts, credentials, paper/live
 trading, and broker-order capability remain unchanged.
+
+## Superseding decision: component-completion heartbeats preserve causal ordering
+
+The round-robin candidate above is rejected and must not be deployed. Although its
+focused tests and opening replays passed, the full repository suite produced 33 new
+failures across dynamic option interest activation, discovery/fence publication,
+snapshot completion/reconnect races, and shadow invocation. Those failures prove that
+the existing same-`drain` downstream order is a causal domain contract. Rewriting
+those contracts to fit scheduling would broaden this remediation and risk delayed or
+missing derived evidence.
+
+The Architect accepted the smaller compatibility-preserving seam. Add an optional
+caller-supplied `component_completion_clock_us` to `Recorder.drain` and the component
+boundary. The production recorder loop supplies `time.time_ns() // 1_000`;
+deterministic direct callers and replays may omit it or inject a fake. Preserve the
+existing order and run every applicable component in the same drain: option
+projection, idea runner, connected option discovery, then shadow evaluation. After a
+component returns successfully, or after its recoverable failure has been isolated
+and persisted, publish the existing process heartbeat at
+`max(causal_now_us, component_completion_clock_us())`. Do not publish a completion
+heartbeat for a backed-off component that did not run, while a component is still
+running, or after ownership loss, `RecorderFatalError`, hard storage/I/O failure, or
+another exception that escapes the component boundary.
+
+This preserves truthful readiness without a thread or threshold increase. Several
+healthy bounded components may cumulatively take more than five seconds without
+making the recorder appear wedged because each completed boundary proves main-loop
+progress. One component that alone blocks beyond five seconds remains visibly stale
+until it actually returns. Full production batches with normal deferral still skip all
+optional downstream work; the explicit offline/replay override continues to run all
+stages in their original order. No schema, persisted cursor, state, queue, service,
+daemon, additional writer, or trading capability is added.
+
+Blocking tests use a fake completion clock to prove same-call order and a heartbeat
+after every completed boundary, recoverable failure incident persistence plus later
+component execution, an event-blocked component remaining stale until release, no
+false completion heartbeat after fatal/ownership failure, deterministic behavior when
+the clock is omitted, production CLI clock injection, and unchanged full-batch
+deferral/override behavior. All dynamic option/shadow tests that rejected round-robin
+must pass unchanged. Before deployment, a disposable exact generation-13 workload
+must show every individual component at or below four seconds, maximum heartbeat gap
+below five seconds, stable readiness, and bounded callback backlog/WAL. If one
+component exceeds five seconds, this candidate is insufficient and only that measured
+component may be bounded.
+
+Generation 13 may continue recording under the existing attended stop gates while the
+candidate is tested. Rollout remains code-only on schema 20: clean-stop generation 13,
+mask the web reader, install the exact reviewed candidate, and restart the same run as
+generation 14 without fatal recovery. Require 60--120 seconds of stable readiness,
+backlog below 5,000, WAL below 48 MiB, all 41 feeds active/fresh, downstream evidence
+progress, and zero order capability before handoff. XNYS hours, subscriptions, risk,
+execution, reconciliation, accounts, credentials, and paper/live behavior remain
+unchanged.
+
+The component boundary must also suppress every completion heartbeat while any
+component incident is still pending durable publication. A contended incident write
+keeps its process-local pending marker and permits later components to continue, but
+neither the failed component nor those later successful components may advance the
+heartbeat until the evidence has been persisted. Once publication succeeds, the
+completion heartbeat may advance while the durable component incident keeps readiness
+degraded. Direct authority loss and durable-inbox authority loss converted to
+`AuthoritativeLeaseLost` remain heartbeat-silent. This closes the false-green window
+without adding another latch: the existing pending-incident collection is the exact
+publication boundary.
+
+The final local candidate passed the focused ingestion, deployment, idea and shadow
+suites together, including every same-drain causal contract that rejected the
+round-robin design. The independent read-only Reviewer reported no remaining blocking
+finding after five focused closure tests and `git diff --check`. The unchanged opening
+replays then produced:
+
+| replay | presented/admitted/projected | loss/duplicates/order/provenance | p50 / p95 / p99 admission | max/final backlog | heartbeat delay | readiness | WAL after checkpoint |
+|---|---:|---:|---:|---:|---:|---|---:|
+| 10 seconds | 2,022 / 2,022 / 2,022 | 0 / 0 / 0 / 0 | 0.164 / 0.299 / 8.688 ms | 219 / 0 | 0 s | true | 4,622,672 B |
+| 60 seconds | 12,132 / 12,132 / 12,132 | 0 / 0 / 0 / 0 | 0.164 / 0.324 / 9.257 ms | 219 / 0 | 0 s | true | 5,162,392 B |
+
+Both replays reported zero escaped SQLite busy/locked errors, all 100 simulated
+required feeds active and fresh, and no acceptance failure. These simulations do not
+replace the required stopped-generation component timing or the attended generation-14
+IBKR observation.
+
+The final repository test command completed with 2,082 passing and one skipped test.
+It retained 13 failures and 19 setup errors, all caused by the already-absent protected
+`trade_decisions.parquet` historical research input; the same inherited failures were
+present before this candidate. The repository check stopped at its first formatting
+gate because 151 unrelated, pre-existing research/core files would be reformatted.
+Every changed Python file passes focused Ruff formatting/checking and MyPy; the focused
+runtime suites and replays above are green. Neither inherited condition is concealed
+or modified by this operational rollout.

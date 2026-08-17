@@ -1319,6 +1319,7 @@ def test_recorder_service_loop_invokes_bounded_health_tick(
     real_drain = Recorder.drain
     drain_calls = 0
     idle_work_flags: list[bool] = []
+    completion_clock_flags: list[bool] = []
 
     def drain_then_stop(
         recorder: Recorder,
@@ -1326,15 +1327,18 @@ def test_recorder_service_loop_invokes_bounded_health_tick(
         now_us: int,
         limit: int = 256,
         run_downstream_when_idle: bool = True,
+        component_completion_clock_us: Any = None,
     ) -> int:
         nonlocal drain_calls
         drain_calls += 1
         idle_work_flags.append(run_downstream_when_idle)
+        completion_clock_flags.append(callable(component_completion_clock_us))
         result = real_drain(
             recorder,
             now_us=now_us,
             limit=limit,
             run_downstream_when_idle=run_downstream_when_idle,
+            component_completion_clock_us=component_completion_clock_us,
         )
         if drain_calls == 2:
             clock_ns["value"] = 2_000_000_000
@@ -1352,6 +1356,7 @@ def test_recorder_service_loop_invokes_bounded_health_tick(
 
     assert result.exit_code == 0, result.output
     assert idle_work_flags == [True, False, True]
+    assert completion_clock_flags == [False, True, True]
     assert health_calls == [2_000_000]
     assert json.loads(result.stdout)["termination"] == "sigterm"
 
@@ -1481,7 +1486,13 @@ def test_recorder_service_failure_leaves_an_unclean_generation_for_restart(
     )
     real_drain = Recorder.drain
 
-    def fail_drain(_recorder: Recorder, *, now_us: int) -> None:
+    def fail_drain(
+        _recorder: Recorder,
+        *,
+        now_us: int,
+        component_completion_clock_us: Any = None,
+    ) -> None:
+        del component_completion_clock_us
         raise RuntimeError(f"temporary drain failure at {now_us}")
 
     monkeypatch.setattr(Recorder, "drain", fail_drain)

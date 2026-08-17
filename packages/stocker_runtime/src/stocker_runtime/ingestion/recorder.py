@@ -2822,10 +2822,10 @@ class Recorder:
         retry_at_us = now_us + delay_us
         self._component_first_failure_at_us.setdefault(component, now_us)
         self._component_failures[component] = (failures, retry_at_us)
-        self._component_pending_incidents[component] = (
-            error_name,
-            {} if incident_details is None else dict(incident_details),
-        )
+        pending_details = dict(self._component_pending_incidents.get(component, ("", {}))[1])
+        if incident_details is not None:
+            pending_details.update(incident_details)
+        self._component_pending_incidents[component] = (error_name, pending_details)
         if self._persist_component_incident(component, now_us=now_us):
             self._component_pending_incidents.pop(component, None)
             return True

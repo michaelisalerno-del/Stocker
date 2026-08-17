@@ -195,6 +195,16 @@ Generation-scoped incident details report only bounded phase and committed-count
 fields. Do not interpret an overall maintenance wall time above 100 ms as a breach:
 the deadline applies independently to each short writer transaction.
 
+Heavy retention is scheduled only outside the existing NYSE/XNYS regular session. At
+regular-session timestamps the recorder measures and publishes DB/WAL cap state and
+heartbeat only: hard-cap failure remains fail-closed and the 95% boundary still pauses
+optional feeds. Receipt proof, payload compaction, evidence pruning, checkpoint, and
+vacuum resume at the unchanged 10-second cadence outside the session, including
+holidays and after an early close. This uses the same exchange calendar as feed
+staleness; it does not add pre-market/after-hours data collection or hard-coded UTC
+hours. An intentional in-session skip neither opens nor resolves a retention incident;
+only a real off-session maintenance success resolves one.
+
 Use an attended offline recovery only after the incident has been diagnosed:
 
 1. Stop recorder and web, runtime-mask both units, and verify they are inactive with no

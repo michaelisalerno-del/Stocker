@@ -415,6 +415,7 @@ class Recorder:
         now_us: int,
         instruments: tuple[InstrumentSpec, ...],
         subscriptions: tuple[SubscriptionSpec, ...],
+        retention_work_expected: bool = True,
     ) -> RecorderState:
         """Acquire the writer generation, recover the inbox, then connect."""
 
@@ -423,6 +424,7 @@ class Recorder:
             instruments=instruments,
             subscriptions=subscriptions,
             allow_empty_test_inputs=False,
+            retention_work_expected=retention_work_expected,
         )
 
     def _start_test_only_allow_empty_inputs(
@@ -439,6 +441,7 @@ class Recorder:
             instruments=instruments,
             subscriptions=subscriptions,
             allow_empty_test_inputs=True,
+            retention_work_expected=True,
         )
 
     def _start_with_input_policy(
@@ -448,6 +451,7 @@ class Recorder:
         instruments: tuple[InstrumentSpec, ...],
         subscriptions: tuple[SubscriptionSpec, ...],
         allow_empty_test_inputs: bool,
+        retention_work_expected: bool,
     ) -> RecorderState:
         """Acquire ownership and start under the selected input-validation policy."""
 
@@ -463,6 +467,7 @@ class Recorder:
                 instruments=instruments,
                 subscriptions=subscriptions,
                 allow_empty_test_inputs=allow_empty_test_inputs,
+                retention_work_expected=retention_work_expected,
             )
         except BaseException:
             if self.state is None:
@@ -478,6 +483,7 @@ class Recorder:
         instruments: tuple[InstrumentSpec, ...],
         subscriptions: tuple[SubscriptionSpec, ...],
         allow_empty_test_inputs: bool,
+        retention_work_expected: bool,
     ) -> RecorderState:
         """Start after the process-lifetime local writer lock is held."""
 
@@ -658,7 +664,7 @@ class Recorder:
         self._restore_dynamic_subscriptions(now_us=now_us)
         self.inbox.reclaim_expired_leases(now_us=now_us, authority=self._authority())
         self.drain(now_us=now_us)
-        self.maintain(now_us=now_us)
+        self.maintain(now_us=now_us, retention_work_expected=retention_work_expected)
         cast(
             Callable[[Callable[[CallbackFence, MarketDataCallback], AdmissionResult]], None],
             self.adapter.set_callback,
@@ -4186,10 +4192,93 @@ class Recorder:
         with suppress(Exception):
             self.adapter.disconnect()
 
-    def maintain(self, *, now_us: int) -> StorageCapState:
+    def _publish_storage_measurement(
+        self,
+        *,
+        authority: WriterAuthority,
+        now_us: int,
+        database_bytes: int,
+        wal_bytes: int,
+    ) -> bool:
+        try:
+            with connect_v2(self.config.database) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._verify_owned(connection)
+                connection.execute(
+                    "UPDATE runtime_state SET database_bytes=?, wal_bytes=?, "
+                    "process_heartbeat_at_us=? WHERE run_id=? AND recorder_generation=?",
+                    (
+                        database_bytes,
+                        wal_bytes,
+                        now_us,
+                        self.config.run_id,
+                        authority.recorder_generation,
+                    ),
+                )
+                connection.commit()
+        except AuthoritativeLeaseLost:
+            raise
+        except sqlite3.Error as error:
+            if self._hard_component_error(error):
+                self._fatal("RETENTION_INVARIANT_FAILED", now_us)
+                raise RecorderFatalError("retention invariant failed") from error
+            self._retention_maintenance_deferred = True
+            self._component_failure(
+                "retention_maintenance",
+                now_us=now_us,
+                error_name=type(error).__name__,
+            )
+            return False
+        return True
+
+    def maintain(
+        self,
+        *,
+        now_us: int,
+        retention_work_expected: bool = True,
+    ) -> StorageCapState:
         """Consume one bounded Phase 2 retention result and apply recorder reactions."""
 
         authority = self._authority()
+        if not retention_work_expected:
+            try:
+                cap_state, database_bytes, wal_bytes, required_action = RetentionManager(
+                    self.config.database
+                ).measure_cap_state()
+            except sqlite3.OperationalError as error:
+                if self._hard_component_error(error):
+                    self._fatal("RETENTION_INVARIANT_FAILED", now_us)
+                    raise RecorderFatalError("retention invariant failed") from error
+                self._retention_maintenance_deferred = True
+                self._component_failure(
+                    "retention_maintenance",
+                    now_us=now_us,
+                    error_name=type(error).__name__,
+                )
+                return StorageCapState.NORMAL
+            except Exception as error:
+                self._retention_maintenance_deferred = True
+                self._component_failure(
+                    "retention_maintenance",
+                    now_us=now_us,
+                    error_name=type(error).__name__,
+                )
+                return StorageCapState.NORMAL
+            published = self._publish_storage_measurement(
+                authority=authority,
+                now_us=now_us,
+                database_bytes=database_bytes,
+                wal_bytes=wal_bytes,
+            )
+            if cap_state is StorageCapState.FATAL:
+                self._fatal(required_action or "STORAGE_CAP_FATAL", now_us)
+                raise RecorderFatalError(required_action or "storage cap closed admission")
+            if cap_state is StorageCapState.DEGRADED:
+                if not published:
+                    return cap_state
+                self._pause_optional(now_us)
+                self._set_lifecycle("degraded", "PAUSE_OPTIONAL_FEEDS", now_us)
+            return cap_state
         retention_failures, retention_retry_at_us = self._component_failures.get(
             "retention_maintenance", (0, 0)
         )

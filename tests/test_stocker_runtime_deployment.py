@@ -1135,7 +1135,10 @@ def _market_data_input_json() -> str:
 
 
 def test_recorder_health_window_tracks_exact_xnys_sessions() -> None:
-    from stocker_runtime.cli import _market_data_expected_since_us
+    from stocker_runtime.cli import (
+        _market_data_expected_since_us,
+        _retention_work_expected,
+    )
 
     def at_us(year: int, month: int, day: int, hour: int, minute: int) -> int:
         return int(datetime(year, month, day, hour, minute, tzinfo=UTC).timestamp() * 1_000_000)
@@ -1146,15 +1149,45 @@ def test_recorder_health_window_tracks_exact_xnys_sessions() -> None:
     assert _market_data_expected_since_us(regular_open) == regular_open
     assert _market_data_expected_since_us(regular_close - 1) == regular_open
     assert _market_data_expected_since_us(regular_close) is None
+    assert _retention_work_expected(regular_open - 1) is True
+    assert _retention_work_expected(regular_open) is False
+    assert _retention_work_expected(regular_close - 1) is False
+    assert _retention_work_expected(regular_close) is True
 
     thanksgiving_midday = at_us(2026, 11, 26, 17, 0)
     assert _market_data_expected_since_us(thanksgiving_midday) is None
+    assert _retention_work_expected(thanksgiving_midday) is True
 
     early_open = at_us(2026, 11, 27, 14, 30)
     early_close = at_us(2026, 11, 27, 18, 0)
     assert _market_data_expected_since_us(early_open) == early_open
     assert _market_data_expected_since_us(early_close - 1) == early_open
     assert _market_data_expected_since_us(early_close) is None
+    assert _retention_work_expected(early_open) is False
+    assert _retention_work_expected(early_close) is True
+
+    standard_time_open = at_us(2026, 1, 5, 14, 30)
+    standard_time_close = at_us(2026, 1, 5, 21, 0)
+    assert _retention_work_expected(standard_time_open) is False
+    assert _retention_work_expected(standard_time_close) is True
+
+
+def test_off_session_retention_capacity_exceeds_frozen_regular_session_load() -> None:
+    from stocker_runtime.cli import RECORDER_MAINTENANCE_INTERVAL_US
+    from stocker_runtime.storage import RetentionPolicy
+    from stocker_runtime.storage.retention import MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS
+
+    off_session_seconds = int(17.5 * 60 * 60)
+    opportunities = off_session_seconds * 1_000_000 // RECORDER_MAINTENANCE_INTERVAL_US
+    receipt_capacity = opportunities * MAX_RECEIPT_CHECKPOINT_CALLBACKS_PER_PASS
+    evidence_row_capacity = opportunities * RetentionPolicy().maintenance_batch_rows
+    frozen_regular_session_callbacks = 12_132 * 390
+
+    assert opportunities == 6_300
+    assert receipt_capacity == 7_560_000
+    assert frozen_regular_session_callbacks == 4_731_480
+    assert receipt_capacity > frozen_regular_session_callbacks
+    assert evidence_row_capacity == 12_600_000
 
 
 def test_server_dependency_closure_includes_the_runtime_market_calendar() -> None:

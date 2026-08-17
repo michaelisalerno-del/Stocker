@@ -675,3 +675,46 @@ This addendum affects only prospective/shadow market-data retention and its read
 signal. It does not change risk, execution, reconciliation, accounts, credentials,
 paper/live/order capability, subscription semantics, or NYSE/XNYS regular-session
 behavior.
+
+## Accepted final addendum: keep heavy retention outside the regular session
+
+The exact B1/B2 split was rejected by its fixed production-copy deployment gate:
+under the single-vCPU host workload only one of 12 passes completed, with bounded
+failures observed in receipt selection, both receipt transactions, and pruning. This
+proves further transaction slicing would not solve CPU/I/O starvation. Generation 9
+therefore remains on the reviewed receipt release through the current session; raw
+admission, the connected socket, all 41 identities, and fail-closed caps remain active,
+while readiness truthfully reflects any degradation.
+
+The Architect accepted session-aware scheduling as the smallest measured correction.
+At timestamps where the existing `market_data_expected_since_us(now_us)` says XNYS
+regular-session data is expected, `Recorder.maintain` performs only storage-cap
+measurement and runtime DB/WAL publication. It must retain the existing hard-cap fatal
+actions and 95% optional-feed pause, must not call full `RetentionManager.run`, and must
+neither open nor resolve a retention incident merely because work was intentionally
+deferred. Outside that exact existing calendar session—including holidays and after an
+early close—the recorder runs the full bounded maintenance path every 10 seconds using
+the two receipt transactions and B1/B2 evidence split. No new calendar, setting,
+timer, daemon, state, or hard-coded UTC window is allowed.
+
+Capacity remains based on the frozen market-open workload, not a relaxed post-result
+threshold. The ordinary 17.5-hour off-session window provides 6,300 maintenance
+opportunities: 7.56 million callbacks of receipt-proof capacity at 1,200 per pass and
+12.6 million physical evidence rows at 2,000 per pass. The fixed 12,132-callback per
+minute scenario extrapolates to approximately 4.73 million callbacks over a 6.5-hour
+regular session, leaving material proof/drain headroom.
+
+Tests must cover before open, exact open, in-session, exact close, early close,
+holiday, and DST through the existing XNYS calendar; normal/soft/degraded/fatal cap
+behavior during scheduled deferral; no false incident opening/resolution; actual
+off-session recovery; the capacity arithmetic from frozen constants; and unchanged
+ordering, duplicates, gaps, admission, per-feed staleness, and 2,022/12,132 replays.
+The exact candidate must pass at least 12 consecutive full passes on the mature copy
+without callback pressure and a session-pressure test proving zero heavy-retention
+calls while raw admission continues.
+
+Deploy only in an attended off-session window: stop/mask, take and restore-check a
+fresh schema-19 backup, require one successful offline full pass and integrity/FK
+proof, restart the same run as a new generation, prove 12 off-session maintenance
+successes, then observe the next real regular session. No paper/live/order, risk,
+execution, reconciliation, account, subscription, or XNYS-session semantics change.

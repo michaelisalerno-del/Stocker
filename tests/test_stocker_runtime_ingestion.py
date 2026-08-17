@@ -2510,6 +2510,209 @@ def test_maintenance_database_failure_preserves_admitted_evidence_and_fails_clos
     assert set(adapter.cancelled) == {3, 4}
 
 
+def test_regular_session_maintenance_measures_caps_without_heavy_work_or_false_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    class CapMeasurementOnly:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+            return StorageCapState.NORMAL, 123, 4, None
+
+        def run(self, **_kwargs: object) -> RetentionResult:
+            raise AssertionError("regular-session maintenance must not run heavy retention")
+
+    monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", CapMeasurementOnly)
+
+    assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.NORMAL
+    with connect_v2(database) as connection:
+        assert tuple(
+            connection.execute(
+                "SELECT database_bytes, wal_bytes, process_heartbeat_at_us FROM runtime_state"
+            ).fetchone()
+        ) == (123, 4, 101)
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM incidents WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED'"
+            ).fetchone()[0]
+            == 0
+        )
+
+    assert recorder._component_failure(
+        "retention_maintenance",
+        now_us=102,
+        error_name="MaintenanceDeadlineExceeded",
+    )
+    assert recorder.maintain(now_us=103, retention_work_expected=False) is StorageCapState.NORMAL
+    with connect_v2(database) as connection:
+        incident = connection.execute(
+            "SELECT resolved_at_us FROM incidents "
+            "WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED'"
+        ).fetchone()
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, database_bytes, wal_bytes, process_heartbeat_at_us "
+            "FROM runtime_state"
+        ).fetchone()
+    assert incident["resolved_at_us"] is None
+    assert tuple(runtime) == (
+        "degraded",
+        "COMPONENT_RETENTION_MAINTENANCE_FAILED",
+        123,
+        4,
+        103,
+    )
+
+
+def test_regular_session_start_propagates_scheduled_retention_deferral(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    maintenance_calls: list[tuple[int, bool]] = []
+
+    def observe_maintenance(
+        *, now_us: int, retention_work_expected: bool = True
+    ) -> StorageCapState:
+        maintenance_calls.append((now_us, retention_work_expected))
+        return StorageCapState.NORMAL
+
+    monkeypatch.setattr(recorder, "maintain", observe_maintenance)
+
+    recorder.start(
+        now_us=100,
+        instruments=(instrument,),
+        subscriptions=specs,
+        retention_work_expected=False,
+    )
+
+    assert maintenance_calls == [(100, False)]
+
+
+def test_regular_session_cap_measurement_contention_degrades_without_stopping_ingestion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    class ContendedCapMeasurement:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+            raise sqlite3.OperationalError("database is locked")
+
+        def run(self, **_kwargs: object) -> RetentionResult:
+            raise AssertionError("contention must not start heavy retention")
+
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager", ContendedCapMeasurement
+    )
+
+    assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.NORMAL
+
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        incident = connection.execute(
+            "SELECT details_json FROM incidents WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED'"
+        ).fetchone()
+    assert tuple(runtime) == (
+        "degraded",
+        "COMPONENT_RETENTION_MAINTENANCE_FAILED",
+        "connected",
+    )
+    assert json.loads(incident["details_json"])["error"] == "OperationalError"
+    assert adapter.connected is True
+    assert adapter.cancelled == []
+
+
+def test_regular_session_cap_measurement_still_fails_closed_at_hard_wal_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    class FatalCapMeasurement:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+            return StorageCapState.FATAL, 100, 64, "WAL_CAP_FATAL"
+
+        def run(self, **_kwargs: object) -> RetentionResult:
+            raise AssertionError("hard-cap check must fail before heavy retention")
+
+    monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", FatalCapMeasurement)
+
+    with pytest.raises(RecorderFatalError, match="WAL_CAP_FATAL"):
+        recorder.maintain(now_us=101, retention_work_expected=False)
+
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+    assert tuple(runtime) == ("fatal", "WAL_CAP_FATAL", "disconnected")
+    assert adapter.connected is False
+
+
+def test_regular_session_degraded_cap_pauses_optional_feed_idempotently(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    class DegradedCapMeasurement:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+            return StorageCapState.DEGRADED, 95, 1, None
+
+        def run(self, **_kwargs: object) -> RetentionResult:
+            raise AssertionError("degraded cap must not run heavy retention in-session")
+
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager", DegradedCapMeasurement
+    )
+
+    assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.DEGRADED
+    assert recorder.maintain(now_us=102, retention_work_expected=False) is StorageCapState.DEGRADED
+
+    assert adapter.cancelled == [4]
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, database_bytes, wal_bytes FROM runtime_state"
+        ).fetchone()
+    assert tuple(runtime) == ("degraded", "PAUSE_OPTIONAL_FEEDS", 95, 1)
+
+
 @pytest.mark.parametrize(
     "failure",
     (

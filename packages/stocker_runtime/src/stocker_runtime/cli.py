@@ -100,6 +100,10 @@ def _recorder_health_tick(recorder: Recorder, *, now_us: int) -> None:
     recorder.recover_subscriptions(now_us=now_us)
 
 
+def _retention_work_expected(now_us: int) -> bool:
+    return _market_data_expected_since_us(now_us) is None
+
+
 class ReplayBlockedError(RuntimeError):
     """A bounded replay pass could not make durable progress."""
 
@@ -645,10 +649,12 @@ def recorder_run_command(
             external_read_only_verified=loaded.external_read_only_verified,
         )
         recorder = Recorder(loaded, adapter)
+        started_at_us = time.time_ns() // 1_000
         recorder.start(
-            now_us=time.time_ns() // 1_000,
+            now_us=started_at_us,
             instruments=instruments,
             subscriptions=subscriptions,
+            retention_work_expected=_retention_work_expected(started_at_us),
         )
         started_loop_at_us = time.time_ns() // 1_000
         next_health_at_us = started_loop_at_us + RECORDER_HEALTH_INTERVAL_US
@@ -672,7 +678,10 @@ def recorder_run_command(
                 _recorder_health_tick(recorder, now_us=now_us)
                 next_health_at_us = now_us + RECORDER_HEALTH_INTERVAL_US
             if now_us >= next_maintenance_at_us:
-                recorder.maintain(now_us=now_us)
+                recorder.maintain(
+                    now_us=now_us,
+                    retention_work_expected=_retention_work_expected(now_us),
+                )
                 next_maintenance_at_us = now_us + RECORDER_MAINTENANCE_INTERVAL_US
         recorder.stop(now_us=time.time_ns() // 1_000)
     except (OSError, ValueError, RuntimeError, sqlite3.Error, TypeError) as error:

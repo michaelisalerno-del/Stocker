@@ -3467,9 +3467,14 @@ class Recorder:
                 return
             placeholders = ",".join("?" for _item in request_ids)
             candidate = connection.execute(
-                "SELECT 1 FROM subscriptions WHERE run_id=? AND recorder_generation=? "
-                "AND connection_generation=? AND last_error_code IS NOT NULL "
-                f"AND request_id IN ({placeholders}) LIMIT 1",
+                "SELECT 1 FROM subscriptions subscription WHERE run_id=? "
+                "AND recorder_generation=? AND connection_generation=? "
+                f"AND request_id IN ({placeholders}) AND permanent_failure=0 "
+                "AND (last_error_code IS NOT NULL OR EXISTS "
+                "(SELECT 1 FROM incidents incident WHERE incident.run_id=subscription.run_id "
+                "AND incident.subscription_id=subscription.subscription_id "
+                "AND incident.code='STALE_REQUEST_GENERATION' "
+                "AND incident.resolved_at_us IS NULL)) LIMIT 1",
                 (
                     self.config.run_id,
                     state.recorder_generation,
@@ -3497,9 +3502,9 @@ class Recorder:
                         request_id,
                     ),
                 ).fetchone()
-                if row is None or row["last_error_code"] is None or bool(row["permanent_failure"]):
+                if row is None or bool(row["permanent_failure"]):
                     continue
-                recovery_evidence = False
+                recovery_received_at_us: int | None = None
                 for source_sequence in callback_sequences_by_request.get(request_id, ()):
                     evidence = connection.execute(
                         "SELECT received_at_us FROM callback_inbox WHERE source_sequence=? "
@@ -3518,11 +3523,38 @@ class Recorder:
                         row["last_attempt_at_us"] is None
                         or int(evidence["received_at_us"]) >= int(row["last_attempt_at_us"])
                     ):
-                        recovery_evidence = True
-                        break
-                if not recovery_evidence:
+                        recovery_received_at_us = max(
+                            recovery_received_at_us or 0,
+                            int(evidence["received_at_us"]),
+                        )
+                if recovery_received_at_us is None:
                     continue
                 subscription_id = str(row["subscription_id"])
+                connection.execute(
+                    "UPDATE gaps SET ended_at_us=?, resolved_at_us=? WHERE run_id=? "
+                    "AND subscription_id=? AND started_at_us<=? AND resolved_at_us IS NULL "
+                    "AND reason='STALE_REQUEST_GENERATION'",
+                    (
+                        now_us,
+                        now_us,
+                        self.config.run_id,
+                        subscription_id,
+                        recovery_received_at_us,
+                    ),
+                )
+                connection.execute(
+                    "UPDATE incidents SET resolved_at_us=? WHERE run_id=? "
+                    "AND subscription_id=? AND opened_at_us<=? AND resolved_at_us IS NULL "
+                    "AND code='STALE_REQUEST_GENERATION'",
+                    (
+                        now_us,
+                        self.config.run_id,
+                        subscription_id,
+                        recovery_received_at_us,
+                    ),
+                )
+                if row["last_error_code"] is None:
+                    continue
                 unresolved_farm = connection.execute(
                     "SELECT 1 FROM gaps WHERE run_id=? AND subscription_id=? "
                     "AND reason LIKE 'IBKR_FARM_%' AND resolved_at_us IS NULL LIMIT 1",

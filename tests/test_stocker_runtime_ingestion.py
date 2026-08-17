@@ -864,6 +864,192 @@ def test_stale_request_generation_is_terminal_evidence_not_active_state(tmp_path
     assert tuple(row) == ("failed", "STALE_REQUEST_GENERATION")
 
 
+def test_current_callback_resolves_older_stale_request_incident_and_restores_readiness(
+    tmp_path: Path,
+) -> None:
+    from stocker_runtime.web.readiness import calculate_readiness
+
+    database = tmp_path / "stale-request-recovery.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    fence = state.fences[0]
+    assert fence.subscription_id is not None
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE subscriptions SET lifecycle='disconnected' WHERE subscription_id=?",
+            (fence.subscription_id,),
+        )
+
+    stale = recorder.receive(
+        fence,
+        MarketDataCallback("quote", 105, None, {"event_at_us": 105, "bid": 1.0}),
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE subscriptions SET lifecycle='active', last_error_code=NULL "
+            "WHERE subscription_id=?",
+            (fence.subscription_id,),
+        )
+        blocked = calculate_readiness(
+            connection,
+            pinned_run_id="run-1",
+            now_us=106,
+            expected_since_us=100,
+        )
+    assert blocked["ready"] is False
+    assert blocked["reasons"] == ["REQUIRED_FEED_INCIDENT:instrument-1:quotes:3"]
+
+    current = recorder.receive(
+        fence,
+        MarketDataCallback("quote", 110, None, {"event_at_us": 110, "bid": 2.0}),
+    )
+    assert recorder.drain(now_us=111) == 1
+
+    with connect_v2(database) as connection:
+        callback = connection.execute(
+            "SELECT lifecycle, failure_code FROM callback_inbox WHERE source_sequence=?",
+            (stale.source_sequence,),
+        ).fetchone()
+        gap = connection.execute(
+            "SELECT reason, started_at_us, ended_at_us, resolved_at_us FROM gaps "
+            "WHERE subscription_id=? AND reason='STALE_REQUEST_GENERATION'",
+            (fence.subscription_id,),
+        ).fetchone()
+        incident = connection.execute(
+            "SELECT code, opened_at_us, resolved_at_us FROM incidents "
+            "WHERE subscription_id=? AND code='STALE_REQUEST_GENERATION'",
+            (fence.subscription_id,),
+        ).fetchone()
+        current_callback = connection.execute(
+            "SELECT lifecycle, normalized_event_id FROM callback_inbox WHERE source_sequence=?",
+            (current.source_sequence,),
+        ).fetchone()
+        recovered = calculate_readiness(
+            connection,
+            pinned_run_id="run-1",
+            now_us=112,
+            expected_since_us=100,
+        )
+    assert tuple(callback) == ("failed", "STALE_REQUEST_GENERATION")
+    assert tuple(gap) == ("STALE_REQUEST_GENERATION", 105, 111, 111)
+    assert tuple(incident) == ("STALE_REQUEST_GENERATION", 105, 111)
+    assert tuple(current_callback) == ("acknowledged", current.event_uid)
+    assert recovered["ready"] is True
+    recorder.stop(now_us=113)
+
+
+def test_stale_request_recovery_retains_newer_and_unrelated_incidents(tmp_path: Path) -> None:
+    database = tmp_path / "stale-request-frontier.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    required_fence, optional_fence = state.fences
+    assert required_fence.subscription_id is not None
+    assert optional_fence.subscription_id is not None
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE subscriptions SET lifecycle='disconnected' WHERE subscription_id IN (?, ?)",
+            (required_fence.subscription_id, optional_fence.subscription_id),
+        )
+    recorder.receive(
+        required_fence,
+        MarketDataCallback("quote", 105, None, {"event_at_us": 105, "bid": 1.0}),
+    )
+    recorder.receive(
+        optional_fence,
+        MarketDataCallback("bar", 106, None, {"event_at_us": 106, "close": 1.0}),
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE subscriptions SET lifecycle='active' WHERE subscription_id IN (?, ?)",
+            (required_fence.subscription_id, optional_fence.subscription_id),
+        )
+        CallbackInbox._record_scoped_gap(
+            connection,
+            required_fence,
+            115,
+            "STALE_REQUEST_GENERATION",
+            999,
+        )
+
+    recorder.receive(
+        required_fence,
+        MarketDataCallback("quote", 110, None, {"event_at_us": 110, "bid": 2.0}),
+    )
+    assert recorder.drain(now_us=111) == 1
+
+    with connect_v2(database) as connection:
+        required_incidents = tuple(
+            connection.execute(
+                "SELECT opened_at_us, resolved_at_us FROM incidents "
+                "WHERE subscription_id=? AND code='STALE_REQUEST_GENERATION' "
+                "ORDER BY opened_at_us",
+                (required_fence.subscription_id,),
+            )
+        )
+        optional_incident = connection.execute(
+            "SELECT opened_at_us, resolved_at_us FROM incidents "
+            "WHERE subscription_id=? AND code='STALE_REQUEST_GENERATION'",
+            (optional_fence.subscription_id,),
+        ).fetchone()
+    assert [tuple(row) for row in required_incidents] == [(105, 111), (115, None)]
+    assert tuple(optional_incident) == (106, None)
+    recorder.stop(now_us=112)
+
+
+@pytest.mark.parametrize("malformed,last_attempt_at_us", [(True, None), (False, 120)])
+def test_stale_request_recovery_rejects_invalid_or_pre_attempt_evidence(
+    tmp_path: Path,
+    *,
+    malformed: bool,
+    last_attempt_at_us: int | None,
+) -> None:
+    database = tmp_path / f"stale-request-invalid-{malformed}.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    fence = state.fences[0]
+    assert fence.subscription_id is not None
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE subscriptions SET lifecycle='disconnected' WHERE subscription_id=?",
+            (fence.subscription_id,),
+        )
+    recorder.receive(
+        fence,
+        MarketDataCallback("quote", 105, None, {"event_at_us": 105, "bid": 1.0}),
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE subscriptions SET lifecycle='active', last_attempt_at_us=? "
+            "WHERE subscription_id=?",
+            (last_attempt_at_us, fence.subscription_id),
+        )
+    recorder.receive(
+        fence,
+        MarketDataCallback(
+            "quote",
+            110,
+            None,
+            {"event_at_us": "invalid" if malformed else 110, "bid": 2.0},
+        ),
+    )
+    assert recorder.drain(now_us=111) == (0 if malformed else 1)
+
+    with connect_v2(database) as connection:
+        unresolved = connection.execute(
+            "SELECT count(*) FROM incidents WHERE subscription_id=? "
+            "AND code='STALE_REQUEST_GENERATION' AND resolved_at_us IS NULL",
+            (fence.subscription_id,),
+        ).fetchone()[0]
+    assert unresolved == 1
+    recorder.stop(now_us=112)
+
+
 def test_receipt_chain_matches_phase2_contract_and_authorizes_compaction(tmp_path: Path) -> None:
     from stocker_runtime.storage import RetentionManager, RetentionPolicy
 

@@ -1250,3 +1250,92 @@ stops deployment rather than broadening the selector or heartbeat threshold.
 This remains prospective/shadow market-data projection and readiness work only. It
 does not alter XNYS session rules, risk, execution, reconciliation, accounts,
 credentials, broker capabilities, paper trading or live trading.
+
+## Unattended-operations closure: feed incident recovery and managed backup
+
+Current production generation 15 is safe to continue recording while this addendum is
+implemented: the IBKR socket is connected, every exact validated required identity is
+active and fresh, the durable inbox and WAL are bounded, writer admission is healthy,
+and order capability is zero. Its HTTP 503 is caused only by an unresolved
+`STALE_REQUEST_GENERATION` incident on an otherwise recovered current feed. Clean-stop
+if ownership or durable admission fails, the socket or required feeds become genuinely
+unhealthy, the heartbeat stops, the inbox exceeds 5,000 and continues rising, or the
+WAL approaches the established 48 MiB operational gate. Do not run backup experiments
+or unbounded SQLite reads against the active database.
+
+### Phase 1: recover stale-request evidence narrowly
+
+The reproduced sequence is: a request becomes temporarily non-active; a late callback
+is durably rejected as `STALE_REQUEST_GENERATION`; an exact current-fence callback is
+later acknowledged and normalized; the subscription is active with fresh callbacks,
+but the historical incident remains unresolved and readiness remains 503.
+
+Correct the recovery transaction rather than weakening readiness. An acknowledged,
+normalized callback from the exact current run, recorder generation, connection
+generation, subscription and request fence may resolve only earlier
+`STALE_REQUEST_GENERATION` gaps and incidents for that exact subscription. Use the
+valid callback's `received_at_us` as the recovery frontier so concurrently opened
+newer evidence is retained. Preserve the failed callback, gap and incident rows and
+set only resolution timestamps. This narrow path must not require a subscription
+`last_error_code`, and must not resolve unrelated subscriptions, future incidents,
+`STALE_RECORDER_GENERATION`, malformed callbacks, permanent failures, or transport and
+farm incidents. Readiness remains strict.
+
+Tests must reproduce the full failure/recovery/readiness path, prove the stale callback
+and resolved evidence remain auditable, require exact current-fence evidence, retain
+newer and unrelated incidents, reject malformed or pre-retry evidence, and preserve
+the existing reconnect, ordering, duplicate, per-feed readiness and XNYS behavior.
+This is code-only; schema 20 remains unchanged.
+
+### Phase 2: bounded off-session managed backups
+
+The live online backup path is not accepted for unattended production use: it timed
+out under active load and previously contributed to WAL pressure. Do not fix that by
+raising the 30-minute timeout, tuning pages/sleeps without evidence, using
+`VACUUM INTO`, copying a live SQLite file, or adding another daemon/database.
+
+Add a narrow quiescent managed-backup mode to the existing daily/weekly service
+surface. Reuse the tracked canonical writer-lock, complete-WAL-truncate, byte-copy,
+hash and restore-verification implementation rather than duplicating it. Before any
+service stop, use the existing XNYS calendar to require an off-session interval long
+enough for the bounded operation and restart; a persistent timer firing during RTH is
+a harmless failure before mutation. Clean-stop web and recorder, hold the canonical
+writer lock across the stable snapshot, require no competing database descriptor and
+zero WAL, verify source stability, exact copy hash/size, schema ledger, quick check,
+foreign keys and evidence counts, then publish through the existing compression,
+manifest, rotation, tier-floor and byte-cap policy. The helper is fixed to the named
+Stocker services and daily/weekly tiers. It always restarts recorder and then web,
+including after snapshot/publication failure, while returning nonzero and retaining a
+degraded backup status on failure. The same run resumes in a new generation.
+
+Tests cover RTH/insufficient-window rejection before service stop; holidays, DST and
+early close through the unchanged XNYS calendar; persistent-timer catch-up; clean stop
+and unconditional ordered restart on success and every failure; one canonical writer
+lock; descriptor, WAL, mutation and lock-identity failures; exact logical evidence and
+hash preservation; daily/weekly exclusion, rotation floors, total byte cap and atomic
+publication; no partial healthy status; a disposable exact-size timing gate; and the
+unchanged opening replay. The first production run is attended and off-session. Enable
+both timers only after a daily backup has been restored and verified and the resumed
+generation has fresh heartbeat, connected socket, every exact required identity,
+growing raw sequence, bounded inbox/WAL and truthful readiness.
+
+### IB Gateway authentication boundary
+
+The server-local daily readiness probe is correct: on each of 14--16 August it polled
+the restarted gateway for 120 seconds and port 4002 never opened. The installed unit
+explicitly requires manual paper-account authentication. Do not disable the probe,
+extend it without evidence, store credentials, automate login, or change account
+selection merely to claim unattended operation. It remains an operator alarm until an
+already-authorized IBKR session is proven to resume without credential/account changes,
+or an operator authenticates manually. Recorder socket/subscription state and
+`/api/v2/ready` remain the authoritative end-to-end health boundary. This broker-login
+limitation must remain explicit in the runbook and completion report.
+
+Implement serially: incident red/green tests and fix, focused tests, read-only review;
+then backup red/green tests and implementation, disposable full-size proof, read-only
+review, failure-oriented tests, `scripts/test.sh`, `scripts/check.sh`, and attended
+off-session deployment. Affected modes are `prospective_record`, `shadow` and the
+read-only web/backup operational lifecycle. Market-data availability is affected.
+Risk, execution, reconciliation, accounts, credentials, paper/live trading and order
+capability are not changed. The XNYS regular-session definition remains exact and is
+reused only to prohibit quiescent backup work during or too near the expected session.

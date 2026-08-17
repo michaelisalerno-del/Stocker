@@ -24,7 +24,7 @@ from stocker_runtime.ingestion import (
 )
 from stocker_runtime.ingestion.ibkr_market_data import IBKRSubscription
 from stocker_runtime.market_session import xnys_session_window_us
-from stocker_runtime.storage import connect_v2, initialize_database
+from stocker_runtime.storage import RetentionPolicy, connect_v2, initialize_database
 from stocker_runtime.web import WebConfig
 from stocker_runtime.web.queries import ReadModel
 
@@ -269,6 +269,7 @@ def run_opening_burst(database: Path, *, seconds: int) -> dict[str, Any]:
         final_drain_seconds = time.perf_counter() - drain_after_burst_started
         final_backlog = recorder.inbox.nonterminal_count()
         last_received_at_us = callbacks[-1][4].received_at_us
+        recorder.maintain(now_us=last_received_at_us, retention_work_expected=False)
         readiness_started = time.perf_counter()
         readiness = ReadModel(
             WebConfig(
@@ -326,12 +327,12 @@ def run_opening_burst(database: Path, *, seconds: int) -> dict[str, Any]:
                     (last_received_at_us - 15_000_000,),
                 ).fetchone()[0]
             )
-            heartbeat = int(
-                connection.execute(
-                    "SELECT process_heartbeat_at_us FROM runtime_state "
-                    "WHERE run_id='opening-burst-replay'"
-                ).fetchone()[0]
-            )
+            runtime = connection.execute(
+                "SELECT process_heartbeat_at_us, wal_bytes FROM runtime_state "
+                "WHERE run_id='opening-burst-replay'"
+            ).fetchone()
+            heartbeat = int(runtime["process_heartbeat_at_us"])
+            wal_bytes_after_session_checkpoint = int(runtime["wal_bytes"])
         ordering_violations = sum(
             1
             for index, (row, expected) in enumerate(zip(rows, expected_order, strict=True), start=1)
@@ -365,6 +366,7 @@ def run_opening_burst(database: Path, *, seconds: int) -> dict[str, Any]:
             "recorder_heartbeat_delay_seconds": max(
                 0.0, (last_received_at_us - heartbeat) / 1_000_000
             ),
+            "wal_bytes_after_session_checkpoint": wal_bytes_after_session_checkpoint,
             "required_feeds_fresh": fresh_required,
             "required_feeds_expected": OPENING_BURST_FEEDS,
             "healthy_feeds_active": len(adapter.active_request_ids),
@@ -408,6 +410,8 @@ def opening_burst_failures(result: dict[str, Any], *, include_performance: bool)
         failures.append("backlog_to_zero_seconds>30")
     if float(result["recorder_heartbeat_delay_seconds"]) > 5:
         failures.append("recorder_heartbeat_delay_seconds>5")
+    if int(result["wal_bytes_after_session_checkpoint"]) >= RetentionPolicy().wal_cap_bytes:
+        failures.append("wal_bytes_after_session_checkpoint>=wal_cap_bytes")
     for field in ("required_feeds_fresh", "healthy_feeds_active"):
         if int(result[field]) != OPENING_BURST_FEEDS:
             failures.append(f"{field}={result[field]} expected={OPENING_BURST_FEEDS}")

@@ -9,6 +9,7 @@ from stocker_runtime.opening_burst import (
     opening_burst_failures,
     run_opening_burst,
 )
+from stocker_runtime.storage import RetentionPolicy
 
 
 def test_deterministic_ten_second_opening_burst_preserves_durable_evidence(
@@ -21,4 +22,5 @@ def test_deterministic_ten_second_opening_burst_preserves_durable_evidence(
 
     assert opening_burst_callback_count(CI_OPENING_BURST_SECONDS) == 2_022
     assert result["required_feeds_expected"] == OPENING_BURST_FEEDS
+    assert result["wal_bytes_after_session_checkpoint"] < RetentionPolicy().wal_cap_bytes
     assert opening_burst_failures(result, include_performance=False) == ()

@@ -104,13 +104,15 @@ stocker-runtime recorder recover-fatal-generation \
   --config /etc/stocker/recorder.json \
   --inputs /etc/stocker/market-data.json \
   --generation REPLACE_WITH_GENERATION \
-  --fatal-code POST_ADMISSION_PRESERVATION_FAILED \
+  --fatal-code REPLACE_WITH_ELIGIBLE_FATAL_CODE \
   --operator REPLACE_WITH_OPERATOR \
   --reason 'REPLACE_WITH_RECORDED_REMEDIATION'
 ```
 
 The command acquires the same writer lock and checks exact run/mode/config/input
 identity, integrity, writability, hard capacity, fatal code, and absence of an owner.
+`WAL_CAP_FATAL` is eligible only after its passive-checkpoint remediation is installed;
+the recovery command also checkpoints and verifies that WAL is below the hard cap.
 Corruption, ownership loss, callback ordering/provenance loss, hard capacity, unsafe
 adapter capability, unknown fatal codes, and incompatible identity remain blocked.
 
@@ -196,11 +198,12 @@ fields. Do not interpret an overall maintenance wall time above 100 ms as a brea
 the deadline applies independently to each short writer transaction.
 
 Heavy retention is scheduled only outside the existing NYSE/XNYS regular session. At
-regular-session timestamps the recorder measures and publishes DB/WAL cap state and
-heartbeat only: hard-cap failure remains fail-closed and the 95% boundary still pauses
-optional feeds. Receipt proof, payload compaction, evidence pruning, checkpoint, and
-vacuum resume at the unchanged 10-second cadence outside the session, including
-holidays and after an early close. This uses the same exchange calendar as feed
+regular-session timestamps the recorder preserves the existing passive WAL checkpoint
+and measures and publishes DB/WAL cap state and heartbeat after that attempt. Hard-cap
+failure remains fail-closed and the 95% boundary still pauses optional feeds. Receipt
+proof, payload compaction, evidence pruning, incremental vacuum, and backup work resume
+at the unchanged 10-second cadence outside the session, including holidays and after
+an early close. This uses the same exchange calendar as feed
 staleness; it does not add pre-market/after-hours data collection or hard-coded UTC
 hours. An intentional in-session skip neither opens nor resolves a retention incident;
 only a real off-session maintenance success resolves one.

@@ -718,3 +718,45 @@ fresh schema-19 backup, require one successful offline full pass and integrity/F
 proof, restart the same run as a new generation, prove 12 off-session maintenance
 successes, then observe the next real regular session. No paper/live/order, risk,
 execution, reconciliation, account, subscription, or XNYS-session semantics change.
+
+## Accepted incident addendum: preserve passive WAL control during deferral
+
+Generation 9 failed closed with `WAL_CAP_FATAL` 26 seconds after the 2026-08-17 XNYS
+open. The WAL grew from approximately 19.8 MiB to the 64 MiB hard boundary while the
+single-vCPU recorder handled the callback burst. Process exit checkpointed it to zero,
+but the session scheduler above had accidentally removed the existing every-pass
+`PRAGMA wal_checkpoint(PASSIVE)` behavior. Deploying that scheduler unchanged would
+therefore make a repeat fatal likely. The recorder remains stopped while this bounded
+correction is implemented and reviewed.
+
+During XNYS regular hours the recorder will still skip all heavy receipt,
+terminalization, payload-compaction, pruning, incremental-vacuum, and backup work, but
+it will attempt the existing passive checkpoint at the existing 10-second cadence and
+measure DB/WAL size afterward. The post-checkpoint sizes drive the unchanged soft,
+degraded, and hard-cap actions. A passive-checkpoint error is visible as recoverable
+retention degradation unless it is an existing hard storage/integrity error; a WAL
+that remains at or above 64 MiB still fails closed. Outside the existing XNYS session,
+the full bounded path remains unchanged. No new loop, setting, calendar, state,
+service, deadline, or cap is introduced.
+
+`WAL_CAP_FATAL` becomes eligible for the existing explicit, audited exact-generation
+recovery command only after the process-local writer lock is acquired, database schema
+and integrity/FK verification pass, a passive checkpoint leaves WAL below its hard
+cap, the database is below its hard cap and writable, and run mode/config/input/current
+generation/fatal termination evidence match exactly. The failed generation and fatal
+incident remain immutable evidence. `STORAGE_CAP_FATAL`, corruption, ownership,
+durable-admission, provenance, identity, and unknown fatal codes remain
+non-recoverable.
+
+Blocking tests cover post-checkpoint measurement, a busy/partial checkpoint below the
+cap, a WAL still at the cap, DB hard-cap preservation, callback admission and fixed
+opening-burst ordering/latency, and exact `WAL_CAP_FATAL` recovery acceptance/denials
+for capped WAL, capped DB, corruption, live ownership, incompatible identity and wrong
+fatal evidence. Deployment requires a new checked post-fatal schema-19 backup, one
+successful offline full-retention pass with integrity/FK proof, the exact audited
+generation-9 recovery, and same-run generation-10 startup. Poll WAL more frequently
+than the observed 26-second failure window for the first 60–120 seconds and require a
+demonstrated passive checkpoint/reduction, fresh heartbeat, 41 exact active identities,
+source-sequence growth, backlog drain, no current-generation incident, and truthful
+readiness. Because the feed is already stopped, this reviewed incident correction may
+be deployed during the current session; waiting for close would only extend the gap.

@@ -23,6 +23,9 @@ RECOVERABLE_FATAL_CODES = frozenset(
         # This legacy boundary occurs only after durable raw admission. Phase 3 replaces
         # it with narrow derived-component incidents; retained callbacks can be replayed.
         "POST_ADMISSION_PRESERVATION_FAILED",
+        # A WAL hard-cap stop is recoverable only after the local lock, integrity,
+        # identity, writability and post-checkpoint cap checks below all pass.
+        "WAL_CAP_FATAL",
     }
 )
 MAX_PAYLOAD_DRAIN_PASSES = 1_000
@@ -232,7 +235,7 @@ def recover_fatal_generation(
     try:
         verify_database(database)
         with connect_v2(database) as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
             page_count = int(connection.execute("PRAGMA page_count").fetchone()[0])
             page_size = int(connection.execute("PRAGMA page_size").fetchone()[0])
             wal_path = Path(f"{Path(database).resolve(strict=False)}-wal")
@@ -242,6 +245,7 @@ def recover_fatal_generation(
                 raise LocalWriterLockError("fatal recovery blocked by the database hard cap")
             if wal_bytes >= policy.wal_cap_bytes:
                 raise LocalWriterLockError("fatal recovery blocked by the WAL hard cap")
+            connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT run.mode, run.config_hash, run.status, state.recorder_generation, "
                 "state.lifecycle, state.reason, generation.termination_code, "

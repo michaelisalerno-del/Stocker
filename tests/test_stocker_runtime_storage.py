@@ -5431,6 +5431,63 @@ def test_wal_cap_is_fatal_after_checkpoint(tmp_path: Path) -> None:
     assert result.required_action == "WAL_CAP_FATAL"
 
 
+def test_cap_only_maintenance_checkpoints_before_measuring_wal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    events: list[str] = []
+    original_connect = retention_module.connect_v2
+
+    def traced_connect(path: Path) -> sqlite3.Connection:
+        connection = original_connect(path)
+        connection.set_trace_callback(lambda statement: events.append(statement))
+        return connection
+
+    monkeypatch.setattr(retention_module, "connect_v2", traced_connect)
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(database_cap_bytes=200, wal_cap_bytes=60),
+    )
+
+    def measured(_connection: sqlite3.Connection) -> tuple[int, int]:
+        events.append("MEASURE")
+        return 100, 59
+
+    monkeypatch.setattr(manager, "_measured_sizes", measured)
+    state, database_bytes, wal_bytes, action = manager.checkpoint_and_measure_cap_state()
+
+    checkpoint_index = next(
+        index for index, event in enumerate(events) if "wal_checkpoint(PASSIVE)" in event
+    )
+    assert checkpoint_index < events.index("MEASURE")
+    assert (state, database_bytes, wal_bytes, action) == (
+        StorageCapState.NORMAL,
+        100,
+        59,
+        None,
+    )
+
+
+def test_cap_only_maintenance_fails_closed_on_post_checkpoint_wal_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(database_cap_bytes=200, wal_cap_bytes=60),
+    )
+    monkeypatch.setattr(manager, "_measured_sizes", lambda _connection: (100, 60))
+
+    assert manager.checkpoint_and_measure_cap_state() == (
+        StorageCapState.FATAL,
+        100,
+        60,
+        "WAL_CAP_FATAL",
+    )
+
+
 def test_retention_deadline_rolls_back_safely(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)

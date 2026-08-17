@@ -4250,7 +4250,7 @@ class Recorder:
             try:
                 cap_state, database_bytes, wal_bytes, required_action = RetentionManager(
                     self.config.database
-                ).measure_cap_state()
+                ).checkpoint_and_measure_cap_state()
             except sqlite3.OperationalError as error:
                 if self._hard_component_error(error):
                     self._fatal("RETENTION_INVARIANT_FAILED", now_us)

@@ -349,6 +349,25 @@ class RetentionManager:
                 required_action = "WAL_CAP_FATAL"
         return state, database_bytes, wal_bytes, required_action
 
+    def checkpoint_and_measure_cap_state(
+        self,
+    ) -> tuple[StorageCapState, int, int, str | None]:
+        """Passively checkpoint available WAL frames, then measure the hard caps."""
+
+        connection = connect_v2(self.database_path)
+        try:
+            connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+            database_bytes, wal_bytes = self._measured_sizes(connection)
+        finally:
+            connection.close()
+        state = _cap_state(database_bytes, self.policy.database_cap_bytes)
+        required_action = "STORAGE_CAP_FATAL" if state is StorageCapState.FATAL else None
+        if wal_bytes >= self.policy.wal_cap_bytes:
+            state = StorageCapState.FATAL
+            if required_action is None:
+                required_action = "WAL_CAP_FATAL"
+        return state, database_bytes, wal_bytes, required_action
+
     def _compact_payloads(
         self,
         connection: sqlite3.Connection,

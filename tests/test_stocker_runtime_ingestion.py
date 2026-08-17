@@ -2524,7 +2524,9 @@ def test_regular_session_maintenance_measures_caps_without_heavy_work_or_false_r
         def __init__(self, _database: Path) -> None:
             pass
 
-        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+        def checkpoint_and_measure_cap_state(
+            self,
+        ) -> tuple[StorageCapState, int, int, str | None]:
             return StorageCapState.NORMAL, 123, 4, None
 
         def run(self, **_kwargs: object) -> RetentionResult:
@@ -2669,7 +2671,9 @@ def test_regular_session_cap_measurement_contention_degrades_without_stopping_in
         def __init__(self, _database: Path) -> None:
             pass
 
-        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+        def checkpoint_and_measure_cap_state(
+            self,
+        ) -> tuple[StorageCapState, int, int, str | None]:
             raise sqlite3.OperationalError("database is locked")
 
         def run(self, **_kwargs: object) -> RetentionResult:
@@ -2713,7 +2717,9 @@ def test_regular_session_cap_measurement_still_fails_closed_at_hard_wal_cap(
         def __init__(self, _database: Path) -> None:
             pass
 
-        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+        def checkpoint_and_measure_cap_state(
+            self,
+        ) -> tuple[StorageCapState, int, int, str | None]:
             return StorageCapState.FATAL, 100, 64, "WAL_CAP_FATAL"
 
         def run(self, **_kwargs: object) -> RetentionResult:
@@ -2747,7 +2753,9 @@ def test_regular_session_degraded_cap_pauses_optional_feed_idempotently(
         def __init__(self, _database: Path) -> None:
             pass
 
-        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+        def checkpoint_and_measure_cap_state(
+            self,
+        ) -> tuple[StorageCapState, int, int, str | None]:
             return StorageCapState.DEGRADED, 95, 1, None
 
         def run(self, **_kwargs: object) -> RetentionResult:
@@ -2783,7 +2791,9 @@ def test_regular_session_soft_cap_publishes_without_pausing_feeds(
         def __init__(self, _database: Path) -> None:
             pass
 
-        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+        def checkpoint_and_measure_cap_state(
+            self,
+        ) -> tuple[StorageCapState, int, int, str | None]:
             return StorageCapState.SOFT, 85, 1, None
 
     monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", SoftCapMeasurement)
@@ -2814,7 +2824,9 @@ def test_degraded_cap_still_pauses_optional_feed_after_publication_contention(
         def __init__(self, _database: Path) -> None:
             pass
 
-        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+        def checkpoint_and_measure_cap_state(
+            self,
+        ) -> tuple[StorageCapState, int, int, str | None]:
             return StorageCapState.DEGRADED, 95, 1, None
 
     def contended_publication(**_kwargs: object) -> bool:
@@ -4596,6 +4608,83 @@ def test_recoverable_fatal_generation_restart_is_explicit_audited_and_preserves_
         ("fatal", "POST_ADMISSION_PRESERVATION_FAILED", None),
         ("info", "FATAL_GENERATION_RECOVERY_AUTHORIZED", None),
     ]
+
+
+def test_wal_cap_fatal_generation_recovery_is_explicit_and_audited(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    failed = Recorder(_config(database), FakeMarketData())
+    failed.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    failed._fatal("WAL_CAP_FATAL", 101)
+    failed.abandon_unclean()
+
+    recover_fatal_generation(
+        database=database,
+        run_id="run-1",
+        generation=1,
+        mode="prospective_record",
+        config_hash="a" * 64,
+        input_hash=market_data_input_hash((instrument,), specs),
+        fatal_code="WAL_CAP_FATAL",
+        operator="operator@example.invalid",
+        reason="passive WAL control installed and integrity verified",
+        authorized_at_us=102,
+    )
+    restarted = Recorder(_config(database, owner_id="owner-2"), FakeMarketData()).start(
+        now_us=103,
+        instruments=(instrument,),
+        subscriptions=specs,
+    )
+
+    assert restarted.recorder_generation == 2
+    with connect_v2(database) as connection:
+        generation = connection.execute(
+            "SELECT termination_code, fatal_recovery_authorized_at_us, "
+            "recovered_fatal_code FROM recorder_generations "
+            "WHERE run_id='run-1' AND generation=1"
+        ).fetchone()
+        fatal_incident = connection.execute(
+            "SELECT code, resolved_at_us FROM incidents "
+            "WHERE run_id='run-1' AND code='WAL_CAP_FATAL'"
+        ).fetchone()
+    assert tuple(generation) == ("WAL_CAP_FATAL", 102, "WAL_CAP_FATAL")
+    assert tuple(fatal_incident) == ("WAL_CAP_FATAL", None)
+
+
+def test_wal_cap_fatal_recovery_rejects_wal_still_at_hard_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    failed = Recorder(_config(database), FakeMarketData())
+    failed.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    failed._fatal("WAL_CAP_FATAL", 101)
+    failed.abandon_unclean()
+    monkeypatch.setattr(
+        lifecycle_module,
+        "RetentionPolicy",
+        lambda: types.SimpleNamespace(database_cap_bytes=2**63, wal_cap_bytes=0),
+    )
+
+    with pytest.raises(LocalWriterLockError, match="WAL hard cap"):
+        recover_fatal_generation(
+            database=database,
+            run_id="run-1",
+            generation=1,
+            mode="prospective_record",
+            config_hash="a" * 64,
+            input_hash=market_data_input_hash((instrument,), specs),
+            fatal_code="WAL_CAP_FATAL",
+            operator="operator@example.invalid",
+            reason="must remain closed while WAL is capped",
+            authorized_at_us=102,
+        )
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "fatal"
 
 
 def test_offline_payload_drain_uses_one_lock_fixed_time_and_two_zero_passes(

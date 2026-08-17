@@ -3133,19 +3133,7 @@ class Recorder:
                     max(receipt.created_at_us for receipt in receipts),
                 )
             self._heartbeat(causal_now_us)
-            if (
-                defer_downstream_when_full
-                and len(leased_callbacks) == limit
-                and all(
-                    any(
-                        receipt.run_id == callback.run_id
-                        and receipt.first_source_sequence <= callback.source_sequence
-                        and receipt.last_source_sequence >= callback.source_sequence
-                        for receipt in receipts
-                    )
-                    for callback in leased_callbacks
-                )
-            ):
+            if defer_downstream_when_full and len(leased_callbacks) == limit:
                 return processed
 
             def project_options() -> None:

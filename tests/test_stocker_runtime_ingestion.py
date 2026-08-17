@@ -2082,7 +2082,7 @@ def test_full_drain_batch_rearms_wakeup_for_preexisting_backlog(tmp_path: Path) 
     recorder.stop(now_us=360)
 
 
-def test_full_batch_defers_only_when_each_leased_callback_is_receipted(
+def test_full_batch_defers_downstream_after_receipt_attempt_even_with_receipt_lag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "mixed-run-receipts.sqlite3"
@@ -2127,7 +2127,11 @@ def test_full_batch_defers_only_when_each_leased_callback_is_receipted(
             created_at_us=111,
         ),
     )
-    receipt_sets = [(current_receipt, *prior_receipts), (current_receipt,)]
+    receipt_sets = [
+        (current_receipt, *prior_receipts),
+        (current_receipt,),
+        (current_receipt,),
+    ]
     downstream_calls: list[str] = []
 
     monkeypatch.setattr(recorder.inbox, "lease_pending", lambda *_args, **_kwargs: leased)
@@ -2174,8 +2178,183 @@ def test_full_batch_defers_only_when_each_leased_callback_is_receipted(
     assert recorder.drain(now_us=110, limit=3) == 3
     assert downstream_calls == []
     assert recorder.drain(now_us=111, limit=3) == 3
+    assert downstream_calls == []
+    assert recorder.drain(now_us=112, limit=3, defer_downstream_when_full=False) == 3
     assert downstream_calls == ["snapshot", "interests", "ideas", "dynamic", "shadow"]
-    recorder.stop(now_us=112)
+    recorder.stop(now_us=113)
+
+
+def test_production_shaped_receipt_lag_does_not_starve_full_callback_batches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "receipt-lag-backlog.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    quote_fence = next(fence for fence in state.fences if fence.request_id == 3)
+
+    historical_lag = 2_395
+    with connect_v2(database) as connection:
+        connection.executemany(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle, failure_code) VALUES "
+            "(?, 'run-1', 1, 1, 'quote', ?, '{}', ?, 'failed', 'fixture')",
+            (
+                (f"historical-{sequence}", sequence, f"{sequence:064x}")
+                for sequence in range(1, historical_lag + 1)
+            ),
+        )
+    for offset in range(513):
+        received_at_us = 10_000 + offset
+        recorder.receive(
+            quote_fence,
+            MarketDataCallback(
+                "quote",
+                received_at_us,
+                None,
+                {"event_at_us": received_at_us, "bid": 100.0 + offset},
+            ),
+        )
+
+    downstream_calls: list[str] = []
+    from stocker_runtime.ingestion import snapshot_projection
+
+    monkeypatch.setattr(
+        snapshot_projection,
+        "project_option_snapshot_captures",
+        lambda *_args, **_kwargs: downstream_calls.append("snapshot"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_fulfill_snapshot_interests_from_streams",
+        lambda *, now_us: downstream_calls.append("interests"),
+    )
+    assert recorder._idea_runner is not None
+    monkeypatch.setattr(
+        recorder._idea_runner,
+        "run_once",
+        lambda *, now_us: downstream_calls.append("ideas"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_reconcile_dynamic_market_data",
+        lambda *, now_us: downstream_calls.append("dynamic"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_shadow_engine",
+        types.SimpleNamespace(run_once=lambda *, now_us: downstream_calls.append("shadow")),
+    )
+
+    for drain_at_us in (20_000, 20_001):
+        recorder.prepare_pending_callback_drain()
+        assert recorder.drain(now_us=drain_at_us) == 256
+        assert recorder.wait_for_pending_callbacks(timeout=0) is True
+        assert downstream_calls == []
+        with connect_v2(database) as connection:
+            assert (
+                connection.execute(
+                    "SELECT count(*) FROM callback_inbox WHERE lifecycle IN "
+                    "('acknowledged','failed') AND receipt_batch_id IS NULL"
+                ).fetchone()[0]
+                == historical_lag
+            )
+
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE source_sequence > ? "
+                "AND lifecycle='acknowledged' AND receipt_batch_id IS NULL",
+                (historical_lag,),
+            ).fetchone()[0]
+            == 512
+        )
+        assert tuple(
+            connection.execute(
+                "SELECT count(*), sum(callback_count), max(last_source_sequence) "
+                "FROM callback_receipts"
+            ).fetchone()
+        ) == (2, 512, 512)
+
+    recorder.prepare_pending_callback_drain()
+    assert recorder.drain(now_us=20_002) == 1
+    assert downstream_calls == ["snapshot", "interests", "ideas", "dynamic", "shadow"]
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE lifecycle IN "
+                "('acknowledged','failed') AND receipt_batch_id IS NULL"
+            ).fetchone()[0]
+            == historical_lag - 255
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE lifecycle IN ('pending','leased')"
+            ).fetchone()[0]
+            == 0
+        )
+    recorder.stop(now_us=20_003)
+
+
+def test_receipt_failure_prevents_full_batch_downstream_deferral(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "receipt-failure-before-deferral.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    leased = tuple(
+        LeasedCallback(
+            source_sequence=sequence,
+            event_uid=f"event-{sequence}",
+            run_id="run-1",
+            recorder_generation=1,
+            connection_generation=1,
+            request_id=3,
+            callback_kind="quote",
+            received_at_us=100 + sequence,
+            provider_at_us=None,
+            payload={},
+            payload_sha256=f"{sequence:064x}",
+            lease_owner="owner-1",
+        )
+        for sequence in range(1, 4)
+    )
+    downstream_called = False
+
+    monkeypatch.setattr(recorder.inbox, "lease_pending", lambda *_args, **_kwargs: leased)
+    monkeypatch.setattr(
+        recorder.inbox,
+        "project_batch",
+        lambda *_args, **_kwargs: ProjectionBatchResult(processed=3, causal_now_us=111),
+    )
+    monkeypatch.setattr(
+        recorder.inbox,
+        "create_pending_receipts",
+        lambda **_kwargs: (_ for _ in ()).throw(sqlite3.OperationalError("disk I/O error")),
+    )
+
+    def downstream(*_args: object, **_kwargs: object) -> bool:
+        nonlocal downstream_called
+        downstream_called = True
+        return True
+
+    monkeypatch.setattr(recorder, "_run_component", downstream)
+    with pytest.raises(RecorderFatalError, match="post-admission preservation failed"):
+        recorder.drain(now_us=110, limit=3)
+    assert downstream_called is False
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT termination_code FROM recorder_generations WHERE run_id='run-1' "
+                "AND generation=1"
+            ).fetchone()[0]
+            == "POST_ADMISSION_PRESERVATION_FAILED"
+        )
+    recorder.abandon_unclean()
 
 
 def test_admission_connection_closes_on_callback_thread_exit_and_abnormal_exit(

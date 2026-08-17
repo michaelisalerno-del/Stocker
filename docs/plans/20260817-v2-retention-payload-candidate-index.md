@@ -887,3 +887,99 @@ The full storage suite passed 130/130 tests. The candidate's migration-ledger an
 integrity verifier then exited zero on that same disposable copy with
 `applied_versions:[]`, `current_version:20`, and `status:"ok"`; this also verified the
 schema-20 migration checksums, `quick_check=ok`, and zero foreign-key violations.
+
+## Accepted live addendum: actual-mix projection capacity
+
+Generation 11 proved the schema-20 admission-freshness correction against the real
+IBKR session: the socket connected, every exact 41/41 subscription remained active,
+every feed acquired a durable admission timestamp, source sequence advanced from
+1,639,710 to 1,647,967, no subscription stale/retry cycle occurred, and observed order
+capability remained zero. It also exposed a separate single-vCPU capacity boundary.
+The inherited nonterminal backlog grew from 22,038 to 26,711 in 146 seconds while the
+process consumed approximately one full CPU. The 8,257 admitted callbacks imply about
+3,393/minute ingress; only 3,584 older callbacks were projected, about 1,473/minute,
+so continuation would have reached the existing 50,000-row fail-closed boundary.
+Generation 11 was therefore clean-stopped and runtime-masked with `CLEAN_STOP`; its
+source sequence and backlog remained stable, the writer lock was free, and a passive
+checkpoint completed all 196 frames and left WAL at zero.
+
+Diagnosis and correction remain off the production database. A disposable exact
+generation-11 copy must exercise the real pending payload mix through
+`lease_pending -> project_batch -> acknowledge/fail -> receipt` under the server's
+single-vCPU constraint. Measure lease, each 32-row projection transaction, each 32-row
+terminalization/count publication transaction, receipt creation, writer wait, and any
+downstream work that runs despite a full backlog. The fixed capacity target is at
+least 1.25 times the observed peak ingress used in the Architect review: 6,412
+projected callbacks/minute, with monotonically draining backlog, no loss, duplicate,
+ordering or provenance violation, bounded heartbeat/WAL/memory, and no weakened
+50,000-row cap.
+
+The leading hypothesis is measured, not assumed: each callback admission and each
+terminalization chunk currently executes an exact nonterminal `count(*)`. If that
+scan dominates under concurrent admission, transactionally maintain the existing
+authoritative `runtime_state.inbox_nonterminal_count`, reconciling it exactly during
+startup/recovery and proving duplicate admission, stale-fence failure, rollback,
+crash/restart, acknowledgement and hard-cap behavior. If projection SQL or downstream
+work instead dominates, change only that measured boundary. Do not add a queue,
+thread, daemon, table, service, global latch, larger batch chosen blindly, relaxed cap,
+or callback acknowledgement before durable evidence. A fixed actual-mix red/green
+replay, focused failure tests, opening replays, full checks, and independent read-only
+review are required before same-run restart.
+
+This addendum affects prospective/shadow durable callback projection and readiness
+only. It does not change XNYS hours, broker subscriptions, risk, execution,
+reconciliation, accounts, credentials, paper/live trading, or order capability.
+
+The generation-11 disposable copy disproved the initial count-scan hypothesis.
+Projection without production plugins sustained 26,414 callbacks/minute; production
+plugins sustained 16,949/minute; repeated nonterminal counts completed at 1.018 ms
+p50 and 1.202 ms p95; sequential durable admission sustained 402.48 callbacks/second;
+and a 30-second concurrent 56-callback/second simulation with production plugins
+projected about 13,103 callbacks/minute while the backlog fell by 4,871 rows. All
+measurements exceed the frozen 6,412/minute target.
+
+The actual starvation cause is the full-batch downstream deferral predicate. In the
+stopped production database, 5,893 terminal callbacks are not yet receipted and the
+receipt frontier at source sequence 1,615,363 trails the first pending callback at
+1,617,759. A drain projects 256 callbacks but `create_pending_receipts` creates one
+bounded receipt of at most 256 callbacks for the run. Its returned receipt therefore
+covers an older terminal prefix, not the newly leased callbacks. The receipt-coverage
+comprehension evaluates false on every saturated batch, so option discovery, plugins,
+dynamic reconciliation and shadow work run before the next raw batch. The receipt
+frontier and projection frontier then advance at the same rate and the condition
+cannot recover while the backlog remains saturated.
+
+The Architect accepted removal of only that superseded receipt-coverage condition.
+After `project_batch`, the existing receipt attempt and heartbeat all succeed, a full
+lease (`len(leased_callbacks) == limit`) is sufficient to defer optional downstream
+work and immediately re-service the already rearmed callback wake-up. The leased
+callbacks are already durably terminalized; receipt creation was attempted and any
+failure still escapes before deferral. Receipt proof is an independent retained
+frontier and may trail by a fixed amount while saturated; optional downstream work
+cannot advance it. Underfull and idle drains continue to run downstream and allow the
+existing receipt path to converge. Replay explicitly passing
+`defer_downstream_when_full=False` remains unchanged. Do not increase receipt limits,
+add transactions, or weaken receipt/hash verification.
+
+TDD must reproduce at least 2,395 older terminal unreceipted callbacks followed by a
+full 256 pending batch. The full batch must project and acknowledge all callbacks,
+rearm the wake-up, attempt receipt creation before returning, and invoke zero option,
+plugin, dynamic or shadow work even though its newly returned receipt covers only the
+older prefix. Repeated full batches must keep the receipt lag non-growing and defer
+downstream; an underfull batch and explicit offline override must run downstream; an
+injected receipt failure must still prevent downstream and remain visible. Callback
+ordering, duplicates, gaps, provenance and plugin isolation remain covered.
+
+Before rollout, rerun the actual generation-11 mix on a fresh disposable copy under a
+single-vCPU-equivalent constraint. Require at least 6,412 projections/minute, a
+monotonically falling 26,711-row backlog, no loss/duplicate/order/provenance error,
+non-growing then converging receipt lag, and bounded heartbeat, WAL and memory. There
+is no migration. Generation 11 ended cleanly, so restart the same run as generation
+12 without fatal recovery. Poll backlog, WAL and heartbeat every few seconds; require
+backlog reduction within 10 seconds and sustained negative slope for 60--120 seconds,
+41 exact active subscriptions without stale cycling, zero order capability, and a
+bounded first passive checkpoint. Clean-stop if the backlog has not fallen by 30
+seconds or reaches the conservative 35,000-row operational cutoff. Start the web only
+after backlog is below the existing 5,000 readiness threshold and downstream plus
+receipt catch-up have resumed. Real market-open host-I/O observation remains a
+separate required proof.

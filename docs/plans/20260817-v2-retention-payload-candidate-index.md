@@ -883,3 +883,7 @@ maximum/final backlog 219/0; drain time 0.153 seconds; admission p50/p95/p99
 second; heartbeat delay zero; all 100 required feeds fresh and active; readiness true
 in 3.102 ms; RSS growth 22,134,784 bytes; and post-session-checkpoint WAL 5,162,392
 bytes. Acceptance failures were empty and no threshold was changed after measurement.
+The full storage suite passed 130/130 tests. The candidate's migration-ledger and
+integrity verifier then exited zero on that same disposable copy with
+`applied_versions:[]`, `current_version:20`, and `status:"ok"`; this also verified the
+schema-20 migration checksums, `quick_check=ok`, and zero foreign-key violations.

@@ -418,3 +418,56 @@ release, but the flaky drain must not then be resumed as a dependable recovery p
 Actual corruption detected before services resume permits restoring the already checked
 pre-drain schema-19 backup because no callback admission occurred after it. Once a new
 callback is admitted, never restore that backup; preserve evidence and roll forward.
+
+## Accepted deployment addendum: isolate the remaining normal-maintenance deadline
+
+Deployment of `aee5693ae3010c191546a8e984963b9e927aa001` proved the payload-only
+recovery path: 515,606 payloads were compacted in 260 passes over 14.561 seconds,
+ending with two zero-work passes. Together with the 90,000 earlier policy-equivalent
+compactions, non-null payloads fell exactly from 651,498 to 45,892. Callback count and
+immutable hash, receipt count/hash, watermark count/hash, schema 19, `quick_check=ok`,
+and zero foreign-key violations all remained exact.
+
+Recorder generation 7 then connected with all 41 identities active and continued raw
+sequence growth, but normal `RetentionManager.run` entered repeated
+`MaintenanceDeadlineExceeded` episodes. One episode recovered after five failures;
+the next reached seven failures and kept truthful readiness at HTTP 503. Database size
+was 3.731 GB against the existing 8 GiB cap, WAL about 5 MB against 64 MiB, and the
+nonterminal inbox remained below 70 against 50,000. The Architect accepted continued,
+time-boxed degraded operation while durable admission, ownership, integrity, heartbeat,
+socket, subscriptions, and hard limits remain healthy. Stop cleanly if any existing
+hard boundary is threatened; do not conceal the incident or call the service ready.
+
+The next phase must measure before changing behavior. On a fresh disposable copy of
+the post-drain schema-19 database, identify and time checkpoint selection,
+`_roll_receipts`, transaction-A commit, pending terminalization, payload compaction,
+each named prune operation, transaction-B commit, passive checkpoint, and incremental
+vacuum across at least 12 normal-retention passes. Add controlled fake callback-write
+or CPU pressure. If the copy cannot reproduce, add only bounded phase labels to
+`MaintenanceDeadlineExceeded` and its current-generation incident; add no schema,
+state, loop, or payload detail.
+
+Make exactly one correction justified by that evidence. A bad query may receive only
+its required query/index correction. Per-row overhead may receive the same local
+set-based treatment. Split a transaction only if every component is independently
+within 100 ms but their measured cumulative work crosses the bound; retain the shared
+2,000-row budget, authority checks before commit, atomic rollback within each phase,
+and exact partial-commit accounting. Do not raise the 100 ms deadline, lower capacity
+below measured ingress, add adaptive policy speculatively, calendar-gate an unresolved
+failure, suppress incidents, or rerun the payload-only drain.
+
+The deterministic regression must advance fake monotonic time at the measured
+statement/work boundary, be red on the current implementation, and pass without
+relaxing deadline or capacity. Reprove rollback, authority, receipt/watermark chains,
+corrupt-proof fatal behavior, recoverable DB-lock isolation, raw admission continuity,
+payload-drain safety, callback ordering/duplicates/gaps, incident recovery, and the
+fixed 2,022/12,132 opening replays. Validate at least 12 consecutive full maintenance
+passes under simulated writer pressure on the mature copy. After review and attended
+rollout, require at least 12 consecutive scheduled live successes, no unresolved
+current-generation retention incident, fresh heartbeat, growing raw sequence, every
+configured identity active without duplicates, bounded DB/WAL/inbox, and HTTP 200
+readiness. Real market-open host-I/O observation remains separate.
+
+This addendum affects prospective/shadow market-data retention and readiness only.
+Risk, execution, reconciliation, accounts, credentials, paper/live/order capability,
+subscription semantics, and XNYS regular-session behavior remain unchanged.

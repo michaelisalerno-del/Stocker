@@ -84,7 +84,7 @@ AND EXISTS (
 ACK_PAYLOAD_CANDIDATES_SQL = (
     """
 SELECT source_sequence, run_id, receipt_batch_id
-FROM callback_inbox INDEXED BY callback_inbox_run_sequence_idx
+FROM callback_inbox INDEXED BY callback_inbox_payload_run_sequence_idx
 WHERE run_id = ? AND source_sequence <= ?
   AND lifecycle = 'acknowledged' AND payload_json IS NOT NULL
   AND normalized_event_id IS NOT NULL AND acknowledged_at_us IS NOT NULL
@@ -95,7 +95,7 @@ WHERE run_id = ? AND source_sequence <= ?
 FAILED_PAYLOAD_CANDIDATES_SQL = (
     """
 SELECT source_sequence, run_id, receipt_batch_id
-FROM callback_inbox INDEXED BY callback_inbox_run_sequence_idx
+FROM callback_inbox INDEXED BY callback_inbox_payload_run_sequence_idx
 WHERE run_id = ? AND source_sequence <= ?
   AND lifecycle = 'failed' AND payload_json IS NOT NULL
   AND failure_code IS NOT NULL AND received_at_us <= ?

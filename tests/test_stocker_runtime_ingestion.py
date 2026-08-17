@@ -1444,7 +1444,7 @@ def test_schema_15_clean_stop_can_bind_inputs_and_restart_same_run(tmp_path: Pat
             "process_heartbeat_at_us, connection_state, connection_generation) VALUES "
             "('run-1', 1, 'stopped', NULL, 2, 'disconnected', 1)"
         )
-    assert migrate_database(database, applied_at_us=3).applied_versions == (16,)
+    assert migrate_database(database, applied_at_us=3).applied_versions == (16, 17)
     instrument, specs = _specs()
 
     restarted = Recorder(_config(database, owner_id="new-owner"), FakeMarketData()).start(

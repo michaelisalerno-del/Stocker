@@ -105,6 +105,7 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
         14,
         15,
         16,
+        17,
     )
     with connect_v2(database) as connection:
         tables = {
@@ -163,7 +164,7 @@ def test_market_open_reliability_migration_preserves_deployed_v2_evidence(
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (16,)
+    assert result.applied_versions == (16, 17)
     with connect_v2(database) as connection:
         generation = connection.execute(
             "SELECT run_id, generation, owner_id, termination_code, ownership_protocol, "
@@ -187,6 +188,69 @@ def test_market_open_reliability_migration_preserves_deployed_v2_evidence(
     )
     assert tuple(subscription) == ("subscription-1", "closed", 0, 0, None, None)
     assert tuple(run) == ("fatal", "a" * 64, "old-commit")
+
+
+def test_payload_compaction_index_migration_preserves_schema_16_evidence(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "schema-16.sqlite3"
+    migration_root = tmp_path / "schema-16-migrations"
+    migration_root.mkdir()
+    for migration in migration_plan()[:16]:
+        (migration_root / migration.name).write_text(migration.sql, encoding="utf-8")
+    initialize_database(database, migration_root=migration_root, applied_at_us=1)
+    _seed_output_dependencies(database, verify_schema=False)
+    with connect_v2(database, verify_schema=False) as connection:
+        connection.executemany(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle, failure_code, receipt_batch_id) "
+            "VALUES (?, 'retention-run', 1, 1, 'tick', 1, ?, ?, 'failed', "
+            "'fixture-failure', 'fixture-receipt')",
+            (
+                ("schema-16-tombstone", None, "1" * 64),
+                ("schema-16-payload", "{}", "2" * 64),
+            ),
+        )
+        before = tuple(connection.execute("SELECT * FROM callback_inbox ORDER BY source_sequence"))
+
+    result = migrate_database(database, applied_at_us=2)
+
+    assert result.applied_versions == (17,)
+    with connect_v2(database) as connection:
+        after = tuple(connection.execute("SELECT * FROM callback_inbox ORDER BY source_sequence"))
+        index_sql = connection.execute(
+            "SELECT sql FROM sqlite_schema WHERE type='index' "
+            "AND name='callback_inbox_payload_run_sequence_idx'"
+        ).fetchone()[0]
+        plans = {
+            "acknowledged": " ".join(
+                str(row["detail"])
+                for row in connection.execute(
+                    f"EXPLAIN QUERY PLAN {ACK_PAYLOAD_CANDIDATES_SQL}",
+                    ("retention-run", 10, 10, 2_000),
+                )
+            ),
+            "failed": " ".join(
+                str(row["detail"])
+                for row in connection.execute(
+                    f"EXPLAIN QUERY PLAN {FAILED_PAYLOAD_CANDIDATES_SQL}",
+                    ("retention-run", 10, 10, 2_000),
+                )
+            ),
+        }
+        foreign_keys = tuple(connection.execute("PRAGMA foreign_key_check"))
+        quick_check = connection.execute("PRAGMA quick_check").fetchone()[0]
+    assert after == before
+    assert " ".join(index_sql.split()) == (
+        "CREATE INDEX callback_inbox_payload_run_sequence_idx "
+        "ON callback_inbox(run_id, lifecycle, source_sequence) "
+        "WHERE payload_json IS NOT NULL"
+    )
+    assert all("callback_inbox_payload_run_sequence_idx" in plan for plan in plans.values())
+    assert all("USE TEMP B-TREE" not in plan for plan in plans.values())
+    assert foreign_keys == ()
+    assert quick_check == "ok"
 
 
 def test_callback_receipt_frontier_index_migration_preserves_rows_and_is_used(
@@ -231,7 +295,7 @@ def test_callback_receipt_frontier_index_migration_preserves_rows_and_is_used(
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (15, 16)
+    assert result.applied_versions == (15, 16, 17)
     with connect_v2(database) as connection:
         after = tuple(connection.execute("SELECT * FROM callback_inbox ORDER BY source_sequence"))
         index_sql = connection.execute(
@@ -306,7 +370,7 @@ def test_instrument_alias_migration_preserves_evidence_and_rejects_physical_mism
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (14, 15, 16)
+    assert result.applied_versions == (14, 15, 16, 17)
     with connect_v2(database) as connection:
         index = next(
             row
@@ -491,7 +555,7 @@ def test_phase2_migration_preserves_dynamic_rows_and_admits_only_causal_derived_
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (13, 14, 15, 16)
+    assert result.applied_versions == (13, 14, 15, 16, 17)
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -620,7 +684,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (17, '0017_future.sql', ?, 2)",
+            "VALUES (18, '0018_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -729,7 +793,7 @@ def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_h
 
     result = migrate_database(backfill_database, applied_at_us=2)
 
-    assert result.applied_versions == (7, 8, 9, 10, 11, 12, 13, 14, 15, 16)
+    assert result.applied_versions == (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17)
     with connect_v2(backfill_database) as connection:
         assert tuple(
             connection.execute(
@@ -822,7 +886,7 @@ def test_expiry_projection_migration_deactivates_terminal_history(tmp_path: Path
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (8, 9, 10, 11, 12, 13, 14, 15, 16)
+    assert result.applied_versions == (8, 9, 10, 11, 12, 13, 14, 15, 16, 17)
     with connect_v2(database) as connection:
         assert tuple(
             connection.execute(
@@ -975,6 +1039,7 @@ def test_commit_boundary_migration_rewinds_pending_shadow_to_conservative_run_ma
         14,
         15,
         16,
+        17,
     )
     with connect_v2(database) as connection:
         assert (
@@ -2593,6 +2658,68 @@ def test_retention_compacts_only_durably_projected_acknowledged_receipted_payloa
     assert payloads[pending] is not None
     assert payloads[unreceipted] is not None
     assert payloads[recent] is not None
+
+
+def test_retention_payload_lookup_skips_large_compacted_prefix_within_deadline(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    prefix_rows = 20_000
+    with connect_v2(database) as connection:
+        connection.execute("UPDATE runs SET status='stopped' WHERE run_id='retention-run'")
+        connection.executemany(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle, failure_code, receipt_batch_id) "
+            "VALUES (?, 'retention-run', 1, 1, 'tick', 1, NULL, ?, 'failed', "
+            "'fixture-failure', 'fixture-receipt')",
+            ((f"compacted-prefix-{index}", f"{index + 1:064x}") for index in range(prefix_rows)),
+        )
+        target = connection.execute(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle, failure_code, receipt_batch_id) "
+            "VALUES ('payload-target', 'retention-run', 1, 1, 'tick', 1, '{}', ?, "
+            "'failed', 'fixture-failure', 'fixture-receipt')",
+            ("f" * 64,),
+        ).lastrowid
+        connection.execute(
+            "INSERT INTO callback_compaction_watermarks(run_id, "
+            "compacted_through_sequence, cumulative_callback_count, "
+            "first_received_at_us, last_received_at_us, rolled_receipt_chain_hash, "
+            "last_receipt_chain_hash, updated_at_us) VALUES "
+            "('retention-run', ?, ?, 1, 1, ?, ?, 1)",
+            (target, prefix_rows + 1, "0" * 64, "0" * 64),
+        )
+
+    logical_time = 0.0
+
+    def monotonic() -> float:
+        nonlocal logical_time
+        logical_time += 0.001
+        return logical_time
+
+    result = RetentionManager(
+        database,
+        RetentionPolicy(
+            callback_payload_us=10,
+            receipt_us=1_000,
+            tombstone_us=1_000,
+            maintenance_transaction_ms=100,
+        ),
+        monotonic=monotonic,
+    ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert result.payloads_compacted == 1
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT payload_json FROM callback_inbox WHERE source_sequence=?", (target,)
+            ).fetchone()[0]
+            is None
+        )
 
 
 def test_retention_reuses_shared_receipt_proof_within_deadline(
@@ -4438,7 +4565,7 @@ def test_planned_ui_projection_queries_use_declared_indexes(tmp_path: Path) -> N
             "AND resolved_at_us <= ? ORDER BY resolved_at_us, gap_id LIMIT ?",
             (100, 10_000),
         ),
-        "callback_inbox_run_sequence_idx": (
+        "callback_inbox_payload_run_sequence_idx": (
             ACK_PAYLOAD_CANDIDATES_SQL,
             ("run-1", 100, 100, 10_000),
         ),
@@ -4473,7 +4600,7 @@ def test_planned_ui_projection_queries_use_declared_indexes(tmp_path: Path) -> N
                 ("run-1", 100, 100, 10_000),
             )
         )
-        assert "callback_inbox_run_sequence_idx" in failed_payload_plan
+        assert "callback_inbox_payload_run_sequence_idx" in failed_payload_plan
 
 
 def test_callback_recovery_uses_bounded_unresolved_gap_plan(tmp_path: Path) -> None:
@@ -4537,11 +4664,29 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     migration_payload = json.loads(migrated.stdout)
     retention_payload = json.loads(retained.stdout)
     assert init_payload == {
-        "applied_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-        "current_version": 16,
+        "applied_versions": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+        ],
+        "current_version": 17,
         "status": "ok",
     }
-    assert migration_payload == {"applied_versions": [], "current_version": 16, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 17, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

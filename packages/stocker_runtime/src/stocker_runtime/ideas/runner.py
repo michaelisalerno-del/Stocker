@@ -54,6 +54,60 @@ RETRY_MAX_US = 60_000_000
 _RUNNER_STATE_VERSION = 1
 _RUNNER_STATE_VERSION_KEY = "_stocker_runner_state_version"
 
+_GENERAL_BATCH_CANDIDATES_SQL = (
+    "SELECT event.* FROM market_events event WHERE event.run_id=? "
+    "AND EXISTS (SELECT 1 FROM json_each(?) requirement "
+    "WHERE event.instrument_id=json_extract(requirement.value, '$.instrument_id') "
+    "AND event.feed_kind=json_extract(requirement.value, '$.feed_kind') "
+    "AND (json_extract(requirement.value, '$.event_kind') IS NULL "
+    "OR event.event_kind=json_extract(requirement.value, '$.event_kind')) "
+    "AND json_extract(requirement.value, '$.available_at_us') "
+    "<=max(event.event_at_us, event.received_at_us) "
+    "AND (json_extract(requirement.value, '$.available_until_us') IS NULL "
+    "OR max(event.event_at_us, event.received_at_us)<"
+    "json_extract(requirement.value, '$.available_until_us'))) "
+    "AND (coalesce(event.source_sequence, event.derived_after_source_sequence)>? "
+    "OR (? IS NOT NULL AND "
+    "coalesce(event.source_sequence, event.derived_after_source_sequence)=? "
+    "AND event.event_id>?)) "
+    "AND (event.event_kind!='bar_5m' OR "
+    "json_extract(event.payload_json, '$.first_source_sequence')>?) "
+    "ORDER BY coalesce(event.source_sequence, event.derived_after_source_sequence), "
+    "event.event_id LIMIT 256"
+)
+
+_TYPED_BATCH_CANDIDATES_SQL = (
+    "SELECT DISTINCT event.* FROM json_each(?) requirement "
+    "JOIN market_events event INDEXED BY market_events_instrument_kind_time_idx "
+    "ON event.instrument_id=json_extract(requirement.value, '$.instrument_id') "
+    "AND event.event_kind=json_extract(requirement.value, '$.event_kind') "
+    "WHERE json_extract(requirement.value, '$.event_kind') IS NOT NULL "
+    "AND event.run_id=? "
+    "AND event.feed_kind=json_extract(requirement.value, '$.feed_kind') "
+    "AND json_extract(requirement.value, '$.available_at_us') "
+    "<=max(event.event_at_us, event.received_at_us) "
+    "AND (json_extract(requirement.value, '$.available_until_us') IS NULL "
+    "OR max(event.event_at_us, event.received_at_us)<"
+    "json_extract(requirement.value, '$.available_until_us')) "
+    "AND (coalesce(event.source_sequence, event.derived_after_source_sequence)>? "
+    "OR (? IS NOT NULL AND "
+    "coalesce(event.source_sequence, event.derived_after_source_sequence)=? "
+    "AND event.event_id>?)) "
+    "AND (event.event_kind!='bar_5m' OR "
+    "json_extract(event.payload_json, '$.first_source_sequence')>?) "
+    "ORDER BY coalesce(event.source_sequence, event.derived_after_source_sequence), "
+    "event.event_id LIMIT 256"
+)
+
+
+def _batch_candidate_sql(requirements: tuple[JsonValue, ...]) -> str:
+    if requirements and all(
+        isinstance(requirement, Mapping) and requirement.get("event_kind") is not None
+        for requirement in requirements
+    ):
+        return _TYPED_BATCH_CANDIDATES_SQL
+    return _GENERAL_BATCH_CANDIDATES_SQL
+
 
 class IdeaRunnerError(RuntimeError):
     """An activation or evaluation violates a generic Phase 4 invariant."""
@@ -916,36 +970,27 @@ class IdeaRunner:
                 if row["last_source_sequence"] is not None
                 else int(row["activated_after_source_sequence"])
             )
-            candidates = connection.execute(
-                "SELECT event.* FROM market_events event WHERE event.run_id=? "
-                "AND EXISTS (SELECT 1 FROM json_each(?) requirement "
-                "WHERE event.instrument_id=json_extract(requirement.value, '$.instrument_id') "
-                "AND event.feed_kind=json_extract(requirement.value, '$.feed_kind') "
-                "AND (json_extract(requirement.value, '$.event_kind') IS NULL "
-                "OR event.event_kind=json_extract(requirement.value, '$.event_kind')) "
-                "AND json_extract(requirement.value, '$.available_at_us') "
-                "<=max(event.event_at_us, event.received_at_us) "
-                "AND (json_extract(requirement.value, '$.available_until_us') IS NULL "
-                "OR max(event.event_at_us, event.received_at_us)<"
-                "json_extract(requirement.value, '$.available_until_us'))) "
-                "AND (coalesce(event.source_sequence, event.derived_after_source_sequence)>? "
-                "OR (? IS NOT NULL AND "
-                "coalesce(event.source_sequence, event.derived_after_source_sequence)=? "
-                "AND event.event_id>?)) "
-                "AND (event.event_kind!='bar_5m' OR "
-                "json_extract(event.payload_json, '$.first_source_sequence')>?) "
-                "ORDER BY coalesce(event.source_sequence, event.derived_after_source_sequence), "
-                "event.event_id LIMIT 256",
-                (
+            candidate_sql = _batch_candidate_sql(batch_requirements)
+            common_candidate_parameters = (
+                start_sequence,
+                row["last_market_event_id"],
+                start_sequence,
+                row["last_market_event_id"],
+                int(row["activated_after_source_sequence"]),
+            )
+            if candidate_sql == _TYPED_BATCH_CANDIDATES_SQL:
+                candidate_parameters = (
+                    batch_requirements_json,
+                    row["run_id"],
+                    *common_candidate_parameters,
+                )
+            else:
+                candidate_parameters = (
                     row["run_id"],
                     batch_requirements_json,
-                    start_sequence,
-                    row["last_market_event_id"],
-                    start_sequence,
-                    row["last_market_event_id"],
-                    int(row["activated_after_source_sequence"]),
-                ),
-            ).fetchall()
+                    *common_candidate_parameters,
+                )
+            candidates = connection.execute(candidate_sql, candidate_parameters).fetchall()
             rows = list(candidates)
             if not rows:
                 return None

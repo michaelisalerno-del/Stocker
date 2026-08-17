@@ -58,9 +58,12 @@ from stocker_runtime.ideas.discovery import (
     reviewed_code_hash,
 )
 from stocker_runtime.ideas.runner import (
+    _GENERAL_BATCH_CANDIDATES_SQL,
+    _TYPED_BATCH_CANDIDATES_SQL,
     EvaluationResult,
     IdeaRunner,
     IdeaRunnerError,
+    _batch_candidate_sql,
     _merge_batch_requirements,
 )
 from stocker_runtime.ingestion import (
@@ -419,6 +422,236 @@ def test_dynamic_batch_requirements_merge_cadence_and_blocking_conservatively() 
     )
 
     assert _merge_batch_requirements((snapshot, stream)) == (stream,)
+
+
+def test_batch_candidate_query_selects_only_the_all_typed_fast_path() -> None:
+    typed = (
+        {
+            "feed_kind": "bars",
+            "event_kind": "bar_5m_session_prefix",
+            "instrument_id": "AAL",
+            "available_at_us": 0,
+        },
+    )
+    untyped = (
+        {
+            "feed_kind": "quotes",
+            "event_kind": None,
+            "instrument_id": "AAL-option",
+            "available_at_us": 100,
+        },
+    )
+
+    assert _batch_candidate_sql(typed) == _TYPED_BATCH_CANDIDATES_SQL
+    assert _batch_candidate_sql(()) == _GENERAL_BATCH_CANDIDATES_SQL
+    assert _batch_candidate_sql((*typed, *untyped)) == _GENERAL_BATCH_CANDIDATES_SQL
+
+
+def test_typed_batch_candidate_query_is_equivalent_and_index_bounded(tmp_path: Path) -> None:
+    database = tmp_path / "typed-batch-candidates.sqlite3"
+    _seed(database)
+    event_at_us = int(datetime(2026, 8, 3, 13, 30, tzinfo=UTC).timestamp() * 1_000_000)
+    with connect_v2(database) as connection:
+        for sequence in range(1, 2_001):
+            _persist_market_event(
+                connection,
+                sequence,
+                MarketEvent(
+                    event_id=f"irrelevant-quote-{sequence}",
+                    instrument_id="AAL",
+                    feed_kind="quotes",
+                    event_kind="quote",
+                    event_at_us=event_at_us + sequence,
+                    received_at_us=event_at_us + sequence,
+                    payload={"bid": 1.0},
+                ),
+            )
+        for sequence in range(2_001, 2_301):
+            _event(connection, sequence, "AAL", 100.0 + sequence / 10_000)
+
+        requirement = cast(
+            JsonValue,
+            {
+                "feed_kind": "bars",
+                "event_kind": "bar",
+                "instrument_id": "AAL",
+                "available_at_us": 0,
+            },
+        )
+        requirements = (requirement, requirement)
+        requirements_json = canonical_json_bytes(cast(JsonValue, requirements)).decode()
+        general_parameters = (
+            "run-1",
+            requirements_json,
+            0,
+            None,
+            0,
+            None,
+            0,
+        )
+        typed_parameters = (
+            requirements_json,
+            "run-1",
+            0,
+            None,
+            0,
+            None,
+            0,
+        )
+
+        def execute_with_progress(
+            sql: str, parameters: tuple[object, ...]
+        ) -> tuple[list[object], int]:
+            progress_calls = 0
+
+            def progress() -> int:
+                nonlocal progress_calls
+                progress_calls += 1
+                return 0
+
+            connection.set_progress_handler(progress, 100)
+            try:
+                rows = connection.execute(sql, parameters).fetchall()
+            finally:
+                connection.set_progress_handler(None, 0)
+            return rows, progress_calls
+
+        general_rows, general_progress = execute_with_progress(
+            _GENERAL_BATCH_CANDIDATES_SQL,
+            general_parameters,
+        )
+        typed_rows, typed_progress = execute_with_progress(
+            _TYPED_BATCH_CANDIDATES_SQL,
+            typed_parameters,
+        )
+        plan = tuple(
+            str(row[3])
+            for row in connection.execute(
+                "EXPLAIN QUERY PLAN " + _TYPED_BATCH_CANDIDATES_SQL,
+                typed_parameters,
+            )
+        )
+
+    assert [tuple(row) for row in typed_rows] == [tuple(row) for row in general_rows]
+    assert len(typed_rows) == 256
+    assert typed_progress < 600 < general_progress
+    assert any(
+        "SEARCH event USING INDEX market_events_instrument_kind_time_idx "
+        "(instrument_id=? AND event_kind=?)" in detail
+        for detail in plan
+    )
+    assert not any("SCAN event" in detail for detail in plan)
+    assert not any("market_events_causal_sequence_idx" in detail for detail in plan)
+
+
+def test_typed_batch_candidate_query_preserves_every_filter_and_causal_tie(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "typed-batch-candidate-filters.sqlite3"
+    _seed(database)
+
+    def event(
+        event_id: str,
+        sequence: int,
+        *,
+        instrument_id: str = "AAL",
+        feed_kind: str = "bars",
+        event_kind: str = "bar",
+        event_at_us: int = 150,
+        payload: Mapping[str, JsonValue] | None = None,
+    ) -> MarketEvent:
+        return MarketEvent(
+            event_id=event_id,
+            instrument_id=instrument_id,
+            feed_kind=feed_kind,
+            event_kind=event_kind,
+            event_at_us=event_at_us,
+            received_at_us=event_at_us,
+            payload={} if payload is None else payload,
+        )
+
+    with connect_v2(database) as connection:
+        _persist_market_event(connection, 5, event("source-tie", 5))
+        _persist_market_event(
+            connection,
+            5,
+            event(
+                "derived-tie",
+                5,
+                event_kind="bar_5m",
+                payload={"first_source_sequence": 1},
+            ),
+        )
+        _persist_market_event(connection, 6, event("before-availability", 6, event_at_us=99))
+        _persist_market_event(connection, 7, event("at-availability-end", 7, event_at_us=200))
+        _persist_market_event(
+            connection,
+            8,
+            event(
+                "bar-before-activation",
+                8,
+                event_kind="bar_5m",
+                payload={"first_source_sequence": 0},
+            ),
+        )
+        _persist_market_event(
+            connection,
+            9,
+            event("wrong-feed", 9, feed_kind="quotes"),
+        )
+        _persist_market_event(
+            connection,
+            10,
+            event("wrong-instrument", 10, instrument_id="AAOI"),
+        )
+        connection.execute(
+            "INSERT INTO runs VALUES ('run-2', 'prospective_record', 'ibkr', 1, NULL, ?, "
+            "'fixture', 'prospective_protected', 'running', NULL)",
+            ("b" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us) "
+            "VALUES ('run-2', 1, 'fixture', 1)"
+        )
+        _persist_market_event(connection, 11, event("wrong-run", 11), run_id="run-2")
+
+        requirements = cast(
+            tuple[JsonValue, ...],
+            (
+                {
+                    "feed_kind": "bars",
+                    "event_kind": "bar",
+                    "instrument_id": "AAL",
+                    "available_at_us": 100,
+                    "available_until_us": 200,
+                },
+                {
+                    "feed_kind": "bars",
+                    "event_kind": "bar",
+                    "instrument_id": "AAL",
+                    "available_at_us": 100,
+                    "available_until_us": 200,
+                },
+                {
+                    "feed_kind": "bars",
+                    "event_kind": "bar_5m",
+                    "instrument_id": "AAL",
+                    "available_at_us": 0,
+                },
+            ),
+        )
+        requirements_json = canonical_json_bytes(cast(JsonValue, requirements)).decode()
+        general_rows = connection.execute(
+            _GENERAL_BATCH_CANDIDATES_SQL,
+            ("run-1", requirements_json, 0, None, 0, None, 0),
+        ).fetchall()
+        typed_rows = connection.execute(
+            _TYPED_BATCH_CANDIDATES_SQL,
+            (requirements_json, "run-1", 0, None, 0, None, 0),
+        ).fetchall()
+
+    assert [tuple(row) for row in typed_rows] == [tuple(row) for row in general_rows]
+    assert [str(row["event_id"]) for row in typed_rows] == ["derived-tie", "source-tie"]
 
 
 def test_reference_plugin_uses_supported_phase3_raw_bar_subscription() -> None:

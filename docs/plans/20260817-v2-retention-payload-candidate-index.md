@@ -1178,3 +1178,45 @@ gate because 151 unrelated, pre-existing research/core files would be reformatte
 Every changed Python file passes focused Ruff formatting/checking and MyPy; the focused
 runtime suites and replays above are green. Neither inherited condition is concealed
 or modified by this operational rollout.
+
+## Stopped-generation correction: typed idea candidate lookup
+
+The exact generation-13 disposable-copy gate rejected the first
+component-completion-heartbeat candidate before deployment. Three idle drains measured
+option projection at no more than 31.583 ms, option discovery at 66.763 ms, and shadow
+evaluation at 22.402 ms, but the idea runner took 6,852.991--7,423.190 ms. Per-instance
+instrumentation isolated one `frozen_m1c_signal` load at 6,977.196 ms; the other three
+instances took 391.231, 643.290 and 408.590 ms.
+
+Statement timing proved the final candidate SELECT was the bottleneck. Five-minute bar
+projection took 262.697 ms and session projection 93.244 ms, while the candidate query
+took 7,931.587 ms to execute and 177.657 ms to fetch 256 rows. Its plan searched
+`market_events_causal_sequence_idx` by run and executed a correlated `json_each` scan
+for each causal event. The production-shaped run held 344,707 events, including 288,919
+irrelevant quotes, and the instance's checkpoint began at sequence zero.
+
+The accepted smallest correction adds only an all-typed fast path. When the validated,
+nonempty in-memory batch requirements all have an exact `event_kind`, `json_each`
+drives `market_events_instrument_kind_time_idx` by exact instrument and event kind;
+the existing run/feed/availability/causal/tie-break/bar-fence predicates, distinctness,
+ordering and 256 limit remain unchanged. Empty, mixed or nullable/dynamic requirement
+sets execute the former general SQL and parameter order byte-for-byte. No query is
+moved across a projector or gap boundary, and no schema or index is added.
+
+On the exact copy, the replacement returned the identical ordered 256 event identities
+and used the intended `(instrument_id,event_kind)` index search. Its first cold run took
+474.973 ms and subsequent runs 16.346--30.272 ms; a separate equality run measured the
+old query at 7,369.783 ms and the replacement at 16.346--25.294 ms. The accepted tests
+pin exact row/order/filter equivalence, duplicate requirements, source/derived causal
+ties, wrong run/feed/kind, availability boundaries, the bar activation fence, the
+index plan, a deterministic SQLite opcode budget, and exact fallback selection.
+
+The Architect rejected a per-instance heartbeat callback because this local query fix
+should bring the complete runner below four seconds. The existing outer component
+completion heartbeat remains the only new heartbeat boundary. Deployment remains
+blocked until three or more cold/warm drains on the exact generation-13 copy show the
+whole idea runner and every component at or below four seconds, the maximum heartbeat
+gap below five seconds, and unchanged idea/checkpoint/interest/fence/shadow evidence.
+Production remains stopped and runtime-masked until that gate and independent review
+pass. This remains a schema-20 code-only same-run generation-14 restart with no fatal
+recovery and no trading/session scope change.

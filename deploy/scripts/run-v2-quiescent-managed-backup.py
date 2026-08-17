@@ -45,7 +45,16 @@ MINIMUM_OFF_SESSION_US = 60 * 60 * 1_000_000
 MAX_SESSION_LOOKAHEAD_DAYS = 10
 RECORDER_RESTART_TIMEOUT_SECONDS = 30.0
 RECORDER_HEARTBEAT_FRESH_US = 5_000_000
+SQLITE_BOUNDARY_REASON_PREFIX = "blocked_unsafe_runtime_configuration:v2_sqlite_boundary:"
 _NEW_YORK = ZoneInfo("America/New_York")
+
+
+class SQLiteBoundaryError(RuntimeError):
+    """A fixed, sanitized failure reason from the root-owned boundary helper."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"SQLite boundary preparation failed: {reason}")
 
 
 def _next_xnys_open_us(now_us: int) -> int:
@@ -103,7 +112,15 @@ def _prepare_web_sqlite_boundary() -> None:
         text=True,
     )
     if completed.returncode != 0:
-        raise RuntimeError("SQLite boundary preparation failed before web restart")
+        stderr = completed.stderr.strip()
+        reason = "unknown_failure"
+        if stderr.startswith(SQLITE_BOUNDARY_REASON_PREFIX):
+            candidate = stderr.removeprefix(SQLITE_BOUNDARY_REASON_PREFIX)
+            if 0 < len(candidate) <= 96 and all(
+                character in "abcdefghijklmnopqrstuvwxyz0123456789_" for character in candidate
+            ):
+                reason = candidate
+        raise SQLiteBoundaryError(reason)
 
 
 def _require_fresh_owned_recorder(database: Path) -> None:
@@ -153,14 +170,17 @@ def _restart_services(database: Path) -> list[str]:
         errors.append(f"{RECORDER_UNIT}:inactive")
         return errors
     try:
+        _prepare_web_sqlite_boundary()
+    except SQLiteBoundaryError as error:
+        errors.append(f"sqlite-boundary:{error.reason}")
+        return errors
+    except Exception as error:
+        errors.append(f"sqlite-boundary:{type(error).__name__}")
+        return errors
+    try:
         _require_fresh_owned_recorder(database)
     except Exception as error:
         errors.append(f"recorder-heartbeat:{type(error).__name__}")
-        return errors
-    try:
-        _prepare_web_sqlite_boundary()
-    except Exception as error:
-        errors.append(f"sqlite-boundary:{type(error).__name__}")
         return errors
     try:
         _systemctl("start", WEB_UNIT)

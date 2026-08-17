@@ -1387,6 +1387,29 @@ the focused storage/backup suites, independent review, a disposable mature backu
 restore, then one attended production backup with zero deleted work-copy descriptors,
 exact restore/integrity evidence, healthy status and automatic recorder/web restart.
 
+That attended run completed archive publication and restore proof, then correctly kept
+the backup degraded when boundary preparation failed during automatic restart. Recorder
+remained running, web was skipped, the restart marker remained and `ExecStopPost`
+reported `BackupInterrupted`; the same preparer succeeded manually one minute later.
+The likely race is ordering: the root backup helper opened SQLite to verify heartbeat
+before boundary preparation, and even a read-only WAL connection may create or replace
+SHM coordination state while recorder is also starting. The accepted correction is not
+a generic retry. Restart now requires recorder start and `is-active`, runs the exact
+boundary preparer, then opens SQLite for the fresh owned-generation heartbeat proof,
+then starts web. Recorder's existing `ExecStartPre` already runs that same preparer.
+
+The boundary helper gains only two bounded SQLite-race cases: an `ENOENT` create losing
+to `EEXIST` reopens and validates the winner, and an opened regular inode whose link
+count became zero is retried against the canonical path. Symlinks, nonregular files,
+hard links, wrong ownership, permission/read-only-filesystem/storage failures and
+bounded race exhaustion still fail immediately or after the narrow fixed bound. The
+orchestrator records only the helper's fixed sanitized reason token, never arbitrary
+stderr. Tests cover the new order, both recoverable races, exhaustion and each hard
+safety rejection; preparer failure leaves recorder active and skips heartbeat/web,
+heartbeat failure after preparation skips web, and success starts web. Timers remain
+disabled until a corrected attended backup publishes healthy status and completes the
+full automatic restart.
+
 The final repository test invocation completed with 2,104 passing and one skipped
 test. It retained 13 failures and 19 setup errors, all caused by the already-absent
 protected `trade_decisions.parquet` research input. The repository check stopped at

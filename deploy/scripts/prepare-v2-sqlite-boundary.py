@@ -21,6 +21,7 @@ RECORDER_USER = "stocker-recorder"
 WEB_USER = "stocker-web"
 BACKUP_USER = "stocker-backup"
 READER_GROUP = "stocker-readers"
+AUXILIARY_RACE_ATTEMPTS = 3
 
 
 def fail(reason: str) -> NoReturn:
@@ -83,32 +84,47 @@ def _prepare_auxiliary(
     label: str,
 ) -> None:
     flags = os.O_CLOEXEC | os.O_NOFOLLOW | os.O_RDWR
-    try:
-        descriptor = os.open(name, flags, dir_fd=directory)
-    except FileNotFoundError:
+    for _attempt in range(AUXILIARY_RACE_ATTEMPTS):
         try:
-            descriptor = os.open(
-                name,
-                flags | os.O_CREAT | os.O_EXCL,
-                mode,
-                dir_fd=directory,
-            )
-        except OSError:
-            fail(f"{label}_create_failed")
-        os.fchown(descriptor, owner_uid, group_gid)
-    except OSError as error:
-        if error.errno == errno.ELOOP:
-            fail(f"{label}_symlink")
-        fail(f"{label}_open_failed")
-    try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
-            fail(f"{label}_not_single_regular_file")
-        if metadata.st_uid != owner_uid or metadata.st_gid != group_gid:
-            fail(f"{label}_unexpected_owner")
-        os.fchmod(descriptor, mode)
-    finally:
-        os.close(descriptor)
+            descriptor = os.open(name, flags, dir_fd=directory)
+            created = False
+        except FileNotFoundError:
+            try:
+                descriptor = os.open(
+                    name,
+                    flags | os.O_CREAT | os.O_EXCL,
+                    mode,
+                    dir_fd=directory,
+                )
+                created = True
+            except FileExistsError:
+                continue
+            except OSError:
+                fail(f"{label}_create_failed")
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                fail(f"{label}_symlink")
+            fail(f"{label}_open_failed")
+        try:
+            if created:
+                os.fchown(descriptor, owner_uid, group_gid)
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink > 1:
+                fail(f"{label}_not_single_regular_file")
+            if metadata.st_nlink == 0:
+                continue
+            if metadata.st_uid != owner_uid or metadata.st_gid != group_gid:
+                fail(f"{label}_unexpected_owner")
+            os.fchmod(descriptor, mode)
+            metadata = os.fstat(descriptor)
+            if metadata.st_nlink == 0:
+                continue
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                fail(f"{label}_not_single_regular_file")
+            return
+        finally:
+            os.close(descriptor)
+    fail(f"{label}_race_exhausted")
 
 
 def main() -> None:

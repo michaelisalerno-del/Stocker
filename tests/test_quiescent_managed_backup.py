@@ -407,8 +407,8 @@ def test_restart_prepares_sqlite_boundary_after_recorder_and_before_web(
     assert events == [
         f"start:{module.RECORDER_UNIT}",
         f"is-active:{module.RECORDER_UNIT}",
-        "recorder-heartbeat",
         "sqlite-boundary",
+        "recorder-heartbeat",
         f"start:{module.WEB_UNIT}",
     ]
 
@@ -435,6 +435,65 @@ def test_restart_attempts_web_and_reports_boundary_failure(
         f"start:{module.RECORDER_UNIT}",
         f"is-active:{module.RECORDER_UNIT}",
     ]
+
+
+def test_restart_skips_web_when_heartbeat_fails_after_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _script_module()
+    events: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "_systemctl",
+        lambda action, unit: events.append(f"{action}:{unit}") or 0,
+    )
+    monkeypatch.setattr(
+        module,
+        "_prepare_web_sqlite_boundary",
+        lambda: events.append("sqlite-boundary"),
+    )
+    monkeypatch.setattr(
+        module,
+        "_require_fresh_owned_recorder",
+        lambda _database: (_ for _ in ()).throw(RuntimeError("injected stale heartbeat")),
+    )
+
+    assert module._restart_services(Path("database.sqlite3")) == ["recorder-heartbeat:RuntimeError"]
+    assert events == [
+        f"start:{module.RECORDER_UNIT}",
+        f"is-active:{module.RECORDER_UNIT}",
+        "sqlite-boundary",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected"),
+    [
+        (
+            "blocked_unsafe_runtime_configuration:v2_sqlite_boundary:shm_race_exhausted\n",
+            "shm_race_exhausted",
+        ),
+        (
+            "blocked_unsafe_runtime_configuration:v2_sqlite_boundary:wrong_owner\n"
+            "attacker-controlled detail\n",
+            "unknown_failure",
+        ),
+    ],
+)
+def test_boundary_failure_exposes_only_fixed_sanitized_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    stderr: str,
+    expected: str,
+) -> None:
+    module = _script_module()
+    completed = SimpleNamespace(returncode=78, stdout="", stderr=stderr)
+    monkeypatch.setattr(module.subprocess, "run", lambda *_args, **_kwargs: completed)
+
+    with pytest.raises(module.SQLiteBoundaryError) as raised:
+        module._prepare_web_sqlite_boundary()
+
+    assert raised.value.reason == expected
+    assert "attacker-controlled" not in str(raised.value)
 
 
 def test_restart_skips_boundary_and_web_when_recorder_start_fails(

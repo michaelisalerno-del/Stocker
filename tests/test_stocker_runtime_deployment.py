@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import signal
@@ -33,6 +34,23 @@ SYSTEMD = ROOT / "deploy/systemd"
 
 def _unit(name: str) -> str:
     return (SYSTEMD / name).read_text(encoding="utf-8")
+
+
+def _sqlite_boundary_module() -> ModuleType:
+    path = ROOT / "deploy/scripts/prepare-v2-sqlite-boundary.py"
+    specification = importlib.util.spec_from_file_location(
+        "prepare_v2_sqlite_boundary",
+        path,
+    )
+    assert specification is not None and specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        specification.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
+    return module
 
 
 def test_v2_services_have_distinct_least_privilege_filesystem_boundaries() -> None:
@@ -738,6 +756,171 @@ def test_sqlite_boundary_preparation_targets_only_v2_and_backup_paths() -> None:
     assert 'READER_GROUP = "stocker-readers"' in source
     assert "prospective.sqlite3" not in source
     assert "bundles" not in source
+
+
+def test_sqlite_boundary_recovers_when_create_loses_to_existing_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _sqlite_boundary_module()
+    directory = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    real_open = module.os.open
+    calls = 0
+
+    def racing_open(name: str, flags: int, *args: object, **kwargs: object) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise FileNotFoundError(name)
+        if calls == 2:
+            winner = real_open(name, flags, *args, **kwargs)
+            os.close(winner)
+            raise FileExistsError(name)
+        return real_open(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(module.os, "open", racing_open)
+    try:
+        module._prepare_auxiliary(
+            directory,
+            "stocker-v2.sqlite3-shm",
+            owner_uid=os.getuid(),
+            group_gid=os.getgid(),
+            mode=0o640,
+            label="shm",
+        )
+    finally:
+        os.close(directory)
+
+    assert calls == 3
+    assert (tmp_path / "stocker-v2.sqlite3-shm").is_file()
+
+
+def test_sqlite_boundary_recovers_from_concurrently_unlinked_inode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _sqlite_boundary_module()
+    auxiliary = tmp_path / "stocker-v2.sqlite3-shm"
+    auxiliary.touch()
+    directory = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    real_open = module.os.open
+    calls = 0
+
+    def racing_open(name: str, flags: int, *args: object, **kwargs: object) -> int:
+        nonlocal calls
+        descriptor = real_open(name, flags, *args, **kwargs)
+        calls += 1
+        if calls == 1:
+            auxiliary.unlink()
+            replacement = real_open(
+                name,
+                os.O_RDWR | os.O_CREAT | os.O_EXCL,
+                0o640,
+                dir_fd=directory,
+            )
+            os.close(replacement)
+        return descriptor
+
+    monkeypatch.setattr(module.os, "open", racing_open)
+    try:
+        module._prepare_auxiliary(
+            directory,
+            auxiliary.name,
+            owner_uid=os.getuid(),
+            group_gid=os.getgid(),
+            mode=0o640,
+            label="shm",
+        )
+    finally:
+        os.close(directory)
+
+    assert calls == 2
+    assert auxiliary.is_file()
+
+
+def test_sqlite_boundary_fails_after_bounded_unlink_races(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _sqlite_boundary_module()
+    auxiliary = tmp_path / "stocker-v2.sqlite3-shm"
+    auxiliary.touch()
+    directory = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    real_open = module.os.open
+    calls = 0
+
+    def always_unlinked(name: str, flags: int, *args: object, **kwargs: object) -> int:
+        nonlocal calls
+        descriptor = real_open(name, flags, *args, **kwargs)
+        calls += 1
+        auxiliary.unlink()
+        replacement = real_open(
+            name,
+            os.O_RDWR | os.O_CREAT | os.O_EXCL,
+            0o640,
+            dir_fd=directory,
+        )
+        os.close(replacement)
+        return descriptor
+
+    monkeypatch.setattr(module.os, "open", always_unlinked)
+    try:
+        with pytest.raises(SystemExit) as raised:
+            module._prepare_auxiliary(
+                directory,
+                auxiliary.name,
+                owner_uid=os.getuid(),
+                group_gid=os.getgid(),
+                mode=0o640,
+                label="shm",
+            )
+    finally:
+        os.close(directory)
+
+    assert raised.value.code == 78
+    assert calls == module.AUXILIARY_RACE_ATTEMPTS
+    assert capsys.readouterr().err.strip().endswith("shm_race_exhausted")
+
+
+@pytest.mark.parametrize("failure", ["symlink", "wrong_owner", "nonregular"])
+def test_sqlite_boundary_hard_failures_are_not_retried(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    module = _sqlite_boundary_module()
+    auxiliary = tmp_path / "stocker-v2.sqlite3-shm"
+    if failure == "symlink":
+        auxiliary.symlink_to(tmp_path / "target")
+    elif failure == "nonregular":
+        auxiliary.mkdir()
+    else:
+        auxiliary.touch()
+    directory = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    real_open = module.os.open
+    calls = 0
+
+    def counted_open(name: str, flags: int, *args: object, **kwargs: object) -> int:
+        nonlocal calls
+        calls += 1
+        return real_open(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(module.os, "open", counted_open)
+    try:
+        with pytest.raises(SystemExit):
+            module._prepare_auxiliary(
+                directory,
+                auxiliary.name,
+                owner_uid=os.getuid() + (1 if failure == "wrong_owner" else 0),
+                group_gid=os.getgid(),
+                mode=0o640,
+                label="shm",
+            )
+    finally:
+        os.close(directory)
+
+    assert calls == 1
 
 
 def test_cutover_precreates_reader_boundary_before_import_and_verifies_afterward() -> None:

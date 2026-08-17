@@ -3419,6 +3419,18 @@ class Recorder:
     ) -> None:
         state = self._authority_state()
         specs = {item.request_id: item for item in self._subscriptions}
+        callback_sequences_by_request: dict[int, tuple[int, ...]] = {
+            request_id: tuple(
+                callback.source_sequence
+                for callback in callbacks
+                if callback.request_id == request_id
+            )
+            for request_id in {
+                int(callback.request_id)
+                for callback in callbacks
+                if callback.request_id is not None
+            }
+        }
         with connect_v2(self.config.database) as connection:
             request_ids = sorted(
                 {
@@ -3474,7 +3486,8 @@ class Recorder:
                 if spec is None:
                     continue
                 row = connection.execute(
-                    "SELECT subscription_id, last_error_code, permanent_failure "
+                    "SELECT subscription_id, last_attempt_at_us, last_error_code, "
+                    "permanent_failure "
                     "FROM subscriptions WHERE run_id=? AND recorder_generation=? "
                     "AND connection_generation=? AND request_id=?",
                     (
@@ -3485,6 +3498,29 @@ class Recorder:
                     ),
                 ).fetchone()
                 if row is None or row["last_error_code"] is None or bool(row["permanent_failure"]):
+                    continue
+                recovery_evidence = False
+                for source_sequence in callback_sequences_by_request.get(request_id, ()):
+                    evidence = connection.execute(
+                        "SELECT received_at_us FROM callback_inbox WHERE source_sequence=? "
+                        "AND run_id=? AND recorder_generation=? AND connection_generation=? "
+                        "AND request_id=? AND lifecycle='acknowledged' "
+                        "AND normalized_event_id IS NOT NULL",
+                        (
+                            source_sequence,
+                            state.run_id,
+                            state.recorder_generation,
+                            state.connection_generation,
+                            request_id,
+                        ),
+                    ).fetchone()
+                    if evidence is not None and (
+                        row["last_attempt_at_us"] is None
+                        or int(evidence["received_at_us"]) >= int(row["last_attempt_at_us"])
+                    ):
+                        recovery_evidence = True
+                        break
+                if not recovery_evidence:
                     continue
                 subscription_id = str(row["subscription_id"])
                 unresolved_farm = connection.execute(

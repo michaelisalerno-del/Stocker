@@ -77,6 +77,46 @@ preserve the database and roll forward; restoring the older backup would lose ev
 and old code must not open the newer schema. Never drop an index or edit migration or
 incident rows manually on production.
 
+### Quiescent emergency snapshot when managed backup is unavailable
+
+The tracked fallback is
+[`scripts/quiescent_v2_snapshot.py`](../../scripts/quiescent_v2_snapshot.py). Use it
+only after both services are stopped and runtime-masked. It acquires the canonical
+`<database>.writer.lock` non-blockingly and holds it across WAL truncation, source
+stability checks, byte-for-byte copy, matching-runtime schema/checksum verification,
+`quick_check`, foreign keys, callback/generation evidence checks, deterministic gzip,
+and decompression verification. It fails before producing a manifest if any service or
+database descriptor remains, the checkpoint is incomplete, the source changes, hashes
+differ, or restored evidence differs. It does not publish managed-backup health or
+forge a `BackupManifest`.
+
+Record the stopped generation's exact maximum source sequence and pending/leased count,
+then run from the exact candidate source tree while naming the still-installed matching
+schema release:
+
+```bash
+uv run python scripts/quiescent_v2_snapshot.py \
+  --database /var/lib/stocker/v2/stocker-v2.sqlite3 \
+  --destination-directory /var/lib/stocker/recovery-snapshots \
+  --runtime-executable \
+    /opt/stocker/releases/<matching-schema-commit>/.venv/bin/stocker-runtime \
+  --expected-schema 19 \
+  --run-id stocker-v2-shadow-20260816t191816z \
+  --generation <cleanly-stopped-generation> \
+  --expected-termination-code CLEAN_STOP \
+  --expected-max-source-sequence <recorded-maximum> \
+  --expected-nonterminal <recorded-pending-plus-leased-count> \
+  --release-commit <matching-schema-commit> \
+  --operator <operator-identity>
+```
+
+Require exit zero and one JSON object with `status=ok`, exact expected evidence,
+identical snapshot/decompressed hashes and `restore_verified=true`. Keep its compressed
+archive and manifest outside managed backup rotation. Removing a prior uncompressed
+emergency copy for headroom is allowed only after its retained archive hash matches its
+manifest; report that removal because restoration then requires decompression. This
+fallback is not permission to snapshot a live database or a nonzero WAL separately.
+
 ## Production preflight
 
 The service unit validates both files before creating an IBKR connection:

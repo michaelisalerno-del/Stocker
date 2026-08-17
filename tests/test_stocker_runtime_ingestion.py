@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from typer.testing import CliRunner
 
 import stocker_runtime.ingestion.lifecycle as lifecycle_module
+import stocker_runtime.ingestion.recorder as recorder_module
 from stocker_runtime.cli import app
 from stocker_runtime.ingestion import (
     AdmissionResult,
@@ -2360,6 +2361,110 @@ def test_pre_retry_queued_callback_does_not_falsely_complete_recovery(tmp_path: 
             "SELECT lifecycle, last_error_code FROM subscriptions WHERE request_id=3"
         ).fetchone()
     assert tuple(after_fresh) == ("active", None)
+
+
+def test_newer_subscription_failure_wins_race_with_older_projected_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "recovery-status-race.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    fence = state.fences[0]
+    recorder.receive(
+        fence,
+        MarketDataCallback("quote", 150, None, {"event_at_us": 150, "bid": 1.0}),
+    )
+    leased = recorder.inbox.lease_pending(
+        "owner-1",
+        now_us=151,
+        lease_us=10,
+        limit=1,
+        authority=WriterAuthority("run-1", 1, "owner-1"),
+    )[0]
+    projected = recorder.inbox.project(
+        leased,
+        authority=WriterAuthority("run-1", 1, "owner-1"),
+    )
+    recorder.inbox.acknowledge(
+        leased,
+        projected.event_id,
+        acknowledged_at_us=152,
+        authority=WriterAuthority("run-1", 1, "owner-1"),
+    )
+    recorder._persist_subscription_failure(
+        fence,
+        specs[0],
+        now_us=140,
+        code="IBKR_STATUS_420_PACING",
+        details="older failure",
+        retry_kind="pacing",
+        status_code=420,
+    )
+
+    original_connect = recorder_module.connect_v2
+    newer_failure_persisted = False
+
+    class RacingConnection:
+        def __init__(self, connection: sqlite3.Connection) -> None:
+            self.connection = connection
+
+        def __enter__(self) -> RacingConnection:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            self.connection.close()
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self.connection, name)
+
+        def execute(
+            self,
+            sql: str,
+            parameters: tuple[object, ...] = (),
+        ) -> sqlite3.Cursor:
+            nonlocal newer_failure_persisted
+            if sql == "BEGIN IMMEDIATE" and not newer_failure_persisted:
+                newer_failure_persisted = True
+                monkeypatch.setattr(recorder_module, "connect_v2", original_connect)
+                recorder._persist_subscription_failure(
+                    fence,
+                    specs[0],
+                    now_us=160,
+                    code="IBKR_STATUS_162_REQUEST_REJECTED",
+                    details="newer failure",
+                    status_code=162,
+                )
+                monkeypatch.setattr(recorder_module, "connect_v2", racing_connect)
+            return self.connection.execute(sql, parameters)
+
+    def racing_connect(path: Path) -> RacingConnection:
+        return RacingConnection(original_connect(path))
+
+    monkeypatch.setattr(recorder_module, "connect_v2", racing_connect)
+    recorder._mark_projected_subscription_recovery((leased,), now_us=170)
+
+    with original_connect(database) as connection:
+        subscription = connection.execute(
+            "SELECT lifecycle, last_attempt_at_us, last_error_code "
+            "FROM subscriptions WHERE subscription_id=?",
+            (fence.subscription_id,),
+        ).fetchone()
+        unresolved = tuple(
+            connection.execute(
+                "SELECT code FROM incidents WHERE subscription_id=? "
+                "AND resolved_at_us IS NULL ORDER BY opened_at_us",
+                (fence.subscription_id,),
+            )
+        )
+    assert newer_failure_persisted is True
+    assert tuple(subscription) == ("disconnected", 160, "IBKR_STATUS_162_REQUEST_REJECTED")
+    assert [row["code"] for row in unresolved] == [
+        "IBKR_STATUS_420_PACING",
+        "IBKR_STATUS_162_REQUEST_REJECTED",
+    ]
 
 
 def test_malformed_admission_records_activity_but_cannot_close_subscription_incident(

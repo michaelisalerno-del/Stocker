@@ -1984,7 +1984,7 @@ def test_high_rate_callback_path_uses_single_authoritative_admission_and_project
         assert drain_connections == connections_after_full_batch + 1
         assert len(drain_transactions) <= transactions_after_full_batch + 2
         assert recorder.drain(now_us=359, run_downstream_when_idle=True) == 0
-    assert downstream_calls == ["snapshot", "interests", "ideas", "dynamic", "shadow"]
+    assert downstream_calls == ["ideas"]
     assert redundant_owner_connections == []
     assert drain_connections <= 8
     assert drain_transactions.count("BEGIN IMMEDIATE") <= 24
@@ -2180,7 +2180,7 @@ def test_full_batch_defers_downstream_after_receipt_attempt_even_with_receipt_la
     assert recorder.drain(now_us=111, limit=3) == 3
     assert downstream_calls == []
     assert recorder.drain(now_us=112, limit=3, defer_downstream_when_full=False) == 3
-    assert downstream_calls == ["snapshot", "interests", "ideas", "dynamic", "shadow"]
+    assert downstream_calls == ["ideas"]
     recorder.stop(now_us=113)
 
 
@@ -2280,7 +2280,7 @@ def test_production_shaped_receipt_lag_does_not_starve_full_callback_batches(
 
     recorder.prepare_pending_callback_drain()
     assert recorder.drain(now_us=20_002) == 1
-    assert downstream_calls == ["snapshot", "interests", "ideas", "dynamic", "shadow"]
+    assert downstream_calls == ["ideas"]
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -2296,6 +2296,294 @@ def test_production_shaped_receipt_lag_does_not_starve_full_callback_batches(
             == 0
         )
     recorder.stop(now_us=20_003)
+
+
+def test_idle_drains_rotate_one_optional_downstream_component_at_a_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "downstream-round-robin.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    downstream_calls: list[str] = []
+    from stocker_runtime.ingestion import snapshot_projection
+
+    monkeypatch.setattr(
+        snapshot_projection,
+        "project_option_snapshot_captures",
+        lambda *_args, **_kwargs: downstream_calls.append("option_projection"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_fulfill_snapshot_interests_from_streams",
+        lambda *, now_us: None,
+    )
+    assert recorder._idea_runner is not None
+    monkeypatch.setattr(
+        recorder._idea_runner,
+        "run_once",
+        lambda *, now_us: downstream_calls.append("idea_runner"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_reconcile_dynamic_market_data",
+        lambda *, now_us: downstream_calls.append("option_discovery"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_shadow_engine",
+        types.SimpleNamespace(
+            run_once=lambda *, now_us: downstream_calls.append("shadow_evaluation")
+        ),
+    )
+
+    for ordinal, expected in enumerate(
+        (
+            "idea_runner",
+            "option_discovery",
+            "shadow_evaluation",
+            "option_projection",
+        )
+    ):
+        recorder.prepare_pending_callback_drain()
+        assert recorder.drain(now_us=110 + ordinal) == 0
+        assert (
+            downstream_calls
+            == [
+                "idea_runner",
+                "option_discovery",
+                "shadow_evaluation",
+                "option_projection",
+            ][: ordinal + 1]
+        )
+        assert downstream_calls[-1] == expected
+
+    recorder.stop(now_us=120)
+
+
+def test_optional_downstream_failure_is_persisted_and_rotation_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "downstream-failure-rotation.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    assert recorder._idea_runner is not None
+    idea_attempts = 0
+
+    def fail_idea(*, now_us: int) -> None:
+        nonlocal idea_attempts
+        idea_attempts += 1
+        raise RuntimeError("plugin failed")
+
+    monkeypatch.setattr(
+        recorder._idea_runner,
+        "run_once",
+        fail_idea,
+    )
+    later_components: list[str] = []
+    monkeypatch.setattr(
+        recorder,
+        "_reconcile_dynamic_market_data",
+        lambda *, now_us: later_components.append("option_discovery"),
+    )
+
+    assert recorder.drain(now_us=110) == 0
+    with connect_v2(database) as connection:
+        incident = connection.execute(
+            "SELECT code, recorder_generation, resolved_at_us FROM incidents "
+            "WHERE run_id='run-1' AND scope='component' AND resolved_at_us IS NULL"
+        ).fetchone()
+    assert tuple(incident) == ("COMPONENT_IDEA_RUNNER_FAILED", 1, None)
+
+    assert recorder.drain(now_us=111) == 0
+    assert later_components == ["option_discovery"]
+    assert recorder.drain(now_us=112) == 0
+    assert recorder.drain(now_us=113) == 0
+    assert recorder.drain(now_us=114) == 0
+    assert idea_attempts == 1
+    assert recorder.drain(now_us=115) == 0
+    assert later_components == ["option_discovery", "option_discovery"]
+    recorder.stop(now_us=120)
+
+
+def test_downstream_rotation_keeps_fixed_slots_when_socket_availability_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "downstream-fixed-slots.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    downstream_calls: list[str] = []
+    from stocker_runtime.ingestion import snapshot_projection
+
+    monkeypatch.setattr(
+        snapshot_projection,
+        "project_option_snapshot_captures",
+        lambda *_args, **_kwargs: downstream_calls.append("option_projection"),
+    )
+    monkeypatch.setattr(recorder, "_fulfill_snapshot_interests_from_streams", lambda **_: None)
+    assert recorder._idea_runner is not None
+    monkeypatch.setattr(
+        recorder._idea_runner,
+        "run_once",
+        lambda *, now_us: downstream_calls.append("idea_runner"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_reconcile_dynamic_market_data",
+        lambda *, now_us: downstream_calls.append("option_discovery"),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_shadow_engine",
+        types.SimpleNamespace(
+            run_once=lambda *, now_us: downstream_calls.append("shadow_evaluation")
+        ),
+    )
+    connection_states = iter((False, True, False, True))
+    monkeypatch.setattr(
+        recorder,
+        "_connection_is_connected",
+        lambda: next(connection_states),
+    )
+
+    for ordinal in range(4):
+        assert recorder.drain(now_us=110 + ordinal) == 0
+
+    assert downstream_calls == [
+        "idea_runner",
+        "option_discovery",
+        "shadow_evaluation",
+        "option_projection",
+    ]
+    recorder.stop(now_us=120)
+
+
+def test_callback_arriving_during_downstream_is_projected_before_next_component(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "downstream-callback-priority.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    assert recorder._idea_runner is not None
+    admitted_sequences: list[int] = []
+
+    def admit_during_idea(*, now_us: int) -> None:
+        admitted_sequences.append(
+            recorder.receive(
+                state.fences[0],
+                MarketDataCallback(
+                    "quote",
+                    200,
+                    None,
+                    {"event_at_us": 200, "bid": 1.0},
+                ),
+            ).source_sequence
+        )
+
+    observed_lifecycles: list[str] = []
+
+    def observe_projection_before_discovery(*, now_us: int) -> None:
+        with connect_v2(database) as connection:
+            observed_lifecycles.append(
+                str(
+                    connection.execute(
+                        "SELECT lifecycle FROM callback_inbox WHERE source_sequence=?",
+                        (admitted_sequences[0],),
+                    ).fetchone()[0]
+                )
+            )
+
+    monkeypatch.setattr(recorder._idea_runner, "run_once", admit_during_idea)
+    monkeypatch.setattr(
+        recorder,
+        "_reconcile_dynamic_market_data",
+        observe_projection_before_discovery,
+    )
+
+    assert recorder.drain(now_us=110) == 0
+    assert recorder.wait_for_pending_callbacks(timeout=0) is True
+    assert recorder.drain(now_us=201) == 1
+    assert observed_lifecycles == ["acknowledged"]
+    recorder.stop(now_us=210)
+
+
+def test_downstream_rotation_bounds_aggregate_heartbeat_gap_but_not_a_slow_component(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from stocker_runtime.ingestion import snapshot_projection
+    from stocker_runtime.web.readiness import calculate_readiness
+
+    database = tmp_path / "downstream-heartbeat-budget.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    assert recorder._idea_runner is not None
+    clock_us = 100
+
+    def advance_clock(duration_us: int) -> None:
+        nonlocal clock_us
+        clock_us += duration_us
+
+    monkeypatch.setattr(
+        snapshot_projection,
+        "project_option_snapshot_captures",
+        lambda *_args, **_kwargs: advance_clock(2_000_000),
+    )
+    monkeypatch.setattr(recorder, "_fulfill_snapshot_interests_from_streams", lambda **_: None)
+    monkeypatch.setattr(
+        recorder._idea_runner,
+        "run_once",
+        lambda *, now_us: advance_clock(2_000_000),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_reconcile_dynamic_market_data",
+        lambda *, now_us: advance_clock(2_000_000),
+    )
+    monkeypatch.setattr(
+        recorder,
+        "_shadow_engine",
+        types.SimpleNamespace(run_once=lambda *, now_us: advance_clock(2_000_000)),
+    )
+
+    started_at_us = clock_us
+    for _ordinal in range(4):
+        assert recorder.drain(now_us=clock_us) == 0
+        with connect_v2(database) as connection:
+            readiness = calculate_readiness(
+                connection,
+                pinned_run_id="run-1",
+                now_us=clock_us,
+                expected_since_us=None,
+            )
+        assert readiness["ready"] is True
+        assert "RECORDER_HEARTBEAT_STALE" not in readiness["reasons"]
+    assert clock_us - started_at_us == 8_000_000
+
+    monkeypatch.setattr(
+        recorder._idea_runner,
+        "run_once",
+        lambda *, now_us: advance_clock(6_000_000),
+    )
+    assert recorder.drain(now_us=clock_us) == 0
+    with connect_v2(database) as connection:
+        slow_readiness = calculate_readiness(
+            connection,
+            pinned_run_id="run-1",
+            now_us=clock_us,
+            expected_since_us=None,
+        )
+    assert slow_readiness["ready"] is False
+    assert "RECORDER_HEARTBEAT_STALE" in slow_readiness["reasons"]
+    recorder.stop(now_us=clock_us)
 
 
 def test_receipt_failure_prevents_full_batch_downstream_deferral(
@@ -6197,22 +6485,27 @@ def test_optional_downstream_components_fail_independently_and_recover(
         run_once=lambda *, now_us: component("shadow_evaluation")
     )
 
-    first = recorder.receive(
-        state.fences[0],
-        MarketDataCallback("quote", 150, None, {"event_at_us": 150, "bid": 1.0}),
-    )
-    assert recorder.drain(now_us=150) == 1
-    second = recorder.receive(
-        state.fences[0],
-        MarketDataCallback("quote", 151, None, {"event_at_us": 151, "bid": 2.0}),
-    )
-    assert recorder.drain(now_us=151) == 1
+    callbacks = []
+    for offset in range(4):
+        callback_at_us = 150 + offset
+        callbacks.append(
+            recorder.receive(
+                state.fences[0],
+                MarketDataCallback(
+                    "quote",
+                    callback_at_us,
+                    None,
+                    {"event_at_us": callback_at_us, "bid": 1.0 + offset},
+                ),
+            )
+        )
+        assert recorder.drain(now_us=callback_at_us) == 1
     with connect_v2(database) as connection:
-        callbacks = dict(
+        callback_lifecycles = dict(
             connection.execute(
                 "SELECT source_sequence, lifecycle FROM callback_inbox "
-                "WHERE source_sequence IN (?, ?)",
-                (first.source_sequence, second.source_sequence),
+                "WHERE source_sequence IN (?, ?, ?, ?)",
+                tuple(callback.source_sequence for callback in callbacks),
             )
         )
         incidents = {
@@ -6224,9 +6517,8 @@ def test_optional_downstream_components_fail_independently_and_recover(
         runtime = connection.execute(
             "SELECT lifecycle, connection_state FROM runtime_state"
         ).fetchone()
-    assert callbacks == {
-        first.source_sequence: "acknowledged",
-        second.source_sequence: "acknowledged",
+    assert callback_lifecycles == {
+        callback.source_sequence: "acknowledged" for callback in callbacks
     }
     assert incidents == {
         "COMPONENT_OPTION_PROJECTION_FAILED",
@@ -6238,7 +6530,8 @@ def test_optional_downstream_components_fail_independently_and_recover(
     assert adapter.connected is True
 
     failing = False
-    assert recorder.drain(now_us=1_000_150) == 0
+    for offset in range(4):
+        assert recorder.drain(now_us=2_000_150 + offset) == 0
     with connect_v2(database) as connection:
         unresolved = connection.execute(
             "SELECT count(*) FROM incidents WHERE scope='component' AND resolved_at_us IS NULL"

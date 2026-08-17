@@ -1037,3 +1037,55 @@ WAL below the existing cap. Update the linked runbook to forbid unbounded direct
 reads on an active operational database and name the supported bounded observation
 path. No schema, XNYS, subscription, risk, execution, reconciliation, paper/live,
 account, credential, or order-capability behavior changes.
+
+## Accepted live addendum: one optional downstream component per drain
+
+Generation 13 recovered the exact generation-12 `WAL_CAP_FATAL` through the audited
+same-run path after a restore-verified schema-20 snapshot. Raw projection recovered
+from 16,113 nonterminal callbacks to 109, all exact 41 subscriptions were active and
+fresh, the socket stayed connected, order capability remained zero, and physical WAL
+stabilised at 40,936,352 bytes. With the bounded web reader enabled, readiness then
+oscillated between 200 and 503. The only reason was `RECORDER_HEARTBEAT_STALE`: the
+heartbeat advanced again after roughly seven-second gaps while backlog remained
+119--430, feeds remained fresh, and no feed/component incident appeared. This proves
+that an underfull drain resumes several individually optional components in one
+orchestration turn and can cumulatively exceed the fixed five-second main-loop
+heartbeat contract.
+
+The accepted correction preserves the five-second threshold and the existing single
+orchestration thread. A full callback lease continues to defer all optional downstream
+work. Each underfull or idle `Recorder.drain` invocation may run at most one existing
+component, chosen by one process-local round-robin cursor in this order: option
+projection, idea runner, option discovery, shadow evaluation. The cursor advances
+after success, recoverable failure, or component backoff so no component can starve
+the others. The next recorder iteration therefore services durable raw callbacks,
+publishes the existing heartbeat, and runs health supervision before another optional
+component. No heartbeat thread, additional heartbeat transaction, database state,
+schema, setting, queue, service, threshold increase, or new failure latch is added. A
+single component that genuinely exceeds five seconds remains truthfully visible as a
+stale heartbeat.
+
+TDD uses the public `Recorder.drain` seam. Four bounded fake components whose aggregate
+runtime exceeds five seconds reproduce the old single-turn exposure; the corrected
+behavior runs exactly one component per eligible drain in deterministic order. Tests
+also prove full batches run none, underfull and idle calls rotate without starvation,
+recoverable failure/backoff advances rotation and persists its incident, callbacks
+arriving during one component are drained before the next, offline
+`defer_downstream_when_full=False` retains deliberate downstream execution one
+component per invocation, and existing receipt failure/order/duplicate/gap/plugin
+isolation behavior remains unchanged. Before rollout, measure each component on a
+disposable stopped-generation snapshot and require each individual call at or below
+four seconds; if any component exceeds that bound, split or bound only that measured
+component rather than masking it with scheduling.
+
+This is a code-only schema-20 rollout. Generation 13 may continue collecting while raw
+admission remains healthy, backlog stays below 5,000 without a rising trend, WAL stays
+below 48 MiB, every feed stays active/fresh, and heartbeat advances within 30 seconds.
+For deployment, clean-stop generation 13, mask the web reader, install the exact
+reviewed candidate, and restart the same run as generation 14 without fatal recovery.
+The fixed acceptance gate is 60--120 seconds of stable readiness with maximum heartbeat
+gap below five seconds, backlog below 5,000, WAL below 48 MiB, all downstream/receipt
+frontiers progressing, 41/41 fresh active feeds, and zero order capability. This
+affects prospective/shadow downstream scheduling and readiness only; XNYS hours,
+subscriptions, risk, execution, reconciliation, accounts, credentials, paper/live
+trading, and broker-order capability remain unchanged.

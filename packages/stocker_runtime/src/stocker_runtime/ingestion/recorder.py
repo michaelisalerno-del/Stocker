@@ -372,6 +372,7 @@ class Recorder:
         self._component_pending_incidents: dict[str, tuple[str, dict[str, JsonValue]]] = {}
         self._component_observations: set[str] = set()
         self._pending_callback_wakeup = threading.Event()
+        self._next_downstream_component = 0
         self._writer_lock = LocalWriterLock.for_database(config.database)
 
     @contextmanager
@@ -3152,31 +3153,43 @@ class Recorder:
                     connection.commit()
                 self._fulfill_snapshot_interests_from_streams(now_us=causal_now_us)
 
-            self._run_component(
-                "option_projection",
-                now_us=causal_now_us,
-                operation=project_options,
-            )
             idea_runner = self._idea_runner
-            if idea_runner is not None:
-                self._run_component(
-                    "idea_runner",
-                    now_us=causal_now_us,
-                    operation=lambda: idea_runner.run_once(now_us=causal_now_us),
-                )
-            if self._connection_is_connected():
-                self._run_component(
-                    "option_discovery",
-                    now_us=causal_now_us,
-                    operation=lambda: self._reconcile_dynamic_market_data(now_us=causal_now_us),
-                )
             shadow_engine = self._shadow_engine
-            if shadow_engine is not None:
-                self._run_component(
+            downstream_components: tuple[tuple[str, Callable[[], object] | None], ...] = (
+                ("option_projection", project_options),
+                (
+                    "idea_runner",
+                    None
+                    if idea_runner is None
+                    else lambda: idea_runner.run_once(now_us=causal_now_us),
+                ),
+                (
+                    "option_discovery",
+                    None
+                    if not self._connection_is_connected()
+                    else lambda: self._reconcile_dynamic_market_data(now_us=causal_now_us),
+                ),
+                (
                     "shadow_evaluation",
-                    now_us=causal_now_us,
-                    operation=lambda: shadow_engine.run_once(now_us=causal_now_us),
+                    None
+                    if shadow_engine is None
+                    else lambda: shadow_engine.run_once(now_us=causal_now_us),
+                ),
+            )
+            for component_offset in range(len(downstream_components)):
+                component_index = (self._next_downstream_component + component_offset) % len(
+                    downstream_components
                 )
+                component, operation = downstream_components[component_index]
+                if operation is None:
+                    continue
+                self._next_downstream_component = (component_index + 1) % len(downstream_components)
+                self._run_component(
+                    component,
+                    now_us=causal_now_us,
+                    operation=operation,
+                )
+                break
             return processed
         except CallbackTimestampOrderingLoss as error:
             self._fatal("CALLBACK_TIMESTAMP_ORDERING_LOSS", causal_now_us)

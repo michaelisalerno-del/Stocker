@@ -4,17 +4,21 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import gzip
 import hashlib
 import json
 import os
 import shutil
 import sqlite3
-import stat
 import subprocess
 import time
 from pathlib import Path
+
+from stocker_runtime.ingestion.lifecycle import LocalWriterLock
+
+MAX_RECOVERY_SNAPSHOTS = 2
+MAX_RECOVERY_ARCHIVE_BYTES = 9 * 1024 * 1024 * 1024
+RECOVERY_WORKING_HEADROOM_BYTES = 512 * 1024 * 1024
 
 
 def _sha256(path: Path) -> str:
@@ -31,6 +35,33 @@ def _fsync(path: Path) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _manifest_for_archive(archive: Path) -> Path:
+    return Path(f"{str(archive)[:-3]}.manifest.json")
+
+
+def _recovery_archives(destination: Path) -> list[Path]:
+    archives = sorted(
+        destination.glob("stocker-v2-*.sqlite3.gz"),
+        key=lambda path: (path.stat().st_mtime_ns, path.name),
+    )
+    for archive in archives:
+        if archive.stat().st_size > MAX_RECOVERY_ARCHIVE_BYTES:
+            raise RuntimeError(f"recovery archive exceeds its size limit: {archive.name}")
+        if not _manifest_for_archive(archive).is_file():
+            raise RuntimeError(f"recovery archive has no matching manifest: {archive.name}")
+    return archives
+
+
+def _rotate_recovery_archives(destination: Path) -> None:
+    archives = _recovery_archives(destination)
+    while len(archives) > MAX_RECOVERY_SNAPSHOTS:
+        expired = archives.pop(0)
+        manifest = _manifest_for_archive(expired)
+        expired.unlink()
+        manifest.unlink()
+    _fsync(destination)
 
 
 def _verify(
@@ -130,6 +161,14 @@ def main() -> None:
         raise RuntimeError("database, destination, and matching runtime must exist")
     if arguments.expected_schema < 1 or arguments.generation < 0:
         raise RuntimeError("expected schema and generation are invalid")
+    _recovery_archives(destination)
+    source_bytes = database.stat().st_size
+    required_free_bytes = 3 * source_bytes + RECOVERY_WORKING_HEADROOM_BYTES
+    if shutil.disk_usage(destination).free < required_free_bytes:
+        raise RuntimeError(
+            "recovery snapshot lacks space for copy, compressed archive, restore proof, "
+            "and working headroom"
+        )
     for unit in (arguments.recorder_unit, arguments.web_unit):
         service = subprocess.run(
             ["systemctl", "is-active", "--quiet", unit],
@@ -160,21 +199,21 @@ def main() -> None:
     if any(path.exists() for path in generated):
         raise RuntimeError("a generated snapshot target already exists")
 
-    lock_path = Path(f"{database}.writer.lock")
-    lock_descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o640)
+    lock = LocalWriterLock.for_database(database)
     succeeded = False
     try:
-        if not stat.S_ISREG(os.fstat(lock_descriptor).st_mode):
-            raise RuntimeError("canonical writer lock is not a regular file")
-        fcntl.flock(lock_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock.acquire()
+        lock.verify_held()
         lsof = subprocess.run(["lsof", str(database)], capture_output=True, text=True)
         if lsof.returncode == 0 and lsof.stdout.strip():
             raise RuntimeError(f"database has an open descriptor: {lsof.stdout.strip()}")
         if lsof.returncode != 1:
             raise RuntimeError("cannot prove that the database has no open descriptor")
 
+        lock.verify_held()
         with sqlite3.connect(database, isolation_level=None) as connection:
             checkpoint = tuple(connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone())
+        lock.verify_held()
         if checkpoint[0] != 0 or checkpoint[2] < checkpoint[1]:
             raise RuntimeError(f"source WAL checkpoint is incomplete: {checkpoint}")
         wal = Path(f"{database}-wal")
@@ -182,11 +221,13 @@ def main() -> None:
             raise RuntimeError("source WAL is nonzero after the truncate checkpoint")
 
         before = database.stat()
+        lock.verify_held()
         shutil.copyfile(database, snapshot)
         os.chmod(snapshot, 0o640)
-        os.chown(snapshot, 0, before.st_gid)
+        os.chown(snapshot, before.st_uid, before.st_gid)
         _fsync(snapshot)
         _fsync(destination)
+        lock.verify_held()
         after = database.stat()
         if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
             raise RuntimeError("source database changed during the snapshot")
@@ -204,6 +245,7 @@ def main() -> None:
             expected_max_source_sequence=arguments.expected_max_source_sequence,
             expected_nonterminal=arguments.expected_nonterminal,
         )
+        lock.verify_held()
 
         with snapshot.open("rb") as source, archive.open("xb") as raw_archive:
             with gzip.GzipFile(filename="", mode="wb", fileobj=raw_archive, mtime=0) as compressed:
@@ -211,8 +253,11 @@ def main() -> None:
             raw_archive.flush()
             os.fsync(raw_archive.fileno())
         os.chmod(archive, 0o640)
-        os.chown(archive, 0, before.st_gid)
+        os.chown(archive, before.st_uid, before.st_gid)
+        if archive.stat().st_size > MAX_RECOVERY_ARCHIVE_BYTES:
+            raise RuntimeError("recovery archive exceeds its size limit")
         archive_hash = _sha256(archive)
+        lock.verify_held()
 
         with gzip.open(archive, "rb") as compressed, restore.open("xb") as restored:
             shutil.copyfileobj(compressed, restored, length=8 * 1024 * 1024)
@@ -232,6 +277,7 @@ def main() -> None:
         )
         if restored_evidence != evidence:
             raise RuntimeError("decompressed restore evidence differs from the snapshot")
+        lock.verify_held()
 
         payload = {
             "status": "ok",
@@ -244,6 +290,7 @@ def main() -> None:
             "snapshot_filename": snapshot.name,
             "snapshot_bytes": snapshot.stat().st_size,
             "snapshot_sha256": snapshot_hash,
+            "uncompressed_retained": False,
             "archive_filename": archive.name,
             "archive_bytes": archive.stat().st_size,
             "archive_sha256": archive_hash,
@@ -256,8 +303,14 @@ def main() -> None:
             output.flush()
             os.fsync(output.fileno())
         os.chmod(manifest, 0o640)
-        os.chown(manifest, 0, before.st_gid)
+        os.chown(manifest, before.st_uid, before.st_gid)
         _fsync(destination)
+        lock.verify_held()
+        snapshot.unlink()
+        Path(f"{snapshot}-wal").unlink(missing_ok=True)
+        Path(f"{snapshot}-shm").unlink(missing_ok=True)
+        _rotate_recovery_archives(destination)
+        lock.verify_held()
         print(json.dumps(payload, sort_keys=True))
         succeeded = True
     finally:
@@ -267,7 +320,7 @@ def main() -> None:
             for partial in generated:
                 partial.unlink(missing_ok=True)
         _fsync(destination)
-        os.close(lock_descriptor)
+        lock.release()
 
 
 if __name__ == "__main__":

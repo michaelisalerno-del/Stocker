@@ -111,11 +111,14 @@ uv run python scripts/quiescent_v2_snapshot.py \
 ```
 
 Require exit zero and one JSON object with `status=ok`, exact expected evidence,
-identical snapshot/decompressed hashes and `restore_verified=true`. Keep its compressed
-archive and manifest outside managed backup rotation. Removing a prior uncompressed
-emergency copy for headroom is allowed only after its retained archive hash matches its
-manifest; report that removal because restoration then requires decompression. This
-fallback is not permission to snapshot a live database or a nonzero WAL separately.
+identical snapshot/decompressed hashes, `restore_verified=true`, and
+`uncompressed_retained=false`. The command requires free space for three database-size
+working files plus 512 MiB, limits each compressed artifact to 9 GiB, retains exactly
+the two newest compressed recovery snapshots with their manifests, and deletes the
+verified uncompressed working copy. These artifacts remain outside managed backup
+health/rotation, but the command's own two-copy/18-GiB maximum is mandatory. Never
+manually retain its uncompressed working copy. This fallback is not permission to
+snapshot a live database or a nonzero WAL separately.
 
 ## Production preflight
 

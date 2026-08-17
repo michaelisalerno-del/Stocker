@@ -733,9 +733,11 @@ During XNYS regular hours the recorder will still skip all heavy receipt,
 terminalization, payload-compaction, pruning, incremental-vacuum, and backup work, but
 it will attempt the existing passive checkpoint at the existing 10-second cadence and
 measure DB/WAL size afterward. The post-checkpoint sizes drive the unchanged soft,
-degraded, and hard-cap actions. A passive-checkpoint error is visible as recoverable
-retention degradation unless it is an existing hard storage/integrity error; a WAL
-that remains at or above 64 MiB still fails closed. Outside the existing XNYS session,
+degraded, and hard-cap actions. A passive-checkpoint error or incomplete result
+(including fewer checkpointed frames than logged frames even when SQLite's busy column
+is zero) is visible as recoverable retention degradation unless it is an existing hard
+storage/integrity error; a WAL that remains at or above 64 MiB still fails closed.
+Outside the existing XNYS session,
 the full bounded path remains unchanged. No new loop, setting, calendar, state,
 service, deadline, or cap is introduced.
 

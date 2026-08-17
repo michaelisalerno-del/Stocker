@@ -5455,17 +5455,20 @@ def test_cap_only_maintenance_checkpoints_before_measuring_wal(
         return 100, 59
 
     monkeypatch.setattr(manager, "_measured_sizes", measured)
-    state, database_bytes, wal_bytes, action = manager.checkpoint_and_measure_cap_state()
+    state, database_bytes, wal_bytes, action, checkpoint_complete = (
+        manager.checkpoint_and_measure_cap_state()
+    )
 
     checkpoint_index = next(
         index for index, event in enumerate(events) if "wal_checkpoint(PASSIVE)" in event
     )
     assert checkpoint_index < events.index("MEASURE")
-    assert (state, database_bytes, wal_bytes, action) == (
+    assert (state, database_bytes, wal_bytes, action, checkpoint_complete) == (
         StorageCapState.NORMAL,
         100,
         59,
         None,
+        True,
     )
 
 
@@ -5485,7 +5488,57 @@ def test_cap_only_maintenance_fails_closed_on_post_checkpoint_wal_size(
         100,
         60,
         "WAL_CAP_FATAL",
+        True,
     )
+
+
+def test_cap_only_maintenance_reports_incomplete_passive_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    manager = RetentionManager(database)
+    monkeypatch.setattr(
+        retention_module,
+        "passive_wal_checkpoint_complete",
+        lambda _connection: False,
+    )
+    monkeypatch.setattr(manager, "_measured_sizes", lambda _connection: (100, 59))
+
+    assert manager.checkpoint_and_measure_cap_state() == (
+        StorageCapState.NORMAL,
+        100,
+        59,
+        None,
+        False,
+    )
+
+
+def test_passive_wal_checkpoint_detects_real_held_reader_partial_progress(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    writer = connect_v2(database)
+    reader = sqlite3.connect(database)
+    checkpoint = connect_v2(database)
+    try:
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute("UPDATE schema_migrations SET applied_at_us=applied_at_us+1 WHERE version=1")
+        writer.commit()
+        reader.execute("BEGIN")
+        reader.execute("SELECT applied_at_us FROM schema_migrations WHERE version=1").fetchone()
+        for _ in range(5):
+            writer.execute(
+                "UPDATE schema_migrations SET applied_at_us=applied_at_us+1 WHERE version=1"
+            )
+            writer.commit()
+
+        assert retention_module.passive_wal_checkpoint_complete(checkpoint) is False
+    finally:
+        checkpoint.close()
+        reader.close()
+        writer.close()
 
 
 def test_retention_deadline_rolls_back_safely(tmp_path: Path) -> None:

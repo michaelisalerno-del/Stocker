@@ -313,6 +313,14 @@ def _cap_state(database_bytes: int, cap_bytes: int) -> StorageCapState:
     return StorageCapState.NORMAL
 
 
+def passive_wal_checkpoint_complete(connection: sqlite3.Connection) -> bool:
+    """Checkpoint available WAL frames and report whether every logged frame completed."""
+
+    row = connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+    busy, log_frames, checkpointed_frames = (int(row[index]) for index in range(3))
+    return busy == 0 and (log_frames < 0 or checkpointed_frames >= log_frames)
+
+
 class RetentionManager:
     """Run small transactional expiry passes without deleting unexpired protected evidence."""
 
@@ -351,12 +359,12 @@ class RetentionManager:
 
     def checkpoint_and_measure_cap_state(
         self,
-    ) -> tuple[StorageCapState, int, int, str | None]:
+    ) -> tuple[StorageCapState, int, int, str | None, bool]:
         """Passively checkpoint available WAL frames, then measure the hard caps."""
 
         connection = connect_v2(self.database_path)
         try:
-            connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+            checkpoint_complete = passive_wal_checkpoint_complete(connection)
             database_bytes, wal_bytes = self._measured_sizes(connection)
         finally:
             connection.close()
@@ -366,7 +374,7 @@ class RetentionManager:
             state = StorageCapState.FATAL
             if required_action is None:
                 required_action = "WAL_CAP_FATAL"
-        return state, database_bytes, wal_bytes, required_action
+        return state, database_bytes, wal_bytes, required_action, checkpoint_complete
 
     def _compact_payloads(
         self,

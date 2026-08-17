@@ -2526,8 +2526,8 @@ def test_regular_session_maintenance_measures_caps_without_heavy_work_or_false_r
 
         def checkpoint_and_measure_cap_state(
             self,
-        ) -> tuple[StorageCapState, int, int, str | None]:
-            return StorageCapState.NORMAL, 123, 4, None
+        ) -> tuple[StorageCapState, int, int, str | None, bool]:
+            return StorageCapState.NORMAL, 123, 4, None, True
 
         def run(self, **_kwargs: object) -> RetentionResult:
             raise AssertionError("regular-session maintenance must not run heavy retention")
@@ -2673,7 +2673,7 @@ def test_regular_session_cap_measurement_contention_degrades_without_stopping_in
 
         def checkpoint_and_measure_cap_state(
             self,
-        ) -> tuple[StorageCapState, int, int, str | None]:
+        ) -> tuple[StorageCapState, int, int, str | None, bool]:
             raise sqlite3.OperationalError("database is locked")
 
         def run(self, **_kwargs: object) -> RetentionResult:
@@ -2702,6 +2702,46 @@ def test_regular_session_cap_measurement_contention_degrades_without_stopping_in
     assert adapter.cancelled == []
 
 
+def test_regular_session_incomplete_wal_checkpoint_publishes_metrics_and_degrades(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    class IncompleteCheckpoint:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def checkpoint_and_measure_cap_state(
+            self,
+        ) -> tuple[StorageCapState, int, int, str | None, bool]:
+            return StorageCapState.NORMAL, 123, 59, None, False
+
+    monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", IncompleteCheckpoint)
+
+    assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.NORMAL
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, database_bytes, wal_bytes FROM runtime_state"
+        ).fetchone()
+        incident = connection.execute(
+            "SELECT details_json FROM incidents WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED'"
+        ).fetchone()
+    assert tuple(runtime) == (
+        "degraded",
+        "COMPONENT_RETENTION_MAINTENANCE_FAILED",
+        123,
+        59,
+    )
+    assert json.loads(incident["details_json"])["error"] == "WalCheckpointIncomplete"
+    assert adapter.connected is True
+
+
 def test_regular_session_cap_measurement_still_fails_closed_at_hard_wal_cap(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2719,8 +2759,8 @@ def test_regular_session_cap_measurement_still_fails_closed_at_hard_wal_cap(
 
         def checkpoint_and_measure_cap_state(
             self,
-        ) -> tuple[StorageCapState, int, int, str | None]:
-            return StorageCapState.FATAL, 100, 64, "WAL_CAP_FATAL"
+        ) -> tuple[StorageCapState, int, int, str | None, bool]:
+            return StorageCapState.FATAL, 100, 64, "WAL_CAP_FATAL", True
 
         def run(self, **_kwargs: object) -> RetentionResult:
             raise AssertionError("hard-cap check must fail before heavy retention")
@@ -2755,8 +2795,8 @@ def test_regular_session_degraded_cap_pauses_optional_feed_idempotently(
 
         def checkpoint_and_measure_cap_state(
             self,
-        ) -> tuple[StorageCapState, int, int, str | None]:
-            return StorageCapState.DEGRADED, 95, 1, None
+        ) -> tuple[StorageCapState, int, int, str | None, bool]:
+            return StorageCapState.DEGRADED, 95, 1, None, True
 
         def run(self, **_kwargs: object) -> RetentionResult:
             raise AssertionError("degraded cap must not run heavy retention in-session")
@@ -2793,8 +2833,8 @@ def test_regular_session_soft_cap_publishes_without_pausing_feeds(
 
         def checkpoint_and_measure_cap_state(
             self,
-        ) -> tuple[StorageCapState, int, int, str | None]:
-            return StorageCapState.SOFT, 85, 1, None
+        ) -> tuple[StorageCapState, int, int, str | None, bool]:
+            return StorageCapState.SOFT, 85, 1, None, True
 
     monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", SoftCapMeasurement)
 
@@ -2826,8 +2866,8 @@ def test_degraded_cap_still_pauses_optional_feed_after_publication_contention(
 
         def checkpoint_and_measure_cap_state(
             self,
-        ) -> tuple[StorageCapState, int, int, str | None]:
-            return StorageCapState.DEGRADED, 95, 1, None
+        ) -> tuple[StorageCapState, int, int, str | None, bool]:
+            return StorageCapState.DEGRADED, 95, 1, None, True
 
     def contended_publication(**_kwargs: object) -> bool:
         recorder._component_failure(
@@ -4681,6 +4721,39 @@ def test_wal_cap_fatal_recovery_rejects_wal_still_at_hard_cap(
             fatal_code="WAL_CAP_FATAL",
             operator="operator@example.invalid",
             reason="must remain closed while WAL is capped",
+            authorized_at_us=102,
+        )
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT status FROM runs").fetchone()[0] == "fatal"
+
+
+def test_wal_cap_fatal_recovery_rejects_incomplete_passive_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    failed = Recorder(_config(database), FakeMarketData())
+    failed.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    failed._fatal("WAL_CAP_FATAL", 101)
+    failed.abandon_unclean()
+    monkeypatch.setattr(
+        lifecycle_module,
+        "passive_wal_checkpoint_complete",
+        lambda _connection: False,
+    )
+
+    with pytest.raises(LocalWriterLockError, match="incomplete WAL checkpoint"):
+        recover_fatal_generation(
+            database=database,
+            run_id="run-1",
+            generation=1,
+            mode="prospective_record",
+            config_hash="a" * 64,
+            input_hash=market_data_input_hash((instrument,), specs),
+            fatal_code="WAL_CAP_FATAL",
+            operator="operator@example.invalid",
+            reason="must remain closed after partial checkpoint",
             authorized_at_us=102,
         )
     with connect_v2(database) as connection:

@@ -4248,9 +4248,13 @@ class Recorder:
         authority = self._authority()
         if not retention_work_expected:
             try:
-                cap_state, database_bytes, wal_bytes, required_action = RetentionManager(
-                    self.config.database
-                ).checkpoint_and_measure_cap_state()
+                (
+                    cap_state,
+                    database_bytes,
+                    wal_bytes,
+                    required_action,
+                    checkpoint_complete,
+                ) = RetentionManager(self.config.database).checkpoint_and_measure_cap_state()
             except sqlite3.OperationalError as error:
                 if self._hard_component_error(error):
                     self._fatal("RETENTION_INVARIANT_FAILED", now_us)
@@ -4276,6 +4280,13 @@ class Recorder:
                 database_bytes=database_bytes,
                 wal_bytes=wal_bytes,
             )
+            if not checkpoint_complete:
+                self._retention_maintenance_deferred = True
+                self._component_failure(
+                    "retention_maintenance",
+                    now_us=now_us,
+                    error_name="WalCheckpointIncomplete",
+                )
             if cap_state is StorageCapState.FATAL:
                 self._fatal(required_action or "STORAGE_CAP_FATAL", now_us)
                 raise RecorderFatalError(required_action or "storage cap closed admission")

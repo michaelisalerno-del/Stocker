@@ -15,7 +15,10 @@ from pathlib import Path
 from typing import Literal
 
 from stocker_runtime.storage import RetentionManager, RetentionPolicy, connect_v2, verify_database
-from stocker_runtime.storage.retention import PayloadCompactionCommittedError
+from stocker_runtime.storage.retention import (
+    PayloadCompactionCommittedError,
+    passive_wal_checkpoint_complete,
+)
 
 OWNERSHIP_PROTOCOL = "local_flock_v1"
 RECOVERABLE_FATAL_CODES = frozenset(
@@ -235,7 +238,8 @@ def recover_fatal_generation(
     try:
         verify_database(database)
         with connect_v2(database) as connection:
-            connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+            if not passive_wal_checkpoint_complete(connection):
+                raise LocalWriterLockError("fatal recovery blocked by an incomplete WAL checkpoint")
             page_count = int(connection.execute("PRAGMA page_count").fetchone()[0])
             page_size = int(connection.execute("PRAGMA page_size").fetchone()[0])
             wal_path = Path(f"{Path(database).resolve(strict=False)}-wal")

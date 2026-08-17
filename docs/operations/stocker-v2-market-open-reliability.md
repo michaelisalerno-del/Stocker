@@ -140,7 +140,12 @@ creates a byte-identical source copy. The ordinary managed-backup verifier, dete
 compression, manifest, rotation floors, and 8 GiB directory cap then apply. The newly
 published archive is decompressed to a temporary path and schema, hashes, `quick_check`,
 and foreign keys are verified before success. Recorder is restarted first with the same
-`run_id` and a new generation, then web is restarted. Both the helper and systemd
+`run_id` and a new generation. The helper requires a fresh heartbeat from that exact
+owned generation, then runs the tracked root-owned SQLite-boundary preparer so the
+WAL/SHM files exist with their fixed identities before systemd constructs the web
+sandbox; only then is web restarted. Recorder, heartbeat, or boundary failure keeps web
+stopped and the backup degraded rather than presenting stale data as recovered. Both
+the helper and systemd
 `ExecStopPost` provide this ordered restart boundary on success, ordinary failure, or
 service timeout. A failed snapshot remains nonzero/degraded; it is never reported as a
 healthy backup merely because the services restarted.

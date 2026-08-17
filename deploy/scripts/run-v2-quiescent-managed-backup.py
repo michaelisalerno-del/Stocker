@@ -6,12 +6,13 @@ import argparse
 import fcntl
 import json
 import os
+import sqlite3
 import stat
 import subprocess
 import tempfile
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -39,8 +40,11 @@ RESTART_MARKERS = {
 }
 RECORDER_UNIT = "stocker-v2-recorder.service"
 WEB_UNIT = "stocker-v2-web.service"
+SQLITE_BOUNDARY = Path("/usr/local/libexec/stocker-prepare-v2-sqlite-boundary")
 MINIMUM_OFF_SESSION_US = 60 * 60 * 1_000_000
 MAX_SESSION_LOOKAHEAD_DAYS = 10
+RECORDER_RESTART_TIMEOUT_SECONDS = 30.0
+RECORDER_HEARTBEAT_FRESH_US = 5_000_000
 _NEW_YORK = ZoneInfo("America/New_York")
 
 
@@ -87,6 +91,82 @@ def _require_no_database_descriptors(database: Path) -> None:
         raise RuntimeError("operational database still has an open descriptor")
     if completed.returncode != 1:
         raise RuntimeError("cannot prove the operational database has no open descriptor")
+
+
+def _prepare_web_sqlite_boundary() -> None:
+    """Recreate the verified WAL/SHM boundary before systemd mounts the web sandbox."""
+
+    completed = subprocess.run(
+        [str(SQLITE_BOUNDARY)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError("SQLite boundary preparation failed before web restart")
+
+
+def _require_fresh_owned_recorder(database: Path) -> None:
+    deadline = time.monotonic() + RECORDER_RESTART_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        now_us = time.time_ns() // 1_000
+        try:
+            with closing(
+                sqlite3.connect(
+                    f"{database.resolve().as_uri()}?mode=ro",
+                    uri=True,
+                    timeout=0.3,
+                    isolation_level=None,
+                )
+            ) as connection:
+                connection.execute("PRAGMA query_only = ON")
+                row = connection.execute(
+                    "SELECT state.process_heartbeat_at_us "
+                    "FROM runtime_state state "
+                    "JOIN runs run ON run.run_id=state.run_id "
+                    "JOIN recorder_generations generation "
+                    "ON generation.run_id=state.run_id "
+                    "AND generation.generation=state.recorder_generation "
+                    "WHERE run.status='running' AND generation.ended_at_us IS NULL "
+                    "AND generation.ownership_protocol='local_flock_v1' "
+                    "AND state.lifecycle NOT IN ('stopped','fatal') "
+                    "ORDER BY state.process_heartbeat_at_us DESC LIMIT 1"
+                ).fetchone()
+        except sqlite3.Error:
+            row = None
+        if row is not None and row[0] is not None:
+            age_us = now_us - int(row[0])
+            if 0 <= age_us <= RECORDER_HEARTBEAT_FRESH_US:
+                return
+        time.sleep(0.25)
+    raise RuntimeError("recorder did not publish a fresh owned-generation heartbeat")
+
+
+def _restart_services(database: Path) -> list[str]:
+    errors: list[str] = []
+    try:
+        _systemctl("start", RECORDER_UNIT)
+    except Exception as error:
+        errors.append(f"{RECORDER_UNIT}:{type(error).__name__}")
+        return errors
+    if _systemctl("is-active", RECORDER_UNIT) != 0:
+        errors.append(f"{RECORDER_UNIT}:inactive")
+        return errors
+    try:
+        _require_fresh_owned_recorder(database)
+    except Exception as error:
+        errors.append(f"recorder-heartbeat:{type(error).__name__}")
+        return errors
+    try:
+        _prepare_web_sqlite_boundary()
+    except Exception as error:
+        errors.append(f"sqlite-boundary:{type(error).__name__}")
+        return errors
+    try:
+        _systemctl("start", WEB_UNIT)
+    except Exception as error:
+        errors.append(f"{WEB_UNIT}:{type(error).__name__}")
+    return errors
 
 
 def _restore_check(manifest: Path, working_directory: Path) -> None:
@@ -154,12 +234,7 @@ def restart_after_interruption(
     marker = json.loads(restart_marker.read_text(encoding="utf-8"))
     if set(marker) != {"created_at_us"} or not isinstance(marker["created_at_us"], int):
         raise RuntimeError("backup restart marker is invalid")
-    errors: list[str] = []
-    for unit in (RECORDER_UNIT, WEB_UNIT):
-        try:
-            _systemctl("start", unit)
-        except Exception as error:
-            errors.append(f"{unit}:{type(error).__name__}")
+    errors = _restart_services(DATABASE)
     try:
         record_backup_failure(
             DESTINATION,
@@ -253,11 +328,7 @@ def _run_quiescent_managed_backup(
     finally:
         restart_errors: list[str] = []
         if restart_required:
-            for unit in (RECORDER_UNIT, WEB_UNIT):
-                try:
-                    _systemctl("start", unit)
-                except Exception as error:
-                    restart_errors.append(f"{unit}:{type(error).__name__}")
+            restart_errors = _restart_services(database)
             if not restart_errors:
                 restart_marker.unlink(missing_ok=True)
         if restart_errors:

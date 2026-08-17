@@ -9,6 +9,8 @@ from typing import Any
 
 import pytest
 
+from stocker_runtime.storage import connect_v2, initialize_database
+
 
 def _script_module() -> ModuleType:
     path = Path("deploy/scripts/run-v2-quiescent-managed-backup.py").resolve()
@@ -29,6 +31,53 @@ def _script_module() -> ModuleType:
 
 def _timestamp(value: str) -> int:
     return int(datetime.fromisoformat(value).replace(tzinfo=UTC).timestamp() * 1_000_000)
+
+
+def _seed_owned_recorder(database: Path, *, heartbeat_at_us: int) -> None:
+    initialize_database(database, applied_at_us=1)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO runs(run_id, mode, source, started_at_us, config_hash, git_commit, "
+            "data_class, status) VALUES ('run-1', 'shadow', 'ibkr', 1, ?, 'deadbee', "
+            "'shadow_protected', 'running')",
+            ("a" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
+            "ownership_protocol, git_commit, input_hash) VALUES "
+            "('run-1', 1, 'owner-1', 1, 'local_flock_v1', 'deadbee', ?)",
+            ("b" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO runtime_state(run_id, recorder_generation, lifecycle, "
+            "process_heartbeat_at_us, connection_state, connection_generation) VALUES "
+            "('run-1', 1, 'running', ?, 'connected', 1)",
+            (heartbeat_at_us,),
+        )
+
+
+def test_restart_requires_fresh_owned_generation_heartbeat(tmp_path: Path) -> None:
+    module = _script_module()
+    database = tmp_path / "operational.sqlite3"
+    _seed_owned_recorder(database, heartbeat_at_us=module.time.time_ns() // 1_000)
+
+    module._require_fresh_owned_recorder(database)
+
+
+def test_restart_rejects_stale_owned_generation_heartbeat(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _script_module()
+    database = tmp_path / "operational.sqlite3"
+    _seed_owned_recorder(database, heartbeat_at_us=1)
+    monotonic = iter((0.0, 0.0, 1.0))
+    monkeypatch.setattr(module.time, "monotonic", lambda: next(monotonic))
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(module, "RECORDER_RESTART_TIMEOUT_SECONDS", 0.5)
+
+    with pytest.raises(RuntimeError, match="fresh owned-generation heartbeat"):
+        module._require_fresh_owned_recorder(database)
 
 
 def test_quiescent_backup_window_uses_exact_xnys_regular_session() -> None:
@@ -64,6 +113,8 @@ def _service_controller(module: ModuleType) -> tuple[list[tuple[str, str]], dict
         raise AssertionError(action)
 
     module._systemctl = systemctl
+    module._require_fresh_owned_recorder = lambda _database: None
+    module._prepare_web_sqlite_boundary = lambda: None
     return calls, active
 
 
@@ -135,6 +186,7 @@ def test_quiescent_backup_stops_once_holds_lock_and_restarts_in_order(
         ("is-active", module.WEB_UNIT),
         ("is-active", module.RECORDER_UNIT),
         ("start", module.RECORDER_UNIT),
+        ("is-active", module.RECORDER_UNIT),
         ("start", module.WEB_UNIT),
     ]
     assert events == [
@@ -184,7 +236,7 @@ def test_quiescent_backup_failure_is_degraded_and_always_restarts(
     assert failures == ["BACKUP_IN_PROGRESS", "RuntimeError"]
     assert active == {module.RECORDER_UNIT: True, module.WEB_UNIT: True}
     assert calls[-2:] == [
-        ("start", module.RECORDER_UNIT),
+        ("is-active", module.RECORDER_UNIT),
         ("start", module.WEB_UNIT),
     ]
 
@@ -234,8 +286,9 @@ def test_quiescent_backup_ownership_boundaries_fail_before_copy_and_restart(
 
     assert copied is False
     assert active == {module.RECORDER_UNIT: True, module.WEB_UNIT: True}
-    assert calls[-2:] == [
+    assert calls[-3:] == [
         ("start", module.RECORDER_UNIT),
+        ("is-active", module.RECORDER_UNIT),
         ("start", module.WEB_UNIT),
     ]
 
@@ -286,6 +339,7 @@ def test_interruption_restart_is_marker_gated_and_ordered(
     module.restart_after_interruption(tier="daily", restart_marker=marker)
     assert calls == [
         ("start", module.RECORDER_UNIT),
+        ("is-active", module.RECORDER_UNIT),
         ("start", module.WEB_UNIT),
     ]
     assert active == {module.RECORDER_UNIT: True, module.WEB_UNIT: True}
@@ -293,7 +347,7 @@ def test_interruption_restart_is_marker_gated_and_ordered(
     assert failures == [("BackupInterrupted", 1)]
 
 
-def test_interruption_restart_attempts_web_and_status_after_recorder_failure(
+def test_interruption_restart_skips_web_but_attempts_status_after_recorder_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -308,6 +362,8 @@ def test_interruption_restart_attempts_web_and_status_after_recorder_failure(
 
     failures: list[str] = []
     monkeypatch.setattr(module, "_systemctl", systemctl)
+    monkeypatch.setattr(module, "_require_fresh_owned_recorder", lambda _database: None)
+    monkeypatch.setattr(module, "_prepare_web_sqlite_boundary", lambda: None)
     monkeypatch.setattr(
         module,
         "record_backup_failure",
@@ -321,10 +377,92 @@ def test_interruption_restart_attempts_web_and_status_after_recorder_failure(
 
     assert calls == [
         ("start", module.RECORDER_UNIT),
-        ("start", module.WEB_UNIT),
     ]
     assert failures == ["BackupInterrupted"]
     assert marker.is_file()
+
+
+def test_restart_prepares_sqlite_boundary_after_recorder_and_before_web(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _script_module()
+    events: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "_systemctl",
+        lambda action, unit: events.append(f"{action}:{unit}") or 0,
+    )
+    monkeypatch.setattr(
+        module,
+        "_prepare_web_sqlite_boundary",
+        lambda: events.append("sqlite-boundary"),
+    )
+    monkeypatch.setattr(
+        module,
+        "_require_fresh_owned_recorder",
+        lambda _database: events.append("recorder-heartbeat"),
+    )
+
+    assert module._restart_services(Path("database.sqlite3")) == []
+    assert events == [
+        f"start:{module.RECORDER_UNIT}",
+        f"is-active:{module.RECORDER_UNIT}",
+        "recorder-heartbeat",
+        "sqlite-boundary",
+        f"start:{module.WEB_UNIT}",
+    ]
+
+
+def test_restart_attempts_web_and_reports_boundary_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _script_module()
+    events: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "_systemctl",
+        lambda action, unit: events.append(f"{action}:{unit}") or 0,
+    )
+    monkeypatch.setattr(
+        module,
+        "_prepare_web_sqlite_boundary",
+        lambda: (_ for _ in ()).throw(RuntimeError("injected boundary failure")),
+    )
+    monkeypatch.setattr(module, "_require_fresh_owned_recorder", lambda _database: None)
+
+    assert module._restart_services(Path("database.sqlite3")) == ["sqlite-boundary:RuntimeError"]
+    assert events == [
+        f"start:{module.RECORDER_UNIT}",
+        f"is-active:{module.RECORDER_UNIT}",
+    ]
+
+
+def test_restart_skips_boundary_and_web_when_recorder_start_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _script_module()
+    events: list[str] = []
+
+    def systemctl(action: str, unit: str) -> int:
+        events.append(f"{action}:{unit}")
+        raise RuntimeError("injected recorder failure")
+
+    monkeypatch.setattr(module, "_systemctl", systemctl)
+    monkeypatch.setattr(
+        module,
+        "_require_fresh_owned_recorder",
+        lambda _database: events.append("recorder-heartbeat"),
+    )
+    monkeypatch.setattr(
+        module,
+        "_prepare_web_sqlite_boundary",
+        lambda: events.append("sqlite-boundary"),
+    )
+
+    assert module._restart_services(Path("database.sqlite3")) == [
+        f"{module.RECORDER_UNIT}:RuntimeError"
+    ]
+    assert events == [f"start:{module.RECORDER_UNIT}"]
 
 
 def test_concurrent_daily_and_weekly_backup_cannot_touch_winner_recovery(
@@ -366,8 +504,9 @@ def test_concurrent_daily_and_weekly_backup_cannot_touch_winner_recovery(
     active[module.RECORDER_UNIT] = False
     active[module.WEB_UNIT] = False
     module.restart_after_interruption(tier="daily", restart_marker=daily_marker)
-    assert calls[-2:] == [
+    assert calls[-3:] == [
         ("start", module.RECORDER_UNIT),
+        ("is-active", module.RECORDER_UNIT),
         ("start", module.WEB_UNIT),
     ]
     assert active == {module.RECORDER_UNIT: True, module.WEB_UNIT: True}

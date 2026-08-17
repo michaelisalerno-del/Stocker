@@ -1343,6 +1343,17 @@ manifest remain auditable, status remains degraded, and no false healthy state w
 published. The retry gate remains the same; no storage limit or integrity check is
 relaxed.
 
+The attended restart also reproduced a systemd ordering issue after complete WAL
+truncation: the web unit's narrow writable `-shm` mount is resolved before its
+`ExecCondition`, so web cannot start when the recorder has not yet recreated that
+sidecar. The accepted correction does not widen web permissions. After releasing the
+writer lock it starts recorder, requires an active generation with a fresh heartbeat,
+runs the existing root-owned fixed-path SQLite-boundary preparer, and starts web only
+after that command succeeds. Recorder-start failure skips boundary and web; boundary
+failure leaves recorder running, web stopped, the restart marker retained and backup
+status degraded. Existing boundary verification continues to reject symlinks,
+nonregular files and wrong identity/mode. This adds no service, schema or session rule.
+
 The final unchanged replay after these backup changes passed both fixed scenarios:
 
 | replay | presented/admitted/projected | loss/duplicates/order/provenance | p50 / p95 / p99 admission | max/final backlog | heartbeat | WAL |

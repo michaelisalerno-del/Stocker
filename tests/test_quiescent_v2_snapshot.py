@@ -168,6 +168,10 @@ def test_quiescent_snapshot_rejects_incomplete_wal_checkpoint_before_copy(
         def fetchone() -> tuple[int, int, int]:
             return (1, 7, 2)
 
+        @staticmethod
+        def close() -> None:
+            return None
+
     monkeypatch.setattr(module.sqlite3, "connect", lambda *_args, **_kwargs: IncompleteCheckpoint())
 
     with pytest.raises(RuntimeError, match="WAL checkpoint is incomplete"):

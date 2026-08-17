@@ -13,7 +13,7 @@ import stat
 import tempfile
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager, suppress
+from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -796,7 +796,7 @@ def copy_quiescent_database(
     """Copy a stopped database byte-for-byte under a caller-held writer lock."""
 
     precondition()
-    with sqlite3.connect(source, isolation_level=None) as connection:
+    with closing(sqlite3.connect(source, isolation_level=None)) as connection:
         checkpoint = tuple(connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone())
     precondition()
     if checkpoint[0] != 0 or checkpoint[2] < checkpoint[1]:
@@ -1269,8 +1269,8 @@ def _create_backup_locked(
             verify_database(temporary_database)
         except (OSError, SchemaError, sqlite3.Error) as error:
             raise BackupIntegrityError("online backup database verification failed") from error
-        with sqlite3.connect(
-            f"{temporary_database.resolve().as_uri()}?mode=ro", uri=True
+        with closing(
+            sqlite3.connect(f"{temporary_database.resolve().as_uri()}?mode=ro", uri=True)
         ) as verified:
             quick_check = str(verified.execute("PRAGMA quick_check").fetchone()[0])
             schema_version = int(

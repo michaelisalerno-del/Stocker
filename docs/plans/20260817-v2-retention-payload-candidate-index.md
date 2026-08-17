@@ -1331,6 +1331,18 @@ not a bare `sqlite3` connection. The managed helper and emergency snapshot now u
 application verifier for those checks. The selected backup/snapshot/deployment suite
 passes 73 tests.
 
+The first attended production invocation remained correctly degraded and restarted
+services after restore proof failed for insufficient effective headroom. Investigation
+found the copied database had been unlinked before restore but remained open because a
+`sqlite3.Connection` context manager commits/rolls back without closing; Linux therefore
+retained approximately 5 GB as a deleted open file. The corrected implementation uses
+explicit `closing(...)` boundaries for both quiescent-checkpoint and temporary-schema
+connections. A regression holds the observed connection object alive and proves it is
+closed before work-file unlink and restore proof. The failed candidate archive and
+manifest remain auditable, status remains degraded, and no false healthy state was
+published. The retry gate remains the same; no storage limit or integrity check is
+relaxed.
+
 The final unchanged replay after these backup changes passed both fixed scenarios:
 
 | replay | presented/admitted/projected | loss/duplicates/order/provenance | p50 / p95 / p99 admission | max/final backlog | heartbeat | WAL |

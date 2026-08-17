@@ -4,6 +4,7 @@ import errno
 import hashlib
 import json
 import os
+import sqlite3
 import stat
 import threading
 from pathlib import Path
@@ -138,6 +139,7 @@ def test_quiescent_managed_backup_rejects_source_mutation_before_publication(
 
 def test_quiescent_managed_backup_stays_degraded_until_restore_proof_finishes(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     database = tmp_path / "operational.sqlite3"
     backups = tmp_path / "backups"
@@ -146,9 +148,20 @@ def test_quiescent_managed_backup_stays_degraded_until_restore_proof_finishes(
     working.mkdir()
     _seed_database(database)
     observed_status: dict[str, object] = {}
+    opened: list[sqlite3.Connection] = []
+    real_connect = backup_module.sqlite3.connect
+
+    def observed_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
+        connection = real_connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(backup_module.sqlite3, "connect", observed_connect)
 
     def fail_restore_proof(_artifact: object) -> None:
         _assert_only_work_lock(working)
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            opened[-1].execute("SELECT 1")
         observed_status.update(
             json.loads((backups / backup_module.BACKUP_STATUS_FILENAME).read_text())
         )

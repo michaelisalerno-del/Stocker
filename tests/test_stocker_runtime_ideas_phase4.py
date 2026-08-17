@@ -424,14 +424,45 @@ def test_dynamic_batch_requirements_merge_cadence_and_blocking_conservatively() 
     assert _merge_batch_requirements((snapshot, stream)) == (stream,)
 
 
-def test_batch_candidate_query_selects_only_the_all_typed_fast_path() -> None:
-    typed = (
+def test_batch_candidate_query_selects_only_sparse_derived_typed_fast_path() -> None:
+    sparse_derived = (
         {
             "feed_kind": "bars",
             "event_kind": "bar_5m_session_prefix",
             "instrument_id": "AAL",
             "available_at_us": 0,
         },
+        {
+            "feed_kind": "bars",
+            "event_kind": "session_volume_baseline",
+            "instrument_id": "AAL",
+            "available_at_us": 0,
+        },
+    )
+    dense_raw = (
+        {
+            "feed_kind": "bars",
+            "event_kind": "bar",
+            "instrument_id": "AAL",
+            "available_at_us": 0,
+        },
+    )
+    other_exact_kinds = tuple(
+        (
+            {
+                "feed_kind": feed_kind,
+                "event_kind": event_kind,
+                "instrument_id": "AAL",
+                "available_at_us": 0,
+            },
+        )
+        for feed_kind, event_kind in (
+            ("bars", "bar_5m"),
+            ("quotes", "quote"),
+            ("trades", "trade"),
+            ("bars", "option_snapshot_capture"),
+            ("quotes", "bar_5m_session_prefix"),
+        )
     )
     untyped = (
         {
@@ -442,9 +473,15 @@ def test_batch_candidate_query_selects_only_the_all_typed_fast_path() -> None:
         },
     )
 
-    assert _batch_candidate_sql(typed) == _TYPED_BATCH_CANDIDATES_SQL
+    assert _batch_candidate_sql(sparse_derived) == _TYPED_BATCH_CANDIDATES_SQL
+    assert _batch_candidate_sql(dense_raw) == _GENERAL_BATCH_CANDIDATES_SQL
+    assert all(
+        _batch_candidate_sql(requirement) == _GENERAL_BATCH_CANDIDATES_SQL
+        for requirement in other_exact_kinds
+    )
     assert _batch_candidate_sql(()) == _GENERAL_BATCH_CANDIDATES_SQL
-    assert _batch_candidate_sql((*typed, *untyped)) == _GENERAL_BATCH_CANDIDATES_SQL
+    assert _batch_candidate_sql((*sparse_derived, *dense_raw)) == _GENERAL_BATCH_CANDIDATES_SQL
+    assert _batch_candidate_sql((*sparse_derived, *untyped)) == _GENERAL_BATCH_CANDIDATES_SQL
 
 
 def test_typed_batch_candidate_query_is_equivalent_and_index_bounded(tmp_path: Path) -> None:
@@ -542,6 +579,58 @@ def test_typed_batch_candidate_query_is_equivalent_and_index_bounded(tmp_path: P
     )
     assert not any("SCAN event" in detail for detail in plan)
     assert not any("market_events_causal_sequence_idx" in detail for detail in plan)
+
+
+def test_dense_raw_batch_candidate_query_keeps_causal_limit_bounded(tmp_path: Path) -> None:
+    database = tmp_path / "dense-raw-batch-candidates.sqlite3"
+    _seed(database)
+    with connect_v2(database) as connection:
+        for sequence in range(1, 3_001):
+            _event(connection, sequence, "AAL", 100.0 + sequence / 10_000)
+
+        requirements = cast(
+            tuple[JsonValue, ...],
+            (
+                {
+                    "feed_kind": "bars",
+                    "event_kind": "bar",
+                    "instrument_id": "AAL",
+                    "available_at_us": 0,
+                },
+            ),
+        )
+        requirements_json = canonical_json_bytes(cast(JsonValue, requirements)).decode()
+        common_parameters = (0, None, 0, None, 0)
+
+        def execute_with_progress(
+            sql: str, parameters: tuple[object, ...]
+        ) -> tuple[list[object], int]:
+            progress_calls = 0
+
+            def progress() -> int:
+                nonlocal progress_calls
+                progress_calls += 1
+                return 0
+
+            connection.set_progress_handler(progress, 100)
+            try:
+                rows = connection.execute(sql, parameters).fetchall()
+            finally:
+                connection.set_progress_handler(None, 0)
+            return rows, progress_calls
+
+        general_rows, general_progress = execute_with_progress(
+            _GENERAL_BATCH_CANDIDATES_SQL,
+            ("run-1", requirements_json, *common_parameters),
+        )
+        typed_rows, typed_progress = execute_with_progress(
+            _TYPED_BATCH_CANDIDATES_SQL,
+            (requirements_json, "run-1", *common_parameters),
+        )
+
+    assert [tuple(row) for row in typed_rows] == [tuple(row) for row in general_rows]
+    assert len(general_rows) == 256
+    assert general_progress < 200 < typed_progress
 
 
 def test_typed_batch_candidate_query_preserves_every_filter_and_causal_tie(

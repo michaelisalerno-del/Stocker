@@ -53,6 +53,7 @@ RETRY_BASE_US = 1_000_000
 RETRY_MAX_US = 60_000_000
 _RUNNER_STATE_VERSION = 1
 _RUNNER_STATE_VERSION_KEY = "_stocker_runner_state_version"
+_SPARSE_DERIVED_BATCH_EVENT_KINDS = frozenset({"bar_5m_session_prefix", "session_volume_baseline"})
 
 _GENERAL_BATCH_CANDIDATES_SQL = (
     "SELECT event.* FROM market_events event WHERE event.run_id=? "
@@ -102,7 +103,9 @@ _TYPED_BATCH_CANDIDATES_SQL = (
 
 def _batch_candidate_sql(requirements: tuple[JsonValue, ...]) -> str:
     if requirements and all(
-        isinstance(requirement, Mapping) and requirement.get("event_kind") is not None
+        isinstance(requirement, Mapping)
+        and requirement.get("feed_kind") == "bars"
+        and requirement.get("event_kind") in _SPARSE_DERIVED_BATCH_EVENT_KINDS
         for requirement in requirements
     ):
         return _TYPED_BATCH_CANDIDATES_SQL

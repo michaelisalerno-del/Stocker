@@ -1220,3 +1220,33 @@ gap below five seconds, and unchanged idea/checkpoint/interest/fence/shadow evid
 Production remains stopped and runtime-masked until that gate and independent review
 pass. This remains a schema-20 code-only same-run generation-14 restart with no fatal
 recovery and no trading/session scope change.
+
+## Superseding correction: sparse-derived candidate selection
+
+The exact generation-13 copy rejected commit `e0f9c00`; it must not be deployed. The
+all-typed predicate fixed the `frozen_m1c_signal` instance (301.874 ms load) but sent
+two other typed instances from their approximately 0.38--0.40 second baseline to
+6,613.639 ms and 6,449.350 ms. Complete idea-runner drains regressed from
+7.542--9.345 seconds to 16.220--25.262 seconds. The returned evidence remained equal;
+the defect was the unbounded intermediate match/sort cost for dense raw event kinds.
+
+The accepted correction retains the same SQL but selects it only for a nonempty set in
+which every requirement is a bars feed and every event kind is one of the two
+projector-owned sparse derived kinds: `bar_5m_session_prefix` or
+`session_volume_baseline`. Raw bar, quote, trade, option, `bar_5m`, nullable, non-bars,
+and mixed sparse/dense sets use the original causal query byte-for-byte. This adds no
+runtime statistics, plugin identity, duplicated subscription count, schema, index,
+state, setting or background work.
+
+The fixed acceptance thresholds remain unchanged: deterministic tests must prove both
+directions under SQLite opcode budgets and exact row/order equality; the exact copy
+must show at least three drains with every component and the complete idea runner at
+or below four seconds, process-heartbeat gaps below five seconds, the formerly slow
+derived instance remaining subsecond, the raw instances returning to their baseline
+range, and identical idea/checkpoint/interest/fence/shadow evidence. The 2,022- and
+12,132-callback opening replays retain their existing fixed thresholds. Any failure
+stops deployment rather than broadening the selector or heartbeat threshold.
+
+This remains prospective/shadow market-data projection and readiness work only. It
+does not alter XNYS session rules, risk, execution, reconciliation, accounts,
+credentials, broker capabilities, paper trading or live trading.

@@ -281,3 +281,27 @@ This addendum affects only read-only web startup and readiness calculation. Reco
 ownership, durable admission, retention, IBKR subscriptions, market-data evidence,
 risk, execution, reconciliation, paper/live trading, orders, accounts, credentials,
 and broker capabilities are unchanged.
+
+## Mature schema-19 deployment evidence
+
+The restored schema-18 production backup contained about 1.5 million callbacks and a
+41-feed active generation. Before schema 19, the first readiness calculation failed at
+2,583.129 ms and the following nine each failed at approximately 301.2 ms. After the
+schema-19 migration but before the calendar correction, nine warm calculations passed
+at 9.576–35.436 ms, while the cold first calculation still failed after 5,674.064 ms.
+Direct isolation measured the cold XNYS initialization at 3,801.698 ms and its cached
+call at 0.027 ms.
+
+With final commit `5e82955b9a7ed420188a3a4dc1ec005759cdfe74`, web startup prewarming
+took 2,795.926 ms before the application accepted requests. The first accepted
+readiness calculation took 14.081 ms; ten consecutive calculations all returned the
+correct run, generation, and 41 green feed diagnostics in 8.202–14.081 ms, with p95
+11.903 ms and no errors. Thus every accepted request passed the frozen 300 ms maximum
+and 275 ms p95 thresholds.
+
+The real schema-19 migration framework completed against the disposable copy with no
+evidence rewrite. Database size increased from 3,617,161,216 to 3,706,494,976 bytes;
+the new index occupies 89,227,264 bytes. An isolated exact index rebuild took 8.76
+seconds. The final database reported schema 19, `quick_check=ok`, and zero foreign-key
+violations. The hit and miss plans both use the covering index without a callback-sort
+temporary B-tree.

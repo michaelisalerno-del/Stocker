@@ -398,8 +398,11 @@ cutoff timestamp, verifies the lock in every transaction, inherits the 2,000-row
 payload-only: it cannot roll/delete receipts, advance watermarks, terminalize shadow
 positions, prune any table, vacuum, or mutate runtime/incident/cap state. Runtime
 masking keeps the recorder start-prevented during the surrounding backup, verification,
-and restart preparation. Any lock conflict, deadline, pass/time cap, invalid result, or
-other error exits nonzero without claiming that earlier committed batches were undone.
+and restart preparation. Any internally reported lock conflict, deadline, pass/time
+cap, invalid result, or other error exits nonzero with its completed-pass count and
+committed payload total, without claiming that earlier committed batches were undone.
+An outer process timeout may prevent JSON emission, so operators must reconcile its
+committed total from the recorded pre/post payload counts.
 
 This amendment is supported by two independent candidate measurements. The original
 mature copy completed 12 consecutive 2,000-row passes in 0.783–1.198 seconds. A fresh

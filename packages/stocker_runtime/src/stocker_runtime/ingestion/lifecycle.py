@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Literal
 
 from stocker_runtime.storage import RetentionManager, RetentionPolicy, connect_v2, verify_database
+from stocker_runtime.storage.retention import PayloadCompactionCommittedError
 
 OWNERSHIP_PROTOCOL = "local_flock_v1"
 RECOVERABLE_FATAL_CODES = frozenset(
@@ -150,10 +151,23 @@ def drain_callback_payloads(
                     "payload drain wall-time limit reached after "
                     f"{pass_number - 1} passes and {total_compacted} committed payloads"
                 )
-            compacted = manager.compact_payloads_only(
-                now_us=now_us,
-                precondition=lambda _connection: lock.verify_held(),
-            )
+            try:
+                compacted = manager.compact_payloads_only(
+                    now_us=now_us,
+                    precondition=lambda _connection: lock.verify_held(),
+                )
+            except PayloadCompactionCommittedError as error:
+                total_compacted += error.compacted
+                raise PayloadDrainIncompleteError(
+                    "payload drain failed after pass "
+                    f"{pass_number} committed; {total_compacted} payloads are committed: {error}"
+                ) from error
+            except Exception as error:
+                raise PayloadDrainIncompleteError(
+                    "payload drain failed during pass "
+                    f"{pass_number} after {pass_number - 1} completed passes and "
+                    f"{total_compacted} committed payloads: {type(error).__name__}: {error}"
+                ) from error
             if not 0 <= compacted <= manager.policy.maintenance_batch_rows:
                 raise PayloadDrainIncompleteError(
                     "payload drain returned an invalid compacted-row count after "

@@ -207,7 +207,9 @@ Use an attended offline recovery only after the incident has been diagnosed:
    committed pass, and `consecutive_zero_passes=2`. The command uses one fixed cutoff
    and emits total compacted rows. Pass/time/deadline/lock loss exits nonzero and names
    the incomplete committed total; it never claims earlier successful passes rolled
-   back.
+   back. The outer `timeout` is only a last-resort process bound: if it fires before
+   the command emits JSON, reconcile the committed total from the recorded pre/post
+   payload counts instead of assuming the current pass or earlier passes rolled back.
 4. Recompute the evidence hashes. Because this command is purpose-built payload-only,
    callback row count and every immutable callback field (including `payload_sha256`),
    receipt row/count/hash, watermark row/count/hash, and every other table must match.

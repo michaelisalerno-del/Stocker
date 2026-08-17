@@ -19,7 +19,10 @@ from stocker_runtime.ingestion.inbox import (
     CALLBACK_GAP_RECOVERY_SQL,
     CALLBACK_INCIDENT_RECOVERY_SQL,
 )
-from stocker_runtime.ingestion.lifecycle import LocalWriterLock, drain_callback_payloads
+from stocker_runtime.ingestion.lifecycle import (
+    LocalWriterLock,
+    LocalWriterLockError,
+)
 from stocker_runtime.storage import (
     EXPECTED_TABLES,
     CallbackReceiptRecord,
@@ -3329,6 +3332,63 @@ def test_payload_only_deadline_rolls_back_current_set_update(
         )
 
 
+def test_payload_only_writer_lock_identity_loss_rolls_back_current_set_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    sequence = _seed_callback_for_retention(
+        database,
+        uid="payload-only-lock-loss",
+        received_at_us=1,
+        receipt_batch_id="payload-only-lock-loss-receipt",
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO callback_compaction_watermarks(run_id, "
+            "compacted_through_sequence, cumulative_callback_count, "
+            "first_received_at_us, last_received_at_us, rolled_receipt_chain_hash, "
+            "last_receipt_chain_hash, updated_at_us) VALUES "
+            "('retention-run', ?, 1, 1, 1, ?, ?, 1)",
+            (sequence, "0" * 64, "0" * 64),
+        )
+
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(callback_payload_us=10, maintenance_transaction_ms=100),
+    )
+    lock = LocalWriterLock.for_database(database)
+    original_compact = manager._compact_payloads
+
+    def compact_then_replace_lock(
+        connection: sqlite3.Connection,
+        cutoff_us: int,
+        limit: int,
+        *,
+        run_id: str | None,
+    ) -> int:
+        compacted = original_compact(connection, cutoff_us, limit, run_id=run_id)
+        lock.path.unlink()
+        lock.path.touch()
+        return compacted
+
+    monkeypatch.setattr(manager, "_compact_payloads", compact_then_replace_lock)
+    with lock, pytest.raises(LocalWriterLockError, match="identity changed"):
+        manager.compact_payloads_only(
+            now_us=100,
+            precondition=lambda _connection: lock.verify_held(),
+        )
+
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT payload_json FROM callback_inbox WHERE source_sequence=?", (sequence,)
+            ).fetchone()[0]
+            is not None
+        )
+
+
 def test_payload_drain_preserves_committed_batches_when_a_later_pass_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3391,14 +3451,27 @@ def test_payload_drain_preserves_committed_batches_when_a_later_pass_fails(
 
     monkeypatch.setattr(manager, "compact_payloads_only", fail_second_pass)
     monkeypatch.setattr(lifecycle_module, "RetentionManager", lambda _database: manager)
-    with pytest.raises(RuntimeError, match="later-pass failure"):
-        drain_callback_payloads(
-            database=database,
-            now_us=100,
-            max_passes=10,
-            max_wall_seconds=10,
-            monotonic=lambda: 0.0,
-        )
+    result = CliRunner().invoke(
+        runtime_app,
+        [
+            "recorder",
+            "drain-payloads",
+            "--database",
+            str(database),
+            "--now-us",
+            "86400000100",
+            "--max-passes",
+            "10",
+            "--max-wall-seconds",
+            "10",
+        ],
+    )
+
+    assert result.exit_code == 1
+    error = json.loads(result.stdout)
+    assert error["error"] == "PayloadDrainIncompleteError"
+    assert "during pass 2 after 1 completed passes and 2000 committed payloads" in error["message"]
+    assert "RuntimeError: injected later-pass failure" in error["message"]
 
     with connect_v2(database) as connection:
         assert (
@@ -3414,6 +3487,78 @@ def test_payload_drain_preserves_committed_batches_when_a_later_pass_fails(
                 "WHERE run_id='retention-run' AND payload_json IS NOT NULL"
             ).fetchone()[0]
             == 1
+        )
+    with LocalWriterLock.for_database(database):
+        pass
+
+
+def test_payload_drain_reports_current_batch_when_postcommit_checkpoint_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    sequence = _seed_callback_for_retention(
+        database,
+        uid="payload-drain-checkpoint",
+        received_at_us=1,
+        receipt_batch_id="payload-drain-checkpoint-receipt",
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO callback_compaction_watermarks(run_id, "
+            "compacted_through_sequence, cumulative_callback_count, "
+            "first_received_at_us, last_received_at_us, rolled_receipt_chain_hash, "
+            "last_receipt_chain_hash, updated_at_us) VALUES "
+            "('retention-run', ?, 1, 1, 1, ?, ?, 1)",
+            (sequence, "0" * 64, "0" * 64),
+        )
+
+    real_connect = retention_module.connect_v2
+
+    class FailingCheckpointConnection:
+        def __init__(self, connection: sqlite3.Connection) -> None:
+            self._connection = connection
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._connection, name)
+
+        def execute(self, statement: str, parameters: object = ()) -> sqlite3.Cursor:
+            if statement == "PRAGMA wal_checkpoint(PASSIVE)":
+                raise sqlite3.OperationalError("injected checkpoint failure")
+            return self._connection.execute(statement, parameters)
+
+    def failing_checkpoint_connect(path: str | Path) -> FailingCheckpointConnection:
+        return FailingCheckpointConnection(real_connect(path))
+
+    monkeypatch.setattr(retention_module, "connect_v2", failing_checkpoint_connect)
+    result = CliRunner().invoke(
+        runtime_app,
+        [
+            "recorder",
+            "drain-payloads",
+            "--database",
+            str(database),
+            "--now-us",
+            "86400000100",
+            "--max-passes",
+            "10",
+            "--max-wall-seconds",
+            "10",
+        ],
+    )
+
+    assert result.exit_code == 1
+    error = json.loads(result.stdout)
+    assert error["error"] == "PayloadDrainIncompleteError"
+    assert "after pass 1 committed; 1 payloads are committed" in error["message"]
+    assert "injected checkpoint failure" in error["message"]
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT payload_json FROM callback_inbox WHERE source_sequence=?", (sequence,)
+            ).fetchone()[0]
+            is None
         )
 
 

@@ -204,6 +204,17 @@ class MaintenanceDeadlineExceeded(RuntimeError):
     """A retention transaction exceeded its 100 ms hard deadline and was rolled back."""
 
 
+class PayloadCompactionCommittedError(RuntimeError):
+    """Payload compaction committed, but its best-effort checkpoint failed."""
+
+    def __init__(self, compacted: int, cause: sqlite3.Error) -> None:
+        self.compacted = compacted
+        super().__init__(
+            f"payload drain committed {compacted} payloads before passive checkpoint failed: "
+            f"{type(cause).__name__}: {cause}"
+        )
+
+
 class StorageCapState(StrEnum):
     NORMAL = "normal"
     SOFT = "soft_cap"
@@ -1307,10 +1318,15 @@ class RetentionManager:
                 self.policy.maintenance_batch_rows,
                 run_id=None if selected is None else str(selected["run_id"]),
             )
+            if precondition is not None:
+                precondition(connection)
             check_deadline()
             connection.commit()
             connection.set_progress_handler(None, 0)
-            connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+            try:
+                connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+            except sqlite3.Error as error:
+                raise PayloadCompactionCommittedError(compacted, error) from error
             return compacted
         except Exception as error:
             if connection.in_transaction:

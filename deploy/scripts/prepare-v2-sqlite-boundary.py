@@ -54,7 +54,35 @@ def _require_directory(
         fail(f"{label}_not_directory")
     if metadata.st_uid != owner_uid or metadata.st_gid != group_gid:
         fail(f"{label}_unexpected_owner")
-    os.fchmod(descriptor, mode)
+    _set_mode_if_needed(descriptor, metadata=metadata, mode=mode, label=label)
+
+
+def _set_mode_if_needed(
+    descriptor: int,
+    *,
+    metadata: os.stat_result,
+    mode: int,
+    label: str,
+) -> None:
+    if stat.S_IMODE(metadata.st_mode) == mode:
+        return
+    try:
+        os.fchmod(descriptor, mode)
+    except OSError:
+        fail(f"{label}_mode_update_failed")
+
+
+def _set_owner(
+    descriptor: int,
+    *,
+    owner_uid: int,
+    group_gid: int,
+    label: str,
+) -> None:
+    try:
+        os.fchown(descriptor, owner_uid, group_gid)
+    except OSError:
+        fail(f"{label}_owner_update_failed")
 
 
 def _open_regular(directory: int, name: str, *, writable: bool, label: str) -> int:
@@ -107,7 +135,12 @@ def _prepare_auxiliary(
             fail(f"{label}_open_failed")
         try:
             if created:
-                os.fchown(descriptor, owner_uid, group_gid)
+                _set_owner(
+                    descriptor,
+                    owner_uid=owner_uid,
+                    group_gid=group_gid,
+                    label=label,
+                )
             metadata = os.fstat(descriptor)
             if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink > 1:
                 fail(f"{label}_not_single_regular_file")
@@ -115,7 +148,12 @@ def _prepare_auxiliary(
                 continue
             if metadata.st_uid != owner_uid or metadata.st_gid != group_gid:
                 fail(f"{label}_unexpected_owner")
-            os.fchmod(descriptor, mode)
+            _set_mode_if_needed(
+                descriptor,
+                metadata=metadata,
+                mode=mode,
+                label=label,
+            )
             metadata = os.fstat(descriptor)
             if metadata.st_nlink == 0:
                 continue
@@ -167,7 +205,12 @@ def main() -> None:
                 metadata = os.fstat(database)
                 if metadata.st_uid != recorder_uid or metadata.st_gid != reader_gid:
                     fail("database_unexpected_owner")
-                os.fchmod(database, 0o640)
+                _set_mode_if_needed(
+                    database,
+                    metadata=metadata,
+                    mode=0o640,
+                    label="database",
+                )
             finally:
                 os.close(database)
             _prepare_auxiliary(

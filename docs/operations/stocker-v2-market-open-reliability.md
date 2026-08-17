@@ -153,6 +153,14 @@ the helper and systemd
 service timeout. A failed snapshot remains nonzero/degraded; it is never reported as a
 healthy backup merely because the services restarted.
 
+The backup unit intentionally cannot write the `/var/lib/stocker` parent directory.
+The boundary preparer validates that parent's exact type, owner, group and mode, but
+does not issue a redundant metadata write when the mode is already correct. A real
+mode correction inside the read-only backup namespace fails with the named
+`persistent_root_mode_update_failed` boundary error; do not widen the unit's
+`ReadWritePaths` or retry that safety failure. WAL/SHM corrections remain restricted
+to the exact writable V2 database directory.
+
 The first invocation after each release is attended and off-session:
 
 ```bash

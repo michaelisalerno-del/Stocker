@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import importlib.util
 import json
@@ -756,6 +757,77 @@ def test_sqlite_boundary_preparation_targets_only_v2_and_backup_paths() -> None:
     assert 'READER_GROUP = "stocker-readers"' in source
     assert "prospective.sqlite3" not in source
     assert "bundles" not in source
+
+
+def test_backup_sandbox_does_not_widen_parent_stocker_write_access() -> None:
+    for name in ("stocker-v2-backup-daily.service", "stocker-v2-backup-weekly.service"):
+        lines = _unit(name).splitlines()
+        assert "ProtectSystem=strict" in lines
+        assert "ReadWritePaths=/var/lib/stocker/v2" in lines
+        assert "ReadWritePaths=/var/lib/stocker/backups-v2" in lines
+        assert "ReadWritePaths=/var/lib/stocker" not in lines
+
+
+def test_sqlite_boundary_does_not_mutate_an_already_correct_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _sqlite_boundary_module()
+    tmp_path.chmod(0o750)
+    descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    calls = 0
+
+    def read_only_fchmod(_descriptor: int, _mode: int) -> None:
+        nonlocal calls
+        calls += 1
+        raise OSError(errno.EROFS, "read-only file system")
+
+    monkeypatch.setattr(module.os, "fchmod", read_only_fchmod)
+    try:
+        module._require_directory(
+            descriptor,
+            owner_uid=os.getuid(),
+            group_gid=os.getgid(),
+            mode=0o750,
+            label="persistent_root",
+        )
+    finally:
+        os.close(descriptor)
+
+    assert calls == 0
+
+
+def test_sqlite_boundary_names_a_required_directory_mode_update_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _sqlite_boundary_module()
+    tmp_path.chmod(0o700)
+    descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    calls = 0
+
+    def read_only_fchmod(_descriptor: int, _mode: int) -> None:
+        nonlocal calls
+        calls += 1
+        raise OSError(errno.EROFS, "read-only file system")
+
+    monkeypatch.setattr(module.os, "fchmod", read_only_fchmod)
+    try:
+        with pytest.raises(SystemExit) as raised:
+            module._require_directory(
+                descriptor,
+                owner_uid=os.getuid(),
+                group_gid=os.getgid(),
+                mode=0o750,
+                label="persistent_root",
+            )
+    finally:
+        os.close(descriptor)
+
+    assert raised.value.code == 78
+    assert calls == 1
+    assert capsys.readouterr().err.strip().endswith("persistent_root_mode_update_failed")
 
 
 def test_sqlite_boundary_recovers_when_create_loses_to_existing_file(

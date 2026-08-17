@@ -1437,3 +1437,32 @@ read-only web/backup operational lifecycle. Market-data availability is affected
 Risk, execution, reconciliation, accounts, credentials, paper/live trading and order
 capability are not changed. The XNYS regular-session definition remains exact and is
 reused only to prohibit quiescent backup work during or too near the expected session.
+
+### Final unattended-backup restart namespace correction
+
+The first exact-release attended backup published and restore-verified a valid archive,
+but both its main restart and `ExecStopPost` failed the SQLite boundary helper with
+`filesystem_operation_failed`. The identical helper succeeded immediately in the host
+namespace. A deterministic `systemd-run` reproducer using the backup unit's
+`ProtectSystem=strict` and its two narrow `ReadWritePaths` fails with exit 78: the
+preparer unconditionally attempts `fchmod` on the already-correct
+`/var/lib/stocker` parent, which is intentionally read-only inside the backup mount
+namespace. This is not a SQLite retry race.
+
+Keep the backup sandbox narrow; do not grant write access to all of
+`/var/lib/stocker` and do not add a generic retry. Metadata enforcement becomes
+idempotent: after type, link and ownership validation, perform `fchmod` only when the
+actual mode differs. Actual owner or mode corrections retain fixed operation-specific
+sanitized failure codes, while symlink, nonregular, hard-link, wrong-owner and storage
+failures remain fail-closed. Existing bounded WAL/SHM create/unlink race handling is
+unchanged.
+
+Regression tests prove a correctly-mode parent succeeds even when every attempted
+`fchmod` would receive `EROFS`; a wrong-mode parent makes exactly one correction
+attempt and fails with `persistent_root_mode_update_failed`; permitted child
+corrections still work; the backup units retain only their exact database and backup
+write paths; and orchestrator parsing preserves only fixed sanitized tokens. The
+production gate is the same deterministic sandboxed helper invocation followed by a
+new attended daily backup. Only that new archive/restore plus automatic recorder,
+boundary, heartbeat and web restart may publish healthy status and permit timer
+enablement.

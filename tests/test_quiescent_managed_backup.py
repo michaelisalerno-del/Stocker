@@ -474,6 +474,11 @@ def test_restart_skips_web_when_heartbeat_fails_after_boundary(
             "shm_race_exhausted",
         ),
         (
+            "blocked_unsafe_runtime_configuration:v2_sqlite_boundary:"
+            "persistent_root_mode_update_failed\n",
+            "persistent_root_mode_update_failed",
+        ),
+        (
             "blocked_unsafe_runtime_configuration:v2_sqlite_boundary:wrong_owner\n"
             "attacker-controlled detail\n",
             "unknown_failure",

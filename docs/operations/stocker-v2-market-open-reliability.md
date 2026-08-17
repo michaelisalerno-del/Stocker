@@ -24,26 +24,51 @@ kernel releases that lock and the first normal systemd retry can close the aband
 generation and create an auditable replacement. Schema-15 generations have no lock
 protocol marker and retain the old heartbeat-expiry takeover rule during rollout.
 
-## Schema-16 rollout and rollback
+## Schema 16–19 rollout and rollback
 
 Schema 16 adds generation ownership, commit/input identity, fatal-recovery audit fields,
 and per-subscription staleness/retry state. Existing rows and fatal evidence are
-preserved. V1 databases remain rejected and must never be migrated in place.
+preserved. Schema 17 adds the partial payload-compaction candidate index. Schema 18
+adds nullable recorder-generation provenance to component incidents; legacy `NULL`
+incidents remain visible but cannot poison a new generation. Schema 19 adds the
+acknowledged-callback covering index used by exact per-feed readiness. None of these
+migrations rewrites callback evidence. V1 databases remain rejected and must never be
+migrated in place. The accepted migration design and measurements are recorded in
+[`20260817-v2-retention-payload-candidate-index.md`](../plans/20260817-v2-retention-payload-candidate-index.md).
+
+The current schema-18-to-19 production migration builds an approximately 89.2 MB index.
+On the restored 3.62 GB production backup, the exact index build took 8.76 seconds and
+the complete migration framework, including verification, took approximately 137
+seconds. Verify enough free space for the database, WAL/temp work, the new index, and a
+checked backup before beginning. Do not increase the 300 ms query budget to compensate
+for a missing or incomplete index.
 
 In a market-closed attended window:
 
 1. Stop recorder and web.
-2. Create a checked compressed schema-15 backup and restore-check it to a disposable
-   path using the existing backup commands.
+2. Record the deployed schema and create a checked compressed backup of that exact
+   schema. Restore-check it to a disposable path using the existing backup commands.
 3. Run `stocker-runtime migrate /var/lib/stocker/v2/stocker-v2.sqlite3`.
-4. Require migration checksum/schema verification, `foreign_key_check`, and
-   `quick_check` to pass.
-5. Run the combined preflight shown below.
-6. Restart with the same V2 `run_id`, mode, frozen configuration, and validated input.
+4. Require the ledger to report schema 19, exact schema/index checksum verification,
+   `foreign_key_check` with zero rows, and `quick_check=ok`.
+5. Confirm both a hit and a miss use
+   `callback_inbox_readiness_latest_idx` as a covering seek without a callback-sort
+   temporary B-tree. On a restored mature copy, require ten exact-feed readiness
+   calculations to return all diagnostics, each within 300 ms and p95 within 275 ms.
+6. Run the combined preflight shown below.
+7. Restart with the same V2 `run_id`, mode, frozen configuration, and validated input.
+   Require a new recorder generation, a fresh heartbeat, connected IBKR market-data
+   socket, every exact required configured identity active, raw sequence growth, no
+   duplicate active request, and zero unresolved current-generation component
+   incidents.
+8. Start web only after the recorder is healthy. Require `/` to return liveness and
+   `/api/v2/ready` to select that exact generation and complete within 300 ms.
 
-Before schema-16 admits new callbacks, rollback requires the matching old release and
-the checked schema-15 backup. After schema-16 admission, preserve the database and roll
-forward; old code must not open it.
+Before the new schema admits callbacks, rollback requires the matching old release and
+the checked pre-migration backup. After any callback is admitted under the new schema,
+preserve the database and roll forward; restoring the older backup would lose evidence,
+and old code must not open the newer schema. Never drop an index or edit migration or
+incident rows manually on production.
 
 ## Production preflight
 
@@ -107,10 +132,21 @@ is no pre-market, after-hours, futures, forex, international, hard-coded UTC, or
 per-instrument calendar expansion. Outside regular hours, quiet feeds are not stale,
 while process, socket, configuration, and subscription lifecycle remain reported.
 
-The web query budget defaults to 300 ms and is capped at 500 ms. The initial four local
-opening replays measured the readiness query between 218.4 ms and 246.1 ms; 300 ms is
-the smallest rounded setting with useful headroom. Timeout remains bounded and returns
-a web-query timeout/503 without implying recorder ingestion failure.
+The web query budget defaults to 300 ms and is capped at 500 ms. Schema 19 changes the
+mature lookup from repeated history scans to exact acknowledged-callback covering-index
+seeks. On the restored 41-feed production copy, the old query failed between about 301
+and 2,583 ms. The final indexed calculation completed ten times in 7.21–9.86 ms, with
+p95 9.77 ms. Timeout remains bounded and returns a web-query timeout/503 without
+implying recorder ingestion failure.
+
+Web startup prewarms the existing XNYS calendar before the listening socket is made
+available. This took approximately 2.8–4.8 seconds in deployment measurements; treat it
+as startup time, not a failed health query. Session calculation also occurs before the
+SQLite deadline, so a calendar cache miss cannot consume the database query budget. A
+long-lived process can still pay calendar-library initialization latency on the first
+request for a newly uncached New York date; that may delay or false-red that request,
+but cannot make readiness falsely green or weaken the 300 ms SQLite bound. Do not add
+hard-coded hours or a second calendar cache to avoid this behavior.
 
 ## Downstream degradation
 

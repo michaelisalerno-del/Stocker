@@ -2687,6 +2687,28 @@ def test_retention_transaction_two_failure_is_auditable_and_retry_recovers(
     assert tuple(runtime) == ("running", None, "connected")
 
 
+def test_retention_split_phase_diagnostics_are_bounded_and_sanitized() -> None:
+    failure = MaintenanceDeadlineExceeded("pruning deadline")
+    failure.__dict__.update(
+        retention_phase="expired_evidence_pruning",
+        receipt_transactions_committed=2,
+        receipt_rows_rolled_committed=233,
+        terminalizations_committed=3,
+        payloads_compacted_committed=1_997,
+        expired_rows_deleted_committed=0,
+        arbitrary_private_value={"must_not_persist": True},
+    )
+
+    assert Recorder._retention_incident_details(failure) == {
+        "expired_rows_deleted_committed": 0,
+        "payloads_compacted_committed": 1_997,
+        "receipt_rows_rolled_committed": 233,
+        "receipt_transactions_committed": 2,
+        "retention_phase": "expired_evidence_pruning",
+        "terminalizations_committed": 3,
+    }
+
+
 def test_unpublished_retention_progress_survives_a_later_generic_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

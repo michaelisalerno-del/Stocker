@@ -185,6 +185,16 @@ commit. If transaction two fails, transaction one's watermark/rollup remains val
 the current incident stays degraded, and retry resumes from durable evidence. Do not
 manually alter a watermark or retry by suppressing the incident.
 
+The remaining evidence work also uses two bounded writer transactions with one carried
+2,000-row budget. The first terminalizes expired pending shadow positions and compacts
+proof-authorized callback payloads; the second prunes expired evidence only with the
+remaining budget. Both keep the same 100 ms deadline and repeat writer-authority checks
+after `BEGIN IMMEDIATE` and before commit. A pruning failure therefore retains and
+reports any valid first-transaction progress while rolling back the prune transaction.
+Generation-scoped incident details report only bounded phase and committed-count
+fields. Do not interpret an overall maintenance wall time above 100 ms as a breach:
+the deadline applies independently to each short writer transaction.
+
 Use an attended offline recovery only after the incident has been diagnosed:
 
 1. Stop recorder and web, runtime-mask both units, and verify they are inactive with no

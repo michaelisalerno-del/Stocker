@@ -5483,6 +5483,147 @@ def test_retention_deadline_starts_after_writer_lock_acquisition(
     assert result.cap_state is StorageCapState.NORMAL
 
 
+def test_retention_uses_independent_deadlines_for_compaction_and_pruning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    logical_time = 0.0
+    prune_limits: list[int] = []
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(maintenance_transaction_ms=100, maintenance_batch_rows=2_000),
+        monotonic=lambda: logical_time,
+    )
+
+    def charged_compaction(
+        _connection: sqlite3.Connection,
+        _cutoff_us: int,
+        _limit: int,
+        *,
+        run_id: str | None,
+    ) -> int:
+        del run_id
+        nonlocal logical_time
+        logical_time += 0.06
+        return 0
+
+    def charged_pruning(
+        _connection: sqlite3.Connection,
+        _now_us: int,
+        limit: int,
+    ) -> int:
+        nonlocal logical_time
+        logical_time += 0.05
+        prune_limits.append(limit)
+        return 0
+
+    monkeypatch.setattr(manager, "_compact_payloads", charged_compaction)
+    monkeypatch.setattr(manager, "_prune_expired", charged_pruning)
+
+    result = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert result.payloads_compacted == 0
+    assert result.expired_rows_deleted == 0
+    assert prune_limits == [2_000]
+
+
+def test_pruning_deadline_preserves_committed_payload_compaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    sequence = _seed_callback_for_retention(
+        database,
+        uid="prune-deadline",
+        received_at_us=1,
+        receipt_batch_id="prune-deadline-receipt",
+    )
+    _insert_receipt(
+        database,
+        batch_id="prune-deadline-receipt",
+        first_sequence=sequence,
+        last_sequence=sequence,
+        created_at_us=99,
+    )
+    logical_time = 0.0
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(
+            callback_payload_us=10,
+            receipt_us=1_000,
+            maintenance_transaction_ms=100,
+        ),
+        monotonic=lambda: logical_time,
+    )
+
+    def expired_pruning(
+        _connection: sqlite3.Connection,
+        _now_us: int,
+        _limit: int,
+    ) -> int:
+        nonlocal logical_time
+        logical_time += 0.101
+        return 0
+
+    monkeypatch.setattr(manager, "_prune_expired", expired_pruning)
+
+    with pytest.raises(MaintenanceDeadlineExceeded, match="expired_evidence_pruning") as raised:
+        manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert raised.value.__dict__["payloads_compacted_committed"] == 1
+    assert raised.value.__dict__["expired_rows_deleted_committed"] == 0
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT payload_json FROM callback_inbox WHERE source_sequence=?",
+                (sequence,),
+            ).fetchone()[0]
+            is None
+        )
+
+
+def test_exhausted_compaction_budget_skips_pruning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    manager = RetentionManager(database, RetentionPolicy(maintenance_batch_rows=2_000))
+    prune_called = False
+
+    def exhaust_budget(
+        _connection: sqlite3.Connection,
+        _cutoff_us: int,
+        limit: int,
+        *,
+        run_id: str | None,
+    ) -> int:
+        del run_id
+        return limit
+
+    def unexpected_pruning(
+        _connection: sqlite3.Connection,
+        _now_us: int,
+        _limit: int,
+    ) -> int:
+        nonlocal prune_called
+        prune_called = True
+        return 0
+
+    monkeypatch.setattr(manager, "_compact_payloads", exhaust_budget)
+    monkeypatch.setattr(manager, "_prune_expired", unexpected_pruning)
+
+    result = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert result.payloads_compacted == 2_000
+    assert result.expired_rows_deleted == 0
+    assert prune_called is False
+
+
 def test_retention_deadline_rolls_back_payload_compaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

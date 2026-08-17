@@ -1193,6 +1193,9 @@ class RetentionManager:
         connection = connect_v2(self.database_path)
         payloads_compacted = receipts_rolled = expired_rows_deleted = 0
         receipt_transactions_committed = 0
+        terminalizations_committed = 0
+        payloads_compacted_committed = 0
+        expired_rows_deleted_committed = 0
         deadline_hit = False
         deadline = 0.0
         phase = "storage_measurement"
@@ -1265,7 +1268,7 @@ class RetentionManager:
                 if receipt_change_budget <= 0:
                     break
 
-            phase = "terminalization_payload_compaction_and_pruning"
+            phase = "terminalization_and_payload_compaction"
             deadline_hit = False
             connection.execute("BEGIN IMMEDIATE")
             deadline = self._monotonic() + self.policy.maintenance_transaction_ms / 1_000
@@ -1308,12 +1311,30 @@ class RetentionManager:
             )
             check_deadline()
             remaining -= payloads_compacted
-            expired_rows_deleted = self._prune_expired(connection, now_us, remaining)
             if precondition is not None:
                 precondition(connection)
             check_deadline()
             connection.commit()
+            terminalizations_committed = len(terminalized)
+            payloads_compacted_committed = payloads_compacted
             connection.set_progress_handler(None, 0)
+
+            if remaining > 0:
+                phase = "expired_evidence_pruning"
+                deadline_hit = False
+                connection.execute("BEGIN IMMEDIATE")
+                deadline = self._monotonic() + self.policy.maintenance_transaction_ms / 1_000
+                connection.set_progress_handler(progress, 1_000)
+                if precondition is not None:
+                    precondition(connection)
+                check_deadline()
+                expired_rows_deleted = self._prune_expired(connection, now_us, remaining)
+                if precondition is not None:
+                    precondition(connection)
+                check_deadline()
+                connection.commit()
+                expired_rows_deleted_committed = expired_rows_deleted
+                connection.set_progress_handler(None, 0)
             connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
             connection.execute("PRAGMA incremental_vacuum(64)")
             post_maintenance_sizes = self._measured_sizes(connection)
@@ -1328,12 +1349,18 @@ class RetentionManager:
                 retention_phase=phase,
                 receipt_transactions_committed=receipt_transactions_committed,
                 receipt_rows_rolled_committed=receipts_rolled,
+                terminalizations_committed=terminalizations_committed,
+                payloads_compacted_committed=payloads_compacted_committed,
+                expired_rows_deleted_committed=expired_rows_deleted_committed,
             )
             if isinstance(error, MaintenanceDeadlineExceeded):
                 reported = MaintenanceDeadlineExceeded(
                     f"{error}; phase={phase}; "
                     f"receipt_transactions_committed={receipt_transactions_committed}; "
-                    f"receipt_rows_rolled_committed={receipts_rolled}"
+                    f"receipt_rows_rolled_committed={receipts_rolled}; "
+                    f"terminalizations_committed={terminalizations_committed}; "
+                    f"payloads_compacted_committed={payloads_compacted_committed}; "
+                    f"expired_rows_deleted_committed={expired_rows_deleted_committed}"
                 )
                 reported.__dict__.update(error.__dict__)
                 raise reported from error
@@ -1341,7 +1368,10 @@ class RetentionManager:
                 reported = MaintenanceDeadlineExceeded(
                     f"retention {phase} exceeded its configured deadline; "
                     f"receipt_transactions_committed={receipt_transactions_committed}; "
-                    f"receipt_rows_rolled_committed={receipts_rolled}"
+                    f"receipt_rows_rolled_committed={receipts_rolled}; "
+                    f"terminalizations_committed={terminalizations_committed}; "
+                    f"payloads_compacted_committed={payloads_compacted_committed}; "
+                    f"expired_rows_deleted_committed={expired_rows_deleted_committed}"
                 )
                 reported.__dict__.update(error.__dict__)
                 raise reported from error
@@ -1364,9 +1394,9 @@ class RetentionManager:
             cap_state=state,
             database_bytes=database_bytes,
             wal_bytes=wal_bytes,
-            payloads_compacted=payloads_compacted,
+            payloads_compacted=payloads_compacted_committed,
             receipts_rolled=receipts_rolled,
-            expired_rows_deleted=expired_rows_deleted,
+            expired_rows_deleted=expired_rows_deleted_committed,
             admission_allowed=state is not StorageCapState.FATAL,
             optional_feeds_allowed=state not in {StorageCapState.DEGRADED, StorageCapState.FATAL},
             required_action=required_action,

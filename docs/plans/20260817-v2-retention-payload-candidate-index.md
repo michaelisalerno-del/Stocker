@@ -616,3 +616,62 @@ ordering/provenance violations, or escaped SQLite errors; maximum/final backlog 
 0.154/0.309/9.712 ms, admission/projection throughput 402.60/1,410.53 callbacks per
 second, heartbeat delay zero, 100/100 required feeds fresh/active, readiness true in
 2.259 ms, and RSS growth 24,444,928 bytes.
+
+## Accepted cutover addendum: split the cumulative evidence transaction
+
+The stopped-service cutover on the exact reviewed receipt release exposed one further
+measured boundary. Its required offline full-retention pass committed both receipt
+transactions and exactly 233 receipt-row changes, then raised
+`MaintenanceDeadlineExceeded` in
+`terminalization_payload_compaction_and_pruning`. The current transaction rolled back
+atomically: callback count, maximum sequence, payload count, and market-event count
+were unchanged. Receipt count fell by 233 and the verified watermark advanced by the
+same 1,187 callbacks removed from receipts. Preserve those valid commits; do not
+restore the pre-pass backup or retry the same combined transaction.
+
+The Architect accepted the smallest measured correction on schema 19. Split the
+existing second writer transaction into two transactions with independent, unchanged
+100 ms deadlines and one carried 2,000-row budget:
+
+1. `terminalization_and_payload_compaction` performs the existing bounded pending
+   terminalization and set-based proof-authorized payload compaction, subtracts both
+   counts from 2,000, verifies writer authority after `BEGIN IMMEDIATE` and immediately
+   before commit, and commits.
+2. `expired_evidence_pruning` runs only when budget remains, begins a new transaction,
+   passes exactly that remainder to the unchanged `_prune_expired`, repeats both
+   authority checks, and commits.
+
+If the first transaction commits and pruning fails, retain and report its valid
+terminalization/payload changes while rolling back every prune change. Extend bounded
+maintenance diagnostics with `terminalizations_committed`,
+`payloads_compacted_committed`, and `expired_rows_deleted_committed`; keep the existing
+exception type and recorder degradation boundary. Do not reset the budget, change a
+cutoff or predicate, relax the deadline, add a schema/index/state/loop, or modify the
+receipt transactions, cadence, cap behavior, subscription handling, or XNYS calendar.
+
+TDD must reproduce cumulative work crossing 100 ms before the split and prove the two
+new transactions pass independently, the carried budget never exceeds 2,000, zero
+remainder skips pruning, first-phase deadline/authority loss rolls it back, and
+second-phase failure preserves/accountably reports only the first commit. Existing
+proof corruption, payload authorization, protected-row anti-join, ownership, component
+incident, callback ordering/duplicate/gap, payload-drain, and opening-replay tests
+remain required. Validate at least 12 consecutive full passes on the disposable exact
+schema-19 production copy, then obtain independent read-only review.
+
+For rollout, keep both services stopped and runtime-masked, retain the fresh checked
+backup, and preserve the already committed 233 receipt changes. Deploy the exact
+reviewed split release, require one offline full-retention pass to exit successfully,
+verify schema 19, `quick_check=ok`, and zero foreign-key violations, then restart the
+same run as a new recorder generation. Require 12 consecutive scheduled maintenance
+opportunities under callbacks, fresh heartbeat, raw sequence growth, all exact 41
+validated identities active without duplicates, bounded DB/WAL/inbox, no unresolved
+current-generation retention incident, and truthful readiness before declaring the
+cutover complete. If implementation/review cannot complete before the operational
+cutoff, temporarily restart the reviewed receipt release in explicitly degraded mode
+to preserve raw market evidence; readiness must remain 503 and that is not release
+acceptance.
+
+This addendum affects only prospective/shadow market-data retention and its readiness
+signal. It does not change risk, execution, reconciliation, accounts, credentials,
+paper/live/order capability, subscription semantics, or NYSE/XNYS regular-session
+behavior.

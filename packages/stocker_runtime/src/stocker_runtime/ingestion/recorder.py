@@ -2793,7 +2793,8 @@ class Recorder:
             "receipt_work_selection",
             "receipt_transaction_1",
             "receipt_transaction_2",
-            "terminalization_payload_compaction_and_pruning",
+            "terminalization_and_payload_compaction",
+            "expired_evidence_pruning",
         }:
             details["retention_phase"] = cast(str, phase)
         transactions = error.__dict__.get("receipt_transactions_committed")
@@ -2802,6 +2803,14 @@ class Recorder:
         rolled = error.__dict__.get("receipt_rows_rolled_committed")
         if type(rolled) is int and 0 <= rolled <= 2_000:
             details["receipt_rows_rolled_committed"] = rolled
+        for name in (
+            "terminalizations_committed",
+            "payloads_compacted_committed",
+            "expired_rows_deleted_committed",
+        ):
+            value = error.__dict__.get(name)
+            if type(value) is int and 0 <= value <= 2_000:
+                details[name] = value
         return details
 
     @staticmethod

@@ -431,7 +431,7 @@ class ReadModel:
                 ).fetchone()
                 incidents = connection.execute(
                     "SELECT incident_id, scope, severity, code, plugin_instance_id, "
-                    "subscription_id, opened_at_us, resolved_at_us "
+                    "subscription_id, recorder_generation, opened_at_us, resolved_at_us "
                     "FROM incidents WHERE run_id = ? "
                     "ORDER BY opened_at_us DESC, incident_id DESC LIMIT ?",
                     (run_id, limit),

@@ -1444,7 +1444,7 @@ def test_schema_15_clean_stop_can_bind_inputs_and_restart_same_run(tmp_path: Pat
             "process_heartbeat_at_us, connection_state, connection_generation) VALUES "
             "('run-1', 1, 'stopped', NULL, 2, 'disconnected', 1)"
         )
-    assert migrate_database(database, applied_at_us=3).applied_versions == (16, 17)
+    assert migrate_database(database, applied_at_us=3).applied_versions == (16, 17, 18)
     instrument, specs = _specs()
 
     restarted = Recorder(_config(database, owner_id="new-owner"), FakeMarketData()).start(
@@ -5082,6 +5082,125 @@ def test_component_recovery_preserves_prior_episode_history(tmp_path: Path) -> N
         (101, 1_000_101),
         (2_000_101, None),
     ]
+
+
+def test_component_recovery_is_scoped_to_current_recorder_generation(tmp_path: Path) -> None:
+    database = tmp_path / "component-generation-scope.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    first = Recorder(_config(database), FakeMarketData())
+    first.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    assert first._component_failure(
+        "retention_maintenance",
+        now_us=101,
+        error_name="MaintenanceDeadlineExceeded",
+    )
+    first.stop(now_us=102)
+
+    second = Recorder(_config(database, owner_id="owner-2"), FakeMarketData())
+    second.start(now_us=200, instruments=(instrument,), subscriptions=specs)
+    assert second._component_failure(
+        "retention_maintenance",
+        now_us=201,
+        error_name="MaintenanceDeadlineExceeded",
+    )
+    assert second._component_recovered("retention_maintenance", now_us=1_000_201)
+
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT recorder_generation, lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        incidents = tuple(
+            connection.execute(
+                "SELECT recorder_generation, opened_at_us, resolved_at_us FROM incidents "
+                "WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED' "
+                "ORDER BY opened_at_us"
+            )
+        )
+    assert tuple(runtime) == (2, "running", None, "connected")
+    assert [tuple(row) for row in incidents] == [
+        (1, 101, None),
+        (2, 201, 1_000_201),
+    ]
+
+
+def test_legacy_component_incident_without_generation_cannot_poison_recovery(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "legacy-component-generation.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO incidents(incident_id, run_id, scope, severity, code, opened_at_us, "
+            "details_json, recorder_generation) VALUES ('legacy-component', 'run-1', "
+            "'component', 'degraded', 'COMPONENT_RETENTION_MAINTENANCE_FAILED', 50, '{}', NULL)"
+        )
+
+    assert recorder._component_failure(
+        "backup_maintenance",
+        now_us=101,
+        error_name="OSError",
+    )
+    assert recorder._component_recovered("backup_maintenance", now_us=1_000_101)
+
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        legacy = connection.execute(
+            "SELECT recorder_generation, resolved_at_us FROM incidents "
+            "WHERE incident_id='legacy-component'"
+        ).fetchone()
+    assert tuple(runtime) == ("running", None, "connected")
+    assert tuple(legacy) == (None, None)
+
+
+def test_current_generation_stays_degraded_until_every_component_recovers(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "current-component-generation.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    assert recorder._component_failure(
+        "retention_maintenance",
+        now_us=101,
+        error_name="MaintenanceDeadlineExceeded",
+    )
+    assert recorder._component_failure(
+        "backup_maintenance",
+        now_us=102,
+        error_name="OSError",
+    )
+
+    assert recorder._component_recovered("retention_maintenance", now_us=1_000_101)
+    with connect_v2(database) as connection:
+        after_first = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        unresolved = tuple(
+            connection.execute(
+                "SELECT code, recorder_generation FROM incidents "
+                "WHERE resolved_at_us IS NULL ORDER BY code"
+            )
+        )
+    assert tuple(after_first) == (
+        "degraded",
+        "COMPONENT_RETENTION_MAINTENANCE_FAILED",
+        "connected",
+    )
+    assert [tuple(row) for row in unresolved] == [("COMPONENT_BACKUP_MAINTENANCE_FAILED", 1)]
+
+    assert recorder._component_recovered("backup_maintenance", now_us=1_000_102)
+    with connect_v2(database) as connection:
+        after_last = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+    assert tuple(after_last) == ("running", None, "connected")
 
 
 def test_retention_backoff_still_fails_closed_at_storage_hard_cap(

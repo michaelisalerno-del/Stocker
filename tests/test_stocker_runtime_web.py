@@ -1085,7 +1085,8 @@ def test_meta_and_diagnostics_are_bounded_and_authority_free(tmp_path: Path) -> 
         for number in range(3):
             connection.execute(
                 "INSERT INTO incidents(incident_id, run_id, scope, severity, code, opened_at_us, "
-                "details_json) VALUES (?, 'run-live', 'ingestion', 'degraded', 'TEST', ?, '{}')",
+                "details_json, recorder_generation) VALUES "
+                "(?, 'run-live', 'component', 'degraded', 'TEST', ?, '{}', 1)",
                 (f"incident-{number}", 200 + number),
             )
             connection.execute(
@@ -1133,6 +1134,7 @@ def test_meta_and_diagnostics_are_bounded_and_authority_free(tmp_path: Path) -> 
     assert response.status_code == 200
     diagnostics = response.json()
     assert len(diagnostics["incidents"]) == 2
+    assert {item["recorder_generation"] for item in diagnostics["incidents"]} == {1}
     assert len(diagnostics["gaps"]) == 2
     assert len(diagnostics["subscriptions"]) == 1
     assert len(diagnostics["backups"]["items"]) == 2

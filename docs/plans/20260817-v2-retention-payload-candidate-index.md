@@ -110,12 +110,66 @@ different later maintenance query may still exceed the deadline and must be meas
 separately. This change adds no queue, cursor, table, daemon, loop, global latch,
 storage layer, feed source, calendar scope, or trading authority.
 
-## Final unchanged-threshold replay
+## Accepted deployment addendum: generation-scoped component incidents
 
-The post-change 60-second replay passed all frozen thresholds with 12,132 presented,
+The schema-17 rollout exposed a separate current-HEAD lifecycle defect. A retention
+failure from recorder generation 2 remained unresolved, while generation 3 retried
+retention successfully. Component incident identifiers already contain the generation,
+but `_component_recovered()` checks every unresolved component incident for the run.
+The historical generation-2 row therefore kept healthy generation 3 degraded and made
+readiness false even though raw admission, ownership, the IBKR socket, and the complete
+required subscription set remained healthy.
+
+The accepted smallest evidence-preserving correction is schema migration 18 with one
+nullable column:
+
+```sql
+ALTER TABLE incidents ADD COLUMN recorder_generation INTEGER
+    CHECK(recorder_generation IS NULL OR recorder_generation >= 0);
+```
+
+New component incidents record the authoritative recorder generation. Component
+recovery checks only unresolved component incidents for the current run and generation.
+Schema-17 and older incident rows retain every existing value and receive `NULL`; they
+remain visible historical evidence but cannot poison a schema-18 generation. Do not
+resolve, backfill, rewrite, or delete historical incidents at generation start. Keep the
+generation-bearing incident-ID formula. Do not duplicate generation in `details_json`,
+add an index without measured need, or generalise non-component incident producers.
+
+Rejected alternatives were resolving old incidents at startup, resolving prior episodes
+after a later generation succeeds, encoding the lifecycle relationship only in JSON,
+and relying on process-local failure dictionaries. Each would either falsify evidence or
+lose durable lifecycle scope across a restart.
+
+Acceptance requires schema-17-to-18 evidence preservation and integrity checks; exact
+generation provenance on new component incidents; repeated-failure deduplication; a
+generation-2 failure remaining visible while generation 3 recovers to `running`; legacy
+`NULL` incidents not blocking current recovery; another unresolved incident in the same
+generation continuing to block recovery; contention deferring recovery; raw admission
+continuing under degradation; and hard durable-admission/storage failures remaining
+fail-closed.
+
+Deploy this addendum serially. Stop recorder and web, create and restore-check a fresh
+schema-17 backup, migrate offline, verify migration ledger/schema/`quick_check`/foreign
+keys, and restart the same run as a new recorder generation. Require a fresh heartbeat,
+a connected market-data socket, every exact required subscription identity reported by
+validated preflight active, healthy durable admission, and readiness for the new
+generation. Before schema-18 admission the checked schema-17 backup and matching release
+may be restored; after schema-18 callbacks are admitted, roll forward to avoid evidence
+loss. Do not manually edit or resolve the historical incident.
+
+This addendum affects prospective-record and shadow component health, incident
+provenance, and read-only readiness. It does not affect risk, execution, reconciliation,
+orders, fills, positions, accounts, credentials, paper/live trading, broker capability,
+subscription behavior, or XNYS regular-session semantics. No live order test is
+authorised.
+
+## Final unchanged-threshold schema-18 replay
+
+The post-schema-18 60-second replay passed all frozen thresholds with 12,132 presented,
 admitted, durable, and projected callbacks; zero missing, duplicate, ordering,
 provenance, or escaped SQLite busy/locked failures; admission p50/p95/p99 of
-0.154/0.287/9.617 ms; admission/projection throughput of 421.59/1,496.65 callbacks per
+0.159/0.289/9.802 ms; admission/projection throughput of 414.48/1,456.55 callbacks per
 second; maximum/final backlog of 219/0; zero seconds to the 256-row safe range and
-0.150 seconds to drain; heartbeat delay 0 seconds; 100/100 feeds active and fresh;
-readiness true in 214.01 ms; and RSS growth of 31,326,208 bytes.
+0.169 seconds to drain; heartbeat delay 0 seconds; 100/100 feeds active and fresh;
+readiness true in 224.24 ms; and RSS growth of 27,639,808 bytes.

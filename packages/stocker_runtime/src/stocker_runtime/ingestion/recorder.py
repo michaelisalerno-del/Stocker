@@ -2833,10 +2833,18 @@ class Recorder:
                 self._verify_owned(connection)
                 connection.execute(
                     "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
-                    "opened_at_us, details_json) VALUES (?, ?, 'component', 'degraded', ?, ?, ?) "
+                    "opened_at_us, details_json, recorder_generation) "
+                    "VALUES (?, ?, 'component', 'degraded', ?, ?, ?, ?) "
                     "ON CONFLICT(incident_id) DO UPDATE SET resolved_at_us=NULL, "
                     "details_json=excluded.details_json",
-                    (incident_id, self.config.run_id, code, opened_at_us, details_json),
+                    (
+                        incident_id,
+                        self.config.run_id,
+                        code,
+                        opened_at_us,
+                        details_json,
+                        generation,
+                    ),
                 )
                 connection.execute(
                     "UPDATE runtime_state SET lifecycle='degraded', reason=? WHERE run_id=? "
@@ -2858,9 +2866,9 @@ class Recorder:
                 return False
             self._component_pending_incidents.pop(component, None)
         opened_at_us = self._component_first_failure_at_us.get(component, now_us)
+        generation = self._authority_state().recorder_generation
         incident_id = hashlib.sha256(
-            f"{self.config.run_id}|{self._authority_state().recorder_generation}|component|"
-            f"{component}|{opened_at_us}".encode()
+            f"{self.config.run_id}|{generation}|component|{component}|{opened_at_us}".encode()
         ).hexdigest()
         recovery_details_json = canonical_json_bytes(
             cast(JsonValue, {"component": component, "recovered": True})
@@ -2871,13 +2879,15 @@ class Recorder:
                 self._verify_owned(connection)
                 connection.execute(
                     "INSERT OR IGNORE INTO incidents(incident_id, run_id, scope, severity, code, "
-                    "opened_at_us, details_json) VALUES (?, ?, 'component', 'degraded', ?, ?, ?)",
+                    "opened_at_us, details_json, recorder_generation) "
+                    "VALUES (?, ?, 'component', 'degraded', ?, ?, ?, ?)",
                     (
                         incident_id,
                         self.config.run_id,
                         self._component_code(component),
                         opened_at_us,
                         recovery_details_json,
+                        generation,
                     ),
                 )
                 connection.execute(
@@ -2887,8 +2897,9 @@ class Recorder:
                 )
                 unresolved_components = connection.execute(
                     "SELECT 1 FROM incidents WHERE run_id=? AND scope='component' "
-                    "AND resolved_at_us IS NULL AND incident_id!=? LIMIT 1",
-                    (self.config.run_id, incident_id),
+                    "AND recorder_generation=? AND resolved_at_us IS NULL "
+                    "AND incident_id!=? LIMIT 1",
+                    (self.config.run_id, generation, incident_id),
                 ).fetchone()
                 required_incomplete = connection.execute(
                     "SELECT 1 FROM subscriptions WHERE run_id=? AND recorder_generation=? "

@@ -106,6 +106,7 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
         15,
         16,
         17,
+        18,
     )
     with connect_v2(database) as connection:
         tables = {
@@ -164,7 +165,7 @@ def test_market_open_reliability_migration_preserves_deployed_v2_evidence(
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (16, 17)
+    assert result.applied_versions == (16, 17, 18)
     with connect_v2(database) as connection:
         generation = connection.execute(
             "SELECT run_id, generation, owner_id, termination_code, ownership_protocol, "
@@ -216,7 +217,7 @@ def test_payload_compaction_index_migration_preserves_schema_16_evidence(
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (17,)
+    assert result.applied_versions == (17, 18)
     with connect_v2(database) as connection:
         after = tuple(connection.execute("SELECT * FROM callback_inbox ORDER BY source_sequence"))
         index_sql = connection.execute(
@@ -249,6 +250,55 @@ def test_payload_compaction_index_migration_preserves_schema_16_evidence(
     )
     assert all("callback_inbox_payload_run_sequence_idx" in plan for plan in plans.values())
     assert all("USE TEMP B-TREE" not in plan for plan in plans.values())
+    assert foreign_keys == ()
+    assert quick_check == "ok"
+
+
+def test_component_incident_generation_migration_preserves_schema_17_evidence(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "schema-17.sqlite3"
+    migration_root = tmp_path / "schema-17-migrations"
+    migration_root.mkdir()
+    for migration in migration_plan()[:17]:
+        (migration_root / migration.name).write_text(migration.sql, encoding="utf-8")
+    initialize_database(database, migration_root=migration_root, applied_at_us=1)
+    with connect_v2(database, verify_schema=False) as connection:
+        connection.execute(
+            "INSERT INTO runs(run_id, mode, source, started_at_us, config_hash, git_commit, "
+            "data_class, status) VALUES ('incident-run', 'shadow', 'ibkr', 10, ?, "
+            "'old-commit', 'shadow_protected', 'running')",
+            ("a" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO incidents(incident_id, run_id, scope, severity, code, opened_at_us, "
+            "details_json) VALUES ('old-component', 'incident-run', 'component', "
+            "'degraded', 'COMPONENT_RETENTION_MAINTENANCE_FAILED', 11, '{}')"
+        )
+        before = tuple(connection.execute("SELECT * FROM incidents"))[0]
+
+    result = migrate_database(database, applied_at_us=2)
+
+    assert result.applied_versions == (18,)
+    with connect_v2(database) as connection:
+        after = connection.execute(
+            "SELECT incident_id, run_id, scope, severity, code, plugin_instance_id, "
+            "subscription_id, opened_at_us, resolved_at_us, details_json, "
+            "recorder_generation FROM incidents"
+        ).fetchone()
+        column = connection.execute("PRAGMA table_info(incidents)").fetchall()[-1]
+        foreign_keys = tuple(connection.execute("PRAGMA foreign_key_check"))
+        quick_check = connection.execute("PRAGMA quick_check").fetchone()[0]
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
+                "opened_at_us, details_json, recorder_generation) VALUES "
+                "('invalid-generation', 'incident-run', 'component', 'degraded', "
+                "'TEST', 12, '{}', -1)"
+            )
+    assert tuple(after[:-1]) == tuple(before)
+    assert after[-1] is None
+    assert tuple(column[1:6]) == ("recorder_generation", "INTEGER", 0, None, 0)
     assert foreign_keys == ()
     assert quick_check == "ok"
 
@@ -295,7 +345,7 @@ def test_callback_receipt_frontier_index_migration_preserves_rows_and_is_used(
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (15, 16, 17)
+    assert result.applied_versions == (15, 16, 17, 18)
     with connect_v2(database) as connection:
         after = tuple(connection.execute("SELECT * FROM callback_inbox ORDER BY source_sequence"))
         index_sql = connection.execute(
@@ -370,7 +420,7 @@ def test_instrument_alias_migration_preserves_evidence_and_rejects_physical_mism
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (14, 15, 16, 17)
+    assert result.applied_versions == (14, 15, 16, 17, 18)
     with connect_v2(database) as connection:
         index = next(
             row
@@ -555,7 +605,7 @@ def test_phase2_migration_preserves_dynamic_rows_and_admits_only_causal_derived_
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (13, 14, 15, 16, 17)
+    assert result.applied_versions == (13, 14, 15, 16, 17, 18)
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -684,7 +734,7 @@ def test_migration_verification_fails_closed_for_future_or_tampered_history(
     with sqlite3.connect(future) as connection:
         connection.execute(
             "INSERT INTO schema_migrations(version, name, sha256, applied_at_us) "
-            "VALUES (18, '0018_future.sql', ?, 2)",
+            "VALUES (19, '0019_future.sql', ?, 2)",
             ("f" * 64,),
         )
     with pytest.raises(SchemaError, match="newer"):
@@ -793,7 +843,7 @@ def test_shadow_policy_migration_backfills_one_binding_and_rejects_conflicting_h
 
     result = migrate_database(backfill_database, applied_at_us=2)
 
-    assert result.applied_versions == (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17)
+    assert result.applied_versions == (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18)
     with connect_v2(backfill_database) as connection:
         assert tuple(
             connection.execute(
@@ -886,7 +936,7 @@ def test_expiry_projection_migration_deactivates_terminal_history(tmp_path: Path
 
     result = migrate_database(database, applied_at_us=2)
 
-    assert result.applied_versions == (8, 9, 10, 11, 12, 13, 14, 15, 16, 17)
+    assert result.applied_versions == (8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18)
     with connect_v2(database) as connection:
         assert tuple(
             connection.execute(
@@ -1040,6 +1090,7 @@ def test_commit_boundary_migration_rewinds_pending_shadow_to_conservative_run_ma
         15,
         16,
         17,
+        18,
     )
     with connect_v2(database) as connection:
         assert (
@@ -4682,11 +4733,12 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
             15,
             16,
             17,
+            18,
         ],
-        "current_version": 17,
+        "current_version": 18,
         "status": "ok",
     }
-    assert migration_payload == {"applied_versions": [], "current_version": 17, "status": "ok"}
+    assert migration_payload == {"applied_versions": [], "current_version": 18, "status": "ok"}
     assert retention_payload["status"] == "ok"
     assert retention_payload["cap_state"] in {"normal", "soft_cap", "degraded"}
     assert "payload_json" not in retained.stdout

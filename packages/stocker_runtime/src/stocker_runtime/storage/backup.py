@@ -83,6 +83,14 @@ class BackupCapacityError(BackupError):
 
 
 @dataclass(frozen=True)
+class QuiescentCopyResult:
+    """Stable identity of the stopped source after WAL truncation."""
+
+    source_bytes: int
+    source_sha256: str
+
+
+@dataclass(frozen=True)
 class BackupPolicy:
     """Frozen tier counts and total backup-directory byte cap."""
 
@@ -779,6 +787,45 @@ def _online_copy(source: Path, destination: Path) -> None:
         os.fsync(handle.fileno())
 
 
+def copy_quiescent_database(
+    source: Path,
+    destination: Path,
+    *,
+    precondition: Callable[[], None],
+) -> QuiescentCopyResult:
+    """Copy a stopped database byte-for-byte under a caller-held writer lock."""
+
+    precondition()
+    with sqlite3.connect(source, isolation_level=None) as connection:
+        checkpoint = tuple(connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone())
+    precondition()
+    if checkpoint[0] != 0 or checkpoint[2] < checkpoint[1]:
+        raise BackupError(f"source WAL checkpoint is incomplete: {checkpoint}")
+    wal = Path(f"{source}-wal")
+    if wal.exists() and wal.stat().st_size != 0:
+        raise BackupError("source WAL is nonzero after the truncate checkpoint")
+
+    before = source.stat()
+    shutil.copyfile(source, destination)
+    with destination.open("rb") as handle:
+        os.fsync(handle.fileno())
+    precondition()
+    after = source.stat()
+    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    ):
+        raise BackupError("source database changed during the quiescent copy")
+    source_hash, source_bytes = _hash_file(source)
+    copied_hash, copied_bytes = _hash_file(destination)
+    precondition()
+    if source_bytes != copied_bytes or source_hash != copied_hash:
+        raise BackupIntegrityError("quiescent database copy is not byte-identical")
+    return QuiescentCopyResult(source_bytes, source_hash)
+
+
 def _compress(source: Path, destination: Path) -> None:
     with source.open("rb") as source_handle, destination.open("xb") as raw_destination:
         with gzip.GzipFile(
@@ -1038,6 +1085,90 @@ def create_backup(
             created_at_us=created_at_us,
             policy=policy,
             working_directory=working,
+            copy_database=_online_copy,
+            precondition=None,
+            post_publish_verify=None,
+        )
+
+
+def create_quiescent_backup(
+    database: str | Path,
+    destination: str | Path,
+    *,
+    tier: BackupTier,
+    precondition: Callable[[], None],
+    created_at_us: int | None = None,
+    policy: BackupPolicy | None = None,
+    working_directory: str | Path | None = None,
+    post_publish_verify: Callable[[BackupArtifact], None] | None = None,
+    defer_healthy_status: bool = False,
+) -> BackupArtifact:
+    """Create a managed backup from a stopped database under verified ownership."""
+
+    root = _prepare_backup_directory(Path(destination))
+    working = _prepare_working_directory(
+        Path(tempfile.gettempdir()) if working_directory is None else Path(working_directory),
+        backup_directory=root,
+    )
+    with _backup_locks(root, working):
+        _remove_stale_atomic_files(root)
+        _remove_interrupted_publication_orphans(root, previous_status=_read_status(root))
+        _remove_stale_backup_work(working)
+        return _create_backup_locked(
+            database,
+            root,
+            tier=tier,
+            created_at_us=created_at_us,
+            policy=policy,
+            working_directory=working,
+            copy_database=lambda source, destination: copy_quiescent_database(
+                source,
+                destination,
+                precondition=precondition,
+            ),
+            precondition=precondition,
+            post_publish_verify=post_publish_verify,
+            defer_healthy_status=defer_healthy_status,
+        )
+
+
+def finalize_quiescent_backup(
+    artifact: BackupArtifact,
+    destination: str | Path,
+    *,
+    policy: BackupPolicy | None = None,
+    working_directory: str | Path | None = None,
+) -> None:
+    """Publish healthy status only after restore proof and service recovery."""
+
+    root = _prepare_backup_directory(Path(destination))
+    working = _prepare_working_directory(
+        Path(tempfile.gettempdir()) if working_directory is None else Path(working_directory),
+        backup_directory=root,
+    )
+    if (
+        artifact.archive_path.parent.resolve() != root
+        or artifact.manifest_path.parent.resolve() != root
+    ):
+        raise BackupIntegrityError("quiescent backup artifact is outside its destination")
+    with _backup_locks(root, working):
+        loaded = load_backup_manifest(artifact.manifest_path, verify_compressed_hash=True)
+        if loaded != artifact.manifest or artifact.archive_path.name != loaded.archive_filename:
+            raise BackupIntegrityError("quiescent backup artifact identity changed")
+        current = _read_status(root)
+        if (
+            current.state != "degraded"
+            or current.code != "BACKUP_IN_PROGRESS"
+            or current.latest_manifest_filename != artifact.manifest_path.name
+        ):
+            raise BackupIntegrityError("quiescent backup is not awaiting finalization")
+        _write_status(
+            root,
+            state="healthy",
+            checked_at_us=artifact.manifest.created_at_us,
+            code=None,
+            latest_manifest_filename=artifact.manifest_path.name,
+            byte_cap=(policy or BackupPolicy()).byte_cap,
         )
 
 
@@ -1049,6 +1180,10 @@ def _create_backup_locked(
     created_at_us: int | None = None,
     policy: BackupPolicy | None = None,
     working_directory: Path,
+    copy_database: Callable[[Path, Path], object],
+    precondition: Callable[[], None] | None,
+    post_publish_verify: Callable[[BackupArtifact], None] | None,
+    defer_healthy_status: bool = False,
 ) -> BackupArtifact:
     """Create one checked online backup and atomically commit its strict manifest."""
 
@@ -1127,7 +1262,9 @@ def _create_backup_locked(
         os.close(archive_descriptor)
         temporary_archive = Path(archive_temporary_name)
         temporary_archive.unlink()
-        _online_copy(source, temporary_database)
+        copy_database(source, temporary_database)
+        if precondition is not None:
+            precondition()
         try:
             verify_database(temporary_database)
         except (OSError, SchemaError, sqlite3.Error) as error:
@@ -1146,6 +1283,8 @@ def _create_backup_locked(
         uncompressed_sha256, uncompressed_bytes = _hash_file(temporary_database)
         _compress(temporary_database, temporary_archive)
         compressed_sha256, compressed_bytes = _hash_file(temporary_archive)
+        if precondition is not None:
+            precondition()
         manifest = BackupManifest(
             format_version=BACKUP_FORMAT_VERSION,
             tier=tier,
@@ -1202,6 +1341,8 @@ def _create_backup_locked(
         )
         if publication_peak > frozen_policy.byte_cap:
             raise _capacity_error(frozen_policy)
+        if precondition is not None:
+            precondition()
         _remove_managed_backups(before_publication, directory=root)
         publication_descriptor, publication_temporary_name = tempfile.mkstemp(
             prefix=".stocker-v2-atomic-",
@@ -1231,9 +1372,25 @@ def _create_backup_locked(
             latest_manifest_filename=manifest.manifest_filename,
             byte_cap=frozen_policy.byte_cap,
         )
+        artifact = BackupArtifact(manifest, archive_path, manifest_path)
+        # The committed archive is now the sole restore source. Release the
+        # redundant full-size work files before restore verification so a
+        # mature database does not require space for both copies at once.
+        temporary_database.unlink()
+        Path(f"{temporary_database}-journal").unlink(missing_ok=True)
+        Path(f"{temporary_database}-wal").unlink(missing_ok=True)
+        Path(f"{temporary_database}-shm").unlink(missing_ok=True)
+        temporary_database = None
+        temporary_archive.unlink()
+        temporary_archive = None
+        if post_publish_verify is not None:
+            post_publish_verify(artifact)
         _remove_managed_backups(after_publication, directory=root)
-        _write_atomic(status_path, status_payload)
-        return BackupArtifact(manifest, archive_path, manifest_path)
+        if not defer_healthy_status:
+            _write_atomic(status_path, status_payload)
+        if precondition is not None:
+            precondition()
+        return artifact
     except Exception as error:
         removed_candidate = False
         if not committed:

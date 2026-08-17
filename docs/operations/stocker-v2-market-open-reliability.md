@@ -124,6 +124,68 @@ health/rotation, but the command's own two-copy/18-GiB maximum is mandatory. Nev
 manually retain its uncompressed working copy. This fallback is not permission to
 snapshot a live database or a nonzero WAL separately.
 
+### Unattended managed backups
+
+The production daily and weekly timers use the tracked quiescent helper
+[`run-v2-quiescent-managed-backup.py`](../../deploy/scripts/run-v2-quiescent-managed-backup.py),
+not the live online-copy command. Daily work is scheduled for 22:00 UTC with a bounded
+random delay; weekly work is scheduled for Sunday 06:00 UTC. The helper independently
+uses the existing XNYS calendar and requires at least one hour before the next regular
+session. A persistent timer caught up during regular hours or too near the next open
+fails before stopping either service.
+
+For an accepted window the helper clean-stops web and recorder, holds the canonical
+writer lock, proves no database descriptor remains, completely truncates the WAL, and
+creates a byte-identical source copy. The ordinary managed-backup verifier, deterministic
+compression, manifest, rotation floors, and 8 GiB directory cap then apply. The newly
+published archive is decompressed to a temporary path and schema, hashes, `quick_check`,
+and foreign keys are verified before success. Recorder is restarted first with the same
+`run_id` and a new generation, then web is restarted. Both the helper and systemd
+`ExecStopPost` provide this ordered restart boundary on success, ordinary failure, or
+service timeout. A failed snapshot remains nonzero/degraded; it is never reported as a
+healthy backup merely because the services restarted.
+
+The first invocation after each release is attended and off-session:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl start stocker-v2-backup-daily.service
+sudo systemctl status stocker-v2-backup-daily.service --no-pager
+sudo cat /var/lib/stocker/backups-v2/backup-status.json
+```
+
+Require service exit zero, backup status `healthy`, a current daily manifest and
+restore-checked archive, a cleanly ended prior generation, the same run in a new
+generation, fresh recorder heartbeat, connected socket, every exact configured
+required identity active, increasing raw sequence, bounded inbox/WAL, zero order
+capability, and truthful `/api/v2/ready`. Only after that proof enable the timers:
+
+```bash
+sudo systemctl enable --now \
+  stocker-v2-backup-daily.timer stocker-v2-backup-weekly.timer
+systemctl list-timers 'stocker-v2-backup-*' --no-pager
+```
+
+Do not run `stocker-runtime backup create` against the active production database as a
+substitute. The command remains available for disposable/offline administration, but
+the installed timer units accept only the fixed quiescent helper and named service
+pair. Never run an unbounded direct SQLite read while the recorder is active.
+
+### IB Gateway authentication is not unattended
+
+The installed Gateway unit intentionally uses manual paper-account authentication.
+Its daily readiness probe correctly failed on 14, 15, and 16 August 2026: systemd
+restarted the Gateway at 23:45 UTC, but API port 4002 did not reopen during the bounded
+120-second probe. This is an operator alarm, not a recorder defect.
+
+Do not disable the probe, store credentials, automate login or 2FA, change account
+selection, or lengthen the probe merely to make systemd green. After a broker restart,
+an operator must authenticate through the existing VNC procedure unless an already
+authorized IBKR session is separately proven to resume without credential or account
+changes. `/api/v2/ready` remains 503 while the socket or required subscriptions are
+unavailable. Consequently Stocker process recovery and backups are unattended, but
+end-to-end IBKR availability still has this explicit broker-authentication boundary.
+
 ## Production preflight
 
 The service unit validates both files before creating an IBKR connection:

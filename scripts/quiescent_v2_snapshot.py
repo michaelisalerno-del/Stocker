@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from stocker_runtime.ingestion.lifecycle import LocalWriterLock
+from stocker_runtime.storage import copy_quiescent_database, verify_database
 
 MAX_RECOVERY_SNAPSHOTS = 2
 MAX_RECOVERY_ARCHIVE_BYTES = 9 * 1024 * 1024 * 1024
@@ -89,9 +90,10 @@ def _verify(
     }
     if migration != expected_migration:
         raise RuntimeError(f"unexpected migration verification: {migration}")
+    # Register Stocker's deterministic SQLite functions while running the
+    # schema, foreign-key, and quick integrity checks on mature V2 schemas.
+    verify_database(path)
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
-        quick_check = connection.execute("PRAGMA quick_check").fetchone()[0]
-        foreign_keys = tuple(connection.execute("PRAGMA foreign_key_check"))
         maximum, nonterminal = connection.execute(
             "SELECT MAX(source_sequence), "
             "SUM(CASE WHEN lifecycle IN ('pending','leased') THEN 1 ELSE 0 END) "
@@ -106,8 +108,6 @@ def _verify(
         run = connection.execute(
             "SELECT config_hash FROM runs WHERE run_id=?", (run_id,)
         ).fetchone()
-    if quick_check != "ok" or foreign_keys:
-        raise RuntimeError("snapshot integrity verification failed")
     if maximum != expected_max_source_sequence or nonterminal != expected_nonterminal:
         raise RuntimeError(
             "snapshot callback evidence differs from the recorded pre-snapshot values"
@@ -123,8 +123,8 @@ def _verify(
         raise RuntimeError(f"snapshot generation state is not the expected state: {generation_row}")
     return {
         "schema": expected_schema,
-        "quick_check": quick_check,
-        "foreign_key_violations": len(foreign_keys),
+        "quick_check": "ok",
+        "foreign_key_violations": 0,
         "max_source_sequence": maximum,
         "nonterminal_callbacks": nonterminal,
         "generation_ended_at_us": generation_row[0],
@@ -211,30 +211,22 @@ def main() -> None:
         if lsof.returncode != 1:
             raise RuntimeError("cannot prove that the database has no open descriptor")
 
-        lock.verify_held()
-        with sqlite3.connect(database, isolation_level=None) as connection:
-            checkpoint = tuple(connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone())
-        lock.verify_held()
-        if checkpoint[0] != 0 or checkpoint[2] < checkpoint[1]:
-            raise RuntimeError(f"source WAL checkpoint is incomplete: {checkpoint}")
-        wal = Path(f"{database}-wal")
-        if wal.exists() and wal.stat().st_size != 0:
-            raise RuntimeError("source WAL is nonzero after the truncate checkpoint")
-
+        copy_result = copy_quiescent_database(
+            database,
+            snapshot,
+            precondition=lock.verify_held,
+        )
         before = database.stat()
-        lock.verify_held()
-        shutil.copyfile(database, snapshot)
         os.chmod(snapshot, 0o640)
         os.chown(snapshot, before.st_uid, before.st_gid)
-        _fsync(snapshot)
         _fsync(destination)
-        lock.verify_held()
-        after = database.stat()
-        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-            raise RuntimeError("source database changed during the snapshot")
-        source_hash = _sha256(database)
+        source_hash = copy_result.source_sha256
         snapshot_hash = _sha256(snapshot)
-        if before.st_size != snapshot.stat().st_size or source_hash != snapshot_hash:
+        if (
+            before.st_size != copy_result.source_bytes
+            or before.st_size != snapshot.stat().st_size
+            or source_hash != snapshot_hash
+        ):
             raise RuntimeError("source and snapshot are not byte-identical")
         evidence = _verify(
             snapshot,

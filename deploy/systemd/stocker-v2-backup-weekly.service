@@ -1,18 +1,21 @@
 [Unit]
-Description=Stocker V2 weekly checked compressed backup
-Documentation=file:/opt/stocker/v2-current/docs/plans/stocker-v2-platform.md
-After=stocker-v2-recorder.service
+Description=Stocker V2 weekly quiescent checked compressed backup
+Documentation=file:/opt/stocker/v2-current/docs/operations/stocker-v2-market-open-reliability.md
+After=stocker-v2-recorder.service stocker-v2-web.service
 
 [Service]
 Type=oneshot
-User=stocker-backup
+User=root
 Group=stocker-readers
 WorkingDirectory=/opt/stocker/v2-current
 EnvironmentFile=-/etc/stocker/stocker-backup.env
 CacheDirectory=stocker-v2-backup-work
 CacheDirectoryMode=0750
-ExecStart=/opt/stocker/v2-current/.venv/bin/stocker-runtime backup create --database /var/lib/stocker/v2/stocker-v2.sqlite3 --destination /var/lib/stocker/backups-v2 --tier weekly --working-directory /var/cache/stocker-v2-backup-work
-TimeoutStartSec=31min
+RuntimeDirectory=stocker-v2-backup-weekly
+RuntimeDirectoryMode=0700
+ExecStart=/opt/stocker/v2-current/.venv/bin/python /opt/stocker/v2-current/deploy/scripts/run-v2-quiescent-managed-backup.py --tier weekly
+ExecStopPost=/opt/stocker/v2-current/.venv/bin/python /opt/stocker/v2-current/deploy/scripts/run-v2-quiescent-managed-backup.py --tier weekly --restart-after-interruption
+TimeoutStartSec=45min
 UMask=0027
 NoNewPrivileges=true
 PrivateTmp=true
@@ -26,7 +29,6 @@ LockPersonality=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX
 IPAddressDeny=any
-ReadOnlyPaths=/var/lib/stocker/v2
-ReadWritePaths=/var/lib/stocker/v2/stocker-v2.sqlite3-shm
+ReadWritePaths=/var/lib/stocker/v2
 ReadWritePaths=/var/lib/stocker/backups-v2
 ReadWritePaths=/var/cache/stocker-v2-backup-work

@@ -776,8 +776,11 @@ systemctl is-enabled stocker-v2-recorder.service stocker-v2-web.service \
 The three V1 checks must report inactive and disabled; their unit definitions remain
 installed until the owner closes the rollback window. The four V2 checks must remain
 disabled until the next two sections. Only the recorder may write the database or WAL.
-Web and backup hold read-only database/WAL paths plus the narrow SQLite SHM permission
-defined in their reviewed units.
+Web holds read-only database/WAL paths plus the narrow SQLite SHM permission in its
+reviewed unit. The managed-backup service is a root-owned, strongly sandboxed, fixed
+orchestrator because it must stop and restart the named services and truncate the WAL;
+it can write the database directory only while recorder and web are stopped and while
+it holds the canonical writer lock.
 
 ## 5. Prove the web boundary before recording
 
@@ -820,8 +823,11 @@ proof.
 Keep the deployment attended for the bounded observation window recorded in the change
 approval. Review recorder lifecycle, freshness, gaps, incidents, plugin isolation,
 callback backlog, database/WAL size, and web query-only behaviour. Run one checked V2
-backup and a disposable restore verification. Only then enable the reviewed V2 daily
-and weekly timers and declare V2 admission operational. This does not close the
+quiescent managed backup and its built-in disposable restore verification. Require the
+same run to resume in a new generation with exact required feeds before enabling the
+reviewed V2 daily and weekly timers and declare V2 admission operational. A
+persistent timer invocation during XNYS regular hours fails before service stop. This
+does not close the
 rollback window: `/opt/stocker/current`, the installed V1 units, the complete V1
 release, its untouched database, and both recovery sets remain preserved.
 

@@ -1319,6 +1319,37 @@ both timers only after a daily backup has been restored and verified and the res
 generation has fresh heartbeat, connected socket, every exact required identity,
 growing raw sequence, bounded inbox/WAL and truthful readiness.
 
+The completed local production-size gate restored the existing checked 3,731,283,968
+byte schema-19 backup, migrated the disposable copy to schema 20, and ran the exact
+quiescent managed publication/restore/finalization path. It produced a 1,035,556,460
+byte archive with exact uncompressed and compressed hashes, schema ledger, quick check
+and foreign-key verification, released the redundant full-size work files before
+restore proof, and finalized `backup-status.json` as `healthy` in approximately 6
+minutes 16 seconds. The mature schema also exposed and closed a fixture-hidden issue:
+restore integrity checks must use Stocker's registered deterministic SQLite functions,
+not a bare `sqlite3` connection. The managed helper and emergency snapshot now use the
+application verifier for those checks. The selected backup/snapshot/deployment suite
+passes 73 tests.
+
+The final unchanged replay after these backup changes passed both fixed scenarios:
+
+| replay | presented/admitted/projected | loss/duplicates/order/provenance | p50 / p95 / p99 admission | max/final backlog | heartbeat | WAL |
+|---|---:|---:|---:|---:|---:|---:|
+| 10 seconds | 2,022 / 2,022 / 2,022 | 0 / 0 / 0 / 0 | 0.160 / 0.273 / 8.488 ms | 219 / 0 | 0 s | 4,622,672 B |
+| 60 seconds | 12,132 / 12,132 / 12,132 | 0 / 0 / 0 / 0 | 0.164 / 0.299 / 9.141 ms | 219 / 0 | 0 s | 5,162,392 B |
+
+Both reported zero escaped SQLite busy/locked errors, every one of the 100 simulated
+required feeds active and fresh, truthful readiness, and no acceptance failure.
+Simulation proves deterministic admission/projection behavior; it does not replace the
+first attended production backup/restart or a real IBKR market-open observation.
+
+The final repository test invocation completed with 2,104 passing and one skipped
+test. It retained 13 failures and 19 setup errors, all caused by the already-absent
+protected `trade_decisions.parquet` research input. The repository check stopped at
+its first formatting gate because 151 unrelated pre-existing files would be
+reformatted. All changed Python files pass focused Ruff formatting/checking and MyPy;
+these inherited repository conditions were neither changed nor concealed.
+
 ### IB Gateway authentication boundary
 
 The server-local daily readiness probe is correct: on each of 14--16 August it polled

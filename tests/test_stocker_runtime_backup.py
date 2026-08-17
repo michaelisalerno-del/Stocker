@@ -20,6 +20,8 @@ from stocker_runtime.storage import (
     BackupPolicy,
     connect_v2,
     create_backup,
+    create_quiescent_backup,
+    finalize_quiescent_backup,
     initialize_database,
     read_backup_manifests,
     record_backup_failure,
@@ -63,6 +65,144 @@ def _regular_directory_bytes(directory: Path) -> int:
         for path in directory.iterdir()
         if path.is_file() and not path.is_symlink()
     )
+
+
+def test_quiescent_managed_backup_is_byte_identical_and_restore_checked(tmp_path: Path) -> None:
+    database = tmp_path / "operational.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    backups.mkdir()
+    working.mkdir()
+    _seed_database(database, incidents=3)
+    with connect_v2(database) as connection:
+        before_incidents = tuple(connection.execute("SELECT * FROM incidents ORDER BY incident_id"))
+    precondition_calls = 0
+
+    def verify_lock() -> None:
+        nonlocal precondition_calls
+        precondition_calls += 1
+
+    artifact = create_quiescent_backup(
+        database,
+        backups,
+        tier="daily",
+        precondition=verify_lock,
+        created_at_us=1,
+        working_directory=working,
+    )
+    restored = tmp_path / "restored.sqlite3"
+    result = restore_backup(artifact.manifest_path, restored)
+
+    assert precondition_calls >= 4
+    source_hash = _sha256(database)
+    assert result.uncompressed_sha256 == source_hash
+    assert _sha256(restored) == source_hash
+    with connect_v2(restored) as connection:
+        assert tuple(connection.execute("SELECT * FROM incidents ORDER BY incident_id")) == (
+            before_incidents
+        )
+        assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+        assert tuple(connection.execute("PRAGMA foreign_key_check")) == ()
+
+
+def test_quiescent_managed_backup_rejects_source_mutation_before_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "operational.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    backups.mkdir()
+    working.mkdir()
+    _seed_database(database)
+    real_copy = backup_module.shutil.copyfile
+
+    def mutate_after_copy(source: Path, destination: Path) -> None:
+        real_copy(source, destination)
+        with source.open("ab") as active_database:
+            active_database.write(b"injected mutation")
+
+    monkeypatch.setattr(backup_module.shutil, "copyfile", mutate_after_copy)
+    with pytest.raises(BackupError, match="changed during the quiescent copy"):
+        create_quiescent_backup(
+            database,
+            backups,
+            tier="daily",
+            precondition=lambda: None,
+            created_at_us=1,
+            working_directory=working,
+        )
+
+    assert tuple(backups.glob("*.sqlite3.gz")) == ()
+
+
+def test_quiescent_managed_backup_stays_degraded_until_restore_proof_finishes(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "operational.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    backups.mkdir()
+    working.mkdir()
+    _seed_database(database)
+    observed_status: dict[str, object] = {}
+
+    def fail_restore_proof(_artifact: object) -> None:
+        _assert_only_work_lock(working)
+        observed_status.update(
+            json.loads((backups / backup_module.BACKUP_STATUS_FILENAME).read_text())
+        )
+        raise RuntimeError("injected restore proof failure")
+
+    with pytest.raises(RuntimeError, match="injected restore proof failure"):
+        create_quiescent_backup(
+            database,
+            backups,
+            tier="daily",
+            precondition=lambda: None,
+            created_at_us=1,
+            working_directory=working,
+            post_publish_verify=fail_restore_proof,
+        )
+
+    assert observed_status["state"] == "degraded"
+    assert observed_status["code"] == "BACKUP_IN_PROGRESS"
+    final_status = json.loads((backups / backup_module.BACKUP_STATUS_FILENAME).read_text())
+    assert final_status["state"] == "degraded"
+    assert final_status["code"] == "RuntimeError"
+
+
+def test_deferred_quiescent_backup_becomes_healthy_only_after_finalization(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "operational.sqlite3"
+    backups = tmp_path / "backups"
+    working = tmp_path / "working"
+    backups.mkdir()
+    working.mkdir()
+    _seed_database(database)
+    artifact = create_quiescent_backup(
+        database,
+        backups,
+        tier="daily",
+        precondition=lambda: None,
+        created_at_us=1,
+        working_directory=working,
+        post_publish_verify=lambda _artifact: None,
+        defer_healthy_status=True,
+    )
+
+    pending = json.loads((backups / backup_module.BACKUP_STATUS_FILENAME).read_text())
+    assert pending["state"] == "degraded"
+    assert pending["code"] == "BACKUP_IN_PROGRESS"
+    finalize_quiescent_backup(
+        artifact,
+        backups,
+        working_directory=working,
+    )
+    healthy = json.loads((backups / backup_module.BACKUP_STATUS_FILENAME).read_text())
+    assert healthy["state"] == "healthy"
+    assert healthy["code"] is None
 
 
 def _assert_only_work_lock(working: Path) -> None:

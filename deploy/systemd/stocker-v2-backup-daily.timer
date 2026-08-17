@@ -2,7 +2,7 @@
 Description=Schedule the daily Stocker V2 backup tier
 
 [Timer]
-OnCalendar=*-*-* 23:45:00 UTC
+OnCalendar=*-*-* 22:00:00 UTC
 Persistent=true
 RandomizedDelaySec=300
 Unit=stocker-v2-backup-daily.service

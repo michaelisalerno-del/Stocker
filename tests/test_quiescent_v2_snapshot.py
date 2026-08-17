@@ -176,6 +176,37 @@ def test_quiescent_snapshot_rejects_incomplete_wal_checkpoint_before_copy(
     assert tuple(destination.iterdir()) == ()
 
 
+def test_quiescent_snapshot_uses_stable_post_checkpoint_size_with_nonempty_wal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "operational.sqlite3"
+    writer = sqlite3.connect(database, isolation_level=None)
+    writer.execute("PRAGMA journal_mode=WAL")
+    writer.execute("PRAGMA wal_autocheckpoint=0")
+    writer.execute("CREATE TABLE evidence(value BLOB)")
+    writer.execute("INSERT INTO evidence VALUES (zeroblob(1048576))")
+    wal = Path(f"{database}-wal")
+    assert wal.stat().st_size > 0
+    destination = tmp_path / "snapshots"
+    destination.mkdir()
+    module = _script_module()
+    monkeypatch.setattr(module.subprocess, "run", _inactive_services_and_no_descriptors)
+    monkeypatch.setattr(sys, "argv", _arguments(database, destination))
+    monkeypatch.setattr(
+        module,
+        "_verify",
+        lambda *_args, **_kwargs: {"schema": 19, "quick_check": "ok"},
+    )
+    try:
+        module.main()
+    finally:
+        writer.close()
+
+    assert len(tuple(destination.glob("*.sqlite3.gz"))) == 1
+    assert tuple(destination.glob("*.restore.sqlite3")) == ()
+
+
 def test_quiescent_snapshot_rejects_mismatched_schema_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

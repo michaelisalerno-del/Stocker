@@ -43,8 +43,10 @@ def test_v2_services_have_distinct_least_privilege_filesystem_boundaries() -> No
 
     assert "User=stocker-recorder" in recorder
     assert "User=stocker-web" in web
-    assert "User=stocker-backup" in daily
-    assert "User=stocker-backup" in weekly
+    assert "User=root" in daily
+    assert "User=root" in weekly
+    assert "Group=stocker-readers" in daily
+    assert "Group=stocker-readers" in weekly
     assert "ExecStart=/opt/stocker/v2-current/.venv/bin/stocker-runtime recorder run" in recorder
     assert (
         "validate-recorder /etc/stocker/recorder.json --inputs /etc/stocker/market-data.json"
@@ -54,12 +56,15 @@ def test_v2_services_have_distinct_least_privilege_filesystem_boundaries() -> No
     for unit in (recorder, web, daily, weekly):
         assert "/opt/stocker/current" not in unit
         assert "/opt/stocker/v2-current" in unit
-    assert "--tier daily" in daily
-    assert "--tier weekly" in weekly
-    assert "--working-directory /var/cache/stocker-v2-backup-work" in daily
+    assert "run-v2-quiescent-managed-backup.py --tier daily" in daily
+    assert "run-v2-quiescent-managed-backup.py --tier weekly" in weekly
     assert "CacheDirectory=stocker-v2-backup-work" in daily
-    assert "TimeoutStartSec=31min" in daily
-    assert "TimeoutStartSec=31min" in weekly
+    assert "TimeoutStartSec=45min" in daily
+    assert "TimeoutStartSec=45min" in weekly
+    assert "RuntimeDirectory=stocker-v2-backup-daily" in daily
+    assert "RuntimeDirectory=stocker-v2-backup-weekly" in weekly
+    for unit in (daily, weekly):
+        assert "--restart-after-interruption" in unit
     assert "ExecCondition=" not in daily
     assert "ExecCondition=" not in weekly
 
@@ -69,9 +74,8 @@ def test_v2_services_have_distinct_least_privilege_filesystem_boundaries() -> No
     assert "ReadOnlyPaths=/var/lib/stocker/v2" in web
     assert "ReadOnlyPaths=/var/lib/stocker/backups-v2" in web
     assert "ReadWritePaths=/var/lib/stocker/v2" not in web.splitlines()
-    assert "ReadOnlyPaths=/var/lib/stocker/v2" in daily
+    assert "ReadWritePaths=/var/lib/stocker/v2" in daily
     assert "ReadWritePaths=/var/lib/stocker/backups-v2" in daily
-    assert "ReadWritePaths=/var/lib/stocker/v2" not in daily.splitlines()
 
     assert "IPAddressDeny=any" in recorder
     assert "IPAddressAllow=localhost" in recorder
@@ -88,8 +92,8 @@ def test_daily_and_weekly_timers_are_bounded_and_not_implicitly_enabled() -> Non
     daily = _unit("stocker-v2-backup-daily.timer")
     weekly = _unit("stocker-v2-backup-weekly.timer")
 
-    assert "OnCalendar=*-*-* 23:45:00 UTC" in daily
-    assert "OnCalendar=Sun *-*-* 22:45:00 UTC" in weekly
+    assert "OnCalendar=*-*-* 22:00:00 UTC" in daily
+    assert "OnCalendar=Sun *-*-* 06:00:00 UTC" in weekly
     assert "Persistent=true" in daily
     assert "Persistent=true" in weekly
     assert "RandomizedDelaySec=" in daily

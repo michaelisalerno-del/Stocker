@@ -504,18 +504,43 @@ def test_typed_batch_candidate_query_is_equivalent_and_index_bounded(tmp_path: P
                 ),
             )
         for sequence in range(2_001, 2_301):
-            _event(connection, sequence, "AAL", 100.0 + sequence / 10_000)
+            event_kind = "bar_5m_session_prefix" if sequence % 2 else "session_volume_baseline"
+            payload_json = "{}"
+            connection.execute(
+                "INSERT INTO market_events(event_id, run_id, source_sequence, "
+                "derived_after_source_sequence, instrument_id, feed_kind, event_kind, "
+                "event_at_us, received_at_us, connection_generation, payload_json, "
+                "payload_sha256) VALUES (?, 'run-1', NULL, ?, 'AAL', 'bars', ?, ?, ?, 1, ?, ?)",
+                (
+                    f"derived-{sequence}",
+                    sequence,
+                    event_kind,
+                    event_at_us + sequence,
+                    event_at_us + sequence,
+                    payload_json,
+                    hashlib.sha256(payload_json.encode()).hexdigest(),
+                ),
+            )
 
-        requirement = cast(
+        prefix_requirement = cast(
             JsonValue,
             {
                 "feed_kind": "bars",
-                "event_kind": "bar",
+                "event_kind": "bar_5m_session_prefix",
                 "instrument_id": "AAL",
                 "available_at_us": 0,
             },
         )
-        requirements = (requirement, requirement)
+        baseline_requirement = cast(
+            JsonValue,
+            {
+                "feed_kind": "bars",
+                "event_kind": "session_volume_baseline",
+                "instrument_id": "AAL",
+                "available_at_us": 0,
+            },
+        )
+        requirements = (prefix_requirement, prefix_requirement, baseline_requirement)
         requirements_json = canonical_json_bytes(cast(JsonValue, requirements)).decode()
         general_parameters = (
             "run-1",
@@ -557,18 +582,20 @@ def test_typed_batch_candidate_query_is_equivalent_and_index_bounded(tmp_path: P
             _GENERAL_BATCH_CANDIDATES_SQL,
             general_parameters,
         )
+        selected_sql = _batch_candidate_sql(requirements)
         typed_rows, typed_progress = execute_with_progress(
-            _TYPED_BATCH_CANDIDATES_SQL,
+            selected_sql,
             typed_parameters,
         )
         plan = tuple(
             str(row[3])
             for row in connection.execute(
-                "EXPLAIN QUERY PLAN " + _TYPED_BATCH_CANDIDATES_SQL,
+                "EXPLAIN QUERY PLAN " + selected_sql,
                 typed_parameters,
             )
         )
 
+    assert selected_sql == _TYPED_BATCH_CANDIDATES_SQL
     assert [tuple(row) for row in typed_rows] == [tuple(row) for row in general_rows]
     assert len(typed_rows) == 256
     assert typed_progress < 600 < general_progress

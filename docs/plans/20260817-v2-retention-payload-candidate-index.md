@@ -762,3 +762,65 @@ demonstrated passive checkpoint/reduction, fresh heartbeat, 41 exact active iden
 source-sequence growth, backlog drain, no current-generation incident, and truthful
 readiness. Because the feed is already stopped, this reviewed incident correction may
 be deployed during the current session; waiting for close would only extend the gap.
+
+## Accepted urgent addendum: admission-based per-feed freshness
+
+Generation 10 reproduced a distinct market-data supervision failure under the real
+single-vCPU session load. Durable callback admission and source sequencing continued,
+but the nonterminal inbox reached 19,457 rows while projection lagged. Feed staleness
+was calculated from `subscriptions.latest_event_id`, which advances only after
+projection, so all 41 healthy broker requests repeatedly cycled through stale,
+disconnected, and connecting states even though fresh callbacks had already been
+durably admitted. The recorder was clean-stopped before the 50,000-row hard inbox
+boundary; this preserves the same run lineage and avoids converting a recoverable
+condition into `INBOX_FULL` fatal evidence.
+
+The Architect accepted one schema-20 observation field on the existing authoritative
+subscription row: nullable `last_admitted_callback_at_us`, constrained to be no earlier
+than `opened_at_us`. Exact current-fence callback insertion and this timestamp update
+must occur in the same durable transaction. A rejected stale-generation/request
+callback and an idempotent duplicate must not advance it. `mark_stale` and per-feed
+readiness use this admitted timestamp rather than projected `market_events`; readiness
+continues to report the independent durable-inbox backlog, so projection delay cannot
+be hidden. Migration 20 removes the superseded schema-19 acknowledged-callback
+freshness index.
+
+Admission proves transport activity only. It must not close a stale, rejection,
+disconnect, or retry incident. Recovery still requires an acknowledged callback with
+a non-null normalized event identity from the exact current run, recorder generation,
+connection generation, subscription, and logical request, received no earlier than
+the subscription's `last_attempt_at_us`. Permanent rejection and unresolved farm
+outage rules remain unchanged. Thus malformed evidence can defer a stale cancellation
+without falsely restoring readiness, and valid evidence queued before a retry cannot
+restore the replacement request.
+
+TDD must cover fresh admitted-but-unprojected callbacks, per-feed isolation, malformed
+evidence, pre-retry queued evidence, stale-generation/request fencing, insertion and
+timestamp atomicity, duplicate replay, existing XNYS outside-session behavior, and an
+evidence-preserving schema-19-to-20 migration. Rerun the unchanged 2,022- and
+12,132-callback opening replays plus callback ordering, duplicate, gap, ownership,
+database-writability, and inbox-full failure tests. Obtain a separate read-only review
+before deployment.
+
+Rollout is serial and attended: keep recorder/web stopped and runtime-masked, take and
+restore-check a fresh schema-19 quiescent backup, apply schema 20 offline, verify the
+migration ledger, `quick_check=ok`, and zero foreign-key violations, then restart the
+same run as a new recorder generation. Require all exact validated subscriptions to
+remain active without stale/retry cycling, per-feed admission timestamps to advance,
+WAL to remain bounded, and backlog to trend below the 5,000 readiness limit. After any
+schema-20 callback admission, roll forward only. Online backup timers remain disabled
+until the separately observed `_online_copy` failure is diagnosed and reviewed.
+
+This addendum affects prospective-record and shadow raw market-data freshness,
+subscription supervision, and the read-only readiness projection. It does not alter
+risk, execution, reconciliation, order capability, fills, positions, accounts,
+credentials, paper/live trading, or the existing NYSE/XNYS regular-session calendar.
+
+The unchanged fixed 60-second replay passed after schema 20 with 12,132 callbacks
+presented, admitted, durable, and projected; zero missing, duplicate, ordering,
+provenance, or escaped SQLite busy/locked failures; maximum/final backlog 219/0;
+backlog drain 0.135 seconds; admission p50/p95/p99 0.165/0.317/8.826 ms;
+admission/projection throughput 413.50/1,508.70 callbacks per second; heartbeat delay
+zero; all 100 required feeds fresh and active; readiness true in 2.150 ms; RSS growth
+21,544,960 bytes; and post-session-checkpoint WAL 5,162,392 bytes. Acceptance failures
+were empty; no threshold was changed after observing the result.

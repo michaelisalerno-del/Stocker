@@ -1447,7 +1447,7 @@ def test_schema_15_clean_stop_can_bind_inputs_and_restart_same_run(tmp_path: Pat
             "process_heartbeat_at_us, connection_state, connection_generation) VALUES "
             "('run-1', 1, 'stopped', NULL, 2, 'disconnected', 1)"
         )
-    assert migrate_database(database, applied_at_us=3).applied_versions == (16, 17, 18, 19)
+    assert migrate_database(database, applied_at_us=3).applied_versions == (16, 17, 18, 19, 20)
     instrument, specs = _specs()
 
     restarted = Recorder(_config(database, owner_id="new-owner"), FakeMarketData()).start(
@@ -2256,6 +2256,247 @@ def test_staleness_reference_is_clamped_to_current_expected_session(tmp_path: Pa
         ).fetchone()
     assert tuple(gap) == (1_005, "STREAM_STALE")
     recorder.stop(now_us=1_007)
+
+
+def test_fresh_durable_admission_prevents_projection_backlog_from_marking_feed_stale(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "admission-freshness.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 109, None, {"event_at_us": 109, "bid": 1.0}),
+    )
+
+    assert recorder.mark_stale(now_us=115, expected_since_us=100) == 0
+    with connect_v2(database) as connection:
+        required = connection.execute(
+            "SELECT lifecycle, last_admitted_callback_at_us FROM subscriptions WHERE request_id=3"
+        ).fetchone()
+        callback = connection.execute(
+            "SELECT lifecycle FROM callback_inbox WHERE request_id=3"
+        ).fetchone()[0]
+        assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM gaps").fetchone()[0] == 0
+    assert tuple(required) == ("active", 109)
+    assert callback == "pending"
+    assert adapter.cancelled == []
+
+
+def test_admission_freshness_is_per_feed_and_busy_feed_cannot_hide_silent_feeds(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "per-feed-admission-freshness.sqlite3"
+    initialize_database(database)
+    instrument, specs = _three_required_specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    for received_at_us in range(106, 116):
+        recorder.receive(
+            state.fences[0],
+            MarketDataCallback(
+                "quote",
+                received_at_us,
+                None,
+                {"event_at_us": received_at_us, "bid": 1.0},
+            ),
+        )
+
+    assert recorder.mark_stale(now_us=116, expected_since_us=100) == 2
+    with connect_v2(database) as connection:
+        lifecycles = dict(
+            connection.execute(
+                "SELECT request_id, lifecycle FROM subscriptions ORDER BY request_id"
+            )
+        )
+    assert lifecycles == {3: "active", 4: "disconnected", 5: "disconnected"}
+
+
+def test_pre_retry_queued_callback_does_not_falsely_complete_recovery(tmp_path: Path) -> None:
+    database = tmp_path / "pre-retry-callback.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    quote_fence = state.fences[0]
+    recorder.receive(
+        quote_fence,
+        MarketDataCallback("quote", 105, None, {"event_at_us": 105, "bid": 1.0}),
+    )
+
+    assert recorder.mark_stale(now_us=116, expected_since_us=100) == 1
+    retry_at_us = 1_000_116
+    assert recorder.recover_subscriptions(now_us=retry_at_us) == 1
+    assert recorder.drain(now_us=retry_at_us + 1, limit=1) == 1
+    with connect_v2(database) as connection:
+        before_fresh = connection.execute(
+            "SELECT lifecycle, last_error_code FROM subscriptions WHERE request_id=3"
+        ).fetchone()
+        unresolved = connection.execute(
+            "SELECT count(*) FROM gaps WHERE reason='STREAM_STALE' AND resolved_at_us IS NULL"
+        ).fetchone()[0]
+    assert tuple(before_fresh) == ("connecting", "STREAM_STALE")
+    assert unresolved == 1
+
+    recorder.receive(
+        quote_fence,
+        MarketDataCallback(
+            "quote",
+            retry_at_us + 2,
+            None,
+            {"event_at_us": retry_at_us + 2, "bid": 2.0},
+        ),
+    )
+    assert recorder.drain(now_us=retry_at_us + 3, limit=1) == 1
+    with connect_v2(database) as connection:
+        after_fresh = connection.execute(
+            "SELECT lifecycle, last_error_code FROM subscriptions WHERE request_id=3"
+        ).fetchone()
+    assert tuple(after_fresh) == ("active", None)
+
+
+def test_malformed_admission_records_activity_but_cannot_close_subscription_incident(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "malformed-admission-freshness.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    subscription_id = str(state.fences[0].subscription_id)
+    with connect_v2(database) as connection:
+        Recorder._open_gap_for_run(
+            connection,
+            "run-1",
+            subscription_id,
+            105,
+            "STREAM_STALE",
+            True,
+        )
+        connection.execute(
+            "UPDATE subscriptions SET lifecycle='connecting', retry_count=1, "
+            "last_attempt_at_us=108, last_error_code='STREAM_STALE' "
+            "WHERE subscription_id=?",
+            (subscription_id,),
+        )
+    recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 109, None, {"event_at_us": "invalid", "bid": 1.0}),
+    )
+
+    assert recorder.drain(now_us=110, limit=1) == 0
+    with connect_v2(database) as connection:
+        subscription = connection.execute(
+            "SELECT lifecycle, last_error_code, last_admitted_callback_at_us "
+            "FROM subscriptions WHERE subscription_id=?",
+            (subscription_id,),
+        ).fetchone()
+        callback = connection.execute(
+            "SELECT lifecycle, failure_code FROM callback_inbox"
+        ).fetchone()
+        unresolved = connection.execute(
+            "SELECT count(*) FROM gaps WHERE subscription_id=? AND reason='STREAM_STALE' "
+            "AND resolved_at_us IS NULL",
+            (subscription_id,),
+        ).fetchone()[0]
+    assert tuple(subscription) == ("connecting", "STREAM_STALE", 109)
+    assert tuple(callback) == ("failed", "MALFORMED_CALLBACK")
+    assert unresolved == 1
+
+
+def test_stale_fence_and_duplicate_do_not_advance_subscription_admission_freshness(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "fenced-admission-freshness.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    callback = MarketDataCallback("quote", 105, None, {"event_at_us": 105, "bid": 1.0})
+    first = recorder.receive(state.fences[0], callback)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE subscriptions SET last_admitted_callback_at_us=110 WHERE request_id=3"
+        )
+
+    duplicate = recorder.receive(state.fences[0], callback)
+    stale = recorder.receive(
+        replace(state.fences[0], connection_generation=0),
+        MarketDataCallback("quote", 111, None, {"event_at_us": 111, "bid": 2.0}),
+    )
+
+    assert first.inserted is True
+    assert duplicate.inserted is False
+    assert stale.inserted is True
+    with connect_v2(database) as connection:
+        freshness = connection.execute(
+            "SELECT last_admitted_callback_at_us FROM subscriptions WHERE request_id=3"
+        ).fetchone()[0]
+        stale_row = connection.execute(
+            "SELECT lifecycle, failure_code FROM callback_inbox WHERE source_sequence=?",
+            (stale.source_sequence,),
+        ).fetchone()
+    assert freshness == 110
+    assert tuple(stale_row) == ("failed", "STALE_REQUEST_GENERATION")
+
+
+def test_subscription_freshness_update_failure_rolls_back_callback_insertion(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "atomic-admission-freshness.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "CREATE TRIGGER reject_admission_freshness "
+            "BEFORE UPDATE OF last_admitted_callback_at_us ON subscriptions "
+            "BEGIN SELECT RAISE(ABORT, 'injected freshness failure'); END"
+        )
+
+    with pytest.raises(InboxAdmissionError, match="callback durable admission failed"):
+        recorder.inbox.admit(
+            state.fences[0],
+            MarketDataCallback("quote", 105, None, {"event_at_us": 105, "bid": 1.0}),
+            authority=WriterAuthority("run-1", 1, "owner-1"),
+        )
+
+    with connect_v2(database, verify_schema=False) as connection:
+        assert connection.execute("SELECT count(*) FROM callback_inbox").fetchone()[0] == 0
+        assert (
+            connection.execute(
+                "SELECT last_admitted_callback_at_us FROM subscriptions WHERE request_id=3"
+            ).fetchone()[0]
+            is None
+        )
+        connection.execute("DROP TRIGGER reject_admission_freshness")
+        connection.execute(
+            "CREATE TRIGGER reject_callback_insert BEFORE INSERT ON callback_inbox "
+            "BEGIN SELECT RAISE(ABORT, 'injected callback failure'); END"
+        )
+
+    with pytest.raises(InboxAdmissionError, match="callback durable admission failed"):
+        recorder.inbox.admit(
+            state.fences[0],
+            MarketDataCallback("quote", 106, None, {"event_at_us": 106, "bid": 2.0}),
+            authority=WriterAuthority("run-1", 1, "owner-1"),
+        )
+    with connect_v2(database, verify_schema=False) as connection:
+        assert connection.execute("SELECT count(*) FROM callback_inbox").fetchone()[0] == 0
+        assert (
+            connection.execute(
+                "SELECT last_admitted_callback_at_us FROM subscriptions WHERE request_id=3"
+            ).fetchone()[0]
+            is None
+        )
 
 
 def test_stale_feed_recovers_independently_only_when_regular_session_expects_data(

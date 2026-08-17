@@ -3260,9 +3260,9 @@ class Recorder:
             rows = tuple(
                 connection.execute(
                     "SELECT subscription.subscription_id, subscription.request_id, "
-                    "subscription.opened_at_us, subscription.retry_count, event.received_at_us "
-                    "FROM subscriptions subscription LEFT JOIN market_events event "
-                    "ON event.event_id=subscription.latest_event_id WHERE subscription.run_id=? "
+                    "subscription.opened_at_us, subscription.retry_count, "
+                    "subscription.last_admitted_callback_at_us "
+                    "FROM subscriptions subscription WHERE subscription.run_id=? "
                     "AND subscription.connection_generation=? AND subscription.lifecycle='active'",
                     (self.config.run_id, self.state.connection_generation),
                 )
@@ -3270,7 +3270,9 @@ class Recorder:
             for row in rows:
                 spec = by_request[int(row["request_id"])]
                 reference = int(
-                    row["opened_at_us"] if row["received_at_us"] is None else row["received_at_us"]
+                    row["opened_at_us"]
+                    if row["last_admitted_callback_at_us"] is None
+                    else row["last_admitted_callback_at_us"]
                 )
                 if expected_since_us is not None:
                     reference = max(reference, expected_since_us)
@@ -3425,9 +3427,26 @@ class Recorder:
                     if callback.run_id == self.config.run_id
                     and callback.request_id is not None
                     and connection.execute(
-                        "SELECT 1 FROM callback_inbox WHERE source_sequence=? "
-                        "AND lifecycle='acknowledged' AND normalized_event_id IS NOT NULL",
-                        (callback.source_sequence,),
+                        "SELECT 1 FROM callback_inbox callback "
+                        "JOIN subscriptions subscription ON "
+                        "subscription.run_id=callback.run_id "
+                        "AND subscription.recorder_generation=callback.recorder_generation "
+                        "AND subscription.connection_generation=callback.connection_generation "
+                        "AND subscription.request_id=callback.request_id "
+                        "WHERE callback.source_sequence=? "
+                        "AND callback.run_id=? AND callback.recorder_generation=? "
+                        "AND callback.connection_generation=? AND callback.request_id=? "
+                        "AND callback.lifecycle='acknowledged' "
+                        "AND callback.normalized_event_id IS NOT NULL "
+                        "AND (subscription.last_attempt_at_us IS NULL "
+                        "OR callback.received_at_us>=subscription.last_attempt_at_us)",
+                        (
+                            callback.source_sequence,
+                            state.run_id,
+                            state.recorder_generation,
+                            state.connection_generation,
+                            callback.request_id,
+                        ),
                     ).fetchone()
                     is not None
                 }

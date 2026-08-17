@@ -7,14 +7,6 @@ from typing import Any
 
 RECORDER_HEARTBEAT_FRESH_US = 5_000_000
 READINESS_INBOX_BACKLOG_LIMIT = 5_000
-READINESS_LATEST_CALLBACK_SEEK_SQL = (
-    "SELECT callback.received_at_us FROM callback_inbox AS callback "
-    "INDEXED BY callback_inbox_readiness_latest_idx "
-    "WHERE callback.run_id=? AND callback.recorder_generation=? "
-    "AND callback.connection_generation=? AND callback.request_id=? "
-    "AND callback.lifecycle='acknowledged' "
-    "ORDER BY callback.received_at_us DESC LIMIT 1"
-)
 
 READINESS_FEEDS_SQL = (
     "SELECT subscription.subscription_id, subscription.instrument_id, "
@@ -23,14 +15,7 @@ READINESS_FEEDS_SQL = (
     "subscription.opened_at_us, subscription.retry_count, "
     "subscription.next_retry_at_us, subscription.last_attempt_at_us, "
     "subscription.last_error_code, subscription.permanent_failure, "
-    "(SELECT callback.received_at_us FROM callback_inbox AS callback "
-    "INDEXED BY callback_inbox_readiness_latest_idx "
-    "WHERE callback.run_id=subscription.run_id "
-    "AND callback.recorder_generation=subscription.recorder_generation "
-    "AND callback.connection_generation=subscription.connection_generation "
-    "AND callback.request_id=subscription.request_id "
-    "AND callback.lifecycle='acknowledged' "
-    "ORDER BY callback.received_at_us DESC LIMIT 1) AS latest_callback_at_us, "
+    "subscription.last_admitted_callback_at_us AS latest_callback_at_us, "
     "(SELECT incident.code FROM incidents incident "
     "WHERE incident.run_id=subscription.run_id "
     "AND incident.subscription_id=subscription.subscription_id "

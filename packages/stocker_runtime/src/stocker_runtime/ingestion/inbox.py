@@ -459,6 +459,25 @@ class CallbackInbox:
                     fence_failure,
                     sequence,
                 )
+            elif fence.subscription_id is not None:
+                freshness = connection.execute(
+                    "UPDATE subscriptions SET last_admitted_callback_at_us=? "
+                    "WHERE subscription_id=? AND run_id=? AND recorder_generation=? "
+                    "AND connection_generation=? AND request_id=? "
+                    "AND lifecycle IN ('connecting','active')",
+                    (
+                        callback.received_at_us,
+                        fence.subscription_id,
+                        fence.run_id,
+                        fence.recorder_generation,
+                        fence.connection_generation,
+                        fence.request_id,
+                    ),
+                )
+                if freshness.rowcount != 1:
+                    raise InboxAdmissionError(
+                        "callback subscription freshness did not preserve the exact fence"
+                    )
             connection.execute(
                 "UPDATE runtime_state SET callback_heartbeat_at_us = ?, "
                 "admission_heartbeat_at_us = ?, inbox_nonterminal_count = ? "

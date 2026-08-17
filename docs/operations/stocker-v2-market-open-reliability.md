@@ -24,19 +24,21 @@ kernel releases that lock and the first normal systemd retry can close the aband
 generation and create an auditable replacement. Schema-15 generations have no lock
 protocol marker and retain the old heartbeat-expiry takeover rule during rollout.
 
-## Schema 16–19 rollout and rollback
+## Schema 16–20 rollout and rollback
 
 Schema 16 adds generation ownership, commit/input identity, fatal-recovery audit fields,
 and per-subscription staleness/retry state. Existing rows and fatal evidence are
 preserved. Schema 17 adds the partial payload-compaction candidate index. Schema 18
 adds nullable recorder-generation provenance to component incidents; legacy `NULL`
-incidents remain visible but cannot poison a new generation. Schema 19 adds the
-acknowledged-callback covering index used by exact per-feed readiness. None of these
-migrations rewrites callback evidence. V1 databases remain rejected and must never be
-migrated in place. The accepted migration design and measurements are recorded in
+incidents remain visible but cannot poison a new generation. Schema 19 added an
+acknowledged-callback covering index for exact per-feed readiness. Schema 20 adds a
+nullable durable last-admitted-callback timestamp to each existing subscription row
+and removes that superseded history index. None of these migrations rewrites callback
+evidence. V1 databases remain rejected and must never be migrated in place. The
+accepted migration design and measurements are recorded in
 [`20260817-v2-retention-payload-candidate-index.md`](../plans/20260817-v2-retention-payload-candidate-index.md).
 
-The current schema-18-to-19 production migration builds an approximately 89.2 MB index.
+The historical schema-18-to-19 production migration built an approximately 89.2 MB index.
 On the restored 3.62 GB production backup, the exact index build took 8.76 seconds and
 the complete migration framework, including verification, took approximately 137
 seconds. Verify enough free space for the database, WAL/temp work, the new index, and a
@@ -46,17 +48,20 @@ for a missing or incomplete index.
 In a market-closed attended window:
 
 1. Stop recorder and web.
-2. For the current schema-18-to-19 route, create a fresh checked compressed schema-18
-   backup and retain the matching schema-18 release. Restore-check the backup to a
-   disposable path using the existing backup commands. For a later route, record and
-   back up its exact deployed schema and retain its matching release.
+2. For the current schema-19-to-20 route, create a fresh checked compressed schema-19
+   backup and retain the matching schema-19 release. Restore-check the backup to a
+   disposable path using the existing backup commands. If the managed online-copy path
+   is unavailable while services are fully quiescent, use the reviewed canonical-lock,
+   complete-WAL-truncate, byte-identical emergency snapshot procedure; do not mark that
+   emergency artifact as a healthy managed backup.
 3. Run `stocker-runtime migrate /var/lib/stocker/v2/stocker-v2.sqlite3`.
-4. Require the ledger to report schema 19, exact schema/index checksum verification,
+4. Require the ledger to report schema 20, exact schema checksum verification,
    `foreign_key_check` with zero rows, and `quick_check=ok`.
-5. Confirm both a hit and a miss use
-   `callback_inbox_readiness_latest_idx` as a covering seek without a callback-sort
-   temporary B-tree. On a restored mature copy, require ten exact-feed readiness
-   calculations to return all diagnostics, each within 300 ms and p95 within 275 ms.
+5. Confirm every current subscription exposes its durable
+   `last_admitted_callback_at_us`, existing schema-19 rows begin `NULL`, and the
+   superseded `callback_inbox_readiness_latest_idx` is absent. On a restored mature
+   copy, require ten exact-feed readiness calculations to return all diagnostics, each
+   within 300 ms and p95 within 275 ms.
 6. Run the combined preflight shown below.
 7. Restart with the same V2 `run_id`, mode, frozen configuration, and validated input.
    Require a new recorder generation, a fresh heartbeat, connected IBKR market-data
@@ -130,18 +135,25 @@ Without a pin, fresh current recorder-generation evidence selects the operationa
 a newer failed/empty attempt is reported and cannot silently obscure it. Historical
 inspection remains separate from current readiness.
 
-Tick freshness is evaluated only inside the existing XNYS regular session. The shared
+Tick freshness is evaluated only inside the existing XNYS regular session. Per-feed
+freshness uses the callback timestamp committed atomically with raw durable admission;
+it does not wait for canonical projection. A malformed callback may prove that a
+transport is active, but only a normalized callback from the current retry attempt may
+close a subscription incident. The independent inbox-backlog reason prevents delayed
+projection from being presented as ready. The shared
 exchange calendar retains holidays, daylight-saving changes, and early closes. There
 is no pre-market, after-hours, futures, forex, international, hard-coded UTC, or
 per-instrument calendar expansion. Outside regular hours, quiet feeds are not stale,
 while process, socket, configuration, and subscription lifecycle remain reported.
 
-The web query budget defaults to 300 ms and is capped at 500 ms. Schema 19 changes the
+The web query budget defaults to 300 ms and is capped at 500 ms. Schema 19 changed the
 mature lookup from repeated history scans to exact acknowledged-callback covering-index
-seeks. On the restored 41-feed production copy, the old query failed between about 301
-and 2,583 ms. The accepted final measurement completed ten calculations in
-8.202–14.081 ms, with p95 11.903 ms. Timeout remains bounded and returns a web-query
-timeout/503 without implying recorder ingestion failure.
+seeks; schema 20 replaces that lookup with the durable value on the selected current
+subscription row. On the restored 41-feed production copy, the pre-schema-19 query
+failed between about 301 and 2,583 ms. The accepted schema-19 measurement completed ten
+calculations in 8.202–14.081 ms, with p95 11.903 ms. Revalidate schema-20 timing during
+rollout. Timeout remains bounded and returns a web-query timeout/503 without implying
+recorder ingestion failure.
 
 Web startup prewarms the existing XNYS calendar before the listening socket is made
 available. The accepted deployment measurement was 2,795.926 ms; treat it as startup
@@ -221,10 +233,10 @@ Use an attended offline recovery only after the incident has been diagnosed:
    test "$(systemctl is-active stocker-v2-web.service)" = inactive
    ! pgrep -af '[s]tocker-runtime recorder run'
    ```
-2. Create a fresh checked compressed schema-19 backup and restore-check it to a
-   disposable path. Record callback, receipt, and watermark counts/hashes plus
+2. Create a fresh checked compressed backup of the exact deployed schema and
+   restore-check it to a disposable path. Record callback, receipt, and watermark counts/hashes plus
    `quick_check` and `foreign_key_check`.
-3. Verify the exact release artifacts, recorder/input preflight, and schema 19. Run the
+3. Verify the exact release artifacts, recorder/input preflight, and deployed schema. Run the
    tracked bounded command below. It acquires the canonical `.writer.lock` once for the
    entire loop and verifies it in every transaction; an active recorder or another
    drain fails before mutation.
@@ -248,7 +260,8 @@ Use an attended offline recovery only after the incident has been diagnosed:
    callback row count and every immutable callback field (including `payload_sha256`),
    receipt row/count/hash, watermark row/count/hash, and every other table must match.
    The non-null payload reduction must exactly equal the reported compacted total.
-   Require schema 19, `quick_check=ok`, zero foreign-key violations, and bounded DB/WAL.
+   Require the exact deployed schema, `quick_check=ok`, zero foreign-key violations,
+   and bounded DB/WAL.
 5. Keep the recorder runtime-masked while installing/verifying the final release and
    updating the frozen commit identity. Unmask only at the intentional handoff; start
    recorder first and web only after recorder health is proven.
@@ -272,7 +285,7 @@ A successful full command may exceed 100 ms because it contains many separately
 bounded payload transactions plus passive WAL checkpoints; that is not a transaction-
 deadline violation. This recovery nulls only proven eligible `payload_json`; callback
 identity/provenance, payload hashes, receipts, and watermarks remain. If release
-rollback is needed while evidence is valid, preserve the current schema-19 database
+rollback is needed while evidence is valid, preserve the current database
 and roll back only the binary. Restore the checked pre-drain backup only for actual
 corruption found before callback admission resumes. After any new callback is admitted,
 never restore the older backup.

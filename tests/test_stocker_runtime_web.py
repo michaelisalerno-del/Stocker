@@ -29,10 +29,6 @@ from stocker_runtime.web.queries import (
     ReadModel,
     _encode_cursor,
 )
-from stocker_runtime.web.readiness import (
-    READINESS_FEEDS_SQL,
-    READINESS_LATEST_CALLBACK_SEEK_SQL,
-)
 
 EXPECTED_API_ROUTES = {
     "/api/v2/meta",
@@ -130,8 +126,10 @@ def _make_live_ready(database: Path, *, now_us: int) -> None:
             (now_us,),
         )
         connection.execute(
-            "UPDATE subscriptions SET lifecycle='active', optional=0, stale_after_us=15000000 "
-            "WHERE run_id='run-live'"
+            "UPDATE subscriptions SET lifecycle='active', optional=0, stale_after_us=15000000, "
+            "last_admitted_callback_at_us=? "
+            "WHERE run_id='run-live'",
+            (now_us,),
         )
         connection.execute(
             "UPDATE callback_inbox SET received_at_us=?, lifecycle='acknowledged', "
@@ -543,7 +541,7 @@ def test_web_app_prewarms_market_session_before_accepting_requests(
     assert observed == [started_at_us]
 
 
-def test_readiness_latest_callback_uses_exact_fenced_identity_and_covering_index(
+def test_readiness_latest_callback_uses_durable_subscription_admission_freshness(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "ready-latest-callback.sqlite3"
@@ -590,6 +588,11 @@ def test_readiness_latest_callback_uses_exact_fenced_identity_and_covering_index
                 ) in callbacks
             ),
         )
+        connection.execute(
+            "UPDATE subscriptions SET last_admitted_callback_at_us=? "
+            "WHERE subscription_id='sub-aapl'",
+            (now_us + 50,),
+        )
         acknowledged = tuple(item for item in callbacks if item[-1] == "acknowledged")
         connection.executemany(
             "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
@@ -625,37 +628,9 @@ def test_readiness_latest_callback_uses_exact_fenced_identity_and_covering_index
                 ) in acknowledged
             ),
         )
-        plan = " ".join(
-            str(row["detail"])
-            for row in connection.execute(
-                f"EXPLAIN QUERY PLAN {READINESS_FEEDS_SQL}",
-                ("run-live", 2, 4),
-            )
-        )
-        seek_plans = []
-        for request_id in (7, 123_456):
-            seek_plan = " ".join(
-                str(row["detail"])
-                for row in connection.execute(
-                    f"EXPLAIN QUERY PLAN {READINESS_LATEST_CALLBACK_SEEK_SQL}",
-                    ("run-live", 2, 4, request_id),
-                )
-            )
-            seek_plans.append(seek_plan)
-        missing = connection.execute(
-            READINESS_LATEST_CALLBACK_SEEK_SQL,
-            ("run-live", 2, 4, 123_456),
-        ).fetchone()
-
     payload = ReadModel(_config(database)).ready(now_us=now_us)
 
     assert payload["feeds"][0]["latest_callback_at_us"] == now_us + 50
-    assert "callback_inbox_readiness_latest_idx" in plan
-    assert missing is None
-    assert all(
-        "USING COVERING INDEX callback_inbox_readiness_latest_idx" in item for item in seek_plans
-    )
-    assert all("USE TEMP B-TREE" not in item for item in seek_plans)
 
 
 def test_readiness_is_per_feed_and_busy_quote_cannot_hide_dead_required_trade(

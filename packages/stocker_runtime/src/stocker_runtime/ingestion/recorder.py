@@ -2783,7 +2783,7 @@ class Recorder:
 
     @staticmethod
     def _retention_incident_details(
-        error: MaintenanceDeadlineExceeded,
+        error: BaseException,
     ) -> dict[str, JsonValue]:
         """Expose only bounded maintenance progress, never callback evidence."""
 
@@ -4234,6 +4234,7 @@ class Recorder:
                 "retention_maintenance",
                 now_us=now_us,
                 error_name=type(error).__name__,
+                incident_details=self._retention_incident_details(error),
             )
             return StorageCapState.NORMAL
         except Exception as error:
@@ -4242,6 +4243,7 @@ class Recorder:
                 "retention_maintenance",
                 now_us=now_us,
                 error_name=type(error).__name__,
+                incident_details=self._retention_incident_details(error),
             )
             return StorageCapState.NORMAL
         if retention_failures:

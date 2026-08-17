@@ -2709,6 +2709,80 @@ def test_retention_split_phase_diagnostics_are_bounded_and_sanitized() -> None:
     }
 
 
+def test_generic_pruning_failure_reports_committed_compaction_and_recovers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    recorder = Recorder(_config(database), FakeMarketData())
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    pruning_failure = RuntimeError("pruning dependency failed")
+    pruning_failure.__dict__.update(
+        retention_phase="expired_evidence_pruning",
+        receipt_transactions_committed=2,
+        receipt_rows_rolled_committed=233,
+        terminalizations_committed=3,
+        payloads_compacted_committed=1_997,
+        expired_rows_deleted_committed=0,
+    )
+    normal = RetentionResult(
+        cap_state=StorageCapState.NORMAL,
+        database_bytes=100,
+        wal_bytes=1,
+        payloads_compacted=0,
+        receipts_rolled=0,
+        expired_rows_deleted=0,
+        admission_allowed=True,
+        optional_feeds_allowed=True,
+        required_action=None,
+        checkpoint_attempted=True,
+        incremental_vacuum_attempted=True,
+    )
+
+    class FailedPruningThenSuccessfulRetention:
+        calls = 0
+
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
+            assert callable(precondition)
+            self.__class__.calls += 1
+            if self.calls == 1:
+                raise pruning_failure
+            return normal
+
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager",
+        FailedPruningThenSuccessfulRetention,
+    )
+
+    assert recorder.maintain(now_us=102) is StorageCapState.NORMAL
+    with connect_v2(database) as connection:
+        incident = connection.execute(
+            "SELECT details_json, resolved_at_us FROM incidents "
+            "WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED'"
+        ).fetchone()
+    details = json.loads(incident["details_json"])
+    assert details["error"] == "RuntimeError"
+    assert details["retention_phase"] == "expired_evidence_pruning"
+    assert details["terminalizations_committed"] == 3
+    assert details["payloads_compacted_committed"] == 1_997
+    assert details["expired_rows_deleted_committed"] == 0
+    assert incident["resolved_at_us"] is None
+
+    assert recorder.maintain(now_us=1_000_102) is StorageCapState.NORMAL
+    with connect_v2(database) as connection:
+        recovered = connection.execute(
+            "SELECT details_json, resolved_at_us FROM incidents "
+            "WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED'"
+        ).fetchone()
+    assert json.loads(recovered["details_json"])["payloads_compacted_committed"] == 1_997
+    assert recovered["resolved_at_us"] == 1_000_102
+
+
 def test_unpublished_retention_progress_survives_a_later_generic_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -864,3 +864,22 @@ zero foreign-key violations, DB/WAL below their hard caps, and retained generati
 fatal evidence before same-run startup. This affects prospective/shadow retention
 only and does not change subscriptions, XNYS session behavior, risk, execution,
 reconciliation, paper/live trading, accounts, credentials, or order capability.
+
+The exact code-only candidate was measured on the disposable schema-20 production
+copy before cutover. The rollback-only direct prune harness completed with zero
+eligible/deleted rows in 1.743 ms across 15 statements; the formerly dominant
+`market_event_derivations` statement completed in 0.460 ms, versus the fixed baseline
+of 321.963 ms and 329.207 ms total. Twelve consecutive full `stocker-runtime retain`
+passes then exited zero with `status:"ok"`, `cap_state:"normal"`, no deadline failure,
+and a reported WAL of 20,632 bytes on every pass. No pass compacted payloads, rolled
+receipts, or deleted expired rows; incremental vacuum reduced the copy by one 4 KiB
+page per pass as designed.
+
+The unchanged 2,022-callback automated replay passed. The unchanged fixed 60-second
+replay also passed with 12,132 callbacks presented, admitted, durable, and projected;
+zero missing, duplicate, ordering, provenance, or escaped SQLite busy/locked failures;
+maximum/final backlog 219/0; drain time 0.153 seconds; admission p50/p95/p99
+0.194/0.440/10.039 ms; admission/projection throughput 372.93/1,363.86 callbacks per
+second; heartbeat delay zero; all 100 required feeds fresh and active; readiness true
+in 3.102 ms; RSS growth 22,134,784 bytes; and post-session-checkpoint WAL 5,162,392
+bytes. Acceptance failures were empty and no threshold was changed after measurement.

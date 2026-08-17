@@ -6279,6 +6279,159 @@ def test_derived_event_retention_waits_for_explicit_mapping_prune_at_batch_cut(
         )
 
 
+def test_derivation_retention_seeks_recent_rows_within_the_unchanged_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "recent-derivations.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    derivation_count = 5_000
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+            "recorder_generation, connection_generation, callback_kind, received_at_us, "
+            "payload_json, payload_sha256, lifecycle) VALUES "
+            "(2, 'recent-input-callback', 'run-1', 1, 1, 'bar', 10, '{}', ?, 'pending')",
+            ("1" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+            "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+            "payload_json, payload_sha256) VALUES "
+            "('recent-input', 'run-1', 2, 'instrument-1', 'bars', 'bar', 10, 10, 1, "
+            "'{}', ?)",
+            ("2" * 64,),
+        )
+        connection.executemany(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, "
+            "derived_after_source_sequence, instrument_id, feed_kind, event_kind, "
+            "event_at_us, received_at_us, connection_generation, payload_json, "
+            "payload_sha256) VALUES (?, 'run-1', NULL, 2, 'instrument-1', 'bars', "
+            "'bar_5m', 20, 20, 1, '{}', ?)",
+            (
+                (
+                    f"recent-derived-{index:05d}",
+                    hashlib.sha256(f"recent-derived-{index:05d}".encode()).hexdigest(),
+                )
+                for index in range(derivation_count)
+            ),
+        )
+        connection.executemany(
+            "INSERT INTO market_event_derivations(derived_event_id, input_event_id, "
+            "input_ordinal, input_role, created_at_us) VALUES "
+            "(?, 'recent-input', 0, 'constituent', 1_000)",
+            ((f"recent-derived-{index:05d}",) for index in range(derivation_count)),
+        )
+
+    traced_derivation_deletes: list[str] = []
+    original_connect = retention_module.connect_v2
+
+    def traced_connect(path: str | Path) -> sqlite3.Connection:
+        connection = original_connect(path)
+
+        def trace(statement: str) -> None:
+            if statement.startswith("DELETE FROM market_event_derivations"):
+                traced_derivation_deletes.append(statement)
+
+        connection.set_trace_callback(trace)
+        return connection
+
+    logical_time = 0.0
+
+    def monotonic() -> float:
+        nonlocal logical_time
+        logical_time += 0.01
+        return logical_time
+
+    monkeypatch.setattr(retention_module, "connect_v2", traced_connect)
+    result = RetentionManager(
+        database,
+        RetentionPolicy(
+            derivation_mapping_us=10,
+            raw_market_event_us=10**18,
+            completed_bar_us=10**18,
+            idea_shadow_us=10**18,
+            maintenance_transaction_ms=100,
+        ),
+        monotonic=monotonic,
+    ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert result.expired_rows_deleted == 0
+    assert len(traced_derivation_deletes) == 1
+    with connect_v2(database) as connection:
+        plan = " ".join(
+            str(row["detail"])
+            for row in connection.execute(f"EXPLAIN QUERY PLAN {traced_derivation_deletes[0]}")
+        )
+        remaining = connection.execute("SELECT count(*) FROM market_event_derivations").fetchone()[
+            0
+        ]
+    assert "market_event_derivations_retention_idx" in plan
+    assert "SCAN market_event_derivations" not in plan
+    assert remaining == derivation_count
+
+
+def test_derivation_retention_deletes_oldest_mapping_before_insertion_order(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "ordered-derivations.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+            "recorder_generation, connection_generation, callback_kind, received_at_us, "
+            "payload_json, payload_sha256, lifecycle) VALUES "
+            "(2, 'ordered-input-callback', 'run-1', 1, 1, 'bar', 10, '{}', ?, 'pending')",
+            ("1" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+            "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+            "payload_json, payload_sha256) VALUES "
+            "('ordered-input', 'run-1', 2, 'instrument-1', 'bars', 'bar', 10, 10, 1, "
+            "'{}', ?)",
+            ("2" * 64,),
+        )
+        for event_id in ("inserted-first", "oldest", "recent"):
+            connection.execute(
+                "INSERT INTO market_events(event_id, run_id, source_sequence, "
+                "derived_after_source_sequence, instrument_id, feed_kind, event_kind, "
+                "event_at_us, received_at_us, connection_generation, payload_json, "
+                "payload_sha256) VALUES (?, 'run-1', NULL, 2, 'instrument-1', 'bars', "
+                "'bar_5m', 20, 20, 1, '{}', ?)",
+                (event_id, hashlib.sha256(event_id.encode()).hexdigest()),
+            )
+        connection.executemany(
+            "INSERT INTO market_event_derivations(derived_event_id, input_event_id, "
+            "input_ordinal, input_role, created_at_us) VALUES "
+            "(?, 'ordered-input', 0, 'constituent', ?)",
+            (("inserted-first", 20), ("oldest", 10), ("recent", 90)),
+        )
+
+    result = RetentionManager(
+        database,
+        RetentionPolicy(
+            derivation_mapping_us=50,
+            raw_market_event_us=10**18,
+            completed_bar_us=10**18,
+            idea_shadow_us=10**18,
+            maintenance_batch_rows=1,
+        ),
+    ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert result.expired_rows_deleted == 1
+    with connect_v2(database) as connection:
+        remaining = tuple(
+            str(row[0])
+            for row in connection.execute(
+                "SELECT derived_event_id FROM market_event_derivations "
+                "ORDER BY created_at_us, derived_event_id"
+            )
+        )
+    assert remaining == ("inserted-first", "recent")
+
+
 def test_phase2_receipt_mappings_follow_the_bounded_receipt_retention_tier(
     tmp_path: Path,
 ) -> None:

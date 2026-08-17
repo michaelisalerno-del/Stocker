@@ -824,3 +824,43 @@ admission/projection throughput 413.50/1,508.70 callbacks per second; heartbeat 
 zero; all 100 required feeds fresh and active; readiness true in 2.150 ms; RSS growth
 21,544,960 bytes; and post-session-checkpoint WAL 5,162,392 bytes. Acceptance failures
 were empty; no threshold was changed after observing the result.
+
+## Accepted deployment addendum: index-align derivation expiry selection
+
+The attended schema-20 cutover reproduced a deterministic offline maintenance failure.
+The required full-retention pass twice exited nonzero in `expired_evidence_pruning`;
+the second pass committed no receipt, terminalization, payload-compaction, or prune
+change. A disposable copy of the exact schema-20 production database reproduced the
+failure. Direct rollback-only timing isolated 321.963 ms of the 329.207 ms prune pass
+to a zero-result `market_event_derivations` deletion. The table contained 86,109 rows,
+all newer than the cutoff, but `EXPLAIN QUERY PLAN` showed a full table scan because
+the generic helper ordered this table by `rowid` rather than the declared
+`market_event_derivations_retention_idx(created_at_us, derived_event_id,
+input_ordinal)`.
+
+The Architect accepted one code-only correction: map `market_event_derivations` to
+`ORDER BY created_at_us, derived_event_id, input_ordinal` in the existing bounded
+delete helper. This preserves the retention predicate, oldest-first semantics, the
+shared 2,000-row pass budget, the 100 ms transaction deadline, writer-authority
+checks, rollback behavior, and all protected-evidence rules. It adds no schema,
+index, state, setting, service, or loop.
+
+TDD uses the public `RetentionManager.run` seam with a production-shaped large
+all-newer derivation fixture under the unchanged deadline, plus a plan assertion that
+the exact candidate seek uses the existing retention index without a full table scan.
+Coverage also proves eligible rows are selected oldest-first, protected recent rows
+remain, the carried physical-row budget is respected, and deadline/authority loss
+still rolls back. Before production, the exact disposable schema-20 copy must complete
+the direct prune harness materially below 100 ms and at least 12 consecutive full
+retention passes without a deadline failure. The fixed opening replays and focused,
+failure-oriented, full repository, and independent review gates remain unchanged.
+
+Production stays stopped and runtime-masked until the exact reviewed code-only release
+passes those gates. The verified pre-migration snapshot and schema-20 database remain
+authoritative; the 64 receipt rows committed before the rolled-back prune attempt are
+valid evidence and are not reversed. Deployment then requires one successful full
+production retention pass, schema-20 ledger/checksum verification, `quick_check=ok`,
+zero foreign-key violations, DB/WAL below their hard caps, and retained generation-9
+fatal evidence before same-run startup. This affects prospective/shadow retention
+only and does not change subscriptions, XNYS session behavior, risk, execution,
+reconciliation, paper/live trading, accounts, credentials, or order capability.

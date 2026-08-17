@@ -864,6 +864,7 @@ class RetentionManager:
             "shadow_positions": "closed_at_us, position_id",
             "idea_outputs": "emitted_at_us, output_id",
             "market_data_interests": "updated_at_us, interest_id",
+            "market_event_derivations": "created_at_us, derived_event_id, input_ordinal",
             "market_events": "event_at_us, event_kind, event_id",
             "subscriptions": "closed_at_us, subscription_id",
             "incidents": "resolved_at_us, incident_id",

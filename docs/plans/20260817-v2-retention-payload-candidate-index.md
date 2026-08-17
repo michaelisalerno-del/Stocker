@@ -983,3 +983,57 @@ seconds or reaches the conservative 35,000-row operational cutoff. Start the web
 after backlog is below the existing 5,000 readiness threshold and downstream plus
 receipt catch-up have resumed. Real market-open host-I/O observation remains a
 separate required proof.
+
+## Accepted live addendum: bounded observation during saturated recovery
+
+The exact reviewed projection candidate passed the generation-11 disposable-copy
+gate. It drained 26,455 measured pending callbacks to zero in 95.745 seconds, or
+16,578.36 callbacks/minute, with individual saturated batches normally completing in
+about 0.36--1.13 seconds. The initial unreceipted terminal count fell from 5,893 to
+5,724 after the underfull batch, callback row/event/source-sequence identities remained
+one-to-one, WAL returned to zero, and the latest diagnostic generation clean-stopped.
+A second single-CPU 30-second simulation admitted 1,680 callbacks at 56/second without
+producer error while backlog fell from 26,455 to 22,684; derived projection throughput
+was 10,840/minute and maximum RSS was 219,868 KiB with zero swap. Both exceed the fixed
+6,412/minute acceptance threshold.
+
+Generation 12 then confirmed the correction against IBKR: all 41 subscriptions became
+active and produced callbacks, order capability remained zero, and backlog fell from
+26,711 to 16,113 while source sequence advanced from 1,647,967 to 1,649,145. During
+rollout observation, however, an operator `sqlite3 -readonly` process issued several
+unbounded aggregate queries against the active 1.65-million-row database while the
+single CPU was saturated. That reader overlapped the scheduled passive checkpoint.
+The checkpoint correctly reported incomplete, physical WAL reached 120,118,632 bytes,
+and the existing 64 MiB rule fail-closed generation 12 as `WAL_CAP_FATAL`. Process exit
+then checkpointed WAL to zero. The fatal evidence and valid projection progress are
+retained.
+
+The Architect rejected an unmeasured checkpoint-code change. The platform is not
+required to tolerate arbitrary local direct readers, and `RESTART`, `TRUNCATE`, or a
+checkpoint after every saturated batch could block durable admission. One explicit
+audited same-run generation-12 `WAL_CAP_FATAL` recovery on unchanged reviewed commit
+`1a4eec2fdeae1108a328ee45875ce2645f2b9023` is accepted only after a new verified
+quiescent snapshot, exact schema/integrity/FK/writability/cap checks, WAL zero or a
+complete passive checkpoint, and proof that no process or writer lock remains. The
+authorization reason must name the unbounded rollout reader and its replacement with
+hard-bounded monitoring.
+
+Generation 13 monitoring must not run `count(*)`, joins, integrity checks, or large
+scans on the active database. Filesystem `stat`, process state and logs are safe.
+Any SQLite observation must be a single-row/indexed lookup protected by a hard process
+deadline below 300 ms; SQLite `busy_timeout` alone is not a query deadline. Require
+backlog decline from 16,113 within 10 seconds, the first scheduled passive checkpoint
+to complete without a retention incident, WAL to remain below a conservative 48 MiB
+abort threshold and visibly reset, fresh heartbeat, connected socket, all 41 exact
+subscriptions, and zero order capability. Observe for 60--120 seconds, require backlog
+below 5,000 and receipt/downstream catch-up, then start the bounded web application.
+Clean-stop at no backlog decline by 30 seconds, WAL at 48 MiB, checkpoint incomplete
+without a known bounded reader, or any integrity/ownership/admission fault. A second
+autonomous WAL fatal must not be recovered without a measured code correction.
+
+Add a disposable regression proving that a deliberately held read transaction makes
+the passive checkpoint incomplete, while no-reader and bounded web-budget reads keep
+WAL below the existing cap. Update the linked runbook to forbid unbounded direct SQLite
+reads on an active operational database and name the supported bounded observation
+path. No schema, XNYS, subscription, risk, execution, reconciliation, paper/live,
+account, credential, or order-capability behavior changes.

@@ -114,12 +114,13 @@ def _verify(
         )
     if generation_row is None or run is None:
         raise RuntimeError("snapshot run or generation evidence is absent")
+    expected_clean_stop = 1 if expected_termination_code == "CLEAN_STOP" else 0
     if (
         generation_row[0] is None
-        or generation_row[1] != 1
+        or generation_row[1] != expected_clean_stop
         or generation_row[2] != expected_termination_code
     ):
-        raise RuntimeError(f"snapshot generation is not the expected clean stop: {generation_row}")
+        raise RuntimeError(f"snapshot generation state is not the expected state: {generation_row}")
     return {
         "schema": expected_schema,
         "quick_check": quick_check,

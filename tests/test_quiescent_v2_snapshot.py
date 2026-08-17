@@ -250,6 +250,41 @@ def test_quiescent_snapshot_verifies_actual_generation_identity_with_matching_ru
     assert evidence["generation_termination_code"] == "CLEAN_STOP"
 
 
+def test_quiescent_snapshot_accepts_the_exact_expected_fatal_generation(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "fatal-snapshot.sqlite3"
+    initialize_database(database, applied_at_us=1)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO runs(run_id, mode, source, started_at_us, config_hash, git_commit, "
+            "data_class, status) VALUES ('run-1', 'prospective_record', 'ibkr', 1, ?, "
+            "'deadbee', 'prospective_protected', 'fatal')",
+            ("a" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
+            "ended_at_us, clean_stop, termination_code, input_hash) VALUES "
+            "('run-1', 1, 'owner-1', 1, 2, 0, 'WAL_CAP_FATAL', ?)",
+            ("b" * 64,),
+        )
+    module = _script_module()
+
+    evidence = module._verify(
+        database,
+        runtime=Path(".venv/bin/stocker-runtime").resolve(),
+        expected_schema=20,
+        run_id="run-1",
+        generation=1,
+        expected_termination_code="WAL_CAP_FATAL",
+        expected_max_source_sequence=None,
+        expected_nonterminal=None,
+    )
+
+    assert evidence["generation_clean_stop"] == 0
+    assert evidence["generation_termination_code"] == "WAL_CAP_FATAL"
+
+
 def test_quiescent_snapshot_restore_hash_failure_removes_all_new_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

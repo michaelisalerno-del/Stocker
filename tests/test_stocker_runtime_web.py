@@ -18,7 +18,13 @@ from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from stocker_runtime.cli import app as runtime_cli
-from stocker_runtime.storage import connect_v2, create_backup, initialize_database
+from stocker_runtime.storage import (
+    RetentionManager,
+    RetentionPolicy,
+    connect_v2,
+    create_backup,
+    initialize_database,
+)
 from stocker_runtime.web import WebConfig, create_web_app
 from stocker_runtime.web import queries as web_queries
 from stocker_runtime.web.queries import (
@@ -1494,6 +1500,37 @@ def test_query_layer_is_read_only_and_progress_handler_enforces_budget(
             "SELECT 1 UNION ALL SELECT value + 1 FROM counter WHERE value < 1000000"
             ") SELECT SUM(value) FROM counter"
         ).fetchone()
+
+
+def test_bounded_web_reads_release_wal_checkpoint_progress(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    read_model = ReadModel(_config(database, query_budget_ms=300))
+    with connect_v2(database) as writer:
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        for _index in range(200):
+            writer.execute(
+                "UPDATE schema_migrations SET applied_at_us=applied_at_us+1 WHERE version=1"
+            )
+            writer.commit()
+            with read_model._connection() as reader:
+                assert (
+                    reader.execute(
+                        "SELECT applied_at_us FROM schema_migrations WHERE version=1"
+                    ).fetchone()
+                    is not None
+                )
+
+    policy = RetentionPolicy()
+    state, _database_bytes, wal_bytes, action, checkpoint_complete = RetentionManager(
+        database,
+        policy,
+    ).checkpoint_and_measure_cap_state()
+
+    assert checkpoint_complete is True
+    assert wal_bytes < policy.wal_cap_bytes
+    assert action is None
+    assert state.value == "normal"
 
 
 def test_measured_web_queries_use_timestamp_id_indexes(tmp_path: Path) -> None:

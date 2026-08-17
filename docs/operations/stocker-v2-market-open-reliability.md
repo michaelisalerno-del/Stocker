@@ -100,15 +100,19 @@ uv run python scripts/quiescent_v2_snapshot.py \
   --destination-directory /var/lib/stocker/recovery-snapshots \
   --runtime-executable \
     /opt/stocker/releases/<matching-schema-commit>/.venv/bin/stocker-runtime \
-  --expected-schema 19 \
+  --expected-schema 20 \
   --run-id stocker-v2-shadow-20260816t191816z \
-  --generation <cleanly-stopped-generation> \
+  --generation <stopped-generation> \
   --expected-termination-code CLEAN_STOP \
   --expected-max-source-sequence <recorded-maximum> \
   --expected-nonterminal <recorded-pending-plus-leased-count> \
   --release-commit <matching-schema-commit> \
   --operator <operator-identity>
 ```
+
+For a fail-closed generation snapshot, pass its exact recorded fatal termination code
+instead of `CLEAN_STOP`. The verifier then requires `clean_stop=0`; for `CLEAN_STOP`
+it requires `clean_stop=1`. It never accepts a mismatched generation state or code.
 
 Require exit zero and one JSON object with `status=ok`, exact expected evidence,
 identical snapshot/decompressed hashes, `restore_verified=true`, and
@@ -206,6 +210,16 @@ long-lived process can still pay calendar-library initialization latency on the 
 request for a newly uncached New York date; that may delay or false-red that request,
 but cannot make readiness falsely green or weaken the 300 ms SQLite bound. Do not add
 hard-coded hours or a second calendar cache to avoid this behavior.
+
+Do not run unbounded direct `sqlite3` aggregates, joins, integrity checks, or table
+scans against the active operational database. A long-lived direct read snapshot can
+prevent a passive WAL checkpoint from advancing and correctly drive the recorder into
+`WAL_CAP_FATAL`. SQLite `busy_timeout` does not bound query execution. During an
+attended saturated-backlog recovery, observe WAL with filesystem `stat`, process state
+with systemd/journal, and recorder state only through the bounded web readiness path or
+a single-row/indexed query protected by an OS process deadline below 300 ms. Stop the
+recorder before running `quick_check`, `foreign_key_check`, callback counts, or other
+diagnostic scans.
 
 ## Downstream degradation
 

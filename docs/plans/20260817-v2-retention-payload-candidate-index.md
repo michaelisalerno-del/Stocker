@@ -598,3 +598,21 @@ maximum/final backlog 219/0, backlog drain 0.180 seconds, p50/p95/p99 admission 
 0.156/0.306/9.660 ms, admission/projection throughput 407.49/1,433.68 callbacks per
 second, zero heartbeat delay, 100/100 required feeds fresh and active, readiness true
 in 2.344 ms, and RSS growth 34,029,568 bytes. No acceptance threshold was changed.
+
+The independent Reviewer found one deployment-blocking audit gap: the storage
+exception carried its bounded phase and committed receipt progress, but
+`Recorder.maintain` persisted only the exception class. The closure binds the exact
+`MaintenanceDeadlineExceeded`, whitelists only the four maintenance phase names and
+integer ranges 0–2 committed receipt transactions / 0–2,000 rolled receipt rows, and
+persists those fields with the generation-scoped component incident. Arbitrary
+exception attributes and callback payload material cannot enter incident details. A
+recorder integration regression proves transaction-two visibility, continued
+degradation, resolution on retry, and retention of the diagnostic evidence.
+
+After that closure, the focused retention/component set passed 8/8, the 2,022 replay
+passed, and the unchanged 12,132 replay again passed with zero loss, duplicates,
+ordering/provenance violations, or escaped SQLite errors; maximum/final backlog was
+219/0, drain time 0.161 seconds, p50/p95/p99 admission latency
+0.154/0.309/9.712 ms, admission/projection throughput 402.60/1,410.53 callbacks per
+second, heartbeat delay zero, 100/100 required feeds fresh/active, readiness true in
+2.259 ms, and RSS growth 24,444,928 bytes.

@@ -2605,6 +2605,88 @@ def test_bounded_retention_contention_degrades_then_recovers_without_stopping_in
     assert adapter.connected is True
 
 
+def test_retention_transaction_two_failure_is_auditable_and_retry_recovers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    failure = MaintenanceDeadlineExceeded(
+        "retention receipt_transaction_2 exceeded its configured deadline"
+    )
+    failure.__dict__.update(
+        retention_phase="receipt_transaction_2",
+        receipt_transactions_committed=1,
+        receipt_rows_rolled_committed=17,
+        raw_callback_payload={"must_not_persist": "private evidence"},
+    )
+    normal = RetentionResult(
+        cap_state=StorageCapState.NORMAL,
+        database_bytes=100,
+        wal_bytes=1,
+        payloads_compacted=0,
+        receipts_rolled=0,
+        expired_rows_deleted=0,
+        admission_allowed=True,
+        optional_feeds_allowed=True,
+        required_action=None,
+        checkpoint_attempted=True,
+        incremental_vacuum_attempted=True,
+    )
+
+    class TransactionTwoThenSuccessfulRetention:
+        calls = 0
+
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
+            assert callable(precondition)
+            self.__class__.calls += 1
+            if self.calls == 1:
+                raise failure
+            return normal
+
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager",
+        TransactionTwoThenSuccessfulRetention,
+    )
+
+    assert recorder.maintain(now_us=102) is StorageCapState.NORMAL
+    with connect_v2(database) as connection:
+        incident = connection.execute(
+            "SELECT details_json, resolved_at_us FROM incidents "
+            "WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED'"
+        ).fetchone()
+    assert json.loads(incident["details_json"]) == {
+        "component": "retention_maintenance",
+        "consecutive_failures": 1,
+        "error": "MaintenanceDeadlineExceeded",
+        "next_retry_at_us": 1_000_102,
+        "receipt_rows_rolled_committed": 17,
+        "receipt_transactions_committed": 1,
+        "retention_phase": "receipt_transaction_2",
+    }
+    assert incident["resolved_at_us"] is None
+
+    assert recorder.maintain(now_us=1_000_102) is StorageCapState.NORMAL
+    with connect_v2(database) as connection:
+        recovered = connection.execute(
+            "SELECT details_json, resolved_at_us FROM incidents "
+            "WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED'"
+        ).fetchone()
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state WHERE run_id='run-1'"
+        ).fetchone()
+    assert json.loads(recovered["details_json"])["retention_phase"] == "receipt_transaction_2"
+    assert recovered["resolved_at_us"] == 1_000_102
+    assert tuple(runtime) == ("running", None, "connected")
+
+
 @pytest.mark.parametrize(
     ("contention_stage", "result_state"),
     (

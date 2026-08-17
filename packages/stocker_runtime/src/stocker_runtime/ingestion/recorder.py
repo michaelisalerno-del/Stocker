@@ -369,7 +369,7 @@ class Recorder:
         self._retention_maintenance_deferred = False
         self._component_failures: dict[str, tuple[int, int]] = {}
         self._component_first_failure_at_us: dict[str, int] = {}
-        self._component_pending_incidents: dict[str, str] = {}
+        self._component_pending_incidents: dict[str, tuple[str, dict[str, JsonValue]]] = {}
         self._component_observations: set[str] = set()
         self._pending_callback_wakeup = threading.Event()
         self._writer_lock = LocalWriterLock.for_database(config.database)
@@ -2782,6 +2782,29 @@ class Recorder:
         }
 
     @staticmethod
+    def _retention_incident_details(
+        error: MaintenanceDeadlineExceeded,
+    ) -> dict[str, JsonValue]:
+        """Expose only bounded maintenance progress, never callback evidence."""
+
+        details: dict[str, JsonValue] = {}
+        phase = error.__dict__.get("retention_phase")
+        if phase in {
+            "receipt_work_selection",
+            "receipt_transaction_1",
+            "receipt_transaction_2",
+            "terminalization_payload_compaction_and_pruning",
+        }:
+            details["retention_phase"] = cast(str, phase)
+        transactions = error.__dict__.get("receipt_transactions_committed")
+        if type(transactions) is int and 0 <= transactions <= 2:
+            details["receipt_transactions_committed"] = transactions
+        rolled = error.__dict__.get("receipt_rows_rolled_committed")
+        if type(rolled) is int and 0 <= rolled <= 2_000:
+            details["receipt_rows_rolled_committed"] = rolled
+        return details
+
+    @staticmethod
     def _component_code(component: str) -> str:
         return f"COMPONENT_{component.upper()}_FAILED"
 
@@ -2791,6 +2814,7 @@ class Recorder:
         *,
         now_us: int,
         error_name: str,
+        incident_details: dict[str, JsonValue] | None = None,
     ) -> bool:
         failures, _retry_at_us = self._component_failures.get(component, (0, 0))
         failures += 1
@@ -2798,7 +2822,10 @@ class Recorder:
         retry_at_us = now_us + delay_us
         self._component_first_failure_at_us.setdefault(component, now_us)
         self._component_failures[component] = (failures, retry_at_us)
-        self._component_pending_incidents[component] = error_name
+        self._component_pending_incidents[component] = (
+            error_name,
+            {} if incident_details is None else dict(incident_details),
+        )
         if self._persist_component_incident(component, now_us=now_us):
             self._component_pending_incidents.pop(component, None)
             return True
@@ -2809,24 +2836,21 @@ class Recorder:
 
     def _persist_component_incident(self, component: str, *, now_us: int) -> bool:
         failures, retry_at_us = self._component_failures[component]
-        error_name = self._component_pending_incidents[component]
+        error_name, incident_details = self._component_pending_incidents[component]
         opened_at_us = self._component_first_failure_at_us[component]
         code = self._component_code(component)
         generation = self._authority_state().recorder_generation
         incident_id = hashlib.sha256(
             f"{self.config.run_id}|{generation}|component|{component}|{opened_at_us}".encode()
         ).hexdigest()
-        details_json = canonical_json_bytes(
-            cast(
-                JsonValue,
-                {
-                    "component": component,
-                    "consecutive_failures": failures,
-                    "error": error_name,
-                    "next_retry_at_us": retry_at_us,
-                },
-            )
-        ).decode()
+        details: dict[str, JsonValue] = {
+            "component": component,
+            "consecutive_failures": failures,
+            "error": error_name,
+            "next_retry_at_us": retry_at_us,
+        }
+        details.update(incident_details)
+        details_json = canonical_json_bytes(cast(JsonValue, details)).decode()
         try:
             with connect_v2(self.config.database) as connection:
                 connection.execute("BEGIN IMMEDIATE")
@@ -4180,12 +4204,13 @@ class Recorder:
             raise
         except InboxAdmissionError as error:
             raise AuthoritativeLeaseLost(str(error)) from error
-        except MaintenanceDeadlineExceeded:
+        except MaintenanceDeadlineExceeded as error:
             self._retention_maintenance_deferred = True
             self._component_failure(
                 "retention_maintenance",
                 now_us=now_us,
                 error_name="MaintenanceDeadlineExceeded",
+                incident_details=self._retention_incident_details(error),
             )
             return StorageCapState.NORMAL
         except RetentionInvariantError as error:

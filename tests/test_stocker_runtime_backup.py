@@ -13,6 +13,7 @@ import pytest
 from typer.testing import CliRunner
 
 import stocker_runtime.storage.backup as backup_module
+import stocker_runtime.storage.connection as connection_module
 from stocker_runtime.cli import app
 from stocker_runtime.storage import (
     BackupCapacityError,
@@ -149,7 +150,9 @@ def test_quiescent_managed_backup_stays_degraded_until_restore_proof_finishes(
     _seed_database(database)
     observed_status: dict[str, object] = {}
     opened: list[sqlite3.Connection] = []
+    verifier_opened: list[sqlite3.Connection] = []
     real_connect = backup_module.sqlite3.connect
+    real_read_only_connect = connection_module._read_only_connect
 
     def observed_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
         connection = real_connect(*args, **kwargs)
@@ -158,10 +161,36 @@ def test_quiescent_managed_backup_stays_degraded_until_restore_proof_finishes(
 
     monkeypatch.setattr(backup_module.sqlite3, "connect", observed_connect)
 
+    def retained_verifier_connect(path: Path) -> sqlite3.Connection:
+        connection = real_read_only_connect(path)
+        verifier_opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(
+        connection_module,
+        "_read_only_connect",
+        retained_verifier_connect,
+    )
+
     def fail_restore_proof(_artifact: object) -> None:
         _assert_only_work_lock(working)
         with pytest.raises(sqlite3.ProgrammingError, match="closed"):
             opened[-1].execute("SELECT 1")
+        assert verifier_opened
+        for connection in verifier_opened:
+            with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                connection.execute("SELECT 1")
+        descriptor_root = Path("/proc/self/fd")
+        if descriptor_root.is_dir():
+            work_prefix = str(working.resolve())
+            for descriptor in descriptor_root.iterdir():
+                try:
+                    target = descriptor.readlink()
+                except OSError:
+                    continue
+                assert not (
+                    str(target).startswith(work_prefix) and str(target).endswith(" (deleted)")
+                )
         observed_status.update(
             json.loads((backups / backup_module.BACKUP_STATUS_FILENAME).read_text())
         )

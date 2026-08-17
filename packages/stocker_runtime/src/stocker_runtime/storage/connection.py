@@ -7,6 +7,7 @@ import json
 import re
 import sqlite3
 import time
+from contextlib import closing
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from functools import cache
@@ -257,7 +258,7 @@ def _probe_v2(
     verify_integrity: bool,
     default_plan: tuple[Migration, ...] | None = None,
 ) -> set[int]:
-    with _read_only_connect(database_path) as connection:
+    with closing(_read_only_connect(database_path)) as connection:
         applied = _verify_applied_migrations(connection, migrations)
         _verify_schema_structure(
             connection,
@@ -446,6 +447,6 @@ def verify_database(database_path: str | Path) -> None:
     applied = _probe_v2(path, migrations, verify_integrity=True)
     if applied != {item.version for item in migrations}:
         raise SchemaError("database schema is older than this runtime; run migrate")
-    with _read_only_connect(path) as connection:
+    with closing(_read_only_connect(path)) as connection:
         if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
             raise SchemaError("database quick_check failed")

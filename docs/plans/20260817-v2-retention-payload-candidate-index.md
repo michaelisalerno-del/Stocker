@@ -1366,6 +1366,27 @@ required feeds active and fresh, truthful readiness, and no acceptance failure.
 Simulation proves deterministic admission/projection behavior; it does not replace the
 first attended production backup/restart or a real IBKR market-open observation.
 
+The retry on the reviewed restart-boundary release published its candidate archive and
+began restore verification, but production `lsof +L1` then showed three read-only
+descriptors retaining the deleted 5,019,611,136-byte work database. The narrower cause
+is in the shared verifier: `sqlite3.Connection.__exit__` commits or rolls back but does
+not close the connection, so `_probe_v2` and `verify_database` cannot use a plain
+connection `with` statement as an ownership boundary. The accepted correction wraps
+both and only those `_read_only_connect` ownership sites in `contextlib.closing`.
+Those are the helper's only callers; public `connect_v2` ownership remains unchanged.
+There is no schema, backup format, hash, evidence, cap, session or trading change.
+
+Regression coverage retains every actual verifier connection and proves it is unusable
+after success and after schema, foreign-key and quick-check failure. Backup integration
+also retains verifier references and proves every descriptor is closed before the work
+copy is unlinked and restore begins, with no deleted temporary database visible through
+the current process descriptor table. The current attended operation is allowed to
+finish while its remaining write and free-space bounds remain safe, but its release is
+not eligible for timer enablement. The corrected code-only schema-20 release requires
+the focused storage/backup suites, independent review, a disposable mature backup and
+restore, then one attended production backup with zero deleted work-copy descriptors,
+exact restore/integrity evidence, healthy status and automatic recorder/web restart.
+
 The final repository test invocation completed with 2,104 passing and one skipped
 test. It retained 13 failures and 19 setup errors, all caused by the already-absent
 protected `trade_decisions.parquet` research input. The repository check stopped at

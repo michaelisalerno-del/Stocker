@@ -951,6 +951,137 @@ def test_initialize_database_creates_exact_immediate_schema_and_writer_pragmas(
         assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
 
 
+def _assert_connections_closed(connections: list[sqlite3.Connection]) -> None:
+    assert connections
+    for connection in connections:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            connection.execute("SELECT 1")
+
+
+def test_verify_database_closes_every_read_connection_on_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "verified.sqlite3"
+    initialize_database(database)
+    opened: list[sqlite3.Connection] = []
+    real_connect = connection_module._read_only_connect
+
+    def retained_connect(path: Path) -> sqlite3.Connection:
+        connection = real_connect(path)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(connection_module, "_read_only_connect", retained_connect)
+
+    verify_database(database)
+
+    assert len(opened) == 2
+    _assert_connections_closed(opened)
+
+
+def test_verify_database_closes_probe_connection_on_schema_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "schema-failure.sqlite3"
+    initialize_database(database)
+    opened: list[sqlite3.Connection] = []
+    real_connect = connection_module._read_only_connect
+
+    def retained_connect(path: Path) -> sqlite3.Connection:
+        connection = real_connect(path)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(connection_module, "_read_only_connect", retained_connect)
+    monkeypatch.setattr(
+        connection_module,
+        "_verify_schema_structure",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(SchemaError("injected schema failure")),
+    )
+
+    with pytest.raises(SchemaError, match="injected schema failure"):
+        verify_database(database)
+
+    assert len(opened) == 1
+    _assert_connections_closed(opened)
+
+
+def test_verify_database_closes_probe_connection_on_foreign_key_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "foreign-key-failure.sqlite3"
+    initialize_database(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
+            "ownership_protocol, git_commit, input_hash) VALUES "
+            "('missing-run', 1, 'owner', 1, 'local_flock_v1', 'deadbee', ?)",
+            ("a" * 64,),
+        )
+    opened: list[sqlite3.Connection] = []
+    real_connect = connection_module._read_only_connect
+
+    def retained_connect(path: Path) -> sqlite3.Connection:
+        connection = real_connect(path)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(connection_module, "_read_only_connect", retained_connect)
+
+    with pytest.raises(SchemaError, match="foreign-key violations"):
+        verify_database(database)
+
+    assert len(opened) == 1
+    _assert_connections_closed(opened)
+
+
+def test_verify_database_closes_quick_check_connection_on_sqlite_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "quick-check-failure.sqlite3"
+    initialize_database(database)
+    opened: list[sqlite3.Connection] = []
+
+    class FailingQuickCheckConnection(sqlite3.Connection):
+        def execute(  # type: ignore[override]
+            self,
+            sql: str,
+            parameters: tuple[object, ...] = (),
+        ) -> sqlite3.Cursor:
+            if sql == "PRAGMA quick_check":
+                raise sqlite3.DatabaseError("injected quick-check failure")
+            return super().execute(sql, parameters)
+
+    def failing_connect(path: Path) -> sqlite3.Connection:
+        uri = f"{path.resolve().as_uri()}?mode=ro"
+        connection = sqlite3.connect(
+            uri,
+            uri=True,
+            factory=FailingQuickCheckConnection,
+            isolation_level=None,
+        )
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(
+        connection_module,
+        "_probe_v2",
+        lambda *_args, **_kwargs: {item.version for item in migration_plan()},
+    )
+    monkeypatch.setattr(connection_module, "_read_only_connect", failing_connect)
+
+    with pytest.raises(sqlite3.DatabaseError, match="injected quick-check failure"):
+        verify_database(database)
+
+    assert len(opened) == 1
+    _assert_connections_closed(opened)
+
+
 def test_market_open_reliability_migration_preserves_deployed_v2_evidence(
     tmp_path: Path,
 ) -> None:

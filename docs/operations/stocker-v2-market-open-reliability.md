@@ -46,8 +46,10 @@ for a missing or incomplete index.
 In a market-closed attended window:
 
 1. Stop recorder and web.
-2. Record the deployed schema and create a checked compressed backup of that exact
-   schema. Restore-check it to a disposable path using the existing backup commands.
+2. For the current schema-18-to-19 route, create a fresh checked compressed schema-18
+   backup and retain the matching schema-18 release. Restore-check the backup to a
+   disposable path using the existing backup commands. For a later route, record and
+   back up its exact deployed schema and retain its matching release.
 3. Run `stocker-runtime migrate /var/lib/stocker/v2/stocker-v2.sqlite3`.
 4. Require the ledger to report schema 19, exact schema/index checksum verification,
    `foreign_key_check` with zero rows, and `quick_check=ok`.
@@ -135,13 +137,13 @@ while process, socket, configuration, and subscription lifecycle remain reported
 The web query budget defaults to 300 ms and is capped at 500 ms. Schema 19 changes the
 mature lookup from repeated history scans to exact acknowledged-callback covering-index
 seeks. On the restored 41-feed production copy, the old query failed between about 301
-and 2,583 ms. The final indexed calculation completed ten times in 7.21–9.86 ms, with
-p95 9.77 ms. Timeout remains bounded and returns a web-query timeout/503 without
-implying recorder ingestion failure.
+and 2,583 ms. The accepted final measurement completed ten calculations in
+8.202–14.081 ms, with p95 11.903 ms. Timeout remains bounded and returns a web-query
+timeout/503 without implying recorder ingestion failure.
 
 Web startup prewarms the existing XNYS calendar before the listening socket is made
-available. This took approximately 2.8–4.8 seconds in deployment measurements; treat it
-as startup time, not a failed health query. Session calculation also occurs before the
+available. The accepted deployment measurement was 2,795.926 ms; treat it as startup
+time, not a failed health query. Session calculation also occurs before the
 SQLite deadline, so a calendar cache miss cannot consume the database query budget. A
 long-lived process can still pay calendar-library initialization latency on the first
 request for a newly uncached New York date; that may delay or false-red that request,

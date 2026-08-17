@@ -7,6 +7,8 @@ import json
 import re
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -473,6 +475,72 @@ def test_readiness_is_green_outside_regular_session_without_recent_ticks(
     assert payload["reasons"] == []
     assert len(payload["feeds"]) == 2
     assert all(feed["stale"] is False for feed in payload["feeds"])
+
+
+def test_readiness_evaluates_market_session_before_starting_sqlite_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "ready-session-before-sqlite.sqlite3"
+    _seed_live(database)
+    sunday_us = 1_786_881_600_000_000
+    _make_live_ready(database, now_us=sunday_us)
+    read_model = ReadModel(_config(database))
+    original_connection = read_model._connection
+    events: list[str] = []
+    clock = [0.0]
+
+    def expected_since(now_us: int) -> None:
+        assert now_us == sunday_us
+        events.append("session")
+        clock[0] += 1.0
+        return None
+
+    @contextmanager
+    def observed_connection() -> Iterator[sqlite3.Connection]:
+        events.append("sqlite")
+        with original_connection() as connection:
+            yield connection
+
+    monkeypatch.setattr(
+        web_queries,
+        "market_data_expected_since_us",
+        expected_since,
+        raising=False,
+    )
+    monkeypatch.setattr(read_model, "_connection", observed_connection)
+    monkeypatch.setattr(web_queries.time, "perf_counter", lambda: clock[0])
+
+    payload = read_model.ready(now_us=sunday_us)
+
+    assert payload["ready"] is True
+    assert payload["session"]["state"] == "outside_regular_session"
+    assert events == ["session", "sqlite"]
+    assert clock == [1.0]
+
+
+def test_web_app_prewarms_market_session_before_accepting_requests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "web-startup-prewarm.sqlite3"
+    initialize_database(database)
+    started_at_us = 1_786_881_600_000_000
+    observed: list[int] = []
+
+    monkeypatch.setattr(
+        "stocker_runtime.web.app.market_data_expected_since_us",
+        lambda now_us: observed.append(now_us),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "stocker_runtime.web.app.time.time_ns",
+        lambda: started_at_us * 1_000,
+    )
+
+    create_web_app(_config(database))
+
+    assert observed == [started_at_us]
 
 
 def test_readiness_latest_callback_uses_exact_fenced_identity_and_covering_index(

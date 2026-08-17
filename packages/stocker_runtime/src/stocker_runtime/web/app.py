@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from stocker_runtime.market_session import market_data_expected_since_us
 from stocker_runtime.web.config import WebConfig
 from stocker_runtime.web.queries import (
     SQLITE_INTEGER_MAX,
@@ -51,6 +52,7 @@ def create_web_app(config: WebConfig) -> FastAPI:
                 raise ResponseTooLargeError("response_too_large")
             return rendered
 
+    market_data_expected_since_us(time.time_ns() // 1_000)
     read_model = ReadModel(config)
     static_root = Path(__file__).with_name("static")
     app = FastAPI(

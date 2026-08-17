@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from stocker_runtime.market_session import market_data_expected_since_us
 from stocker_runtime.storage import read_backup_manifests
 from stocker_runtime.web.config import WebConfig
 from stocker_runtime.web.readiness import calculate_readiness, select_operational_run
@@ -209,11 +210,14 @@ class ReadModel:
     def ready(self, *, now_us: int | None = None) -> dict[str, Any]:
         """Return current recorder readiness without touching writer state."""
 
+        evaluated_at_us = time.time_ns() // 1_000 if now_us is None else now_us
+        expected_since_us = market_data_expected_since_us(evaluated_at_us)
         with self._connection() as connection:
             return calculate_readiness(
                 connection,
                 pinned_run_id=self.config.run_id,
-                now_us=time.time_ns() // 1_000 if now_us is None else now_us,
+                now_us=evaluated_at_us,
+                expected_since_us=expected_since_us,
             )
 
     def _backup_projection(self, *, limit: int) -> dict[str, Any]:

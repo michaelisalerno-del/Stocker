@@ -5,8 +5,6 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from stocker_runtime.market_session import market_data_expected_since_us
-
 RECORDER_HEARTBEAT_FRESH_US = 5_000_000
 READINESS_INBOX_BACKLOG_LIMIT = 5_000
 READINESS_LATEST_CALLBACK_SEEK_SQL = (
@@ -96,6 +94,7 @@ def calculate_readiness(
     *,
     pinned_run_id: str | None,
     now_us: int,
+    expected_since_us: int | None,
 ) -> dict[str, Any]:
     """Calculate bounded operational readiness from one query-only snapshot."""
 
@@ -105,7 +104,6 @@ def calculate_readiness(
         now_us=now_us,
     )
     reasons: list[str] = []
-    expected_since_us = market_data_expected_since_us(now_us)
     session = {
         "calendar": "XNYS",
         "state": "regular_session" if expected_since_us is not None else "outside_regular_session",

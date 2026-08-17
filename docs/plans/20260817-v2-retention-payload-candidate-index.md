@@ -252,3 +252,32 @@ second; maximum/final backlog of 219/0; zero seconds to the 256-row safe range a
 0.158 seconds to drain; heartbeat delay 0 seconds; 100/100 feeds active and fresh;
 readiness true in 2.19 ms; and RSS growth of 20,234,240 bytes. The deterministic
 2,022-callback CI replay also passed unchanged.
+
+## Accepted deployment addendum: exclude XNYS initialization from the SQLite budget
+
+The mature schema-19 query uses bounded covering-index seeks, but the first readiness
+calculation in a new web process still failed after 5.67 seconds. Direct measurement
+showed that lazy initialization of the existing XNYS calendar took 3.802 seconds; the
+subsequent call took 0.027 ms. The 300 ms deadline was being started before that
+calendar work, so the first SQLite progress check reported a false web-query timeout.
+
+The accepted correction computes `market_data_expected_since_us` from one captured
+timestamp before opening the bounded read-only connection and passes that result into
+the pure readiness calculation. Web application construction also calls the same
+calendar function once so that the existing date-keyed LRU cache is warm before the
+server accepts requests. This adds no cache, state, loop, service, or hard-coded market
+hours. The SQLite query budget remains 300 ms and continues to cover only connection
+acquisition and SQLite work; a genuinely slow statement must still time out.
+
+Acceptance requires tests proving calendar evaluation precedes the connection deadline,
+application startup prewarms the shared calendar function, the supplied session value
+is used consistently, and the existing SQLite timeout remains enforced. XNYS holiday,
+DST, early-close, regular-session freshness, and outside-session quietness tests remain
+unchanged. After a clean web restart, record startup duration separately and require
+the first request accepted by the server plus ten mature 41-feed requests to finish
+within 300 ms with the correct run, generation, feed diagnostics, and session state.
+
+This addendum affects only read-only web startup and readiness calculation. Recorder
+ownership, durable admission, retention, IBKR subscriptions, market-data evidence,
+risk, execution, reconciliation, paper/live trading, orders, accounts, credentials,
+and broker capabilities are unchanged.

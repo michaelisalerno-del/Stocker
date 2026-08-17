@@ -41,7 +41,12 @@ from stocker_runtime.ingestion.ibkr_api import (
     write_immutable_official_ibkr_api_provenance,
     write_official_ibkr_api_update_status,
 )
-from stocker_runtime.ingestion.lifecycle import recover_fatal_generation
+from stocker_runtime.ingestion.lifecycle import (
+    MAX_PAYLOAD_DRAIN_PASSES,
+    MAX_PAYLOAD_DRAIN_WALL_SECONDS,
+    drain_callback_payloads,
+    recover_fatal_generation,
+)
 from stocker_runtime.market_session import (
     market_data_expected_since_us as _market_data_expected_since_us,
 )
@@ -370,6 +375,36 @@ def recover_fatal_generation_command(
             "status": "ok",
         }
     )
+
+
+@recorder_app.command("drain-payloads")
+def drain_payloads_command(
+    database: Annotated[Path, typer.Option("--database", exists=True, dir_okay=False)],
+    now_us: Annotated[int | None, typer.Option("--now-us", min=0)] = None,
+    max_passes: Annotated[
+        int, typer.Option("--max-passes", min=2, max=MAX_PAYLOAD_DRAIN_PASSES)
+    ] = MAX_PAYLOAD_DRAIN_PASSES,
+    max_wall_seconds: Annotated[
+        int,
+        typer.Option("--max-wall-seconds", min=1, max=MAX_PAYLOAD_DRAIN_WALL_SECONDS),
+    ] = MAX_PAYLOAD_DRAIN_WALL_SECONDS,
+) -> None:
+    """Drain only proven callback payloads while holding sole writer ownership."""
+
+    fixed_now_us = time.time_ns() // 1_000 if now_us is None else now_us
+    try:
+        result = drain_callback_payloads(
+            database=database,
+            now_us=fixed_now_us,
+            max_passes=max_passes,
+            max_wall_seconds=max_wall_seconds,
+        )
+    except (OSError, ValueError, RuntimeError, sqlite3.Error, SchemaError) as error:
+        _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
+        raise typer.Exit(code=1) from error
+    payload = asdict(result)
+    payload["status"] = "ok"
+    _emit(payload)
 
 
 @backup_app.command("create")

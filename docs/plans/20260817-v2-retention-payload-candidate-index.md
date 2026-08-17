@@ -381,12 +381,25 @@ batches remain legitimate policy compaction and reduced non-null payloads from 6
 to 561,498 without callback admission.
 
 The Architect therefore superseded only the prior-release drain ordering: do not keep
-retrying the measured per-row implementation. Install the exact reviewed set-based
-candidate offline while both services remain stopped, verify release artifacts,
-configuration, schema 19, and exclusive writer ownership, then run the same explicitly
-capped drain with the candidate until two consecutive zero-work passes. Every pass
-must exit zero, return valid JSON, report `status=ok`, compact at most 2,000 payloads,
-and report no unexplained receipt or expiry mutation. Any failure stops the procedure.
+retrying the measured per-row implementation. Install the reviewed set-based candidate
+offline while both services remain stopped and runtime-masked, then verify release
+artifacts, configuration, and schema 19. Use the purpose-built command:
+
+```bash
+stocker-runtime recorder drain-payloads \
+  --database /var/lib/stocker/v2/stocker-v2.sqlite3 \
+  --max-passes 1000 \
+  --max-wall-seconds 2700
+```
+
+The command acquires the canonical `LocalWriterLock` once for its full loop, fixes one
+cutoff timestamp, verifies the lock in every transaction, inherits the 2,000-row and
+100 ms limits, and succeeds only after two consecutive zero-compaction passes. It is
+payload-only: it cannot roll/delete receipts, advance watermarks, terminalize shadow
+positions, prune any table, vacuum, or mutate runtime/incident/cap state. Runtime
+masking keeps the recorder start-prevented during the surrounding backup, verification,
+and restart preparation. Any lock conflict, deadline, pass/time cap, invalid result, or
+other error exits nonzero without claiming that earlier committed batches were undone.
 
 This amendment is supported by two independent candidate measurements. The original
 mature copy completed 12 consecutive 2,000-row passes in 0.783–1.198 seconds. A fresh

@@ -176,29 +176,62 @@ pass while retaining receipt/watermark proof, acknowledged-first ordering, the s
 
 Use an attended offline recovery only after the incident has been diagnosed:
 
-1. Stop recorder and web, verify no recorder process remains, and acquire the existing
-   writer lock nonblockingly for the whole procedure.
+1. Stop recorder and web, runtime-mask both units, and verify they are inactive with no
+   recorder process. The mask is the fail-closed start barrier around backup,
+   verification, and restart preparation; do not depend on operator convention.
+
+   ```bash
+   systemctl stop stocker-v2-recorder.service stocker-v2-web.service
+   systemctl mask --runtime stocker-v2-recorder.service stocker-v2-web.service
+   test "$(systemctl is-active stocker-v2-recorder.service)" = inactive
+   test "$(systemctl is-active stocker-v2-web.service)" = inactive
+   ! pgrep -af '[s]tocker-runtime recorder run'
+   ```
 2. Create a fresh checked compressed schema-19 backup and restore-check it to a
    disposable path. Record callback, receipt, and watermark counts/hashes plus
    `quick_check` and `foreign_key_check`.
-3. Verify the exact release artifacts, recorder/input preflight, and schema 19. Run
-   `stocker-runtime retain /var/lib/stocker/v2/stocker-v2.sqlite3` in an explicitly
-   capped loop. Stop on any nonzero exit, invalid JSON, non-`ok` status, more than 2,000
-   compacted payloads, or unexplained receipt/expiry mutation.
-4. Continue until a full zero-work pass is repeated once. The second zero proves a
-   stable frontier because callback admission remains stopped.
-5. Recompute the evidence hashes. Callback row count and all immutable callback,
-   receipt, and watermark evidence must match; the non-null payload reduction must
-   equal the sum of successful compactions. Require schema 19, `quick_check=ok`, zero
-   foreign-key violations, and bounded DB/WAL.
+3. Verify the exact release artifacts, recorder/input preflight, and schema 19. Run the
+   tracked bounded command below. It acquires the canonical `.writer.lock` once for the
+   entire loop and verifies it in every transaction; an active recorder or another
+   drain fails before mutation.
+
+   ```bash
+   timeout --foreground 2705 \
+     /opt/stocker/v2-current/.venv/bin/stocker-runtime recorder drain-payloads \
+       --database /var/lib/stocker/v2/stocker-v2.sqlite3 \
+       --max-passes 1000 \
+       --max-wall-seconds 2700
+   ```
+
+   Require exit zero, `status=ok`, at most 1,000 passes, at most 2,000 payloads per
+   committed pass, and `consecutive_zero_passes=2`. The command uses one fixed cutoff
+   and emits total compacted rows. Pass/time/deadline/lock loss exits nonzero and names
+   the incomplete committed total; it never claims earlier successful passes rolled
+   back.
+4. Recompute the evidence hashes. Because this command is purpose-built payload-only,
+   callback row count and every immutable callback field (including `payload_sha256`),
+   receipt row/count/hash, watermark row/count/hash, and every other table must match.
+   The non-null payload reduction must exactly equal the reported compacted total.
+   Require schema 19, `quick_check=ok`, zero foreign-key violations, and bounded DB/WAL.
+5. Keep the recorder runtime-masked while installing/verifying the final release and
+   updating the frozen commit identity. Unmask only at the intentional handoff; start
+   recorder first and web only after recorder health is proven.
+
+   ```bash
+   systemctl unmask --runtime stocker-v2-recorder.service
+   systemctl start stocker-v2-recorder.service
+   # Verify generation, heartbeat, socket, exact subscriptions, and raw sequence here.
+   systemctl unmask --runtime stocker-v2-web.service
+   systemctl start stocker-v2-web.service
+   ```
 6. Restart the same `run_id`, creating a new recorder generation. Require a fresh
    heartbeat, connected market-data socket, every exact identity from validated input
    active without duplicates, growing raw sequence, and no new generation-scoped
    retention incident across at least three maintenance opportunities. Then start web
    and require truthful readiness.
 
-A successful full command may exceed 100 ms because one pass contains two separately
-bounded writer transactions plus checkpoint/vacuum work; that is not a transaction-
+A successful full command may exceed 100 ms because it contains many separately
+bounded payload transactions plus passive WAL checkpoints; that is not a transaction-
 deadline violation. This recovery nulls only proven eligible `payload_json`; callback
 identity/provenance, payload hashes, receipts, and watermarks remain. If release
 rollback is needed while evidence is valid, preserve the current schema-19 database

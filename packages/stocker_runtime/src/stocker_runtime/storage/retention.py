@@ -116,6 +116,38 @@ FAILED_PAYLOAD_COMPACTION_SQL = (
     + FAILED_PAYLOAD_CANDIDATES_SQL
     + ")"
 )
+ACK_PAYLOAD_DRAIN_RUN_SQL = """
+SELECT inbox.run_id, inbox.acknowledged_at_us AS terminal_at_us,
+       inbox.source_sequence
+FROM callback_inbox AS inbox INDEXED BY callback_inbox_terminal_idx
+JOIN callback_compaction_watermarks AS watermark
+  ON watermark.run_id = inbox.run_id
+ AND watermark.compacted_through_sequence >= inbox.source_sequence
+WHERE inbox.lifecycle = 'acknowledged' AND inbox.payload_json IS NOT NULL
+  AND inbox.normalized_event_id IS NOT NULL
+  AND inbox.acknowledged_at_us IS NOT NULL
+  AND inbox.acknowledged_at_us <= ? AND inbox.receipt_batch_id IS NOT NULL
+ORDER BY inbox.acknowledged_at_us, inbox.source_sequence
+LIMIT 1
+"""
+FAILED_PAYLOAD_DRAIN_RUN_SQL = """
+SELECT inbox.run_id, inbox.received_at_us AS terminal_at_us,
+       inbox.source_sequence
+FROM callback_inbox AS inbox INDEXED BY callback_inbox_failed_payload_idx
+JOIN callback_compaction_watermarks AS watermark
+  ON watermark.run_id = inbox.run_id
+ AND watermark.compacted_through_sequence >= inbox.source_sequence
+WHERE inbox.lifecycle = 'failed' AND inbox.payload_json IS NOT NULL
+  AND inbox.failure_code IS NOT NULL AND inbox.received_at_us <= ?
+  AND inbox.receipt_batch_id IS NOT NULL
+  AND EXISTS (
+      SELECT 1 FROM runs AS terminal_run
+      WHERE terminal_run.run_id = inbox.run_id
+        AND terminal_run.status IN ('stopped', 'fatal')
+  )
+ORDER BY inbox.received_at_us, inbox.source_sequence
+LIMIT 1
+"""
 ACK_CHECKPOINT_RUN_SQL = """
 SELECT run_id, acknowledged_at_us AS terminal_at_us, source_sequence
 FROM callback_inbox INDEXED BY callback_inbox_terminal_idx
@@ -1212,3 +1244,82 @@ class RetentionManager:
             checkpoint_attempted=True,
             incremental_vacuum_attempted=True,
         )
+
+    def compact_payloads_only(
+        self,
+        *,
+        now_us: int,
+        precondition: Callable[[sqlite3.Connection], None] | None = None,
+    ) -> int:
+        """Compact one proof-authorized payload batch without other maintenance."""
+
+        if now_us < 0:
+            raise ValueError("payload drain time cannot be negative")
+        connection = connect_v2(self.database_path)
+        deadline_hit = False
+        deadline = 0.0
+        try:
+
+            def progress() -> int:
+                nonlocal deadline_hit
+                deadline_hit = self._monotonic() >= deadline
+                return 1 if deadline_hit else 0
+
+            def check_deadline() -> None:
+                nonlocal deadline_hit
+                deadline_hit = self._monotonic() >= deadline
+                if deadline_hit:
+                    raise MaintenanceDeadlineExceeded(
+                        "payload drain transaction exceeded its configured deadline"
+                    )
+
+            connection.execute("BEGIN IMMEDIATE")
+            deadline = self._monotonic() + self.policy.maintenance_transaction_ms / 1_000
+            connection.set_progress_handler(progress, 1_000)
+            if precondition is not None:
+                precondition(connection)
+            check_deadline()
+            payload_cutoff_us = now_us - self.policy.callback_payload_us
+            candidates = tuple(
+                row
+                for row in (
+                    connection.execute(ACK_PAYLOAD_DRAIN_RUN_SQL, (payload_cutoff_us,)).fetchone(),
+                    connection.execute(
+                        FAILED_PAYLOAD_DRAIN_RUN_SQL, (payload_cutoff_us,)
+                    ).fetchone(),
+                )
+                if row is not None
+            )
+            selected = (
+                None
+                if not candidates
+                else min(
+                    candidates,
+                    key=lambda row: (
+                        int(row["terminal_at_us"]),
+                        int(row["source_sequence"]),
+                    ),
+                )
+            )
+            compacted = self._compact_payloads(
+                connection,
+                payload_cutoff_us,
+                self.policy.maintenance_batch_rows,
+                run_id=None if selected is None else str(selected["run_id"]),
+            )
+            check_deadline()
+            connection.commit()
+            connection.set_progress_handler(None, 0)
+            connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+            return compacted
+        except Exception as error:
+            if connection.in_transaction:
+                connection.rollback()
+            if deadline_hit and isinstance(error, sqlite3.OperationalError):
+                raise MaintenanceDeadlineExceeded(
+                    "payload drain transaction exceeded its configured deadline"
+                ) from error
+            raise
+        finally:
+            connection.set_progress_handler(None, 0)
+            connection.close()

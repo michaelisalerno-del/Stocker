@@ -46,7 +46,10 @@ from stocker_runtime.ingestion.inbox import (
     transport_incident_id,
 )
 from stocker_runtime.ingestion.lifecycle import (
+    LocalWriterLock,
     LocalWriterLockError,
+    PayloadDrainIncompleteError,
+    drain_callback_payloads,
     recover_fatal_generation,
 )
 from stocker_runtime.storage import (
@@ -3992,6 +3995,96 @@ def test_recoverable_fatal_generation_restart_is_explicit_audited_and_preserves_
         ("fatal", "POST_ADMISSION_PRESERVATION_FAILED", None),
         ("info", "FATAL_GENERATION_RECOVERY_AUTHORIZED", None),
     ]
+
+
+def test_offline_payload_drain_uses_one_lock_fixed_time_and_two_zero_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    calls: list[int] = []
+    counts = iter((2_000, 0, 0))
+
+    class FakePolicy:
+        maintenance_batch_rows = 2_000
+
+    class FakeManager:
+        policy = FakePolicy()
+
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def compact_payloads_only(
+            self,
+            *,
+            now_us: int,
+            precondition: object,
+        ) -> int:
+            cast(Any, precondition)(None)
+            calls.append(now_us)
+            return next(counts)
+
+    monkeypatch.setattr(lifecycle_module, "RetentionManager", FakeManager)
+    result = drain_callback_payloads(
+        database=database,
+        now_us=123,
+        max_passes=10,
+        max_wall_seconds=10,
+        monotonic=lambda: 0.0,
+    )
+
+    assert calls == [123, 123, 123]
+    assert result.passes == 3
+    assert result.payloads_compacted == 2_000
+    assert result.consecutive_zero_passes == 2
+    assert result.elapsed_ms == 0
+    with LocalWriterLock.for_database(database):
+        pass
+
+
+def test_offline_payload_drain_pass_and_wall_limits_are_incomplete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+
+    class FakePolicy:
+        maintenance_batch_rows = 2_000
+
+    class FakeManager:
+        policy = FakePolicy()
+
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def compact_payloads_only(
+            self,
+            *,
+            now_us: int,
+            precondition: object,
+        ) -> int:
+            cast(Any, precondition)(None)
+            return 1
+
+    monkeypatch.setattr(lifecycle_module, "RetentionManager", FakeManager)
+    with pytest.raises(PayloadDrainIncompleteError, match="2 passes and 2 committed"):
+        drain_callback_payloads(
+            database=database,
+            now_us=123,
+            max_passes=2,
+            max_wall_seconds=10,
+            monotonic=lambda: 0.0,
+        )
+
+    clock = iter((0.0, 0.0, 2.0))
+    with pytest.raises(PayloadDrainIncompleteError, match="1 passes and 1 committed"):
+        drain_callback_payloads(
+            database=database,
+            now_us=123,
+            max_passes=10,
+            max_wall_seconds=1,
+            monotonic=lambda: next(clock),
+        )
 
 
 def test_fatal_generation_recovery_respects_storage_hard_cap(

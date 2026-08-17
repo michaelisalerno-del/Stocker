@@ -7,12 +7,14 @@ import hashlib
 import json
 import os
 import stat
+import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from stocker_runtime.storage import RetentionPolicy, connect_v2, verify_database
+from stocker_runtime.storage import RetentionManager, RetentionPolicy, connect_v2, verify_database
 
 OWNERSHIP_PROTOCOL = "local_flock_v1"
 RECOVERABLE_FATAL_CODES = frozenset(
@@ -22,10 +24,30 @@ RECOVERABLE_FATAL_CODES = frozenset(
         "POST_ADMISSION_PRESERVATION_FAILED",
     }
 )
+MAX_PAYLOAD_DRAIN_PASSES = 1_000
+MAX_PAYLOAD_DRAIN_WALL_SECONDS = 2_700
 
 
 class LocalWriterLockError(RuntimeError):
     """The local operating-system writer lock cannot be acquired safely."""
+
+
+class PayloadDrainIncompleteError(RuntimeError):
+    """A bounded offline payload drain ended before a stable frontier."""
+
+
+@dataclass(frozen=True)
+class PayloadDrainResult:
+    """Bounded evidence from one completed offline payload drain."""
+
+    fixed_now_us: int
+    passes: int
+    payloads_compacted: int
+    consecutive_zero_passes: int
+    elapsed_ms: int
+    batch_rows_limit: int
+    max_passes: int
+    max_wall_seconds: int
 
 
 @dataclass
@@ -93,6 +115,74 @@ class LocalWriterLock:
 
     def __exit__(self, *_error: object) -> None:
         self.release()
+
+
+def drain_callback_payloads(
+    *,
+    database: Path,
+    now_us: int,
+    max_passes: int,
+    max_wall_seconds: int,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> PayloadDrainResult:
+    """Drain only proof-authorized callback payloads under one local writer lock."""
+
+    if now_us < 0:
+        raise ValueError("payload drain time cannot be negative")
+    if not 2 <= max_passes <= MAX_PAYLOAD_DRAIN_PASSES:
+        raise ValueError(
+            f"payload drain max_passes must be between 2 and {MAX_PAYLOAD_DRAIN_PASSES}"
+        )
+    if not 1 <= max_wall_seconds <= MAX_PAYLOAD_DRAIN_WALL_SECONDS:
+        raise ValueError(
+            f"payload drain max_wall_seconds must be between 1 and {MAX_PAYLOAD_DRAIN_WALL_SECONDS}"
+        )
+
+    manager = RetentionManager(database)
+    started = monotonic()
+    total_compacted = 0
+    zero_passes = 0
+    lock = LocalWriterLock.for_database(database)
+    with lock:
+        for pass_number in range(1, max_passes + 1):
+            if monotonic() - started >= max_wall_seconds:
+                raise PayloadDrainIncompleteError(
+                    "payload drain wall-time limit reached after "
+                    f"{pass_number - 1} passes and {total_compacted} committed payloads"
+                )
+            compacted = manager.compact_payloads_only(
+                now_us=now_us,
+                precondition=lambda _connection: lock.verify_held(),
+            )
+            if not 0 <= compacted <= manager.policy.maintenance_batch_rows:
+                raise PayloadDrainIncompleteError(
+                    "payload drain returned an invalid compacted-row count after "
+                    f"{pass_number} passes and {total_compacted} committed payloads"
+                )
+            total_compacted += compacted
+            zero_passes = zero_passes + 1 if compacted == 0 else 0
+            elapsed = monotonic() - started
+            if zero_passes == 2:
+                return PayloadDrainResult(
+                    fixed_now_us=now_us,
+                    passes=pass_number,
+                    payloads_compacted=total_compacted,
+                    consecutive_zero_passes=zero_passes,
+                    elapsed_ms=max(0, round(elapsed * 1_000)),
+                    batch_rows_limit=manager.policy.maintenance_batch_rows,
+                    max_passes=max_passes,
+                    max_wall_seconds=max_wall_seconds,
+                )
+            if elapsed >= max_wall_seconds:
+                raise PayloadDrainIncompleteError(
+                    "payload drain wall-time limit reached after "
+                    f"{pass_number} passes and {total_compacted} committed payloads"
+                )
+
+    raise PayloadDrainIncompleteError(
+        "payload drain pass limit reached after "
+        f"{max_passes} passes and {total_compacted} committed payloads"
+    )
 
 
 def recover_fatal_generation(

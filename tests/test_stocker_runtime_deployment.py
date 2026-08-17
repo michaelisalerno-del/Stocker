@@ -1190,6 +1190,31 @@ def test_off_session_retention_capacity_exceeds_frozen_regular_session_load() ->
     assert evidence_row_capacity == 12_600_000
 
 
+def test_maintenance_tick_takes_fresh_session_decision_at_call_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stocker_runtime.cli import _recorder_maintenance_tick
+
+    calls: list[tuple[int, bool]] = []
+    session_checks: list[int] = []
+
+    class MaintenanceRecorder:
+        def maintain(self, *, now_us: int, retention_work_expected: bool) -> None:
+            calls.append((now_us, retention_work_expected))
+
+    monkeypatch.setattr("stocker_runtime.cli.time.time_ns", lambda: 200_000_000)
+
+    def session_policy(at_us: int) -> bool:
+        session_checks.append(at_us)
+        return False
+
+    monkeypatch.setattr("stocker_runtime.cli._retention_work_expected", session_policy)
+
+    assert _recorder_maintenance_tick(cast(Any, MaintenanceRecorder())) == 200_000
+    assert session_checks == [200_000]
+    assert calls == [(200_000, False)]
+
+
 def test_server_dependency_closure_includes_the_runtime_market_calendar() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     server_dependencies = project["dependency-groups"]["server"]

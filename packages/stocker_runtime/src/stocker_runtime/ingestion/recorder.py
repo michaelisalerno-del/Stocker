@@ -13,7 +13,7 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from time import monotonic_ns
+from time import monotonic_ns, time_ns
 from typing import Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -415,7 +415,7 @@ class Recorder:
         now_us: int,
         instruments: tuple[InstrumentSpec, ...],
         subscriptions: tuple[SubscriptionSpec, ...],
-        retention_work_expected: bool = True,
+        retention_schedule: Callable[[int], bool] | None = None,
     ) -> RecorderState:
         """Acquire the writer generation, recover the inbox, then connect."""
 
@@ -424,7 +424,7 @@ class Recorder:
             instruments=instruments,
             subscriptions=subscriptions,
             allow_empty_test_inputs=False,
-            retention_work_expected=retention_work_expected,
+            retention_schedule=retention_schedule,
         )
 
     def _start_test_only_allow_empty_inputs(
@@ -441,7 +441,7 @@ class Recorder:
             instruments=instruments,
             subscriptions=subscriptions,
             allow_empty_test_inputs=True,
-            retention_work_expected=True,
+            retention_schedule=None,
         )
 
     def _start_with_input_policy(
@@ -451,7 +451,7 @@ class Recorder:
         instruments: tuple[InstrumentSpec, ...],
         subscriptions: tuple[SubscriptionSpec, ...],
         allow_empty_test_inputs: bool,
-        retention_work_expected: bool,
+        retention_schedule: Callable[[int], bool] | None,
     ) -> RecorderState:
         """Acquire ownership and start under the selected input-validation policy."""
 
@@ -467,7 +467,7 @@ class Recorder:
                 instruments=instruments,
                 subscriptions=subscriptions,
                 allow_empty_test_inputs=allow_empty_test_inputs,
-                retention_work_expected=retention_work_expected,
+                retention_schedule=retention_schedule,
             )
         except BaseException:
             if self.state is None:
@@ -483,7 +483,7 @@ class Recorder:
         instruments: tuple[InstrumentSpec, ...],
         subscriptions: tuple[SubscriptionSpec, ...],
         allow_empty_test_inputs: bool,
-        retention_work_expected: bool,
+        retention_schedule: Callable[[int], bool] | None,
     ) -> RecorderState:
         """Start after the process-lifetime local writer lock is held."""
 
@@ -664,7 +664,13 @@ class Recorder:
         self._restore_dynamic_subscriptions(now_us=now_us)
         self.inbox.reclaim_expired_leases(now_us=now_us, authority=self._authority())
         self.drain(now_us=now_us)
-        self.maintain(now_us=now_us, retention_work_expected=retention_work_expected)
+        maintenance_at_us = now_us if retention_schedule is None else time_ns() // 1_000
+        self.maintain(
+            now_us=maintenance_at_us,
+            retention_work_expected=(
+                True if retention_schedule is None else retention_schedule(maintenance_at_us)
+            ),
+        )
         cast(
             Callable[[Callable[[CallbackFence, MarketDataCallback], AdmissionResult]], None],
             self.adapter.set_callback,
@@ -4264,7 +4270,7 @@ class Recorder:
                     error_name=type(error).__name__,
                 )
                 return StorageCapState.NORMAL
-            published = self._publish_storage_measurement(
+            self._publish_storage_measurement(
                 authority=authority,
                 now_us=now_us,
                 database_bytes=database_bytes,
@@ -4274,8 +4280,6 @@ class Recorder:
                 self._fatal(required_action or "STORAGE_CAP_FATAL", now_us)
                 raise RecorderFatalError(required_action or "storage cap closed admission")
             if cap_state is StorageCapState.DEGRADED:
-                if not published:
-                    return cap_state
                 self._pause_optional(now_us)
                 self._set_lifecycle("degraded", "PAUSE_OPTIONAL_FEEDS", now_us)
             return cap_state

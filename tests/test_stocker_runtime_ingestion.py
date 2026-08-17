@@ -2518,7 +2518,7 @@ def test_regular_session_maintenance_measures_caps_without_heavy_work_or_false_r
     initialize_database(database)
     instrument, specs = _specs()
     recorder = Recorder(_config(database), FakeMarketData())
-    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
 
     class CapMeasurementOnly:
         def __init__(self, _database: Path) -> None:
@@ -2533,6 +2533,11 @@ def test_regular_session_maintenance_measures_caps_without_heavy_work_or_false_r
     monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", CapMeasurementOnly)
 
     assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.NORMAL
+    admitted = recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 100.0}),
+    )
+    assert recorder.drain(now_us=101) == 1
     with connect_v2(database) as connection:
         assert tuple(
             connection.execute(
@@ -2544,6 +2549,13 @@ def test_regular_session_maintenance_measures_caps_without_heavy_work_or_false_r
                 "SELECT count(*) FROM incidents WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED'"
             ).fetchone()[0]
             == 0
+        )
+        assert (
+            connection.execute(
+                "SELECT lifecycle FROM callback_inbox WHERE source_sequence=?",
+                (admitted.source_sequence,),
+            ).fetchone()[0]
+            == "acknowledged"
         )
 
     assert recorder._component_failure(
@@ -2570,6 +2582,42 @@ def test_regular_session_maintenance_measures_caps_without_heavy_work_or_false_r
         103,
     )
 
+    normal = RetentionResult(
+        cap_state=StorageCapState.NORMAL,
+        database_bytes=124,
+        wal_bytes=5,
+        payloads_compacted=0,
+        receipts_rolled=0,
+        expired_rows_deleted=0,
+        admission_allowed=True,
+        optional_feeds_allowed=True,
+        required_action=None,
+        checkpoint_attempted=True,
+        incremental_vacuum_attempted=True,
+    )
+
+    class SuccessfulOffSessionRetention:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
+            assert callable(precondition)
+            return normal
+
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager",
+        SuccessfulOffSessionRetention,
+    )
+    assert recorder.maintain(now_us=1_000_103) is StorageCapState.NORMAL
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT resolved_at_us FROM incidents "
+                "WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED'"
+            ).fetchone()[0]
+            == 1_000_103
+        )
+
 
 def test_regular_session_start_propagates_scheduled_retention_deferral(
     tmp_path: Path,
@@ -2580,6 +2628,7 @@ def test_regular_session_start_propagates_scheduled_retention_deferral(
     instrument, specs = _specs()
     recorder = Recorder(_config(database), FakeMarketData())
     maintenance_calls: list[tuple[int, bool]] = []
+    schedule_calls: list[int] = []
 
     def observe_maintenance(
         *, now_us: int, retention_work_expected: bool = True
@@ -2588,15 +2637,21 @@ def test_regular_session_start_propagates_scheduled_retention_deferral(
         return StorageCapState.NORMAL
 
     monkeypatch.setattr(recorder, "maintain", observe_maintenance)
+    monkeypatch.setattr("stocker_runtime.ingestion.recorder.time_ns", lambda: 150_000_000)
+
+    def schedule(at_us: int) -> bool:
+        schedule_calls.append(at_us)
+        return False
 
     recorder.start(
         now_us=100,
         instruments=(instrument,),
         subscriptions=specs,
-        retention_work_expected=False,
+        retention_schedule=schedule,
     )
 
-    assert maintenance_calls == [(100, False)]
+    assert schedule_calls == [150_000]
+    assert maintenance_calls == [(150_000, False)]
 
 
 def test_regular_session_cap_measurement_contention_degrades_without_stopping_ingestion(
@@ -2711,6 +2766,81 @@ def test_regular_session_degraded_cap_pauses_optional_feed_idempotently(
             "SELECT lifecycle, reason, database_bytes, wal_bytes FROM runtime_state"
         ).fetchone()
     assert tuple(runtime) == ("degraded", "PAUSE_OPTIONAL_FEEDS", 95, 1)
+
+
+def test_regular_session_soft_cap_publishes_without_pausing_feeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    class SoftCapMeasurement:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+            return StorageCapState.SOFT, 85, 1, None
+
+    monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", SoftCapMeasurement)
+
+    assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.SOFT
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT lifecycle, database_bytes, wal_bytes FROM runtime_state"
+        ).fetchone()
+        incidents = connection.execute("SELECT count(*) FROM incidents").fetchone()[0]
+    assert tuple(runtime) == ("running", 85, 1)
+    assert incidents == 0
+    assert adapter.cancelled == []
+
+
+def test_degraded_cap_still_pauses_optional_feed_after_publication_contention(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+
+    class DegradedCapMeasurement:
+        def __init__(self, _database: Path) -> None:
+            pass
+
+        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+            return StorageCapState.DEGRADED, 95, 1, None
+
+    def contended_publication(**_kwargs: object) -> bool:
+        recorder._component_failure(
+            "retention_maintenance",
+            now_us=101,
+            error_name="OperationalError",
+        )
+        return False
+
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager", DegradedCapMeasurement
+    )
+    monkeypatch.setattr(recorder, "_publish_storage_measurement", contended_publication)
+
+    assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.DEGRADED
+
+    assert adapter.cancelled == [4]
+    with connect_v2(database) as connection:
+        runtime = connection.execute("SELECT lifecycle, reason FROM runtime_state").fetchone()
+        incident = connection.execute(
+            "SELECT resolved_at_us FROM incidents "
+            "WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED'"
+        ).fetchone()
+    assert tuple(runtime) == ("degraded", "PAUSE_OPTIONAL_FEEDS")
+    assert incident["resolved_at_us"] is None
 
 
 @pytest.mark.parametrize(

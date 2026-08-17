@@ -104,6 +104,15 @@ def _retention_work_expected(now_us: int) -> bool:
     return _market_data_expected_since_us(now_us) is None
 
 
+def _recorder_maintenance_tick(recorder: Recorder) -> int:
+    maintenance_at_us = time.time_ns() // 1_000
+    recorder.maintain(
+        now_us=maintenance_at_us,
+        retention_work_expected=_retention_work_expected(maintenance_at_us),
+    )
+    return maintenance_at_us
+
+
 class ReplayBlockedError(RuntimeError):
     """A bounded replay pass could not make durable progress."""
 
@@ -654,7 +663,7 @@ def recorder_run_command(
             now_us=started_at_us,
             instruments=instruments,
             subscriptions=subscriptions,
-            retention_work_expected=_retention_work_expected(started_at_us),
+            retention_schedule=_retention_work_expected,
         )
         started_loop_at_us = time.time_ns() // 1_000
         next_health_at_us = started_loop_at_us + RECORDER_HEALTH_INTERVAL_US
@@ -678,11 +687,8 @@ def recorder_run_command(
                 _recorder_health_tick(recorder, now_us=now_us)
                 next_health_at_us = now_us + RECORDER_HEALTH_INTERVAL_US
             if now_us >= next_maintenance_at_us:
-                recorder.maintain(
-                    now_us=now_us,
-                    retention_work_expected=_retention_work_expected(now_us),
-                )
-                next_maintenance_at_us = now_us + RECORDER_MAINTENANCE_INTERVAL_US
+                maintenance_at_us = _recorder_maintenance_tick(recorder)
+                next_maintenance_at_us = maintenance_at_us + RECORDER_MAINTENANCE_INTERVAL_US
         recorder.stop(now_us=time.time_ns() // 1_000)
     except (OSError, ValueError, RuntimeError, sqlite3.Error, TypeError) as error:
         if recorder is not None and recorder.state is not None:

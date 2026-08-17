@@ -305,3 +305,64 @@ the new index occupies 89,227,264 bytes. An isolated exact index rebuild took 8.
 seconds. The final database reported schema 19, `quick_check=ok`, and zero foreign-key
 violations. The hit and miss plans both use the covering index without a callback-sort
 temporary B-tree.
+
+## Accepted deployment addendum: set-based payload compaction under live admission
+
+Post-deployment monitoring reproduced a bounded-maintenance failure under actual IBKR
+callback traffic. The recorder remained connected, all 41 required subscriptions
+continued raw durable admission, and the web truthfully degraded, but retention
+repeatedly raised `MaintenanceDeadlineExceeded`. A controlled clean stop followed by
+the exact production `stocker-runtime retain` command succeeded and compacted 2,000
+payloads. Twelve consecutive mature-copy passes also succeeded at 2,000 rows each.
+Production still contains approximately 775,000 old acknowledged payload rows across
+historical runs, so repeated live rollback would prevent the backlog from draining and
+eventually threaten the 8 GiB cap.
+
+The measured cause is the payload candidate update shape. Schema 17 made discovery a
+bounded index seek, but `_compact_payloads` still materializes up to 2,000 sequences and
+uses `executemany` to issue 2,000 individual updates. On the mature disposable copy,
+the per-row update took 22.151–33.854 ms without live load, while one equivalent
+set-based update took 12.914–13.662 ms. Under production callback I/O and CPU load, the
+per-row loop intermittently crosses the unchanged 100 ms second-transaction deadline
+and all 2,000 updates roll back.
+
+The accepted correction keeps schema 19 and replaces the materialized per-row update
+loop with at most two set-based statements: acknowledged candidates first, then failed
+candidates only for the remaining shared budget. Each statement selects bounded
+source sequences through `callback_inbox_payload_run_sequence_idx`, retains the exact
+cutoff, watermark, lifecycle, proof, and source-sequence ordering predicates, and
+reports its affected count. Keep the 2,000-row default, 100 ms transaction deadline,
+`BEGIN IMMEDIATE`, writer precondition, progress interruption, full rollback, receipt
+proof, cap behavior, checkpoint, and incremental vacuum unchanged. Delete the
+superseded candidate materialization and `executemany` loop. Add no migration, cursor,
+state, adaptive batch, calendar deferral, queue, service, or deadline increase.
+
+The deterministic regression uses 2,000 eligible watermarked acknowledged payloads and
+a traced connection that advances a fake clock for every payload-nulling update
+statement. The old 2,000-statement loop must exceed 100 ms and roll back; the set-based
+implementation must execute one acknowledged update (and at most one failed update),
+compact exactly the shared bound, and preserve recent, pending, unwatermarked, and
+non-payload evidence. Also prove acknowledged-first failed-fill behavior, zero-
+remaining failed skip, interruption rollback, exact index plans, writer loss, receipt
+corruption, callback ordering/duplicates/gaps, and both fixed opening replays.
+
+Before rollout, cleanly stop recorder and web, verify lock release, take and restore-
+check a fresh schema-19 backup, and run the prior release's retention command offline
+in an explicitly capped loop until one zero-work pass, repeated once. Every pass must
+exit zero and compact no more than 2,000 rows. Preserve callback/receipt/watermark
+counts and hashes, require `quick_check=ok` and zero foreign-key violations, then run
+one offline pass with the set-based release. Binary rollback keeps the current schema-
+19 database; after new callback admission, never restore the pre-drain backup.
+
+Live acceptance requires at least three scheduled maintenance opportunities under
+actual callback traffic with no new current-generation retention incident, a fresh
+heartbeat, growing raw source sequence, healthy writer admission, connected socket,
+all exact configured required identities active without duplicates, bounded inbox/WAL,
+and truthful HTTP 200 readiness when all conditions hold. Outside XNYS regular hours,
+tick quietness remains non-stale. This does not prove real market-open host I/O; retain
+the attended regular-session observation requirement.
+
+This addendum affects only prospective-record/shadow market-data retention and
+readiness availability. It does not affect risk, execution, reconciliation, accounts,
+credentials, broker/order capability, paper/live trading, subscription semantics, or
+XNYS calendar behavior.

@@ -44,8 +44,10 @@ from stocker_runtime.storage import (
 )
 from stocker_runtime.storage.retention import (
     ACK_PAYLOAD_CANDIDATES_SQL,
+    ACK_PAYLOAD_COMPACTION_SQL,
     ACK_TOMBSTONE_CANDIDATES_SQL,
     FAILED_PAYLOAD_CANDIDATES_SQL,
+    FAILED_PAYLOAD_COMPACTION_SQL,
     FAILED_TOMBSTONE_CANDIDATES_SQL,
     IDEA_OUTPUT_RETENTION_CANDIDATES_SQL,
     MAX_IDEA_OUTPUT_CASCADE_ROWS,
@@ -237,6 +239,20 @@ def test_payload_compaction_index_migration_preserves_schema_16_evidence(
                 str(row["detail"])
                 for row in connection.execute(
                     f"EXPLAIN QUERY PLAN {FAILED_PAYLOAD_CANDIDATES_SQL}",
+                    ("retention-run", 10, 10, 2_000),
+                )
+            ),
+            "acknowledged_compaction": " ".join(
+                str(row["detail"])
+                for row in connection.execute(
+                    f"EXPLAIN QUERY PLAN {ACK_PAYLOAD_COMPACTION_SQL}",
+                    ("retention-run", 10, 10, 2_000),
+                )
+            ),
+            "failed_compaction": " ".join(
+                str(row["detail"])
+                for row in connection.execute(
+                    f"EXPLAIN QUERY PLAN {FAILED_PAYLOAD_COMPACTION_SQL}",
                     ("retention-run", 10, 10, 2_000),
                 )
             ),
@@ -2850,6 +2866,196 @@ def test_retention_payload_lookup_skips_large_compacted_prefix_within_deadline(
         )
 
 
+def test_retention_compacts_full_batch_with_one_set_based_update_under_loaded_clock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    batch_rows = 2_000
+    with connect_v2(database) as connection:
+        connection.executemany(
+            "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+            "connection_generation, callback_kind, received_at_us, payload_json, "
+            "payload_sha256, lifecycle, receipt_batch_id) VALUES "
+            "(?, 'retention-run', 1, 1, 'tick', 1, '{\"private\":\"evidence\"}', ?, "
+            "'pending', 'bulk-receipt')",
+            ((f"bulk-{index}", "a" * 64) for index in range(batch_rows)),
+        )
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, instrument_id, "
+            "feed_kind, event_kind, event_at_us, received_at_us, connection_generation, "
+            "payload_json, payload_sha256) SELECT 'bulk-event-' || source_sequence, run_id, "
+            "source_sequence, 'instrument-1', 'trades', 'tick', received_at_us, "
+            "received_at_us, connection_generation, '{}', ? FROM callback_inbox "
+            "WHERE run_id='retention-run'",
+            ("b" * 64,),
+        )
+        connection.execute(
+            "UPDATE callback_inbox SET lifecycle='acknowledged', "
+            "normalized_event_id='bulk-event-' || source_sequence, acknowledged_at_us=1 "
+            "WHERE run_id='retention-run'"
+        )
+        last_sequence = int(
+            connection.execute(
+                "SELECT max(source_sequence) FROM callback_inbox WHERE run_id='retention-run'"
+            ).fetchone()[0]
+        )
+        connection.execute(
+            "INSERT INTO callback_compaction_watermarks(run_id, "
+            "compacted_through_sequence, cumulative_callback_count, "
+            "first_received_at_us, last_received_at_us, rolled_receipt_chain_hash, "
+            "last_receipt_chain_hash, updated_at_us) VALUES "
+            "('retention-run', ?, ?, 1, 1, ?, ?, 1)",
+            (last_sequence, batch_rows, "0" * 64, "0" * 64),
+        )
+
+    logical_time = 0.0
+    payload_update_statements: set[str] = set()
+    real_connect = retention_module.connect_v2
+
+    def traced_connect(path: str | Path) -> sqlite3.Connection:
+        connection = real_connect(path)
+
+        def trace(statement: str) -> None:
+            nonlocal logical_time
+            normalized = " ".join(statement.upper().split())
+            if (
+                normalized.startswith("UPDATE CALLBACK_INBOX SET PAYLOAD_JSON = NULL")
+                and normalized not in payload_update_statements
+            ):
+                logical_time += 0.000_06
+                payload_update_statements.add(normalized)
+
+        connection.set_trace_callback(trace)
+        return connection
+
+    monkeypatch.setattr(retention_module, "connect_v2", traced_connect)
+    result = RetentionManager(
+        database,
+        RetentionPolicy(
+            callback_payload_us=10,
+            receipt_us=1_000,
+            tombstone_us=1_000,
+            maintenance_batch_rows=batch_rows,
+            maintenance_transaction_ms=100,
+        ),
+        monotonic=lambda: logical_time,
+    ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert result.payloads_compacted == batch_rows
+    assert len(payload_update_statements) == 1
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox WHERE run_id='retention-run'"
+            ).fetchone()[0]
+            == batch_rows
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM callback_inbox "
+                "WHERE run_id='retention-run' AND payload_json IS NULL"
+            ).fetchone()[0]
+            == batch_rows
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM market_events WHERE run_id='retention-run'"
+            ).fetchone()[0]
+            == batch_rows
+        )
+
+
+@pytest.mark.parametrize(
+    ("batch_rows", "expected_statements", "expected_null_payloads"),
+    ((2, 1, 2), (3, 2, 3)),
+)
+def test_retention_set_based_updates_share_acknowledged_first_failed_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    batch_rows: int,
+    expected_statements: int,
+    expected_null_payloads: int,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    acknowledged = (
+        _seed_callback_for_retention(database, uid="ack-1", received_at_us=1),
+        _seed_callback_for_retention(
+            database,
+            uid="ack-2",
+            received_at_us=2,
+            acknowledged_at_us=2,
+        ),
+    )
+    with connect_v2(database) as connection:
+        failed = tuple(
+            int(
+                connection.execute(
+                    "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+                    "connection_generation, callback_kind, received_at_us, payload_json, "
+                    "payload_sha256, lifecycle, failure_code, receipt_batch_id) VALUES "
+                    "(?, 'retention-run', 1, 1, 'tick', ?, '{}', ?, 'failed', "
+                    "'fixture-failure', 'failed-receipt')",
+                    (f"failed-{index}", index + 3, "c" * 64),
+                ).lastrowid
+            )
+            for index in range(2)
+        )
+        connection.execute("UPDATE runs SET status='stopped' WHERE run_id='retention-run'")
+        connection.execute(
+            "INSERT INTO callback_compaction_watermarks(run_id, "
+            "compacted_through_sequence, cumulative_callback_count, "
+            "first_received_at_us, last_received_at_us, rolled_receipt_chain_hash, "
+            "last_receipt_chain_hash, updated_at_us) VALUES "
+            "('retention-run', ?, 4, 1, 4, ?, ?, 1)",
+            (failed[-1], "0" * 64, "0" * 64),
+        )
+
+    payload_update_statements: set[str] = set()
+    real_connect = retention_module.connect_v2
+
+    def traced_connect(path: str | Path) -> sqlite3.Connection:
+        connection = real_connect(path)
+
+        def trace(statement: str) -> None:
+            normalized = " ".join(statement.upper().split())
+            if normalized.startswith("UPDATE CALLBACK_INBOX SET PAYLOAD_JSON = NULL"):
+                payload_update_statements.add(normalized)
+
+        connection.set_trace_callback(trace)
+        return connection
+
+    monkeypatch.setattr(retention_module, "connect_v2", traced_connect)
+    result = RetentionManager(
+        database,
+        RetentionPolicy(
+            callback_payload_us=10,
+            receipt_us=1_000,
+            tombstone_us=1_000,
+            maintenance_batch_rows=batch_rows,
+        ),
+    ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    assert result.payloads_compacted == batch_rows
+    assert len(payload_update_statements) == expected_statements
+    with connect_v2(database) as connection:
+        payloads = {
+            int(row["source_sequence"]): row["payload_json"]
+            for row in connection.execute(
+                "SELECT source_sequence, payload_json FROM callback_inbox "
+                "WHERE run_id='retention-run' ORDER BY source_sequence"
+            )
+        }
+    assert sum(payload is None for payload in payloads.values()) == expected_null_payloads
+    assert all(payloads[sequence] is None for sequence in acknowledged)
+    assert (payloads[failed[0]] is None) is (batch_rows == 3)
+    assert payloads[failed[1]] is not None
+
+
 def test_retention_reuses_shared_receipt_proof_within_deadline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3936,6 +4142,81 @@ def test_retention_deadline_rolls_back_payload_compaction(
     assert compacted is True
     assert payload is not None
     assert watermark["compacted_through_sequence"] == sequence
+
+
+def test_retention_deadline_during_failed_set_update_rolls_back_acknowledged_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    acknowledged = _seed_callback_for_retention(
+        database,
+        uid="set-update-acknowledged",
+        received_at_us=1,
+        receipt_batch_id="set-update-receipt",
+    )
+    with connect_v2(database) as connection:
+        failed = int(
+            connection.execute(
+                "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
+                "connection_generation, callback_kind, received_at_us, payload_json, "
+                "payload_sha256, lifecycle, failure_code, receipt_batch_id) VALUES "
+                "('set-update-failed', 'retention-run', 1, 1, 'tick', 2, '{}', ?, "
+                "'failed', 'fixture-failure', 'set-update-receipt')",
+                ("c" * 64,),
+            ).lastrowid
+        )
+        connection.execute("UPDATE runs SET status='stopped' WHERE run_id='retention-run'")
+        connection.execute(
+            "INSERT INTO callback_compaction_watermarks(run_id, "
+            "compacted_through_sequence, cumulative_callback_count, "
+            "first_received_at_us, last_received_at_us, rolled_receipt_chain_hash, "
+            "last_receipt_chain_hash, updated_at_us) VALUES "
+            "('retention-run', ?, 2, 1, 2, ?, ?, 1)",
+            (failed, "0" * 64, "0" * 64),
+        )
+
+    logical_time = 0.0
+    real_connect = retention_module.connect_v2
+
+    def traced_connect(path: str | Path) -> sqlite3.Connection:
+        connection = real_connect(path)
+
+        def trace(statement: str) -> None:
+            nonlocal logical_time
+            normalized = " ".join(statement.upper().split())
+            if normalized.startswith("UPDATE CALLBACK_INBOX SET PAYLOAD_JSON = NULL") and (
+                "CANDIDATE.LIFECYCLE = 'FAILED'" in normalized
+            ):
+                logical_time = 1.0
+
+        connection.set_trace_callback(trace)
+        return connection
+
+    monkeypatch.setattr(retention_module, "connect_v2", traced_connect)
+    with pytest.raises(MaintenanceDeadlineExceeded, match="deadline"):
+        RetentionManager(
+            database,
+            RetentionPolicy(
+                callback_payload_us=10,
+                receipt_us=1_000,
+                maintenance_batch_rows=2,
+                maintenance_transaction_ms=100,
+            ),
+            monotonic=lambda: logical_time,
+        ).run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
+
+    with connect_v2(database) as connection:
+        payloads = tuple(
+            row["payload_json"]
+            for row in connection.execute(
+                "SELECT payload_json FROM callback_inbox WHERE source_sequence IN (?, ?) "
+                "ORDER BY source_sequence",
+                (acknowledged, failed),
+            )
+        )
+    assert payloads == ('{"private":"evidence"}', "{}")
 
 
 def test_retention_rechecks_writer_authority_after_checkpoint_commit(tmp_path: Path) -> None:

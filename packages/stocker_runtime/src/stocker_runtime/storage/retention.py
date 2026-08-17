@@ -83,27 +83,38 @@ AND EXISTS (
 """
 ACK_PAYLOAD_CANDIDATES_SQL = (
     """
-SELECT source_sequence, run_id, receipt_batch_id
-FROM callback_inbox INDEXED BY callback_inbox_payload_run_sequence_idx
-WHERE run_id = ? AND source_sequence <= ?
-  AND lifecycle = 'acknowledged' AND payload_json IS NOT NULL
-  AND normalized_event_id IS NOT NULL AND acknowledged_at_us IS NOT NULL
-  AND acknowledged_at_us <= ?
+SELECT candidate.source_sequence
+FROM callback_inbox AS candidate INDEXED BY callback_inbox_payload_run_sequence_idx
+WHERE candidate.run_id = ? AND candidate.source_sequence <= ?
+  AND candidate.lifecycle = 'acknowledged' AND candidate.payload_json IS NOT NULL
+  AND candidate.normalized_event_id IS NOT NULL
+  AND candidate.acknowledged_at_us IS NOT NULL
+  AND candidate.acknowledged_at_us <= ?
 """
-    + " ORDER BY source_sequence LIMIT ?"
+    + " ORDER BY candidate.source_sequence LIMIT ?"
 )
 FAILED_PAYLOAD_CANDIDATES_SQL = (
     """
-SELECT source_sequence, run_id, receipt_batch_id
-FROM callback_inbox INDEXED BY callback_inbox_payload_run_sequence_idx
-WHERE run_id = ? AND source_sequence <= ?
-  AND lifecycle = 'failed' AND payload_json IS NOT NULL
-  AND failure_code IS NOT NULL AND received_at_us <= ?
+SELECT candidate.source_sequence
+FROM callback_inbox AS candidate INDEXED BY callback_inbox_payload_run_sequence_idx
+WHERE candidate.run_id = ? AND candidate.source_sequence <= ?
+  AND candidate.lifecycle = 'failed' AND candidate.payload_json IS NOT NULL
+  AND candidate.failure_code IS NOT NULL AND candidate.received_at_us <= ?
   AND EXISTS (SELECT 1 FROM runs terminal_run
-      WHERE terminal_run.run_id = callback_inbox.run_id
+      WHERE terminal_run.run_id = candidate.run_id
         AND terminal_run.status IN ('stopped', 'fatal'))
 """
-    + " ORDER BY source_sequence LIMIT ?"
+    + " ORDER BY candidate.source_sequence LIMIT ?"
+)
+ACK_PAYLOAD_COMPACTION_SQL = (
+    "UPDATE callback_inbox SET payload_json = NULL WHERE source_sequence IN ("
+    + ACK_PAYLOAD_CANDIDATES_SQL
+    + ")"
+)
+FAILED_PAYLOAD_COMPACTION_SQL = (
+    "UPDATE callback_inbox SET payload_json = NULL WHERE source_sequence IN ("
+    + FAILED_PAYLOAD_CANDIDATES_SQL
+    + ")"
 )
 ACK_CHECKPOINT_RUN_SQL = """
 SELECT run_id, acknowledged_at_us AS terminal_at_us, source_sequence
@@ -292,29 +303,18 @@ class RetentionManager:
         if watermark is None:
             return 0
         compacted_through = int(watermark["compacted_through_sequence"])
-        acknowledged = tuple(
-            connection.execute(
-                ACK_PAYLOAD_CANDIDATES_SQL,
-                (run_id, compacted_through, cutoff_us, limit),
-            )
-        )
-        failed = tuple(
-            connection.execute(
-                FAILED_PAYLOAD_CANDIDATES_SQL,
-                (
-                    run_id,
-                    compacted_through,
-                    cutoff_us,
-                    max(0, limit - len(acknowledged)),
-                ),
-            )
-        )
-        candidates = acknowledged + failed
-        connection.executemany(
-            "UPDATE callback_inbox SET payload_json = NULL WHERE source_sequence = ?",
-            ((int(row["source_sequence"]),) for row in candidates),
-        )
-        return len(candidates)
+        acknowledged = connection.execute(
+            ACK_PAYLOAD_COMPACTION_SQL,
+            (run_id, compacted_through, cutoff_us, limit),
+        ).rowcount
+        remaining = max(0, limit - acknowledged)
+        failed = 0
+        if remaining:
+            failed = connection.execute(
+                FAILED_PAYLOAD_COMPACTION_SQL,
+                (run_id, compacted_through, cutoff_us, remaining),
+            ).rowcount
+        return acknowledged + failed
 
     def _receipt_actions(
         self,

@@ -1399,6 +1399,7 @@ def test_recorder_service_command_handles_sigterm_as_a_clean_stop(
         return previous
 
     monkeypatch.setattr("stocker_runtime.cli.signal.signal", install_handler)
+    monkeypatch.setattr("stocker_runtime.cli._retention_work_expected", lambda _now_us: True)
 
     def create_adapter(**_kwargs: object) -> _SignalMarketData:
         return _SignalMarketData(lambda signum, frame: handlers[signum](signum, frame))

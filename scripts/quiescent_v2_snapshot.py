@@ -98,13 +98,13 @@ def _verify(
             "FROM callback_inbox"
         ).fetchone()
         generation_row = connection.execute(
-            "SELECT ended_at_us, clean_stop, termination_code FROM recorder_generations "
+            "SELECT ended_at_us, clean_stop, termination_code, input_hash "
+            "FROM recorder_generations "
             "WHERE run_id=? AND generation=?",
             (run_id, generation),
         ).fetchone()
         run = connection.execute(
-            "SELECT config_hash, market_data_input_hash FROM runs WHERE run_id=?",
-            (run_id,),
+            "SELECT config_hash FROM runs WHERE run_id=?", (run_id,)
         ).fetchone()
     if quick_check != "ok" or foreign_keys:
         raise RuntimeError("snapshot integrity verification failed")
@@ -130,7 +130,7 @@ def _verify(
         "generation_clean_stop": generation_row[1],
         "generation_termination_code": generation_row[2],
         "config_hash": run[0],
-        "input_hash": run[1],
+        "input_hash": generation_row[3],
     }
 
 

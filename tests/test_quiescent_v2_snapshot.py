@@ -12,6 +12,7 @@ from typing import Any, cast
 import pytest
 
 from stocker_runtime.ingestion.lifecycle import LocalWriterLock, LocalWriterLockError
+from stocker_runtime.storage import connect_v2, initialize_database
 
 
 def _script_module() -> ModuleType:
@@ -204,6 +205,49 @@ def test_quiescent_snapshot_rejects_mismatched_schema_runtime(
             expected_max_source_sequence=0,
             expected_nonterminal=0,
         )
+
+
+def test_quiescent_snapshot_verifies_actual_generation_identity_with_matching_runtime(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "snapshot.sqlite3"
+    initialize_database(database, applied_at_us=1)
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO runs(run_id, mode, source, started_at_us, ended_at_us, config_hash, "
+            "git_commit, data_class, status) VALUES ('run-1', 'prospective_record', 'ibkr', "
+            "1, 2, ?, 'deadbee', 'prospective_protected', 'stopped')",
+            ("a" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
+            "ended_at_us, clean_stop, termination_code, input_hash) VALUES "
+            "('run-1', 1, 'owner-1', 1, 2, 1, 'CLEAN_STOP', ?)",
+            ("b" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO callback_inbox(source_sequence, event_uid, run_id, "
+            "recorder_generation, connection_generation, callback_kind, received_at_us, "
+            "payload_sha256, lifecycle) VALUES "
+            "(1, 'callback-1', 'run-1', 1, 1, 'quote', 1, ?, 'pending')",
+            ("c" * 64,),
+        )
+    module = _script_module()
+
+    evidence = module._verify(
+        database,
+        runtime=Path(".venv/bin/stocker-runtime").resolve(),
+        expected_schema=20,
+        run_id="run-1",
+        generation=1,
+        expected_termination_code="CLEAN_STOP",
+        expected_max_source_sequence=1,
+        expected_nonterminal=1,
+    )
+
+    assert evidence["config_hash"] == "a" * 64
+    assert evidence["input_hash"] == "b" * 64
+    assert evidence["generation_termination_code"] == "CLEAN_STOP"
 
 
 def test_quiescent_snapshot_restore_hash_failure_removes_all_new_artifacts(

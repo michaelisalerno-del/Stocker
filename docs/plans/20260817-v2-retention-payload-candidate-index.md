@@ -1466,3 +1466,34 @@ production gate is the same deterministic sandboxed helper invocation followed b
 new attended daily backup. Only that new archive/restore plus automatic recorder,
 boundary, heartbeat and web restart may publish healthy status and permit timer
 enablement.
+
+### 2026-08-18: physical-WAL cap remediation
+
+Production generation 25 reproduced `WAL_CAP_FATAL` with the web stopped and no
+external SQLite readers. The current regular-session path correctly calls
+`PRAGMA wal_checkpoint(PASSIVE)` every ten seconds, but SQLite may recycle all WAL
+frames without shrinking the physical `-wal` file. The runtime then classified that
+retained allocation as fatal at `>= 64 MiB`; `journal_size_limit` is itself set to
+that same value. A complete checkpoint is therefore capable of producing a false
+physical-cap fatal without any integrity, ownership, or durable-admission fault.
+
+The accepted bounded correction keeps the existing 64 MiB physical cap and its
+fail-closed comparison. It performs the existing PASSIVE checkpoint first. Only when
+that checkpoint is complete and the measured physical WAL is at or above the cap, it
+temporarily uses a zero busy timeout to attempt `PRAGMA wal_checkpoint(TRUNCATE)`,
+restores the prior timeout, and remeasures before the cap decision. A successful
+truncate permits continued recording. A blocked, incomplete, or failed truncate, or a
+post-attempt WAL still at or above the cap, remains `WAL_CAP_FATAL`. An incomplete
+PASSIVE checkpoint below the cap remains a visible recoverable degradation.
+
+This change adds no schema, setting, loop, broker capability, calendar, order,
+account, risk, execution, reconciliation, paper, or live behavior. It affects only
+prospective/shadow market-data storage availability. Tests must reproduce a complete
+PASSIVE checkpoint retaining an over-cap physical WAL, the exact `journal_size_limit`
+boundary, a held-reader and concurrent-writer failure, below-cap non-truncation,
+I/O failure, and the unchanged replay ordering/duplicate/gap and latency guarantees.
+Production remains stopped and masked until focused tests, failure tests, fixed replay,
+and independent read-only review pass. Rollout is code-only on schema 20, followed by
+an explicit audited recovery of exact generation 25, recorder-only observation through
+three successful checkpoint cycles, and web restoration only after bounded WAL and
+readiness evidence.

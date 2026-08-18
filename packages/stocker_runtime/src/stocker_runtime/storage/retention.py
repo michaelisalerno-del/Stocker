@@ -317,7 +317,16 @@ def passive_wal_checkpoint_complete(connection: sqlite3.Connection) -> bool:
     """Checkpoint available WAL frames and report whether every logged frame completed."""
 
     row = connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
-    busy, log_frames, checkpointed_frames = (int(row[index]) for index in range(3))
+    return _wal_checkpoint_complete(row)
+
+
+def _wal_checkpoint_complete(row: sqlite3.Row | tuple[object, ...]) -> bool:
+    """Return whether SQLite reported that a checkpoint copied every WAL frame."""
+
+    values = tuple(row[index] for index in range(3))
+    if any(type(value) is not int for value in values):
+        raise sqlite3.DatabaseError("wal checkpoint returned non-integer status")
+    busy, log_frames, checkpointed_frames = cast(tuple[int, int, int], values)
     return busy == 0 and (log_frames < 0 or checkpointed_frames >= log_frames)
 
 
@@ -364,17 +373,54 @@ class RetentionManager:
 
         connection = connect_v2(self.database_path)
         try:
-            checkpoint_complete = passive_wal_checkpoint_complete(connection)
-            database_bytes, wal_bytes = self._measured_sizes(connection)
+            (
+                database_bytes,
+                wal_bytes,
+                checkpoint_complete,
+                truncate_required_but_incomplete,
+            ) = self._checkpoint_and_measure_sizes(connection)
         finally:
             connection.close()
         state = _cap_state(database_bytes, self.policy.database_cap_bytes)
         required_action = "STORAGE_CAP_FATAL" if state is StorageCapState.FATAL else None
-        if wal_bytes >= self.policy.wal_cap_bytes:
+        if truncate_required_but_incomplete or wal_bytes >= self.policy.wal_cap_bytes:
             state = StorageCapState.FATAL
             if required_action is None:
                 required_action = "WAL_CAP_FATAL"
         return state, database_bytes, wal_bytes, required_action, checkpoint_complete
+
+    def _checkpoint_and_measure_sizes(
+        self, connection: sqlite3.Connection
+    ) -> tuple[int, int, bool, bool]:
+        """Checkpoint WAL without mistaking recycled allocation for retained evidence.
+
+        PASSIVE is the ordinary regular-session path: it never waits for readers or
+        writers. SQLite can nevertheless retain an already-checkpointed physical WAL
+        allocation for reuse. Only at the existing hard physical cap do we attempt a
+        zero-wait TRUNCATE to release that allocation before deciding admission.
+        """
+
+        checkpoint_complete = passive_wal_checkpoint_complete(connection)
+        database_bytes, wal_bytes = self._measured_sizes(connection)
+        if not checkpoint_complete or wal_bytes < self.policy.wal_cap_bytes:
+            return database_bytes, wal_bytes, checkpoint_complete, False
+
+        try:
+            previous_busy_timeout = int(connection.execute("PRAGMA busy_timeout").fetchone()[0])
+            try:
+                connection.execute("PRAGMA busy_timeout = 0")
+                truncate_complete = _wal_checkpoint_complete(
+                    connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                )
+            finally:
+                connection.execute(f"PRAGMA busy_timeout = {previous_busy_timeout}")
+            database_bytes, wal_bytes = self._measured_sizes(connection)
+        except (OSError, sqlite3.Error):
+            # At the physical hard cap, an unavailable verification/truncation path
+            # cannot safely leave admission open. Preserve the pre-attempt measured
+            # evidence so callers take the existing WAL_CAP_FATAL path.
+            return database_bytes, wal_bytes, False, True
+        return database_bytes, wal_bytes, truncate_complete, not truncate_complete
 
     def _compact_payloads(
         self,
@@ -1224,6 +1270,7 @@ class RetentionManager:
         terminalizations_committed = 0
         payloads_compacted_committed = 0
         expired_rows_deleted_committed = 0
+        post_maintenance_wal_cap_blocked = False
         deadline_hit = False
         deadline = 0.0
         phase = "storage_measurement"
@@ -1363,13 +1410,17 @@ class RetentionManager:
                 connection.commit()
                 expired_rows_deleted_committed = expired_rows_deleted
                 connection.set_progress_handler(None, 0)
-            connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
             connection.execute("PRAGMA incremental_vacuum(64)")
-            post_maintenance_sizes = self._measured_sizes(connection)
+            (
+                post_maintenance_database_bytes,
+                post_maintenance_wal_bytes,
+                _post_maintenance_checkpoint_complete,
+                post_maintenance_wal_cap_blocked,
+            ) = self._checkpoint_and_measure_sizes(connection)
             if measured_database_bytes is None:
-                database_bytes = post_maintenance_sizes[0]
+                database_bytes = post_maintenance_database_bytes
             if measured_wal_bytes is None:
-                wal_bytes = post_maintenance_sizes[1]
+                wal_bytes = post_maintenance_wal_bytes
         except Exception as error:
             if connection.in_transaction:
                 connection.rollback()
@@ -1409,7 +1460,7 @@ class RetentionManager:
             connection.close()
 
         state = _cap_state(database_bytes, self.policy.database_cap_bytes)
-        wal_over_cap = wal_bytes >= self.policy.wal_cap_bytes
+        wal_over_cap = post_maintenance_wal_cap_blocked or wal_bytes >= self.policy.wal_cap_bytes
         database_fatal = state is StorageCapState.FATAL
         if wal_over_cap:
             state = StorageCapState.FATAL

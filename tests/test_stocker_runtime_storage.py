@@ -5713,6 +5713,157 @@ def test_cap_only_maintenance_fails_closed_on_post_checkpoint_wal_size(
     )
 
 
+def test_cap_only_maintenance_truncates_complete_over_cap_recycled_wal(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    writer = connect_v2(database)
+    try:
+        writer.execute("UPDATE schema_migrations SET applied_at_us=applied_at_us+1 WHERE version=1")
+        writer.commit()
+
+        state, _database_bytes, wal_bytes, action, checkpoint_complete = RetentionManager(
+            database,
+            RetentionPolicy(database_cap_bytes=1 << 30, wal_cap_bytes=1),
+        ).checkpoint_and_measure_cap_state()
+
+        assert state is StorageCapState.NORMAL
+        assert wal_bytes == 0
+        assert action is None
+        assert checkpoint_complete is True
+        assert (database.parent / f"{database.name}-wal").stat().st_size == 0
+    finally:
+        writer.close()
+
+
+def test_cap_only_maintenance_fails_closed_when_over_cap_truncate_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(database_cap_bytes=200, wal_cap_bytes=60),
+    )
+    actual_connection = connect_v2(database)
+    commands: list[str] = []
+
+    class TruncateErrorConnection:
+        def execute(self, statement: str, parameters: object = ()) -> sqlite3.Cursor:
+            del parameters
+            commands.append(statement)
+            if statement == "PRAGMA wal_checkpoint(TRUNCATE)":
+                raise sqlite3.OperationalError("truncate unavailable")
+            return actual_connection.execute(statement)
+
+        def close(self) -> None:
+            actual_connection.close()
+
+    monkeypatch.setattr(retention_module, "connect_v2", lambda _database: TruncateErrorConnection())
+    monkeypatch.setattr(manager, "_measured_sizes", lambda _connection: (100, 60))
+
+    assert manager.checkpoint_and_measure_cap_state() == (
+        StorageCapState.FATAL,
+        100,
+        60,
+        "WAL_CAP_FATAL",
+        False,
+    )
+    assert commands.count("PRAGMA busy_timeout = 0") == 1
+    assert "PRAGMA busy_timeout = 5000" in commands
+
+
+def test_cap_only_maintenance_fails_closed_when_complete_over_cap_truncate_is_busy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(database_cap_bytes=200, wal_cap_bytes=60),
+    )
+    actual_connection = connect_v2(database)
+
+    class CheckpointCursor:
+        def __init__(self, result: tuple[int, int, int]) -> None:
+            self._result = result
+
+        def fetchone(self) -> tuple[int, int, int]:
+            return self._result
+
+    class BusyTruncateConnection:
+        def execute(
+            self, statement: str, parameters: object = ()
+        ) -> sqlite3.Cursor | CheckpointCursor:
+            del parameters
+            if statement == "PRAGMA wal_checkpoint(PASSIVE)":
+                return CheckpointCursor((0, 4, 4))
+            if statement == "PRAGMA wal_checkpoint(TRUNCATE)":
+                return CheckpointCursor((1, 4, 0))
+            return actual_connection.execute(statement)
+
+        def close(self) -> None:
+            actual_connection.close()
+
+    monkeypatch.setattr(retention_module, "connect_v2", lambda _database: BusyTruncateConnection())
+    monkeypatch.setattr(manager, "_measured_sizes", lambda _connection: (100, 60))
+
+    assert manager.checkpoint_and_measure_cap_state() == (
+        StorageCapState.FATAL,
+        100,
+        60,
+        "WAL_CAP_FATAL",
+        False,
+    )
+
+
+def test_cap_only_maintenance_keeps_incomplete_over_cap_wal_fatal(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    writer = connect_v2(database)
+    reader = sqlite3.connect(database)
+    try:
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute("UPDATE schema_migrations SET applied_at_us=applied_at_us+1 WHERE version=1")
+        writer.commit()
+        reader.execute("BEGIN")
+        reader.execute("SELECT applied_at_us FROM schema_migrations WHERE version=1").fetchone()
+        writer.execute("UPDATE schema_migrations SET applied_at_us=applied_at_us+1 WHERE version=1")
+        writer.commit()
+
+        state, _database_bytes, wal_bytes, action, checkpoint_complete = RetentionManager(
+            database,
+            RetentionPolicy(database_cap_bytes=1 << 30, wal_cap_bytes=1),
+        ).checkpoint_and_measure_cap_state()
+
+        assert state is StorageCapState.FATAL
+        assert wal_bytes >= 1
+        assert action == "WAL_CAP_FATAL"
+        assert checkpoint_complete is False
+    finally:
+        reader.close()
+        writer.close()
+
+
+def test_full_maintenance_truncates_complete_over_cap_recycled_wal(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    writer = connect_v2(database)
+    try:
+        writer.execute("UPDATE schema_migrations SET applied_at_us=applied_at_us+1 WHERE version=1")
+        writer.commit()
+
+        result = RetentionManager(
+            database,
+            RetentionPolicy(database_cap_bytes=1 << 30, wal_cap_bytes=1),
+        ).run(now_us=1_000_000)
+
+        assert result.cap_state is StorageCapState.NORMAL
+        assert result.wal_bytes == 0
+        assert result.required_action is None
+    finally:
+        writer.close()
+
+
 def test_cap_only_maintenance_reports_incomplete_passive_checkpoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

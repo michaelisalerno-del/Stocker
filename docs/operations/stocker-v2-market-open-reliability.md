@@ -332,19 +332,19 @@ unable to persist a component incident, the process retains and republishes it b
 normal recovery; a process crash in that narrow interval can lose the in-memory health
 marker, but never the already durable raw callback or writer evidence.
 
-## Schema-19 retention backlog recovery
+## Retention backlog recovery
 
 Repeated `COMPONENT_RETENTION_MAINTENANCE_FAILED` incidents may leave durable raw
 admission healthy while an old payload backlog cannot drain. Do not suppress the
 incident, increase the 100 ms writer-transaction deadline, or manually edit SQLite.
-The current schema-19 release uses at most two bounded set-based payload updates per
+The current schema-20 release uses at most two bounded set-based payload updates per
 pass while retaining receipt/watermark proof, acknowledged-first ordering, the shared
-2,000-row cap, and atomic rollback.
+2,600-row cap, and atomic rollback.
 
-Normal schema-19 maintenance first performs a separately bounded read-only selector,
+Normal schema-20 maintenance first performs a separately bounded read-only selector,
 then at most two receipt-proof writer transactions. Each writer transaction verifies
 no more than 600 callbacks and has its own unchanged 100 ms deadline; together they
-retain the existing 1,200-callback proof ceiling and carry the existing shared 2,000
+retain the existing 1,200-callback proof ceiling and carry the existing shared 2,600
 receipt-change budget. Receipt IDs, hashes, watermark bounds, and deletions are always
 re-read and validated after `BEGIN IMMEDIATE`; the outside selector supplies only a
 run-ID hint. Writer authority is checked after begin and immediately before every
@@ -353,7 +353,7 @@ the current incident stays degraded, and retry resumes from durable evidence. Do
 manually alter a watermark or retry by suppressing the incident.
 
 The remaining evidence work also uses two bounded writer transactions with one carried
-2,000-row budget. The first terminalizes expired pending shadow positions and compacts
+2,600-row budget. The first terminalizes expired pending shadow positions and compacts
 proof-authorized callback payloads; the second prunes expired evidence only with the
 remaining budget. Both keep the same 100 ms deadline and repeat writer-authority checks
 after `BEGIN IMMEDIATE` and before commit. A pruning failure therefore retains and
@@ -365,7 +365,7 @@ the deadline applies independently to each short writer transaction.
 During the existing NYSE/XNYS regular session, the ten-second maintenance tick runs
 three independent rolling-window transactions: proven callback-payload compaction,
 protected granular raw-event expiry, and proven callback-tombstone expiry. Each has its
-own 2,000-row budget, 100 ms deadline, writer-authority checks, and rollback boundary.
+own 2,600-row budget, 100 ms deadline, writer-authority checks, and rollback boundary.
 A recoverable failure opens a bounded component incident and backs off without
 disconnecting healthy feeds; a later successful pressure pass is recovery evidence.
 Hard DB/WAL capacity, corruption, ownership loss, or durable-admission failure still
@@ -411,7 +411,7 @@ Use an attended offline recovery only after the incident has been diagnosed:
        --max-wall-seconds 2700
    ```
 
-   Require exit zero, `status=ok`, at most 1,000 passes, at most 2,000 payloads per
+   Require exit zero, `status=ok`, at most 1,000 passes, at most 2,600 payloads per
    committed pass, and `consecutive_zero_passes=2`. The command uses one fixed cutoff
    and emits total compacted rows. Pass/time/deadline/lock loss exits nonzero and names
    the incomplete committed total; it never claims earlier successful passes rolled

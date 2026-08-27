@@ -114,7 +114,7 @@ def _seed_generation(database: Path) -> None:
             "INSERT INTO runs(run_id, mode, source, started_at_us, config_hash, git_commit, "
             "data_class, status) VALUES ('run-1', 'prospective_record', 'ibkr', 1, ?, "
             "'deadbee', 'prospective_protected', 'running')",
-            ("a" * 64,),
+            (_config(database).frozen_config_hash,),
         )
         connection.execute(
             "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us) "
@@ -1713,6 +1713,49 @@ def test_clean_restart_rejects_incompatible_frozen_configuration(tmp_path: Path)
         )
 
 
+def test_approved_retention_policy_is_bound_into_persisted_run_identity(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    config = _config(database)
+    first = Recorder(config, FakeMarketData())
+    first.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    first.stop(now_us=101)
+
+    assert config.frozen_config_hash != config.config_hash
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT config_hash FROM runs WHERE run_id='run-1'"
+            ).fetchone()[0]
+            == config.frozen_config_hash
+        )
+        connection.execute(
+            "UPDATE runs SET config_hash=? WHERE run_id='run-1'",
+            (config.config_hash,),
+        )
+
+    replacement_adapter = FakeMarketData()
+    with pytest.raises(RecorderFatalError, match="frozen configuration changed"):
+        Recorder(
+            _config(database, owner_id="replacement-owner"), replacement_adapter
+        ).start(
+            now_us=102,
+            instruments=(instrument,),
+            subscriptions=specs,
+        )
+    assert replacement_adapter.connect_calls == 0
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM recorder_generations WHERE run_id='run-1'"
+            ).fetchone()[0]
+            == 1
+        )
+
+
 def test_clean_restart_rejects_changed_market_data_input(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
@@ -1749,7 +1792,7 @@ def test_schema_15_clean_stop_can_bind_inputs_and_restart_same_run(tmp_path: Pat
             "git_commit, data_class, status) VALUES "
             "('run-1', 'prospective_record', 'ibkr', 1, 2, ?, 'old-code', "
             "'prospective_protected', 'stopped')",
-            ("a" * 64,),
+            (_config(database).frozen_config_hash,),
         )
         connection.execute(
             "INSERT INTO recorder_generations(run_id, generation, owner_id, started_at_us, "
@@ -3924,7 +3967,9 @@ def test_regular_session_maintenance_runs_pressure_work_and_recovers_from_succes
         "stocker_runtime.ingestion.recorder.RetentionManager", RegularSessionPressure
     )
 
-    assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.NORMAL
+    assert recorder.maintain(
+        now_us=101, run_full_off_session_maintenance=False
+    ) is StorageCapState.NORMAL
     admitted = recorder.receive(
         state.fences[0],
         MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 100.0}),
@@ -3956,7 +4001,8 @@ def test_regular_session_maintenance_runs_pressure_work_and_recovers_from_succes
         error_name="MaintenanceDeadlineExceeded",
     )
     assert (
-        recorder.maintain(now_us=1_000_103, retention_work_expected=False) is StorageCapState.NORMAL
+        recorder.maintain(now_us=1_000_103, run_full_off_session_maintenance=False)
+        is StorageCapState.NORMAL
     )
     with connect_v2(database) as connection:
         incident = connection.execute(
@@ -3990,9 +4036,9 @@ def test_regular_session_start_propagates_scheduled_retention_deferral(
     schedule_calls: list[int] = []
 
     def observe_maintenance(
-        *, now_us: int, retention_work_expected: bool = True
+        *, now_us: int, run_full_off_session_maintenance: bool = True
     ) -> StorageCapState:
-        maintenance_calls.append((now_us, retention_work_expected))
+        maintenance_calls.append((now_us, run_full_off_session_maintenance))
         return StorageCapState.NORMAL
 
     monkeypatch.setattr(recorder, "maintain", observe_maintenance)
@@ -4006,7 +4052,7 @@ def test_regular_session_start_propagates_scheduled_retention_deferral(
         now_us=100,
         instruments=(instrument,),
         subscriptions=specs,
-        retention_schedule=schedule,
+        full_maintenance_schedule=schedule,
     )
 
     assert schedule_calls == [150_000]
@@ -4038,7 +4084,9 @@ def test_regular_session_cap_measurement_contention_degrades_without_stopping_in
         "stocker_runtime.ingestion.recorder.RetentionManager", ContendedPressureMaintenance
     )
 
-    assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.NORMAL
+    assert recorder.maintain(
+        now_us=101, run_full_off_session_maintenance=False
+    ) is StorageCapState.NORMAL
 
     with connect_v2(database) as connection:
         runtime = connection.execute(
@@ -4055,6 +4103,61 @@ def test_regular_session_cap_measurement_contention_degrades_without_stopping_in
     assert json.loads(incident["details_json"])["error"] == "OperationalError"
     assert adapter.connected is True
     assert adapter.cancelled == []
+
+
+def test_retention_backoff_cap_measurement_contention_does_not_stop_ingestion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    instrument, specs = _specs()
+    adapter = FakeMarketData()
+    recorder = Recorder(_config(database), adapter)
+    state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
+    assert recorder._component_failure(
+        "retention_maintenance",
+        now_us=101,
+        error_name="MaintenanceDeadlineExceeded",
+    )
+
+    class ContendedBackoffMeasurement:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
+            pass
+
+        def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
+            raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager",
+        ContendedBackoffMeasurement,
+    )
+
+    assert recorder.maintain(
+        now_us=102, run_full_off_session_maintenance=False
+    ) is StorageCapState.NORMAL
+    admitted = recorder.receive(
+        state.fences[0],
+        MarketDataCallback("quote", 103, None, {"event_at_us": 103, "bid": 100.0}),
+    )
+    assert recorder.drain(now_us=103) == 1
+    with connect_v2(database) as connection:
+        runtime = connection.execute(
+            "SELECT lifecycle, reason, connection_state FROM runtime_state"
+        ).fetchone()
+        callback = connection.execute(
+            "SELECT lifecycle FROM callback_inbox WHERE source_sequence=?",
+            (admitted.source_sequence,),
+        ).fetchone()
+        run_status = connection.execute("SELECT status FROM runs").fetchone()[0]
+    assert tuple(runtime) == (
+        "degraded",
+        "COMPONENT_RETENTION_MAINTENANCE_FAILED",
+        "connected",
+    )
+    assert callback[0] == "acknowledged"
+    assert run_status == "running"
+    assert adapter.connected is True
 
 
 def test_regular_session_incomplete_wal_checkpoint_publishes_metrics_and_degrades(
@@ -4077,7 +4180,9 @@ def test_regular_session_incomplete_wal_checkpoint_publishes_metrics_and_degrade
 
     monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", IncompleteCheckpoint)
 
-    assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.NORMAL
+    assert recorder.maintain(
+        now_us=101, run_full_off_session_maintenance=False
+    ) is StorageCapState.NORMAL
     with connect_v2(database) as connection:
         runtime = connection.execute(
             "SELECT lifecycle, reason, database_bytes, wal_bytes FROM runtime_state"
@@ -4126,7 +4231,7 @@ def test_regular_session_cap_measurement_still_fails_closed_at_hard_wal_cap(
     )
 
     with pytest.raises(RecorderFatalError, match="WAL_CAP_FATAL"):
-        recorder.maintain(now_us=101, retention_work_expected=False)
+        recorder.maintain(now_us=101, run_full_off_session_maintenance=False)
 
     with connect_v2(database) as connection:
         runtime = connection.execute(
@@ -4165,8 +4270,12 @@ def test_regular_session_degraded_cap_pauses_optional_feed_idempotently(
         "stocker_runtime.ingestion.recorder.RetentionManager", DegradedPressureMaintenance
     )
 
-    assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.DEGRADED
-    assert recorder.maintain(now_us=102, retention_work_expected=False) is StorageCapState.DEGRADED
+    assert recorder.maintain(
+        now_us=101, run_full_off_session_maintenance=False
+    ) is StorageCapState.DEGRADED
+    assert recorder.maintain(
+        now_us=102, run_full_off_session_maintenance=False
+    ) is StorageCapState.DEGRADED
 
     assert adapter.cancelled == [4]
     with connect_v2(database) as connection:
@@ -4202,7 +4311,9 @@ def test_regular_session_soft_cap_publishes_without_pausing_feeds(
         "stocker_runtime.ingestion.recorder.RetentionManager", SoftPressureMaintenance
     )
 
-    assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.SOFT
+    assert recorder.maintain(
+        now_us=101, run_full_off_session_maintenance=False
+    ) is StorageCapState.SOFT
     with connect_v2(database) as connection:
         runtime = connection.execute(
             "SELECT lifecycle, database_bytes, wal_bytes FROM runtime_state"
@@ -4248,7 +4359,9 @@ def test_degraded_cap_still_pauses_optional_feed_after_publication_contention(
     )
     monkeypatch.setattr(recorder, "_publish_storage_measurement", contended_publication)
 
-    assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.DEGRADED
+    assert recorder.maintain(
+        now_us=101, run_full_off_session_maintenance=False
+    ) is StorageCapState.DEGRADED
 
     assert adapter.cancelled == [4]
     with connect_v2(database) as connection:
@@ -5969,7 +6082,7 @@ def test_recoverable_fatal_generation_restart_is_explicit_audited_and_preserves_
             run_id="run-1",
             generation=1,
             mode="prospective_record",
-            config_hash="a" * 64,
+            config_hash=_config(database).frozen_config_hash,
             input_hash=market_data_input_hash((instrument,), specs),
             fatal_code="POST_ADMISSION_PRESERVATION_FAILED",
             operator="operator@example.invalid",
@@ -5984,7 +6097,7 @@ def test_recoverable_fatal_generation_restart_is_explicit_audited_and_preserves_
             run_id="run-1",
             generation=1,
             mode="prospective_record",
-            config_hash="a" * 64,
+            config_hash=_config(database).frozen_config_hash,
             input_hash="b" * 64,
             fatal_code="POST_ADMISSION_PRESERVATION_FAILED",
             operator="operator@example.invalid",
@@ -5996,7 +6109,7 @@ def test_recoverable_fatal_generation_restart_is_explicit_audited_and_preserves_
         run_id="run-1",
         generation=1,
         mode="prospective_record",
-        config_hash="a" * 64,
+        config_hash=_config(database).frozen_config_hash,
         input_hash=market_data_input_hash((instrument,), specs),
         fatal_code="POST_ADMISSION_PRESERVATION_FAILED",
         operator="operator@example.invalid",
@@ -6050,7 +6163,7 @@ def test_wal_cap_fatal_generation_recovery_is_explicit_and_audited(
         run_id="run-1",
         generation=1,
         mode="prospective_record",
-        config_hash="a" * 64,
+        config_hash=_config(database).frozen_config_hash,
         input_hash=market_data_input_hash((instrument,), specs),
         fatal_code="WAL_CAP_FATAL",
         operator="operator@example.invalid",
@@ -6100,7 +6213,7 @@ def test_wal_cap_fatal_recovery_rejects_wal_still_at_hard_cap(
             run_id="run-1",
             generation=1,
             mode="prospective_record",
-            config_hash="a" * 64,
+            config_hash=_config(database).frozen_config_hash,
             input_hash=market_data_input_hash((instrument,), specs),
             fatal_code="WAL_CAP_FATAL",
             operator="operator@example.invalid",
@@ -6133,7 +6246,7 @@ def test_wal_cap_fatal_recovery_rejects_incomplete_passive_checkpoint(
             run_id="run-1",
             generation=1,
             mode="prospective_record",
-            config_hash="a" * 64,
+            config_hash=_config(database).frozen_config_hash,
             input_hash=market_data_input_hash((instrument,), specs),
             fatal_code="WAL_CAP_FATAL",
             operator="operator@example.invalid",
@@ -6257,7 +6370,7 @@ def test_fatal_generation_recovery_respects_storage_hard_cap(
             run_id="run-1",
             generation=1,
             mode="prospective_record",
-            config_hash="a" * 64,
+            config_hash=_config(database).frozen_config_hash,
             input_hash=market_data_input_hash((instrument,), specs),
             fatal_code="POST_ADMISSION_PRESERVATION_FAILED",
             operator="operator@example.invalid",
@@ -6299,7 +6412,7 @@ def test_callback_identity_corruption_is_fatal_and_never_recoverable(
             run_id="run-1",
             generation=1,
             mode="prospective_record",
-            config_hash="a" * 64,
+            config_hash=_config(database).frozen_config_hash,
             input_hash=market_data_input_hash((instrument,), specs),
             fatal_code="CALLBACK_PROVENANCE_CORRUPTION",
             operator="operator@example.invalid",
@@ -6337,7 +6450,7 @@ def test_hard_or_ambiguous_fatal_generation_cannot_be_recovered(
             run_id="run-1",
             generation=1,
             mode="prospective_record",
-            config_hash="a" * 64,
+            config_hash=_config(database).frozen_config_hash,
             input_hash=market_data_input_hash((instrument,), specs),
             fatal_code=fatal_code,
             operator="operator@example.invalid",

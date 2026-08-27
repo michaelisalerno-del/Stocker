@@ -67,6 +67,30 @@ from stocker_runtime.storage.retention import (
 )
 
 
+def _write_recorder_config(path: Path, database: Path) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "database": str(database),
+                "run_id": "new-retention-lineage",
+                "owner_id": "offline-maintenance",
+                "mode": "prospective_record",
+                "host": "127.0.0.1",
+                "port": 4002,
+                "client_id": 71,
+                "read_only": True,
+                "external_read_only_verified": True,
+                "config_hash": "a" * 64,
+                "git_commit": "deadbee",
+                "callback_payload_retention_us": 86_400_000_000,
+                "callback_tombstone_retention_us": 86_400_000_000,
+                "raw_market_event_retention_us": 86_400_000_000,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _proposal_legs() -> tuple[ProposedTradeLeg, ...]:
     return (
         ProposedTradeLeg(
@@ -243,6 +267,148 @@ def test_regular_session_pressure_preserves_earlier_commits_when_later_phase_fai
         assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 1
 
 
+def test_regular_session_pressure_uses_independent_100ms_phase_deadlines(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    logical_time = 0.0
+    phases: list[str] = []
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(maintenance_transaction_ms=100),
+        monotonic=lambda: logical_time,
+    )
+
+    def charge(name: str) -> int:
+        nonlocal logical_time
+        logical_time += 0.09
+        phases.append(name)
+        return 0
+
+    monkeypatch.setattr(
+        manager,
+        "_compact_payloads",
+        lambda *_args, **_kwargs: charge("payload"),
+    )
+    monkeypatch.setattr(
+        manager,
+        "_prune_raw_market_events",
+        lambda *_args, **_kwargs: charge("raw"),
+    )
+    monkeypatch.setattr(
+        manager,
+        "_prune_callback_tombstones",
+        lambda *_args, **_kwargs: charge("tombstone"),
+    )
+
+    result = manager.run_regular_session_pressure(now_us=100)
+
+    assert phases == ["payload", "raw", "tombstone"]
+    assert result.payloads_compacted == 0
+    assert result.raw_market_events_deleted == 0
+    assert result.callback_tombstones_deleted == 0
+
+
+def test_regular_session_pressure_rolls_back_a_phase_that_exceeds_100ms(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    logical_time = 0.0
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(maintenance_transaction_ms=100),
+        monotonic=lambda: logical_time,
+    )
+
+    monkeypatch.setattr(manager, "_compact_payloads", lambda *_args, **_kwargs: 0)
+
+    def overrun_raw(*_args: object, **_kwargs: object) -> int:
+        nonlocal logical_time
+        logical_time += 0.101
+        return 0
+
+    monkeypatch.setattr(manager, "_prune_raw_market_events", overrun_raw)
+
+    with pytest.raises(MaintenanceDeadlineExceeded, match="raw_market_event_expiry") as raised:
+        manager.run_regular_session_pressure(now_us=100)
+
+    assert raised.value.__dict__ == {
+        "retention_phase": "regular_session_raw_market_event_expiry",
+        "payloads_compacted_committed": 0,
+        "raw_market_events_deleted_committed": 0,
+        "callback_tombstones_deleted_committed": 0,
+    }
+
+
+def test_regular_session_pressure_drains_frozen_opening_minute_with_three_passes_spare(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    _seed_receipt_callback_batches(
+        database,
+        run_id="retention-run",
+        batch_sizes=(600, 600, 600, 222),
+    )
+    proof_manager = RetentionManager(
+        database,
+        RetentionPolicy(callback_payload_us=10_000, receipt_us=10_000),
+    )
+    for _ in range(2):
+        proof_manager.run(
+            now_us=3_000,
+            measured_database_bytes=1,
+            measured_wal_bytes=0,
+        )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "UPDATE runs SET status='stopped', ended_at_us=3000 "
+            "WHERE run_id='retention-run'"
+        )
+        connection.execute(
+            "UPDATE recorder_generations SET ended_at_us=3000, clean_stop=1, "
+            "termination_code='CLEAN_STOP' WHERE run_id='retention-run' AND generation=1"
+        )
+    manager = RetentionManager(
+        database,
+        RetentionPolicy(
+            callback_payload_us=10,
+            tombstone_us=10,
+            raw_market_event_us=10,
+            maintenance_batch_rows=2_000,
+        ),
+    )
+
+    results = tuple(manager.run_regular_session_pressure(now_us=10_000) for _ in range(6))
+
+    assert [result.payloads_compacted for result in results] == [2_000, 22, 0, 0, 0, 0]
+    assert [result.raw_market_events_deleted for result in results] == [
+        2_000,
+        23,
+        0,
+        0,
+        0,
+        0,
+    ]
+    assert [result.callback_tombstones_deleted for result in results] == [
+        2_000,
+        22,
+        0,
+        0,
+        0,
+        0,
+    ]
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM callback_inbox").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 4
+
+
 def test_offline_granular_reclaim_uses_fixed_cutoff_and_builds_verified_compact_copy(
     tmp_path: Path,
 ) -> None:
@@ -325,30 +491,11 @@ def test_granular_reclaim_cli_uses_explicit_recorder_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     database = tmp_path / "v2.sqlite3"
+    operational_database = tmp_path / "operational.sqlite3"
     output = tmp_path / "reclaimed.sqlite3"
     config = tmp_path / "recorder.json"
     initialize_database(database)
-    config.write_text(
-        json.dumps(
-            {
-                "database": str(database),
-                "run_id": "new-retention-lineage",
-                "owner_id": "offline-reclaim",
-                "mode": "prospective_record",
-                "host": "127.0.0.1",
-                "port": 4002,
-                "client_id": 71,
-                "read_only": True,
-                "external_read_only_verified": True,
-                "config_hash": "a" * 64,
-                "git_commit": "deadbee",
-                "callback_payload_retention_us": 86_400_000_000,
-                "callback_tombstone_retention_us": 86_400_000_000,
-                "raw_market_event_retention_us": 86_400_000_000,
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_recorder_config(config, operational_database)
     calls: list[tuple[Path, Path, int, RetentionPolicy]] = []
 
     def reclaim(**kwargs: object) -> lifecycle_module.GranularEvidenceReclaimResult:
@@ -401,6 +548,80 @@ def test_granular_reclaim_cli_uses_explicit_recorder_policy(
     assert response["status"] == "ok"
     assert response["output"] == str(output)
     assert response["consecutive_zero_passes"] == 2
+
+
+def test_granular_reclaim_cli_rejects_configured_operational_database(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "operational.sqlite3"
+    output = tmp_path / "reclaimed.sqlite3"
+    config = tmp_path / "recorder.json"
+    initialize_database(database)
+    _write_recorder_config(config, database)
+    called = False
+
+    def forbidden(**_kwargs: object) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(cli_module, "reclaim_granular_evidence", forbidden)
+    result = CliRunner().invoke(
+        runtime_app,
+        [
+            "recorder",
+            "reclaim-granular-evidence",
+            "--config",
+            str(config),
+            "--database",
+            str(database),
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert called is False
+    assert "disposable copy" in json.loads(result.stdout)["message"]
+    assert not output.exists()
+
+
+def test_granular_reclaim_cli_rejects_a_hard_link_to_the_operational_database(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "operational.sqlite3"
+    alias = tmp_path / "operational-hard-link.sqlite3"
+    output = tmp_path / "reclaimed.sqlite3"
+    config = tmp_path / "recorder.json"
+    initialize_database(database)
+    alias.hardlink_to(database)
+    _write_recorder_config(config, database)
+    called = False
+
+    def forbidden(**_kwargs: object) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(cli_module, "reclaim_granular_evidence", forbidden)
+    result = CliRunner().invoke(
+        runtime_app,
+        [
+            "recorder",
+            "reclaim-granular-evidence",
+            "--config",
+            str(config),
+            "--database",
+            str(alias),
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert called is False
+    assert "disposable copy" in json.loads(result.stdout)["message"]
+    assert not output.exists()
 
 
 def test_offline_granular_reclaim_rejects_an_active_writer_before_output(
@@ -7572,11 +7793,16 @@ def test_callback_incident_recovery_uses_primary_key_plan(tmp_path: Path) -> Non
 
 def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: Path) -> None:
     database = tmp_path / "v2.sqlite3"
+    config = tmp_path / "recorder.json"
+    _write_recorder_config(config, tmp_path / "operational.sqlite3")
     runner = CliRunner()
 
     initialized = runner.invoke(runtime_app, ["init", str(database)])
     migrated = runner.invoke(runtime_app, ["migrate", str(database)])
-    retained = runner.invoke(runtime_app, ["retain", str(database), "--now-us", "100"])
+    retained = runner.invoke(
+        runtime_app,
+        ["retain", str(database), "--config", str(config), "--now-us", "100"],
+    )
 
     assert initialized.exit_code == migrated.exit_code == retained.exit_code == 0
     init_payload = json.loads(initialized.stdout)
@@ -7615,6 +7841,33 @@ def test_database_cli_is_machine_readable_and_never_returns_payloads(tmp_path: P
     assert "evidence" not in retained.stdout
 
 
+def test_retain_cli_requires_disposable_database_and_canonical_writer_lock(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "operational.sqlite3"
+    disposable = tmp_path / "disposable.sqlite3"
+    config = tmp_path / "recorder.json"
+    initialize_database(database)
+    initialize_database(disposable)
+    _write_recorder_config(config, database)
+    runner = CliRunner()
+
+    configured = runner.invoke(
+        runtime_app,
+        ["retain", str(database), "--config", str(config), "--now-us", "100"],
+    )
+    assert configured.exit_code == 1
+    assert "disposable copy" in json.loads(configured.stdout)["message"]
+
+    with LocalWriterLock.for_database(disposable):
+        locked = runner.invoke(
+            runtime_app,
+            ["retain", str(disposable), "--config", str(config), "--now-us", "100"],
+        )
+    assert locked.exit_code == 1
+    assert json.loads(locked.stdout)["error"] == "LocalWriterLockError"
+
+
 def test_init_cli_reports_sqlite_failures_as_machine_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -7637,21 +7890,27 @@ def test_migrate_and_retain_cli_errors_are_machine_readable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = tmp_path / "v2.sqlite3"
+    config = tmp_path / "recorder.json"
+    _write_recorder_config(config, tmp_path / "operational.sqlite3")
 
     def fail_migration(_database: Path) -> None:
         raise SchemaError("simulated schema mismatch")
 
     class FailingRetentionManager:
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
-        def run(self, *, now_us: int) -> None:
+        def run(self, *, now_us: int, precondition: object) -> None:
+            assert callable(precondition)
             raise RetentionInvariantError(f"simulated receipt failure at {now_us}")
 
     monkeypatch.setattr("stocker_runtime.cli.migrate_database", fail_migration)
     migrated = CliRunner().invoke(runtime_app, ["migrate", str(database)])
     monkeypatch.setattr("stocker_runtime.cli.RetentionManager", FailingRetentionManager)
-    retained = CliRunner().invoke(runtime_app, ["retain", str(database), "--now-us", "100"])
+    retained = CliRunner().invoke(
+        runtime_app,
+        ["retain", str(database), "--config", str(config), "--now-us", "100"],
+    )
 
     assert migrated.exit_code == retained.exit_code == 1
     assert json.loads(migrated.stdout) == {

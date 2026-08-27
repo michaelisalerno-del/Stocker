@@ -229,6 +229,12 @@ change uses a new run ID and configuration hash; generation 26 and its fatal evi
 remain immutable. Later clean restarts of that exact configuration resume the new run
 with a new recorder generation.
 
+`runs.config_hash` stores a derived frozen identity, not the operator's base hash
+verbatim. It is the canonical SHA-256 identity of that base hash, the three retention
+values, and identity format version 1. A pre-policy lineage or any later policy change
+is intentionally incompatible with same-run restart; choose a new run ID and preserve
+the old lineage. This changes no table and requires no schema migration.
+
 Required subscription failure makes readiness false, but healthy feeds remain active
 and continue durable capture. Optional failure is visible degradation and does not make
 the required set incomplete. Request retries are independent, fenced, exponentially

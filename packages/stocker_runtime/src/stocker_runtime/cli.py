@@ -46,6 +46,7 @@ from stocker_runtime.ingestion.lifecycle import (
     MAX_GRANULAR_RECLAIM_WALL_SECONDS,
     MAX_PAYLOAD_DRAIN_PASSES,
     MAX_PAYLOAD_DRAIN_WALL_SECONDS,
+    LocalWriterLock,
     drain_callback_payloads,
     reclaim_granular_evidence,
     recover_fatal_generation,
@@ -104,7 +105,7 @@ def _recorder_health_tick(recorder: Recorder, *, now_us: int) -> None:
     recorder.recover_subscriptions(now_us=now_us)
 
 
-def _retention_work_expected(now_us: int) -> bool:
+def _run_full_off_session_maintenance(now_us: int) -> bool:
     return _market_data_expected_since_us(now_us) is None
 
 
@@ -112,7 +113,7 @@ def _recorder_maintenance_tick(recorder: Recorder) -> int:
     maintenance_at_us = time.time_ns() // 1_000
     recorder.maintain(
         now_us=maintenance_at_us,
-        retention_work_expected=_retention_work_expected(maintenance_at_us),
+        run_full_off_session_maintenance=_run_full_off_session_maintenance(maintenance_at_us),
     )
     return maintenance_at_us
 
@@ -157,6 +158,18 @@ def _validated_replay_callback(
 
 def _emit(payload: dict[str, object]) -> None:
     typer.echo(json.dumps(payload, separators=(",", ":"), sort_keys=True))
+
+
+def _require_disposable_database(configured: Path, candidate: Path) -> None:
+    """Prevent offline evidence deletion from targeting the configured live path."""
+
+    same_path = configured.resolve(strict=False) == candidate.resolve(strict=False)
+    same_file = configured.exists() and candidate.exists() and configured.samefile(candidate)
+    if same_path or same_file:
+        raise ValueError(
+            "offline retention requires a disposable copy, not the configured "
+            "operational database"
+        )
 
 
 def _migration_payload(
@@ -304,14 +317,27 @@ def migrate_command(database: Annotated[Path, typer.Argument()]) -> None:
 @app.command("retain")
 def retain_command(
     database: Annotated[Path, typer.Argument()],
+    config: Annotated[Path, typer.Option("--config", exists=True, dir_okay=False)],
     now_us: Annotated[int | None, typer.Option("--now-us", min=0)] = None,
 ) -> None:
-    """Run one bounded retention/checkpoint pass and report storage-cap state."""
+    """Run one bounded configured pass on a disposable database copy."""
 
     try:
-        result = RetentionManager(database).run(
-            now_us=now_us if now_us is not None else time.time_ns() // 1_000
-        )
+        loaded = load_recorder_config(config)
+        _require_disposable_database(loaded.database, database)
+        lock = LocalWriterLock.for_database(database)
+        with lock:
+            result = RetentionManager(
+                database,
+                RetentionPolicy(
+                    callback_payload_us=loaded.callback_payload_retention_us,
+                    tombstone_us=loaded.callback_tombstone_retention_us,
+                    raw_market_event_us=loaded.raw_market_event_retention_us,
+                ),
+            ).run(
+                now_us=now_us if now_us is not None else time.time_ns() // 1_000,
+                precondition=lambda _connection: lock.verify_held(),
+            )
     except (OSError, SchemaError, ValueError, RuntimeError, sqlite3.Error) as error:
         _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
         raise typer.Exit(code=1) from error
@@ -373,7 +399,7 @@ def recover_fatal_generation_command(
             run_id=loaded.run_id,
             generation=generation,
             mode=loaded.mode,
-            config_hash=loaded.config_hash,
+            config_hash=loaded.frozen_config_hash,
             input_hash=market_data_input_hash(instruments, subscriptions),
             fatal_code=fatal_code,
             operator=operator,
@@ -447,6 +473,7 @@ def reclaim_granular_evidence_command(
     fixed_now_us = time.time_ns() // 1_000 if now_us is None else now_us
     try:
         loaded = load_recorder_config(config)
+        _require_disposable_database(loaded.database, database)
         result = reclaim_granular_evidence(
             database=database,
             output=output,
@@ -711,7 +738,7 @@ def recorder_run_command(
             now_us=started_at_us,
             instruments=instruments,
             subscriptions=subscriptions,
-            retention_schedule=_retention_work_expected,
+            full_maintenance_schedule=_run_full_off_session_maintenance,
         )
         started_loop_at_us = time.time_ns() // 1_000
         next_health_at_us = started_loop_at_us + RECORDER_HEALTH_INTERVAL_US

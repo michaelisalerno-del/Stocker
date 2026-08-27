@@ -269,7 +269,10 @@ def run_opening_burst(database: Path, *, seconds: int) -> dict[str, Any]:
         final_drain_seconds = time.perf_counter() - drain_after_burst_started
         final_backlog = recorder.inbox.nonterminal_count()
         last_received_at_us = callbacks[-1][4].received_at_us
-        recorder.maintain(now_us=last_received_at_us, retention_work_expected=False)
+        recorder.maintain(
+            now_us=last_received_at_us,
+            run_full_off_session_maintenance=False,
+        )
         readiness_started = time.perf_counter()
         readiness = ReadModel(
             WebConfig(

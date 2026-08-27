@@ -1396,7 +1396,7 @@ def _market_data_input_json() -> str:
 def test_recorder_health_window_tracks_exact_xnys_sessions() -> None:
     from stocker_runtime.cli import (
         _market_data_expected_since_us,
-        _retention_work_expected,
+        _run_full_off_session_maintenance,
     )
 
     def at_us(year: int, month: int, day: int, hour: int, minute: int) -> int:
@@ -1408,27 +1408,27 @@ def test_recorder_health_window_tracks_exact_xnys_sessions() -> None:
     assert _market_data_expected_since_us(regular_open) == regular_open
     assert _market_data_expected_since_us(regular_close - 1) == regular_open
     assert _market_data_expected_since_us(regular_close) is None
-    assert _retention_work_expected(regular_open - 1) is True
-    assert _retention_work_expected(regular_open) is False
-    assert _retention_work_expected(regular_close - 1) is False
-    assert _retention_work_expected(regular_close) is True
+    assert _run_full_off_session_maintenance(regular_open - 1) is True
+    assert _run_full_off_session_maintenance(regular_open) is False
+    assert _run_full_off_session_maintenance(regular_close - 1) is False
+    assert _run_full_off_session_maintenance(regular_close) is True
 
     thanksgiving_midday = at_us(2026, 11, 26, 17, 0)
     assert _market_data_expected_since_us(thanksgiving_midday) is None
-    assert _retention_work_expected(thanksgiving_midday) is True
+    assert _run_full_off_session_maintenance(thanksgiving_midday) is True
 
     early_open = at_us(2026, 11, 27, 14, 30)
     early_close = at_us(2026, 11, 27, 18, 0)
     assert _market_data_expected_since_us(early_open) == early_open
     assert _market_data_expected_since_us(early_close - 1) == early_open
     assert _market_data_expected_since_us(early_close) is None
-    assert _retention_work_expected(early_open) is False
-    assert _retention_work_expected(early_close) is True
+    assert _run_full_off_session_maintenance(early_open) is False
+    assert _run_full_off_session_maintenance(early_close) is True
 
     standard_time_open = at_us(2026, 1, 5, 14, 30)
     standard_time_close = at_us(2026, 1, 5, 21, 0)
-    assert _retention_work_expected(standard_time_open) is False
-    assert _retention_work_expected(standard_time_close) is True
+    assert _run_full_off_session_maintenance(standard_time_open) is False
+    assert _run_full_off_session_maintenance(standard_time_close) is True
 
 
 def test_startup_capacity_reserve_tracks_remaining_xnys_session_without_widening() -> None:
@@ -1501,8 +1501,8 @@ def test_maintenance_tick_takes_fresh_session_decision_at_call_boundary(
     session_checks: list[int] = []
 
     class MaintenanceRecorder:
-        def maintain(self, *, now_us: int, retention_work_expected: bool) -> None:
-            calls.append((now_us, retention_work_expected))
+        def maintain(self, *, now_us: int, run_full_off_session_maintenance: bool) -> None:
+            calls.append((now_us, run_full_off_session_maintenance))
 
     monkeypatch.setattr("stocker_runtime.cli.time.time_ns", lambda: 200_000_000)
 
@@ -1510,7 +1510,7 @@ def test_maintenance_tick_takes_fresh_session_decision_at_call_boundary(
         session_checks.append(at_us)
         return False
 
-    monkeypatch.setattr("stocker_runtime.cli._retention_work_expected", session_policy)
+    monkeypatch.setattr("stocker_runtime.cli._run_full_off_session_maintenance", session_policy)
 
     assert _recorder_maintenance_tick(cast(Any, MaintenanceRecorder())) == 200_000
     assert session_checks == [200_000]
@@ -1712,7 +1712,9 @@ def test_recorder_service_command_handles_sigterm_as_a_clean_stop(
         return previous
 
     monkeypatch.setattr("stocker_runtime.cli.signal.signal", install_handler)
-    monkeypatch.setattr("stocker_runtime.cli._retention_work_expected", lambda _now_us: True)
+    monkeypatch.setattr(
+        "stocker_runtime.cli._run_full_off_session_maintenance", lambda _now_us: True
+    )
 
     def create_adapter(**_kwargs: object) -> _SignalMarketData:
         return _SignalMarketData(lambda signum, frame: handlers[signum](signum, frame))

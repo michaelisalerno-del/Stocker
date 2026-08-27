@@ -1524,6 +1524,10 @@ validated production configuration and frozen configuration identity. Missing,
 nonpositive, inconsistent, or non-24-hour production values fail preflight. This is an
 incompatible evidence-policy change: generation 26 remains fatal and immutable and
 rollout uses a new run ID. Later exact-config clean restarts retain same-run behavior.
+The persisted `runs.config_hash` is the canonical SHA-256 identity of the operator's
+base `config_hash`, all three fixed retention values, and identity format version 1.
+Therefore changing any approved evidence window rejects same-run restart without a
+schema change or silent mutation of prior run evidence.
 
 At the fatal timestamp, 24 hours retained 1,604,921 of 3,637,819 market events. The
 estimated retained database is 3.97 GB. The exact stopped-copy acceptance ceiling is
@@ -1579,18 +1583,18 @@ Affected modes are `prospective_record`, `shadow`, and read-only web health. Ris
 execution, reconciliation, accounts, credentials, paper/live trading, broker orders,
 order capability, and the exact XNYS regular-session definition are unchanged.
 
-The unchanged deterministic replay after the 24-hour pressure implementation passed
-both fixed scenarios on 2026-08-27:
+The unchanged deterministic replay after the 24-hour pressure implementation and
+reviewer fixes passed both fixed scenarios on 2026-08-27:
 
 | replay | presented/admitted/projected | loss/duplicates/order/provenance | p50 / p95 / p99 admission | throughput | max/final backlog | drain | heartbeat | WAL |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| 10 seconds | 2,022 / 2,022 / 2,022 | 0 / 0 / 0 / 0 | 0.159 / 0.294 / 8.538 ms | 452.33 callbacks/s | 219 / 0 | 0.126 s | 0 s | 4,622,672 B |
-| 60 seconds | 12,132 / 12,132 / 12,132 | 0 / 0 / 0 / 0 | 0.160 / 0.292 / 8.977 ms | 423.30 callbacks/s | 219 / 0 | 0.133 s | 0 s | 5,162,392 B |
+| 10 seconds | 2,022 / 2,022 / 2,022 | 0 / 0 / 0 / 0 | 0.180 / 0.432 / 9.446 ms | 405.85 callbacks/s | 219 / 0 | 0.145 s | 0 s | 4,622,672 B |
+| 60 seconds | 12,132 / 12,132 / 12,132 | 0 / 0 / 0 / 0 | 0.163 / 0.314 / 9.188 ms | 415.94 callbacks/s | 219 / 0 | 0.138 s | 0 s | 5,162,392 B |
 
 Both had zero escaped SQLite busy/locked errors, all 100 required feeds active and
 fresh, truthful readiness, and no acceptance failure. The 60-second run projected at
-1,549.67 callbacks/s, used 51,494,912 bytes of measured RSS growth, and completed its
-readiness query in 2.085 ms. The prior unchanged final baseline was 0.164/0.299/9.141
+1,516.60 callbacks/s, used 51,068,928 bytes of measured RSS growth, and completed its
+readiness query in 2.041 ms. The prior unchanged final baseline was 0.164/0.299/9.141
 ms p50/p95/p99 with the same 12,132 callbacks, 219/0 backlog, zero evidence violations,
 and 5,162,392-byte WAL. No ingestion optimization, queue, or storage-layer change was
 justified by this replay.

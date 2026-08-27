@@ -308,6 +308,24 @@ class RecorderConfig(BaseModel):
     idea_config: Path | None = None
     backup_directory: Path | None = None
 
+    @property
+    def frozen_config_hash(self) -> str:
+        """Bind the approved evidence policy into persisted run compatibility."""
+
+        identity = cast(
+            JsonValue,
+            {
+                "base_config_hash": self.config_hash,
+                "evidence_policy": {
+                    "callback_payload_retention_us": self.callback_payload_retention_us,
+                    "callback_tombstone_retention_us": self.callback_tombstone_retention_us,
+                    "raw_market_event_retention_us": self.raw_market_event_retention_us,
+                },
+                "identity_version": 1,
+            },
+        )
+        return hashlib.sha256(canonical_json_bytes(identity)).hexdigest()
+
     @model_validator(mode="after")
     def loopback_only(self) -> Self:
         try:
@@ -442,7 +460,7 @@ class Recorder:
         now_us: int,
         instruments: tuple[InstrumentSpec, ...],
         subscriptions: tuple[SubscriptionSpec, ...],
-        retention_schedule: Callable[[int], bool] | None = None,
+        full_maintenance_schedule: Callable[[int], bool] | None = None,
     ) -> RecorderState:
         """Acquire the writer generation, recover the inbox, then connect."""
 
@@ -451,7 +469,7 @@ class Recorder:
             instruments=instruments,
             subscriptions=subscriptions,
             allow_empty_test_inputs=False,
-            retention_schedule=retention_schedule,
+            full_maintenance_schedule=full_maintenance_schedule,
         )
 
     def _start_test_only_allow_empty_inputs(
@@ -468,7 +486,7 @@ class Recorder:
             instruments=instruments,
             subscriptions=subscriptions,
             allow_empty_test_inputs=True,
-            retention_schedule=None,
+            full_maintenance_schedule=None,
         )
 
     def _start_with_input_policy(
@@ -478,7 +496,7 @@ class Recorder:
         instruments: tuple[InstrumentSpec, ...],
         subscriptions: tuple[SubscriptionSpec, ...],
         allow_empty_test_inputs: bool,
-        retention_schedule: Callable[[int], bool] | None,
+        full_maintenance_schedule: Callable[[int], bool] | None,
     ) -> RecorderState:
         """Acquire ownership and start under the selected input-validation policy."""
 
@@ -494,7 +512,7 @@ class Recorder:
                 instruments=instruments,
                 subscriptions=subscriptions,
                 allow_empty_test_inputs=allow_empty_test_inputs,
-                retention_schedule=retention_schedule,
+                full_maintenance_schedule=full_maintenance_schedule,
             )
         except BaseException:
             if self.state is None:
@@ -510,7 +528,7 @@ class Recorder:
         instruments: tuple[InstrumentSpec, ...],
         subscriptions: tuple[SubscriptionSpec, ...],
         allow_empty_test_inputs: bool,
-        retention_schedule: Callable[[int], bool] | None,
+        full_maintenance_schedule: Callable[[int], bool] | None,
     ) -> RecorderState:
         """Start after the process-lifetime local writer lock is held."""
 
@@ -602,7 +620,7 @@ class Recorder:
                         self.config.run_id,
                         self.config.mode,
                         now_us,
-                        self.config.config_hash,
+                        self.config.frozen_config_hash,
                         self.config.git_commit,
                         (
                             "prospective_protected"
@@ -613,7 +631,7 @@ class Recorder:
                 )
             elif (
                 str(run["mode"]) != self.config.mode
-                or str(run["config_hash"]) != self.config.config_hash
+                or str(run["config_hash"]) != self.config.frozen_config_hash
             ):
                 raise RecorderFatalError("run mode or frozen configuration changed")
             elif str(run["status"]) == "fatal":
@@ -708,11 +726,13 @@ class Recorder:
         self._restore_dynamic_subscriptions(now_us=now_us)
         self.inbox.reclaim_expired_leases(now_us=now_us, authority=self._authority())
         self.drain(now_us=now_us)
-        maintenance_at_us = now_us if retention_schedule is None else time_ns() // 1_000
+        maintenance_at_us = now_us if full_maintenance_schedule is None else time_ns() // 1_000
         self.maintain(
             now_us=maintenance_at_us,
-            retention_work_expected=(
-                True if retention_schedule is None else retention_schedule(maintenance_at_us)
+            run_full_off_session_maintenance=(
+                True
+                if full_maintenance_schedule is None
+                else full_maintenance_schedule(maintenance_at_us)
             ),
         )
         cast(
@@ -4379,7 +4399,7 @@ class Recorder:
         self,
         *,
         now_us: int,
-        retention_work_expected: bool = True,
+        run_full_off_session_maintenance: bool = True,
     ) -> StorageCapState:
         """Run the bounded maintenance appropriate to the current session."""
 
@@ -4388,9 +4408,29 @@ class Recorder:
             "retention_maintenance", (0, 0)
         )
         if retention_failures and now_us < retention_retry_at_us:
-            cap_state, _database_bytes, _wal_bytes, required_action = RetentionManager(
-                self.config.database, self._retention_policy
-            ).measure_cap_state()
+            try:
+                cap_state, _database_bytes, _wal_bytes, required_action = RetentionManager(
+                    self.config.database, self._retention_policy
+                ).measure_cap_state()
+            except sqlite3.Error as error:
+                if self._hard_component_error(error):
+                    self._fatal("RETENTION_INVARIANT_FAILED", now_us)
+                    raise RecorderFatalError("retention invariant failed") from error
+                self._retention_maintenance_deferred = True
+                self._component_failure(
+                    "retention_maintenance",
+                    now_us=now_us,
+                    error_name=type(error).__name__,
+                )
+                return StorageCapState.NORMAL
+            except Exception as error:
+                self._retention_maintenance_deferred = True
+                self._component_failure(
+                    "retention_maintenance",
+                    now_us=now_us,
+                    error_name=type(error).__name__,
+                )
+                return StorageCapState.NORMAL
             if cap_state is StorageCapState.FATAL:
                 self._fatal(required_action or "STORAGE_CAP_FATAL", now_us)
                 raise RecorderFatalError(required_action or "storage cap closed admission")
@@ -4400,7 +4440,7 @@ class Recorder:
             return cap_state
         try:
             manager = RetentionManager(self.config.database, self._retention_policy)
-            if retention_work_expected:
+            if run_full_off_session_maintenance:
                 result = manager.run(
                     now_us=now_us,
                     precondition=lambda connection: CallbackInbox.verify_writer(
@@ -4451,7 +4491,7 @@ class Recorder:
                 incident_details=self._retention_incident_details(error),
             )
             return StorageCapState.NORMAL
-        if not retention_work_expected:
+        if not run_full_off_session_maintenance:
             published = self._publish_storage_measurement(
                 authority=authority,
                 now_us=now_us,

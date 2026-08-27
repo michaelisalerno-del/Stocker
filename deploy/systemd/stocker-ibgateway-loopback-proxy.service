@@ -1,6 +1,6 @@
 [Unit]
-Description=Loopback-only proxy to the explicitly configured IB Gateway socket
-Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
+Description=Loopback-only proxy to the market-data-only IB Gateway socket
+Documentation=file:/opt/stocker/v2-current/docs/operations/stocker-v2-cutover.md
 Requires=stocker-ibgateway.service
 After=stocker-ibgateway.service
 PartOf=stocker-ibgateway.service

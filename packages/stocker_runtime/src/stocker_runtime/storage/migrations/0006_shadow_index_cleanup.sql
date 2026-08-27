@@ -1,0 +1,2 @@
+DROP INDEX shadow_progress_schedule_idx;
+DROP INDEX market_events_shadow_scan_idx;

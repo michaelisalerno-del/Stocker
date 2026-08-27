@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "stocker"
 version = "0.1.0"
-description = "Trading research and execution foundation with strict research, backtest, risk, and execution boundaries."
+description = "Trading research and Stocker V2 runtime with strict authority boundaries."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "Proprietary" }
@@ -25,7 +25,7 @@ dependencies = [
 [project.scripts]
 stocker = "stocker_launcher:main"
 stocker-mcp = "stocker_launcher:mcp_main"
-stocker-prospective = "stocker_prospective.cli:app"
+stocker-runtime = "stocker_runtime.cli:app"
 
 [dependency-groups]
 research = [
@@ -46,18 +46,9 @@ research = [
   "backtesting>=0.6",
 ]
 server = [
-  "httpx>=0.27",
-  "joblib>=1.4",
-  "numpy>=1.26",
-  "pandas>=2.2",
-  "pyarrow>=16.0",
-  "scipy>=1.13",
-  "scikit-learn>=1.5",
-  "tenacity>=8.4",
-  "prometheus-client>=0.20",
   "fastapi>=0.111",
-  "uvicorn>=0.30",
   "pandas-market-calendars>=4.4",
+  "uvicorn>=0.30",
 ]
 dev = [
   "pytest>=8.2",
@@ -74,9 +65,9 @@ packages = [
   "packages/stocker_data/src/stocker_data",
   "packages/stocker_research/src/stocker_research",
   "packages/stocker_backtest/src/stocker_backtest",
-  "packages/stocker_execution/src/stocker_execution",
   "packages/stocker_mcp/src/stocker_mcp",
-  "packages/stocker_prospective/src/stocker_prospective",
+  "packages/stocker_runtime/src/stocker_runtime",
+  "packages/stocker_ideas/src/stocker_ideas",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
@@ -89,9 +80,9 @@ pythonpath = [
   "packages/stocker_data/src",
   "packages/stocker_research/src",
   "packages/stocker_backtest/src",
-  "packages/stocker_execution/src",
   "packages/stocker_mcp/src",
-  "packages/stocker_prospective/src",
+  "packages/stocker_runtime/src",
+  "packages/stocker_ideas/src",
 ]
 addopts = "-q"
 
@@ -103,9 +94,9 @@ src = [
   "packages/stocker_data/src",
   "packages/stocker_research/src",
   "packages/stocker_backtest/src",
-  "packages/stocker_execution/src",
   "packages/stocker_mcp/src",
-  "packages/stocker_prospective/src",
+  "packages/stocker_runtime/src",
+  "packages/stocker_ideas/src",
   "apps",
   "tests",
 ]
@@ -127,9 +118,9 @@ packages = [
   "stocker_data",
   "stocker_research",
   "stocker_backtest",
-  "stocker_execution",
   "stocker_mcp",
-  "stocker_prospective",
+  "stocker_runtime",
+  "stocker_ideas",
 ]
 ignore_missing_imports = true
 

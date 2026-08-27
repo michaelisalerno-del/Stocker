@@ -2,17 +2,15 @@
 
 ![CI](https://github.com/michaelisalerno-del/Stocker/actions/workflows/ci.yml/badge.svg)
 
-Stocker is a from-scratch trading research and execution foundation. The first goal is
-not to find an edge or place trades. The goal is to make bad ideas cheap to disprove on
-a Mac, while keeping any future server execution small, boring, and protected by hard
-risk boundaries.
+Stocker is a from-scratch trading research and prospective/shadow evaluation platform.
+Its first goal is not to find an edge or place trades. It makes bad ideas cheap to
+disprove while keeping future execution outside the current runtime.
 
 ## Repo Split
 
 - `apps/desktop/`: macOS research workspace for notebooks, data audits, baseline
   research, feature experiments, and backtest reports.
-- `apps/server/`: Linux execution workspace for dry runs, paper execution, future
-  broker adapters, state reconciliation, and monitoring hooks.
+- `apps/server/`: Linux workspace for the record-only/shadow prospective runtime.
 - `packages/stocker_core/`: config, logging, time, shared types, and CLI entry points.
 - `packages/stocker_data/`: local dataset paths, Parquet storage, validators, and
   exchange-calendar helpers.
@@ -21,11 +19,15 @@ risk boundaries.
   and research reports.
 - `packages/stocker_backtest/`: cost models and transparent vectorized/event-driven
   backtest interfaces.
-- `packages/stocker_execution/`: broker interface, orders, paper broker placeholder,
-  risk checks, and execution state.
-- `packages/stocker_prospective/`: isolated record-only/shadow evidence recorder,
-  immutable bundle contract, SQLite ledgers, optional market-data-only IBKR adapter,
-  deterministic replay, and read-only web application.
+- `packages/stocker_runtime/`: the V2 prospective-record/shadow recorder, generic idea
+  plugins, bounded SQLite read model, backups, one-way V1 importer, and read-only web
+  application.
+- `packages/stocker_research/legacy_prospective/`: frozen calculations retained only to
+  reproduce historical research; it has no recorder, database, broker, or web surface.
+
+V2 recorder restart, recovery, readiness, migration, and opening-replay operations are
+documented in
+[`docs/operations/stocker-v2-market-open-reliability.md`](docs/operations/stocker-v2-market-open-reliability.md).
 
 ## Python And Dependency Management
 
@@ -37,7 +39,7 @@ The repo uses `uv` with dependency groups:
 
 - Default project dependencies: core config, logging, CLI, and settings libraries.
 - `research`: heavy Mac research stack.
-- `server`: lightweight server execution stack.
+- `server`: lightweight prospective server stack.
 - `dev`: tests, linting, typing, and pre-commit.
 
 ## Bootstrap On Mac
@@ -83,21 +85,23 @@ The server bootstrap installs only core and `server` dependency groups:
 
 ```bash
 uv sync --locked --no-editable --no-default-groups --group server
-uv run --no-sync stocker server dry-run --config configs/server.example.yaml
 ```
 
-The dedicated prospective recorder has a separate, no-order process boundary:
+The V2 recorder and web application have separate least-privilege, no-order process
+boundaries:
 
 ```bash
-export STOCKER_GIT_COMMIT="$(git rev-parse HEAD)"
-uv run --no-sync stocker-prospective replay run \
-  --config configs/prospective/replay.example.yaml
-uv run --no-sync stocker-prospective web run \
-  --config configs/prospective/replay.example.yaml
+uv run --no-sync stocker-runtime recorder run \
+  --config configs/runtime/recorder.example.json \
+  --inputs configs/runtime/market-data.example.json
+uv run --no-sync stocker-runtime web run \
+  --config configs/runtime/web.example.json
 ```
 
-See [the prospective architecture](docs/architecture/prospective-evidence-recorder.md)
-and [dedicated-server runbook](docs/operations/prospective-server-runbook.md).
+The stopped V1 database can be imported once into a new V2 target with
+`stocker-runtime legacy import`; it is never modified in place. See the
+[platform architecture](docs/architecture/stocker-platform-purpose.md) and
+[V2 cutover runbook](docs/operations/stocker-v2-cutover.md).
 
 ## Tests And Checks
 
@@ -117,7 +121,7 @@ bash scripts/check.sh
 - No strategy optimization.
 - No remote deployment automation; example hardened systemd units are provided for
   explicit operator installation.
-- No event-driven accounting engine beyond an explicit placeholder.
+- No portfolio, risk-approval, order-intent, paper-execution, or live-execution runtime.
 
 ## Data Pipeline
 

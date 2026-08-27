@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from stocker_prospective.opening_market_transition_v1 import (
+from stocker_research.legacy_prospective.opening_market_transition_v1 import (
     OpeningTransitionThresholdManifestV1,
 )
 

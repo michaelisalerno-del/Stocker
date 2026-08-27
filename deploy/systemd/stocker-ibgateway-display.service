@@ -1,6 +1,6 @@
 [Unit]
-Description=Private X11 display for the manually authenticated IB Gateway
-Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
+Description=Private X11 display for the market-data-only IB Gateway
+Documentation=file:/opt/stocker/v2-current/docs/operations/stocker-v2-cutover.md
 PartOf=stocker-ibgateway.service
 ConditionPathExists=/var/lib/ibgateway/.Xauthority
 StartLimitIntervalSec=300

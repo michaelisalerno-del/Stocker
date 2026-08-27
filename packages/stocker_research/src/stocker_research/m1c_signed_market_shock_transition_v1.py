@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from stocker_prospective.signed_market_shock_v1 import (
+from stocker_research.legacy_prospective.signed_market_shock_v1 import (
     FROZEN_SHOCK_CHECKPOINTS_V1,
     CheckpointShockThresholdsV1,
     assert_unprotected_sessions_v1,
@@ -98,10 +98,12 @@ def freeze_checkpoint_thresholds_v1(
         ]
         complete_rows = group["complete_v1"].eq(True)  # noqa: E712
         finite = np.isfinite(
-            group.loc[:, predictor_columns].apply(
+            group.loc[:, predictor_columns]
+            .apply(
                 pd.to_numeric,
                 errors="coerce",
-            ).to_numpy(float)
+            )
+            .to_numpy(float)
         ).all(axis=1)
         group = group.loc[complete_rows & finite]
         values = {column: _finite_series(group, column) for column in predictor_columns}
@@ -191,9 +193,7 @@ def freeze_response_quintiles_v1(
             q80_v1=None,
             support_v1=support,
             calibration_complete_v1=False,
-            calibration_missing_reason_v1=(
-                "no_valid_predictor_rows"
-            ),
+            calibration_missing_reason_v1=("no_valid_predictor_rows"),
         )
     observed = values.to_numpy(float)
     boundaries = np.quantile(
@@ -218,11 +218,7 @@ def assign_response_quintile_v1(
 ) -> ResponseQuintileV1:
     """Assign one score with inclusive upper boundaries and no refitting."""
 
-    if (
-        value is None
-        or not math.isfinite(float(value))
-        or not frozen.calibration_complete_v1
-    ):
+    if value is None or not math.isfinite(float(value)) or not frozen.calibration_complete_v1:
         return "UNKNOWN_INCOMPLETE"
     boundaries = (frozen.q20_v1, frozen.q40_v1, frozen.q60_v1, frozen.q80_v1)
     if any(boundary is None for boundary in boundaries):

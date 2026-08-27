@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from stocker_prospective.signed_market_shock_v1 import (
+from stocker_research.legacy_prospective.signed_market_shock_v1 import (
     CheckpointShockThresholdsV1,
     MarketShockBarV1,
     MarketShockStateResultV1,

@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Bounded read-only monitoring for Stocker prospective recording and virtual shadow evidence."
+    />
+    <title>Stocker V2 — Observation Ledger</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to current view</a>
+    <div class="safety-banner" role="status">
+      PROSPECTIVE / SHADOW ONLY — NO APPROVAL OR EXECUTION
+    </div>
+
+    <header class="masthead">
+      <div class="identity">
+        <p class="coordinate">STOCKER / V2 / READ MODEL</p>
+        <h1>Observation <em>ledger</em></h1>
+        <p class="lede">
+          Recorder health, generic idea evidence, and virtual outcomes—kept inside one
+          authority-free interface.
+        </p>
+      </div>
+      <div class="header-actions">
+        <div class="read-state" aria-live="polite">
+          <span class="status-lamp" aria-hidden="true"></span>
+          <span id="sync-status">Awaiting first read</span>
+        </div>
+        <button id="refresh" class="text-button" type="button">Refresh</button>
+        <button
+          id="diagnostics-open"
+          class="diagnostics-button"
+          type="button"
+          aria-haspopup="dialog"
+        >
+          Diagnostics
+        </button>
+      </div>
+    </header>
+
+    <div class="view-rail">
+      <nav aria-label="Primary views" role="tablist">
+        <button
+          class="view-tab is-active"
+          id="tab-live"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="view-live"
+          data-view="live"
+        >Live</button>
+        <button
+          class="view-tab"
+          id="tab-ideas"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="view-ideas"
+          data-view="ideas"
+          tabindex="-1"
+        >Ideas</button>
+        <button
+          class="view-tab"
+          id="tab-results"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="view-results"
+          data-view="results"
+          tabindex="-1"
+        >Results</button>
+      </nav>
+      <p id="mode-note">Read-only current projections</p>
+    </div>
+
+    <main id="main" tabindex="-1">
+      <section
+        id="view-live"
+        class="view-panel is-active"
+        role="tabpanel"
+        aria-labelledby="tab-live"
+        tabindex="0"
+      >
+        <header class="view-heading">
+          <div>
+            <p class="eyebrow">01 / Current recorder surface</p>
+            <h2>Live</h2>
+          </div>
+          <p>
+            Lifecycle, IBKR market-data connectivity, freshness, gaps, active feeds, and
+            latest generic instrument values.
+          </p>
+        </header>
+        <div id="live-summary" class="metric-grid" aria-live="polite"></div>
+        <div class="split-grid">
+          <article class="ledger-card">
+            <header><span>FEEDS</span><h3>Active subscriptions</h3></header>
+            <div id="live-feeds" class="data-region"></div>
+          </article>
+          <article class="ledger-card">
+            <header><span>STORE</span><h3>Bounded storage state</h3></header>
+            <div id="live-storage" class="data-region"></div>
+          </article>
+        </div>
+        <article class="ledger-card wide-card">
+          <header><span>LATEST</span><h3>Generic instrument values</h3></header>
+          <div id="live-instruments" class="data-region table-scroll"></div>
+        </article>
+      </section>
+
+      <section
+        id="view-ideas"
+        class="view-panel"
+        role="tabpanel"
+        aria-labelledby="tab-ideas"
+        tabindex="0"
+        hidden
+      >
+        <header class="view-heading">
+          <div>
+            <p class="eyebrow">02 / Generic plugin evidence</p>
+            <h2>Ideas</h2>
+          </div>
+          <p>
+            Discovered plugins and activated instances share one stream of observations,
+            signals, proposed positions, and unapproved proposed trades.
+          </p>
+        </header>
+        <div id="plugin-catalog" class="plugin-strip" aria-label="Discovered plugins"></div>
+        <div class="workspace-grid">
+          <article class="ledger-card list-card">
+            <header><span>INSTANCES</span><h3>Health and activation</h3></header>
+            <div id="idea-instances" class="data-region"></div>
+          </article>
+          <article class="ledger-card detail-card">
+            <header><span>STREAM</span><h3>Bounded generic detail</h3></header>
+            <div id="idea-detail" class="data-region" aria-live="polite">
+              <p class="empty-state">Select an activated instance to inspect its generic output stream.</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section
+        id="view-results"
+        class="view-panel"
+        role="tabpanel"
+        aria-labelledby="tab-results"
+        tabindex="0"
+        hidden
+      >
+        <header class="view-heading">
+          <div>
+            <p class="eyebrow">03 / Shadow evidence only</p>
+            <h2>Results</h2>
+          </div>
+          <p>Open, closed, incomplete, and invalid virtual positions with exact provenance.</p>
+        </header>
+        <div class="virtual-warning" role="note">
+          virtual only; no broker orders, fills, or positions
+        </div>
+        <div id="result-aggregates" class="metric-grid"></div>
+        <div class="workspace-grid">
+          <article class="ledger-card list-card">
+            <header><span>POSITIONS</span><h3>Shadow outcomes</h3></header>
+            <div id="result-list" class="data-region"></div>
+          </article>
+          <article class="ledger-card detail-card">
+            <header><span>PROVENANCE</span><h3>Virtual position detail</h3></header>
+            <div id="result-detail" class="data-region" aria-live="polite">
+              <p class="empty-state">Select a virtual position to inspect proposal and market-event references.</p>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="diagnostics-drawer" aria-labelledby="diagnostics-title">
+      <div class="drawer-shell">
+        <header>
+          <div>
+            <p class="eyebrow">System detail / not a primary view</p>
+            <h2 id="diagnostics-title">Diagnostics</h2>
+          </div>
+          <button id="diagnostics-close" class="icon-button" type="button" aria-label="Close diagnostics">×</button>
+        </header>
+        <div id="diagnostics-summary" class="metric-grid"></div>
+        <div class="diagnostic-grid">
+          <article><h3>Incidents</h3><div id="diagnostic-incidents"></div></article>
+          <article><h3>Gaps</h3><div id="diagnostic-gaps"></div></article>
+          <article><h3>Subscriptions</h3><div id="diagnostic-subscriptions"></div></article>
+          <article><h3>Backups</h3><div id="diagnostic-backups"></div></article>
+          <article><h3>Hashes</h3><div id="diagnostic-hashes"></div></article>
+          <article><h3>Retention</h3><div id="diagnostic-retention"></div></article>
+        </div>
+      </div>
+    </dialog>
+
+    <footer>
+      <span id="build-label">Build pending</span>
+      <p>Read-only projections. Proposals remain unapproved; shadow evidence remains virtual.</p>
+    </footer>
+    <script src="/assets/app.js" type="module"></script>
+  </body>
+</html>

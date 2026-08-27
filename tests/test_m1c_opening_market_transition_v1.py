@@ -5,14 +5,14 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from stocker_prospective.opening_market_transition_v1 import (
+from stocker_research.legacy_prospective.opening_market_transition_v1 import (
     EXPECTED_OPENING_BAR_COUNT_V1,
     OpeningTransitionThresholdsV1,
     calculate_opening_preentry_window_v1,
     calculate_stock_opening_response_v1,
     classify_opening_market_transition_v1,
 )
-from stocker_prospective.signed_market_shock_v1 import (
+from stocker_research.legacy_prospective.signed_market_shock_v1 import (
     MarketShockBarV1,
     frozen_material_move_v1,
     partition_material_endpoint_v1,

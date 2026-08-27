@@ -1,6 +1,6 @@
 [Unit]
-Description=Verify the IB Gateway loopback and firewall boundary
-Documentation=file:/opt/stocker/current/docs/operations/prospective-server-runbook.md
+Description=Verify the market-data-only IB Gateway loopback and firewall boundary
+Documentation=file:/opt/stocker/v2-current/docs/operations/stocker-v2-cutover.md
 Requires=ufw.service
 After=ufw.service
 Before=stocker-ibgateway-loopback-proxy.socket stocker-ibgateway.service

@@ -6,22 +6,18 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from stocker_core.config import (
-    EODHDConfig,
-    ResearchConfig,
-    load_research_config,
-    load_server_config,
-)
+from stocker_core.config import EODHDConfig, ResearchConfig, load_research_config
 
 console = Console()
-app = typer.Typer(no_args_is_help=True, help="Stocker research and execution utilities.")
+app = typer.Typer(
+    no_args_is_help=True,
+    help="Stocker research and prospective evaluation utilities.",
+)
 data_app = typer.Typer(no_args_is_help=True, help="Data utilities.")
 research_app = typer.Typer(no_args_is_help=True, help="Research utilities.")
-server_app = typer.Typer(no_args_is_help=True, help="Server utilities.")
 universe_app = typer.Typer(no_args_is_help=True, help="Universe data-management utilities.")
 app.add_typer(data_app, name="data")
 app.add_typer(research_app, name="research")
-app.add_typer(server_app, name="server")
 app.add_typer(universe_app, name="universe")
 
 DEFAULT_RESEARCH_CONFIG = Path("configs/research.example.yaml")
@@ -4334,22 +4330,6 @@ def research_exhaustion_extension_exit_replay(
             "trades_csv_path": str(result.trades_csv_path),
             "decision": result.decision,
             "trade_count": result.trade_count,
-        }
-    )
-
-
-@server_app.command("dry-run")
-def server_dry_run(
-    config: Annotated[Path, typer.Option("--config", "-c")] = Path("configs/server.example.yaml"),
-) -> None:
-    """Load server config without connecting to a broker."""
-
-    loaded = load_server_config(config)
-    console.print(
-        {
-            "mode": loaded.server.mode,
-            "broker": loaded.server.broker.provider,
-            "trading_enabled": loaded.risk.trading_enabled,
         }
     )
 

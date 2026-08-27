@@ -1,0 +1,500 @@
+"""Local single-writer ownership and audited fatal-generation recovery."""
+
+from __future__ import annotations
+
+import fcntl
+import hashlib
+import json
+import os
+import stat
+import time
+from collections.abc import Callable
+from contextlib import suppress
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+from stocker_runtime.storage import RetentionManager, RetentionPolicy, connect_v2, verify_database
+from stocker_runtime.storage.retention import (
+    PayloadCompactionCommittedError,
+    passive_wal_checkpoint_complete,
+)
+
+OWNERSHIP_PROTOCOL = "local_flock_v1"
+RECOVERABLE_FATAL_CODES = frozenset(
+    {
+        # This legacy boundary occurs only after durable raw admission. Phase 3 replaces
+        # it with narrow derived-component incidents; retained callbacks can be replayed.
+        "POST_ADMISSION_PRESERVATION_FAILED",
+        # A WAL hard-cap stop is recoverable only after the local lock, integrity,
+        # identity, writability and post-checkpoint cap checks below all pass.
+        "WAL_CAP_FATAL",
+    }
+)
+MAX_PAYLOAD_DRAIN_PASSES = 1_000
+MAX_PAYLOAD_DRAIN_WALL_SECONDS = 2_700
+MAX_GRANULAR_RECLAIM_PASSES = 5_000
+MAX_GRANULAR_RECLAIM_WALL_SECONDS = 7_200
+MAX_RECLAIMED_DATABASE_BYTES = 4_461_774_842
+
+
+class LocalWriterLockError(RuntimeError):
+    """The local operating-system writer lock cannot be acquired safely."""
+
+
+class PayloadDrainIncompleteError(RuntimeError):
+    """A bounded offline payload drain ended before a stable frontier."""
+
+
+class GranularEvidenceReclaimIncompleteError(RuntimeError):
+    """A bounded offline 24-hour evidence reclaim did not produce an eligible copy."""
+
+
+@dataclass(frozen=True)
+class PayloadDrainResult:
+    """Bounded evidence from one completed offline payload drain."""
+
+    fixed_now_us: int
+    passes: int
+    payloads_compacted: int
+    consecutive_zero_passes: int
+    elapsed_ms: int
+    batch_rows_limit: int
+    max_passes: int
+    max_wall_seconds: int
+
+
+@dataclass(frozen=True)
+class GranularEvidenceReclaimResult:
+    """Auditable outcome of one stopped-database 24-hour evidence reclaim."""
+
+    fixed_now_us: int
+    passes: int
+    payloads_compacted: int
+    raw_market_events_deleted: int
+    callback_tombstones_deleted: int
+    consecutive_zero_passes: int
+    elapsed_ms: int
+    batch_rows_limit: int
+    max_passes: int
+    max_wall_seconds: int
+    output: Path
+    output_database_bytes: int
+    maximum_output_database_bytes: int
+
+
+@dataclass
+class LocalWriterLock:
+    """A nonblocking process-lifetime kernel lock beside the operational database."""
+
+    path: Path
+    _descriptor: int | None = None
+
+    @classmethod
+    def for_database(cls, database: str | Path) -> LocalWriterLock:
+        path = Path(database).resolve(strict=False)
+        return cls(path.with_name(f"{path.name}.writer.lock"))
+
+    @property
+    def held(self) -> bool:
+        return self._descriptor is not None
+
+    def acquire(self) -> None:
+        if self._descriptor is not None:
+            raise LocalWriterLockError("local writer lock is already held by this recorder")
+        flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(self.path, flags, 0o640)
+        except OSError as error:
+            raise LocalWriterLockError(
+                f"local writer lock cannot be opened: {self.path}"
+            ) from error
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                raise LocalWriterLockError("local writer lock must be one regular file")
+            os.fchmod(descriptor, 0o640)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise LocalWriterLockError("local authoritative writer lock is held") from error
+            self._descriptor = descriptor
+        except BaseException:
+            os.close(descriptor)
+            raise
+
+    def verify_held(self) -> None:
+        descriptor = self._descriptor
+        if descriptor is None:
+            raise LocalWriterLockError("local authoritative writer lock is not held")
+        try:
+            metadata = os.fstat(descriptor)
+        except OSError as error:
+            raise LocalWriterLockError("local authoritative writer lock was lost") from error
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise LocalWriterLockError("local authoritative writer lock identity changed")
+
+    def release(self) -> None:
+        descriptor, self._descriptor = self._descriptor, None
+        if descriptor is None:
+            return
+        with suppress(OSError):
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+    def __enter__(self) -> LocalWriterLock:
+        self.acquire()
+        return self
+
+    def __exit__(self, *_error: object) -> None:
+        self.release()
+
+
+def drain_callback_payloads(
+    *,
+    database: Path,
+    now_us: int,
+    max_passes: int,
+    max_wall_seconds: int,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> PayloadDrainResult:
+    """Drain only proof-authorized callback payloads under one local writer lock."""
+
+    if now_us < 0:
+        raise ValueError("payload drain time cannot be negative")
+    if not 2 <= max_passes <= MAX_PAYLOAD_DRAIN_PASSES:
+        raise ValueError(
+            f"payload drain max_passes must be between 2 and {MAX_PAYLOAD_DRAIN_PASSES}"
+        )
+    if not 1 <= max_wall_seconds <= MAX_PAYLOAD_DRAIN_WALL_SECONDS:
+        raise ValueError(
+            f"payload drain max_wall_seconds must be between 1 and {MAX_PAYLOAD_DRAIN_WALL_SECONDS}"
+        )
+
+    manager = RetentionManager(database)
+    started = monotonic()
+    total_compacted = 0
+    zero_passes = 0
+    lock = LocalWriterLock.for_database(database)
+    with lock:
+        for pass_number in range(1, max_passes + 1):
+            if monotonic() - started >= max_wall_seconds:
+                raise PayloadDrainIncompleteError(
+                    "payload drain wall-time limit reached after "
+                    f"{pass_number - 1} passes and {total_compacted} committed payloads"
+                )
+            try:
+                compacted = manager.compact_payloads_only(
+                    now_us=now_us,
+                    precondition=lambda _connection: lock.verify_held(),
+                )
+            except PayloadCompactionCommittedError as error:
+                total_compacted += error.compacted
+                raise PayloadDrainIncompleteError(
+                    "payload drain failed after pass "
+                    f"{pass_number} committed; {total_compacted} payloads are committed: {error}"
+                ) from error
+            except Exception as error:
+                raise PayloadDrainIncompleteError(
+                    "payload drain failed during pass "
+                    f"{pass_number} after {pass_number - 1} completed passes and "
+                    f"{total_compacted} committed payloads: {type(error).__name__}: {error}"
+                ) from error
+            if not 0 <= compacted <= manager.policy.maintenance_batch_rows:
+                raise PayloadDrainIncompleteError(
+                    "payload drain returned an invalid compacted-row count after "
+                    f"{pass_number} passes and {total_compacted} committed payloads"
+                )
+            total_compacted += compacted
+            zero_passes = zero_passes + 1 if compacted == 0 else 0
+            elapsed = monotonic() - started
+            if zero_passes == 2:
+                return PayloadDrainResult(
+                    fixed_now_us=now_us,
+                    passes=pass_number,
+                    payloads_compacted=total_compacted,
+                    consecutive_zero_passes=zero_passes,
+                    elapsed_ms=max(0, round(elapsed * 1_000)),
+                    batch_rows_limit=manager.policy.maintenance_batch_rows,
+                    max_passes=max_passes,
+                    max_wall_seconds=max_wall_seconds,
+                )
+            if elapsed >= max_wall_seconds:
+                raise PayloadDrainIncompleteError(
+                    "payload drain wall-time limit reached after "
+                    f"{pass_number} passes and {total_compacted} committed payloads"
+                )
+
+    raise PayloadDrainIncompleteError(
+        "payload drain pass limit reached after "
+        f"{max_passes} passes and {total_compacted} committed payloads"
+    )
+
+
+def reclaim_granular_evidence(
+    *,
+    database: Path,
+    output: Path,
+    now_us: int,
+    policy: RetentionPolicy | None = None,
+    max_passes: int = MAX_GRANULAR_RECLAIM_PASSES,
+    max_wall_seconds: int = MAX_GRANULAR_RECLAIM_WALL_SECONDS,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> GranularEvidenceReclaimResult:
+    """Apply the fixed 24-hour policy and build a verified compact replacement copy."""
+
+    if now_us < 0:
+        raise ValueError("granular evidence reclaim time cannot be negative")
+    if not 2 <= max_passes <= MAX_GRANULAR_RECLAIM_PASSES:
+        raise ValueError(
+            "granular evidence reclaim max_passes must be between 2 and "
+            f"{MAX_GRANULAR_RECLAIM_PASSES}"
+        )
+    if not 1 <= max_wall_seconds <= MAX_GRANULAR_RECLAIM_WALL_SECONDS:
+        raise ValueError(
+            "granular evidence reclaim max_wall_seconds must be between 1 and "
+            f"{MAX_GRANULAR_RECLAIM_WALL_SECONDS}"
+        )
+    database = database.resolve(strict=True)
+    output = output.resolve(strict=False)
+    if output == database:
+        raise ValueError("granular evidence reclaim output must differ from the source database")
+    if output.exists():
+        raise ValueError("granular evidence reclaim output already exists")
+    if not output.parent.is_dir():
+        raise ValueError("granular evidence reclaim output directory does not exist")
+
+    manager = RetentionManager(database, policy or RetentionPolicy())
+    started = monotonic()
+    deadline = started + max_wall_seconds
+    payloads_compacted = 0
+    raw_market_events_deleted = 0
+    callback_tombstones_deleted = 0
+    zero_passes = 0
+    completed_passes = 0
+    lock = LocalWriterLock.for_database(database)
+
+    def progress_summary() -> str:
+        return (
+            f"after {completed_passes} passes; committed payloads={payloads_compacted}, "
+            f"raw_market_events={raw_market_events_deleted}, "
+            f"callback_tombstones={callback_tombstones_deleted}"
+        )
+
+    with lock:
+        for pass_number in range(1, max_passes + 1):
+            if monotonic() >= deadline:
+                raise GranularEvidenceReclaimIncompleteError(
+                    "granular evidence reclaim wall-time limit reached " + progress_summary()
+                )
+            try:
+                result = manager.run_regular_session_pressure(
+                    now_us=now_us,
+                    precondition=lambda _connection: lock.verify_held(),
+                )
+            except Exception as error:
+                raise GranularEvidenceReclaimIncompleteError(
+                    "granular evidence reclaim failed during pass "
+                    f"{pass_number} {progress_summary()}: {type(error).__name__}: {error}"
+                ) from error
+            counts = (
+                result.payloads_compacted,
+                result.raw_market_events_deleted,
+                result.callback_tombstones_deleted,
+            )
+            if any(not 0 <= count <= manager.policy.maintenance_batch_rows for count in counts):
+                raise GranularEvidenceReclaimIncompleteError(
+                    "granular evidence reclaim returned an invalid row count " + progress_summary()
+                )
+            completed_passes = pass_number
+            payloads_compacted += result.payloads_compacted
+            raw_market_events_deleted += result.raw_market_events_deleted
+            callback_tombstones_deleted += result.callback_tombstones_deleted
+            zero_passes = zero_passes + 1 if counts == (0, 0, 0) else 0
+            if zero_passes == 2:
+                break
+        else:
+            raise GranularEvidenceReclaimIncompleteError(
+                "granular evidence reclaim pass limit reached " + progress_summary()
+            )
+
+        lock.verify_held()
+        connection = connect_v2(database)
+        vacuum_deadline_hit = False
+
+        def vacuum_progress() -> int:
+            nonlocal vacuum_deadline_hit
+            vacuum_deadline_hit = monotonic() >= deadline
+            return 1 if vacuum_deadline_hit else 0
+
+        try:
+            connection.set_progress_handler(vacuum_progress, 1_000)
+            connection.execute("VACUUM INTO ?", (str(output),))
+        except Exception as error:
+            if output.exists():
+                output.unlink()
+            reason = "wall-time limit reached" if vacuum_deadline_hit else "vacuum failed"
+            raise GranularEvidenceReclaimIncompleteError(
+                f"granular evidence reclaim {reason} {progress_summary()}: "
+                f"{type(error).__name__}: {error}"
+            ) from error
+        finally:
+            connection.set_progress_handler(None, 0)
+            connection.close()
+        lock.verify_held()
+        try:
+            verify_database(output)
+            output_database_bytes = output.stat().st_size
+        except Exception as error:
+            raise GranularEvidenceReclaimIncompleteError(
+                "granular evidence reclaim output verification failed "
+                f"{progress_summary()}: {type(error).__name__}: {error}"
+            ) from error
+        if output_database_bytes > MAX_RECLAIMED_DATABASE_BYTES:
+            raise GranularEvidenceReclaimIncompleteError(
+                "granular evidence reclaim output exceeds the accepted capacity ceiling: "
+                f"actual={output_database_bytes}; maximum={MAX_RECLAIMED_DATABASE_BYTES}; "
+                + progress_summary()
+            )
+
+    return GranularEvidenceReclaimResult(
+        fixed_now_us=now_us,
+        passes=completed_passes,
+        payloads_compacted=payloads_compacted,
+        raw_market_events_deleted=raw_market_events_deleted,
+        callback_tombstones_deleted=callback_tombstones_deleted,
+        consecutive_zero_passes=zero_passes,
+        elapsed_ms=max(0, round((monotonic() - started) * 1_000)),
+        batch_rows_limit=manager.policy.maintenance_batch_rows,
+        max_passes=max_passes,
+        max_wall_seconds=max_wall_seconds,
+        output=output,
+        output_database_bytes=output_database_bytes,
+        maximum_output_database_bytes=MAX_RECLAIMED_DATABASE_BYTES,
+    )
+
+
+def recover_fatal_generation(
+    *,
+    database: Path,
+    run_id: str,
+    generation: int,
+    mode: Literal["prospective_record", "shadow"],
+    config_hash: str,
+    input_hash: str,
+    fatal_code: str,
+    operator: str,
+    reason: str,
+    authorized_at_us: int,
+) -> None:
+    """Authorize one eligible fatal generation for same-lineage restart."""
+
+    if generation < 1 or authorized_at_us < 0:
+        raise ValueError("fatal recovery generation must be positive and time nonnegative")
+    if len(input_hash) != 64 or any(
+        character not in "0123456789abcdef" for character in input_hash
+    ):
+        raise ValueError("fatal recovery input hash must be 64 lowercase hexadecimal characters")
+    if not operator.strip() or len(operator) > 256:
+        raise ValueError("fatal recovery operator must be bounded non-empty text")
+    if not reason.strip() or len(reason) > 1_024:
+        raise ValueError("fatal recovery reason must be bounded non-empty text")
+    if fatal_code not in RECOVERABLE_FATAL_CODES:
+        raise LocalWriterLockError(f"fatal code is not recoverable: {fatal_code}")
+
+    lock = LocalWriterLock.for_database(database)
+    lock.acquire()
+    try:
+        verify_database(database)
+        with connect_v2(database) as connection:
+            if not passive_wal_checkpoint_complete(connection):
+                raise LocalWriterLockError("fatal recovery blocked by an incomplete WAL checkpoint")
+            page_count = int(connection.execute("PRAGMA page_count").fetchone()[0])
+            page_size = int(connection.execute("PRAGMA page_size").fetchone()[0])
+            wal_path = Path(f"{Path(database).resolve(strict=False)}-wal")
+            wal_bytes = wal_path.stat().st_size if wal_path.exists() else 0
+            policy = RetentionPolicy()
+            if page_count * page_size >= policy.database_cap_bytes:
+                raise LocalWriterLockError("fatal recovery blocked by the database hard cap")
+            if wal_bytes >= policy.wal_cap_bytes:
+                raise LocalWriterLockError("fatal recovery blocked by the WAL hard cap")
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT run.mode, run.config_hash, run.status, state.recorder_generation, "
+                "state.lifecycle, state.reason, generation.termination_code, "
+                "generation.ended_at_us, generation.input_hash, "
+                "generation.fatal_recovery_authorized_at_us "
+                "FROM runs run JOIN runtime_state state ON state.run_id=run.run_id "
+                "JOIN recorder_generations generation ON generation.run_id=state.run_id "
+                "AND generation.generation=state.recorder_generation "
+                "WHERE run.run_id=?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise LocalWriterLockError("fatal recovery run is unavailable")
+            if str(row["mode"]) != mode or str(row["config_hash"]) != config_hash:
+                raise LocalWriterLockError("fatal recovery run identity is incompatible")
+            if row["input_hash"] is None:
+                raise LocalWriterLockError(
+                    "fatal generation predates frozen input identity and cannot be recovered"
+                )
+            if str(row["input_hash"]) != input_hash:
+                raise LocalWriterLockError("fatal recovery market-data input is incompatible")
+            if int(row["recorder_generation"]) != generation:
+                raise LocalWriterLockError("fatal recovery generation is not current")
+            if (
+                str(row["status"]) != "fatal"
+                or str(row["lifecycle"]) != "fatal"
+                or str(row["reason"]) != fatal_code
+                or str(row["termination_code"]) != fatal_code
+                or row["ended_at_us"] is None
+            ):
+                raise LocalWriterLockError("fatal recovery evidence does not match exactly")
+            if row["fatal_recovery_authorized_at_us"] is not None:
+                raise LocalWriterLockError("fatal generation recovery is already authorized")
+            connection.execute(
+                "UPDATE recorder_generations SET fatal_recovery_authorized_at_us=?, "
+                "fatal_recovery_operator=?, fatal_recovery_reason=?, recovered_fatal_code=? "
+                "WHERE run_id=? AND generation=?",
+                (
+                    authorized_at_us,
+                    operator.strip(),
+                    reason.strip(),
+                    fatal_code,
+                    run_id,
+                    generation,
+                ),
+            )
+            details = json.dumps(
+                {
+                    "fatal_code": fatal_code,
+                    "generation": generation,
+                    "operator": operator.strip(),
+                    "reason": reason.strip(),
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            incident_id = hashlib.sha256(
+                f"{run_id}|{generation}|FATAL_GENERATION_RECOVERY_AUTHORIZED".encode()
+            ).hexdigest()
+            connection.execute(
+                "INSERT INTO incidents(incident_id, run_id, scope, severity, code, "
+                "opened_at_us, details_json) VALUES (?, ?, 'recorder', 'info', "
+                "'FATAL_GENERATION_RECOVERY_AUTHORIZED', ?, ?)",
+                (incident_id, run_id, authorized_at_us, details),
+            )
+            connection.execute(
+                "UPDATE runs SET status='running', ended_at_us=NULL WHERE run_id=?",
+                (run_id,),
+            )
+            connection.execute(
+                "UPDATE runtime_state SET lifecycle='stopped', "
+                "reason='FATAL_GENERATION_RECOVERY_AUTHORIZED', "
+                "connection_state='disconnected', process_heartbeat_at_us=? WHERE run_id=? "
+                "AND recorder_generation=?",
+                (authorized_at_us, run_id, generation),
+            )
+            connection.commit()
+    finally:
+        lock.release()

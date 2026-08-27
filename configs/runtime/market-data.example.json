@@ -1,0 +1,32 @@
+{
+  "instruments": [
+    {
+      "instrument_id": "EXAMPLE_ONLY_REPLACE_WITH_VALIDATED_UNIVERSE",
+      "ibkr_con_id": 265598,
+      "kind": "stock",
+      "symbol": "AAPL",
+      "exchange": "SMART",
+      "currency": "USD"
+    }
+  ],
+  "subscriptions": [
+    {
+      "name": "EXAMPLE_ONLY_REQUIRED_QUOTES",
+      "instrument_id": "EXAMPLE_ONLY_REPLACE_WITH_VALIDATED_UNIVERSE",
+      "feed_kind": "quotes",
+      "request_id": 1001,
+      "continuity_required": true,
+      "optional": false,
+      "stale_after_us": 15000000
+    },
+    {
+      "name": "EXAMPLE_ONLY_OPTIONAL_BARS",
+      "instrument_id": "EXAMPLE_ONLY_REPLACE_WITH_VALIDATED_UNIVERSE",
+      "feed_kind": "bars",
+      "request_id": 1002,
+      "continuity_required": false,
+      "optional": true,
+      "stale_after_us": 20000000
+    }
+  ]
+}

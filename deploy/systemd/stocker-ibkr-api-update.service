@@ -6,10 +6,10 @@ ConditionPathExists=/var/lib/stocker/ibkr-api/active-provenance.json
 
 [Service]
 Type=oneshot
-User=stocker
-Group=stocker
-WorkingDirectory=/opt/stocker/current
-ExecStart=/opt/stocker/current/.venv/bin/stocker-prospective ibkr-api check-update --provenance /var/lib/stocker/ibkr-api/active-provenance.json --output /var/lib/stocker/ibkr-api/status/update-status.json
+User=stocker-recorder
+Group=stocker-readers
+WorkingDirectory=/opt/stocker/v2-current
+ExecStart=/opt/stocker/v2-current/.venv/bin/stocker-runtime ibkr-api check-update --provenance /var/lib/stocker/ibkr-api/active-provenance.json --output /var/lib/stocker/ibkr-api/status/update-status.json
 UMask=0027
 NoNewPrivileges=true
 PrivateTmp=true

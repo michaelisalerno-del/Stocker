@@ -10,14 +10,14 @@ from typing import Any, Final, cast
 import numpy as np
 import pandas as pd
 
-from stocker_prospective.contract import M1C_FROZEN_THRESHOLD
-from stocker_prospective.direction import FrozenDirectionRuntime
-from stocker_prospective.direction_features import (
+from stocker_research.legacy_prospective.contract import M1C_FROZEN_THRESHOLD
+from stocker_research.legacy_prospective.direction import FrozenDirectionRuntime
+from stocker_research.legacy_prospective.direction_features import (
     DirectionFeatureBar,
     FrozenDirectionFeatureBuilder,
 )
-from stocker_prospective.frozen_m1c import FreshEpisodeTracker, FrozenM1CRuntime
-from stocker_prospective.tail_phase_v1 import (
+from stocker_research.legacy_prospective.frozen_m1c import FreshEpisodeTracker, FrozenM1CRuntime
+from stocker_research.legacy_prospective.tail_phase_v1 import (
     M1C_TAIL_PHASE_V1_VERSION,
     MovementConsumedBarV1,
     TailPhaseTrackerV1,

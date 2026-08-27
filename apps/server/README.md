@@ -1,24 +1,21 @@
 # Stocker Server
 
-The original `run_executor.py` remains a legacy dry-run scaffold. The first
-deployable prospective slice now lives in `stocker_prospective` and is strictly
-record-only/shadow:
+The deployable Stocker V2 runtime is strictly prospective-record/shadow:
 
 ```bash
-export STOCKER_GIT_COMMIT="$(git rev-parse HEAD)"
 uv sync --locked --no-editable --no-default-groups --group server
-uv run --no-sync stocker-prospective replay run \
-  --config configs/prospective/replay.example.yaml
-uv run --no-sync stocker-prospective web run \
-  --config configs/prospective/replay.example.yaml
+uv run --no-sync stocker-runtime recorder run \
+  --config configs/runtime/recorder.example.json \
+  --inputs configs/runtime/market-data.example.json
+uv run --no-sync stocker-runtime web run \
+  --config configs/runtime/web.example.json
 ```
 
-The recorder and web process are separate. Neither exposes a paper/live order
-path. Real frozen M1 scoring remains blocked until an approved serialized
-bundle and feature-parity gate exist.
+The recorder and web processes are separate. Neither exposes an order path. The web
+database connection is query-only, and only one recorder owns the operational writer.
 
 See:
 
-- `docs/architecture/prospective-evidence-recorder.md`
-- `docs/operations/prospective-server-runbook.md`
+- `docs/architecture/stocker-platform-purpose.md`
+- `docs/operations/stocker-v2-cutover.md`
 - `docs/operations/ibkr-official-api-review.md`

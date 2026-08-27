@@ -10,11 +10,11 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from stocker_prospective.opening_market_transition_v1 import (
+from stocker_research.legacy_prospective.opening_market_transition_v1 import (
     OPENING_TRANSITION_CHECKPOINT_V1,
     OpeningTransitionThresholdsV1,
 )
-from stocker_prospective.signed_market_shock_v1 import (
+from stocker_research.legacy_prospective.signed_market_shock_v1 import (
     assert_unprotected_sessions_v1,
 )
 
@@ -53,22 +53,14 @@ class FrozenOpeningResponseQuintilesV1(BaseModel):
             raise ValueError("opening response-quintile support cannot be negative")
         if self.calibration_complete_v1:
             if any(value is None or not math.isfinite(value) for value in boundaries):
-                raise ValueError(
-                    "complete opening response quintiles require finite boundaries"
-                )
+                raise ValueError("complete opening response quintiles require finite boundaries")
             observed = tuple(float(value) for value in boundaries if value is not None)
             if observed != tuple(sorted(observed)):
-                raise ValueError(
-                    "opening response-quintile boundaries must be ordered"
-                )
+                raise ValueError("opening response-quintile boundaries must be ordered")
             if self.calibration_missing_reason_v1 is not None:
-                raise ValueError(
-                    "complete opening response quintiles cannot have a missing reason"
-                )
+                raise ValueError("complete opening response quintiles cannot have a missing reason")
         elif self.calibration_missing_reason_v1 is None:
-            raise ValueError(
-                "incomplete opening response quintiles require a missing reason"
-            )
+            raise ValueError("incomplete opening response quintiles require a missing reason")
         return self
 
 
@@ -107,14 +99,11 @@ def freeze_opening_thresholds_v1(
         & market_predictors["complete_v1"].eq(True),  # noqa: E712
         list(predictor_columns),
     ].copy()
-    finite = np.isfinite(
-        development.apply(pd.to_numeric, errors="coerce").to_numpy(float)
-    ).all(axis=1)
+    finite = np.isfinite(development.apply(pd.to_numeric, errors="coerce").to_numpy(float)).all(
+        axis=1
+    )
     development = development.loc[finite]
-    values = {
-        column: _finite_series(development, column)
-        for column in predictor_columns
-    }
+    values = {column: _finite_series(development, column) for column in predictor_columns}
     supports = {column: int(len(series)) for column, series in values.items()}
     insufficient = [
         f"{column}={supports[column]}"
@@ -151,14 +140,10 @@ def freeze_opening_thresholds_v1(
             values["market_total_transition_v1"],
             0.90,
         ),
-        market_opening_return_support_v1=supports[
-            "market_opening_return_v1"
-        ],
+        market_opening_return_support_v1=supports["market_opening_return_v1"],
         market_opening_range_support_v1=supports["market_opening_range_v1"],
         market_overnight_gap_support_v1=supports["market_overnight_gap_v1"],
-        market_total_transition_support_v1=supports[
-            "market_total_transition_v1"
-        ],
+        market_total_transition_support_v1=supports["market_total_transition_v1"],
         calibration_complete_v1=calibration_complete,
         calibration_missing_reason_v1=(
             None
@@ -184,9 +169,7 @@ def freeze_opening_response_quintiles_v1(
     }
     missing = sorted(required.difference(predictor_rows.columns))
     if missing:
-        raise ValueError(
-            f"opening response-quintile calibration columns missing: {missing}"
-        )
+        raise ValueError(f"opening response-quintile calibration columns missing: {missing}")
     assert_unprotected_sessions_v1(predictor_rows["session"])
     sessions = predictor_rows["session"].astype(str)
     checkpoints = pd.to_numeric(predictor_rows["checkpoint"], errors="coerce")
@@ -244,18 +227,12 @@ def assign_opening_response_quintile_v1(
 ) -> OpeningResponseQuintileV1:
     """Assign one score using frozen inclusive upper boundaries."""
 
-    if (
-        value is None
-        or not math.isfinite(float(value))
-        or not frozen.calibration_complete_v1
-    ):
+    if value is None or not math.isfinite(float(value)) or not frozen.calibration_complete_v1:
         return "UNKNOWN_INCOMPLETE"
     boundaries = (frozen.q20_v1, frozen.q40_v1, frozen.q60_v1, frozen.q80_v1)
     if any(boundary is None for boundary in boundaries):
         return "UNKNOWN_INCOMPLETE"
-    q20, q40, q60, q80 = (
-        float(boundary) for boundary in boundaries if boundary is not None
-    )
+    q20, q40, q60, q80 = (float(boundary) for boundary in boundaries if boundary is not None)
     observed = float(value)
     if observed <= q20:
         return "Q1"
@@ -304,17 +281,13 @@ def validate_prior_population_reconciliation_v1(
         raise ValueError("population reconciliation has duplicate tail diagnostic keys")
     if set(keys) != set(expected_tail_keys):
         raise ValueError("population reconciliation tail diagnostic keys differ")
-    if not reconciliation[
-        "included_in_tail_phase_diagnostics_v1"
-    ].astype(bool).all():
+    if not reconciliation["included_in_tail_phase_diagnostics_v1"].astype(bool).all():
         raise ValueError("population reconciliation contains a non-Tail row")
     reasons = reconciliation["inclusion_exclusion_reason_v1"].fillna("").astype(str)
     if reasons.str.strip().eq("").any():
         raise ValueError("population reconciliation requires an exact reason")
     included = reconciliation.loc[
-        reconciliation[
-            "included_in_primary_signed_shock_population_v1"
-        ].astype(bool),
+        reconciliation["included_in_primary_signed_shock_population_v1"].astype(bool),
         "fresh_episode_id",
     ]
     included_ids = set(included.dropna().astype(str))

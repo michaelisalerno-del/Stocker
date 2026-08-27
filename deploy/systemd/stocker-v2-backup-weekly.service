@@ -1,0 +1,34 @@
+[Unit]
+Description=Stocker V2 weekly quiescent checked compressed backup
+Documentation=file:/opt/stocker/v2-current/docs/operations/stocker-v2-market-open-reliability.md
+After=stocker-v2-recorder.service stocker-v2-web.service
+
+[Service]
+Type=oneshot
+User=root
+Group=stocker-readers
+WorkingDirectory=/opt/stocker/v2-current
+EnvironmentFile=-/etc/stocker/stocker-backup.env
+CacheDirectory=stocker-v2-backup-work
+CacheDirectoryMode=0750
+RuntimeDirectory=stocker-v2-backup-weekly
+RuntimeDirectoryMode=0700
+ExecStart=/opt/stocker/v2-current/.venv/bin/python /opt/stocker/v2-current/deploy/scripts/run-v2-quiescent-managed-backup.py --tier weekly
+ExecStopPost=/opt/stocker/v2-current/.venv/bin/python /opt/stocker/v2-current/deploy/scripts/run-v2-quiescent-managed-backup.py --tier weekly --restart-after-interruption
+TimeoutStartSec=45min
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ReadWritePaths=/var/lib/stocker/v2
+ReadWritePaths=/var/lib/stocker/backups-v2
+ReadWritePaths=/var/cache/stocker-v2-backup-work

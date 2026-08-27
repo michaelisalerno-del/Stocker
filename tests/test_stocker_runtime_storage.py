@@ -370,8 +370,7 @@ def test_regular_session_pressure_drains_125_percent_opening_minute_in_six_passe
         )
     with connect_v2(database) as connection:
         connection.execute(
-            "UPDATE runs SET status='stopped', ended_at_us=3000 "
-            "WHERE run_id='retention-run'"
+            "UPDATE runs SET status='stopped', ended_at_us=3000 WHERE run_id='retention-run'"
         )
         connection.execute(
             "UPDATE recorder_generations SET ended_at_us=3000, clean_stop=1, "

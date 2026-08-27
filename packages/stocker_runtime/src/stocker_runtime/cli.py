@@ -167,8 +167,7 @@ def _require_disposable_database(configured: Path, candidate: Path) -> None:
     same_file = configured.exists() and candidate.exists() and configured.samefile(candidate)
     if same_path or same_file:
         raise ValueError(
-            "offline retention requires a disposable copy, not the configured "
-            "operational database"
+            "offline retention requires a disposable copy, not the configured operational database"
         )
 
 

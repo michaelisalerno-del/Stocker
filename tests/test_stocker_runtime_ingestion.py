@@ -1727,9 +1727,7 @@ def test_approved_retention_policy_is_bound_into_persisted_run_identity(
     assert config.frozen_config_hash != config.config_hash
     with connect_v2(database) as connection:
         assert (
-            connection.execute(
-                "SELECT config_hash FROM runs WHERE run_id='run-1'"
-            ).fetchone()[0]
+            connection.execute("SELECT config_hash FROM runs WHERE run_id='run-1'").fetchone()[0]
             == config.frozen_config_hash
         )
         connection.execute(
@@ -1739,9 +1737,7 @@ def test_approved_retention_policy_is_bound_into_persisted_run_identity(
 
     replacement_adapter = FakeMarketData()
     with pytest.raises(RecorderFatalError, match="frozen configuration changed"):
-        Recorder(
-            _config(database, owner_id="replacement-owner"), replacement_adapter
-        ).start(
+        Recorder(_config(database, owner_id="replacement-owner"), replacement_adapter).start(
             now_us=102,
             instruments=(instrument,),
             subscriptions=specs,
@@ -3967,9 +3963,10 @@ def test_regular_session_maintenance_runs_pressure_work_and_recovers_from_succes
         "stocker_runtime.ingestion.recorder.RetentionManager", RegularSessionPressure
     )
 
-    assert recorder.maintain(
-        now_us=101, run_full_off_session_maintenance=False
-    ) is StorageCapState.NORMAL
+    assert (
+        recorder.maintain(now_us=101, run_full_off_session_maintenance=False)
+        is StorageCapState.NORMAL
+    )
     admitted = recorder.receive(
         state.fences[0],
         MarketDataCallback("quote", 101, None, {"event_at_us": 101, "bid": 100.0}),
@@ -4084,9 +4081,10 @@ def test_regular_session_cap_measurement_contention_degrades_without_stopping_in
         "stocker_runtime.ingestion.recorder.RetentionManager", ContendedPressureMaintenance
     )
 
-    assert recorder.maintain(
-        now_us=101, run_full_off_session_maintenance=False
-    ) is StorageCapState.NORMAL
+    assert (
+        recorder.maintain(now_us=101, run_full_off_session_maintenance=False)
+        is StorageCapState.NORMAL
+    )
 
     with connect_v2(database) as connection:
         runtime = connection.execute(
@@ -4133,9 +4131,10 @@ def test_retention_backoff_cap_measurement_contention_does_not_stop_ingestion(
         ContendedBackoffMeasurement,
     )
 
-    assert recorder.maintain(
-        now_us=102, run_full_off_session_maintenance=False
-    ) is StorageCapState.NORMAL
+    assert (
+        recorder.maintain(now_us=102, run_full_off_session_maintenance=False)
+        is StorageCapState.NORMAL
+    )
     admitted = recorder.receive(
         state.fences[0],
         MarketDataCallback("quote", 103, None, {"event_at_us": 103, "bid": 100.0}),
@@ -4180,9 +4179,10 @@ def test_regular_session_incomplete_wal_checkpoint_publishes_metrics_and_degrade
 
     monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", IncompleteCheckpoint)
 
-    assert recorder.maintain(
-        now_us=101, run_full_off_session_maintenance=False
-    ) is StorageCapState.NORMAL
+    assert (
+        recorder.maintain(now_us=101, run_full_off_session_maintenance=False)
+        is StorageCapState.NORMAL
+    )
     with connect_v2(database) as connection:
         runtime = connection.execute(
             "SELECT lifecycle, reason, database_bytes, wal_bytes FROM runtime_state"
@@ -4270,12 +4270,14 @@ def test_regular_session_degraded_cap_pauses_optional_feed_idempotently(
         "stocker_runtime.ingestion.recorder.RetentionManager", DegradedPressureMaintenance
     )
 
-    assert recorder.maintain(
-        now_us=101, run_full_off_session_maintenance=False
-    ) is StorageCapState.DEGRADED
-    assert recorder.maintain(
-        now_us=102, run_full_off_session_maintenance=False
-    ) is StorageCapState.DEGRADED
+    assert (
+        recorder.maintain(now_us=101, run_full_off_session_maintenance=False)
+        is StorageCapState.DEGRADED
+    )
+    assert (
+        recorder.maintain(now_us=102, run_full_off_session_maintenance=False)
+        is StorageCapState.DEGRADED
+    )
 
     assert adapter.cancelled == [4]
     with connect_v2(database) as connection:
@@ -4311,9 +4313,10 @@ def test_regular_session_soft_cap_publishes_without_pausing_feeds(
         "stocker_runtime.ingestion.recorder.RetentionManager", SoftPressureMaintenance
     )
 
-    assert recorder.maintain(
-        now_us=101, run_full_off_session_maintenance=False
-    ) is StorageCapState.SOFT
+    assert (
+        recorder.maintain(now_us=101, run_full_off_session_maintenance=False)
+        is StorageCapState.SOFT
+    )
     with connect_v2(database) as connection:
         runtime = connection.execute(
             "SELECT lifecycle, database_bytes, wal_bytes FROM runtime_state"
@@ -4359,9 +4362,10 @@ def test_degraded_cap_still_pauses_optional_feed_after_publication_contention(
     )
     monkeypatch.setattr(recorder, "_publish_storage_measurement", contended_publication)
 
-    assert recorder.maintain(
-        now_us=101, run_full_off_session_maintenance=False
-    ) is StorageCapState.DEGRADED
+    assert (
+        recorder.maintain(now_us=101, run_full_off_session_maintenance=False)
+        is StorageCapState.DEGRADED
+    )
 
     assert adapter.cancelled == [4]
     with connect_v2(database) as connection:

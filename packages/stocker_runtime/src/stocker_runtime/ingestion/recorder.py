@@ -2864,6 +2864,7 @@ class Recorder:
         """Expose only bounded maintenance progress, never callback evidence."""
 
         details: dict[str, JsonValue] = {}
+        maintenance_batch_rows = RetentionPolicy().maintenance_batch_rows
         phase = error.__dict__.get("retention_phase")
         if phase in {
             "receipt_work_selection",
@@ -2882,7 +2883,7 @@ class Recorder:
         if type(transactions) is int and 0 <= transactions <= 2:
             details["receipt_transactions_committed"] = transactions
         rolled = error.__dict__.get("receipt_rows_rolled_committed")
-        if type(rolled) is int and 0 <= rolled <= 2_000:
+        if type(rolled) is int and 0 <= rolled <= maintenance_batch_rows:
             details["receipt_rows_rolled_committed"] = rolled
         for name in (
             "terminalizations_committed",
@@ -2892,7 +2893,7 @@ class Recorder:
             "callback_tombstones_deleted_committed",
         ):
             value = error.__dict__.get(name)
-            if type(value) is int and 0 <= value <= 2_000:
+            if type(value) is int and 0 <= value <= maintenance_batch_rows:
                 details[name] = value
         return details
 

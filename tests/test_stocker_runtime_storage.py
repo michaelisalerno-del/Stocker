@@ -344,24 +344,27 @@ def test_regular_session_pressure_rolls_back_a_phase_that_exceeds_100ms(
     }
 
 
-def test_regular_session_pressure_drains_frozen_opening_minute_with_three_passes_spare(
+def test_regular_session_pressure_drains_125_percent_opening_minute_in_six_passes(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     _seed_output_dependencies(database)
+    with connect_v2(database) as connection:
+        connection.execute("DELETE FROM market_events WHERE run_id='run-1'")
+        connection.execute("DELETE FROM callback_inbox WHERE run_id='run-1'")
     _seed_receipt_callback_batches(
         database,
         run_id="retention-run",
-        batch_sizes=(600, 600, 600, 222),
+        batch_sizes=(*((600,) * 25), 165),
     )
     proof_manager = RetentionManager(
         database,
-        RetentionPolicy(callback_payload_us=10_000, receipt_us=10_000),
+        RetentionPolicy(callback_payload_us=100_000, receipt_us=100_000),
     )
-    for _ in range(2):
+    for _ in range(13):
         proof_manager.run(
-            now_us=3_000,
+            now_us=20_000,
             measured_database_bytes=1,
             measured_wal_bytes=0,
         )
@@ -380,33 +383,19 @@ def test_regular_session_pressure_drains_frozen_opening_minute_with_three_passes
             callback_payload_us=10,
             tombstone_us=10,
             raw_market_event_us=10,
-            maintenance_batch_rows=2_000,
         ),
     )
 
-    results = tuple(manager.run_regular_session_pressure(now_us=10_000) for _ in range(6))
+    results = tuple(manager.run_regular_session_pressure(now_us=200_000) for _ in range(7))
 
-    assert [result.payloads_compacted for result in results] == [2_000, 22, 0, 0, 0, 0]
-    assert [result.raw_market_events_deleted for result in results] == [
-        2_000,
-        23,
-        0,
-        0,
-        0,
-        0,
-    ]
-    assert [result.callback_tombstones_deleted for result in results] == [
-        2_000,
-        22,
-        0,
-        0,
-        0,
-        0,
-    ]
+    expected = [2_600, 2_600, 2_600, 2_600, 2_600, 2_165, 0]
+    assert [result.payloads_compacted for result in results] == expected
+    assert [result.raw_market_events_deleted for result in results] == expected
+    assert [result.callback_tombstones_deleted for result in results] == expected
     with connect_v2(database) as connection:
-        assert connection.execute("SELECT count(*) FROM callback_inbox").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM callback_inbox").fetchone()[0] == 0
         assert connection.execute("SELECT count(*) FROM market_events").fetchone()[0] == 0
-        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 4
+        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 26
 
 
 def test_offline_granular_reclaim_uses_fixed_cutoff_and_builds_verified_compact_copy(
@@ -622,6 +611,42 @@ def test_granular_reclaim_cli_rejects_a_hard_link_to_the_operational_database(
     assert called is False
     assert "disposable copy" in json.loads(result.stdout)["message"]
     assert not output.exists()
+
+
+def test_granular_reclaim_cli_rejects_an_absent_operational_output_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "disposable.sqlite3"
+    operational_output = tmp_path / "currently-absent-operational.sqlite3"
+    config = tmp_path / "recorder.json"
+    initialize_database(source)
+    _write_recorder_config(config, operational_output)
+    called = False
+
+    def forbidden(**_kwargs: object) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(cli_module, "reclaim_granular_evidence", forbidden)
+    result = CliRunner().invoke(
+        runtime_app,
+        [
+            "recorder",
+            "reclaim-granular-evidence",
+            "--config",
+            str(config),
+            "--database",
+            str(source),
+            "--output",
+            str(operational_output),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert called is False
+    assert "disposable copy" in json.loads(result.stdout)["message"]
+    assert not operational_output.exists()
 
 
 def test_offline_granular_reclaim_rejects_an_active_writer_before_output(
@@ -966,7 +991,7 @@ def test_receipt_change_budget_is_carried_across_both_transactions(
     monkeypatch.setattr(manager, "_roll_receipts", bounded_roll)
     result = manager.run(now_us=100, measured_database_bytes=1, measured_wal_bytes=0)
 
-    assert supplied_limits == [2_000, 500]
+    assert supplied_limits == [2_600, 1_100]
     assert result.receipts_rolled == 2_000
 
 
@@ -4893,7 +4918,7 @@ def test_payload_drain_cli_holds_lock_until_two_zero_passes(tmp_path: Path) -> N
     assert payload["payloads_compacted"] == 1
     assert payload["consecutive_zero_passes"] == 2
     assert payload["fixed_now_us"] == 86_400_000_100
-    assert payload["batch_rows_limit"] == 2_000
+    assert payload["batch_rows_limit"] == 2_600
     with connect_v2(database) as connection:
         assert (
             connection.execute(
@@ -5065,7 +5090,7 @@ def test_payload_drain_preserves_committed_batches_when_a_later_pass_fails(
     database = tmp_path / "v2.sqlite3"
     initialize_database(database)
     _seed_output_dependencies(database)
-    callback_count = 2_001
+    callback_count = 2_601
     with connect_v2(database) as connection:
         connection.executemany(
             "INSERT INTO callback_inbox(event_uid, run_id, recorder_generation, "
@@ -5140,7 +5165,7 @@ def test_payload_drain_preserves_committed_batches_when_a_later_pass_fails(
     assert result.exit_code == 1
     error = json.loads(result.stdout)
     assert error["error"] == "PayloadDrainIncompleteError"
-    assert "during pass 2 after 1 completed passes and 2000 committed payloads" in error["message"]
+    assert "during pass 2 after 1 completed passes and 2600 committed payloads" in error["message"]
     assert "RuntimeError: injected later-pass failure" in error["message"]
 
     with connect_v2(database) as connection:
@@ -5149,7 +5174,7 @@ def test_payload_drain_preserves_committed_batches_when_a_later_pass_fails(
                 "SELECT count(*) FROM callback_inbox "
                 "WHERE run_id='retention-run' AND payload_json IS NULL"
             ).fetchone()[0]
-            == 2_000
+            == 2_600
         )
         assert (
             connection.execute(

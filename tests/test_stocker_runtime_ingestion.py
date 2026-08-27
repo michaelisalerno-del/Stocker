@@ -4577,7 +4577,7 @@ def test_regular_session_retention_diagnostics_report_only_bounded_commit_counts
     failure = MaintenanceDeadlineExceeded("raw-event expiry deadline")
     failure.__dict__.update(
         retention_phase="regular_session_raw_market_event_expiry",
-        payloads_compacted_committed=2_000,
+        payloads_compacted_committed=2_600,
         raw_market_events_deleted_committed=0,
         callback_tombstones_deleted_committed=0,
         arbitrary_private_value={"must_not_persist": True},
@@ -4585,7 +4585,7 @@ def test_regular_session_retention_diagnostics_report_only_bounded_commit_counts
 
     assert Recorder._retention_incident_details(failure) == {
         "callback_tombstones_deleted_committed": 0,
-        "payloads_compacted_committed": 2_000,
+        "payloads_compacted_committed": 2_600,
         "raw_market_events_deleted_committed": 0,
         "retention_phase": "regular_session_raw_market_event_expiry",
     }

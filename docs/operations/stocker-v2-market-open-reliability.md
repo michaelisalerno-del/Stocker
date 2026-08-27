@@ -480,6 +480,15 @@ uses SQLite `VACUUM INTO` to build a compact replacement and verifies its schema
 integrity, and foreign keys. It exits nonzero on ownership loss, deadline, pass or wall
 limit, verification failure, or output above the accepted 4,461,774,842-byte ceiling.
 Never raise that ceiling or shorten the approved 24-hour window merely to pass rollout.
+Both the disposable source and compact output must differ from the configured
+operational database, including resolved aliases and existing hard links.
+
+Regular-session pressure retains the ten-second cadence and three independent 100 ms
+transactions. Each transaction is bounded at 2,600 rows, providing 15,600 rows per
+class per minute versus the fixed 15,165-row 1.25x opening-minute requirement. Before
+rollout, the exact production-derived disposable copy must complete six saturated
+passes without a deadline, busy/locked, WAL, or heartbeat violation; otherwise stop
+and return to architecture review.
 
 Before replacement, compare the stopped source, checked backup, and reclaimed copy.
 Require preserved receipt/watermark evidence, derived bars, idea/shadow evidence,

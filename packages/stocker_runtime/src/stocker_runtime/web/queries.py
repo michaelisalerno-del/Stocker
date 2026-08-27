@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from stocker_runtime.market_session import market_data_expected_since_us
-from stocker_runtime.storage import read_backup_manifests
+from stocker_runtime.storage import RetentionPolicy, read_backup_manifests
 from stocker_runtime.web.config import WebConfig
 from stocker_runtime.web.readiness import calculate_readiness, select_operational_run
 
@@ -30,8 +30,6 @@ API_ROUTES = (
     "/api/v2/ready",
 )
 BANNER = "PROSPECTIVE / SHADOW ONLY — NO APPROVAL OR EXECUTION"
-DATABASE_CAP_BYTES = 8 * 1024**3
-WAL_CAP_BYTES = 64 * 1024**2
 IDEA_WINDOW_US = 604_800_000_000
 RESULT_WINDOW_US = 2_592_000_000_000
 SQLITE_INTEGER_MAX = 9_223_372_036_854_775_807
@@ -464,11 +462,12 @@ class ReadModel:
             0 if storage["database_bytes"] is None else int(storage["database_bytes"]),
         )
         measured_wal_bytes = max(int(storage["reported_wal_bytes"]), int(storage["wal_bytes"]))
-        if measured_database_bytes >= DATABASE_CAP_BYTES:
+        policy = RetentionPolicy()
+        if measured_database_bytes >= policy.database_cap_bytes:
             retention_status = "fatal"
-        elif measured_database_bytes >= int(DATABASE_CAP_BYTES * 0.95):
+        elif measured_database_bytes >= int(policy.database_cap_bytes * 0.95):
             retention_status = "critical"
-        elif measured_database_bytes >= int(DATABASE_CAP_BYTES * 0.85):
+        elif measured_database_bytes >= int(policy.database_cap_bytes * 0.85):
             retention_status = "maintenance_required"
         else:
             retention_status = "healthy"
@@ -492,12 +491,13 @@ class ReadModel:
             },
             "retention": {
                 "status": retention_status,
-                "database_cap_bytes": DATABASE_CAP_BYTES,
-                "wal_cap_bytes": WAL_CAP_BYTES,
+                "database_cap_bytes": policy.database_cap_bytes,
+                "wal_cap_bytes": policy.wal_cap_bytes,
                 "database_bytes": measured_database_bytes,
                 "wal_bytes": measured_wal_bytes,
-                "terminal_callback_payload_hours": 24,
-                "raw_market_event_days": 30,
+                "terminal_callback_payload_hours": policy.callback_payload_us // 3_600_000_000,
+                "callback_tombstone_hours": policy.tombstone_us // 3_600_000_000,
+                "raw_market_event_hours": policy.raw_market_event_us // 3_600_000_000,
                 "idea_and_shadow_result_years": 7,
             },
             "limit": limit,

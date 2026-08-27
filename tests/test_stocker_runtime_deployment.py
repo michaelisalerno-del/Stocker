@@ -4,6 +4,7 @@ import errno
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import signal
 import sqlite3
@@ -1459,7 +1460,7 @@ def test_startup_capacity_reserve_tracks_remaining_xnys_session_without_widening
     assert required_session_reserve_bytes(standard_time_open) == FULL_REGULAR_SESSION_RESERVE_BYTES
 
 
-def test_regular_session_pressure_capacity_bounds_frozen_opening_burst_excess() -> None:
+def test_regular_session_pressure_capacity_exceeds_125_percent_of_frozen_opening_burst() -> None:
     from stocker_runtime.cli import RECORDER_MAINTENANCE_INTERVAL_US
     from stocker_runtime.opening_burst import opening_burst_callback_count
     from stocker_runtime.storage import RetentionPolicy
@@ -1467,11 +1468,12 @@ def test_regular_session_pressure_capacity_bounds_frozen_opening_burst_excess() 
     passes_per_minute = 60_000_000 // RECORDER_MAINTENANCE_INTERVAL_US
     per_operation_capacity = RetentionPolicy().maintenance_batch_rows * passes_per_minute
     frozen_opening_minute = opening_burst_callback_count(60)
+    required_capacity = math.ceil(frozen_opening_minute * 1.25)
 
-    assert per_operation_capacity == 12_000
+    assert per_operation_capacity == 15_600
     assert frozen_opening_minute == 12_132
-    assert frozen_opening_minute - per_operation_capacity == 132
-    assert frozen_opening_minute - per_operation_capacity < RetentionPolicy().maintenance_batch_rows
+    assert required_capacity == 15_165
+    assert per_operation_capacity >= required_capacity
 
 
 def test_off_session_retention_capacity_exceeds_frozen_regular_session_load() -> None:
@@ -1489,7 +1491,7 @@ def test_off_session_retention_capacity_exceeds_frozen_regular_session_load() ->
     assert receipt_capacity == 7_560_000
     assert frozen_regular_session_callbacks == 4_731_480
     assert receipt_capacity > frozen_regular_session_callbacks
-    assert evidence_row_capacity == 12_600_000
+    assert evidence_row_capacity == 16_380_000
 
 
 def test_maintenance_tick_takes_fresh_session_decision_at_call_boundary(

@@ -1588,13 +1588,45 @@ reviewer fixes passed both fixed scenarios on 2026-08-27:
 
 | replay | presented/admitted/projected | loss/duplicates/order/provenance | p50 / p95 / p99 admission | throughput | max/final backlog | drain | heartbeat | WAL |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| 10 seconds | 2,022 / 2,022 / 2,022 | 0 / 0 / 0 / 0 | 0.180 / 0.432 / 9.446 ms | 405.85 callbacks/s | 219 / 0 | 0.145 s | 0 s | 4,622,672 B |
-| 60 seconds | 12,132 / 12,132 / 12,132 | 0 / 0 / 0 / 0 | 0.163 / 0.314 / 9.188 ms | 415.94 callbacks/s | 219 / 0 | 0.138 s | 0 s | 5,162,392 B |
+| 10 seconds | 2,022 / 2,022 / 2,022 | 0 / 0 / 0 / 0 | 0.186 / 0.501 / 9.736 ms | 395.16 callbacks/s | 219 / 0 | 0.145 s | 0 s | 4,622,672 B |
+| 60 seconds | 12,132 / 12,132 / 12,132 | 0 / 0 / 0 / 0 | 0.174 / 0.359 / 9.473 ms | 397.20 callbacks/s | 219 / 0 | 0.145 s | 0 s | 5,162,392 B |
 
 Both had zero escaped SQLite busy/locked errors, all 100 required feeds active and
 fresh, truthful readiness, and no acceptance failure. The 60-second run projected at
-1,516.60 callbacks/s, used 51,068,928 bytes of measured RSS growth, and completed its
-readiness query in 2.041 ms. The prior unchanged final baseline was 0.164/0.299/9.141
+1,415.73 callbacks/s, used 51,347,456 bytes of measured RSS growth, and completed its
+readiness query in 2.050 ms. The prior unchanged final baseline was 0.164/0.299/9.141
 ms p50/p95/p99 with the same 12,132 callbacks, 219/0 backlog, zero evidence violations,
 and 5,162,392-byte WAL. No ingestion optimization, queue, or storage-layer change was
 justified by this replay.
+
+### 2026-08-27: corrected regular-session pressure bound
+
+Independent review found an internal inconsistency in the accepted physical-capacity
+addendum: six 2,000-row opportunities provide only 12,000 rows per class each minute,
+below both the fixed 12,132-callback opening minute and its predeclared 1.25x capacity
+requirement. Rollout remains blocked until this correction passes every gate.
+
+Keep the fixed ten-second cadence, exactly three independent regular-session
+transactions, unchanged 100 ms per-transaction deadline, writer-authority checks,
+predicates, XNYS gate, durable-admission priority, and database/WAL hard caps. Raise
+the existing default `maintenance_batch_rows` from 2,000 to exactly 2,600. This gives
+15,600 eligible rows per class per minute, exceeding
+`ceil(1.25 * 12,132) = 15,165` by 435 rows. Do not add a cadence, transaction, queue,
+setting, latch, or infrastructure component.
+
+Fixed acceptance is: the arithmetic above; 15,165 receipt-authorized payloads,
+protected-reference-aware raw events, and proof-authorized tombstones drain in six
+passes with per-class counts `2,600, 2,600, 2,600, 2,600, 2,600, 2,165`, followed by
+a zero-work pass; deadline rollback, partial-commit, ownership, and protected-evidence
+tests pass at the new default; and the unchanged 10-second and 60-second opening
+replays remain green. Before rollout, run six saturated pressure passes against an
+exact disposable production-derived copy and require no
+`MaintenanceDeadlineExceeded`, escaped busy/locked error, unsafe WAL growth, or
+heartbeat violation. If 2,600 rows cannot meet 100 ms on that copy, stop and return to
+Architect; do not relax the deadline or threshold after observing the result.
+
+The read-only diagnostic projection must also remove its superseded 30-day granular
+raw-event claim and expose the approved payload, tombstone, and raw-event windows as
+24 hours, derived from the shared retention policy where practical. This changes no
+schema and does not alter risk, execution, reconciliation, paper/live, broker order,
+or XNYS behavior.

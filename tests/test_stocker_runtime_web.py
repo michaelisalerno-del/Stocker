@@ -1314,6 +1314,10 @@ def test_meta_and_diagnostics_are_bounded_and_authority_free(tmp_path: Path) -> 
     assert diagnostics["hashes"]["plugins"][0]["code_hash"] in {"e" * 64, "1" * 64}
     assert diagnostics["retention"]["database_cap_bytes"] == 8 * 1024**3
     assert diagnostics["retention"]["wal_cap_bytes"] == 64 * 1024**2
+    assert diagnostics["retention"]["terminal_callback_payload_hours"] == 24
+    assert diagnostics["retention"]["callback_tombstone_hours"] == 24
+    assert diagnostics["retention"]["raw_market_event_hours"] == 24
+    assert "raw_market_event_days" not in diagnostics["retention"]
     assert "payload_json" not in json.dumps(diagnostics)
     assert "order_capability_observed" not in json.dumps(diagnostics)
     assert all("details" not in item for item in diagnostics["incidents"])

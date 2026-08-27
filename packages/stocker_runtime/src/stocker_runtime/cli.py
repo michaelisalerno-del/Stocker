@@ -474,6 +474,7 @@ def reclaim_granular_evidence_command(
     try:
         loaded = load_recorder_config(config)
         _require_disposable_database(loaded.database, database)
+        _require_disposable_database(loaded.database, output)
         result = reclaim_granular_evidence(
             database=database,
             output=output,

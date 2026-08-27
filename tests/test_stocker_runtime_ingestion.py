@@ -19,6 +19,7 @@ from typer.testing import CliRunner
 
 import stocker_runtime.ingestion.lifecycle as lifecycle_module
 import stocker_runtime.ingestion.recorder as recorder_module
+import stocker_runtime.storage.retention as retention_module
 from stocker_runtime.cli import app
 from stocker_runtime.ingestion import (
     AdmissionResult,
@@ -56,6 +57,7 @@ from stocker_runtime.ingestion.lifecycle import (
 from stocker_runtime.storage import (
     MaintenanceDeadlineExceeded,
     RetentionPolicy,
+    RetentionPressureResult,
     RetentionResult,
     StorageCapState,
     connect_v2,
@@ -78,9 +80,32 @@ def _config(database: Path, **changes: object) -> RecorderConfig:
         "external_read_only_verified": True,
         "config_hash": "a" * 64,
         "git_commit": "deadbee",
+        "callback_payload_retention_us": 86_400_000_000,
+        "callback_tombstone_retention_us": 86_400_000_000,
+        "raw_market_event_retention_us": 86_400_000_000,
     }
     values.update(changes)
     return RecorderConfig.model_validate(values)
+
+
+def _pressure_result(
+    *,
+    cap_state: StorageCapState = StorageCapState.NORMAL,
+    database_bytes: int = 123,
+    wal_bytes: int = 4,
+    required_action: str | None = None,
+    checkpoint_complete: bool = True,
+) -> RetentionPressureResult:
+    return RetentionPressureResult(
+        cap_state=cap_state,
+        database_bytes=database_bytes,
+        wal_bytes=wal_bytes,
+        payloads_compacted=0,
+        raw_market_events_deleted=0,
+        callback_tombstones_deleted=0,
+        required_action=required_action,
+        checkpoint_complete=checkpoint_complete,
+    )
 
 
 def _seed_generation(database: Path) -> None:
@@ -358,6 +383,73 @@ def test_validate_config_cli_is_offline_and_machine_readable(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize(
+    "field",
+    (
+        "callback_payload_retention_us",
+        "callback_tombstone_retention_us",
+        "raw_market_event_retention_us",
+    ),
+)
+def test_production_preflight_requires_explicit_24_hour_retention_policy(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    config_path = tmp_path / "runtime.json"
+    inputs_path = tmp_path / "market-data.json"
+    payload = _config(tmp_path / "v2.sqlite3").model_dump(mode="json")
+    payload.pop(field)
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+    fixture = _replay_fixture_without_callbacks()
+    fixture.pop("callbacks")
+    inputs_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        ["validate-recorder", str(config_path), "--inputs", str(inputs_path)],
+    )
+
+    assert result.exit_code == 78
+    response = json.loads(result.stdout)
+    assert str(config_path) in response["message"]
+    assert field in response["message"]
+    assert "required 24-hour retention policy" in response["message"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("callback_payload_retention_us", 0),
+        ("callback_tombstone_retention_us", 86_400_000_001),
+        ("raw_market_event_retention_us", -1),
+    ),
+)
+def test_production_preflight_rejects_non_24_hour_retention_policy(
+    tmp_path: Path,
+    field: str,
+    value: int,
+) -> None:
+    config_path = tmp_path / "runtime.json"
+    inputs_path = tmp_path / "market-data.json"
+    payload = _config(tmp_path / "v2.sqlite3").model_dump(mode="json")
+    payload[field] = value
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+    fixture = _replay_fixture_without_callbacks()
+    fixture.pop("callbacks")
+    inputs_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        ["validate-recorder", str(config_path), "--inputs", str(inputs_path)],
+    )
+
+    assert result.exit_code == 78
+    response = json.loads(result.stdout)
+    assert str(config_path) in response["message"]
+    assert field in response["message"]
+    assert "86400000000" in response["message"]
+
+
+@pytest.mark.parametrize(
     ("mutation", "reason"),
     (
         ("zero_instruments", "zero instruments"),
@@ -459,6 +551,41 @@ def test_empty_recorder_input_fails_before_adapter_connect(tmp_path: Path) -> No
     assert adapter.connect_calls == 0
     with connect_v2(database) as connection:
         assert connection.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
+
+
+def test_insufficient_session_headroom_fails_before_generation_or_broker_connect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    adapter = FakeMarketData()
+    instrument, subscriptions = _specs()
+    monkeypatch.setattr(
+        retention_module.RetentionManager,
+        "measure_capacity",
+        lambda _manager: retention_module.StorageCapacity(
+            allocated_bytes=4_500_000_000,
+            reusable_bytes=0,
+            usable_headroom_bytes=4_089_934_592,
+        ),
+    )
+
+    with pytest.raises(
+        RecorderFatalError,
+        match="insufficient storage headroom.*4128159750.*4089934592",
+    ):
+        Recorder(_config(database), adapter).start(
+            now_us=1,
+            instruments=(instrument,),
+            subscriptions=subscriptions,
+        )
+
+    assert adapter.connect_calls == 0
+    assert adapter.subscriptions == []
+    with connect_v2(database) as connection:
+        assert connection.execute("SELECT count(*) FROM runs").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM recorder_generations").fetchone()[0] == 0
 
 
 def test_production_preflight_rejects_input_above_configured_line_cap(tmp_path: Path) -> None:
@@ -3702,7 +3829,7 @@ def test_recorder_consumes_optional_and_fatal_storage_cap_actions(
     class FakeRetention:
         result = degraded
 
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy | None = None) -> None:
             pass
 
         def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
@@ -3742,7 +3869,7 @@ def test_maintenance_database_failure_preserves_admitted_evidence_and_fails_clos
     )
 
     class FailingRetention:
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy | None = None) -> None:
             pass
 
         def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
@@ -3767,7 +3894,7 @@ def test_maintenance_database_failure_preserves_admitted_evidence_and_fails_clos
     assert set(adapter.cancelled) == {3, 4}
 
 
-def test_regular_session_maintenance_measures_caps_without_heavy_work_or_false_recovery(
+def test_regular_session_maintenance_runs_pressure_work_and_recovers_from_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3777,19 +3904,25 @@ def test_regular_session_maintenance_measures_caps_without_heavy_work_or_false_r
     recorder = Recorder(_config(database), FakeMarketData())
     state = recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
 
-    class CapMeasurementOnly:
-        def __init__(self, _database: Path) -> None:
+    pressure_calls: list[int] = []
+
+    class RegularSessionPressure:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
-        def checkpoint_and_measure_cap_state(
-            self,
-        ) -> tuple[StorageCapState, int, int, str | None, bool]:
-            return StorageCapState.NORMAL, 123, 4, None, True
+        def run_regular_session_pressure(
+            self, *, now_us: int, precondition: object = None
+        ) -> RetentionPressureResult:
+            assert callable(precondition)
+            pressure_calls.append(now_us)
+            return _pressure_result()
 
         def run(self, **_kwargs: object) -> RetentionResult:
-            raise AssertionError("regular-session maintenance must not run heavy retention")
+            raise AssertionError("regular-session maintenance must not run off-session work")
 
-    monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", CapMeasurementOnly)
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager", RegularSessionPressure
+    )
 
     assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.NORMAL
     admitted = recorder.receive(
@@ -3822,7 +3955,9 @@ def test_regular_session_maintenance_measures_caps_without_heavy_work_or_false_r
         now_us=102,
         error_name="MaintenanceDeadlineExceeded",
     )
-    assert recorder.maintain(now_us=103, retention_work_expected=False) is StorageCapState.NORMAL
+    assert (
+        recorder.maintain(now_us=1_000_103, retention_work_expected=False) is StorageCapState.NORMAL
+    )
     with connect_v2(database) as connection:
         incident = connection.execute(
             "SELECT resolved_at_us FROM incidents "
@@ -3832,50 +3967,15 @@ def test_regular_session_maintenance_measures_caps_without_heavy_work_or_false_r
             "SELECT lifecycle, reason, database_bytes, wal_bytes, process_heartbeat_at_us "
             "FROM runtime_state"
         ).fetchone()
-    assert incident["resolved_at_us"] is None
+    assert incident["resolved_at_us"] == 1_000_103
     assert tuple(runtime) == (
-        "degraded",
-        "COMPONENT_RETENTION_MAINTENANCE_FAILED",
+        "running",
+        None,
         123,
         4,
-        103,
+        1_000_103,
     )
-
-    normal = RetentionResult(
-        cap_state=StorageCapState.NORMAL,
-        database_bytes=124,
-        wal_bytes=5,
-        payloads_compacted=0,
-        receipts_rolled=0,
-        expired_rows_deleted=0,
-        admission_allowed=True,
-        optional_feeds_allowed=True,
-        required_action=None,
-        checkpoint_attempted=True,
-        incremental_vacuum_attempted=True,
-    )
-
-    class SuccessfulOffSessionRetention:
-        def __init__(self, _database: Path) -> None:
-            pass
-
-        def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
-            assert callable(precondition)
-            return normal
-
-    monkeypatch.setattr(
-        "stocker_runtime.ingestion.recorder.RetentionManager",
-        SuccessfulOffSessionRetention,
-    )
-    assert recorder.maintain(now_us=1_000_103) is StorageCapState.NORMAL
-    with connect_v2(database) as connection:
-        assert (
-            connection.execute(
-                "SELECT resolved_at_us FROM incidents "
-                "WHERE code='COMPONENT_RETENTION_MAINTENANCE_FAILED'"
-            ).fetchone()[0]
-            == 1_000_103
-        )
+    assert pressure_calls == [101, 1_000_103]
 
 
 def test_regular_session_start_propagates_scheduled_retention_deferral(
@@ -3924,20 +4024,18 @@ def test_regular_session_cap_measurement_contention_degrades_without_stopping_in
     recorder = Recorder(_config(database), adapter)
     recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
 
-    class ContendedCapMeasurement:
-        def __init__(self, _database: Path) -> None:
+    class ContendedPressureMaintenance:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
-        def checkpoint_and_measure_cap_state(
-            self,
-        ) -> tuple[StorageCapState, int, int, str | None, bool]:
+        def run_regular_session_pressure(self, **_kwargs: object) -> RetentionPressureResult:
             raise sqlite3.OperationalError("database is locked")
 
         def run(self, **_kwargs: object) -> RetentionResult:
             raise AssertionError("contention must not start heavy retention")
 
     monkeypatch.setattr(
-        "stocker_runtime.ingestion.recorder.RetentionManager", ContendedCapMeasurement
+        "stocker_runtime.ingestion.recorder.RetentionManager", ContendedPressureMaintenance
     )
 
     assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.NORMAL
@@ -3971,13 +4069,11 @@ def test_regular_session_incomplete_wal_checkpoint_publishes_metrics_and_degrade
     recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
 
     class IncompleteCheckpoint:
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
-        def checkpoint_and_measure_cap_state(
-            self,
-        ) -> tuple[StorageCapState, int, int, str | None, bool]:
-            return StorageCapState.NORMAL, 123, 59, None, False
+        def run_regular_session_pressure(self, **_kwargs: object) -> RetentionPressureResult:
+            return _pressure_result(wal_bytes=59, checkpoint_complete=False)
 
     monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", IncompleteCheckpoint)
 
@@ -4010,19 +4106,24 @@ def test_regular_session_cap_measurement_still_fails_closed_at_hard_wal_cap(
     recorder = Recorder(_config(database), adapter)
     recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
 
-    class FatalCapMeasurement:
-        def __init__(self, _database: Path) -> None:
+    class FatalPressureMaintenance:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
-        def checkpoint_and_measure_cap_state(
-            self,
-        ) -> tuple[StorageCapState, int, int, str | None, bool]:
-            return StorageCapState.FATAL, 100, 64, "WAL_CAP_FATAL", True
+        def run_regular_session_pressure(self, **_kwargs: object) -> RetentionPressureResult:
+            return _pressure_result(
+                cap_state=StorageCapState.FATAL,
+                database_bytes=100,
+                wal_bytes=64,
+                required_action="WAL_CAP_FATAL",
+            )
 
         def run(self, **_kwargs: object) -> RetentionResult:
             raise AssertionError("hard-cap check must fail before heavy retention")
 
-    monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", FatalCapMeasurement)
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager", FatalPressureMaintenance
+    )
 
     with pytest.raises(RecorderFatalError, match="WAL_CAP_FATAL"):
         recorder.maintain(now_us=101, retention_work_expected=False)
@@ -4046,20 +4147,22 @@ def test_regular_session_degraded_cap_pauses_optional_feed_idempotently(
     recorder = Recorder(_config(database), adapter)
     recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
 
-    class DegradedCapMeasurement:
-        def __init__(self, _database: Path) -> None:
+    class DegradedPressureMaintenance:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
-        def checkpoint_and_measure_cap_state(
-            self,
-        ) -> tuple[StorageCapState, int, int, str | None, bool]:
-            return StorageCapState.DEGRADED, 95, 1, None, True
+        def run_regular_session_pressure(self, **_kwargs: object) -> RetentionPressureResult:
+            return _pressure_result(
+                cap_state=StorageCapState.DEGRADED,
+                database_bytes=95,
+                wal_bytes=1,
+            )
 
         def run(self, **_kwargs: object) -> RetentionResult:
             raise AssertionError("degraded cap must not run heavy retention in-session")
 
     monkeypatch.setattr(
-        "stocker_runtime.ingestion.recorder.RetentionManager", DegradedCapMeasurement
+        "stocker_runtime.ingestion.recorder.RetentionManager", DegradedPressureMaintenance
     )
 
     assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.DEGRADED
@@ -4084,16 +4187,20 @@ def test_regular_session_soft_cap_publishes_without_pausing_feeds(
     recorder = Recorder(_config(database), adapter)
     recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
 
-    class SoftCapMeasurement:
-        def __init__(self, _database: Path) -> None:
+    class SoftPressureMaintenance:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
-        def checkpoint_and_measure_cap_state(
-            self,
-        ) -> tuple[StorageCapState, int, int, str | None, bool]:
-            return StorageCapState.SOFT, 85, 1, None, True
+        def run_regular_session_pressure(self, **_kwargs: object) -> RetentionPressureResult:
+            return _pressure_result(
+                cap_state=StorageCapState.SOFT,
+                database_bytes=85,
+                wal_bytes=1,
+            )
 
-    monkeypatch.setattr("stocker_runtime.ingestion.recorder.RetentionManager", SoftCapMeasurement)
+    monkeypatch.setattr(
+        "stocker_runtime.ingestion.recorder.RetentionManager", SoftPressureMaintenance
+    )
 
     assert recorder.maintain(now_us=101, retention_work_expected=False) is StorageCapState.SOFT
     with connect_v2(database) as connection:
@@ -4117,14 +4224,16 @@ def test_degraded_cap_still_pauses_optional_feed_after_publication_contention(
     recorder = Recorder(_config(database), adapter)
     recorder.start(now_us=100, instruments=(instrument,), subscriptions=specs)
 
-    class DegradedCapMeasurement:
-        def __init__(self, _database: Path) -> None:
+    class DegradedPressureMaintenance:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
-        def checkpoint_and_measure_cap_state(
-            self,
-        ) -> tuple[StorageCapState, int, int, str | None, bool]:
-            return StorageCapState.DEGRADED, 95, 1, None, True
+        def run_regular_session_pressure(self, **_kwargs: object) -> RetentionPressureResult:
+            return _pressure_result(
+                cap_state=StorageCapState.DEGRADED,
+                database_bytes=95,
+                wal_bytes=1,
+            )
 
     def contended_publication(**_kwargs: object) -> bool:
         recorder._component_failure(
@@ -4135,7 +4244,7 @@ def test_degraded_cap_still_pauses_optional_feed_after_publication_contention(
         return False
 
     monkeypatch.setattr(
-        "stocker_runtime.ingestion.recorder.RetentionManager", DegradedCapMeasurement
+        "stocker_runtime.ingestion.recorder.RetentionManager", DegradedPressureMaintenance
     )
     monkeypatch.setattr(recorder, "_publish_storage_measurement", contended_publication)
 
@@ -4191,7 +4300,7 @@ def test_bounded_retention_contention_degrades_then_recovers_without_stopping_in
     class DeferredThenSuccessfulRetention:
         calls = 0
 
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
         def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
@@ -4283,7 +4392,7 @@ def test_retention_transaction_two_failure_is_auditable_and_retry_recovers(
     class TransactionTwoThenSuccessfulRetention:
         calls = 0
 
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
         def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
@@ -4351,6 +4460,24 @@ def test_retention_split_phase_diagnostics_are_bounded_and_sanitized() -> None:
     }
 
 
+def test_regular_session_retention_diagnostics_report_only_bounded_commit_counts() -> None:
+    failure = MaintenanceDeadlineExceeded("raw-event expiry deadline")
+    failure.__dict__.update(
+        retention_phase="regular_session_raw_market_event_expiry",
+        payloads_compacted_committed=2_000,
+        raw_market_events_deleted_committed=0,
+        callback_tombstones_deleted_committed=0,
+        arbitrary_private_value={"must_not_persist": True},
+    )
+
+    assert Recorder._retention_incident_details(failure) == {
+        "callback_tombstones_deleted_committed": 0,
+        "payloads_compacted_committed": 2_000,
+        "raw_market_events_deleted_committed": 0,
+        "retention_phase": "regular_session_raw_market_event_expiry",
+    }
+
+
 def test_generic_pruning_failure_reports_committed_compaction_and_recovers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -4386,7 +4513,7 @@ def test_generic_pruning_failure_reports_committed_compaction_and_recovers(
     class FailedPruningThenSuccessfulRetention:
         calls = 0
 
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
         def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
@@ -4459,7 +4586,7 @@ def test_unpublished_retention_progress_survives_a_later_generic_failure(
     class DiagnosticThenGenericThenSuccessfulRetention:
         calls = 0
 
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
         def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
@@ -4554,7 +4681,7 @@ def test_retention_contention_with_held_writer_never_uses_a_second_writer_transa
     class HeldWriterRetention:
         connection: sqlite3.Connection | None = None
 
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
         def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
@@ -4647,7 +4774,7 @@ def test_backup_status_failure_is_degraded_and_recovers_without_stopping_ingesti
     )
 
     class SuccessfulRetention:
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
         def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
@@ -6031,7 +6158,7 @@ def test_offline_payload_drain_uses_one_lock_fixed_time_and_two_zero_passes(
     class FakeManager:
         policy = FakePolicy()
 
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy | None = None) -> None:
             pass
 
         def compact_payloads_only(
@@ -6074,7 +6201,7 @@ def test_offline_payload_drain_pass_and_wall_limits_are_incomplete(
     class FakeManager:
         policy = FakePolicy()
 
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy | None = None) -> None:
             pass
 
         def compact_payloads_only(
@@ -6455,7 +6582,7 @@ def test_pre_gap_callback_cannot_clear_startup_storage_pause(
     )
 
     class PauseRetention:
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
         def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
@@ -7387,7 +7514,7 @@ def test_retention_backoff_still_fails_closed_at_storage_hard_cap(
     recorder._component_failures["retention_maintenance"] = (1, 2_000_000)
 
     class FatalCapMeasurement:
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
         def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
@@ -7417,7 +7544,7 @@ def test_retention_backoff_still_pauses_optional_feeds_at_degraded_cap(
     recorder._component_failures["retention_maintenance"] = (1, 2_000_000)
 
     class DegradedCapMeasurement:
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
         def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
@@ -8061,7 +8188,7 @@ def test_authority_takeover_during_slow_maintenance_cannot_publish_old_measureme
     release = threading.Event()
 
     class SlowRetention:
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
 
         def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
@@ -8857,8 +8984,15 @@ def test_startup_storage_pause_survives_connection_and_reconnect(
     )
 
     class StartupRetention:
-        def __init__(self, _database: Path) -> None:
+        def __init__(self, _database: Path, _policy: RetentionPolicy) -> None:
             pass
+
+        def measure_capacity(self) -> retention_module.StorageCapacity:
+            return retention_module.StorageCapacity(
+                allocated_bytes=1,
+                reusable_bytes=0,
+                usable_headroom_bytes=8 * 1024**3 - 1,
+            )
 
         def run(self, *, now_us: int, precondition: object = None) -> RetentionResult:
             assert now_us == 100

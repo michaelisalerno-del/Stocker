@@ -33,6 +33,9 @@ RECOVERABLE_FATAL_CODES = frozenset(
 )
 MAX_PAYLOAD_DRAIN_PASSES = 1_000
 MAX_PAYLOAD_DRAIN_WALL_SECONDS = 2_700
+MAX_GRANULAR_RECLAIM_PASSES = 5_000
+MAX_GRANULAR_RECLAIM_WALL_SECONDS = 7_200
+MAX_RECLAIMED_DATABASE_BYTES = 4_461_774_842
 
 
 class LocalWriterLockError(RuntimeError):
@@ -41,6 +44,10 @@ class LocalWriterLockError(RuntimeError):
 
 class PayloadDrainIncompleteError(RuntimeError):
     """A bounded offline payload drain ended before a stable frontier."""
+
+
+class GranularEvidenceReclaimIncompleteError(RuntimeError):
+    """A bounded offline 24-hour evidence reclaim did not produce an eligible copy."""
 
 
 @dataclass(frozen=True)
@@ -55,6 +62,25 @@ class PayloadDrainResult:
     batch_rows_limit: int
     max_passes: int
     max_wall_seconds: int
+
+
+@dataclass(frozen=True)
+class GranularEvidenceReclaimResult:
+    """Auditable outcome of one stopped-database 24-hour evidence reclaim."""
+
+    fixed_now_us: int
+    passes: int
+    payloads_compacted: int
+    raw_market_events_deleted: int
+    callback_tombstones_deleted: int
+    consecutive_zero_passes: int
+    elapsed_ms: int
+    batch_rows_limit: int
+    max_passes: int
+    max_wall_seconds: int
+    output: Path
+    output_database_bytes: int
+    maximum_output_database_bytes: int
 
 
 @dataclass
@@ -202,6 +228,149 @@ def drain_callback_payloads(
     raise PayloadDrainIncompleteError(
         "payload drain pass limit reached after "
         f"{max_passes} passes and {total_compacted} committed payloads"
+    )
+
+
+def reclaim_granular_evidence(
+    *,
+    database: Path,
+    output: Path,
+    now_us: int,
+    policy: RetentionPolicy | None = None,
+    max_passes: int = MAX_GRANULAR_RECLAIM_PASSES,
+    max_wall_seconds: int = MAX_GRANULAR_RECLAIM_WALL_SECONDS,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> GranularEvidenceReclaimResult:
+    """Apply the fixed 24-hour policy and build a verified compact replacement copy."""
+
+    if now_us < 0:
+        raise ValueError("granular evidence reclaim time cannot be negative")
+    if not 2 <= max_passes <= MAX_GRANULAR_RECLAIM_PASSES:
+        raise ValueError(
+            "granular evidence reclaim max_passes must be between 2 and "
+            f"{MAX_GRANULAR_RECLAIM_PASSES}"
+        )
+    if not 1 <= max_wall_seconds <= MAX_GRANULAR_RECLAIM_WALL_SECONDS:
+        raise ValueError(
+            "granular evidence reclaim max_wall_seconds must be between 1 and "
+            f"{MAX_GRANULAR_RECLAIM_WALL_SECONDS}"
+        )
+    database = database.resolve(strict=True)
+    output = output.resolve(strict=False)
+    if output == database:
+        raise ValueError("granular evidence reclaim output must differ from the source database")
+    if output.exists():
+        raise ValueError("granular evidence reclaim output already exists")
+    if not output.parent.is_dir():
+        raise ValueError("granular evidence reclaim output directory does not exist")
+
+    manager = RetentionManager(database, policy or RetentionPolicy())
+    started = monotonic()
+    deadline = started + max_wall_seconds
+    payloads_compacted = 0
+    raw_market_events_deleted = 0
+    callback_tombstones_deleted = 0
+    zero_passes = 0
+    completed_passes = 0
+    lock = LocalWriterLock.for_database(database)
+
+    def progress_summary() -> str:
+        return (
+            f"after {completed_passes} passes; committed payloads={payloads_compacted}, "
+            f"raw_market_events={raw_market_events_deleted}, "
+            f"callback_tombstones={callback_tombstones_deleted}"
+        )
+
+    with lock:
+        for pass_number in range(1, max_passes + 1):
+            if monotonic() >= deadline:
+                raise GranularEvidenceReclaimIncompleteError(
+                    "granular evidence reclaim wall-time limit reached " + progress_summary()
+                )
+            try:
+                result = manager.run_regular_session_pressure(
+                    now_us=now_us,
+                    precondition=lambda _connection: lock.verify_held(),
+                )
+            except Exception as error:
+                raise GranularEvidenceReclaimIncompleteError(
+                    "granular evidence reclaim failed during pass "
+                    f"{pass_number} {progress_summary()}: {type(error).__name__}: {error}"
+                ) from error
+            counts = (
+                result.payloads_compacted,
+                result.raw_market_events_deleted,
+                result.callback_tombstones_deleted,
+            )
+            if any(not 0 <= count <= manager.policy.maintenance_batch_rows for count in counts):
+                raise GranularEvidenceReclaimIncompleteError(
+                    "granular evidence reclaim returned an invalid row count " + progress_summary()
+                )
+            completed_passes = pass_number
+            payloads_compacted += result.payloads_compacted
+            raw_market_events_deleted += result.raw_market_events_deleted
+            callback_tombstones_deleted += result.callback_tombstones_deleted
+            zero_passes = zero_passes + 1 if counts == (0, 0, 0) else 0
+            if zero_passes == 2:
+                break
+        else:
+            raise GranularEvidenceReclaimIncompleteError(
+                "granular evidence reclaim pass limit reached " + progress_summary()
+            )
+
+        lock.verify_held()
+        connection = connect_v2(database)
+        vacuum_deadline_hit = False
+
+        def vacuum_progress() -> int:
+            nonlocal vacuum_deadline_hit
+            vacuum_deadline_hit = monotonic() >= deadline
+            return 1 if vacuum_deadline_hit else 0
+
+        try:
+            connection.set_progress_handler(vacuum_progress, 1_000)
+            connection.execute("VACUUM INTO ?", (str(output),))
+        except Exception as error:
+            if output.exists():
+                output.unlink()
+            reason = "wall-time limit reached" if vacuum_deadline_hit else "vacuum failed"
+            raise GranularEvidenceReclaimIncompleteError(
+                f"granular evidence reclaim {reason} {progress_summary()}: "
+                f"{type(error).__name__}: {error}"
+            ) from error
+        finally:
+            connection.set_progress_handler(None, 0)
+            connection.close()
+        lock.verify_held()
+        try:
+            verify_database(output)
+            output_database_bytes = output.stat().st_size
+        except Exception as error:
+            raise GranularEvidenceReclaimIncompleteError(
+                "granular evidence reclaim output verification failed "
+                f"{progress_summary()}: {type(error).__name__}: {error}"
+            ) from error
+        if output_database_bytes > MAX_RECLAIMED_DATABASE_BYTES:
+            raise GranularEvidenceReclaimIncompleteError(
+                "granular evidence reclaim output exceeds the accepted capacity ceiling: "
+                f"actual={output_database_bytes}; maximum={MAX_RECLAIMED_DATABASE_BYTES}; "
+                + progress_summary()
+            )
+
+    return GranularEvidenceReclaimResult(
+        fixed_now_us=now_us,
+        passes=completed_passes,
+        payloads_compacted=payloads_compacted,
+        raw_market_events_deleted=raw_market_events_deleted,
+        callback_tombstones_deleted=callback_tombstones_deleted,
+        consecutive_zero_passes=zero_passes,
+        elapsed_ms=max(0, round((monotonic() - started) * 1_000)),
+        batch_rows_limit=manager.policy.maintenance_batch_rows,
+        max_passes=max_passes,
+        max_wall_seconds=max_wall_seconds,
+        output=output,
+        output_database_bytes=output_database_bytes,
+        maximum_output_database_bytes=MAX_RECLAIMED_DATABASE_BYTES,
     )
 
 

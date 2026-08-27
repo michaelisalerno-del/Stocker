@@ -8,6 +8,9 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 _NEW_YORK = ZoneInfo("America/New_York")
+SESSION_GROWTH_BYTES_PER_MINUTE = 10_585_025
+FULL_REGULAR_SESSION_MINUTES = 390
+FULL_REGULAR_SESSION_RESERVE_BYTES = SESSION_GROWTH_BYTES_PER_MINUTE * FULL_REGULAR_SESSION_MINUTES
 
 
 @lru_cache(maxsize=32)
@@ -40,3 +43,18 @@ def market_data_expected_since_us(now_us: int) -> int | None:
         return None
     opened_at_us, closed_at_us = window
     return opened_at_us if opened_at_us <= now_us < closed_at_us else None
+
+
+def required_session_reserve_bytes(now_us: int) -> int:
+    """Return the frozen physical reserve for the current or next regular session."""
+
+    if now_us < 0:
+        raise ValueError("session reserve time cannot be negative")
+    session_date = datetime.fromtimestamp(now_us / 1_000_000, UTC).astimezone(_NEW_YORK).date()
+    window = xnys_session_window_us(session_date)
+    if window is None or not window[0] <= now_us < window[1]:
+        return FULL_REGULAR_SESSION_RESERVE_BYTES
+    remaining_us = window[1] - now_us
+    minute_us = 60_000_000
+    remaining_minutes = (remaining_us + minute_us - 1) // minute_us
+    return remaining_minutes * SESSION_GROWTH_BYTES_PER_MINUTE

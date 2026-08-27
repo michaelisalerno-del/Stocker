@@ -1431,6 +1431,49 @@ def test_recorder_health_window_tracks_exact_xnys_sessions() -> None:
     assert _retention_work_expected(standard_time_close) is True
 
 
+def test_startup_capacity_reserve_tracks_remaining_xnys_session_without_widening() -> None:
+    from stocker_runtime.market_session import (
+        FULL_REGULAR_SESSION_RESERVE_BYTES,
+        SESSION_GROWTH_BYTES_PER_MINUTE,
+        required_session_reserve_bytes,
+    )
+
+    def at_us(year: int, month: int, day: int, hour: int, minute: int) -> int:
+        return int(datetime(year, month, day, hour, minute, tzinfo=UTC).timestamp() * 1_000_000)
+
+    regular_open = at_us(2026, 8, 10, 13, 30)
+    regular_close = at_us(2026, 8, 10, 20, 0)
+    assert required_session_reserve_bytes(regular_open) == FULL_REGULAR_SESSION_RESERVE_BYTES
+    assert required_session_reserve_bytes(regular_close - 1) == SESSION_GROWTH_BYTES_PER_MINUTE
+    assert required_session_reserve_bytes(regular_close) == FULL_REGULAR_SESSION_RESERVE_BYTES
+
+    thanksgiving_midday = at_us(2026, 11, 26, 17, 0)
+    assert required_session_reserve_bytes(thanksgiving_midday) == FULL_REGULAR_SESSION_RESERVE_BYTES
+
+    early_open = at_us(2026, 11, 27, 14, 30)
+    early_close = at_us(2026, 11, 27, 18, 0)
+    assert required_session_reserve_bytes(early_open) == (210 * SESSION_GROWTH_BYTES_PER_MINUTE)
+    assert required_session_reserve_bytes(early_close - 1) == SESSION_GROWTH_BYTES_PER_MINUTE
+
+    standard_time_open = at_us(2026, 1, 5, 14, 30)
+    assert required_session_reserve_bytes(standard_time_open) == FULL_REGULAR_SESSION_RESERVE_BYTES
+
+
+def test_regular_session_pressure_capacity_bounds_frozen_opening_burst_excess() -> None:
+    from stocker_runtime.cli import RECORDER_MAINTENANCE_INTERVAL_US
+    from stocker_runtime.opening_burst import opening_burst_callback_count
+    from stocker_runtime.storage import RetentionPolicy
+
+    passes_per_minute = 60_000_000 // RECORDER_MAINTENANCE_INTERVAL_US
+    per_operation_capacity = RetentionPolicy().maintenance_batch_rows * passes_per_minute
+    frozen_opening_minute = opening_burst_callback_count(60)
+
+    assert per_operation_capacity == 12_000
+    assert frozen_opening_minute == 12_132
+    assert frozen_opening_minute - per_operation_capacity == 132
+    assert frozen_opening_minute - per_operation_capacity < RetentionPolicy().maintenance_batch_rows
+
+
 def test_off_session_retention_capacity_exceeds_frozen_regular_session_load() -> None:
     from stocker_runtime.cli import RECORDER_MAINTENANCE_INTERVAL_US
     from stocker_runtime.storage import RetentionPolicy
@@ -1551,6 +1594,9 @@ def test_recorder_service_loop_invokes_bounded_health_tick(
                 "external_read_only_verified": True,
                 "config_hash": "c" * 64,
                 "git_commit": "0000000",
+                "callback_payload_retention_us": 86_400_000_000,
+                "callback_tombstone_retention_us": 86_400_000_000,
+                "raw_market_event_retention_us": 86_400_000_000,
             }
         ),
         encoding="utf-8",
@@ -1649,6 +1695,9 @@ def test_recorder_service_command_handles_sigterm_as_a_clean_stop(
                 "external_read_only_verified": True,
                 "config_hash": "a" * 64,
                 "git_commit": "0000000",
+                "callback_payload_retention_us": 86_400_000_000,
+                "callback_tombstone_retention_us": 86_400_000_000,
+                "raw_market_event_retention_us": 86_400_000_000,
                 "backup_directory": str(backup_directory),
             }
         ),
@@ -1727,6 +1776,9 @@ def test_recorder_service_failure_leaves_an_unclean_generation_for_restart(
                 "external_read_only_verified": True,
                 "config_hash": "b" * 64,
                 "git_commit": "0000000",
+                "callback_payload_retention_us": 86_400_000_000,
+                "callback_tombstone_retention_us": 86_400_000_000,
+                "raw_market_event_retention_us": 86_400_000_000,
                 "backup_directory": str(backup_directory),
             }
         ),

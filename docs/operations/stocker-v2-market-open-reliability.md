@@ -217,6 +217,18 @@ set above `market_data_line_limit`. The tracked market-data file is conspicuousl
 example-only and must be replaced with an operator-reviewed universe. Errors identify
 the invalid file and reason without printing credentials.
 
+Production recorder configuration must explicitly contain all three fixed
+86,400,000,000-microsecond policies:
+
+- `callback_payload_retention_us`;
+- `callback_tombstone_retention_us`;
+- `raw_market_event_retention_us`.
+
+Missing or different values fail preflight. The first rollout of this evidence-policy
+change uses a new run ID and configuration hash; generation 26 and its fatal evidence
+remain immutable. Later clean restarts of that exact configuration resume the new run
+with a new recorder generation.
+
 Required subscription failure makes readiness false, but healthy feeds remain active
 and continue durable capture. Optional failure is visible degradation and does not make
 the required set incomplete. Request retries are independent, fenced, exponentially
@@ -344,16 +356,25 @@ Generation-scoped incident details report only bounded phase and committed-count
 fields. Do not interpret an overall maintenance wall time above 100 ms as a breach:
 the deadline applies independently to each short writer transaction.
 
-Heavy retention is scheduled only outside the existing NYSE/XNYS regular session. At
-regular-session timestamps the recorder preserves the existing passive WAL checkpoint
-and measures and publishes DB/WAL cap state and heartbeat after that attempt. Hard-cap
-failure remains fail-closed and the 95% boundary still pauses optional feeds. Receipt
-proof, payload compaction, evidence pruning, incremental vacuum, and backup work resume
-at the unchanged 10-second cadence outside the session, including holidays and after
-an early close. This uses the same exchange calendar as feed
-staleness; it does not add pre-market/after-hours data collection or hard-coded UTC
-hours. An intentional in-session skip neither opens nor resolves a retention incident;
-only a real off-session maintenance success resolves one.
+During the existing NYSE/XNYS regular session, the ten-second maintenance tick runs
+three independent rolling-window transactions: proven callback-payload compaction,
+protected granular raw-event expiry, and proven callback-tombstone expiry. Each has its
+own 2,000-row budget, 100 ms deadline, writer-authority checks, and rollback boundary.
+A recoverable failure opens a bounded component incident and backs off without
+disconnecting healthy feeds; a later successful pressure pass is recovery evidence.
+Hard DB/WAL capacity, corruption, ownership loss, or durable-admission failure still
+fails closed.
+
+Receipt rolling, derived/idea/shadow expiry, incremental vacuum, and backup work remain
+outside regular hours. The same exchange calendar controls both maintenance scheduling
+and feed staleness, including holidays, DST, and early closes. This adds no pre-market
+or after-hours collection and no hard-coded UTC session.
+
+Before a generation is created or IBKR is contacted, startup requires usable database
+headroom for the remaining current session or a complete next 390-minute session.
+Usable headroom includes verified SQLite freelist pages but does not weaken the 8 GiB
+physical cap. The frozen full-session reserve is 4,128,159,750 bytes. Insufficient
+headroom is an actionable preflight failure and creates no failed generation.
 
 Use an attended offline recovery only after the incident has been diagnosed:
 
@@ -424,6 +445,55 @@ rollback is needed while evidence is valid, preserve the current database
 and roll back only the binary. Restore the checked pre-drain backup only for actual
 corruption found before callback admission resumes. After any new callback is admitted,
 never restore the older backup.
+
+## Generation-26 physical-capacity recovery
+
+Generation 26 is a genuine `STORAGE_CAP_FATAL`, not an eligible same-lineage fatal
+recovery. Preserve it and use a new run ID. Perform this rollout stopped, runtime-masked,
+and attended. First create and restore-check a compressed backup, then make an exact
+disposable copy of the stopped operational database. Record the fixed cutoff once.
+
+Run the tracked reclaim command against that disposable copy, never the only production
+database:
+
+```bash
+/opt/stocker/v2-current/.venv/bin/stocker-runtime recorder \
+  reclaim-granular-evidence \
+  --config /etc/stocker/recorder.json \
+  --database /var/lib/stocker/v2-reclaim/source.sqlite3 \
+  --output /var/lib/stocker/v2-reclaim/reclaimed.sqlite3 \
+  --now-us REPLACE_WITH_FIXED_STOPPED_TIMESTAMP_US \
+  --max-passes 5000 \
+  --max-wall-seconds 7200
+```
+
+The command holds the canonical local writer lock for its whole fixed-cutoff run. Each
+pass uses the same independently bounded transactions as regular-session pressure. It
+requires two consecutive passes with zero payload, raw-event, and tombstone work, then
+uses SQLite `VACUUM INTO` to build a compact replacement and verifies its schema,
+integrity, and foreign keys. It exits nonzero on ownership loss, deadline, pass or wall
+limit, verification failure, or output above the accepted 4,461,774,842-byte ceiling.
+Never raise that ceiling or shorten the approved 24-hour window merely to pass rollout.
+
+Before replacement, compare the stopped source, checked backup, and reclaimed copy.
+Require preserved receipt/watermark evidence, derived bars, idea/shadow evidence,
+incidents, fatal history, schema ledger, `quick_check=ok`, zero foreign-key violations,
+and the expected deletion only of policy-eligible payloads, tombstones, and unprotected
+granular raw events. The compact copy must leave at least 4,128,159,750 bytes of usable
+8 GiB-cap headroom. Preserve the source and backup until the replacement has completed
+an attended start and verification.
+
+Install the compact copy only while recorder and web remain masked and inactive, remove
+stale sidecars through the existing checked SQLite-boundary procedure, then run recorder
+and market-input preflight. Start recorder alone. Require a fresh generation and
+heartbeat, connected IBKR socket, every exact required subscription, growing durable
+raw sequence, bounded inbox/WAL, and no order capability. Start web only after those
+checks; `/api/v2/ready` must describe the same run and generation. Do not restore the
+older database after any new callback has been admitted.
+
+Rollback before callback admission may restore the checked stopped backup and prior
+binary. After callback admission, preserve the current database and roll back code only.
+No schema migration is required for this policy change.
 
 ## Opening replay
 

@@ -42,9 +42,12 @@ from stocker_runtime.ingestion.ibkr_api import (
     write_official_ibkr_api_update_status,
 )
 from stocker_runtime.ingestion.lifecycle import (
+    MAX_GRANULAR_RECLAIM_PASSES,
+    MAX_GRANULAR_RECLAIM_WALL_SECONDS,
     MAX_PAYLOAD_DRAIN_PASSES,
     MAX_PAYLOAD_DRAIN_WALL_SECONDS,
     drain_callback_payloads,
+    reclaim_granular_evidence,
     recover_fatal_generation,
 )
 from stocker_runtime.market_session import (
@@ -55,6 +58,7 @@ from stocker_runtime.storage import (
     BackupPolicy,
     LegacyImportError,
     RetentionManager,
+    RetentionPolicy,
     SchemaError,
     create_backup,
     import_legacy_database,
@@ -416,6 +420,50 @@ def drain_payloads_command(
         _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
         raise typer.Exit(code=1) from error
     payload = asdict(result)
+    payload["status"] = "ok"
+    _emit(payload)
+
+
+@recorder_app.command("reclaim-granular-evidence")
+def reclaim_granular_evidence_command(
+    config: Annotated[Path, typer.Option("--config", exists=True, dir_okay=False)],
+    database: Annotated[Path, typer.Option("--database", exists=True, dir_okay=False)],
+    output: Annotated[Path, typer.Option("--output", dir_okay=False)],
+    now_us: Annotated[int | None, typer.Option("--now-us", min=0)] = None,
+    max_passes: Annotated[
+        int, typer.Option("--max-passes", min=2, max=MAX_GRANULAR_RECLAIM_PASSES)
+    ] = MAX_GRANULAR_RECLAIM_PASSES,
+    max_wall_seconds: Annotated[
+        int,
+        typer.Option(
+            "--max-wall-seconds",
+            min=1,
+            max=MAX_GRANULAR_RECLAIM_WALL_SECONDS,
+        ),
+    ] = MAX_GRANULAR_RECLAIM_WALL_SECONDS,
+) -> None:
+    """Build a checked compact copy after bounded 24-hour granular evidence reclaim."""
+
+    fixed_now_us = time.time_ns() // 1_000 if now_us is None else now_us
+    try:
+        loaded = load_recorder_config(config)
+        result = reclaim_granular_evidence(
+            database=database,
+            output=output,
+            now_us=fixed_now_us,
+            policy=RetentionPolicy(
+                callback_payload_us=loaded.callback_payload_retention_us,
+                tombstone_us=loaded.callback_tombstone_retention_us,
+                raw_market_event_us=loaded.raw_market_event_retention_us,
+            ),
+            max_passes=max_passes,
+            max_wall_seconds=max_wall_seconds,
+        )
+    except (OSError, ValueError, RuntimeError, sqlite3.Error, SchemaError) as error:
+        _emit({"error": type(error).__name__, "message": str(error), "status": "error"})
+        raise typer.Exit(code=1) from error
+    payload = asdict(result)
+    payload["output"] = str(result.output)
     payload["status"] = "ok"
     _emit(payload)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import math
 import re
 import sqlite3
@@ -66,11 +67,13 @@ from stocker_runtime.ingestion.lifecycle import (
     LocalWriterLockError,
 )
 from stocker_runtime.ingestion.subscription_supervisor import retry_disposition
+from stocker_runtime.market_session import required_session_reserve_bytes
 from stocker_runtime.shadow import ShadowEngine
 from stocker_runtime.storage import (
     MaintenanceDeadlineExceeded,
     RetentionInvariantError,
     RetentionManager,
+    RetentionPolicy,
     StorageCapState,
     connect_v2,
     read_backup_manifests,
@@ -299,6 +302,9 @@ class RecorderConfig(BaseModel):
     writer_lease_stale_us: int = Field(default=60_000_000, ge=15_000_000)
     callback_lease_us: int = Field(default=30_000_000, ge=5_000_000)
     market_data_line_limit: int = Field(default=100, ge=1, le=100)
+    callback_payload_retention_us: Literal[86_400_000_000] = 86_400_000_000
+    callback_tombstone_retention_us: Literal[86_400_000_000] = 86_400_000_000
+    raw_market_event_retention_us: Literal[86_400_000_000] = 86_400_000_000
     idea_config: Path | None = None
     backup_directory: Path | None = None
 
@@ -316,7 +322,23 @@ class RecorderConfig(BaseModel):
 def load_recorder_config(path: str | Path) -> RecorderConfig:
     """Load a strict JSON configuration without inspecting environment variables."""
 
-    return RecorderConfig.model_validate_json(Path(path).read_text(encoding="utf-8"))
+    config_path = Path(path)
+    try:
+        text = config_path.read_text(encoding="utf-8")
+        document = json.loads(text)
+        if not isinstance(document, dict):
+            raise ValueError("top-level value must be an object")
+        required_retention = (
+            "callback_payload_retention_us",
+            "callback_tombstone_retention_us",
+            "raw_market_event_retention_us",
+        )
+        missing = tuple(name for name in required_retention if name not in document)
+        if missing:
+            raise ValueError("required 24-hour retention policy is missing " + ", ".join(missing))
+        return RecorderConfig.model_validate_json(text)
+    except (OSError, ValueError) as error:
+        raise ValueError(f"invalid recorder config {config_path}: {error}") from error
 
 
 def _safe_adapter(adapter: object) -> None:
@@ -344,6 +366,11 @@ class Recorder:
     def __init__(self, config: RecorderConfig, adapter: MarketDataAdapter) -> None:
         _safe_adapter(adapter)
         self.config = config
+        self._retention_policy = RetentionPolicy(
+            callback_payload_us=config.callback_payload_retention_us,
+            tombstone_us=config.callback_tombstone_retention_us,
+            raw_market_event_us=config.raw_market_event_retention_us,
+        )
         self.adapter = adapter
         self.inbox = CallbackInbox(config.database)
         self.state: RecorderState | None = None
@@ -495,6 +522,23 @@ class Recorder:
         )
         if not allow_empty_test_inputs:
             _validate_market_data_inputs(instruments, subscriptions)
+        capacity = RetentionManager(
+            self.config.database,
+            self._retention_policy,
+        ).measure_capacity()
+        required_headroom = required_session_reserve_bytes(now_us)
+        if capacity.allocated_bytes >= self._retention_policy.database_cap_bytes:
+            raise RecorderFatalError(
+                "database is already at or above the physical storage cap before generation "
+                f"creation: allocated={capacity.allocated_bytes}; "
+                f"cap={self._retention_policy.database_cap_bytes}"
+            )
+        if capacity.usable_headroom_bytes < required_headroom:
+            raise RecorderFatalError(
+                "insufficient storage headroom before generation creation or broker connect: "
+                f"required={required_headroom}; available={capacity.usable_headroom_bytes}; "
+                f"allocated={capacity.allocated_bytes}; reusable={capacity.reusable_bytes}"
+            )
         self._instruments = instruments
         self._base_subscriptions = subscriptions
         self._subscriptions = subscriptions
@@ -2807,6 +2851,11 @@ class Recorder:
             "receipt_transaction_2",
             "terminalization_and_payload_compaction",
             "expired_evidence_pruning",
+            "regular_session_storage_measurement",
+            "regular_session_payload_compaction",
+            "regular_session_raw_market_event_expiry",
+            "regular_session_callback_tombstone_expiry",
+            "regular_session_checkpoint",
         }:
             details["retention_phase"] = cast(str, phase)
         transactions = error.__dict__.get("receipt_transactions_committed")
@@ -2819,6 +2868,8 @@ class Recorder:
             "terminalizations_committed",
             "payloads_compacted_committed",
             "expired_rows_deleted_committed",
+            "raw_market_events_deleted_committed",
+            "callback_tombstones_deleted_committed",
         ):
             value = error.__dict__.get(name)
             if type(value) is int and 0 <= value <= 2_000:
@@ -4330,63 +4381,15 @@ class Recorder:
         now_us: int,
         retention_work_expected: bool = True,
     ) -> StorageCapState:
-        """Consume one bounded Phase 2 retention result and apply recorder reactions."""
+        """Run the bounded maintenance appropriate to the current session."""
 
         authority = self._authority()
-        if not retention_work_expected:
-            try:
-                (
-                    cap_state,
-                    database_bytes,
-                    wal_bytes,
-                    required_action,
-                    checkpoint_complete,
-                ) = RetentionManager(self.config.database).checkpoint_and_measure_cap_state()
-            except sqlite3.OperationalError as error:
-                if self._hard_component_error(error):
-                    self._fatal("RETENTION_INVARIANT_FAILED", now_us)
-                    raise RecorderFatalError("retention invariant failed") from error
-                self._retention_maintenance_deferred = True
-                self._component_failure(
-                    "retention_maintenance",
-                    now_us=now_us,
-                    error_name=type(error).__name__,
-                )
-                return StorageCapState.NORMAL
-            except Exception as error:
-                self._retention_maintenance_deferred = True
-                self._component_failure(
-                    "retention_maintenance",
-                    now_us=now_us,
-                    error_name=type(error).__name__,
-                )
-                return StorageCapState.NORMAL
-            self._publish_storage_measurement(
-                authority=authority,
-                now_us=now_us,
-                database_bytes=database_bytes,
-                wal_bytes=wal_bytes,
-            )
-            if not checkpoint_complete:
-                self._retention_maintenance_deferred = True
-                self._component_failure(
-                    "retention_maintenance",
-                    now_us=now_us,
-                    error_name="WalCheckpointIncomplete",
-                )
-            if cap_state is StorageCapState.FATAL:
-                self._fatal(required_action or "STORAGE_CAP_FATAL", now_us)
-                raise RecorderFatalError(required_action or "storage cap closed admission")
-            if cap_state is StorageCapState.DEGRADED:
-                self._pause_optional(now_us)
-                self._set_lifecycle("degraded", "PAUSE_OPTIONAL_FEEDS", now_us)
-            return cap_state
         retention_failures, retention_retry_at_us = self._component_failures.get(
             "retention_maintenance", (0, 0)
         )
         if retention_failures and now_us < retention_retry_at_us:
             cap_state, _database_bytes, _wal_bytes, required_action = RetentionManager(
-                self.config.database
+                self.config.database, self._retention_policy
             ).measure_cap_state()
             if cap_state is StorageCapState.FATAL:
                 self._fatal(required_action or "STORAGE_CAP_FATAL", now_us)
@@ -4396,10 +4399,21 @@ class Recorder:
                 self._set_lifecycle("degraded", "PAUSE_OPTIONAL_FEEDS", now_us)
             return cap_state
         try:
-            result = RetentionManager(self.config.database).run(
-                now_us=now_us,
-                precondition=lambda connection: CallbackInbox.verify_writer(connection, authority),
-            )
+            manager = RetentionManager(self.config.database, self._retention_policy)
+            if retention_work_expected:
+                result = manager.run(
+                    now_us=now_us,
+                    precondition=lambda connection: CallbackInbox.verify_writer(
+                        connection, authority
+                    ),
+                )
+            else:
+                pressure_result = manager.run_regular_session_pressure(
+                    now_us=now_us,
+                    precondition=lambda connection: CallbackInbox.verify_writer(
+                        connection, authority
+                    ),
+                )
         except AuthoritativeLeaseLost:
             raise
         except InboxAdmissionError as error:
@@ -4437,6 +4451,36 @@ class Recorder:
                 incident_details=self._retention_incident_details(error),
             )
             return StorageCapState.NORMAL
+        if not retention_work_expected:
+            published = self._publish_storage_measurement(
+                authority=authority,
+                now_us=now_us,
+                database_bytes=pressure_result.database_bytes,
+                wal_bytes=pressure_result.wal_bytes,
+            )
+            if not pressure_result.checkpoint_complete:
+                self._retention_maintenance_deferred = True
+                self._component_failure(
+                    "retention_maintenance",
+                    now_us=now_us,
+                    error_name="WalCheckpointIncomplete",
+                )
+            elif published:
+                self._retention_maintenance_deferred = False
+                if retention_failures:
+                    self._component_recovered("retention_maintenance", now_us=now_us)
+            if pressure_result.cap_state is StorageCapState.FATAL:
+                self._fatal(
+                    pressure_result.required_action or "STORAGE_CAP_FATAL",
+                    now_us,
+                )
+                raise RecorderFatalError(
+                    pressure_result.required_action or "storage cap closed admission"
+                )
+            if pressure_result.cap_state is StorageCapState.DEGRADED:
+                self._pause_optional(now_us)
+                self._set_lifecycle("degraded", "PAUSE_OPTIONAL_FEEDS", now_us)
+            return pressure_result.cap_state
         if retention_failures:
             self._component_recovered("retention_maintenance", now_us=now_us)
         publication_contended = False

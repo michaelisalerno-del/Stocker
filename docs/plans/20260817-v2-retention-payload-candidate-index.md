@@ -1497,3 +1497,100 @@ and independent read-only review pass. Rollout is code-only on schema 20, follow
 an explicit audited recovery of exact generation 25, recorder-only observation through
 three successful checkpoint cycles, and web restoration only after bounded WAL and
 readiness evidence.
+
+### 2026-08-27: physical-capacity retention correction
+
+Generation 26 failed with `STORAGE_CAP_FATAL` after the schema-20 operational database
+grew from 5,991,989,248 to 8,591,671,296 bytes during 307 minutes of regular-session
+recording. The database exceeded its unchanged 8 GiB physical cap by 1,736,704 bytes;
+this was not a broker, WAL-checkpoint, ownership, or durable-admission failure.
+
+The stopped immutable production census found no reusable free pages. Callback
+structures occupy 2,533,347,328 bytes and market-event structures occupy
+5,736,124,416 bytes, together 8,269,471,744 bytes (96.25% of the database). Freeze the
+observed burn rate at 8,468,020 bytes/minute, a 1.25x planning rate of 10,585,025
+bytes/minute, and a complete 390-minute XNYS-session reserve of 4,128,159,750 bytes.
+Usable headroom is `max(0, cap - allocated_bytes) + freelist_count * page_size`.
+
+The owner explicitly approved a 24-hour granular-evidence window on 2026-08-27:
+
+- callback payload retention: 86,400,000,000 microseconds (unchanged);
+- callback tombstone/full-row retention: 86,400,000,000 microseconds;
+- granular raw market-event retention: 86,400,000,000 microseconds.
+
+Permanent receipts and watermarks, derived bars, idea/shadow evidence, incidents, and
+all other protected classes retain their existing policies. Bind the three values into
+validated production configuration and frozen configuration identity. Missing,
+nonpositive, inconsistent, or non-24-hour production values fail preflight. This is an
+incompatible evidence-policy change: generation 26 remains fatal and immutable and
+rollout uses a new run ID. Later exact-config clean restarts retain same-run behavior.
+
+At the fatal timestamp, 24 hours retained 1,604,921 of 3,637,819 market events. The
+estimated retained database is 3.97 GB. The exact stopped-copy acceptance ceiling is
+4,461,774,842 bytes, leaving at least the fixed 4,128,159,750-byte session reserve.
+Two days cannot satisfy the reserve. If the exact copy misses either threshold, stop;
+do not shorten retention, raise the cap, or drop indexes without another Architect and
+owner decision. Retain every current index initially; no schema migration is justified.
+
+Before generation creation or broker connection, require usable headroom for the
+remaining current or next full XNYS session. Insufficient capacity is an actionable
+preflight failure, not a new fatal generation. Reuse the existing XNYS calendar; do not
+hard-code UTC boundaries or broaden the session.
+
+At the existing ten-second cadence during XNYS regular hours, run three independent
+bounded rolling-window transactions: receipt-authorized payload compaction,
+protected-reference-aware granular raw-event expiry, and receipt/watermark-authorized
+callback-tombstone expiry. Each receives its own `BEGIN IMMEDIATE`, 2,000-row limit,
+unchanged 100 ms deadline, writer-authority checks after begin and before commit,
+rollback, and committed-count diagnostics. Do not share their row budget: the frozen
+rate implies about 683 eligible rows per interval per class. Continue deferring receipt
+rolling, broad derived/idea/shadow expiry, vacuum, and backups outside regular hours.
+Freed pages remain reusable without in-session vacuum. Recoverable cleanup degradation
+must not stop raw admission below the hard cap; corruption, ownership loss, durable
+admission failure, and unchanged DB/WAL hard caps remain fail-closed.
+
+Public TDD seams are validated configuration/preflight, `RetentionManager` maintenance,
+`Recorder.maintain`, recorder startup before broker connection, and the deterministic
+opening replay. Tests cover exact policy/hash binding, pre-connect capacity rejection,
+freelist headroom, XNYS open/close/early-close/holiday/DST, oldest-first proof-aware
+independent cleanup, 2,000-row/100 ms bounds, partial commits, protected evidence,
+1.25x non-growing work, recoverable isolation, hard-cap behavior, ordering, duplicates,
+gaps, provenance, subscriptions, and unchanged 2,022/12,132 replays.
+
+Rollout is serial and attended: create and restore-check a post-fatal backup; pass the
+fixed disposable-copy size/headroom gate; complete focused/failure/replay/full tests and
+independent review; apply the same fixed-cutoff retention under the canonical writer
+lock; verify schema, hashes/counts, `quick_check`, foreign keys, physical size, and
+headroom; install a new run ID/hash; start recorder only; require every exact feed,
+fresh heartbeat, raw growth, bounded backlog/WAL, zero order capability, and
+non-growing eligible work; start web only after truthful readiness; observe the first
+complete XNYS session attended.
+
+The gate uses the tracked `recorder reclaim-granular-evidence` command against the
+stopped database's disposable copy. It holds the canonical local writer lock across a
+fixed-cutoff loop, requires two consecutive zero-work passes, builds a verified compact
+replacement with `VACUUM INTO`, and rejects output above 4,461,774,842 bytes. Pass,
+wall-time, ownership, transaction, verification, or size failure is nonzero and never
+publishes the copy as production. The original stopped database and checked backup are
+preserved until the replacement passes logical evidence hashes, schema, integrity,
+foreign-key, physical-size, and headroom checks.
+
+Affected modes are `prospective_record`, `shadow`, and read-only web health. Risk,
+execution, reconciliation, accounts, credentials, paper/live trading, broker orders,
+order capability, and the exact XNYS regular-session definition are unchanged.
+
+The unchanged deterministic replay after the 24-hour pressure implementation passed
+both fixed scenarios on 2026-08-27:
+
+| replay | presented/admitted/projected | loss/duplicates/order/provenance | p50 / p95 / p99 admission | throughput | max/final backlog | drain | heartbeat | WAL |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 10 seconds | 2,022 / 2,022 / 2,022 | 0 / 0 / 0 / 0 | 0.159 / 0.294 / 8.538 ms | 452.33 callbacks/s | 219 / 0 | 0.126 s | 0 s | 4,622,672 B |
+| 60 seconds | 12,132 / 12,132 / 12,132 | 0 / 0 / 0 / 0 | 0.160 / 0.292 / 8.977 ms | 423.30 callbacks/s | 219 / 0 | 0.133 s | 0 s | 5,162,392 B |
+
+Both had zero escaped SQLite busy/locked errors, all 100 required feeds active and
+fresh, truthful readiness, and no acceptance failure. The 60-second run projected at
+1,549.67 callbacks/s, used 51,494,912 bytes of measured RSS growth, and completed its
+readiness query in 2.085 ms. The prior unchanged final baseline was 0.164/0.299/9.141
+ms p50/p95/p99 with the same 12,132 callbacks, 219/0 backlog, zero evidence violations,
+and 5,162,392-byte WAL. No ingestion optimization, queue, or storage-layer change was
+justified by this replay.

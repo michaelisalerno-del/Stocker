@@ -22,6 +22,7 @@ from stocker_runtime.ingestion.inbox import (
 from stocker_runtime.ingestion.lifecycle import (
     LocalWriterLock,
     LocalWriterLockError,
+    reclaim_granular_evidence,
 )
 from stocker_runtime.storage import (
     EXPECTED_TABLES,
@@ -89,6 +90,339 @@ def test_retention_checkpoint_capacity_exceeds_observed_ingestion_rate() -> None
 
     assert callback_capacity_per_second >= 100
     assert receipt_capacity_per_second >= 100
+
+
+def test_storage_capacity_counts_verified_freelist_pages_as_reusable(tmp_path: Path) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    with connect_v2(database) as connection:
+        connection.execute("CREATE TABLE capacity_fixture(payload BLOB) STRICT")
+        connection.execute("INSERT INTO capacity_fixture VALUES (zeroblob(1048576))")
+        connection.commit()
+        connection.execute("DROP TABLE capacity_fixture")
+        connection.commit()
+        page_count = int(connection.execute("PRAGMA page_count").fetchone()[0])
+        page_size = int(connection.execute("PRAGMA page_size").fetchone()[0])
+        freelist_count = int(connection.execute("PRAGMA freelist_count").fetchone()[0])
+
+    allocated = page_count * page_size
+    reusable = freelist_count * page_size
+    assert reusable > 0
+    capacity = RetentionManager(
+        database,
+        RetentionPolicy(database_cap_bytes=allocated + 1_000),
+    ).measure_capacity()
+
+    assert capacity.allocated_bytes == allocated
+    assert capacity.reusable_bytes == reusable
+    assert capacity.usable_headroom_bytes == 1_000 + reusable
+
+
+def test_regular_session_pressure_relieves_each_high_volume_class_independently(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    sequence = _seed_callback_for_retention(
+        database,
+        uid="regular-session-expired",
+        received_at_us=1,
+        acknowledged_at_us=1,
+        receipt_batch_id="regular-session-proof",
+    )
+    _insert_receipt(
+        database,
+        batch_id="regular-session-proof",
+        first_sequence=sequence,
+        last_sequence=sequence,
+        created_at_us=2,
+    )
+    policy = RetentionPolicy(
+        callback_payload_us=10,
+        tombstone_us=10,
+        raw_market_event_us=10,
+        receipt_us=1_000,
+        maintenance_batch_rows=1,
+    )
+    RetentionManager(database, policy).run(
+        now_us=5,
+        measured_database_bytes=1,
+        measured_wal_bytes=0,
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, "
+            "derived_after_source_sequence, instrument_id, feed_kind, event_kind, "
+            "event_at_us, received_at_us, connection_generation, payload_json, "
+            "payload_sha256) VALUES ('derived-retained', 'retention-run', NULL, ?, "
+            "'instrument-1', 'bars', 'bar_5m', 1, 1, 1, '{}', ?)",
+            (sequence, "d" * 64),
+        )
+
+    result = RetentionManager(database, policy).run_regular_session_pressure(now_us=20)
+
+    assert result.payloads_compacted == 1
+    assert result.raw_market_events_deleted == 1
+    assert result.callback_tombstones_deleted == 1
+    with connect_v2(database) as connection:
+        assert (
+            connection.execute(
+                "SELECT 1 FROM callback_inbox WHERE source_sequence=?", (sequence,)
+            ).fetchone()
+            is None
+        )
+        assert (
+            connection.execute(
+                "SELECT 1 FROM market_events "
+                "WHERE event_id='retention-event-regular-session-expired'"
+            ).fetchone()
+            is None
+        )
+        assert (
+            connection.execute(
+                "SELECT 1 FROM market_events WHERE event_id='derived-retained'"
+            ).fetchone()
+            is not None
+        )
+        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 1
+
+
+def test_regular_session_pressure_preserves_earlier_commits_when_later_phase_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    sequence = _seed_callback_for_retention(
+        database,
+        uid="regular-session-partial",
+        received_at_us=1,
+        acknowledged_at_us=1,
+        receipt_batch_id="regular-session-partial-proof",
+    )
+    _insert_receipt(
+        database,
+        batch_id="regular-session-partial-proof",
+        first_sequence=sequence,
+        last_sequence=sequence,
+        created_at_us=2,
+    )
+    policy = RetentionPolicy(
+        callback_payload_us=10,
+        tombstone_us=10,
+        raw_market_event_us=10,
+        receipt_us=1_000,
+    )
+    RetentionManager(database, policy).run(
+        now_us=5,
+        measured_database_bytes=1,
+        measured_wal_bytes=0,
+    )
+
+    def fail_raw_expiry(*_args: object, **_kwargs: object) -> int:
+        raise RuntimeError("injected raw expiry failure")
+
+    monkeypatch.setattr(RetentionManager, "_prune_raw_market_events", fail_raw_expiry)
+    with pytest.raises(RuntimeError, match="injected raw expiry failure") as raised:
+        RetentionManager(database, policy).run_regular_session_pressure(now_us=20)
+
+    assert raised.value.__dict__ == {
+        "retention_phase": "regular_session_raw_market_event_expiry",
+        "payloads_compacted_committed": 1,
+        "raw_market_events_deleted_committed": 0,
+        "callback_tombstones_deleted_committed": 0,
+    }
+    with connect_v2(database) as connection:
+        callback = connection.execute(
+            "SELECT lifecycle, payload_json FROM callback_inbox WHERE source_sequence=?",
+            (sequence,),
+        ).fetchone()
+        assert tuple(callback) == ("acknowledged", None)
+        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 1
+
+
+def test_offline_granular_reclaim_uses_fixed_cutoff_and_builds_verified_compact_copy(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    output = tmp_path / "v2-reclaimed.sqlite3"
+    initialize_database(database)
+    _seed_output_dependencies(database)
+    sequence = _seed_callback_for_retention(
+        database,
+        uid="offline-granular-reclaim",
+        received_at_us=1,
+        acknowledged_at_us=1,
+        receipt_batch_id="offline-granular-proof",
+    )
+    _insert_receipt(
+        database,
+        batch_id="offline-granular-proof",
+        first_sequence=sequence,
+        last_sequence=sequence,
+        created_at_us=2,
+    )
+    policy = RetentionPolicy(
+        callback_payload_us=10,
+        tombstone_us=10,
+        raw_market_event_us=10,
+        receipt_us=1_000,
+        maintenance_batch_rows=1,
+    )
+    RetentionManager(database, policy).run(
+        now_us=5,
+        measured_database_bytes=1,
+        measured_wal_bytes=0,
+    )
+    with connect_v2(database) as connection:
+        connection.execute(
+            "INSERT INTO market_events(event_id, run_id, source_sequence, "
+            "derived_after_source_sequence, instrument_id, feed_kind, event_kind, "
+            "event_at_us, received_at_us, connection_generation, payload_json, "
+            "payload_sha256) VALUES ('offline-derived-retained', 'retention-run', NULL, ?, "
+            "'instrument-1', 'bars', 'bar_5m', 1, 1, 1, '{}', ?)",
+            (sequence, "e" * 64),
+        )
+
+    result = reclaim_granular_evidence(
+        database=database,
+        output=output,
+        now_us=20,
+        policy=policy,
+        max_passes=10,
+        max_wall_seconds=10,
+    )
+
+    assert result.fixed_now_us == 20
+    assert result.passes == 3
+    assert result.payloads_compacted == 1
+    assert result.raw_market_events_deleted == 1
+    assert result.callback_tombstones_deleted == 1
+    assert result.consecutive_zero_passes == 2
+    assert result.output_database_bytes == output.stat().st_size
+    assert result.output_database_bytes <= result.maximum_output_database_bytes
+    verify_database(output)
+    with connect_v2(output) as connection:
+        assert (
+            connection.execute(
+                "SELECT 1 FROM market_events WHERE event_id='offline-derived-retained'"
+            ).fetchone()
+            is not None
+        )
+        assert connection.execute("SELECT count(*) FROM callback_receipts").fetchone()[0] == 1
+        assert (
+            connection.execute(
+                "SELECT 1 FROM callback_inbox WHERE source_sequence=?", (sequence,)
+            ).fetchone()
+            is None
+        )
+
+
+def test_granular_reclaim_cli_uses_explicit_recorder_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    output = tmp_path / "reclaimed.sqlite3"
+    config = tmp_path / "recorder.json"
+    initialize_database(database)
+    config.write_text(
+        json.dumps(
+            {
+                "database": str(database),
+                "run_id": "new-retention-lineage",
+                "owner_id": "offline-reclaim",
+                "mode": "prospective_record",
+                "host": "127.0.0.1",
+                "port": 4002,
+                "client_id": 71,
+                "read_only": True,
+                "external_read_only_verified": True,
+                "config_hash": "a" * 64,
+                "git_commit": "deadbee",
+                "callback_payload_retention_us": 86_400_000_000,
+                "callback_tombstone_retention_us": 86_400_000_000,
+                "raw_market_event_retention_us": 86_400_000_000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[tuple[Path, Path, int, RetentionPolicy]] = []
+
+    def reclaim(**kwargs: object) -> lifecycle_module.GranularEvidenceReclaimResult:
+        policy = kwargs["policy"]
+        assert isinstance(policy, RetentionPolicy)
+        calls.append(
+            (
+                Path(str(kwargs["database"])),
+                Path(str(kwargs["output"])),
+                int(str(kwargs["now_us"])),
+                policy,
+            )
+        )
+        return lifecycle_module.GranularEvidenceReclaimResult(
+            fixed_now_us=int(str(kwargs["now_us"])),
+            passes=3,
+            payloads_compacted=1,
+            raw_market_events_deleted=1,
+            callback_tombstones_deleted=1,
+            consecutive_zero_passes=2,
+            elapsed_ms=10,
+            batch_rows_limit=2_000,
+            max_passes=int(str(kwargs["max_passes"])),
+            max_wall_seconds=int(str(kwargs["max_wall_seconds"])),
+            output=output,
+            output_database_bytes=123,
+            maximum_output_database_bytes=4_461_774_842,
+        )
+
+    monkeypatch.setattr(cli_module, "reclaim_granular_evidence", reclaim)
+    result = CliRunner().invoke(
+        runtime_app,
+        [
+            "recorder",
+            "reclaim-granular-evidence",
+            "--config",
+            str(config),
+            "--database",
+            str(database),
+            "--output",
+            str(output),
+            "--now-us",
+            "123",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [(database, output, 123, RetentionPolicy())]
+    response = json.loads(result.stdout)
+    assert response["status"] == "ok"
+    assert response["output"] == str(output)
+    assert response["consecutive_zero_passes"] == 2
+
+
+def test_offline_granular_reclaim_rejects_an_active_writer_before_output(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "v2.sqlite3"
+    output = tmp_path / "reclaimed.sqlite3"
+    initialize_database(database)
+
+    with (
+        LocalWriterLock.for_database(database),
+        pytest.raises(LocalWriterLockError, match="writer lock is held"),
+    ):
+        reclaim_granular_evidence(
+            database=database,
+            output=output,
+            now_us=86_400_000_000,
+            max_passes=2,
+            max_wall_seconds=10,
+        )
+
+    assert not output.exists()
 
 
 def test_normal_retention_selects_one_receipt_work_run_before_proof_verification(

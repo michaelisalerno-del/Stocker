@@ -244,14 +244,37 @@ class StorageCapState(StrEnum):
 
 
 @dataclass(frozen=True)
+class StorageCapacity:
+    """Physical allocation and verified reusable-page headroom."""
+
+    allocated_bytes: int
+    reusable_bytes: int
+    usable_headroom_bytes: int
+
+
+@dataclass(frozen=True)
+class RetentionPressureResult:
+    """One regular-session rolling-window maintenance result."""
+
+    cap_state: StorageCapState
+    database_bytes: int
+    wal_bytes: int
+    payloads_compacted: int
+    raw_market_events_deleted: int
+    callback_tombstones_deleted: int
+    required_action: str | None
+    checkpoint_complete: bool
+
+
+@dataclass(frozen=True)
 class RetentionPolicy:
     """Frozen operational retention defaults; smaller values support deterministic tests."""
 
     callback_payload_us: int = DAY_US
     receipt_us: int = 90 * DAY_US
     max_receipts_per_run: int = 2_048
-    tombstone_us: int = 7 * DAY_US
-    raw_market_event_us: int = 30 * DAY_US
+    tombstone_us: int = DAY_US
+    raw_market_event_us: int = DAY_US
     derivation_mapping_us: int = 30 * DAY_US
     completed_bar_us: int = 400 * DAY_US
     closed_subscription_us: int = 90 * DAY_US
@@ -349,6 +372,26 @@ class RetentionManager:
         page_size = int(connection.execute("PRAGMA page_size").fetchone()[0])
         wal_path = Path(f"{self.database_path}-wal")
         return page_count * page_size, wal_path.stat().st_size if wal_path.exists() else 0
+
+    def measure_capacity(self) -> StorageCapacity:
+        """Measure session headroom without weakening the physical hard-cap boundary."""
+
+        connection = connect_v2(self.database_path)
+        try:
+            page_count = int(connection.execute("PRAGMA page_count").fetchone()[0])
+            page_size = int(connection.execute("PRAGMA page_size").fetchone()[0])
+            freelist_count = int(connection.execute("PRAGMA freelist_count").fetchone()[0])
+        finally:
+            connection.close()
+        allocated_bytes = page_count * page_size
+        reusable_bytes = freelist_count * page_size
+        return StorageCapacity(
+            allocated_bytes=allocated_bytes,
+            reusable_bytes=reusable_bytes,
+            usable_headroom_bytes=(
+                max(0, self.policy.database_cap_bytes - allocated_bytes) + reusable_bytes
+            ),
+        )
 
     def measure_cap_state(self) -> tuple[StorageCapState, int, int, str | None]:
         """Measure hard-cap state without running or bypassing retention work."""
@@ -943,6 +986,64 @@ class RetentionManager:
         )
         return len(candidates)
 
+    def _prune_raw_market_events(
+        self,
+        connection: sqlite3.Connection,
+        cutoff_us: int,
+        limit: int,
+    ) -> int:
+        """Delete only granular raw events whose protected references have expired."""
+
+        return self._delete_limited(
+            connection,
+            "market_events",
+            "event_id",
+            "event_kind NOT IN ('historical_bar', 'bar_5m', 'bar_5m_session_prefix', "
+            "'session_volume_baseline', 'option_snapshot_capture') AND event_at_us <= ? "
+            "AND NOT EXISTS (SELECT 1 FROM market_latest l "
+            "WHERE market_events.event_id IN (l.event_id, l.bid_source_event_id, "
+            "l.ask_source_event_id, l.bid_size_source_event_id, l.ask_size_source_event_id, "
+            "l.last_source_event_id, l.size_source_event_id, l.close_source_event_id)) "
+            "AND NOT EXISTS (SELECT 1 FROM idea_checkpoints checkpoint, "
+            "json_each(checkpoint.state_input_event_ids_json) input "
+            "WHERE input.value=market_events.event_id) "
+            "AND NOT EXISTS (SELECT 1 FROM market_data_interests interest "
+            "WHERE interest.input_event_id=market_events.event_id) "
+            "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
+            "WHERE derivation.input_event_id=market_events.event_id) "
+            "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
+            "WHERE derivation.derived_event_id=market_events.event_id) "
+            "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
+            "JOIN shadow_positions position ON position.position_id=progress.position_id "
+            "JOIN shadow_legs leg ON leg.position_id=position.position_id "
+            "WHERE position.run_id=market_events.run_id AND position.lifecycle='open' "
+            "AND market_events.event_kind='quote' "
+            "AND leg.instrument_id=market_events.instrument_id "
+            "AND market_events.source_sequence>=progress.next_source_sequence "
+            "AND progress.final_target_at_us>=?) "
+            "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
+            "JOIN shadow_positions position ON position.position_id=progress.position_id "
+            "JOIN idea_output_legs leg "
+            "ON leg.output_id=position.proposed_trade_output_id "
+            "WHERE position.run_id=market_events.run_id AND position.lifecycle='pending' "
+            "AND market_events.event_kind='quote' "
+            "AND leg.instrument_id=market_events.instrument_id "
+            "AND market_events.source_sequence>=progress.next_source_sequence "
+            "AND market_events.source_sequence>progress.entry_after_source_sequence "
+            "AND (market_events.received_at_us<=progress.pending_retention_deadline_us "
+            "OR market_events.event_id=(SELECT barrier.event_id FROM market_events barrier "
+            "INDEXED BY market_events_shadow_raw_idx "
+            "WHERE barrier.run_id=position.run_id "
+            "AND barrier.instrument_id=leg.instrument_id "
+            "AND barrier.event_kind='quote' "
+            "AND barrier.source_sequence>=progress.next_source_sequence "
+            "AND barrier.source_sequence>progress.entry_after_source_sequence "
+            "AND barrier.source_sequence IS NOT NULL "
+            "ORDER BY barrier.source_sequence, barrier.event_id LIMIT 1)))",
+            (cutoff_us, cutoff_us),
+            limit,
+        )
+
     def _prune_idea_outputs(
         self, connection: sqlite3.Connection, cutoff_us: int, remaining: int
     ) -> int:
@@ -1122,53 +1223,10 @@ class RetentionManager:
             now_us - self.policy.derivation_mapping_us,
             now_us - self.policy.completed_bar_us,
         )
-        prune(
-            "market_events",
-            "event_id",
-            "event_kind NOT IN ('historical_bar', 'bar_5m', 'bar_5m_session_prefix', "
-            "'session_volume_baseline', 'option_snapshot_capture') AND event_at_us <= ? "
-            "AND NOT EXISTS (SELECT 1 FROM market_latest l "
-            "WHERE market_events.event_id IN (l.event_id, l.bid_source_event_id, "
-            "l.ask_source_event_id, l.bid_size_source_event_id, l.ask_size_source_event_id, "
-            "l.last_source_event_id, l.size_source_event_id, l.close_source_event_id)) "
-            "AND NOT EXISTS (SELECT 1 FROM idea_checkpoints checkpoint, "
-            "json_each(checkpoint.state_input_event_ids_json) input "
-            "WHERE input.value=market_events.event_id) "
-            "AND NOT EXISTS (SELECT 1 FROM market_data_interests interest "
-            "WHERE interest.input_event_id=market_events.event_id) "
-            "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
-            "WHERE derivation.input_event_id=market_events.event_id) "
-            "AND NOT EXISTS (SELECT 1 FROM market_event_derivations derivation "
-            "WHERE derivation.derived_event_id=market_events.event_id) "
-            "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
-            "JOIN shadow_positions position ON position.position_id=progress.position_id "
-            "JOIN shadow_legs leg ON leg.position_id=position.position_id "
-            "WHERE position.run_id=market_events.run_id AND position.lifecycle='open' "
-            "AND market_events.event_kind='quote' "
-            "AND leg.instrument_id=market_events.instrument_id "
-            "AND market_events.source_sequence>=progress.next_source_sequence "
-            "AND progress.final_target_at_us>=?) "
-            "AND NOT EXISTS (SELECT 1 FROM shadow_progress progress "
-            "JOIN shadow_positions position ON position.position_id=progress.position_id "
-            "JOIN idea_output_legs leg "
-            "ON leg.output_id=position.proposed_trade_output_id "
-            "WHERE position.run_id=market_events.run_id AND position.lifecycle='pending' "
-            "AND market_events.event_kind='quote' "
-            "AND leg.instrument_id=market_events.instrument_id "
-            "AND market_events.source_sequence>=progress.next_source_sequence "
-            "AND market_events.source_sequence>progress.entry_after_source_sequence "
-            "AND (market_events.received_at_us<=progress.pending_retention_deadline_us "
-            "OR market_events.event_id=(SELECT barrier.event_id FROM market_events barrier "
-            "INDEXED BY market_events_shadow_raw_idx "
-            "WHERE barrier.run_id=position.run_id "
-            "AND barrier.instrument_id=leg.instrument_id "
-            "AND barrier.event_kind='quote' "
-            "AND barrier.source_sequence>=progress.next_source_sequence "
-            "AND barrier.source_sequence>progress.entry_after_source_sequence "
-            "AND barrier.source_sequence IS NOT NULL "
-            "ORDER BY barrier.source_sequence, barrier.event_id LIMIT 1)))",
+        deleted += self._prune_raw_market_events(
+            connection,
             now_us - self.policy.raw_market_event_us,
-            now_us - self.policy.raw_market_event_us,
+            limit - deleted,
         )
         prune(
             "market_events",
@@ -1253,6 +1311,158 @@ class RetentionManager:
             ),
         ).fetchone()
         return None if receipt_run is None else str(receipt_run["run_id"])
+
+    def run_regular_session_pressure(
+        self,
+        *,
+        now_us: int,
+        precondition: Callable[[sqlite3.Connection], None] | None = None,
+    ) -> RetentionPressureResult:
+        """Run only the three independently bounded rolling high-volume operations."""
+
+        if now_us < 0:
+            raise ValueError("regular-session retention time cannot be negative")
+        connection = connect_v2(self.database_path)
+        phase = "regular_session_storage_measurement"
+        payloads_compacted = 0
+        raw_market_events_deleted = 0
+        callback_tombstones_deleted = 0
+
+        def bounded_transaction(
+            name: str,
+            operation: Callable[[sqlite3.Connection], int],
+        ) -> int:
+            nonlocal phase
+            phase = name
+            deadline_hit = False
+            deadline = 0.0
+
+            def progress() -> int:
+                nonlocal deadline_hit
+                deadline_hit = self._monotonic() >= deadline
+                return 1 if deadline_hit else 0
+
+            def check_deadline() -> None:
+                nonlocal deadline_hit
+                deadline_hit = self._monotonic() >= deadline
+                if deadline_hit:
+                    raise MaintenanceDeadlineExceeded(
+                        f"retention {phase} exceeded its configured deadline"
+                    )
+
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                deadline = self._monotonic() + self.policy.maintenance_transaction_ms / 1_000
+                connection.set_progress_handler(progress, 1_000)
+                if precondition is not None:
+                    precondition(connection)
+                check_deadline()
+                changed = operation(connection)
+                if not 0 <= changed <= self.policy.maintenance_batch_rows:
+                    raise RetentionInvariantError(
+                        f"retention {phase} exceeded its configured row bound"
+                    )
+                if precondition is not None:
+                    precondition(connection)
+                check_deadline()
+                connection.commit()
+                return changed
+            except Exception as error:
+                if connection.in_transaction:
+                    connection.rollback()
+                if deadline_hit and isinstance(error, sqlite3.OperationalError):
+                    raise MaintenanceDeadlineExceeded(
+                        f"retention {phase} exceeded its configured deadline"
+                    ) from error
+                raise
+            finally:
+                connection.set_progress_handler(None, 0)
+
+        def compact_payloads(current: sqlite3.Connection) -> int:
+            cutoff_us = now_us - self.policy.callback_payload_us
+            candidates = tuple(
+                row
+                for row in (
+                    current.execute(ACK_PAYLOAD_DRAIN_RUN_SQL, (cutoff_us,)).fetchone(),
+                    current.execute(FAILED_PAYLOAD_DRAIN_RUN_SQL, (cutoff_us,)).fetchone(),
+                )
+                if row is not None
+            )
+            selected = (
+                None
+                if not candidates
+                else min(
+                    candidates,
+                    key=lambda row: (
+                        int(row["terminal_at_us"]),
+                        int(row["source_sequence"]),
+                    ),
+                )
+            )
+            return self._compact_payloads(
+                current,
+                cutoff_us,
+                self.policy.maintenance_batch_rows,
+                run_id=None if selected is None else str(selected["run_id"]),
+            )
+
+        try:
+            payloads_compacted = bounded_transaction(
+                "regular_session_payload_compaction",
+                compact_payloads,
+            )
+            raw_market_events_deleted = bounded_transaction(
+                "regular_session_raw_market_event_expiry",
+                lambda current: self._prune_raw_market_events(
+                    current,
+                    now_us - self.policy.raw_market_event_us,
+                    self.policy.maintenance_batch_rows,
+                ),
+            )
+            callback_tombstones_deleted = bounded_transaction(
+                "regular_session_callback_tombstone_expiry",
+                lambda current: self._prune_callback_tombstones(
+                    current,
+                    now_us - self.policy.tombstone_us,
+                    self.policy.maintenance_batch_rows,
+                ),
+            )
+            phase = "regular_session_checkpoint"
+            (
+                database_bytes,
+                wal_bytes,
+                checkpoint_complete,
+                wal_cap_blocked,
+            ) = self._checkpoint_and_measure_sizes(connection)
+        except Exception as error:
+            error.__dict__.update(
+                retention_phase=phase,
+                payloads_compacted_committed=payloads_compacted,
+                raw_market_events_deleted_committed=raw_market_events_deleted,
+                callback_tombstones_deleted_committed=callback_tombstones_deleted,
+            )
+            raise
+        finally:
+            connection.set_progress_handler(None, 0)
+            connection.close()
+
+        state = _cap_state(database_bytes, self.policy.database_cap_bytes)
+        database_fatal = state is StorageCapState.FATAL
+        wal_fatal = wal_cap_blocked or wal_bytes >= self.policy.wal_cap_bytes
+        if wal_fatal:
+            state = StorageCapState.FATAL
+        return RetentionPressureResult(
+            cap_state=state,
+            database_bytes=database_bytes,
+            wal_bytes=wal_bytes,
+            payloads_compacted=payloads_compacted,
+            raw_market_events_deleted=raw_market_events_deleted,
+            callback_tombstones_deleted=callback_tombstones_deleted,
+            required_action=(
+                "STORAGE_CAP_FATAL" if database_fatal else "WAL_CAP_FATAL" if wal_fatal else None
+            ),
+            checkpoint_complete=checkpoint_complete,
+        )
 
     def run(
         self,

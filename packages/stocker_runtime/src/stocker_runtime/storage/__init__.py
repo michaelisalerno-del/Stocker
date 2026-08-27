@@ -66,7 +66,9 @@ from stocker_runtime.storage.retention import (
     RetentionInvariantError,
     RetentionManager,
     RetentionPolicy,
+    RetentionPressureResult,
     RetentionResult,
+    StorageCapacity,
     StorageCapState,
 )
 
@@ -107,7 +109,9 @@ __all__ = [
     "RetentionInvariantError",
     "RetentionManager",
     "RetentionPolicy",
+    "RetentionPressureResult",
     "RetentionResult",
+    "StorageCapacity",
     "RestoreResult",
     "SchemaError",
     "StoreResult",

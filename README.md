@@ -92,10 +92,29 @@ bash scripts/check.sh
 
 `check.sh` runs Ruff format checks, Ruff linting, mypy, and pytest through `uv`.
 
+## Stage 2 IBKR Diagnostic
+
+Stage 2 uses the maintained `ib_async` client through one read-only Stocker adapter. Start and
+authenticate IB Gateway or TWS yourself, enable its socket API, review
+`configs/ibkr.example.yaml`, then run:
+
+```bash
+uv run stocker ibkr-check \
+  --run-config configs/run.example.yaml \
+  --ibkr-config configs/ibkr.example.yaml \
+  --symbol AAPL \
+  --primary-exchange NASDAQ
+```
+
+The command masks the connected account in normal output and always disconnects. IB Gateway/TWS
+handles authentication; Stocker does not store or automate broker login credentials. If a session
+exposes multiple accounts, copy the example to the ignored `configs/ibkr.local.yaml` and set
+`expected_account` there so Stocker can select the intended account explicitly.
+
 ## Intentionally Not Implemented Yet
 
-- No broker integration.
-- No live trading.
+- No broker order submission or cancellation through the Stage 2 IBKR adapter.
+- No PAPER or LIVE trading logic.
 - No API keys or secrets.
 - No vendor credentials in the repo.
 - No strategy optimization.

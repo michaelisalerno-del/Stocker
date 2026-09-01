@@ -1,5 +1,6 @@
 """Command-line interface for Stocker."""
 
+import asyncio
 from pathlib import Path
 from typing import Annotated
 
@@ -9,6 +10,7 @@ from rich.console import Console
 from stocker_core.config import (
     EODHDConfig,
     ResearchConfig,
+    load_ibkr_config,
     load_research_config,
     load_run_config,
     load_server_config,
@@ -27,6 +29,7 @@ app.add_typer(universe_app, name="universe")
 
 DEFAULT_RESEARCH_CONFIG = Path("configs/research.example.yaml")
 DEFAULT_RUN_CONFIG = Path("configs/run.example.yaml")
+DEFAULT_IBKR_CONFIG = Path("configs/ibkr.example.yaml")
 
 
 @app.command()
@@ -47,6 +50,70 @@ def start(config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_RUN_
     console.print(f"Strategy: {run.strategy}")
     console.print(f"Environment: {run.environment.value}")
     console.print("Stage 1 runtime ready")
+
+
+@app.command("ibkr-check")
+def ibkr_check(
+    run_config: Annotated[
+        Path, typer.Option("--run-config", help="Stage 1 run config selecting PAPER or LIVE.")
+    ] = DEFAULT_RUN_CONFIG,
+    ibkr_config: Annotated[
+        Path, typer.Option("--ibkr-config", help="Explicit PAPER and LIVE IBKR settings.")
+    ] = DEFAULT_IBKR_CONFIG,
+    symbol: Annotated[str, typer.Option("--symbol")] = "AAPL",
+    exchange: Annotated[str, typer.Option("--exchange")] = "SMART",
+    primary_exchange: Annotated[str | None, typer.Option("--primary-exchange")] = "NASDAQ",
+    currency: Annotated[str, typer.Option("--currency")] = "USD",
+    bar_size: Annotated[str, typer.Option("--bar-size")] = "5 mins",
+    duration: Annotated[str, typer.Option("--duration")] = "1 D",
+    what_to_show: Annotated[str, typer.Option("--what-to-show")] = "TRADES",
+    regular_trading_hours: Annotated[bool, typer.Option("--rth/--all-hours")] = True,
+) -> None:
+    """Connect read-only, qualify one stock, request history and a current snapshot."""
+
+    from stocker_execution.ibkr import IbkrConnection, IbkrError
+
+    try:
+        run = load_run_config(run_config)
+        broker_config = load_ibkr_config(ibkr_config, run.environment)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid Stage 2 configuration: {exc}") from exc
+
+    async def diagnose() -> None:
+        connection = IbkrConnection(broker_config)
+        try:
+            session = await connection.connect()
+            console.print(f"IBKR {session.environment.value} connection established")
+            console.print(f"Account: {session.masked_account_id}")
+            instrument = await connection.resolve_stock(
+                symbol,
+                exchange=exchange,
+                primary_exchange=primary_exchange,
+                currency=currency,
+            )
+            console.print(f"{instrument.symbol} resolved: conId={instrument.con_id}")
+            bars = await connection.historical_bars(
+                instrument,
+                bar_size=bar_size,
+                duration=duration,
+                what_to_show=what_to_show,
+                regular_trading_hours=regular_trading_hours,
+            )
+            console.print(f"Historical bars received: {len(bars)}")
+            quote = await connection.current_quote(instrument)
+            console.print(
+                "Current data received: "
+                f"bid={quote.bid} ask={quote.ask} last={quote.last} close={quote.close}"
+            )
+        finally:
+            connection.disconnect()
+            console.print("IBKR disconnected")
+
+    try:
+        asyncio.run(diagnose())
+    except IbkrError as exc:
+        console.print(f"IBKR diagnostic failed: {exc}")
+        raise typer.Exit(code=1) from exc
 
 
 @data_app.command("validate")

@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from stocker_core.runs import RunConfig
+from stocker_core.runs import Environment, RunConfig
 
 
 class DataConfig(BaseModel):
@@ -79,6 +79,18 @@ class BrokerConfig(BaseModel):
     api_key_env: str | None = None
 
 
+class IbkrConfig(BaseModel):
+    """Explicit connection settings for one IBKR PAPER or LIVE session."""
+
+    environment: Environment
+    host: str = Field(min_length=1)
+    port: int = Field(ge=1, le=65_535)
+    client_id: int = Field(ge=1)
+    expected_account: str | None = Field(default=None, min_length=1)
+    connect_timeout_seconds: float = Field(default=5.0, gt=0.0)
+    request_timeout_seconds: float = Field(default=60.0, gt=0.0)
+
+
 class ServerSettings(BaseModel):
     """Server runtime settings for future paper/live execution."""
 
@@ -147,3 +159,18 @@ def load_run_config(path: str | Path) -> RunConfig:
     """Load a Stage 1 run config YAML file."""
 
     return load_config(path, RunConfig)
+
+
+def load_ibkr_config(path: str | Path, environment: Environment) -> IbkrConfig:
+    """Load the explicit IBKR settings selected by a Stage 1 run environment."""
+
+    raw = _read_yaml(path)
+    selected = raw.get(environment.value)
+    if not isinstance(selected, dict):
+        raise ValueError(f"IBKR config has no {environment.value} mapping: {path}")
+    config = IbkrConfig.model_validate(selected)
+    if config.environment is not environment:
+        raise ValueError(
+            f"IBKR {environment.value} mapping declares environment {config.environment.value}"
+        )
+    return config

@@ -67,6 +67,19 @@ IBKR is the exclusive source for historical bars used by production and paper PR
 The local cache stores only IBKR-originated history. Stocker must not silently fall back to EODHD,
 FMP, TwelveData, or another provider for those calculations.
 
+### IBKR boundary
+
+`stocker_execution.ibkr.IbkrConnection` is the Stage 2 read-only boundary for connection/session
+identity, stock qualification, historical bars, and current snapshots. Each instance owns its own
+client state, so PAPER and LIVE can later use separate Gateway sessions without a global singleton.
+The adapter exposes small Stocker models and no order methods; strategies and calculations must not
+import IBKR objects.
+
+PAPER and LIVE host, port, client ID, and environment are separate explicit configuration blocks.
+The Stage 1 run environment selects one block. Connection verification uses the managed account ID,
+not the port: IBKR's `D`-prefixed simulated accounts are PAPER and non-`D` accounts are LIVE. A
+multi-account session must configure `expected_account` so Stocker does not select arbitrarily.
+
 ### PRE level calculator
 
 The calculator receives bars and knows nothing about IBKR:

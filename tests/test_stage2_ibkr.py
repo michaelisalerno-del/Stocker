@@ -139,6 +139,7 @@ LIVE:
     "invalid_field",
     [
         {"host": ""},
+        {"host": "   "},
         {"port": 0},
         {"client_id": 0},
     ],
@@ -450,6 +451,100 @@ def test_historical_failure_does_not_substitute_data_or_drop_connection(
     assert connection.is_connected is True
 
 
+def test_historical_response_fails_when_shorter_than_the_callers_required_sample() -> None:
+    client = FakeIbClient(
+        accounts=["DU123456"],
+        historical_result=[
+            SimpleNamespace(
+                date=datetime(2026, 9, 1, 14, 30, tzinfo=UTC),
+                open=230.1,
+                high=231.25,
+                low=229.8,
+                close=230.9,
+                volume=12345,
+            )
+        ],
+    )
+    connection = IbkrConnection(
+        IbkrConfig(
+            environment=Environment.PAPER,
+            host="127.0.0.1",
+            port=4002,
+            client_id=21,
+        ),
+        client=client,
+    )
+    instrument = QualifiedInstrument(
+        symbol="AAPL",
+        con_id=265598,
+        exchange="SMART",
+        primary_exchange="NASDAQ",
+        currency="USD",
+        security_type="STK",
+    )
+
+    async def scenario() -> None:
+        await connection.connect()
+        await connection.historical_bars(
+            instrument,
+            bar_size="1 min",
+            duration="1 D",
+            what_to_show="TRADES",
+            regular_trading_hours=True,
+            minimum_bars=2,
+        )
+
+    with pytest.raises(IbkrError, match="1 bars; at least 2 required"):
+        asyncio.run(scenario())
+
+
+def test_historical_response_with_non_increasing_timestamps_is_invalid() -> None:
+    client = FakeIbClient(
+        accounts=["DU123456"],
+        historical_result=[
+            SimpleNamespace(
+                date=datetime(2026, 9, 1, 14, minute, tzinfo=UTC),
+                open=230.1,
+                high=231.25,
+                low=229.8,
+                close=230.9,
+                volume=12345,
+            )
+            for minute in (31, 30)
+        ],
+    )
+    connection = IbkrConnection(
+        IbkrConfig(
+            environment=Environment.PAPER,
+            host="127.0.0.1",
+            port=4002,
+            client_id=21,
+        ),
+        client=client,
+    )
+    instrument = QualifiedInstrument(
+        symbol="AAPL",
+        con_id=265598,
+        exchange="SMART",
+        primary_exchange="NASDAQ",
+        currency="USD",
+        security_type="STK",
+    )
+
+    async def scenario() -> None:
+        await connection.connect()
+        await connection.historical_bars(
+            instrument,
+            bar_size="1 min",
+            duration="1 D",
+            what_to_show="TRADES",
+            regular_trading_hours=True,
+        )
+
+    with pytest.raises(IbkrError, match="timestamps are not strictly increasing"):
+        asyncio.run(scenario())
+
+
 def test_current_quote_snapshot_is_converted_to_a_small_internal_result() -> None:
     timestamp = datetime(2026, 9, 1, 14, 31, tzinfo=UTC)
     client = FakeIbClient(
@@ -498,7 +593,7 @@ def test_current_quote_snapshot_is_converted_to_a_small_internal_result() -> Non
     assert client.ticker_request.conId == 265598
 
 
-def test_current_quote_without_any_available_price_fails_clearly() -> None:
+def test_current_quote_with_only_a_previous_close_fails_clearly() -> None:
     client = FakeIbClient(
         accounts=["DU123456"],
         ticker_result=[
@@ -507,7 +602,7 @@ def test_current_quote_without_any_available_price_fails_clearly() -> None:
                 bid=float("nan"),
                 ask=-1.0,
                 last=float("nan"),
-                close=-1.0,
+                close=229.7,
             )
         ],
     )
@@ -533,7 +628,7 @@ def test_current_quote_without_any_available_price_fails_clearly() -> None:
         await connection.connect()
         await connection.current_quote(instrument)
 
-    with pytest.raises(IbkrError, match="contained no available price"):
+    with pytest.raises(IbkrError, match="contained no current bid, ask, or last"):
         asyncio.run(scenario())
 
     assert connection.is_connected is True

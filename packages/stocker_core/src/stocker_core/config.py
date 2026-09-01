@@ -1,10 +1,10 @@
 """Typed configuration loading for research and execution processes."""
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from stocker_core.runs import Environment, RunConfig
@@ -83,7 +83,7 @@ class IbkrConfig(BaseModel):
     """Explicit connection settings for one IBKR PAPER or LIVE session."""
 
     environment: Environment
-    host: str = Field(min_length=1)
+    host: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     port: int = Field(ge=1, le=65_535)
     client_id: int = Field(ge=1)
     expected_account: str | None = Field(default=None, min_length=1)

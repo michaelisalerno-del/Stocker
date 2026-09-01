@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from itertools import pairwise
 from math import isfinite
 from typing import Any, Protocol, cast
 
@@ -255,12 +256,15 @@ class IbkrConnection:
         what_to_show: str,
         regular_trading_hours: bool,
         end_time: date | datetime | None = None,
+        minimum_bars: int = 1,
     ) -> tuple[HistoricalBar, ...]:
         """Request and validate one raw IBKR historical-bar response."""
 
         self._require_connected()
         if not bar_size.strip() or not duration.strip() or not what_to_show.strip():
             raise IbkrError("Historical bar size, duration, and data type are required")
+        if minimum_bars < 1:
+            raise IbkrError("Historical minimum_bars must be at least 1")
 
         try:
             source_bars = await self._client.reqHistoricalDataAsync(
@@ -281,10 +285,28 @@ class IbkrConnection:
 
         if not source_bars:
             raise IbkrError(f"IBKR historical data returned no bars for {instrument.symbol}")
-        return tuple(
+        bars = tuple(
             _normalize_historical_bar(cast(_SourceBar, bar), index=index)
             for index, bar in enumerate(source_bars)
         )
+        if len(bars) < minimum_bars:
+            raise IbkrError(
+                f"IBKR historical data returned {len(bars)} bars; "
+                f"at least {minimum_bars} required for {instrument.symbol}"
+            )
+        try:
+            timestamps_increase = all(
+                current.timestamp > previous.timestamp for previous, current in pairwise(bars)
+            )
+        except TypeError as exc:
+            raise IbkrError(
+                f"IBKR historical timestamps are incompatible for {instrument.symbol}"
+            ) from exc
+        if not timestamps_increase:
+            raise IbkrError(
+                f"IBKR historical timestamps are not strictly increasing for {instrument.symbol}"
+            )
+        return bars
 
     async def current_quote(self, instrument: QualifiedInstrument) -> CurrentQuote:
         """Request one finite IBKR market-data snapshot for a qualified instrument."""
@@ -320,9 +342,10 @@ class IbkrConnection:
             raise IbkrError(
                 f"IBKR returned an invalid current market data timestamp for {instrument.symbol}"
             )
-        if all(price is None for price in (bid, ask, last, close)):
+        if all(price is None for price in (bid, ask, last)):
             raise IbkrError(
-                f"IBKR current market data for {instrument.symbol} contained no available price"
+                f"IBKR current market data for {instrument.symbol} "
+                "contained no current bid, ask, or last"
             )
         return CurrentQuote(
             symbol=instrument.symbol,

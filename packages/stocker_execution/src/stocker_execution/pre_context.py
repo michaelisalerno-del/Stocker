@@ -26,6 +26,7 @@ from stocker_execution.ibkr import (
     OptionContractRequest,
     OptionMarketSnapshot,
     QualifiedInstrument,
+    QualifiedOption,
 )
 
 PRE_CONTEXT_CALCULATION_VERSION = "PRE_CONTEXT_V1"
@@ -33,6 +34,7 @@ IBKR_MODEL_OPTION_COMPUTATION_TICK_TYPE = 13
 IBKR_MODEL_OPTION_IV_SOURCE = "IBKR_MODEL_OPTION_COMPUTATION_TICK_13"
 PRE_CONTEXT_NOT_READY = "PRE_CONTEXT_NOT_READY"
 PRE_UNDERLYING_HISTORY = HistorySemantics("5 mins", "TRADES", True)
+PRE_CONTEXT_CAPTURE_GRACE = timedelta(minutes=5)
 
 
 class ContextStatus(StrEnum):
@@ -62,6 +64,8 @@ class PriorSessionVolatilityContext:
     strike: float
     call_model_iv: float
     put_model_iv: float
+    call_market_data_type: int
+    put_market_data_type: int
     atm_iv: float
     expected_absolute_return_15m: float
     iv_source: str
@@ -306,6 +310,8 @@ class PriorSessionContextStore:
                     strike REAL NOT NULL,
                     call_model_iv REAL NOT NULL,
                     put_model_iv REAL NOT NULL,
+                    call_market_data_type INTEGER NOT NULL,
+                    put_market_data_type INTEGER NOT NULL,
                     atm_iv REAL NOT NULL,
                     expected_absolute_return_15m REAL NOT NULL,
                     iv_source TEXT NOT NULL CHECK (
@@ -353,29 +359,10 @@ class PriorSessionContextStore:
             connection.execute(
                 """
                 INSERT INTO ibkr_pre_volatility_contexts VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 ON CONFLICT (underlying_con_id, target_session, calculation_version)
-                DO UPDATE SET
-                    symbol = excluded.symbol,
-                    security_type = excluded.security_type,
-                    exchange = excluded.exchange,
-                    primary_exchange = excluded.primary_exchange,
-                    currency = excluded.currency,
-                    observation_session = excluded.observation_session,
-                    prior_session_reference_price = excluded.prior_session_reference_price,
-                    call_con_id = excluded.call_con_id,
-                    put_con_id = excluded.put_con_id,
-                    option_exchange = excluded.option_exchange,
-                    expiry = excluded.expiry,
-                    strike = excluded.strike,
-                    call_model_iv = excluded.call_model_iv,
-                    put_model_iv = excluded.put_model_iv,
-                    atm_iv = excluded.atm_iv,
-                    expected_absolute_return_15m = excluded.expected_absolute_return_15m,
-                    iv_source = excluded.iv_source,
-                    captured_at_utc = excluded.captured_at_utc,
-                    calculated_at_utc = excluded.calculated_at_utc
+                DO NOTHING
                 """,
                 _context_row(context),
             )
@@ -416,10 +403,14 @@ class PriorSessionContextService:
                 return PriorSessionContextResult(ContextStatus.READY, existing, "cache hit", True)
             observation, previous_open, previous_close, target_open = _session_contract(session)
             now = _aware_utc(self._clock())
-            if now < previous_close or now >= target_open:
+            if (
+                now < previous_close
+                or now >= previous_close + PRE_CONTEXT_CAPTURE_GRACE
+                or now >= target_open
+            ):
                 raise ValueError(
-                    "uncached option context can only be captured after the previous "
-                    "session close and before the target session opens"
+                    "uncached option context must be captured in the first five minutes "
+                    "after the previous session close"
                 )
             required = _five_minute_starts(previous_open, previous_close)
             history = self._history_cache.get_required_history(
@@ -446,15 +437,32 @@ class PriorSessionContextService:
             previous_reference = history.bars[-1].close
 
             chains = await self._ibkr.option_chains(instrument)
-            requests = _nearest_option_requests(
+            request_groups = _option_request_groups(
                 instrument,
                 chains,
                 previous_close=previous_reference,
                 observation_date=observation,
             )
-            qualified = await self._ibkr.qualify_options(requests)
-            snapshots = await self._ibkr.option_snapshots(qualified)
-            if any(_aware_utc(item.captured_at) >= target_open for item in snapshots):
+            nearest_qualified: tuple[QualifiedOption, ...] = ()
+            for requests in request_groups:
+                qualified = await self._ibkr.qualify_options(requests)
+                try:
+                    nearest_qualified = _nearest_common_qualified_options(
+                        qualified,
+                        previous_close=previous_reference,
+                    )
+                except ValueError:
+                    continue
+                break
+            if not nearest_qualified:
+                raise ValueError("no eligible qualified common-strike expiry")
+            snapshots = await self._ibkr.option_snapshots(nearest_qualified)
+            if any(
+                not previous_close
+                <= _aware_utc(item.captured_at)
+                < previous_close + PRE_CONTEXT_CAPTURE_GRACE
+                for item in snapshots
+            ):
                 raise ValueError("option model IV snapshot is not causal for the target session")
             candidates = tuple(_candidate_from_snapshot(item) for item in snapshots)
             pair = select_canonical_option_pair(
@@ -488,6 +496,12 @@ class PriorSessionContextService:
                 strike=pair.strike,
                 call_model_iv=_required_iv(pair.call),
                 put_model_iv=_required_iv(pair.put),
+                call_market_data_type=_required_market_data_type(
+                    by_con_id[pair.call.con_id]
+                ),
+                put_market_data_type=_required_market_data_type(
+                    by_con_id[pair.put.con_id]
+                ),
                 atm_iv=calculation.atm_iv,
                 expected_absolute_return_15m=calculation.expected_absolute_return_15m,
                 iv_source=IBKR_MODEL_OPTION_IV_SOURCE,
@@ -496,7 +510,10 @@ class PriorSessionContextService:
                 calculated_at=now,
             )
             self._context_store._store_from_ibkr(context)
-            return PriorSessionContextResult(ContextStatus.READY, context, "calculated")
+            persisted = self._context_store.get(instrument, session=session)
+            if persisted is None:
+                raise ValueError("calculated PRE context was not persisted")
+            return PriorSessionContextResult(ContextStatus.READY, persisted, "calculated")
         except (IbkrError, ValueError) as exc:
             return PriorSessionContextResult(
                 ContextStatus.NOT_READY,
@@ -578,13 +595,13 @@ def _contiguous_five_minute_ranges(
     return tuple(tuple(group) for group in groups)
 
 
-def _nearest_option_requests(
+def _option_request_groups(
     instrument: QualifiedInstrument,
     chains: tuple[OptionChainDefinition, ...],
     *,
     previous_close: float,
     observation_date: date,
-) -> tuple[OptionContractRequest, ...]:
+) -> tuple[tuple[OptionContractRequest, ...], ...]:
     smart = tuple(item for item in chains if item.exchange.upper() == "SMART")
     eligible_expiries = sorted(
         {
@@ -597,36 +614,55 @@ def _nearest_option_requests(
     )
     if not eligible_expiries:
         raise ValueError("no eligible SMART option expiry")
-    expiry = eligible_expiries[0]
-    chain_strikes = {
-        (index, strike)
-        for index, chain in enumerate(smart)
-        if expiry in chain.expirations
-        for strike in chain.strikes
-        if previous_close * 0.75 <= strike <= previous_close * 1.25 and strike > 0
-    }
-    if not chain_strikes:
+    groups: list[tuple[OptionContractRequest, ...]] = []
+    for expiry in eligible_expiries:
+        requests: list[OptionContractRequest] = []
+        for chain in smart:
+            if expiry not in chain.expirations:
+                continue
+            for strike in chain.strikes:
+                if not previous_close * 0.75 <= strike <= previous_close * 1.25 or strike <= 0:
+                    continue
+                for right in ("C", "P"):
+                    requests.append(
+                        OptionContractRequest(
+                            symbol=instrument.symbol,
+                            exchange=chain.exchange,
+                            currency=instrument.currency,
+                            expiry=expiry,
+                            strike=strike,
+                            right=right,
+                            multiplier=chain.multiplier,
+                            trading_class=chain.trading_class,
+                        )
+                    )
+        if requests:
+            groups.append(tuple(requests))
+    if not groups:
         raise ValueError("no eligible option strike between 75% and 125% of previous close")
-    nearest_distance = min(abs(log(strike / previous_close)) for _, strike in chain_strikes)
-    requests: list[OptionContractRequest] = []
-    for index, strike in sorted(chain_strikes, key=lambda value: (value[1], value[0])):
-        if abs(log(strike / previous_close)) != nearest_distance:
-            continue
-        chain = smart[index]
-        for right in ("C", "P"):
-            requests.append(
-                OptionContractRequest(
-                    symbol=instrument.symbol,
-                    exchange=chain.exchange,
-                    currency=instrument.currency,
-                    expiry=expiry,
-                    strike=strike,
-                    right=right,
-                    multiplier=chain.multiplier,
-                    trading_class=chain.trading_class,
-                )
-            )
-    return tuple(requests)
+    return tuple(groups)
+
+
+def _nearest_common_qualified_options(
+    options: tuple[QualifiedOption, ...], *, previous_close: float
+) -> tuple[QualifiedOption, ...]:
+    calls = {item.strike for item in options if item.right.upper() in {"C", "CALL"}}
+    puts = {item.strike for item in options if item.right.upper() in {"P", "PUT"}}
+    common = calls & puts
+    if not common:
+        raise ValueError("qualified expiry has no common call/put strike")
+    nearest_distance = min(abs(log(strike / previous_close)) for strike in common)
+    nearest_strikes = {
+        strike
+        for strike in common
+        if abs(log(strike / previous_close)) == nearest_distance
+    }
+    return tuple(
+        item
+        for item in options
+        if item.strike in nearest_strikes
+        and item.right.upper() in {"C", "CALL", "P", "PUT"}
+    )
 
 
 def _candidate_from_snapshot(snapshot: OptionMarketSnapshot) -> OptionCandidate:
@@ -654,6 +690,12 @@ def _required_iv(candidate: OptionCandidate) -> float:
     return candidate.model_iv
 
 
+def _required_market_data_type(snapshot: OptionMarketSnapshot) -> int:
+    if snapshot.market_data_type not in {1, 2}:
+        raise ValueError("selected pair did not originate from tick-13 market data")
+    return snapshot.market_data_type
+
+
 def _aware_utc(value: object) -> datetime:
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("Stage 4 context timestamps must be timezone-aware")
@@ -678,6 +720,8 @@ def _context_row(context: PriorSessionVolatilityContext) -> tuple[object, ...]:
         context.strike,
         context.call_model_iv,
         context.put_model_iv,
+        context.call_market_data_type,
+        context.put_market_data_type,
         context.atm_iv,
         context.expected_absolute_return_15m,
         context.iv_source,
@@ -707,6 +751,8 @@ def _context_from_row(row: sqlite3.Row) -> PriorSessionVolatilityContext:
         strike=float(row["strike"]),
         call_model_iv=float(row["call_model_iv"]),
         put_model_iv=float(row["put_model_iv"]),
+        call_market_data_type=int(row["call_market_data_type"]),
+        put_market_data_type=int(row["put_market_data_type"]),
         atm_iv=float(row["atm_iv"]),
         expected_absolute_return_15m=float(row["expected_absolute_return_15m"]),
         iv_source=str(row["iv_source"]),
@@ -738,3 +784,5 @@ def _validate_context(context: PriorSessionVolatilityContext) -> None:
         raise ValueError("persisted PRE context does not match canonical arithmetic")
     if context.iv_source != IBKR_MODEL_OPTION_IV_SOURCE:
         raise ValueError("persisted PRE context has a non-canonical IV source")
+    if {context.call_market_data_type, context.put_market_data_type} - {1, 2}:
+        raise ValueError("persisted PRE context is not tick-13 market data")

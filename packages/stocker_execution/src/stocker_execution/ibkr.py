@@ -56,6 +56,8 @@ class _IbClient(Protocol):
 
     def cancelMktData(self, contract: object) -> bool: ...
 
+    def reqMarketDataType(self, marketDataType: int) -> object: ...
+
     async def reqSecDefOptParamsAsync(
         self,
         underlyingSymbol: str,
@@ -116,6 +118,7 @@ class _SourceOptionTicker(Protocol):
     ask: float
     callOpenInterest: float
     putOpenInterest: float
+    marketDataType: int
     modelGreeks: _SourceOptionComputation | None
 
 
@@ -199,6 +202,7 @@ class OptionMarketSnapshot:
     bid: float | None
     ask: float | None
     open_interest: float | None
+    market_data_type: int | None
     model_iv: float | None
     model_delta: float | None
     model_gamma: float | None
@@ -484,6 +488,7 @@ class IbkrConnection:
             raise IbkrError("At least one qualified option is required")
         contracts = tuple(_to_ib_option_contract(option) for option in options)
         try:
+            self._client.reqMarketDataType(1)
             tickers = tuple(
                 self._client.reqMktData(
                     contract,
@@ -511,7 +516,12 @@ class IbkrConnection:
         normalized: list[OptionMarketSnapshot] = []
         for option, source in zip(options, tickers, strict=True):
             ticker = cast(_SourceOptionTicker, source)
-            model = getattr(ticker, "modelGreeks", None)
+            market_data_type = _optional_integer(getattr(ticker, "marketDataType", None))
+            model = (
+                getattr(ticker, "modelGreeks", None)
+                if market_data_type in {1, 2}
+                else None
+            )
             normalized.append(
                 OptionMarketSnapshot(
                     option=option,
@@ -519,6 +529,7 @@ class IbkrConnection:
                     bid=_optional_number(getattr(ticker, "bid", None)),
                     ask=_optional_number(getattr(ticker, "ask", None)),
                     open_interest=_option_open_interest(ticker, option),
+                    market_data_type=market_data_type,
                     model_iv=_optional_number(getattr(model, "impliedVol", None)),
                     model_delta=_optional_number(getattr(model, "delta", None)),
                     model_gamma=_optional_number(getattr(model, "gamma", None)),
@@ -595,6 +606,8 @@ class IbkrConnection:
             raise IbkrError(f"IBKR option contract qualification failed: {exc}") from exc
         qualified: list[QualifiedOption] = []
         for source in contracts:
+            if source is None or isinstance(source, list):
+                continue
             contract = cast(_QualifiedContract, source)
             try:
                 expiry = _parse_option_expiry(contract.lastTradeDateOrContractMonth[:8])
@@ -618,8 +631,6 @@ class IbkrConnection:
                     trading_class=contract.tradingClass,
                 )
             )
-        if not qualified:
-            raise IbkrError("IBKR could not qualify any requested option contracts")
         return tuple(qualified)
 
     def _select_account(self, accounts: list[str]) -> str:
@@ -745,7 +756,8 @@ def _option_open_interest(ticker: _SourceOptionTicker, option: QualifiedOption) 
 
 
 def _option_snapshot_complete(ticker: _SourceOptionTicker, option: QualifiedOption) -> bool:
-    model = getattr(ticker, "modelGreeks", None)
+    market_data_type = _optional_integer(getattr(ticker, "marketDataType", None))
+    model = getattr(ticker, "modelGreeks", None) if market_data_type in {1, 2} else None
     return all(
         value is not None
         for value in (
@@ -755,6 +767,13 @@ def _option_snapshot_complete(ticker: _SourceOptionTicker, option: QualifiedOpti
             _optional_number(getattr(model, "impliedVol", None)),
         )
     )
+
+
+def _optional_integer(value: object) -> int | None:
+    number = _optional_number(value)
+    if number is None or not number.is_integer():
+        return None
+    return int(number)
 
 
 def _parse_option_expiry(value: str) -> date:

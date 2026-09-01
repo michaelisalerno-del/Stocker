@@ -133,7 +133,9 @@ The PAPER/LIVE IV source is frozen by user decision as the contract-specific IBK
 Computation `impliedVol` delivered by `tickOptionComputation` tick type 13 (the `ib_async`
 `ticker.modelGreeks.impliedVol` field). Call and put model IV are averaged. Tick types 10, 11, and
 12 are not fallbacks; generic tick 106 `OPTION_IMPLIED_VOLATILITY` is excluded. Generic tick 101 is
-requested only for per-leg open interest. A missing model computation makes the result
+requested only for per-leg open interest. The adapter explicitly requests live market data type 1
+and accepts only returned type 1 or frozen type 2, whose model computation uses tick 13; delayed
+types 3/4 (model tick 83) are rejected. A missing model computation makes the result
 `PRE_CONTEXT_NOT_READY`.
 
 The research specified five-minute regular-session traded-price context functionally. The explicit
@@ -141,13 +143,17 @@ The research specified five-minute regular-session traded-price context function
 XNYS session close. A completely absent session uses `duration=1 D`; partial gaps request only
 contiguous missing five-minute ranges. The existing exchange calendar supplies normal and half-day
 bounds; every scheduled five-minute bar is required and the final bar close is the selection
-reference. No missing bar is filled. An uncached option snapshot is captured only after that close
-and before the target session opens, because IBKR does not provide this contract-specific model IV
-as a historical option-bar series.
+reference. No missing bar is filled. Acquisition qualifies every bounded strike for each expiry in
+order until the first expiry with an actual common call/put strike, then snapshots only the
+primary-distance strike set required for the remaining frozen tie-breakers. An uncached option
+snapshot must be captured in the first five minutes after the previous close, an explicit
+operational mapping of the research's 16:00 America/New_York snapshot, because IBKR does not
+provide this contract-specific model IV as a historical option-bar series.
 
 One SQLite table persists the context by `underlying conId + target session + PRE_CONTEXT_V1` with
 underlying/call/put `conId`, selected expiry/strike, both model IVs, ATM IV, expected-return fraction,
-source, and timestamps. The key has no universe, run, strategy, or PAPER/LIVE dimension. The
+source, market-data types, and timestamps. The first valid context stored for that key is immutable;
+the key has no universe, run, strategy, or PAPER/LIVE dimension. The
 user-accepted EODHD/IBKR parity conclusion comes from prior empirical testing; its old numerical
 artefact is unavailable and is not a blocker. Runtime inputs remain IBKR-only.
 

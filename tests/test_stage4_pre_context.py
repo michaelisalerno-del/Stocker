@@ -42,6 +42,7 @@ class SnapshotClient:
         self.ticker = ticker
         self.connected = False
         self.generic_tick_lists: list[str] = []
+        self.market_data_types: list[int] = []
 
     async def connectAsync(self, *args: object, **kwargs: object) -> None:
         self.connected = True
@@ -80,6 +81,9 @@ class SnapshotClient:
 
     def cancelMktData(self, contract: object) -> bool:
         return True
+
+    def reqMarketDataType(self, market_data_type: int) -> None:
+        self.market_data_types.append(market_data_type)
 
     async def reqSecDefOptParamsAsync(
         self,
@@ -261,6 +265,7 @@ def test_stage2_option_snapshot_uses_only_tick13_model_computation_iv() -> None:
         ask=1.2,
         callOpenInterest=120,
         putOpenInterest=None,
+        marketDataType=1,
         modelGreeks=SimpleNamespace(impliedVol=0.27, delta=0.51, gamma=0.02),
         bidGreeks=SimpleNamespace(impliedVol=0.20),
         askGreeks=SimpleNamespace(impliedVol=0.34),
@@ -279,6 +284,7 @@ def test_stage2_option_snapshot_uses_only_tick13_model_computation_iv() -> None:
     assert not hasattr(snapshots[0], "generic_iv")
     assert client.generic_tick_lists == ["101"]
     assert "106" not in client.generic_tick_lists
+    assert client.market_data_types == [1]
 
 
 def test_stage2_does_not_fallback_when_tick13_model_computation_is_missing() -> None:
@@ -288,6 +294,7 @@ def test_stage2_does_not_fallback_when_tick13_model_computation_is_missing() -> 
         ask=1.2,
         callOpenInterest=120,
         putOpenInterest=None,
+        marketDataType=1,
         modelGreeks=None,
         bidGreeks=SimpleNamespace(impliedVol=0.20),
         askGreeks=SimpleNamespace(impliedVol=0.34),
@@ -300,6 +307,23 @@ def test_stage2_does_not_fallback_when_tick13_model_computation_is_missing() -> 
 
     assert snapshots[0].model_iv is None
     assert client.generic_tick_lists == ["101"]
+
+
+def test_delayed_model_computation_is_not_labelled_as_tick13() -> None:
+    ticker = SimpleNamespace(
+        bid=1.0,
+        ask=1.2,
+        callOpenInterest=120,
+        putOpenInterest=None,
+        marketDataType=3,
+        modelGreeks=SimpleNamespace(impliedVol=0.27, delta=0.51, gamma=0.02),
+    )
+
+    boundary, client = connected_snapshot_boundary(ticker)
+    snapshots = asyncio.run(boundary.option_snapshots((option(),)))
+
+    assert snapshots[0].model_iv is None
+    assert client.market_data_types == [1]
 
 
 class ContextBoundary(IbkrConnection):
@@ -367,10 +391,11 @@ class ContextBoundary(IbkrConnection):
         return tuple(
             OptionMarketSnapshot(
                 option=item,
-                captured_at=datetime(2026, 9, 1, 12, 0, tzinfo=UTC),
+                captured_at=datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
                 bid=1.0,
                 ask=1.2,
                 open_interest=100,
+                market_data_type=1,
                 model_iv=None
                 if item.right == self.missing_right
                 else (0.24 if item.right == "C" else 0.28),
@@ -378,6 +403,65 @@ class ContextBoundary(IbkrConnection):
                 model_gamma=0.02,
             )
             for item in options
+        )
+
+
+class NearestUnqualifiedBoundary(ContextBoundary):
+    async def qualify_options(
+        self, requests: tuple[OptionContractRequest, ...]
+    ) -> tuple[QualifiedOption, ...]:
+        return tuple(
+            QualifiedOption(
+                symbol=item.symbol,
+                con_id=int(item.strike * 100) + (1 if item.right == "C" else 2),
+                exchange=item.exchange,
+                currency=item.currency,
+                security_type="OPT",
+                expiry=item.expiry,
+                strike=item.strike,
+                right=item.right,
+                multiplier=item.multiplier,
+                trading_class=item.trading_class,
+            )
+            for item in requests
+            if item.strike != 101 or item.right == "C"
+        )
+
+
+class FirstExpiryUnqualifiedBoundary(ContextBoundary):
+    async def option_chains(
+        self, instrument: QualifiedInstrument
+    ) -> tuple[OptionChainDefinition, ...]:
+        self.option_requests += 1
+        return (
+            OptionChainDefinition(
+                exchange="SMART",
+                underlying_con_id=instrument.con_id,
+                trading_class=instrument.symbol,
+                multiplier="100",
+                expirations=(date(2026, 9, 18), date(2026, 9, 25)),
+                strikes=(100,),
+            ),
+        )
+
+    async def qualify_options(
+        self, requests: tuple[OptionContractRequest, ...]
+    ) -> tuple[QualifiedOption, ...]:
+        return tuple(
+            QualifiedOption(
+                symbol=item.symbol,
+                con_id=int(item.expiry.strftime("%d")) * 100 + (1 if item.right == "C" else 2),
+                exchange=item.exchange,
+                currency=item.currency,
+                security_type="OPT",
+                expiry=item.expiry,
+                strike=item.strike,
+                right=item.right,
+                multiplier=item.multiplier,
+                trading_class=item.trading_class,
+            )
+            for item in requests
+            if item.expiry != date(2026, 9, 18) or item.right == "C"
         )
 
 
@@ -399,7 +483,7 @@ def test_service_persists_conid_lineage_and_reuses_context(tmp_path: Path) -> No
         boundary,
         IbkrHistoryCache(path),
         PriorSessionContextStore(path),
-        clock=lambda: datetime(2026, 9, 1, 12, 0, tzinfo=UTC),
+        clock=lambda: datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
     )
 
     first = asyncio.run(service.get_or_create(qualified_stock(), session=date(2026, 9, 1)))
@@ -414,6 +498,8 @@ def test_service_persists_conid_lineage_and_reuses_context(tmp_path: Path) -> No
     assert first.context.call_con_id == 99001
     assert first.context.put_con_id == 99002
     assert first.context.iv_source == IBKR_MODEL_OPTION_IV_SOURCE
+    assert first.context.call_market_data_type == 1
+    assert first.context.put_market_data_type == 1
     assert first.context.atm_iv == 0.26
     assert second.reused is True
     assert boundary.history_requests == 1
@@ -423,13 +509,47 @@ def test_service_persists_conid_lineage_and_reuses_context(tmp_path: Path) -> No
     assert not hasattr(first.context, "pre_move_m")
 
 
+def test_service_selects_from_actual_qualified_common_strikes(tmp_path: Path) -> None:
+    path = tmp_path / "stage4.sqlite3"
+    service = PriorSessionContextService(
+        NearestUnqualifiedBoundary(),
+        IbkrHistoryCache(path),
+        PriorSessionContextStore(path),
+        clock=lambda: datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
+    )
+
+    result = asyncio.run(service.get_or_create(qualified_stock(), session=date(2026, 9, 1)))
+
+    assert result.status is ContextStatus.READY
+    assert result.context is not None
+    assert result.context.strike == 100
+    assert result.context.call_con_id == 10001
+    assert result.context.put_con_id == 10002
+
+
+def test_service_uses_first_expiry_with_actual_qualified_common_pair(tmp_path: Path) -> None:
+    path = tmp_path / "stage4.sqlite3"
+    service = PriorSessionContextService(
+        FirstExpiryUnqualifiedBoundary(),
+        IbkrHistoryCache(path),
+        PriorSessionContextStore(path),
+        clock=lambda: datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
+    )
+
+    result = asyncio.run(service.get_or_create(qualified_stock(), session=date(2026, 9, 1)))
+
+    assert result.status is ContextStatus.READY
+    assert result.context is not None
+    assert result.context.expiry == date(2026, 9, 25)
+
+
 def test_invalid_persisted_context_fails_closed(tmp_path: Path) -> None:
     path = tmp_path / "stage4.sqlite3"
     service = PriorSessionContextService(
         ContextBoundary(),
         IbkrHistoryCache(path),
         PriorSessionContextStore(path),
-        clock=lambda: datetime(2026, 9, 1, 12, 0, tzinfo=UTC),
+        clock=lambda: datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
     )
     ready = asyncio.run(service.get_or_create(qualified_stock(), session=date(2026, 9, 1)))
     assert ready.status is ContextStatus.READY
@@ -443,6 +563,21 @@ def test_invalid_persisted_context_fails_closed(tmp_path: Path) -> None:
     assert "does not match canonical arithmetic" in result.reason
 
 
+def test_uncached_context_outside_close_capture_window_is_not_ready(tmp_path: Path) -> None:
+    path = tmp_path / "stage4.sqlite3"
+    service = PriorSessionContextService(
+        ContextBoundary(),
+        IbkrHistoryCache(path),
+        PriorSessionContextStore(path),
+        clock=lambda: datetime(2026, 8, 31, 20, 6, tzinfo=UTC),
+    )
+
+    result = asyncio.run(service.get_or_create(qualified_stock(), session=date(2026, 9, 1)))
+
+    assert result.status is ContextStatus.NOT_READY
+    assert "first five minutes" in result.reason
+
+
 @pytest.mark.parametrize("missing_right", ["C", "P"])
 def test_service_returns_not_ready_for_missing_required_model_iv(
     tmp_path: Path, missing_right: str
@@ -452,7 +587,7 @@ def test_service_returns_not_ready_for_missing_required_model_iv(
         ContextBoundary(missing_right=missing_right),
         IbkrHistoryCache(path),
         PriorSessionContextStore(path),
-        clock=lambda: datetime(2026, 9, 1, 12, 0, tzinfo=UTC),
+        clock=lambda: datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
     )
 
     result = asyncio.run(service.get_or_create(qualified_stock(), session=date(2026, 9, 1)))

@@ -167,10 +167,12 @@ No Stage 5 runtime implementation is added by this audit.
 - Option source: exact qualified SMART call/put contracts. Contract-specific
   `ticker.modelGreeks.impliedVol` is IBKR Model Option Computation tick type 13. Tick types
   10/11/12 and generic tick 106 are excluded as IV sources; generic tick 101 is used only for
-  per-leg open interest.
-- Timing: uncached model context is captured after the observation-session close and before the
-  target-session open, then persisted. A late request cannot reconstruct historical option model
-  ticks and fails closed.
+  per-leg open interest. The adapter requests live market data type 1, accepts returned type 1/2,
+  and rejects delayed type 3/4 model tick 83.
+- Timing: uncached model context is captured within the first five minutes after the
+  observation-session close, then persisted immutably for the underlying/session/version key. This
+  explicit IBKR mapping bounds receipt around the research's 16:00 America/New_York snapshot. A
+  late request cannot reconstruct historical option model ticks and fails closed.
 - Failure: any missing underlying bar, option leg, qualifying identity, quality input, or tick-13
   model IV returns `PRE_CONTEXT_NOT_READY`. There is no fallback provider or fallback IV field.
 

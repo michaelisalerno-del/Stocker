@@ -1,10 +1,9 @@
 """Command-line interface for Stocker."""
 
 import asyncio
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Annotated
-from zoneinfo import ZoneInfo
 
 import typer
 from rich.console import Console
@@ -162,6 +161,9 @@ def ibkr_check(
 
 @app.command("pre-context-check")
 def pre_context_check(
+    target_session: Annotated[
+        str, typer.Option("--session", help="Required target session, YYYY-MM-DD")
+    ],
     run_config: Annotated[
         Path, typer.Option("--run-config", help="Stage 1 PAPER run configuration.")
     ] = DEFAULT_RUN_CONFIG,
@@ -172,7 +174,6 @@ def pre_context_check(
     exchange: Annotated[str, typer.Option("--exchange")] = "SMART",
     primary_exchange: Annotated[str | None, typer.Option("--primary-exchange")] = "NASDAQ",
     currency: Annotated[str, typer.Option("--currency")] = "USD",
-    target_session: Annotated[str | None, typer.Option("--session", help="YYYY-MM-DD")] = None,
     cache_path: Annotated[Path, typer.Option("--cache")] = Path(".stocker/ibkr-stage4.sqlite3"),
 ) -> None:
     """Capture and then reuse one Stage 4 PAPER prior-session volatility context."""
@@ -191,11 +192,7 @@ def pre_context_check(
         if run.environment is not Environment.PAPER:
             raise ValueError("Stage 4 diagnostic requires a PAPER run configuration")
         broker_config = load_ibkr_config(ibkr_config, run.environment)
-        selected_session = (
-            date.fromisoformat(target_session)
-            if target_session is not None
-            else datetime.now(tz=ZoneInfo("America/New_York")).date()
-        )
+        selected_session = date.fromisoformat(target_session)
     except (OSError, ValueError) as exc:
         raise typer.BadParameter(f"Invalid Stage 4 configuration: {exc}") from exc
 

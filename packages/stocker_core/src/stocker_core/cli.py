@@ -13,8 +13,11 @@ from stocker_core.config import (
     load_ibkr_config,
     load_research_config,
     load_run_config,
+    load_runs_config,
     load_server_config,
 )
+from stocker_core.runs import RunManager
+from stocker_core.universes import UniverseCatalog
 
 console = Console()
 app = typer.Typer(no_args_is_help=True, help="Stocker research and execution utilities.")
@@ -29,6 +32,7 @@ app.add_typer(universe_app, name="universe")
 
 DEFAULT_RESEARCH_CONFIG = Path("configs/research.example.yaml")
 DEFAULT_RUN_CONFIG = Path("configs/run.example.yaml")
+DEFAULT_RUNS_CONFIG = Path("configs/runs.example.yaml")
 DEFAULT_IBKR_CONFIG = Path("configs/ibkr.example.yaml")
 
 
@@ -50,6 +54,44 @@ def start(config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_RUN_
     console.print(f"Strategy: {run.strategy}")
     console.print(f"Environment: {run.environment.value}")
     console.print("Stage 1 runtime ready")
+
+
+@app.command("runs-status")
+def runs_status(
+    config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_RUNS_CONFIG,
+    start_runs: Annotated[
+        list[str] | None,
+        typer.Option("--start", help="Mark a configured run active in this diagnostic."),
+    ] = None,
+) -> None:
+    """Show configured universes and independent in-memory run states."""
+
+    try:
+        loaded = load_runs_config(config)
+        catalog = UniverseCatalog(loaded.universes)
+        manager = RunManager(catalog, loaded.runs)
+        for run_id in start_runs or ():
+            manager.start_run(run_id)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid Stage 3 configuration: {exc}") from exc
+
+    console.print("Stocker Stage 3")
+    console.print("\nUNIVERSES")
+    for universe in catalog.list_universes():
+        console.print(f"{universe.universe_id} members={len(universe.members)}")
+
+    console.print("\nRUNS")
+    for instance in manager.list_runs():
+        run = instance.config
+        console.print(f"{instance.state.value}  {run.run_id}")
+        console.print(f"  universe={run.universe}")
+        console.print(f"  strategy={run.strategy}")
+        console.print(f"  environment={run.environment.value}")
+        if run.session is not None:
+            console.print(
+                f"  session={run.session.start.isoformat()}–{run.session.end.isoformat()} "
+                f"{run.session.timezone}"
+            )
 
 
 @app.command("ibkr-check")

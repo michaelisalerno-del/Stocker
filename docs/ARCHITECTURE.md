@@ -49,6 +49,12 @@ The dashboard is a later consumer/controller. Trading must not depend on it.
 A universe defines instruments that may be considered, such as `NASDAQ`, `FTSE350`, `US_MIDCAP`,
 or a custom list. It contains neither strategy nor execution logic.
 
+Stage 3 loads immutable named definitions into `UniverseCatalog`. Membership uses normalized,
+value-based `InstrumentReference` keys containing symbol, exchange context, currency, and security
+type; the universe does not manufacture a universe-specific security identity. Thus overlapping
+universes can share the same conceptual instrument while IBKR qualification and `conId` remain at
+the Stage 2 boundary. Exact duplicate members within one universe are removed in first-seen order.
+
 ### Run
 
 A run is one active combination of universe, strategy, `PAPER` or `LIVE` environment, trading or
@@ -60,6 +66,12 @@ FTSE350               NASDAQ            US_MIDCAP
 SESSION_HARD          SESSION_HARD      NEW_STRATEGY
 PAPER                 LIVE              PAPER
 ```
+
+`RunManager` holds any number of independent in-memory `RunInstance` values in `CONFIGURED`,
+`ACTIVE`, or `STOPPED` state. Multiple runs may share one immutable universe definition while
+retaining separate strategy, environment, optional session window, and lifecycle state. Starting
+or stopping a run only changes that run. Session windows are descriptive in Stage 3: no scheduler,
+calendar processing, broker connection, bulk data request, screening, or trading starts with them.
 
 ### Historical data
 

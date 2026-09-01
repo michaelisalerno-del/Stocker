@@ -1,0 +1,43 @@
+universes:
+  - universe_id: NASDAQ_TEST
+    name: NASDAQ test stocks
+    members:
+      - {symbol: AAPL, exchange: SMART, primary_exchange: NASDAQ, currency: USD}
+      - {symbol: MSFT, exchange: SMART, primary_exchange: NASDAQ, currency: USD}
+      - {symbol: AMD, exchange: SMART, primary_exchange: NASDAQ, currency: USD}
+
+  - universe_id: FTSE_TEST
+    name: FTSE test stocks
+    members:
+      - {symbol: AZN, exchange: SMART, primary_exchange: LSE, currency: GBP}
+      - {symbol: SHEL, exchange: SMART, primary_exchange: LSE, currency: GBP}
+
+  - universe_id: CUSTOM_RESEARCH
+    name: Custom research list
+    members:
+      - {symbol: AMD, exchange: SMART, primary_exchange: NASDAQ, currency: USD}
+      - {symbol: PLTR, exchange: SMART, primary_exchange: NASDAQ, currency: USD}
+
+runs:
+  - run_id: ftse_morning
+    universe: FTSE_TEST
+    strategy: SESSION_HARD
+    environment: PAPER
+    session:
+      start: "08:00"
+      end: "11:00"
+      timezone: Europe/London
+
+  - run_id: nasdaq_main
+    universe: NASDAQ_TEST
+    strategy: SESSION_HARD
+    environment: LIVE
+    session:
+      start: "14:30"
+      end: "18:00"
+      timezone: Europe/London
+
+  - run_id: nasdaq_experiment
+    universe: NASDAQ_TEST
+    strategy: NEW_IDEA
+    environment: PAPER

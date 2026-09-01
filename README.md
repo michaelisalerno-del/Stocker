@@ -111,6 +111,20 @@ handles authentication; Stocker does not store or automate broker login credenti
 exposes multiple accounts, copy the example to the ignored `configs/ibkr.local.yaml` and set
 `expected_account` there so Stocker can select the intended account explicitly.
 
+## Stage 3 Universes And Runs
+
+`configs/runs.example.yaml` defines named and custom universes plus independent PAPER/LIVE runs.
+Inspect the configured state, or mark several runs active for this in-memory diagnostic, with:
+
+```bash
+uv run stocker runs-status \
+  --config configs/runs.example.yaml \
+  --start ftse_morning \
+  --start nasdaq_main
+```
+
+This command does not connect to IBKR, fetch data, schedule work, evaluate a strategy, or trade.
+
 ## Intentionally Not Implemented Yet
 
 - No broker order submission or cancellation through the Stage 2 IBKR adapter.

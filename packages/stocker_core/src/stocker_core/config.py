@@ -4,10 +4,11 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from stocker_core.runs import Environment, RunConfig
+from stocker_core.universes import UniverseDefinition
 
 
 class DataConfig(BaseModel):
@@ -91,6 +92,32 @@ class IbkrConfig(BaseModel):
     request_timeout_seconds: float = Field(default=60.0, gt=0.0)
 
 
+class RunsConfig(BaseModel):
+    """Configured universes and the independent runs that reference them."""
+
+    universes: tuple[UniverseDefinition, ...] = Field(min_length=1)
+    runs: tuple[RunConfig, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_run_references(self) -> "RunsConfig":
+        """Reject duplicate identities and runs that name an absent universe."""
+
+        universe_ids: set[str] = set()
+        for universe in self.universes:
+            if universe.universe_id in universe_ids:
+                raise ValueError(f"Duplicate universe_id: {universe.universe_id}")
+            universe_ids.add(universe.universe_id)
+
+        run_ids: set[str] = set()
+        for run in self.runs:
+            if run.run_id in run_ids:
+                raise ValueError(f"Duplicate run_id: {run.run_id}")
+            run_ids.add(run.run_id)
+            if run.universe not in universe_ids:
+                raise ValueError(f"Unknown universe {run.universe} referenced by run {run.run_id}")
+        return self
+
+
 class ServerSettings(BaseModel):
     """Server runtime settings for future paper/live execution."""
 
@@ -159,6 +186,12 @@ def load_run_config(path: str | Path) -> RunConfig:
     """Load a Stage 1 run config YAML file."""
 
     return load_config(path, RunConfig)
+
+
+def load_runs_config(path: str | Path) -> RunsConfig:
+    """Load the broker-independent multiple-universe and multiple-run configuration."""
+
+    return load_config(path, RunsConfig)
 
 
 def load_ibkr_config(path: str | Path, environment: Environment) -> IbkrConfig:

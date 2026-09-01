@@ -92,6 +92,10 @@ gaps; bars are never interpolated, substituted, or silently dropped from the req
 
 #### Canonical PRE contract status
 
+The detailed recovery evidence, backward lineage, confirmed `PRE_MOVE_M` behavior, reference rows,
+and exact unblock requirements are recorded once in
+[`PRE_LINEAGE_RECOVERY.md`](PRE_LINEAGE_RECOVERY.md).
+
 The current Stage 1--3 branch does not contain an executable or frozen bars-only PRE-level
 definition. The latest accepted research lineage inspected was:
 

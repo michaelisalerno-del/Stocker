@@ -7,6 +7,8 @@ import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from stocker_core.runs import RunConfig
+
 
 class DataConfig(BaseModel):
     """Filesystem and market-context settings shared by research and execution."""
@@ -139,3 +141,9 @@ def load_server_config(path: str | Path) -> ServerConfig:
     """Load a server config YAML file."""
 
     return load_config(path, ServerConfig)
+
+
+def load_run_config(path: str | Path) -> RunConfig:
+    """Load a Stage 1 run config YAML file."""
+
+    return load_config(path, RunConfig)

@@ -10,6 +10,7 @@ from stocker_core.config import (
     EODHDConfig,
     ResearchConfig,
     load_research_config,
+    load_run_config,
     load_server_config,
 )
 
@@ -25,6 +26,7 @@ app.add_typer(server_app, name="server")
 app.add_typer(universe_app, name="universe")
 
 DEFAULT_RESEARCH_CONFIG = Path("configs/research.example.yaml")
+DEFAULT_RUN_CONFIG = Path("configs/run.example.yaml")
 
 
 @app.command()
@@ -32,6 +34,19 @@ def check() -> None:
     """Run a lightweight environment check."""
 
     console.print("Stocker CLI is installed and importable.")
+
+
+@app.command("start")
+def start(config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_RUN_CONFIG) -> None:
+    """Load and report one Stage 1 run without trading."""
+
+    run = load_run_config(config)
+    console.print("Stocker starting")
+    console.print(f"Run: {run.run_id}")
+    console.print(f"Universe: {run.universe}")
+    console.print(f"Strategy: {run.strategy}")
+    console.print(f"Environment: {run.environment.value}")
+    console.print("Stage 1 runtime ready")
 
 
 @data_app.command("validate")

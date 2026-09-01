@@ -79,6 +79,39 @@ IBKR is the exclusive source for historical bars used by production and paper PR
 The local cache stores only IBKR-originated history. Stocker must not silently fall back to EODHD,
 FMP, TwelveData, or another provider for those calculations.
 
+The contract-independent Stage 4 substrate is implemented in
+`stocker_execution.history`. `IbkrHistoryService` accepts only the Stage 2 historical-data
+boundary and writes its validated bars to one SQLite `IbkrHistoryCache`. Cache identity is
+`conId + bar size + whatToShow + RTH mode + UTC timestamp`; it contains neither universe, run,
+strategy, nor PAPER/LIVE identity. Instrument metadata and `fetched_at` are retained with each bar.
+Reads name their exact required timezone-aware timestamps and an `as_of` cutoff. Missing bars
+produce `NOT_READY` with the exact gaps; bars are never interpolated, substituted, or silently
+dropped from the requirement.
+
+#### Canonical PRE contract status
+
+The current Stage 1--3 branch does not contain an executable or frozen bars-only PRE-level
+definition. The latest accepted research lineage inspected was:
+
+- research worktree `2026-09-01-session-hard-structure-d-price-volume/`
+  `rvol_efficiency_context_v0/contract.json` and `run_experiment.py` (research runner SHA-256
+  `3e0c2884ff3f0277265b86d4feca447954e75a349d3d81388390007e50c47f25`), which define
+  `PRE_MOVE_M` as the split-aligned absolute open-price change from exactly `T0-3 minutes` to
+  `T0`, divided by upstream canonical `M`;
+- Stocker research worktree `2026-08-15-you-are-working-in-my-existing/`, file
+  `research/directional-readiness/20260830-session-hard-broad-universe-expansion-v0/`
+  `run_broad_experiment.py`, which produces that upstream `M_price` from prior-session ATM option
+  IV (`P0 * atm_iv * sqrt(15 / (252 * 390)) * sqrt(2 / pi)`), rather than from a frozen
+  stock-bar-only history calculation.
+
+Those sources prove exact-minute missing-bar failure and the downstream PRE_MOVE formula, but they
+do not establish the requested production PRE history contract: canonical IBKR request semantics,
+lookback/session completeness, option-IV acquisition equivalence, price-adjustment policy, or a
+bars-only PRE-level formula and golden outputs. Therefore no `PreHistorySpec`, PRE calculator,
+calculation version, automatic gap fetch, or live diagnostic is implemented yet. Choosing those
+values would create new trading mathematics. The cache exposes exact gaps so the eventual frozen
+contract can request only missing history once that contract is supplied.
+
 ### IBKR boundary
 
 `stocker_execution.ibkr.IbkrConnection` is the Stage 2 read-only boundary for connection/session
@@ -94,14 +127,15 @@ multi-account session must configure `expected_account` so Stocker does not sele
 
 ### PRE level calculator
 
-The calculator receives bars and knows nothing about IBKR:
+The intended calculator receives bars and knows nothing about IBKR:
 
 ```python
 bars = history_service.get(...)
 levels = pre_levels.calculate(bars)
 ```
 
-This makes calculation tests deterministic without a broker connection.
+This boundary will make calculation tests deterministic without a broker connection. It is not yet
+implemented because the canonical calculation contract described above is unresolved.
 
 ### Feature and band layer
 

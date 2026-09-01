@@ -2,7 +2,8 @@
 
 > Follow-up status: [`M_PRE_MOVE_AUDIT.md`](M_PRE_MOVE_AUDIT.md) has since confirmed the
 > row-specific M/PRE_MOVE_M equations, P0/T0 timing, threshold placement, and Stage 4/5 ownership.
-> The remaining blocker is the unproven IBKR underlying/option-IV acquisition and parity contract.
+> That blocker was resolved by the user-approved IBKR tick-13 Model Option Computation contract;
+> the implemented Stage 4 mapping is documented in `ARCHITECTURE.md` and `M_PRE_MOVE_AUDIT.md`.
 
 ## Result
 
@@ -14,8 +15,9 @@ Stage 4 was asked to freeze. `PRE_MOVE_M` also depends on an upstream prior-sess
 movement amount, not only on historical underlying bars. Treating it as the missing Stage 4 PRE
 level, or translating its EODHD inputs to IBKR request settings, would require new trading rules.
 
-Stage 4 therefore remains incomplete. The existing contract-independent IBKR cache substrate is
-unchanged, no PRE calculator/version has been declared, and Stage 5 has not been started.
+This document records the earlier correctly blocked recovery state. Stage 4 has since implemented
+`PRE_CONTEXT_V1` after the missing production source was explicitly supplied. Stage 5 has not been
+started.
 
 ## Search scope
 

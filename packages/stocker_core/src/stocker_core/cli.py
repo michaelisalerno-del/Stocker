@@ -1,8 +1,10 @@
 """Command-line interface for Stocker."""
 
 import asyncio
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 import typer
 from rich.console import Console
@@ -155,6 +157,86 @@ def ibkr_check(
         asyncio.run(diagnose())
     except IbkrError as exc:
         console.print(f"IBKR diagnostic failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("pre-context-check")
+def pre_context_check(
+    run_config: Annotated[
+        Path, typer.Option("--run-config", help="Stage 1 PAPER run configuration.")
+    ] = DEFAULT_RUN_CONFIG,
+    ibkr_config: Annotated[
+        Path, typer.Option("--ibkr-config", help="Explicit IBKR settings.")
+    ] = DEFAULT_IBKR_CONFIG,
+    symbol: Annotated[str, typer.Option("--symbol")] = "AAPL",
+    exchange: Annotated[str, typer.Option("--exchange")] = "SMART",
+    primary_exchange: Annotated[str | None, typer.Option("--primary-exchange")] = "NASDAQ",
+    currency: Annotated[str, typer.Option("--currency")] = "USD",
+    target_session: Annotated[str | None, typer.Option("--session", help="YYYY-MM-DD")] = None,
+    cache_path: Annotated[Path, typer.Option("--cache")] = Path(".stocker/ibkr-stage4.sqlite3"),
+) -> None:
+    """Capture and then reuse one Stage 4 PAPER prior-session volatility context."""
+
+    from stocker_core.runs import Environment
+    from stocker_execution.history import IbkrHistoryCache
+    from stocker_execution.ibkr import IbkrConnection, IbkrError
+    from stocker_execution.pre_context import (
+        ContextStatus,
+        PriorSessionContextService,
+        PriorSessionContextStore,
+    )
+
+    try:
+        run = load_run_config(run_config)
+        if run.environment is not Environment.PAPER:
+            raise ValueError("Stage 4 diagnostic requires a PAPER run configuration")
+        broker_config = load_ibkr_config(ibkr_config, run.environment)
+        selected_session = (
+            date.fromisoformat(target_session)
+            if target_session is not None
+            else datetime.now(tz=ZoneInfo("America/New_York")).date()
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid Stage 4 configuration: {exc}") from exc
+
+    async def diagnose() -> None:
+        connection = IbkrConnection(broker_config)
+        try:
+            await connection.connect()
+            instrument = await connection.resolve_stock(
+                symbol,
+                exchange=exchange,
+                primary_exchange=primary_exchange,
+                currency=currency,
+            )
+            service = PriorSessionContextService(
+                connection,
+                IbkrHistoryCache(cache_path),
+                PriorSessionContextStore(cache_path),
+            )
+            first = await service.get_or_create(instrument, session=selected_session)
+            if first.status is not ContextStatus.READY or first.context is None:
+                raise IbkrError(first.reason)
+            second = await service.get_or_create(instrument, session=selected_session)
+            context = first.context
+            console.print(f"{context.symbol} conId={context.underlying_con_id}")
+            console.print(f"session: {context.target_session}")
+            console.print(f"call conId: {context.call_con_id}")
+            console.print(f"put conId: {context.put_con_id}")
+            console.print(f"expiry: {context.expiry} strike: {context.strike}")
+            console.print(f"call model IV: {context.call_model_iv}")
+            console.print(f"put model IV: {context.put_model_iv}")
+            console.print(f"ATM IV: {context.atm_iv}")
+            console.print(f"expected abs return 15m: {context.expected_absolute_return_15m}")
+            console.print(f"source: {context.iv_source}")
+            console.print(f"cache/context reused: {'yes' if second.reused else 'no'}")
+        finally:
+            connection.disconnect()
+
+    try:
+        asyncio.run(diagnose())
+    except IbkrError as exc:
+        console.print(f"Stage 4 diagnostic failed: {exc}")
         raise typer.Exit(code=1) from exc
 
 
@@ -3447,13 +3529,14 @@ def research_personality_context_workflow(
 ) -> None:
     """Run the research-only single-personality context workflow over report pairs."""
 
-    from stocker_research.personality_context_rule_discovery_v0 import ReportPair
     from stocker_research.personality_context_workflow_v0 import (
         DEFAULT_WORKFLOW_CATEGORICAL_FEATURES,
         DEFAULT_WORKFLOW_NUMERIC_FEATURES,
         PersonalityContextWorkflowConfig,
         run_personality_context_workflow_lab,
     )
+
+    from stocker_research.personality_context_rule_discovery_v0 import ReportPair
 
     parsed_pairs = _parse_report_pair_specs(report_pair or [])
     if not parsed_pairs:

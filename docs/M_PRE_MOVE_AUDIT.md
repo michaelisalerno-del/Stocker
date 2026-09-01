@@ -7,9 +7,10 @@ fixed value `0.475764059845861` was applied only afterwards as a strict threshol
 dimensionless `PRE_MOVE_M` value. No occurrence was found where that threshold was used as `M`, a
 dollar move, or a percentage move.
 
-The research arithmetic is recovered and reproducible. The production IBKR acquisition contract
-is not yet reproducible because the research option IV field has no established IBKR-equivalent
-tick/source and no historical IBKR parity artefact exists.
+The research arithmetic is recovered and reproducible. The production source is now frozen by
+user decision as IBKR contract-specific Model Option Computation `impliedVol`, tick type 13. The
+user accepts the earlier empirical IBKR/EODHD parity conclusion; its numerical artefact is no
+longer available and is not a Stage 4 blocker.
 
 ## Authoritative lineage
 
@@ -156,63 +157,32 @@ arrives at `T0`.
 
 No Stage 5 runtime implementation is added by this audit.
 
-## IBKR contract: confirmed requirements and remaining gap
+## IBKR production mapping
 
-The required information is now exact, but the IBKR request fields are not yet equivalent:
+- Previous-session underlying: calendar-complete XNYS `5 mins` `TRADES` bars with `useRTH=True`,
+  ending at the prior session close. A fully absent session uses `duration=1 D`; partial cache gaps
+  request only contiguous missing ranges. This is an explicit IBKR implementation mapping of the
+  research's five-minute RTH traded-price context. The final scheduled bar close is the
+  option-selection reference; any missing scheduled bar makes the context unavailable.
+- Option source: exact qualified SMART call/put contracts. Contract-specific
+  `ticker.modelGreeks.impliedVol` is IBKR Model Option Computation tick type 13. Tick types
+  10/11/12 and generic tick 106 are excluded as IV sources; generic tick 101 is used only for
+  per-leg open interest.
+- Timing: uncached model context is captured after the observation-session close and before the
+  target-session open, then persisted. A late request cannot reconstruct historical option model
+  ticks and fails closed.
+- Failure: any missing underlying bar, option leg, qualifying identity, quality input, or tick-13
+  model IV returns `PRE_CONTEXT_NOT_READY`. There is no fallback provider or fallback IV field.
 
-- Prior-session underlying reference: the research runner's last available five-minute close after
-  its 09:30–15:55 America/New_York filter. Production session/half-day completeness remains
-  unresolved rather than assuming a 15:55 bar.
-- PRE endpoints for later Stage 5: exact one-minute opening prices at `T0-3m` and `T0`, UTC-aware,
-  duplicate-last, both required, no interpolation.
-- Option context: the exact selection and quality contract above, observed at the previous
-  session's 16:00 America/New_York close, including bid, ask, midpoint, open interest, per-contract
-  IV, contract identity, expiry, and strike.
-- Failure: any missing required bar, option leg, identity, or IV makes the context not ready. There
-  is no alternate provider or alternative IBKR volatility field.
-
-`bar_size` is therefore known functionally (`5 mins` for previous close and `1 min` for PRE
-endpoints), but research evidence does not identify an IBKR `whatToShow`, `useRTH`, request
-duration, or corporate-action setting. Choosing `TRADES`/RTH merely because it appears plausible
-would be a new rule.
-
-IBKR documents `OPTION_IMPLIED_VOLATILITY` for a stock as its own interpolated 30-day at-market
-volatility, not the selected 7–45 DTE call/put average used here. IBKR option-computation ticks can
-return contract-specific model/bid/ask/last IV, but the research does not establish which one is
-equivalent to the EODHD field. IBKR also does not make historical IV bars available for option
-contracts and does not provide ordinary market data for expired options. Sources:
-[IBKR historical data types](https://interactivebrokers.github.io/tws-api/historical_bars.html),
-[IBKR option computations](https://interactivebrokers.github.io/tws-api/option_computations.html),
-[IBKR current historical request fields](https://ibkrcampus.com/docs/tws-api/protobuf/historical-data-request),
-and [IBKR expired-option limitation](https://ibkrcampus.com/campus/trading-lessons/requesting-market-data/?retakeFinal=1).
-
-## Required parity procedure
-
-No IBKR-backed golden case exists, and the accepted 2025 option contracts are expired. Parity must
-therefore be established prospectively on approximately 5–20 liquid stock-days:
-
-1. Qualify the underlying and every candidate option with IBKR identities.
-2. At the exact 16:00 America/New_York prior-session cutoff, record source-labelled underlying
-   prices, option bid/ask, open interest, and each IBKR bid/ask/last/model IV separately.
-3. In a research-only parallel capture, record the reference-vendor snapshot used by the frozen
-   definition; it must never enter the PAPER/LIVE runtime path.
-4. Apply the frozen expiry/strike/quality/ranking algorithm to both captures and compare contract
-   identity, prior close, selected expiry/strike, call IV, put IV, ATM IV, and
-   `expected_absolute_return_15m` separately.
-5. At next-session `T0`, compare `P0`, dollar `M_price`, both raw one-minute opens, aligned raw PRE
-   move, and `PRE_MOVE_M` separately.
-6. Reject missing or semantically different inputs. Do not conceal an earlier mismatch inside the
-   final ratio.
-
-No numerical tolerance is frozen yet: the repository contains no synchronized IBKR/reference
-sample from which to justify one. Exact timestamp/contract/expiry/strike identity is required;
-numeric deltas must first be reported raw and reviewed before any tolerance can be approved.
+The earlier user-run vendor comparison found IBKR model IV practically equivalent to the EODHD IV
+used in the frozen research. That conclusion is accepted; the old CSV/report is unavailable, so no
+bit-for-bit vendor equality or new parity research project is required. Runtime data is IBKR-only.
 
 ## Test boundary
 
 `tests/test_pre_move_m_research_contract.py` freezes six representative input/output rows and
 checks row-specific `M`, repeated-stock time variation, cross-sectional variation, the exact
 normalisation arithmetic, current `P0` rather than prior-close scaling, and threshold placement.
-These are reference-only arithmetic tests. There is intentionally no production PRE_MOVE
-calculator in Stage 4, so broker-side-effect isolation and end-to-end causal input enforcement
-remain untested until Stage 5 implements that pure calculator.
+These remain reference arithmetic tests. `tests/test_stage4_pre_context.py` additionally freezes
+the pure Stage 4 ATM-IV/expected-return calculation, exact option selection, tick-13-only source,
+fail-closed model-IV behavior, `conId` lineage, persistence reuse, and absence of Stage 5 fields.

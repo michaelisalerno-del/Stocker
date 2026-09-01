@@ -98,8 +98,7 @@ and exact unblock requirements are recorded once in
 The follow-up row audit and corrected causal ownership are recorded in
 [`M_PRE_MOVE_AUDIT.md`](M_PRE_MOVE_AUDIT.md).
 
-The current Stage 1--3 branch does not contain an executable or frozen bars-only PRE-level
-definition. The latest accepted research lineage inspected was:
+The accepted research lineage is:
 
 - research worktree `2026-09-01-session-hard-structure-d-price-volume/`
   `rvol_efficiency_context_v0/contract.json` and `run_experiment.py` (research runner SHA-256
@@ -112,15 +111,7 @@ definition. The latest accepted research lineage inspected was:
   IV (`P0 * atm_iv * sqrt(15 / (252 * 390)) * sqrt(2 / pi)`), rather than from a frozen
   stock-bar-only history calculation.
 
-Those sources prove exact-minute missing-bar failure and the downstream PRE_MOVE formula, but they
-do not establish the requested production PRE history contract: canonical IBKR request semantics,
-lookback/session completeness, option-IV acquisition equivalence, price-adjustment policy, or a
-bars-only PRE-level formula and golden outputs. Therefore no `PreHistorySpec`, PRE calculator,
-calculation version, automatic gap fetch, or live diagnostic is implemented yet. Choosing those
-values would create new trading mathematics. The cache exposes exact gaps so the eventual frozen
-contract can request only missing history once that contract is supplied.
-
-The follow-up audit confirms that the research normalisation itself is row-specific and correct:
+The follow-up audit confirms that the research normalisation is row-specific and correct:
 
 ```text
 expected_absolute_return_15m = ATM_IV * sqrt(15 / (252 * 390)) * sqrt(2 / pi)
@@ -131,21 +122,40 @@ PRE_MOVE_M = abs(P0 - raw_open[T0-3m] * (P0 / raw_open[T0])) / M_price
 The unchanged strict threshold `PRE_MOVE_M > 0.475764059845861` is downstream of this
 normalisation and is never `M`.
 
-This timing corrects the Stage boundary. Stage 4 may own the exact-prior-session IBKR option/IV
-context and its dimensionless expected-move fraction after source parity is proven. Stage 5 owns
-`T0`, current-session `P0`, final dollar `M_price`, raw PRE movement, `PRE_MOVE_M`, thresholds,
-bands, and ranking. Final dollar `M_price` is not known on the prior session because its scale uses
-current-session `P0`.
+Stage 4 is implemented in `stocker_execution.pre_context` as `PRE_CONTEXT_V1`. Its pure selector
+preserves the frozen 7--45 calendar-DTE, 75%--125% strike bounds, nearest common-strike expiry,
+`abs(log(strike / previous_close))`, descending minimum open interest, combined relative spread,
+IV-gap, strike, and contract-ID ordering. It validates the selected pair without trying a fallback:
+model IV `[0.005, 5]`, nonnegative bid, ask at least bid, positive midpoint, open interest at least
+10 per leg, relative spread at most 1, and the recovered optional delta/gamma checks.
 
-No IBKR option-IV field has yet been proven equivalent to the frozen research provider's selected
-call/put `implied_volatility`. Production implementation remains gated on a prospective,
-source-labelled parity capture; research/vendor data may be used only as the comparison reference
-and never as a PAPER/LIVE fallback.
+The PAPER/LIVE IV source is frozen by user decision as the contract-specific IBKR Model Option
+Computation `impliedVol` delivered by `tickOptionComputation` tick type 13 (the `ib_async`
+`ticker.modelGreeks.impliedVol` field). Call and put model IV are averaged. Tick types 10, 11, and
+12 are not fallbacks; generic tick 106 `OPTION_IMPLIED_VOLATILITY` is excluded. Generic tick 101 is
+requested only for per-leg open interest. A missing model computation makes the result
+`PRE_CONTEXT_NOT_READY`.
+
+The research specified five-minute regular-session traded-price context functionally. The explicit
+**IBKR implementation mapping** is `5 mins`, `TRADES`, and `useRTH=True`, ending at the previous
+XNYS session close. A completely absent session uses `duration=1 D`; partial gaps request only
+contiguous missing five-minute ranges. The existing exchange calendar supplies normal and half-day
+bounds; every scheduled five-minute bar is required and the final bar close is the selection
+reference. No missing bar is filled. An uncached option snapshot is captured only after that close
+and before the target session opens, because IBKR does not provide this contract-specific model IV
+as a historical option-bar series.
+
+One SQLite table persists the context by `underlying conId + target session + PRE_CONTEXT_V1` with
+underlying/call/put `conId`, selected expiry/strike, both model IVs, ATM IV, expected-return fraction,
+source, and timestamps. The key has no universe, run, strategy, or PAPER/LIVE dimension. The
+user-accepted EODHD/IBKR parity conclusion comes from prior empirical testing; its old numerical
+artefact is unavailable and is not a blocker. Runtime inputs remain IBKR-only.
 
 ### IBKR boundary
 
 `stocker_execution.ibkr.IbkrConnection` is the Stage 2 read-only boundary for connection/session
-identity, stock qualification, historical bars, and current snapshots. Each instance owns its own
+identity, stock and option qualification, option definitions/model snapshots, historical bars,
+and current stock snapshots. Each instance owns its own
 client state, so PAPER and LIVE can later use separate Gateway sessions without a global singleton.
 The adapter exposes small Stocker models and no order methods; strategies and calculations must not
 import IBKR objects.
@@ -157,18 +167,19 @@ multi-account session must configure `expected_account` so Stocker does not sele
 
 ### M and PRE calculator boundary
 
-The intended Stage 4 context service receives normalized prior-session inputs and exposes no IBKR
-objects. Stage 5 will later combine that context with current-session `P0` and `T0`:
+The Stage 4 pure calculator receives two normalized model IV values and exposes no IBKR objects.
+`PriorSessionContextService` composes the Stage 2 adapter, SQLite stores, calendar validation,
+selector, and pure calculation. Stage 5 will later combine the result with current-session `P0`
+and `T0`:
 
 ```python
-prior_context = stage4.get_prior_session_context(instrument, session)
-# Stage 5 later consumes prior_context.expected_absolute_return_15m with P0/T0.
+result = await pre_context_service.get_or_create(instrument, session=session)
+# Stage 5 later consumes result.context.expected_absolute_return_15m with P0/T0.
 ```
 
-This boundary will make calculation tests deterministic without a broker connection. The recovered
-arithmetic is frozen by research-reference tests, but the current-session calculator belongs to
-Stage 5 and is not implemented here. Stage 4's remaining blocker is an authoritative IBKR
-option-IV acquisition/parity contract.
+The pure arithmetic and selector run without a Gateway. Stage 4 does not define or calculate
+`P0`, `T0`, `M_price`, `PRE_MOVE_M`, the `0.475764059845861` threshold, bands, or ranking; all are
+Stage 5 concerns.
 
 ### Feature and band layer
 

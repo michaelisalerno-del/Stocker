@@ -114,6 +114,21 @@ class HistoricalBar:
     volume: float
 
 
+def validate_historical_bar(bar: HistoricalBar) -> HistoricalBar:
+    """Return one valid normalized bar or fail before trading code can use it."""
+
+    if not isinstance(bar.timestamp, (date, datetime)):
+        raise ValueError("invalid historical bar timestamp")
+    values = (bar.open, bar.high, bar.low, bar.close, bar.volume)
+    if not all(isfinite(value) for value in values) or bar.volume < 0:
+        raise ValueError("invalid historical bar values")
+    if bar.high < max(bar.open, bar.low, bar.close) or bar.low > min(
+        bar.open, bar.high, bar.close
+    ):
+        raise ValueError("inconsistent historical bar OHLC values")
+    return bar
+
+
 @dataclass(frozen=True, slots=True)
 class CurrentQuote:
     """Small current IBKR snapshot with missing prices represented explicitly."""
@@ -410,22 +425,19 @@ def _normalize_historical_bar(source: _SourceBar, *, index: int) -> HistoricalBa
     except (AttributeError, TypeError, ValueError) as exc:
         raise IbkrError(f"IBKR returned invalid historical bar at index {index}") from exc
 
-    if not isinstance(timestamp, (date, datetime)):
-        raise IbkrError(f"IBKR returned invalid historical bar timestamp at index {index}")
-    values = (open_price, high, low, close, volume)
-    if not all(isfinite(value) for value in values) or volume < 0:
-        raise IbkrError(f"IBKR returned invalid historical bar values at index {index}")
-    if high < max(open_price, low, close) or low > min(open_price, high, close):
-        raise IbkrError(f"IBKR returned inconsistent OHLC values at index {index}")
-
-    return HistoricalBar(
-        timestamp=timestamp,
-        open=open_price,
-        high=high,
-        low=low,
-        close=close,
-        volume=volume,
-    )
+    try:
+        return validate_historical_bar(
+            HistoricalBar(
+                timestamp=timestamp,
+                open=open_price,
+                high=high,
+                low=low,
+                close=close,
+                volume=volume,
+            )
+        )
+    except ValueError as exc:
+        raise IbkrError(f"IBKR returned {exc} at index {index}") from exc
 
 
 def _available_price(value: float) -> float | None:

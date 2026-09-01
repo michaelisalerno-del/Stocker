@@ -7,27 +7,16 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from math import isfinite
 from pathlib import Path
-from typing import Protocol
 
-from stocker_execution.ibkr import HistoricalBar, QualifiedInstrument
+from stocker_execution.ibkr import (
+    HistoricalBar,
+    IbkrConnection,
+    QualifiedInstrument,
+    validate_historical_bar,
+)
 
 IBKR_HISTORY_SOURCE = "IBKR"
-
-
-class _Stage2HistoryBoundary(Protocol):
-    async def historical_bars(
-        self,
-        instrument: QualifiedInstrument,
-        *,
-        bar_size: str,
-        duration: str,
-        what_to_show: str,
-        regular_trading_hours: bool,
-        end_time: datetime | None = None,
-        minimum_bars: int = 1,
-    ) -> tuple[HistoricalBar, ...]: ...
 
 
 class HistoryStatus(StrEnum):
@@ -123,7 +112,7 @@ class IbkrHistoryCache:
                 """
             )
 
-    def store(
+    def _store_from_ibkr(
         self,
         instrument: QualifiedInstrument,
         semantics: HistorySemantics,
@@ -131,7 +120,7 @@ class IbkrHistoryCache:
         *,
         fetched_at: datetime | None = None,
     ) -> None:
-        """Persist validated Stage 2 bars as IBKR-originated history."""
+        """Persist bars validated by the concrete Stage 2 IBKR boundary."""
 
         if instrument.con_id <= 0:
             raise ValueError("Qualified instrument con_id must be positive")
@@ -184,6 +173,7 @@ class IbkrHistoryCache:
             raise ValueError("At least one required history timestamp is required")
 
         found: dict[datetime, HistoricalBar] = {}
+        invalid_count = 0
         with self._connect() as connection:
             for chunk in _chunks(required, size=500):
                 placeholders = ", ".join("?" for _ in chunk)
@@ -211,23 +201,35 @@ class IbkrHistoryCache:
                 ).fetchall()
                 for row in rows:
                     timestamp = _deserialize_timestamp(str(row["timestamp_utc"]))
-                    found[timestamp] = HistoricalBar(
-                        timestamp=timestamp,
-                        open=float(row["open"]),
-                        high=float(row["high"]),
-                        low=float(row["low"]),
-                        close=float(row["close"]),
-                        volume=float(row["volume"]),
-                    )
+                    try:
+                        found[timestamp] = validate_historical_bar(
+                            HistoricalBar(
+                                timestamp=timestamp,
+                                open=float(row["open"]),
+                                high=float(row["high"]),
+                                low=float(row["low"]),
+                                close=float(row["close"]),
+                                volume=float(row["volume"]),
+                            )
+                        )
+                    except (TypeError, ValueError):
+                        invalid_count += 1
 
         bars = tuple(found[timestamp] for timestamp in required if timestamp in found)
         missing = tuple(timestamp for timestamp in required if timestamp not in found)
         status = HistoryStatus.READY if not missing else HistoryStatus.NOT_READY
         reason = ""
         if missing:
-            reason = (
-                f"incomplete IBKR history: {len(missing)} of {len(required)} required bars missing"
-            )
+            if invalid_count:
+                reason = (
+                    f"invalid cached IBKR history: {invalid_count} required bars rejected; "
+                    f"{len(missing)} of {len(required)} required bars unavailable"
+                )
+            else:
+                reason = (
+                    f"incomplete IBKR history: {len(missing)} of "
+                    f"{len(required)} required bars missing"
+                )
         return HistorySnapshot(
             con_id=instrument.con_id,
             symbol=instrument.symbol,
@@ -253,13 +255,6 @@ class IbkrHistoryCache:
         fetched_at: datetime,
     ) -> tuple[object, ...]:
         timestamp = _to_utc(_require_aware_datetime(bar.timestamp))
-        values = (bar.open, bar.high, bar.low, bar.close, bar.volume)
-        if not all(isfinite(value) for value in values) or bar.volume < 0:
-            raise ValueError("Historical bar contains invalid values")
-        if bar.high < max(bar.open, bar.low, bar.close) or bar.low > min(
-            bar.open, bar.high, bar.close
-        ):
-            raise ValueError("Historical bar contains inconsistent OHLC values")
         return (
             instrument.con_id,
             instrument.symbol,
@@ -286,9 +281,11 @@ class IbkrHistoryService:
 
     def __init__(
         self,
-        ibkr: _Stage2HistoryBoundary,
+        ibkr: IbkrConnection,
         cache: IbkrHistoryCache,
     ) -> None:
+        if not isinstance(ibkr, IbkrConnection):
+            raise TypeError("History ingress requires the concrete Stage 2 IbkrConnection")
         self._ibkr = ibkr
         self._cache = cache
 
@@ -319,7 +316,7 @@ class IbkrHistoryService:
             end_time=end_time,
             minimum_bars=minimum_bars,
         )
-        self._cache.store(instrument, semantics, bars)
+        self._cache._store_from_ibkr(instrument, semantics, bars)
         return bars
 
 

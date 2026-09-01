@@ -80,13 +80,15 @@ The local cache stores only IBKR-originated history. Stocker must not silently f
 FMP, TwelveData, or another provider for those calculations.
 
 The contract-independent Stage 4 substrate is implemented in
-`stocker_execution.history`. `IbkrHistoryService` accepts only the Stage 2 historical-data
-boundary and writes its validated bars to one SQLite `IbkrHistoryCache`. Cache identity is
+`stocker_execution.history`. `IbkrHistoryService` accepts only the concrete Stage 2
+`IbkrConnection`; the cache write operation is private to that service so arbitrary provider
+bars cannot be relabelled as IBKR history. It writes validated bars to one SQLite
+`IbkrHistoryCache`. Cache identity is
 `conId + bar size + whatToShow + RTH mode + UTC timestamp`; it contains neither universe, run,
 strategy, nor PAPER/LIVE identity. Instrument metadata and `fetched_at` are retained with each bar.
 Reads name their exact required timezone-aware timestamps and an `as_of` cutoff. Missing bars
-produce `NOT_READY` with the exact gaps; bars are never interpolated, substituted, or silently
-dropped from the requirement.
+or cached rows that fail the shared historical-bar validation produce `NOT_READY` with the exact
+gaps; bars are never interpolated, substituted, or silently dropped from the requirement.
 
 #### Canonical PRE contract status
 

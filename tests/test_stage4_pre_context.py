@@ -31,6 +31,7 @@ from stocker_execution.pre_context import (
     PriorSessionContextStore,
     _contiguous_five_minute_ranges,
     _five_minute_starts,
+    _option_observation_at,
     _session_contract,
     calculate_volatility,
     select_canonical_option_pair,
@@ -146,6 +147,9 @@ def test_previous_session_grid_respects_known_xnys_half_day() -> None:
     assert session_close == datetime(2025, 11, 28, 18, 0, tzinfo=UTC)
     assert target_open == datetime(2025, 12, 1, 14, 30, tzinfo=UTC)
     assert len(_five_minute_starts(session_open, session_close)) == 42
+    assert _option_observation_at(observation) == datetime(
+        2025, 11, 28, 21, 0, tzinfo=UTC
+    )
 
 
 def test_missing_history_is_grouped_into_only_contiguous_fetch_ranges() -> None:
@@ -391,7 +395,7 @@ class ContextBoundary(IbkrConnection):
         return tuple(
             OptionMarketSnapshot(
                 option=item,
-                captured_at=datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
+                captured_at=datetime(2026, 8, 31, 20, 0, 30, tzinfo=UTC),
                 bid=1.0,
                 ask=1.2,
                 open_interest=100,
@@ -483,7 +487,7 @@ def test_service_persists_conid_lineage_and_reuses_context(tmp_path: Path) -> No
         boundary,
         IbkrHistoryCache(path),
         PriorSessionContextStore(path),
-        clock=lambda: datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
+        clock=lambda: datetime(2026, 8, 31, 20, 0, 30, tzinfo=UTC),
     )
 
     first = asyncio.run(service.get_or_create(qualified_stock(), session=date(2026, 9, 1)))
@@ -515,7 +519,7 @@ def test_service_selects_from_actual_qualified_common_strikes(tmp_path: Path) ->
         NearestUnqualifiedBoundary(),
         IbkrHistoryCache(path),
         PriorSessionContextStore(path),
-        clock=lambda: datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
+        clock=lambda: datetime(2026, 8, 31, 20, 0, 30, tzinfo=UTC),
     )
 
     result = asyncio.run(service.get_or_create(qualified_stock(), session=date(2026, 9, 1)))
@@ -533,7 +537,7 @@ def test_service_uses_first_expiry_with_actual_qualified_common_pair(tmp_path: P
         FirstExpiryUnqualifiedBoundary(),
         IbkrHistoryCache(path),
         PriorSessionContextStore(path),
-        clock=lambda: datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
+        clock=lambda: datetime(2026, 8, 31, 20, 0, 30, tzinfo=UTC),
     )
 
     result = asyncio.run(service.get_or_create(qualified_stock(), session=date(2026, 9, 1)))
@@ -549,7 +553,7 @@ def test_invalid_persisted_context_fails_closed(tmp_path: Path) -> None:
         ContextBoundary(),
         IbkrHistoryCache(path),
         PriorSessionContextStore(path),
-        clock=lambda: datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
+        clock=lambda: datetime(2026, 8, 31, 20, 0, 30, tzinfo=UTC),
     )
     ready = asyncio.run(service.get_or_create(qualified_stock(), session=date(2026, 9, 1)))
     assert ready.status is ContextStatus.READY
@@ -569,13 +573,13 @@ def test_uncached_context_outside_close_capture_window_is_not_ready(tmp_path: Pa
         ContextBoundary(),
         IbkrHistoryCache(path),
         PriorSessionContextStore(path),
-        clock=lambda: datetime(2026, 8, 31, 20, 6, tzinfo=UTC),
+        clock=lambda: datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
     )
 
     result = asyncio.run(service.get_or_create(qualified_stock(), session=date(2026, 9, 1)))
 
     assert result.status is ContextStatus.NOT_READY
-    assert "first five minutes" in result.reason
+    assert "16:00 America/New_York observation minute" in result.reason
 
 
 @pytest.mark.parametrize("missing_right", ["C", "P"])
@@ -587,7 +591,7 @@ def test_service_returns_not_ready_for_missing_required_model_iv(
         ContextBoundary(missing_right=missing_right),
         IbkrHistoryCache(path),
         PriorSessionContextStore(path),
-        clock=lambda: datetime(2026, 8, 31, 20, 1, tzinfo=UTC),
+        clock=lambda: datetime(2026, 8, 31, 20, 0, 30, tzinfo=UTC),
     )
 
     result = asyncio.run(service.get_or_create(qualified_stock(), session=date(2026, 9, 1)))

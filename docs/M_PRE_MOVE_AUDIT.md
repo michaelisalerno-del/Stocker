@@ -169,10 +169,11 @@ No Stage 5 runtime implementation is added by this audit.
   10/11/12 and generic tick 106 are excluded as IV sources; generic tick 101 is used only for
   per-leg open interest. The adapter requests live market data type 1, accepts returned type 1/2,
   and rejects delayed type 3/4 model tick 83.
-- Timing: uncached model context is captured within the first five minutes after the
-  observation-session close, then persisted immutably for the underlying/session/version key. This
-  explicit IBKR mapping bounds receipt around the research's 16:00 America/New_York snapshot. A
-  late request cannot reconstruct historical option model ticks and fails closed.
+- Timing: the option observation remains exactly 16:00 America/New_York on the prior-session date,
+  including half-days. An uncached request must start during that timestamp's one-minute resolution
+  and records both the canonical observation point and actual receipt time, then persists the
+  result immutably for the underlying/session/version key. A late request cannot reconstruct
+  historical option model ticks and fails closed.
 - Failure: any missing underlying bar, option leg, qualifying identity, quality input, or tick-13
   model IV returns `PRE_CONTEXT_NOT_READY`. There is no fallback provider or fallback IV field.
 

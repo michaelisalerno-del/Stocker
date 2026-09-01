@@ -5,12 +5,13 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 from itertools import product
 from math import inf, isfinite, log, pi, sqrt
 from pathlib import Path
 from typing import cast
+from zoneinfo import ZoneInfo
 
 from stocker_execution.history import (
     HistorySemantics,
@@ -34,7 +35,7 @@ IBKR_MODEL_OPTION_COMPUTATION_TICK_TYPE = 13
 IBKR_MODEL_OPTION_IV_SOURCE = "IBKR_MODEL_OPTION_COMPUTATION_TICK_13"
 PRE_CONTEXT_NOT_READY = "PRE_CONTEXT_NOT_READY"
 PRE_UNDERLYING_HISTORY = HistorySemantics("5 mins", "TRADES", True)
-PRE_CONTEXT_CAPTURE_GRACE = timedelta(minutes=5)
+PRE_CONTEXT_OBSERVATION_MINUTE = timedelta(minutes=1)
 
 
 class ContextStatus(StrEnum):
@@ -56,6 +57,7 @@ class PriorSessionVolatilityContext:
     currency: str
     target_session: date
     observation_session: date
+    option_observation_at: datetime
     prior_session_reference_price: float
     call_con_id: int
     put_con_id: int
@@ -302,6 +304,7 @@ class PriorSessionContextStore:
                     currency TEXT NOT NULL,
                     target_session TEXT NOT NULL,
                     observation_session TEXT NOT NULL,
+                    option_observation_at_utc TEXT NOT NULL,
                     prior_session_reference_price REAL NOT NULL,
                     call_con_id INTEGER NOT NULL,
                     put_con_id INTEGER NOT NULL,
@@ -359,7 +362,7 @@ class PriorSessionContextStore:
             connection.execute(
                 """
                 INSERT INTO ibkr_pre_volatility_contexts VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 ON CONFLICT (underlying_con_id, target_session, calculation_version)
                 DO NOTHING
@@ -402,15 +405,16 @@ class PriorSessionContextService:
             if existing is not None:
                 return PriorSessionContextResult(ContextStatus.READY, existing, "cache hit", True)
             observation, previous_open, previous_close, target_open = _session_contract(session)
+            option_observation_at = _option_observation_at(observation)
             now = _aware_utc(self._clock())
             if (
-                now < previous_close
-                or now >= previous_close + PRE_CONTEXT_CAPTURE_GRACE
+                now < option_observation_at
+                or now >= option_observation_at + PRE_CONTEXT_OBSERVATION_MINUTE
                 or now >= target_open
             ):
                 raise ValueError(
-                    "uncached option context must be captured in the first five minutes "
-                    "after the previous session close"
+                    "uncached option context must be captured during the canonical "
+                    "16:00 America/New_York observation minute"
                 )
             required = _five_minute_starts(previous_open, previous_close)
             history = self._history_cache.get_required_history(
@@ -458,9 +462,9 @@ class PriorSessionContextService:
                 raise ValueError("no eligible qualified common-strike expiry")
             snapshots = await self._ibkr.option_snapshots(nearest_qualified)
             if any(
-                not previous_close
+                not option_observation_at
                 <= _aware_utc(item.captured_at)
-                < previous_close + PRE_CONTEXT_CAPTURE_GRACE
+                < option_observation_at + PRE_CONTEXT_OBSERVATION_MINUTE
                 for item in snapshots
             ):
                 raise ValueError("option model IV snapshot is not causal for the target session")
@@ -488,6 +492,7 @@ class PriorSessionContextService:
                 currency=instrument.currency,
                 target_session=session,
                 observation_session=observation,
+                option_observation_at=option_observation_at,
                 prior_session_reference_price=previous_reference,
                 call_con_id=pair.call.con_id,
                 put_con_id=pair.put.con_id,
@@ -581,6 +586,14 @@ def _five_minute_starts(start: datetime, end: datetime) -> tuple[datetime, ...]:
     if not values or cursor != end_utc:
         raise ValueError("session cannot be represented as complete five-minute bars")
     return tuple(values)
+
+
+def _option_observation_at(observation_session: date) -> datetime:
+    return datetime.combine(
+        observation_session,
+        time(16, 0),
+        tzinfo=ZoneInfo("America/New_York"),
+    ).astimezone(UTC)
 
 
 def _contiguous_five_minute_ranges(
@@ -712,6 +725,7 @@ def _context_row(context: PriorSessionVolatilityContext) -> tuple[object, ...]:
         context.currency,
         context.target_session.isoformat(),
         context.observation_session.isoformat(),
+        _aware_utc(context.option_observation_at).isoformat(),
         context.prior_session_reference_price,
         context.call_con_id,
         context.put_con_id,
@@ -743,6 +757,9 @@ def _context_from_row(row: sqlite3.Row) -> PriorSessionVolatilityContext:
         currency=str(row["currency"]),
         target_session=date.fromisoformat(str(row["target_session"])),
         observation_session=date.fromisoformat(str(row["observation_session"])),
+        option_observation_at=_aware_utc(
+            datetime.fromisoformat(str(row["option_observation_at_utc"]))
+        ),
         prior_session_reference_price=float(row["prior_session_reference_price"]),
         call_con_id=int(row["call_con_id"]),
         put_con_id=int(row["put_con_id"]),
@@ -786,3 +803,10 @@ def _validate_context(context: PriorSessionVolatilityContext) -> None:
         raise ValueError("persisted PRE context has a non-canonical IV source")
     if {context.call_market_data_type, context.put_market_data_type} - {1, 2}:
         raise ValueError("persisted PRE context is not tick-13 market data")
+    expected_observation = _option_observation_at(context.observation_session)
+    if context.option_observation_at != expected_observation or not (
+        expected_observation
+        <= context.captured_at
+        < expected_observation + PRE_CONTEXT_OBSERVATION_MINUTE
+    ):
+        raise ValueError("persisted PRE context has invalid 16:00 observation timing")

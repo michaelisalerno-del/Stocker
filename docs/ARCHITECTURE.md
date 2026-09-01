@@ -145,9 +145,10 @@ contiguous missing five-minute ranges. The existing exchange calendar supplies n
 bounds; every scheduled five-minute bar is required and the final bar close is the selection
 reference. No missing bar is filled. Acquisition qualifies every bounded strike for each expiry in
 order until the first expiry with an actual common call/put strike, then snapshots only the
-primary-distance strike set required for the remaining frozen tie-breakers. An uncached option
-snapshot must be captured in the first five minutes after the previous close, an explicit
-operational mapping of the research's 16:00 America/New_York snapshot, because IBKR does not
+primary-distance strike set required for the remaining frozen tie-breakers. The canonical option
+observation is always 16:00 America/New_York on the previous session date, including XNYS
+half-days. An uncached request must start during that timestamp's one-minute resolution and stores
+both the 16:00 observation point and actual receipt time. This is necessary because IBKR does not
 provide this contract-specific model IV as a historical option-bar series.
 
 One SQLite table persists the context by `underlying conId + target session + PRE_CONTEXT_V1` with

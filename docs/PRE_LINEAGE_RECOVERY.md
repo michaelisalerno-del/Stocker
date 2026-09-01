@@ -1,5 +1,9 @@
 # PRE lineage recovery
 
+> Follow-up status: [`M_PRE_MOVE_AUDIT.md`](M_PRE_MOVE_AUDIT.md) has since confirmed the
+> row-specific M/PRE_MOVE_M equations, P0/T0 timing, threshold placement, and Stage 4/5 ownership.
+> The remaining blocker is the unproven IBKR underlying/option-IV acquisition and parity contract.
+
 ## Result
 
 **BLOCKED — PRE CONTRACT NOT RECOVERABLE**

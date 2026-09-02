@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-PRE_MOVE_M_THRESHOLD = 0.475764059845861
+from stocker_execution.stage5 import PRE_MOVE_M_THRESHOLD, calculate_pre_move
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,3 +175,32 @@ def test_reference_pre_window_is_exactly_three_minutes() -> None:
         assert t0.tzinfo is not None
         assert pre_start.tzinfo is not None
         assert t0 - pre_start == timedelta(minutes=3)
+
+
+@pytest.mark.parametrize("row", ROWS, ids=lambda row: f"production-{row.symbol}-{row.session}")
+def test_production_calculator_matches_authoritative_rows(row: ReferenceRow) -> None:
+    result = calculate_pre_move(
+        expected_absolute_return_15m=expected_absolute_return_15m(row.atm_iv),
+        p0=row.p0,
+        raw_open_t0=row.raw_t0_open,
+        raw_open_t0_minus_3m=row.raw_t_minus_3_open,
+    )
+
+    assert result.m_price == pytest.approx(row.expected_m, abs=5e-15)
+    assert result.pre_move_m == pytest.approx(row.expected_pre_move_m, abs=2e-14)
+    assert result.alignment_factor == row.p0 / row.raw_t0_open
+    assert result.aligned_pre_open == row.raw_t_minus_3_open * result.alignment_factor
+    assert result.raw_pre_move_price == abs(row.p0 - result.aligned_pre_open)
+    assert result.passes_pre_move_threshold is (row.expected_pre_move_m > PRE_MOVE_M_THRESHOLD)
+
+
+def test_exact_threshold_equality_does_not_qualify() -> None:
+    result = calculate_pre_move(
+        expected_absolute_return_15m=1.0,
+        p0=1.0,
+        raw_open_t0=1.0,
+        raw_open_t0_minus_3m=1.0 - PRE_MOVE_M_THRESHOLD,
+    )
+
+    assert result.pre_move_m == PRE_MOVE_M_THRESHOLD
+    assert result.passes_pre_move_threshold is False

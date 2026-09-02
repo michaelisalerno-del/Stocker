@@ -1,7 +1,7 @@
 """Command-line interface for Stocker."""
 
 import asyncio
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -235,6 +235,145 @@ def pre_context_check(
     except IbkrError as exc:
         console.print(f"Stage 4 diagnostic failed: {exc}")
         raise typer.Exit(code=1) from exc
+
+
+@app.command("stage5-diagnostic")
+def stage5_diagnostic(
+    target_session: Annotated[str, typer.Option("--session", help="Target session, YYYY-MM-DD.")],
+    t0: Annotated[str, typer.Option("--t0", help="Signal timestamp with UTC offset.")],
+    run_config: Annotated[
+        Path, typer.Option("--run-config", help="Stage 1 PAPER run configuration.")
+    ] = DEFAULT_RUN_CONFIG,
+    ibkr_config: Annotated[
+        Path, typer.Option("--ibkr-config", help="Explicit IBKR settings.")
+    ] = DEFAULT_IBKR_CONFIG,
+    symbols: Annotated[
+        list[str] | None,
+        typer.Option("--symbol", help="Small custom universe; repeat as needed."),
+    ] = None,
+    exchange: Annotated[str, typer.Option("--exchange")] = "SMART",
+    primary_exchange: Annotated[str | None, typer.Option("--primary-exchange")] = None,
+    currency: Annotated[str, typer.Option("--currency")] = "USD",
+    cache_path: Annotated[Path, typer.Option("--cache")] = Path(
+        ".stocker/ibkr-stage5.sqlite3"
+    ),
+) -> None:
+    """Run the non-trading Stage 5 diagnostic for a small PAPER universe."""
+
+    from rich.table import Table
+
+    from stocker_core.runs import Environment
+    from stocker_execution.history import IbkrHistoryCache
+    from stocker_execution.ibkr import IbkrConnection, IbkrError
+    from stocker_execution.pre_context import (
+        PriorSessionContextService,
+        PriorSessionContextStore,
+    )
+    from stocker_execution.stage5 import (
+        Stage5Analyzer,
+        Stage5CandidateSnapshot,
+        Stage5CurrentDataService,
+        Stage5Membership,
+        Stage5QualifiedRequest,
+        Stage5SnapshotStore,
+    )
+
+    try:
+        run = load_run_config(run_config)
+        if run.environment is not Environment.PAPER:
+            raise ValueError("Stage 5 diagnostic requires a PAPER run configuration")
+        broker_config = load_ibkr_config(ibkr_config, run.environment)
+        selected_session = date.fromisoformat(target_session)
+        signal_timestamp = datetime.fromisoformat(t0)
+        if signal_timestamp.tzinfo is None or signal_timestamp.utcoffset() is None:
+            raise ValueError("--t0 must include a UTC offset")
+        selected_symbols = tuple(
+            dict.fromkeys(symbol.strip().upper() for symbol in symbols or ())
+        )
+        if not selected_symbols or any(not symbol for symbol in selected_symbols):
+            raise ValueError("at least one non-empty --symbol is required")
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid Stage 5 configuration: {exc}") from exc
+
+    async def diagnose() -> tuple[
+        tuple[Stage5CandidateSnapshot, ...], tuple[tuple[str, str], ...]
+    ]:
+        connection = IbkrConnection(broker_config)
+        try:
+            await connection.connect()
+            history_cache = IbkrHistoryCache(cache_path)
+            context_service = PriorSessionContextService(
+                connection,
+                history_cache,
+                PriorSessionContextStore(cache_path),
+            )
+            current_service = Stage5CurrentDataService(
+                connection, history_cache, context_service
+            )
+            requests: list[Stage5QualifiedRequest] = []
+            failures: list[tuple[str, str]] = []
+            for symbol in selected_symbols:
+                try:
+                    instrument = await connection.resolve_stock(
+                        symbol,
+                        exchange=exchange,
+                        primary_exchange=primary_exchange,
+                        currency=currency,
+                    )
+                except IbkrError as exc:
+                    failures.append((symbol, str(exc)))
+                    continue
+                requests.append(
+                    Stage5QualifiedRequest(
+                        instrument,
+                        (Stage5Membership("STAGE5_DIAGNOSTIC", "CUSTOM_DIAGNOSTIC"),),
+                    )
+                )
+            rows = await Stage5Analyzer(
+                current_service,
+                snapshot_store=Stage5SnapshotStore(cache_path),
+            ).analyze(requests, session=selected_session, t0=signal_timestamp)
+            return rows, tuple(failures)
+        finally:
+            connection.disconnect()
+
+    try:
+        rows, failures = asyncio.run(diagnose())
+    except IbkrError as exc:
+        console.print(f"Stage 5 diagnostic failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    table = Table(title="Stocker Stage 5 — non-trading diagnostic")
+    headings = (
+        "symbol", "conId", "status", "T0", "P0", "expected_abs_15m", "M_price",
+        "raw_PRE", "PRE_MOVE_M", "pass", "cohort_pct", "band", "rank",
+    )
+    for heading in headings:
+        table.add_column(heading)
+    for symbol, reason in failures:
+        table.add_row(symbol, "-", "INELIGIBLE", reason, *("-" for _ in range(9)))
+    for row in rows:
+        values = (
+            row.symbol,
+            str(row.con_id),
+            row.status.value,
+            row.t0.isoformat(),
+            _display_optional(row.p0),
+            _display_optional(row.expected_absolute_return_15m),
+            _display_optional(row.m_price),
+            _display_optional(row.raw_pre_move_price),
+            _display_optional(row.pre_move_m),
+            _display_optional(row.passes_pre_move_threshold),
+            _display_optional(row.cohort_pre_move_percentile),
+            row.pre_move_band.value if row.pre_move_band is not None else "-",
+            "N/A",
+        )
+        table.add_row(*values)
+    console.print(table)
+
+
+def _display_optional(value: object | None) -> str:
+    return "-" if value is None else str(value)
 
 
 @data_app.command("validate")

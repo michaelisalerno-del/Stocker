@@ -194,6 +194,78 @@ This layer derives values required by strategies, including PRE_MOVE, percentile
 cohorts. Calculate a shared snapshot once where appropriate instead of duplicating it for PAPER,
 LIVE, or multiple strategies.
 
+Stage 5 implements this as a non-trading pipeline in `stocker_execution.stage5`:
+
+```text
+active run universe membership
+        ↓
+Stage 2 stock qualification and conId deduplication
+        ↓
+Stage 4 expected_absolute_return_15m (demand-loaded)
+        ↓
+exact IBKR native 5-minute T0 open plus raw 1-minute T0-3m/T0 opens
+        ↓
+M_price → split-aligned raw PRE move → PRE_MOVE_M → strict absolute gate
+        ↓
+deterministic non-trading candidate snapshot
+```
+
+There is no additional generic cheap price, volume, market-cap, or option-availability screen. The
+accepted broad-universe runner used a pre-frozen 511-security universe and data completeness; the
+older `$5`, first-six-bar dollar-volume, and 100-session rules belonged to an unseen-cohort builder
+and were not the frozen broad-universe Stage 5 contract. Stage 5 therefore narrows through active
+membership and Stage 2 qualification, deduplicates overlapping members by `conId`, and requests
+Stage 4 context only for the survivors. A failed symbol is recorded and does not stop the batch.
+
+The caller supplies timezone-aware `T0`. The accepted Session HARD research generated checkpoints
+at completed native five-minute RTH prefix counts `6, 8, ..., 34`: with a 09:30 America/New_York
+bar zero, their next-bar `T0` opens were 10:00, 10:10, ..., 12:20 local time. Score inputs stopped
+at `checkpoint - 1`; `P0` was the native five-minute open at the next bar. That cadence belongs to
+the Session HARD strategy and is not a global Stage 5 scheduler. Stage 5 accepts any caller-supplied
+causally valid `T0` and does not expose a result before its opening print.
+
+Current-session history uses the existing IBKR-only cache with `TRADES`, `useRTH=True`, and native
+`5 mins`/`1 min` semantics. Only exact timestamps are read as of `T0`; no close, interpolation,
+nearest bar, fill, stale value, or other provider is accepted. The pure calculation is:
+
+```text
+M_price = P0 * expected_absolute_return_15m
+alignment_factor = P0 / raw_1m_open[T0]
+aligned_pre_open = raw_1m_open[T0 - 3 minutes] * alignment_factor
+raw_PRE_move_price = abs(P0 - aligned_pre_open)
+PRE_MOVE_M = raw_PRE_move_price / M_price
+passes_PRE_MOVE_threshold = PRE_MOVE_M > 0.475764059845861
+```
+
+The recovered `COHORT_PRE_MOVE_PERCENTILE` arithmetic uses qualifying observations from all
+symbols in the same named research cohort during the preceding 20 distinct cohort session dates,
+excludes every row from the current session, and requires at least 30 observations. It is
+calculated without rounding as
+`100 * count(prior PRE_MOVE_M <= current PRE_MOVE_M) / prior_count`; equality therefore counts on
+the lower side of a tie. `LOW` is `percentile <= 33.33`, `MID` is
+`33.33 < percentile <= 66.67`, and `HIGH` is `percentile > 66.67`.
+
+The accepted executable lineage populated those named cohorts from a strategy-filtered
+`classified_trade_ledger`; it did not define a strategy-independent mapping from active runtime
+universes to canonical cohorts. Stage 5 therefore exposes and golden-tests the exact pure
+percentile and band functions, but does not substitute `universe_id` for the unrecovered canonical
+cohort membership. Runtime candidate rows leave cohort ID, size, percentile, and band unavailable
+with reason `CANONICAL_COHORT_MEMBERSHIP_UNRESOLVED`. Resolving this requires authoritative lineage,
+not importing Session HARD entry filters into Stage 5.
+
+Candidate rows retain run IDs, universe ID, qualified `conId`, exact input values, status/reason,
+and calculation version in the existing SQLite storage approach. Core feature work is done once per
+`conId + session + T0`; overlapping universe projections reuse it. Rows are emitted deterministically
+by universe, qualified rows before unqualified rows, `conId`, and symbol. Once a READY snapshot is
+stored, a later transient NOT_READY diagnostic cannot replace it. The accepted five-slot ranking compared simultaneous already-
+qualified Session HARD trades under live capacity state, while the relative-rank research rejected
+a production ranking change. It is therefore Stage 6 strategy ownership; Stage 5 does not assign a
+purported canonical rank.
+
+Stage 5 has no strategy entry rules, risk sizing, orders, fills, positions, trade management, or
+dashboard behavior. `stocker stage5-diagnostic` exercises the read-only PAPER data path for a small
+custom universe and labels rank as unavailable.
+
 ### Strategy
 
 A strategy evaluates prepared candidates and market state. It does not download history, resolve

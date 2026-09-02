@@ -107,10 +107,12 @@ class RunsConfig(BaseModel):
         """Reject duplicate identities and runs that name an absent universe."""
 
         universe_ids: set[str] = set()
+        universes_by_id: dict[str, UniverseDefinition] = {}
         for universe in self.universes:
             if universe.universe_id in universe_ids:
                 raise ValueError(f"Duplicate universe_id: {universe.universe_id}")
             universe_ids.add(universe.universe_id)
+            universes_by_id[universe.universe_id] = universe
 
         run_ids: set[str] = set()
         for run in self.runs:
@@ -119,6 +121,16 @@ class RunsConfig(BaseModel):
             run_ids.add(run.run_id)
             if run.universe not in universe_ids:
                 raise ValueError(f"Unknown universe {run.universe} referenced by run {run.run_id}")
+            if run.market_id is not None:
+                market_spec = universes_by_id[run.universe].market_spec
+                if market_spec is None or (
+                    market_spec.market_id is not run.market_id
+                    or market_spec.cap_bucket is not run.cap_bucket
+                    or market_spec.cap_bucket_version != run.cap_bucket_version
+                ):
+                    raise ValueError(
+                        f"Run {run.run_id} lineage does not match universe {run.universe}"
+                    )
         return self
 
 
@@ -210,9 +222,10 @@ def load_runs_config(path: str | Path) -> RunsConfig:
             if isinstance(item, dict) and item.get("universe")
         )
     )
+    requested_named = tuple(NAMED_US_UNIVERSES) if snapshot_value is not None else referenced
     missing_named = tuple(
         universe_id
-        for universe_id in referenced
+        for universe_id in requested_named
         if universe_id in NAMED_US_UNIVERSES and universe_id not in inline_ids
     )
     if missing_named:

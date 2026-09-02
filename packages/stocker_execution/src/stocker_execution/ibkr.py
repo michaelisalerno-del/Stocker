@@ -813,21 +813,53 @@ class IbkrConnection:
             "scan_codes": set(),
             "filters": set(),
         }
+        location_scan_codes: dict[str, set[str]] = {}
+        location_filters: dict[str, set[str]] = {}
         for element in root.iter():
             text = (element.text or "").strip()
-            if not text:
-                continue
             tag = element.tag.rsplit("}", maxsplit=1)[-1]
-            if tag == "locationCode":
+            if tag == "locationCode" and text:
                 values["locations"].add(text)
-            elif tag == "scanCode":
+            elif tag == "scanCode" and text:
                 values["scan_codes"].add(text)
-            elif tag in {"code", "fieldCode", "filterCode"}:
+            elif tag in {"code", "fieldCode", "filterCode"} and text:
                 values["filters"].add(text)
+            direct_location = next(
+                (
+                    (child.text or "").strip()
+                    for child in element
+                    if child.tag.rsplit("}", maxsplit=1)[-1] == "locationCode"
+                    and (child.text or "").strip()
+                ),
+                None,
+            )
+            if direct_location is not None:
+                local_codes = {
+                    (child.text or "").strip()
+                    for child in element.iter()
+                    if child.tag.rsplit("}", maxsplit=1)[-1] == "scanCode"
+                    and (child.text or "").strip()
+                }
+                local_filters = {
+                    (child.text or "").strip()
+                    for child in element.iter()
+                    if child.tag.rsplit("}", maxsplit=1)[-1] in {"code", "fieldCode", "filterCode"}
+                    and (child.text or "").strip()
+                }
+                if local_codes:
+                    location_scan_codes.setdefault(direct_location, set()).update(local_codes)
+                if local_filters:
+                    location_filters.setdefault(direct_location, set()).update(local_filters)
         discovered = ScannerCapabilities(
             locations=frozenset(values["locations"]),
             scan_codes=frozenset(values["scan_codes"]),
             filters=frozenset(values["filters"]),
+            location_scan_codes={
+                location: frozenset(codes) for location, codes in location_scan_codes.items()
+            },
+            location_filters={
+                location: frozenset(filters) for location, filters in location_filters.items()
+            },
         )
         self._scanner_capabilities = discovered
         return discovered
@@ -848,12 +880,13 @@ class IbkrConnection:
         capabilities = await self.scanner_capabilities()
         if market.scanner_location not in capabilities.locations:
             raise IbkrError("SCANNER_NOT_AVAILABLE")
-        if component.value not in capabilities.scan_codes:
+        if component.value not in capabilities.scan_codes_for(market.scanner_location):
             raise IbkrError("SCANNER_NOT_AVAILABLE")
         cap = CAP_BUCKETS_V1.definition(cap_bucket)
         if cap_bucket is not CapBucket.ALL:
-            above_available = bool({"marketCapAbove", "usdMarketCapAbove"} & capabilities.filters)
-            below_available = bool({"marketCapBelow", "usdMarketCapBelow"} & capabilities.filters)
+            filters = capabilities.filters_for(market.scanner_location)
+            above_available = bool({"marketCapAbove", "usdMarketCapAbove"} & filters)
+            below_available = bool({"marketCapBelow", "usdMarketCapBelow"} & filters)
             if not above_available or (
                 cap.maximum_usd_exclusive is not None and not below_available
             ):
@@ -868,15 +901,16 @@ class IbkrConnection:
             scanCode=component.value,
         )
         filter_options: list[object] = []
+        filters = capabilities.filters_for(market.scanner_location)
         if cap.scanner_minimum_millions is not None:
-            if "usdMarketCapAbove" in capabilities.filters:
+            if "usdMarketCapAbove" in filters:
                 filter_options.append(
                     TagValue("usdMarketCapAbove", str(cap.scanner_minimum_millions))
                 )
             else:
                 subscription.marketCapAbove = cap.scanner_minimum_millions
         if cap.scanner_maximum_millions is not None:
-            if "usdMarketCapBelow" in capabilities.filters:
+            if "usdMarketCapBelow" in filters:
                 filter_options.append(
                     TagValue("usdMarketCapBelow", str(cap.scanner_maximum_millions))
                 )

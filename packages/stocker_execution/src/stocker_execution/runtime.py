@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
 from stocker_core.logging import configure_logging
 from stocker_core.markets import MARKET_CATALOGUE, ActivityScanner, CapBucket, get_market
-from stocker_core.runs import Environment, RunConfig, RunInstance, RunManager
+from stocker_core.runs import CandidateScreen, Environment, RunConfig, RunInstance, RunManager
 from stocker_core.universes import UniverseCatalog
 from stocker_data.calendars import get_market_calendar
 from stocker_execution.activity_shortlist import (
@@ -734,6 +734,7 @@ class StockerRuntime:
         self._run_states: dict[str, RunRuntimeState] = {}
         self._run_reasons: dict[str, str] = {}
         self._sessions: dict[str, MarketSession] = {}
+        self._activity_qualification_session: dict[str, date] = {}
         self._execution: dict[str, Stage7ExecutionService] = {}
         self._legacy_execution: dict[tuple[str, Environment], Stage7ExecutionService] = {}
         self._strategy_runtimes: dict[str, Stage7StrategyRuntime] = {}
@@ -921,6 +922,12 @@ class StockerRuntime:
             self._logger.error("instrument_preparation_failed", reason=str(exc))
             return self.status()
         _log_candidate_screen_failures(self._logger, self._qualification)
+        self._remember_activity_qualification_sessions(runnable_runs)
+        for environment in connected_environments:
+            if self._environment_ready[environment]:
+                await self._refresh_position_marks(
+                    environment, self._destinations[environment], now
+                )
         self._run_ready_at.update({instance.config.run_id: now for instance in runnable_runs})
         self._last_sync = now
         self._mark_missed_before(now)
@@ -1011,6 +1018,7 @@ class StockerRuntime:
                 if not updated.enabled:
                     self._set_run(run_id, RunRuntimeState.DISABLED, "disabled by configuration")
                     self._replace_qualification_for({run_id}, Stage5QualificationResult((), ()))
+                    self._activity_qualification_session.pop(run_id, None)
                     continue
                 execution = self._execution.get(run_id)
                 restart_required = current is None or any(
@@ -1090,6 +1098,7 @@ class StockerRuntime:
                         )
                 else:
                     self._replace_qualification_for(prepared_run_ids, qualification)
+                    self._remember_activity_qualification_sessions(prepared_runs)
                     for run_id in prepared_run_ids:
                         self._run_ready_at[run_id] = now
                     self._mark_missed_before(now, prepared_run_ids)
@@ -1209,6 +1218,7 @@ class StockerRuntime:
         if sync_due and not await self._refresh_execution_state(now):
             return self.status()
 
+        await self._refresh_activity_sessions(now)
         await self._refresh_scheduled_activity_shortlists(now)
 
         due: dict[tuple[date, datetime, int], list[RunInstance]] = {}
@@ -1283,6 +1293,46 @@ class StockerRuntime:
         run_ids = {instance.config.run_id for instance in due}
         self._replace_qualification_for(run_ids, qualification)
         _log_candidate_screen_failures(self._logger, qualification)
+
+    async def _refresh_activity_sessions(self, now: datetime) -> None:
+        """Rotate generic activity qualification onto each new trading session."""
+
+        due: list[RunInstance] = []
+        for instance in self._manager.list_runs():
+            run = instance.config
+            if (
+                not run.enabled
+                or run.screen is None
+                or run.screen.method is not CandidateScreen.ACTIVITY_SHORTLIST_V1
+                or self._run_states.get(run.run_id)
+                not in {RunRuntimeState.READY, RunRuntimeState.ACTIVE}
+            ):
+                continue
+            market = self._resolve_market(instance, now)
+            if market is None or not market.active_bar_starts:
+                continue
+            if self._activity_qualification_session.get(run.run_id) != market.session:
+                due.append(instance)
+                self._sessions[run.run_id] = market
+        if not due:
+            return
+        qualification = await self._qualify(tuple(due))
+        run_ids = {instance.config.run_id for instance in due}
+        self._replace_qualification_for(run_ids, qualification)
+        self._remember_activity_qualification_sessions(due)
+        _log_candidate_screen_failures(self._logger, qualification)
+
+    def _remember_activity_qualification_sessions(self, instances: Sequence[RunInstance]) -> None:
+        for instance in instances:
+            screen = instance.config.screen
+            market = self._sessions.get(instance.config.run_id)
+            if (
+                screen is not None
+                and screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
+                and market is not None
+                and market.active_bar_starts
+            ):
+                self._activity_qualification_session[instance.config.run_id] = market.session
 
     async def reconnect(self, environment: Environment | None = None) -> RuntimeStatus:
         """Reconnect only affected environments, then verify and reconcile each one."""
@@ -1419,6 +1469,7 @@ class StockerRuntime:
                     {instance.config.run_id for instance in recovered},
                     recovered_qualification,
                 )
+                self._remember_activity_qualification_sessions(recovered)
         self._run_ready_at.update({instance.config.run_id: now for instance in recovered})
         self._last_sync = now if recovered else self._last_sync
         if recovered:
@@ -1516,14 +1567,33 @@ class StockerRuntime:
                 else "SCANNER_NOT_AVAILABLE"
             )
             return {market.market_id.value: status for market in MARKET_CATALOGUE}
-        supported_components = {component.value for component in ActivityScanner} & set(
-            capabilities.scan_codes
-        )
+        run_markets = {
+            run.run_id: run.market_id for run in self._config.runs if run.market_id is not None
+        }
+        qualified_markets = {
+            run_markets[membership.run_id]
+            for request in self._qualification.requests
+            for membership in request.memberships
+            if membership.run_id in run_markets
+        }
+        failed_markets = {
+            run_markets[membership.run_id]
+            for failure in self._qualification.ineligible
+            if failure.symbol not in {"HOT_BY_VOLUME", "ACTIVITY_SHORTLIST_V1"}
+            for membership in failure.memberships
+            if membership.run_id in run_markets
+        }
         return {
             market.market_id.value: (
-                "AVAILABLE"
+                "CONTRACT_QUALIFICATION_FAILED"
+                if market.market_id in failed_markets and market.market_id not in qualified_markets
+                else "AVAILABLE"
                 if market.scanner_location in capabilities.locations
-                and len(supported_components) >= 2
+                and len(
+                    {component.value for component in ActivityScanner}
+                    & set(capabilities.scan_codes_for(market.scanner_location))
+                )
+                >= 2
                 else "SCANNER_NOT_AVAILABLE"
             )
             for market in MARKET_CATALOGUE
@@ -2089,6 +2159,8 @@ class StockerRuntime:
                 self._ensure_strategy(run_id, execution, now)
             self._environment_reconciled[environment] = environment_ok
             self._environment_ready[environment] = environment_ok
+            if environment_ok:
+                await self._refresh_position_marks(environment, destination, now)
         self._last_sync = now
         self._state = (
             ApplicationState.READY
@@ -2096,6 +2168,84 @@ class StockerRuntime:
             else ApplicationState.DEGRADED
         )
         return self._state is ApplicationState.READY
+
+    async def _refresh_position_marks(
+        self,
+        environment: Environment,
+        destination: ExecutionDestination,
+        now: datetime,
+    ) -> None:
+        current_quote = getattr(destination.broker, "current_quote", None)
+        if current_quote is None:
+            return
+        instruments = {
+            request.instrument.con_id: request.instrument
+            for request in self._qualification.requests
+        }
+        active_records = self._ledger.active_records(environment, destination.expected_account)
+        run_instances = {instance.config.run_id: instance for instance in self._manager.list_runs()}
+        positions = (
+            item
+            for item in self._ledger.broker_position_snapshots()
+            if item.environment is environment and item.account == destination.expected_account
+        )
+        for position in positions:
+            instrument = instruments.get(position.con_id)
+            if instrument is None:
+                record = next(
+                    (
+                        item
+                        for item in active_records
+                        if item.con_id == position.con_id
+                        and item.filled_quantity > item.closed_quantity
+                    ),
+                    None,
+                )
+                instance = run_instances.get(record.run_id) if record is not None else None
+                if instance is None:
+                    continue
+                member = next(
+                    (item for item in instance.universe.members if item.symbol == position.symbol),
+                    None,
+                )
+                market = (
+                    get_market(instance.config.market_id)
+                    if instance.config.market_id is not None
+                    else None
+                )
+                currency = (
+                    market.currency if market is not None else member.currency if member else ""
+                )
+                if not currency:
+                    continue
+                instrument = QualifiedInstrument(
+                    symbol=position.symbol,
+                    con_id=position.con_id,
+                    exchange=member.exchange if member is not None else "SMART",
+                    primary_exchange=(member.primary_exchange if member is not None else None),
+                    currency=currency,
+                    security_type=market.security_type if market is not None else "STK",
+                )
+            try:
+                quote: CurrentQuote = await current_quote(instrument)
+            except Exception as exc:
+                self._logger.warning(
+                    "position_mark_unavailable",
+                    environment=environment.value,
+                    con_id=position.con_id,
+                    reason=str(exc),
+                )
+                continue
+            mark = _quote_mark(quote)
+            if mark is None:
+                continue
+            self._ledger.record_position_mark(
+                environment=environment,
+                account=destination.expected_account,
+                con_id=position.con_id,
+                mark=mark,
+                observed_at=now,
+            )
 
     def _execution_services(self) -> tuple[tuple[str, Stage7ExecutionService], ...]:
         return (
@@ -2116,9 +2266,19 @@ def _session_matches_destination(session: BrokerSession, destination: ExecutionD
     )
 
 
+def _quote_mark(quote: CurrentQuote) -> float | None:
+    if quote.last is not None and quote.last > 0:
+        return quote.last
+    if quote.bid is not None and quote.ask is not None and quote.bid > 0 and quote.ask >= quote.bid:
+        return (quote.bid + quote.ask) / 2
+    if quote.close is not None and quote.close > 0:
+        return quote.close
+    return None
+
+
 def _log_candidate_screen_failures(logger: Any, result: Stage5QualificationResult) -> None:
     for failure in result.ineligible:
-        if failure.symbol != "HOT_BY_VOLUME":
+        if failure.symbol not in {"HOT_BY_VOLUME", "ACTIVITY_SHORTLIST_V1"}:
             continue
         logger.warning(
             "candidate_screen_ineligible",

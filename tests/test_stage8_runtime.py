@@ -5,7 +5,15 @@ from pathlib import Path
 import pytest
 
 from stocker_core.config import IbkrConfig, RunsConfig
-from stocker_core.runs import Environment, RunConfig, RunRiskConfig, RunWindow
+from stocker_core.markets import CapBucket, MarketId, MarketUniverseSpec
+from stocker_core.runs import (
+    CandidateScreen,
+    Environment,
+    RunConfig,
+    RunRiskConfig,
+    RunScreenConfig,
+    RunWindow,
+)
 from stocker_core.universes import InstrumentReference, UniverseDefinition
 from stocker_execution.execution_ledger import ExecutionLedger
 from stocker_execution.execution_models import (
@@ -205,6 +213,26 @@ class FixedSessionResolver:
         )
 
 
+class RotatingSessionResolver:
+    def resolve(self, run: RunConfig, now: datetime) -> MarketSession:
+        opens_at = datetime.combine(now.date(), time(13, 30), tzinfo=UTC)
+        closes_at = datetime.combine(now.date(), time(20), tzinfo=UTC)
+        state = (
+            MarketSessionState.BEFORE_SESSION
+            if now < opens_at
+            else MarketSessionState.ACTIVE_SESSION
+            if now < closes_at
+            else MarketSessionState.AFTER_SESSION
+        )
+        return MarketSession(
+            session=now.date(),
+            state=state,
+            opens_at=opens_at,
+            closes_at=closes_at,
+            active_bar_starts=tuple(opens_at + timedelta(minutes=5 * index) for index in range(78)),
+        )
+
+
 class EmptyContextProvider:
     async def context_for(
         self,
@@ -282,10 +310,7 @@ class RollingTriggerEntrySource:
         signals: object,
     ) -> dict[int, tuple[EntryBar, ...]]:
         timestamp = now.replace(second=0, microsecond=0) - timedelta(minutes=1)
-        return {
-            con_id: (EntryBar(timestamp, 99.5, 99.7, 99.4),)
-            for con_id in instruments
-        }
+        return {con_id: (EntryBar(timestamp, 99.5, 99.7, 99.4),) for con_id in instruments}
 
 
 class MutableClock:
@@ -306,6 +331,20 @@ def _runs(*runs: RunConfig) -> RunsConfig:
                 InstrumentReference(
                     symbol="AAPL", exchange="SMART", primary_exchange="NASDAQ", currency="USD"
                 ),
+            ),
+            market_spec=next(
+                (
+                    MarketUniverseSpec(
+                        market_id=run.market_id,
+                        cap_bucket=run.cap_bucket,
+                        cap_bucket_version=str(run.cap_bucket_version),
+                    )
+                    for run in runs
+                    if run.universe == universe_id
+                    and run.market_id is not None
+                    and run.cap_bucket is not None
+                ),
+                None,
             ),
         )
         for universe_id in sorted(universe_ids)
@@ -417,6 +456,48 @@ def test_clean_startup_reconciles_before_reaching_ready(tmp_path: Path) -> None:
     assert disconnected.buying_power is None
 
 
+def test_activity_qualification_rotates_once_on_each_new_market_session(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        clock = MutableClock(datetime(2026, 9, 2, 14, 0, tzinfo=UTC))
+        calls: list[tuple[str, ...]] = []
+        selected = _run().model_copy(
+            update={
+                "screen": RunScreenConfig(
+                    method=CandidateScreen.ACTIVITY_SHORTLIST_V1,
+                    max_results=50,
+                    version="ACTIVITY_SHORTLIST_V1",
+                    scheduled_active_minutes=15,
+                ),
+                "market_id": MarketId.US_NASDAQ,
+                "cap_bucket": CapBucket.MID,
+                "cap_bucket_version": "CAP_BUCKETS_V1",
+                "strategy_id": "SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
+                "strategy_version": "SESSION_HARD_STRUCTURE_D_V1",
+                "candidate_screen_id": "ACTIVITY_SHORTLIST_V1",
+                "candidate_screen_version": "ACTIVITY_SHORTLIST_V1",
+            }
+        )
+        runtime = _runtime(
+            tmp_path,
+            FakeBroker(),
+            selected,
+            clock=clock,
+            qualification_log=calls,
+        )
+        runtime._session_resolver = RotatingSessionResolver()
+        await runtime.start()
+        assert calls == [("paper-run",)]
+
+        clock.now = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
+        await runtime.poll_once()
+        await runtime.poll_once()
+        assert calls == [("paper-run",), ("paper-run",)]
+
+    asyncio.run(scenario())
+
+
 def test_wrong_account_prevents_readiness(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path, FakeBroker(account="DU999999", connected=True))
 
@@ -503,9 +584,7 @@ def test_hot_enable_prepares_run_without_replaying_missed_checkpoint(tmp_path: P
         assert states["hot"] is RunRuntimeState.ACTIVE
         assert features.calls == 1  # Existing run only; the newly enabled run is not replayed.
         assert (
-            runtime.store.checkpoint_state(
-                "hot", SESSION, datetime(2026, 9, 2, 14, 0, tzinfo=UTC)
-            )
+            runtime.store.checkpoint_state("hot", SESSION, datetime(2026, 9, 2, 14, 0, tzinfo=UTC))
             is not None
         )
 
@@ -658,9 +737,7 @@ def test_environment_hot_change_routes_only_future_orders_and_preserves_exposure
         clock.now = datetime(2026, 9, 2, 14, 11, tzinfo=UTC)
         await runtime.poll_once()
 
-        record = ExecutionLedger(tmp_path / "execution.sqlite3").get(
-            paper_plan.order_plan_id
-        )
+        record = ExecutionLedger(tmp_path / "execution.sqlite3").get(paper_plan.order_plan_id)
         assert record is not None and record.environment is Environment.PAPER
         assert live_status.runs[0].environment is Environment.LIVE
         assert len(paper.submitted) == 1
@@ -670,9 +747,7 @@ def test_environment_hot_change_routes_only_future_orders_and_preserves_exposure
             _runs(_run("switching", environment=Environment.PAPER)),
             frozenset({"switching"}),
         )
-        record = ExecutionLedger(tmp_path / "execution.sqlite3").get(
-            paper_plan.order_plan_id
-        )
+        record = ExecutionLedger(tmp_path / "execution.sqlite3").get(paper_plan.order_plan_id)
         assert record is not None and record.environment is Environment.PAPER
         assert paper_status.runs[0].environment is Environment.PAPER
 
@@ -746,9 +821,7 @@ def test_custom_universe_change_reprepares_only_affected_run_without_stage5_fetc
             _run("custom", enabled=True).model_copy(update={"universe": "CUSTOM_US"}),
             _run("other"),
         )
-        custom = next(
-            item for item in current.universes if item.universe_id == "CUSTOM_US"
-        )
+        custom = next(item for item in current.universes if item.universe_id == "CUSTOM_US")
         updated_custom = custom.model_copy(
             update={
                 "members": (
@@ -786,12 +859,8 @@ def test_custom_universe_change_batches_shared_instrument_preparation(
 ) -> None:
     async def scenario() -> None:
         calls: list[tuple[str, ...]] = []
-        custom_first = _run("custom-first").model_copy(
-            update={"universe": "CUSTOM_US"}
-        )
-        custom_second = _run("custom-second").model_copy(
-            update={"universe": "CUSTOM_US"}
-        )
+        custom_first = _run("custom-first").model_copy(update={"universe": "CUSTOM_US"})
+        custom_second = _run("custom-second").model_copy(update={"universe": "CUSTOM_US"})
         runtime = _runtime(
             tmp_path,
             FakeBroker(),
@@ -803,9 +872,7 @@ def test_custom_universe_change_batches_shared_instrument_preparation(
         await runtime.start()
         calls.clear()
         current = _runs(custom_first, custom_second, _run("other"))
-        custom = next(
-            item for item in current.universes if item.universe_id == "CUSTOM_US"
-        )
+        custom = next(item for item in current.universes if item.universe_id == "CUSTOM_US")
         changed = RunsConfig(
             universes=tuple(
                 custom.model_copy(
@@ -828,9 +895,7 @@ def test_custom_universe_change_batches_shared_instrument_preparation(
             runs=current.runs,
         )
 
-        await runtime.apply_runs_config(
-            changed, frozenset({"custom-first", "custom-second"})
-        )
+        await runtime.apply_runs_config(changed, frozenset({"custom-first", "custom-second"}))
 
         assert calls == [("custom-first", "custom-second")]
 
@@ -1245,9 +1310,7 @@ def test_deterministic_paper_flow_fills_position_and_protective_exit(
     assert runtime.status().counters.orders == 1
     assert runtime.status().counters.fills == 2
     account_values = [
-        values["account"]
-        for _event, values in logger.events
-        if values.get("account") is not None
+        values["account"] for _event, values in logger.events if values.get("account") is not None
     ]
     assert "DU***456" in account_values
     assert "DU123456" not in account_values

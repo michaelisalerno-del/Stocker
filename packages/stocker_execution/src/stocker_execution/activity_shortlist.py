@@ -12,10 +12,15 @@ from pathlib import Path
 from typing import Protocol
 
 from stocker_core.markets import ActivityScanner, CapBucket, MarketDefinition
+from stocker_core.runs import (
+    ACTIVITY_SHORTLIST_V1_ID,
+    ACTIVITY_SHORTLIST_V1_VERSION,
+    ACTIVITY_SHORTLIST_V1_WATCH_LIMIT,
+)
 
-ACTIVITY_SHORTLIST_ID = "ACTIVITY_SHORTLIST_V1"
-ACTIVITY_SHORTLIST_VERSION = "ACTIVITY_SHORTLIST_V1"
-ACTIVITY_SHORTLIST_WATCH_LIMIT = 50
+ACTIVITY_SHORTLIST_ID = ACTIVITY_SHORTLIST_V1_ID
+ACTIVITY_SHORTLIST_VERSION = ACTIVITY_SHORTLIST_V1_VERSION
+ACTIVITY_SHORTLIST_WATCH_LIMIT = ACTIVITY_SHORTLIST_V1_WATCH_LIMIT
 ACTIVITY_SHORTLIST_COMPONENT_LIMIT = 50
 ACTIVITY_SHORTLIST_CAPTURE_WINDOW = timedelta(minutes=1)
 
@@ -79,6 +84,18 @@ class ScannerCapabilities:
     locations: frozenset[str]
     scan_codes: frozenset[str]
     filters: frozenset[str]
+    location_scan_codes: Mapping[str, frozenset[str]] | None = None
+    location_filters: Mapping[str, frozenset[str]] | None = None
+
+    def scan_codes_for(self, location: str) -> frozenset[str]:
+        if self.location_scan_codes and location in self.location_scan_codes:
+            return self.location_scan_codes[location]
+        return self.scan_codes
+
+    def filters_for(self, location: str) -> frozenset[str]:
+        if self.location_filters and location in self.location_filters:
+            return self.location_filters[location]
+        return self.filters
 
 
 class ActivityScannerBoundary(Protocol):
@@ -105,7 +122,7 @@ def rank_activity_candidates(
         raise ValueError("Activity Shortlist V1 watch limit must be between 1 and 50")
     if len(component_rows) < 2:
         raise ValueError("ACTIVITY_SHORTLIST_NOT_AVAILABLE")
-    grouped: dict[tuple[str, int | None], dict[ActivityScanner, ScannerCandidate]] = {}
+    rows_by_symbol: dict[str, list[ScannerCandidate]] = {}
     for component in ActivityScanner:
         for row in component_rows.get(component, ())[:ACTIVITY_SHORTLIST_COMPONENT_LIMIT]:
             if row.component is not component or not 1 <= row.rank <= 50:
@@ -113,11 +130,19 @@ def rank_activity_candidates(
             symbol = row.symbol.strip().upper()
             if not symbol:
                 continue
-            key = (symbol, row.con_id)
+            rows_by_symbol.setdefault(symbol, []).append(row)
+    grouped: dict[tuple[str, int | None], dict[ActivityScanner, ScannerCandidate]] = {}
+    for symbol, rows in rows_by_symbol.items():
+        con_ids = {row.con_id for row in rows if row.con_id is not None}
+        for row in rows:
+            resolved_con_id = row.con_id
+            if resolved_con_id is None and len(con_ids) == 1:
+                resolved_con_id = next(iter(con_ids))
+            key = (symbol, resolved_con_id)
             current = grouped.setdefault(key, {})
-            previous = current.get(component)
+            previous = current.get(row.component)
             if previous is None or row.rank < previous.rank:
-                current[component] = row
+                current[row.component] = row
 
     scored: list[
         tuple[tuple[object, ...], tuple[str, int | None], dict[ActivityScanner, ScannerCandidate]]
@@ -433,7 +458,7 @@ class ActivityShortlistService:
                 )
             )
         if cap_bucket is not CapBucket.ALL and not _supports_cap_bucket(
-            capabilities.filters, cap_bucket
+            capabilities.filters_for(market.scanner_location), cap_bucket
         ):
             return self.store.save_once(
                 self._status(
@@ -446,7 +471,9 @@ class ActivityShortlistService:
                 )
             )
         components = tuple(
-            item for item in ActivityScanner if item.value in capabilities.scan_codes
+            item
+            for item in ActivityScanner
+            if item.value in capabilities.scan_codes_for(market.scanner_location)
         )
         if len(components) < 2:
             return self.store.save_once(
@@ -461,6 +488,8 @@ class ActivityShortlistService:
                 )
             )
         rows: dict[ActivityScanner, tuple[ScannerCandidate, ...]] = {}
+        entitlement_failure = False
+        cap_filter_failure = False
         for component in components:
             try:
                 scanned = await broker.activity_scan(
@@ -474,25 +503,43 @@ class ActivityShortlistService:
                 entitled = any(
                     word in text for word in ("entitle", "subscription", "market data permission")
                 )
-                status = (
-                    ActivityShortlistStatus.DATA_NOT_ENTITLED
-                    if entitled
-                    else ActivityShortlistStatus.SCANNER_NOT_AVAILABLE
+                cap_rejected = cap_bucket is not CapBucket.ALL and (
+                    "cap_filter_unavailable" in text
+                    or ("market" in text and "cap" in text)
+                    or "filter" in text
                 )
-                return self.store.save_once(
-                    self._status(
-                        market,
-                        cap_bucket,
-                        session,
-                        screen_at,
-                        status,
-                        status.value,
-                        components=components,
-                    )
-                )
+                status = ActivityShortlistStatus.SCANNER_NOT_AVAILABLE
+                if cap_rejected:
+                    status = ActivityShortlistStatus.CAP_FILTER_UNAVAILABLE
+                    cap_filter_failure = True
+                elif entitled:
+                    status = ActivityShortlistStatus.DATA_NOT_ENTITLED
+                if status is ActivityShortlistStatus.DATA_NOT_ENTITLED:
+                    entitlement_failure = True
+                continue
             if allowed_symbols is not None:
                 scanned = tuple(item for item in scanned if item.symbol in allowed_symbols)
             rows[component] = scanned
+        used_components = tuple(rows)
+        if len(used_components) < 2:
+            status = (
+                ActivityShortlistStatus.CAP_FILTER_UNAVAILABLE
+                if cap_filter_failure
+                else ActivityShortlistStatus.DATA_NOT_ENTITLED
+                if entitlement_failure
+                else ActivityShortlistStatus.NOT_AVAILABLE
+            )
+            return self.store.save_once(
+                self._status(
+                    market,
+                    cap_bucket,
+                    session,
+                    screen_at,
+                    status,
+                    status.value,
+                    components=used_components,
+                )
+            )
         snapshot = ActivityShortlistSnapshot(
             market_id=market.market_id.value,
             cap_bucket=cap_bucket,
@@ -502,7 +549,7 @@ class ActivityShortlistService:
             profile_id=ACTIVITY_SHORTLIST_ID,
             profile_version=ACTIVITY_SHORTLIST_VERSION,
             status=ActivityShortlistStatus.READY,
-            components=components,
+            components=used_components,
             candidates=rank_activity_candidates(rows),
         )
         return self.store.save_once(snapshot)

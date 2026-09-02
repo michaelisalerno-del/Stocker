@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from stocker_core.markets import CapBucket, MarketId
-from stocker_core.runs import Environment, RunConfig
+from stocker_core.runs import CandidateScreen, Environment, RunConfig, RunScreenConfig
 from stocker_dashboard.performance import PerformancePeriod, RunPerformanceService
 from stocker_execution.execution_ledger import ExecutionLedger
 from stocker_execution.execution_models import (
@@ -29,6 +29,12 @@ def run(run_id: str, environment: Environment = Environment.PAPER) -> RunConfig:
         cap_bucket_version="CAP_BUCKETS_V1",
         candidate_screen_id="ACTIVITY_SHORTLIST_V1",
         candidate_screen_version="ACTIVITY_SHORTLIST_V1",
+        screen=RunScreenConfig(
+            method=CandidateScreen.ACTIVITY_SHORTLIST_V1,
+            max_results=50,
+            version="ACTIVITY_SHORTLIST_V1",
+            scheduled_active_minutes=15,
+        ),
         display_name="NASDAQ · HARD · MID",
         environment=environment,
     )
@@ -184,11 +190,14 @@ def test_same_conid_multiple_runs_get_lot_attribution_only_after_broker_reconcil
         open_orders=(),
         observed_at=now,
     )
-    service = RunPerformanceService(
-        ledger,
-        clock=lambda: now,
-        marks={(Environment.PAPER, "DU1", 7): 90},
+    ledger.record_position_mark(
+        environment=Environment.PAPER,
+        account="DU1",
+        con_id=7,
+        mark=90,
+        observed_at=now,
     )
+    service = RunPerformanceService(ledger, clock=lambda: now)
     one = service.performance(run("one"), PerformancePeriod.TODAY)
     two = service.performance(run("two"), PerformancePeriod.TODAY)
     assert one["unrealised_pnl"] == 100
@@ -205,6 +214,43 @@ def test_same_conid_multiple_runs_get_lot_attribution_only_after_broker_reconcil
     mismatch = service.performance(run("one"), PerformancePeriod.TODAY)
     assert mismatch["unrealised_pnl"] is None
     assert mismatch["unrealised_status"] == "RECONCILIATION_REQUIRED"
+
+
+def test_stale_broker_mark_is_not_used_for_unrealised_pnl(tmp_path: Path) -> None:
+    ledger = ExecutionLedger(tmp_path / "ledger.sqlite3")
+    observed = datetime(2026, 9, 2, 15, tzinfo=UTC)
+    item = plan("paper", "paper-plan", con_id=7, quantity=10, entry=100, created_at=observed)
+    submit(ledger, item, "DU1", 10)
+    fill(
+        ledger,
+        item,
+        account="DU1",
+        order_id=10,
+        side=OrderAction.SELL,
+        price=100,
+        execution_id="entry",
+        when=observed,
+    )
+    ledger.replace_broker_snapshot(
+        environment=Environment.PAPER,
+        account="DU1",
+        positions=(BrokerPosition("DU1", 7, "TEST", -10, 100),),
+        open_orders=(),
+        observed_at=observed,
+    )
+    ledger.record_position_mark(
+        environment=Environment.PAPER,
+        account="DU1",
+        con_id=7,
+        mark=90,
+        observed_at=observed,
+    )
+    result = RunPerformanceService(
+        ledger,
+        clock=lambda: observed.replace(minute=2),
+    ).performance(run("paper"), PerformancePeriod.TODAY)
+    assert result["unrealised_pnl"] is None
+    assert result["unrealised_status"] == "MARK_UNAVAILABLE"
 
 
 def test_periods_and_drawdown_use_only_selected_run(tmp_path: Path) -> None:

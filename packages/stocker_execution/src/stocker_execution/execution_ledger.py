@@ -110,6 +110,15 @@ class BrokerOpenOrderSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class BrokerPositionMark:
+    environment: Environment
+    account: str
+    con_id: int
+    mark: float
+    observed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class ClosedTradeSummary:
     trades: int
     wins: int
@@ -200,6 +209,14 @@ class ExecutionLedger:
                     status TEXT NOT NULL,
                     observed_at TEXT NOT NULL,
                     PRIMARY KEY (environment, account, order_id)
+                );
+                CREATE TABLE IF NOT EXISTS broker_position_marks (
+                    environment TEXT NOT NULL,
+                    account TEXT NOT NULL,
+                    con_id INTEGER NOT NULL,
+                    mark REAL NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    PRIMARY KEY (environment, account, con_id)
                 );
                 """
             )
@@ -869,6 +886,57 @@ class ExecutionLedger:
                 symbol=str(row["symbol"]),
                 quantity=float(row["quantity"]),
                 average_price=float(row["average_price"]),
+                observed_at=datetime.fromisoformat(str(row["observed_at"])),
+            )
+            for row in rows
+        )
+
+    def record_position_mark(
+        self,
+        *,
+        environment: Environment,
+        account: str,
+        con_id: int,
+        mark: float,
+        observed_at: datetime,
+    ) -> None:
+        """Retain the latest broker-authoritative mark for one reconciled position."""
+
+        if con_id <= 0 or mark <= 0:
+            raise ValueError("Position mark requires positive con_id and price")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO broker_position_marks
+                (environment, account, con_id, mark, observed_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(environment, account, con_id) DO UPDATE SET
+                    mark = excluded.mark,
+                    observed_at = excluded.observed_at
+                """,
+                (
+                    environment.value,
+                    account,
+                    con_id,
+                    mark,
+                    observed_at.isoformat(timespec="microseconds"),
+                ),
+            )
+
+    def broker_position_marks(self) -> tuple[BrokerPositionMark, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM broker_position_marks
+                ORDER BY environment, account, con_id
+                """
+            ).fetchall()
+        return tuple(
+            BrokerPositionMark(
+                environment=Environment(str(row["environment"])),
+                account=str(row["account"]),
+                con_id=int(row["con_id"]),
+                mark=float(row["mark"]),
                 observed_at=datetime.fromisoformat(str(row["observed_at"])),
             )
             for row in rows

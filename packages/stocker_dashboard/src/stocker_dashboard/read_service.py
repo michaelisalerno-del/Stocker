@@ -630,11 +630,12 @@ class DashboardReadService:
             start=start,
             end=end,
         )
-        currencies = {
-            get_market(run.market_id).currency
-            for run in self.config.runs
-            if run.run_id in selected_run_ids and run.market_id is not None
-        }
+        selected_runs = tuple(run for run in self.config.runs if run.run_id in selected_run_ids)
+        run_currency_sets = tuple(self._run_currencies(run) for run in selected_runs)
+        currencies = set().union(*run_currency_sets) if run_currency_sets else set()
+        unresolved_currency = any(not values for values in run_currency_sets)
+        mixed_currency = len(currencies) > 1
+        pnl_available = not mixed_currency and not unresolved_currency
         common_currency = next(iter(currencies)) if len(currencies) == 1 else None
         return {
             "items": [self._trade(item) for item in records],
@@ -644,9 +645,15 @@ class DashboardReadService:
                 "wins": summary.wins,
                 "losses": summary.losses,
                 "win_percent": (summary.wins / summary.trades * 100 if summary.trades else None),
-                "total_pnl": summary.total_pnl if len(currencies) <= 1 else None,
+                "total_pnl": summary.total_pnl if pnl_available else None,
                 "currency": common_currency,
-                "pnl_status": ("MULTIPLE_CURRENCIES" if len(currencies) > 1 else "AVAILABLE"),
+                "pnl_status": (
+                    "MULTIPLE_CURRENCIES"
+                    if mixed_currency
+                    else "CURRENCY_UNAVAILABLE"
+                    if unresolved_currency
+                    else "AVAILABLE"
+                ),
                 "total_r": None,
                 "mean_r": None,
             },
@@ -859,6 +866,11 @@ class DashboardReadService:
             return get_market(run.market_id).currency
         currencies = {item.currency for item in self._universe(run.universe).members}
         return next(iter(currencies)) if len(currencies) == 1 else None
+
+    def _run_currencies(self, run: RunConfig) -> set[str]:
+        if run.market_id is not None:
+            return {get_market(run.market_id).currency}
+        return {item.currency for item in self._universe(run.universe).members}
 
     def _account(self, environment: Environment) -> str | None:
         return next(

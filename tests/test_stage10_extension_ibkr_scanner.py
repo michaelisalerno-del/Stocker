@@ -84,6 +84,36 @@ def test_scanner_parameters_are_discovered_once_and_cached() -> None:
     assert first.filters == frozenset({"marketCapAbove", "marketCapBelow"})
 
 
+def test_scanner_capabilities_retain_location_specific_components() -> None:
+    class LocationAwareClient(ScannerClient):
+        async def reqScannerParametersAsync(self) -> str:
+            self.parameter_requests += 1
+            return """
+            <ScanParameterResponse>
+              <Location>
+                <locationCode>STK.US.MAJOR</locationCode>
+                <ScanType><scanCode>TOP_TRADE_RATE</scanCode></ScanType>
+                <ScanType><scanCode>TOP_VOLUME_RATE</scanCode></ScanType>
+                <RangeFilter><code>marketCapAbove</code></RangeFilter>
+                <RangeFilter><code>marketCapBelow</code></RangeFilter>
+              </Location>
+              <Location>
+                <locationCode>STK.EU</locationCode>
+                <ScanType><scanCode>HOT_BY_VOLUME</scanCode></ScanType>
+              </Location>
+            </ScanParameterResponse>
+            """
+
+    capabilities = asyncio.run(connection(LocationAwareClient()).scanner_capabilities())
+    assert capabilities.scan_codes_for("STK.US.MAJOR") == frozenset(
+        {"TOP_TRADE_RATE", "TOP_VOLUME_RATE"}
+    )
+    assert capabilities.scan_codes_for("STK.EU") == frozenset({"HOT_BY_VOLUME"})
+    assert capabilities.filters_for("STK.US.MAJOR") == frozenset(
+        {"marketCapAbove", "marketCapBelow"}
+    )
+
+
 def test_activity_scan_sends_exact_market_cap_component_and_bound() -> None:
     client = ScannerClient()
     broker = connection(client)

@@ -4,7 +4,7 @@ import pytest
 
 from stocker_core.config import RunsConfig
 from stocker_core.markets import CapBucket, MarketId
-from stocker_core.runs import CandidateScreen, Environment
+from stocker_core.runs import CandidateScreen, Environment, RunConfig, RunScreenConfig
 from stocker_core.strategies import SESSION_HARD_METHOD, installed_strategies
 from stocker_core.universes import UniverseDefinition
 from stocker_dashboard.universe_runs import UniverseRunBuilder
@@ -16,6 +16,18 @@ def empty_config() -> RunsConfig:
             UniverseDefinition(
                 universe_id="CUSTOM_KEEP",
                 name="Backend custom universe",
+                members=(
+                    {
+                        "symbol": "AAPL",
+                        "exchange": "SMART",
+                        "primary_exchange": "NASDAQ",
+                        "currency": "USD",
+                    },
+                ),
+            ),
+            UniverseDefinition(
+                universe_id="NASDAQ",
+                name="NASDAQ listing membership",
                 members=(
                     {
                         "symbol": "AAPL",
@@ -133,3 +145,56 @@ def test_disable_and_readd_reuses_exact_lineage() -> None:
     assert same.run_id == created.run_id
     assert same.enabled is True
     assert len(reenabled.runs) == 1
+
+
+def test_exchange_specific_us_run_requires_authoritative_membership() -> None:
+    builder = UniverseRunBuilder()
+    config = RunsConfig(
+        universes=(
+            UniverseDefinition(
+                universe_id="CUSTOM",
+                name="Custom",
+                members=(
+                    {
+                        "symbol": "VOD",
+                        "exchange": "SMART",
+                        "primary_exchange": "LSE",
+                        "currency": "GBP",
+                    },
+                ),
+            ),
+        )
+    )
+    with pytest.raises(ValueError, match="authoritative listing membership"):
+        builder.add(
+            config,
+            market_id=MarketId.US_NYSE,
+            cap_bucket=CapBucket.MID,
+            strategy_id=SESSION_HARD_METHOD.strategy_id,
+            strategy_version=SESSION_HARD_METHOD.strategy_version,
+            environment=Environment.PAPER,
+        )
+
+
+def test_activity_profile_and_generated_lineage_fail_closed_when_mislabeled() -> None:
+    with pytest.raises(ValueError, match="max_results 50"):
+        RunScreenConfig(
+            method=CandidateScreen.ACTIVITY_SHORTLIST_V1,
+            max_results=49,
+            version="ACTIVITY_SHORTLIST_V1",
+            scheduled_active_minutes=15,
+        )
+
+    config, created = UniverseRunBuilder().add(
+        empty_config(),
+        market_id=MarketId.US_NASDAQ,
+        cap_bucket=CapBucket.MID,
+        strategy_id=SESSION_HARD_METHOD.strategy_id,
+        strategy_version=SESSION_HARD_METHOD.strategy_version,
+        environment=Environment.PAPER,
+    )
+    del config
+    payload = created.model_dump(mode="python")
+    payload["candidate_screen_id"] = "MISLABELED"
+    with pytest.raises(ValueError, match="matching immutable lineage"):
+        RunConfig.model_validate(payload)

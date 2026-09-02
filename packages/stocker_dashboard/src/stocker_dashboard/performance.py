@@ -23,6 +23,9 @@ class PerformancePeriod(StrEnum):
     ALL = "ALL"
 
 
+POSITION_MARK_MAX_AGE = timedelta(minutes=1)
+
+
 class RunPerformanceService:
     def __init__(
         self,
@@ -33,7 +36,7 @@ class RunPerformanceService:
     ) -> None:
         self.ledger = ledger
         self.clock = clock or (lambda: datetime.now(tz=UTC))
-        self.marks = marks or {}
+        self.marks = marks
 
     def performance(self, run: RunConfig, period: PerformancePeriod | str) -> dict[str, Any]:
         selected_period = PerformancePeriod(period)
@@ -60,7 +63,7 @@ class RunPerformanceService:
         r_available = all(value is not None for value in r_values)
         total_r = sum(value for value in r_values if value is not None) if r_available else None
         history = self._history(ordered, timezone)
-        unrealised_pnl, unrealised_status, open_positions = self._unrealised(run)
+        unrealised_pnl, unrealised_status, open_positions = self._unrealised(run, now)
         return {
             "period": selected_period.value,
             "currency": market.currency if market is not None else None,
@@ -121,7 +124,7 @@ class RunPerformanceService:
             return None
         return record.realized_pnl / original_risk
 
-    def _unrealised(self, run: RunConfig) -> tuple[float | None, str, int]:
+    def _unrealised(self, run: RunConfig, now: datetime) -> tuple[float | None, str, int]:
         all_records = self._records()
         open_records = tuple(
             item
@@ -134,6 +137,10 @@ class RunPerformanceService:
         broker_positions = {
             (item.environment, item.account, item.con_id): item
             for item in self.ledger.broker_position_snapshots()
+        }
+        persisted_marks = {
+            (item.environment, item.account, item.con_id): item
+            for item in self.ledger.broker_position_marks()
         }
         attributed: defaultdict[tuple[Environment, str, int], float] = defaultdict(float)
         for item in open_records:
@@ -151,7 +158,16 @@ class RunPerformanceService:
             broker = broker_positions.get(identity)
             if broker is None or abs(attributed[identity] - broker.quantity) > 1e-9:
                 return None, "RECONCILIATION_REQUIRED", len(identities)
-            mark = self.marks.get(identity)
+            if self.marks is not None:
+                mark = self.marks.get(identity)
+            else:
+                persisted = persisted_marks.get(identity)
+                mark = (
+                    persisted.mark
+                    if persisted is not None
+                    and _aware(now) - _aware(persisted.observed_at) <= POSITION_MARK_MAX_AGE
+                    else None
+                )
             if mark is None:
                 return None, "MARK_UNAVAILABLE", len(identities)
             lots = [

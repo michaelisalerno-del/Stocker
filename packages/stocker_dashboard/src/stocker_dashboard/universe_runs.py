@@ -14,6 +14,10 @@ from stocker_core.markets import (
     get_market,
 )
 from stocker_core.runs import (
+    ACTIVITY_SHORTLIST_V1_ACTIVE_MINUTES,
+    ACTIVITY_SHORTLIST_V1_ID,
+    ACTIVITY_SHORTLIST_V1_VERSION,
+    ACTIVITY_SHORTLIST_V1_WATCH_LIMIT,
     CandidateScreen,
     Environment,
     RunConfig,
@@ -23,9 +27,6 @@ from stocker_core.runs import (
 )
 from stocker_core.strategies import get_strategy, installed_strategies
 from stocker_core.universes import UniverseDefinition
-
-ACTIVITY_SHORTLIST_ID = "ACTIVITY_SHORTLIST_V1"
-ACTIVITY_SHORTLIST_VERSION = "ACTIVITY_SHORTLIST_V1"
 
 
 class UniverseRunBuilder:
@@ -70,11 +71,11 @@ class UniverseRunBuilder:
                 for item in installed_strategies()
             ],
             "candidate_screen": {
-                "screen_id": ACTIVITY_SHORTLIST_ID,
-                "screen_version": ACTIVITY_SHORTLIST_VERSION,
+                "screen_id": ACTIVITY_SHORTLIST_V1_ID,
+                "screen_version": ACTIVITY_SHORTLIST_V1_VERSION,
                 "label": "Activity Shortlist V1",
-                "screen_active_minutes_after_open": 15,
-                "watch_limit": 50,
+                "screen_active_minutes_after_open": ACTIVITY_SHORTLIST_V1_ACTIVE_MINUTES,
+                "watch_limit": ACTIVITY_SHORTLIST_V1_WATCH_LIMIT,
             },
         }
 
@@ -97,8 +98,8 @@ class UniverseRunBuilder:
             cap,
             strategy_id,
             strategy_version,
-            ACTIVITY_SHORTLIST_ID,
-            ACTIVITY_SHORTLIST_VERSION,
+            ACTIVITY_SHORTLIST_V1_ID,
+            ACTIVITY_SHORTLIST_V1_VERSION,
             environment,
         )
         existing = next(
@@ -129,6 +130,10 @@ class UniverseRunBuilder:
                 ),
                 (),
             )
+            if market.market_id in {MarketId.US_NASDAQ, MarketId.US_NYSE} and not listing_members:
+                raise ValueError(
+                    f"{market.market_id.value} requires authoritative listing membership"
+                )
             universe = UniverseDefinition(
                 universe_id=universe_id,
                 name=f"{market.display_name} {CAP_BUCKETS_V1.definition(cap).label}",
@@ -151,8 +156,8 @@ class UniverseRunBuilder:
             market_id=market.market_id,
             cap_bucket=cap,
             cap_bucket_version=CAP_BUCKETS_V1.version,
-            candidate_screen_id=ACTIVITY_SHORTLIST_ID,
-            candidate_screen_version=ACTIVITY_SHORTLIST_VERSION,
+            candidate_screen_id=ACTIVITY_SHORTLIST_V1_ID,
+            candidate_screen_version=ACTIVITY_SHORTLIST_V1_VERSION,
             display_name=display_name,
             environment=environment,
             risk=risk,
@@ -164,9 +169,9 @@ class UniverseRunBuilder:
             ),
             screen=RunScreenConfig(
                 method=CandidateScreen.ACTIVITY_SHORTLIST_V1,
-                max_results=50,
-                version=ACTIVITY_SHORTLIST_VERSION,
-                scheduled_active_minutes=15,
+                max_results=ACTIVITY_SHORTLIST_V1_WATCH_LIMIT,
+                version=ACTIVITY_SHORTLIST_V1_VERSION,
+                scheduled_active_minutes=ACTIVITY_SHORTLIST_V1_ACTIVE_MINUTES,
             ),
         )
         universes = (

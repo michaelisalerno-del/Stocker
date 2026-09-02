@@ -5,9 +5,9 @@ from dataclasses import dataclass, replace
 from datetime import time
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from stocker_core.markets import CapBucket, MarketId
+from stocker_core.markets import CAP_BUCKETS_V1, CapBucket, MarketId
 from stocker_core.universes import Identifier, UniverseCatalog, UniverseDefinition
 
 
@@ -43,6 +43,12 @@ class CandidateScreen(StrEnum):
     ACTIVITY_SHORTLIST_V1 = "ACTIVITY_SHORTLIST_V1"
 
 
+ACTIVITY_SHORTLIST_V1_ID = "ACTIVITY_SHORTLIST_V1"
+ACTIVITY_SHORTLIST_V1_VERSION = "ACTIVITY_SHORTLIST_V1"
+ACTIVITY_SHORTLIST_V1_WATCH_LIMIT = 50
+ACTIVITY_SHORTLIST_V1_ACTIVE_MINUTES = 15
+
+
 class RunScreenConfig(BaseModel):
     """One bounded pre-qualification screen for a broad run universe."""
 
@@ -52,6 +58,19 @@ class RunScreenConfig(BaseModel):
     max_results: int = Field(default=50, ge=1, le=50)
     version: Identifier | None = None
     scheduled_active_minutes: int = Field(default=15, ge=0)
+
+    @model_validator(mode="after")
+    def validate_frozen_profile(self) -> "RunScreenConfig":
+        if self.method is CandidateScreen.ACTIVITY_SHORTLIST_V1 and (
+            self.max_results != ACTIVITY_SHORTLIST_V1_WATCH_LIMIT
+            or self.version != ACTIVITY_SHORTLIST_V1_VERSION
+            or self.scheduled_active_minutes != ACTIVITY_SHORTLIST_V1_ACTIVE_MINUTES
+        ):
+            raise ValueError(
+                "ACTIVITY_SHORTLIST_V1 requires version ACTIVITY_SHORTLIST_V1, "
+                "max_results 50, and scheduled_active_minutes 15"
+            )
+        return self
 
 
 class RunConfig(BaseModel):
@@ -73,6 +92,44 @@ class RunConfig(BaseModel):
     risk: RunRiskConfig | None = None
     session: RunWindow | None = None
     screen: RunScreenConfig | None = None
+
+    @model_validator(mode="after")
+    def validate_lineage(self) -> "RunConfig":
+        lineage = (
+            self.market_id,
+            self.cap_bucket,
+            self.cap_bucket_version,
+            self.strategy_id,
+            self.strategy_version,
+            self.candidate_screen_id,
+            self.candidate_screen_version,
+        )
+        if any(value is not None for value in lineage) and any(value is None for value in lineage):
+            raise ValueError("Generated market runs require complete immutable lineage")
+        if self.market_id is not None:
+            from stocker_core.strategies import get_strategy
+
+            if self.cap_bucket_version != CAP_BUCKETS_V1.version:
+                raise ValueError("Generated market runs require CAP_BUCKETS_V1")
+            method = get_strategy(str(self.strategy_id), str(self.strategy_version))
+            if self.strategy != method.config_name:
+                raise ValueError("Run strategy name does not match installed strategy lineage")
+        if (
+            self.screen is not None
+            and self.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
+            and (
+                self.candidate_screen_id != ACTIVITY_SHORTLIST_V1_ID
+                or self.candidate_screen_version != ACTIVITY_SHORTLIST_V1_VERSION
+            )
+        ):
+            raise ValueError("Activity shortlist screen requires matching immutable lineage")
+        if self.candidate_screen_id == ACTIVITY_SHORTLIST_V1_ID and (
+            self.candidate_screen_version != ACTIVITY_SHORTLIST_V1_VERSION
+            or self.screen is None
+            or self.screen.method is not CandidateScreen.ACTIVITY_SHORTLIST_V1
+        ):
+            raise ValueError("Activity shortlist lineage must match its frozen screen profile")
+        return self
 
     @property
     def execution_environment(self) -> Environment:

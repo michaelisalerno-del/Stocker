@@ -47,6 +47,38 @@ def test_rank_union_is_deduplicated_deterministic_and_component_hits_dominate() 
     assert all(row.selected for row in rows)
 
 
+def test_deduplication_merges_missing_con_id_with_the_known_contract() -> None:
+    ranked = rank_activity_candidates(
+        {
+            ActivityScanner.TOP_TRADE_RATE: (
+                ScannerCandidate(
+                    ActivityScanner.TOP_TRADE_RATE,
+                    1,
+                    "AAPL",
+                    265598,
+                    "SMART",
+                    "NASDAQ",
+                    "USD",
+                ),
+            ),
+            ActivityScanner.TOP_VOLUME_RATE: (
+                ScannerCandidate(
+                    ActivityScanner.TOP_VOLUME_RATE,
+                    2,
+                    "AAPL",
+                    None,
+                    "SMART",
+                    "NASDAQ",
+                    "USD",
+                ),
+            ),
+        }
+    )
+    assert len(ranked) == 1
+    assert ranked[0].con_id == 265598
+    assert ranked[0].scan_hit_count == 2
+
+
 def test_rank_union_caps_at_50_but_retains_all_when_fewer_exist() -> None:
     many = tuple(
         candidate(ActivityScanner.TOP_TRADE_RATE, (index % 50) + 1, f"S{index:03}", index)
@@ -79,6 +111,35 @@ class FakeScanner:
     async def activity_scan(self, *, market, cap_bucket, component, max_results=50):
         self.calls.append((component, cap_bucket, max_results))
         return (candidate(component, 1, "AAPL", 265598),)
+
+
+class OneRejectedScanner(FakeScanner):
+    async def activity_scan(self, *, market, cap_bucket, component, max_results=50):
+        if component is ActivityScanner.HOT_BY_VOLUME:
+            raise RuntimeError("SCANNER_NOT_AVAILABLE")
+        return await super().activity_scan(
+            market=market,
+            cap_bucket=cap_bucket,
+            component=component,
+            max_results=max_results,
+        )
+
+
+class OneEntitlementFailureScanner(FakeScanner):
+    async def activity_scan(self, *, market, cap_bucket, component, max_results=50):
+        if component is ActivityScanner.HOT_BY_VOLUME:
+            raise RuntimeError("market data subscription not entitled")
+        return await super().activity_scan(
+            market=market,
+            cap_bucket=cap_bucket,
+            component=component,
+            max_results=max_results,
+        )
+
+
+class CapRejectedScanner(FakeScanner):
+    async def activity_scan(self, *, market, cap_bucket, component, max_results=50):
+        raise RuntimeError("CAP_FILTER_UNAVAILABLE: market cap filter rejected")
 
 
 def test_two_components_are_allowed_and_fewer_than_two_is_not_available(tmp_path: Path) -> None:
@@ -117,6 +178,66 @@ def test_two_components_are_allowed_and_fewer_than_two_is_not_available(tmp_path
     assert unavailable.status is ActivityShortlistStatus.NOT_AVAILABLE
     assert unavailable.reason == "ACTIVITY_SHORTLIST_NOT_AVAILABLE"
     assert one.calls == []
+
+
+def test_one_rejected_component_keeps_two_successful_components(tmp_path: Path) -> None:
+    screen_at = datetime(2026, 9, 2, 13, 45, tzinfo=UTC)
+    result = asyncio.run(
+        ActivityShortlistService(
+            ActivityShortlistStore(tmp_path / "screens.sqlite3")
+        ).get_or_create(
+            OneRejectedScanner(tuple(ActivityScanner)),
+            market=get_market(MarketId.US_NASDAQ),
+            cap_bucket=CapBucket.MID,
+            session=date(2026, 9, 2),
+            screen_at=screen_at,
+            now=screen_at,
+        )
+    )
+    assert result.status is ActivityShortlistStatus.READY
+    assert result.components == (
+        ActivityScanner.TOP_TRADE_RATE,
+        ActivityScanner.TOP_VOLUME_RATE,
+    )
+
+
+def test_one_unentitled_component_keeps_two_successful_components(tmp_path: Path) -> None:
+    screen_at = datetime(2026, 9, 2, 13, 45, tzinfo=UTC)
+    result = asyncio.run(
+        ActivityShortlistService(
+            ActivityShortlistStore(tmp_path / "screens.sqlite3")
+        ).get_or_create(
+            OneEntitlementFailureScanner(tuple(ActivityScanner)),
+            market=get_market(MarketId.US_NASDAQ),
+            cap_bucket=CapBucket.MID,
+            session=date(2026, 9, 2),
+            screen_at=screen_at,
+            now=screen_at,
+        )
+    )
+    assert result.status is ActivityShortlistStatus.READY
+    assert result.components == (
+        ActivityScanner.TOP_TRADE_RATE,
+        ActivityScanner.TOP_VOLUME_RATE,
+    )
+
+
+def test_broker_cap_filter_rejection_remains_explicit(tmp_path: Path) -> None:
+    screen_at = datetime(2026, 9, 2, 13, 45, tzinfo=UTC)
+    result = asyncio.run(
+        ActivityShortlistService(
+            ActivityShortlistStore(tmp_path / "screens.sqlite3")
+        ).get_or_create(
+            CapRejectedScanner(tuple(ActivityScanner)),
+            market=get_market(MarketId.US_NASDAQ),
+            cap_bucket=CapBucket.MID,
+            session=date(2026, 9, 2),
+            screen_at=screen_at,
+            now=screen_at,
+        )
+    )
+    assert result.status is ActivityShortlistStatus.CAP_FILTER_UNAVAILABLE
+    assert result.reason == "CAP_FILTER_UNAVAILABLE"
 
 
 def test_snapshot_is_frozen_and_reconnect_reuses_it_without_scanning(tmp_path: Path) -> None:

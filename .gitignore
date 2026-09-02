@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 configs/ibkr.local.yaml
+configs/runs.local.yaml
 
 .venv/
 __pycache__/

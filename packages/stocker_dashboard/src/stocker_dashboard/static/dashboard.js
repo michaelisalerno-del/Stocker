@@ -3,6 +3,7 @@
 const main = document.querySelector("#main");
 const fmt = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
 let timer;
+let lastOutcome = null;
 
 const RUN_COLUMNS = [
   { key: "run_id", label: "Run" }, { key: "universe", label: "Universe" }, { key: "strategy", label: "Strategy" },
@@ -88,24 +89,25 @@ async function runDetail(runId) {
   const grid = details.map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${key === "environment" ? environment(run[key]) : esc(run[key])}</strong></div>`).join("");
   const funnel = run.funnel.map((step, index) => `${index ? '<div class="funnel-arrow"></div>' : ""}<div class="funnel-step"><span>${esc(step.stage)}</span><strong>${number(step.count)}</strong></div>`).join("");
   main.innerHTML = `${head(run.run_id, `${run.universe} / ${run.strategy} / ${run.environment}`)}
-    <section class="section"><div class="control-rail"><button data-control="${run.enabled ? "disable" : "enable"}">${run.enabled ? "Disable run" : "Enable run"}</button><button class="secondary" data-control="edit">Edit run config</button><button class="${run.environment === "LIVE" ? "secondary" : "danger"}" data-control="environment">Move to ${run.environment === "LIVE" ? "PAPER" : "LIVE"}</button></div><p class="notice">Configuration changes use the backend command path and require a runtime reload. Existing positions retain their original environment and account.</p></section>
+    <section class="section"><div class="control-rail"><button data-control="${run.enabled ? "disable" : "enable"}">${run.enabled ? "Disable run" : "Enable run"}</button><button class="secondary" data-control="edit">Edit run config</button><button class="${run.environment === "LIVE" ? "secondary" : "danger"}" data-control="environment">Move to ${run.environment === "LIVE" ? "PAPER" : "LIVE"}</button></div><p class="notice">Changes use the runtime command path. Existing orders and positions retain their original environment and account.</p>${lastOutcome ? `<p class="notice" role="status"><b>${esc(lastOutcome.apply_mode)}</b> · ${esc(lastOutcome.detail)}</p>` : ""}</section>
     <section class="section"><div class="section-head"><h2>Run configuration</h2></div><div class="detail-grid">${grid}</div></section>
     <section class="section"><div class="section-head"><h2>Pipeline funnel</h2><span class="muted">Persisted counters only</span></div><div class="funnel">${funnel}</div></section>`;
   main.querySelectorAll("[data-control]").forEach((button) => button.addEventListener("click", () => runControl(run, button.dataset.control)));
 }
 async function runControl(run, control) {
   try {
-    if (control === "disable") await api(`/api/runs/${encodeURIComponent(run.run_id)}/disable`, { method: "POST" });
+    let result = null;
+    if (control === "disable") result = await api(`/api/runs/${encodeURIComponent(run.run_id)}/disable`, { method: "POST" });
     if (control === "enable") {
       let body = {};
       if (run.environment === "LIVE") body = await confirmLive(run.run_id);
-      await api(`/api/runs/${encodeURIComponent(run.run_id)}/enable`, { method: "POST", body: JSON.stringify(body) });
+      result = await api(`/api/runs/${encodeURIComponent(run.run_id)}/enable`, { method: "POST", body: JSON.stringify(body) });
     }
     if (control === "environment") {
       const target = run.environment === "LIVE" ? "PAPER" : "LIVE";
       let body = { environment: target };
       if (target === "LIVE") body = { ...body, ...(await confirmLive(run.run_id)) };
-      await api(`/api/runs/${encodeURIComponent(run.run_id)}/environment`, { method: "POST", body: JSON.stringify(body) });
+      result = await api(`/api/runs/${encodeURIComponent(run.run_id)}/environment`, { method: "POST", body: JSON.stringify(body) });
     }
     if (control === "edit") {
       const universe = prompt("Universe", run.universe);
@@ -117,8 +119,9 @@ async function runControl(run, control) {
       if (run.environment === "LIVE") {
         body = { ...body, ...(await confirmLive(run.run_id, { risk_per_trade: body.risk_per_trade, max_concurrent_positions: body.max_concurrent_positions })) };
       }
-      await api(`/api/runs/${encodeURIComponent(run.run_id)}`, { method: "PUT", body: JSON.stringify(body) });
+      result = await api(`/api/runs/${encodeURIComponent(run.run_id)}`, { method: "PUT", body: JSON.stringify(body) });
     }
+    if (result) lastOutcome = result;
     await render();
   } catch (error) { if (error.message !== "cancelled") alert(error.message); }
 }
@@ -283,10 +286,53 @@ async function systemPage() {
 }
 async function settingsPage() {
   const data = await api("/api/settings");
-  const broker = data.broker.map((item) => `<div class="detail-cell"><span>IBKR ${esc(item.environment)}</span><strong>${esc(item.account)} · ${item.connected ? "CONNECTED" : "DISCONNECTED"}</strong></div>`).join("");
+  const runtimeBroker = Object.fromEntries(data.broker.map((item) => [item.environment, item]));
+  const broker = data.broker_configuration.map((item) => {
+    const runtime = runtimeBroker[item.environment] || {};
+    return `<form class="config-form" data-broker-form="${esc(item.environment)}"><div class="section-head"><h3>IBKR ${esc(item.environment)}</h3>${environment(item.environment)}</div><div class="detail-grid"><label class="detail-cell"><span>Host</span><input name="host" required value="${esc(item.host)}"></label><label class="detail-cell"><span>Port</span><input name="port" type="number" min="1" max="65535" required value="${esc(item.port)}"></label><label class="detail-cell"><span>Client ID</span><input name="client_id" type="number" min="1" required value="${esc(item.client_id)}"></label><label class="detail-cell"><span>Expected account</span><input name="expected_account" required value="${esc(item.expected_account || "")}"></label><label class="detail-cell"><span>Connect timeout (seconds)</span><input name="connect_timeout_seconds" type="number" min="0.1" step="0.1" required value="${esc(item.connect_timeout_seconds)}"></label><label class="detail-cell"><span>Request timeout (seconds)</span><input name="request_timeout_seconds" type="number" min="0.1" step="0.1" required value="${esc(item.request_timeout_seconds)}"></label><div class="detail-cell"><span>Runtime</span><strong>${runtime.connected ? "CONNECTED" : "DISCONNECTED"} · ${runtime.account ? esc(runtime.account) : "—"}</strong></div></div><div class="control-rail"><button type="submit">Save and reconnect ${esc(item.environment)}</button></div></form>`;
+  }).join("");
   const universeColumns = [{ key: "universe_id", label: "Universe" }, { key: "name", label: "Name" }, { key: "members", label: "Members", numeric: true }];
   const strategyColumns = [{ key: "strategy", label: "Strategy" }, { key: "identity", label: "Identity" }, { key: "version", label: "Version" }, { key: "description", label: "Definition" }];
-  main.innerHTML = `${head("Settings", "Small backend-owned configuration surface; frozen strategy constants are read-only.")}<section class="section"><div class="section-head"><h2>Broker</h2></div><div class="detail-grid">${broker}</div></section><section class="section"><div class="section-head"><h2>Universes</h2></div>${table(universeColumns, data.universes)}</section><section class="section"><div class="section-head"><h2>Runs</h2><span class="muted">Edit from Run Detail</span></div>${table([{ key: "run_id", label: "Run" }, { key: "universe", label: "Universe" }, { key: "strategy", label: "Strategy" }, { label: "Env", render: (row) => environment(row.environment) }, { label: "Enabled", render: (row) => badge(row.enabled ? "YES" : "NO", row.enabled ? "good" : "warn") }], data.runs, (row) => `run:${row.run_id}`)}</section><section class="section"><div class="section-head"><h2>Strategies</h2></div>${table(strategyColumns, data.strategies)}</section>`;
+  const universeForms = data.custom_universes.map((item) => {
+    const first = item.members[0] || {};
+    return `<form class="config-form" data-universe-form="${esc(item.universe_id)}"><div class="section-head"><h3>${esc(item.universe_id)}</h3><span class="muted">${item.members.length} symbols</span></div><div class="detail-grid"><label class="detail-cell"><span>Name</span><input name="name" required value="${esc(item.name)}"></label><label class="detail-cell"><span>Exchange</span><input name="exchange" required value="${esc(first.exchange || "SMART")}"></label><label class="detail-cell"><span>Primary exchange</span><input name="primary_exchange" value="${esc(first.primary_exchange || "")}"></label><label class="detail-cell"><span>Currency</span><input name="currency" required value="${esc(first.currency || "USD")}"></label></div><label><span>Symbols — one per line</span><textarea name="symbols" rows="7" required>${item.members.map((member) => esc(member.symbol)).join("\n")}</textarea></label><div class="control-rail"><button type="submit">Replace symbol list</button></div></form>`;
+  }).join("") || '<div class="empty">No CUSTOM universe is configured.</div>';
+  const createUniverse = `<form class="config-form" data-universe-create><div class="section-head"><h3>Create CUSTOM universe</h3><span class="muted">Broker-independent symbols</span></div><div class="detail-grid"><label class="detail-cell"><span>Universe ID</span><input name="universe_id" required placeholder="CUSTOM_DESK"></label><label class="detail-cell"><span>Name</span><input name="name" required placeholder="Desk list"></label><label class="detail-cell"><span>Exchange</span><input name="exchange" required value="SMART"></label><label class="detail-cell"><span>Primary exchange</span><input name="primary_exchange"></label><label class="detail-cell"><span>Currency</span><input name="currency" required value="USD"></label></div><label><span>Symbols — one per line</span><textarea name="symbols" rows="5" required></textarea></label><div class="control-rail"><button type="submit">Create universe</button></div></form>`;
+  main.innerHTML = `${head("Settings", "Backend-owned broker, universe, and run configuration; frozen strategy constants remain read-only.")}${lastOutcome ? `<p class="notice" role="status"><b>${esc(lastOutcome.apply_mode)}</b> · ${esc(lastOutcome.detail)}</p>` : ""}<section class="section"><div class="section-head"><h2>Broker</h2><span class="muted">Reconnect and reconcile only the edited environment</span></div>${broker}</section><section class="section"><div class="section-head"><h2>Universes</h2></div>${table(universeColumns, data.universes)}<div class="config-stack">${universeForms}${createUniverse}</div></section><section class="section"><div class="section-head"><h2>Runs</h2><span class="muted">Edit from Run Detail</span></div>${table([{ key: "run_id", label: "Run" }, { key: "universe", label: "Universe" }, { key: "strategy", label: "Strategy" }, { label: "Env", render: (row) => environment(row.environment) }, { label: "Enabled", render: (row) => badge(row.enabled ? "YES" : "NO", row.enabled ? "good" : "warn") }], data.runs, (row) => `run:${row.run_id}`)}</section><section class="section"><div class="section-head"><h2>Strategies</h2></div>${table(strategyColumns, data.strategies)}</section>`;
+  main.querySelectorAll("[data-broker-form]").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = Object.fromEntries(new FormData(form));
+    body.port = Number(body.port);
+    body.client_id = Number(body.client_id);
+    body.connect_timeout_seconds = Number(body.connect_timeout_seconds);
+    body.request_timeout_seconds = Number(body.request_timeout_seconds);
+    body.expected_account = body.expected_account || null;
+    try {
+      lastOutcome = await api(`/api/settings/broker/${encodeURIComponent(form.dataset.brokerForm)}`, { method: "PUT", body: JSON.stringify(body) });
+      await render();
+    } catch (error) { alert(error.message); }
+  }));
+  main.querySelectorAll("[data-universe-form]").forEach((form) => form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const fields = Object.fromEntries(new FormData(form));
+    const body = { ...fields, primary_exchange: fields.primary_exchange || null, symbols: fields.symbols.split(/[,\n]/).map((symbol) => symbol.trim()).filter(Boolean) };
+    try {
+      lastOutcome = await api(`/api/settings/universes/${encodeURIComponent(form.dataset.universeForm)}`, { method: "PUT", body: JSON.stringify(body) });
+      await render();
+    } catch (error) { alert(error.message); }
+  }));
+  main.querySelector("[data-universe-create]").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const fields = Object.fromEntries(new FormData(form));
+    const universeId = fields.universe_id;
+    delete fields.universe_id;
+    const body = { ...fields, primary_exchange: fields.primary_exchange || null, symbols: fields.symbols.split(/[,\n]/).map((symbol) => symbol.trim()).filter(Boolean) };
+    try {
+      lastOutcome = await api(`/api/settings/universes/${encodeURIComponent(universeId)}`, { method: "PUT", body: JSON.stringify(body) });
+      await render();
+    } catch (error) { alert(error.message); }
+  });
 }
 
 async function render() {

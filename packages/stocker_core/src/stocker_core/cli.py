@@ -4987,5 +4987,83 @@ def stage10_dashboard(
     uvicorn.run(dashboard, host=host, port=port, log_level="info")
 
 
+@app.command("stage10-run")
+def stage10_run(
+    runs_config: Annotated[Path, typer.Option("--runs-config")] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    database: Annotated[Path, typer.Option("--database")] = DEFAULT_RUNTIME_DATABASE,
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", min=1, max=65_535)] = 8000,
+    poll_seconds: Annotated[float, typer.Option("--poll-seconds", min=0.1)] = 1.0,
+) -> None:
+    """Run Stocker with its dashboard attached to the authoritative runtime."""
+
+    import uvicorn
+
+    from stocker_dashboard.factory import build_dashboard_app
+    from stocker_execution.runtime import build_runtime
+
+    async def serve() -> None:
+        runtime = build_runtime(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+        )
+        dashboard = build_dashboard_app(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+            runtime=runtime,
+        )
+        async def serve_dashboard() -> None:
+            while True:
+                server = uvicorn.Server(
+                    uvicorn.Config(dashboard, host=host, port=port, log_level="info")
+                )
+                try:
+                    await server.serve()
+                except SystemExit as exc:
+                    if exc.code in (None, 0):
+                        return
+                    console.print(
+                        f"Dashboard unavailable; trading runtime continues: {exc}"
+                    )
+                    await asyncio.sleep(1.0)
+                    continue
+                except Exception as exc:
+                    console.print(
+                        f"Dashboard unavailable; trading runtime continues: {exc}"
+                    )
+                    await asyncio.sleep(1.0)
+                    continue
+                return
+
+        runtime_task = asyncio.create_task(
+            runtime.run_forever(poll_interval_seconds=poll_seconds)
+        )
+        server_task = asyncio.create_task(serve_dashboard())
+        try:
+            done, _pending = await asyncio.wait(
+                (runtime_task, server_task), return_when=asyncio.FIRST_COMPLETED
+            )
+            if runtime_task in done:
+                server_task.cancel()
+                runtime_task.result()
+        finally:
+            await runtime.stop()
+            if not server_task.done():
+                server_task.cancel()
+            if not runtime_task.done():
+                await runtime_task
+
+    console.print(f"Stocker runtime + dashboard: http://{host}:{port}")
+    console.print("Run controls hot-apply; the dashboard submits no manual order.")
+    console.print("Enabled runs retain normal execution authority; use PAPER for diagnostics.")
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        console.print("Stage 10 runtime and dashboard stopped")
+
+
 if __name__ == "__main__":
     app()

@@ -87,11 +87,11 @@ tbody tr[data-action]:hover { background: #f4f8f5; }
 .detail-cell strong { display: block; margin-top: 7px; overflow-wrap: anywhere; font: 600 13px var(--mono); }
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 12px; }
 .toolbar label { display: grid; gap: 4px; color: var(--muted); font: 9px var(--mono); text-transform: uppercase; }
-select, input { min-height: 36px; padding: 7px 10px; color: var(--ink); background: var(--panel); border: 1px solid #bfc4be; border-radius: 2px; }
+select, input, textarea { min-height: 36px; padding: 7px 10px; color: var(--ink); background: var(--panel); border: 1px solid #bfc4be; border-radius: 2px; font: inherit; }
 button { min-height: 36px; padding: 8px 13px; color: white; background: var(--ink); border: 1px solid var(--ink); border-radius: 2px; cursor: pointer; font-weight: 700; }
 button.secondary { color: var(--ink); background: transparent; }
 button.danger { background: var(--red); border-color: var(--red); }
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #70e0b4; outline-offset: 2px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #70e0b4; outline-offset: 2px; }
 .order-group { margin-bottom: 12px; padding: 16px; background: var(--panel); border: 1px solid var(--line); }
 .order-title { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .order-leg { display: grid; grid-template-columns: 90px 140px 1fr auto; gap: 12px; padding: 8px 12px; border-top: 1px solid #e7e7e1; font-family: var(--mono); }
@@ -100,6 +100,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .tabs button { color: var(--muted); background: transparent; border-color: var(--line); }
 .tabs button.active { color: white; background: var(--ink); }
 .control-rail { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px; background: #e8e8e1; border: 1px solid var(--line); }
+.config-stack { display: grid; gap: 16px; margin-top: 16px; }
+.config-form { margin-top: 14px; padding: 16px; background: #efefe9; border: 1px solid var(--line); }
+.config-form h3 { margin: 0; font: 750 13px var(--mono); }
+.config-form label > span { display: block; margin: 10px 0 5px; color: var(--muted); font: 9px var(--mono); text-transform: uppercase; }
+.config-form .detail-cell input { width: 100%; margin-top: 7px; }
+.config-form textarea { width: 100%; resize: vertical; font-family: var(--mono); }
+.config-form .control-rail { margin-top: 12px; padding: 0; border: 0; }
 .notice { padding: 12px 15px; background: #e6edf1; border-left: 4px solid var(--blue); color: #29485b; }
 .error { padding: 18px; color: var(--red); background: var(--red-soft); border: 1px solid #dfb9b9; }
 .loading { padding: 40px 0; color: var(--muted); font-family: var(--mono); }

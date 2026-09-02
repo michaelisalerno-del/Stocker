@@ -9,7 +9,7 @@ from fastapi import FastAPI
 
 from stocker_core.config import RunsConfig, load_ibkr_config, load_runs_config
 from stocker_dashboard.app import create_dashboard_app
-from stocker_dashboard.controls import RunControlService
+from stocker_dashboard.controls import ActiveRuntimeControl, RunControlService
 from stocker_dashboard.read_service import DashboardReadService
 from stocker_execution.execution_ledger import ExecutionLedger
 from stocker_execution.pre_context import PriorSessionContextStore
@@ -31,11 +31,16 @@ def build_dashboard_app(
     ibkr_config_path: str | Path,
     database_path: str | Path,
     runtime_status: Callable[[], RuntimeStatus] | None = None,
+    runtime: ActiveRuntimeControl | None = None,
 ) -> FastAPI:
     """Build the dashboard without owning or starting the trading runtime."""
 
     config = load_runs_config(runs_config_path)
-    status_provider = runtime_status or _standalone_status(config, ibkr_config_path)
+    status_provider = (
+        runtime.status
+        if runtime is not None
+        else runtime_status or _standalone_status(config, ibkr_config_path)
+    )
     reads = DashboardReadService(
         config=config,
         runtime_status=status_provider,
@@ -44,7 +49,7 @@ def build_dashboard_app(
         ledger=ExecutionLedger(database_path),
         pre_context_store=PriorSessionContextStore(database_path),
     )
-    controls = RunControlService(runs_config_path, ibkr_config_path)
+    controls = RunControlService(runs_config_path, ibkr_config_path, runtime=runtime)
     return create_dashboard_app(reads, controls)
 
 

@@ -1,8 +1,10 @@
 import asyncio
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
-from stocker_core.config import RunsConfig
+import pytest
+
+from stocker_core.config import IbkrConfig, RunsConfig
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig, RunWindow
 from stocker_core.universes import InstrumentReference, UniverseDefinition
 from stocker_execution.execution_ledger import ExecutionLedger
@@ -41,6 +43,7 @@ from stocker_execution.stage5 import (
     Stage5QualifiedRequest,
     Stage5Status,
 )
+from stocker_execution.stage7 import ExecutionDestination, ExecutionRouter
 
 NOW = datetime(2026, 9, 2, 13, 55, tzinfo=UTC)
 SESSION = date(2026, 9, 2)
@@ -57,8 +60,10 @@ class FakeBroker:
         open_orders: tuple[BrokerOpenOrder, ...] = (),
         fills: tuple[BrokerFill, ...] = (),
         statuses: tuple[BrokerOrderStatus, ...] = (),
+        environment: Environment = Environment.PAPER,
     ) -> None:
-        self.environment = Environment.PAPER
+        self.environment = environment
+        self.configured_account = account
         self.account = account if connected else ""
         self.is_connected = connected
         self.connection_epoch = 1 if connected else 0
@@ -76,10 +81,10 @@ class FakeBroker:
         self.events.append("connect")
         if self.connect_error is not None:
             raise self.connect_error
-        self.account = self.account or "DU123456"
+        self.account = self.account or self.configured_account
         self.is_connected = True
         self.connection_epoch += 1
-        return BrokerSession(Environment.PAPER, self.account, True)
+        return BrokerSession(self.environment, self.account, True)
 
     def disconnect(self) -> None:
         self.events.append("disconnect")
@@ -87,10 +92,15 @@ class FakeBroker:
         self.account = ""
         self.connection_epoch += 1
 
+    def reconfigure(self, config: IbkrConfig) -> None:
+        assert not self.is_connected
+        assert config.environment is self.environment
+        self.events.append("reconfigure")
+
     async def account_state(self) -> BrokerAccountState:
         self.events.append("account_state")
         return BrokerAccountState(
-            Environment.PAPER,
+            self.environment,
             self.account,
             100_000.0,
             200_000.0,
@@ -247,6 +257,23 @@ class TriggerEntrySource:
         return {con_id: (EntryBar(t0, 99.5, 99.7, 99.4),) for con_id in instruments}
 
 
+class RollingTriggerEntrySource:
+    async def bars_for(
+        self,
+        run: RunConfig,
+        instruments: object,
+        *,
+        session: date,
+        now: datetime,
+        signals: object,
+    ) -> dict[int, tuple[EntryBar, ...]]:
+        timestamp = now.replace(second=0, microsecond=0) - timedelta(minutes=1)
+        return {
+            con_id: (EntryBar(timestamp, 99.5, 99.7, 99.4),)
+            for con_id in instruments
+        }
+
+
 class MutableClock:
     def __init__(self, now: datetime = NOW) -> None:
         self.now = now
@@ -302,14 +329,19 @@ def _runtime(
     feature_service: FakeFeatureService | None = None,
     context_provider: object | None = None,
     entry_source: object | None = None,
+    qualification_log: list[tuple[str, ...]] | None = None,
+    live_broker: FakeBroker | None = None,
 ) -> StockerRuntime:
     selected_runs = runs or (_run(),)
     features = feature_service or FakeFeatureService()
 
     async def qualify(active_runs: object) -> Stage5QualificationResult:
+        instances = tuple(active_runs)
+        if qualification_log is not None:
+            qualification_log.append(tuple(item.config.run_id for item in instances))
         memberships = tuple(
             Stage5Membership(instance.config.run_id, instance.config.universe)
-            for instance in active_runs
+            for instance in instances
         )
         return Stage5QualificationResult(
             (
@@ -321,10 +353,20 @@ def _runtime(
             (),
         )
 
+    broker_arguments: dict[str, object]
+    if live_broker is None:
+        broker_arguments = {"broker": broker, "expected_account": "DU123456"}
+    else:
+        broker_arguments = {
+            "execution_router": ExecutionRouter(
+                (
+                    ExecutionDestination(Environment.PAPER, "DU123456", broker),
+                    ExecutionDestination(Environment.LIVE, "U123456", live_broker),
+                )
+            )
+        }
     return StockerRuntime(
         config=_runs(*selected_runs),
-        broker=broker,
-        expected_account="DU123456",
         ledger=ExecutionLedger(tmp_path / "execution.sqlite3"),
         store=RuntimeStore(tmp_path / "runtime.sqlite3"),
         qualify=qualify,
@@ -333,6 +375,7 @@ def _runtime(
         entry_source=entry_source or EmptyEntrySource(),
         session_resolver=FixedSessionResolver(),
         clock=clock or MutableClock(),
+        **broker_arguments,
     )
 
 
@@ -407,6 +450,366 @@ def test_multiple_runs_coexist_and_disabled_run_never_activates(tmp_path: Path) 
         "second": RunRuntimeState.ACTIVE,
         "disabled": RunRuntimeState.DISABLED,
     }
+
+
+def test_hot_enable_prepares_run_without_replaying_missed_checkpoint(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        clock = MutableClock()
+        features = FakeFeatureService()
+        runtime = _runtime(
+            tmp_path,
+            FakeBroker(),
+            _run("existing"),
+            _run("hot", enabled=False),
+            clock=clock,
+            feature_service=features,
+            context_provider=TriggerContextProvider(),
+        )
+        await runtime.start()
+        clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+
+        status = await runtime.apply_runs_config(
+            _runs(_run("existing"), _run("hot", enabled=True)),
+            frozenset({"hot"}),
+        )
+        await runtime.poll_once()
+
+        states = {item.run_id: item.state for item in status.runs}
+        assert states["hot"] is RunRuntimeState.ACTIVE
+        assert features.calls == 1  # Existing run only; the newly enabled run is not replayed.
+        assert (
+            runtime.store.checkpoint_state(
+                "hot", SESSION, datetime(2026, 9, 2, 14, 0, tzinfo=UTC)
+            )
+            is not None
+        )
+
+    asyncio.run(scenario())
+
+
+def test_hot_disable_stops_future_evaluation_without_touching_broker_exposure(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        clock = MutableClock()
+        features = FakeFeatureService()
+        position = BrokerPosition("DU123456", 1000, "AAPL", -10, 100.0)
+        broker = FakeBroker()
+        runtime = _runtime(
+            tmp_path,
+            broker,
+            clock=clock,
+            feature_service=features,
+            context_provider=TriggerContextProvider(),
+        )
+        await runtime.start()
+        broker.positions = (position,)
+        clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+
+        status = await runtime.apply_runs_config(
+            _runs(_run(enabled=False)),
+            frozenset({"paper-run"}),
+        )
+        await runtime.poll_once()
+
+        assert status.runs[0].state is RunRuntimeState.DISABLED
+        assert features.calls == 0
+        assert broker.positions == (position,)
+        assert not hasattr(broker, "cancel_order")
+        assert "disconnect" not in broker.events
+
+    asyncio.run(scenario())
+
+
+def test_hot_risk_change_drives_future_sizing_without_reconnecting(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        clock = MutableClock()
+        broker = FakeBroker()
+        runtime = _runtime(
+            tmp_path,
+            broker,
+            clock=clock,
+            context_provider=TriggerContextProvider(),
+            entry_source=TriggerEntrySource(),
+        )
+        await runtime.start()
+        changed = _run().model_copy(
+            update={
+                "risk": RunRiskConfig(
+                    risk_per_trade=0.0005,
+                    max_concurrent_positions=2,
+                )
+            }
+        )
+
+        await runtime.apply_runs_config(_runs(changed), frozenset({"paper-run"}))
+        clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+        await runtime.poll_once()
+
+        assert len(broker.submitted) == 1
+        assert broker.submitted[0].quantity == 50
+        assert "disconnect" not in broker.events
+
+    asyncio.run(scenario())
+
+
+def test_environment_hot_change_routes_only_future_orders_and_preserves_exposure(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        clock = MutableClock()
+        paper = FakeBroker()
+        live = FakeBroker(account="U123456", environment=Environment.LIVE)
+        runtime = _runtime(
+            tmp_path,
+            paper,
+            _run("switching"),
+            clock=clock,
+            context_provider=TriggerContextProvider(),
+            entry_source=RollingTriggerEntrySource(),
+            live_broker=live,
+        )
+        await runtime.start()
+        await runtime.replace_broker_config(
+            IbkrConfig(
+                environment=Environment.LIVE,
+                host="live-gateway.local",
+                port=4001,
+                client_id=42,
+                expected_account="U123456",
+            )
+        )
+        clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+        await runtime.poll_once()
+        paper_plan = paper.submitted[0]
+        runtime.record_fill(
+            BrokerFill(
+                "paper-entry",
+                101,
+                "DU123456",
+                Environment.PAPER,
+                paper_plan.con_id,
+                paper_plan.symbol,
+                OrderAction.SELL,
+                paper_plan.quantity,
+                99.5,
+                clock.now,
+                0.0,
+            )
+        )
+        paper.positions = (
+            BrokerPosition(
+                "DU123456", paper_plan.con_id, paper_plan.symbol, -paper_plan.quantity, 99.5
+            ),
+        )
+        paper.open_orders = (
+            BrokerOpenOrder(
+                102,
+                paper_plan.order_plan_id,
+                "DU123456",
+                Environment.PAPER,
+                paper_plan.con_id,
+                paper_plan.symbol,
+                OrderRole.STOP,
+                OrderLifecycle.SUBMITTED,
+            ),
+            BrokerOpenOrder(
+                103,
+                paper_plan.order_plan_id,
+                "DU123456",
+                Environment.PAPER,
+                paper_plan.con_id,
+                paper_plan.symbol,
+                OrderRole.TARGET,
+                OrderLifecycle.SUBMITTED,
+            ),
+        )
+        clock.now = datetime(2026, 9, 2, 14, 2, tzinfo=UTC)
+
+        live_status = await runtime.apply_runs_config(
+            _runs(_run("switching", environment=Environment.LIVE)),
+            frozenset({"switching"}),
+        )
+        clock.now = datetime(2026, 9, 2, 14, 11, tzinfo=UTC)
+        await runtime.poll_once()
+
+        record = ExecutionLedger(tmp_path / "execution.sqlite3").get(
+            paper_plan.order_plan_id
+        )
+        assert record is not None and record.environment is Environment.PAPER
+        assert live_status.runs[0].environment is Environment.LIVE
+        assert len(paper.submitted) == 1
+        assert len(live.submitted) == 1
+
+        paper_status = await runtime.apply_runs_config(
+            _runs(_run("switching", environment=Environment.PAPER)),
+            frozenset({"switching"}),
+        )
+        record = ExecutionLedger(tmp_path / "execution.sqlite3").get(
+            paper_plan.order_plan_id
+        )
+        assert record is not None and record.environment is Environment.PAPER
+        assert paper_status.runs[0].environment is Environment.PAPER
+
+    asyncio.run(scenario())
+
+
+def test_run_loop_reconnects_legacy_environment_after_hot_change(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        paper = FakeBroker()
+        live = FakeBroker(account="U123456", environment=Environment.LIVE)
+        runtime = _runtime(
+            tmp_path,
+            paper,
+            _run("switching"),
+            live_broker=live,
+        )
+        loop = asyncio.create_task(runtime.run_forever(poll_interval_seconds=0.001))
+        try:
+            for _ in range(200):
+                if paper.is_connected:
+                    break
+                await asyncio.sleep(0.001)
+            assert paper.is_connected
+            await runtime.replace_broker_config(
+                IbkrConfig(
+                    environment=Environment.LIVE,
+                    host="live-gateway.local",
+                    port=4001,
+                    client_id=42,
+                    expected_account="U123456",
+                )
+            )
+            await runtime.apply_runs_config(
+                _runs(_run("switching", environment=Environment.LIVE)),
+                frozenset({"switching"}),
+            )
+            initial_connects = paper.events.count("connect")
+
+            paper.disconnect()
+            for _ in range(200):
+                if paper.events.count("connect") > initial_connects:
+                    break
+                await asyncio.sleep(0.001)
+
+            assert paper.events.count("connect") == initial_connects + 1
+            assert paper.is_connected
+        finally:
+            await runtime.stop()
+            await asyncio.wait_for(loop, timeout=1.0)
+
+    asyncio.run(scenario())
+
+
+def test_custom_universe_change_reprepares_only_affected_run_without_stage5_fetch(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        calls: list[tuple[str, ...]] = []
+        features = FakeFeatureService()
+        runtime = _runtime(
+            tmp_path,
+            FakeBroker(),
+            _run("custom", enabled=True).model_copy(update={"universe": "CUSTOM_US"}),
+            _run("other"),
+            feature_service=features,
+            qualification_log=calls,
+        )
+        await runtime.start()
+        calls.clear()
+        current = _runs(
+            _run("custom", enabled=True).model_copy(update={"universe": "CUSTOM_US"}),
+            _run("other"),
+        )
+        custom = next(
+            item for item in current.universes if item.universe_id == "CUSTOM_US"
+        )
+        updated_custom = custom.model_copy(
+            update={
+                "members": (
+                    *custom.members,
+                    InstrumentReference(
+                        symbol="msft",
+                        exchange="smart",
+                        primary_exchange="nasdaq",
+                        currency="usd",
+                    ),
+                )
+            }
+        )
+        changed = RunsConfig(
+            universes=tuple(
+                updated_custom if item.universe_id == "CUSTOM_US" else item
+                for item in current.universes
+            ),
+            runs=current.runs,
+        )
+
+        status = await runtime.apply_runs_config(changed, frozenset({"custom"}))
+
+        assert next(item for item in status.runs if item.run_id == "custom").state is (
+            RunRuntimeState.ACTIVE
+        )
+        assert calls == [("custom",)]
+        assert features.calls == 0
+
+    asyncio.run(scenario())
+
+
+def test_custom_universe_change_batches_shared_instrument_preparation(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        calls: list[tuple[str, ...]] = []
+        custom_first = _run("custom-first").model_copy(
+            update={"universe": "CUSTOM_US"}
+        )
+        custom_second = _run("custom-second").model_copy(
+            update={"universe": "CUSTOM_US"}
+        )
+        runtime = _runtime(
+            tmp_path,
+            FakeBroker(),
+            custom_first,
+            custom_second,
+            _run("other"),
+            qualification_log=calls,
+        )
+        await runtime.start()
+        calls.clear()
+        current = _runs(custom_first, custom_second, _run("other"))
+        custom = next(
+            item for item in current.universes if item.universe_id == "CUSTOM_US"
+        )
+        changed = RunsConfig(
+            universes=tuple(
+                custom.model_copy(
+                    update={
+                        "members": (
+                            *custom.members,
+                            InstrumentReference(
+                                symbol="MSFT",
+                                exchange="SMART",
+                                primary_exchange="NASDAQ",
+                                currency="USD",
+                            ),
+                        )
+                    }
+                )
+                if item.universe_id == "CUSTOM_US"
+                else item
+                for item in current.universes
+            ),
+            runs=current.runs,
+        )
+
+        await runtime.apply_runs_config(
+            changed, frozenset({"custom-first", "custom-second"})
+        )
+
+        assert calls == [("custom-first", "custom-second")]
+
+    asyncio.run(scenario())
 
 
 def test_unconfigured_live_environment_is_never_routed_to_paper(tmp_path: Path) -> None:
@@ -632,6 +1035,120 @@ def test_reconnect_with_unknown_exposure_stays_degraded(tmp_path: Path) -> None:
 
         assert runtime.status().application is ApplicationState.DEGRADED
         assert "unexpected broker position" in runtime.status().runs[0].reason
+
+    asyncio.run(scenario())
+
+
+def test_broker_config_change_reconnects_and_reconciles_affected_environment(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker = FakeBroker()
+        runtime = _runtime(tmp_path, broker)
+        await runtime.start()
+        broker.events.clear()
+
+        status = await runtime.replace_broker_config(
+            IbkrConfig(
+                environment=Environment.PAPER,
+                host="paper-gateway.local",
+                port=4002,
+                client_id=41,
+                expected_account="DU123456",
+            )
+        )
+
+        assert broker.events == [
+            "disconnect",
+            "reconfigure",
+            "connect",
+            "account_state",
+            "open_orders",
+            "statuses",
+            "fills",
+            "positions",
+        ]
+        paper = status.execution_environments[0]
+        assert paper.environment is Environment.PAPER
+        assert paper.connected is True
+        assert paper.reconciled is True
+        assert paper.ready is True
+
+    asyncio.run(scenario())
+
+
+def test_broker_config_changes_restart_only_the_selected_environment(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        paper = FakeBroker()
+        live = FakeBroker(account="U123456", environment=Environment.LIVE)
+        runtime = _runtime(
+            tmp_path,
+            paper,
+            _run("paper"),
+            _run("live", environment=Environment.LIVE),
+            live_broker=live,
+        )
+        await runtime.start()
+        live_events = tuple(live.events)
+
+        await runtime.replace_broker_config(
+            IbkrConfig(
+                environment=Environment.PAPER,
+                host="paper-gateway.local",
+                port=4002,
+                client_id=41,
+                expected_account="DU123456",
+            )
+        )
+
+        assert tuple(live.events) == live_events
+        assert live.is_connected is True
+
+        paper_events = tuple(paper.events)
+        await runtime.replace_broker_config(
+            IbkrConfig(
+                environment=Environment.LIVE,
+                host="live-gateway.local",
+                port=4001,
+                client_id=42,
+                expected_account="U123456",
+            )
+        )
+        assert tuple(paper.events) == paper_events
+        assert paper.is_connected is True
+
+    asyncio.run(scenario())
+
+
+def test_broker_account_change_with_existing_exposure_is_rejected_without_disconnect(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker = FakeBroker()
+        runtime = _runtime(tmp_path, broker)
+        await runtime.start()
+        ExecutionLedger(tmp_path / "execution.sqlite3").replace_broker_snapshot(
+            environment=Environment.PAPER,
+            account="DU123456",
+            positions=(BrokerPosition("DU123456", 1000, "AAPL", -10, 100.0),),
+            open_orders=(),
+            observed_at=NOW,
+        )
+        broker.events.clear()
+
+        with pytest.raises(ValueError, match="while broker exposure exists"):
+            await runtime.replace_broker_config(
+                IbkrConfig(
+                    environment=Environment.PAPER,
+                    host="paper-gateway.local",
+                    port=4002,
+                    client_id=41,
+                    expected_account="DU654321",
+                )
+            )
+
+        assert broker.is_connected is True
+        assert "disconnect" not in broker.events
 
     asyncio.run(scenario())
 

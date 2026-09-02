@@ -497,10 +497,11 @@ environment/account/run identity. The same `conId` may therefore be active in de
 PAPER and LIVE runs without crossing broker state.
 
 Promotion is an operational configuration change: observe a PAPER run, change only that run's
-`environment` to `LIVE` (or create a separate LIVE run), restart/reload, verify the configured LIVE
-account, reconcile it, and allow the run to become LIVE-ready. No strategy copy or code change is
-required and there is no automatic promotion. Demotion changes future execution routing only; it
-does not transfer, flatten, or relabel existing LIVE positions.
+`environment` to `LIVE` (or create a separate LIVE run), verify the configured LIVE account,
+reconcile it, and allow the run to become LIVE-ready. Stage 10 can perform this as a serialized
+run-level re-prepare from the current causal point; startup also consumes the same persisted config.
+No strategy copy or code change is required and there is no automatic promotion. Demotion changes
+future execution routing only; it does not transfer, flatten, or relabel existing LIVE positions.
 
 `stocker stage9-readiness --environment LIVE` connects the environments required by enabled runs,
 shows per-environment status, verifies the selected account/state/order/position reads and clean
@@ -551,9 +552,18 @@ Stage 7 persists its latest normalized broker position/open-order snapshot for d
 unknown broker exposure stays visible and positions are never inferred merely from submitted
 orders. The dashboard does not calculate features, qualify candidates, size risk, create order
 geometry, or communicate with IBKR. The control service serializes changes, validates complete
-`RunConfig`/`RunsConfig` values, and atomically updates the backend YAML configuration; LIVE
+`RunConfig`/`RunsConfig` values, atomically updates the backend YAML configuration, and invokes the
+active `StockerRuntime` command boundary when one is attached. Enabled state, risk, and maximum
+positions hot-apply to future opportunities. Universe, strategy, and environment changes re-prepare
+only the affected run from the current causal point, without replaying missed checkpoints. LIVE
 enablement, risk edits, and PAPER-to-LIVE changes require one confirmation bound to the configured
 LIVE account. Existing execution ledger records are never rewritten during an environment change.
+
+Editable IBKR configuration remains separated by PAPER/LIVE environment. A connection edit uses
+the Stage 8/9 reconnect path for only that environment, verifies the expected account, and
+reconciles broker orders and positions before new submissions resume. Editable `CUSTOM_...`
+membership reuses `InstrumentReference` normalization and re-prepares active consumers without
+bulk Stage 4/5 fetching; removing membership never cancels or flattens existing exposure.
 
 The dashboard may run in the runtime process by receiving `runtime.status`, or as a standalone
 process over the persisted stores. In standalone mode connectivity is deliberately reported as

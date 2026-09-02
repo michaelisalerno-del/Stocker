@@ -365,6 +365,15 @@ class IbkrConnection:
         if was_connected:
             self._connection_epoch += 1
 
+    def reconfigure(self, config: IbkrConfig) -> None:
+        """Replace validated connection settings while this socket is disconnected."""
+
+        if self.is_connected:
+            raise IbkrError("IBKR connection must be disconnected before reconfiguration")
+        if config.environment is not self.environment:
+            raise ValueError("IBKR reconfiguration cannot change execution environment")
+        self.config = config
+
     async def account_state(self) -> BrokerAccountState:
         """Read authoritative equity, buying power, and positions for this session."""
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
@@ -7,7 +9,8 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from stocker_core.config import RunsConfig, load_runs_config
+from stocker_core.cli import stage10_run
+from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig, RunWindow
 from stocker_core.universes import InstrumentReference, UniverseDefinition
 from stocker_dashboard.app import create_dashboard_app
@@ -131,6 +134,83 @@ def _runtime_status() -> RuntimeStatus:
             checkpoints_processed=1, instruments_ready=2, signals=1, orders=1, fills=1
         ),
     )
+
+
+class RecordingRuntime:
+    def __init__(self) -> None:
+        self.run_updates: list[tuple[RunsConfig, set[str]]] = []
+        self.broker_updates: list[IbkrConfig] = []
+        self._status = _runtime_status()
+
+    def status(self) -> RuntimeStatus:
+        return self._status
+
+    async def apply_runs_config(
+        self, config: RunsConfig, *, changed_run_ids: frozenset[str]
+    ) -> RuntimeStatus:
+        self.run_updates.append((config, set(changed_run_ids)))
+        self._status = RuntimeStatus(
+            application=ApplicationState.READY,
+            execution_environments=self._status.execution_environments,
+            runs=tuple(
+                RunStatus(
+                    run.run_id,
+                    run.universe,
+                    run.strategy,
+                    run.environment,
+                    RunRuntimeState.ACTIVE if run.enabled else RunRuntimeState.DISABLED,
+                    "" if run.enabled else "disabled",
+                    date(2026, 9, 2) if run.enabled else None,
+                    MarketSessionState.ACTIVE_SESSION if run.enabled else None,
+                    2 if run.enabled else 0,
+                    0,
+                    0,
+                )
+                for run in config.runs
+            ),
+            counters=self._status.counters,
+        )
+        return self._status
+
+    async def replace_broker_config(self, config: IbkrConfig) -> RuntimeStatus:
+        self.broker_updates.append(config)
+        return self._status
+
+
+class RejectingRuntime(RecordingRuntime):
+    async def apply_runs_config(
+        self, config: RunsConfig, *, changed_run_ids: frozenset[str]
+    ) -> RuntimeStatus:
+        raise ValueError("runtime rejected run config")
+
+    async def replace_broker_config(self, config: IbkrConfig) -> RuntimeStatus:
+        raise ValueError("broker exposure exists")
+
+
+class DegradingRuntime(RecordingRuntime):
+    async def apply_runs_config(
+        self, config: RunsConfig, *, changed_run_ids: frozenset[str]
+    ) -> RuntimeStatus:
+        status = await super().apply_runs_config(
+            config, changed_run_ids=changed_run_ids
+        )
+        if not changed_run_ids:
+            return status
+        degraded_id = sorted(changed_run_ids)[0]
+        self._status = replace(
+            status,
+            runs=tuple(
+                replace(
+                    item,
+                    state=RunRuntimeState.DEGRADED,
+                    reason="instrument preparation failed",
+                )
+                if item.run_id == degraded_id
+                else item
+                for item in status.runs
+            ),
+        )
+        return self._status
 
 
 def _seed_authoritative_state(tmp_path: Path) -> DashboardReadService:
@@ -434,30 +514,37 @@ def test_run_controls_validate_through_backend_and_require_live_confirmation(
     runs_path, broker_path = _write_control_files(tmp_path)
     controls = RunControlService(runs_path, broker_path)
 
-    controls.disable_run("US-SH-LIVE")
-    controls.enable_run(
-        "US-SH-LIVE",
-        confirmation=LiveConfirmation(confirmed=True, target_account="U123456"),
+    asyncio.run(controls.disable_run("US-SH-LIVE"))
+    asyncio.run(
+        controls.enable_run(
+            "US-SH-LIVE",
+            confirmation=LiveConfirmation(confirmed=True, target_account="U123456"),
+        )
     )
-    controls.update_run_config(
-        "US-SH-PAPER",
-        risk_per_trade=0.003,
-        max_concurrent_positions=4,
-        universe="NASDAQ",
-        strategy="SESSION_HARD",
+    asyncio.run(
+        controls.update_run_config(
+            "US-SH-PAPER",
+            risk_per_trade=0.003,
+            max_concurrent_positions=4,
+            universe="NASDAQ",
+            strategy="SESSION_HARD",
+        )
     )
 
     with pytest.raises(ValueError, match="LIVE confirmation"):
-        controls.change_execution_environment("US-SH-PAPER", Environment.LIVE)
-    changed = controls.change_execution_environment(
-        "US-SH-PAPER",
-        Environment.LIVE,
-        confirmation=LiveConfirmation(confirmed=True, target_account="U123456"),
+        asyncio.run(controls.change_execution_environment("US-SH-PAPER", Environment.LIVE))
+    changed = asyncio.run(
+        controls.change_execution_environment(
+            "US-SH-PAPER",
+            Environment.LIVE,
+            confirmation=LiveConfirmation(confirmed=True, target_account="U123456"),
+        )
     )
 
     loaded = load_runs_config(runs_path)
-    assert changed.environment is Environment.LIVE
-    assert changed.strategy == "SESSION_HARD"
+    assert changed.run is not None
+    assert changed.run.environment is Environment.LIVE
+    assert changed.run.strategy == "SESSION_HARD"
     assert loaded.runs[1].risk == RunRiskConfig(risk_per_trade=0.003, max_concurrent_positions=4)
 
 
@@ -466,19 +553,310 @@ def test_invalid_live_account_and_invalid_config_are_rejected(tmp_path: Path) ->
     controls = RunControlService(runs_path, broker_path)
 
     with pytest.raises(ValueError, match="target account"):
-        controls.change_execution_environment(
-            "US-SH-PAPER",
-            Environment.LIVE,
-            confirmation=LiveConfirmation(confirmed=True, target_account="WRONG"),
+        asyncio.run(
+            controls.change_execution_environment(
+                "US-SH-PAPER",
+                Environment.LIVE,
+                confirmation=LiveConfirmation(confirmed=True, target_account="WRONG"),
+            )
         )
     with pytest.raises(ValueError):
+        asyncio.run(
+            controls.update_run_config(
+                "US-SH-PAPER",
+                risk_per_trade=-1,
+                max_concurrent_positions=4,
+                universe="NASDAQ",
+                strategy="SESSION_HARD",
+            )
+        )
+
+
+def test_control_service_persists_and_returns_authoritative_runtime_state(
+    tmp_path: Path,
+) -> None:
+    runs_path, broker_path = _write_control_files(tmp_path)
+    runtime = RecordingRuntime()
+    controls = RunControlService(runs_path, broker_path, runtime=runtime)
+
+    result = asyncio.run(controls.enable_run("US-SH-PAPER"))
+
+    persisted = next(
+        run for run in load_runs_config(runs_path).runs if run.run_id == "US-SH-PAPER"
+    )
+    runtime_run = next(
+        run for run in result.runtime.runs if run.run_id == "US-SH-PAPER"
+    ) if result.runtime else None
+    assert persisted.enabled is True
+    assert runtime.run_updates[-1][1] == {"US-SH-PAPER"}
+    assert result.runtime_applied is True
+    assert runtime_run is not None and runtime_run.state is RunRuntimeState.ACTIVE
+
+
+def test_rejected_runtime_change_is_not_persisted_or_shown_as_applied(tmp_path: Path) -> None:
+    runs_path, broker_path = _write_control_files(tmp_path)
+    controls = RunControlService(runs_path, broker_path, runtime=RejectingRuntime())
+
+    result = asyncio.run(controls.disable_run("US-SH-LIVE"))
+
+    persisted = next(
+        run for run in load_runs_config(runs_path).runs if run.run_id == "US-SH-LIVE"
+    )
+    assert persisted.enabled is True
+    assert result.persisted is False
+    assert result.runtime_applied is False
+
+
+def test_broker_config_edit_persists_and_targets_only_selected_environment(
+    tmp_path: Path,
+) -> None:
+    runs_path, broker_path = _write_control_files(tmp_path)
+    runtime = RecordingRuntime()
+    controls = RunControlService(runs_path, broker_path, runtime=runtime)
+    paper = IbkrConfig(
+        environment=Environment.PAPER,
+        host="paper-gateway.local",
+        port=4002,
+        client_id=31,
+        expected_account="DU123456",
+    )
+
+    result = asyncio.run(controls.update_broker_config(paper))
+
+    assert load_ibkr_config(broker_path, Environment.PAPER) == paper
+    assert load_ibkr_config(broker_path, Environment.LIVE).host == "127.0.0.1"
+    assert runtime.broker_updates == [paper]
+    assert result.apply_mode == "RECONNECT_ENVIRONMENT"
+
+
+def test_conflicting_broker_session_identity_is_rejected(tmp_path: Path) -> None:
+    runs_path, broker_path = _write_control_files(tmp_path)
+    controls = RunControlService(runs_path, broker_path)
+
+    with pytest.raises(ValueError, match="same IBKR session identity"):
+        asyncio.run(
+            controls.update_broker_config(
+                IbkrConfig(
+                    environment=Environment.PAPER,
+                    host="127.0.0.1",
+                    port=4001,
+                    client_id=22,
+                    expected_account="DU123456",
+                )
+            )
+        )
+
+
+def test_enabled_paper_broker_requires_expected_account(tmp_path: Path) -> None:
+    runs_path, broker_path = _write_control_files(tmp_path)
+    controls = RunControlService(runs_path, broker_path)
+
+    with pytest.raises(ValueError, match="PAPER expected_account is required"):
+        asyncio.run(
+            controls.update_broker_config(
+                IbkrConfig(
+                    environment=Environment.PAPER,
+                    host="127.0.0.1",
+                    port=4002,
+                    client_id=31,
+                    expected_account=None,
+                )
+            )
+        )
+
+
+def test_runtime_rejected_broker_change_leaves_persisted_config_unchanged(
+    tmp_path: Path,
+) -> None:
+    runs_path, broker_path = _write_control_files(tmp_path)
+    controls = RunControlService(runs_path, broker_path, runtime=RejectingRuntime())
+    proposed = IbkrConfig(
+        environment=Environment.PAPER,
+        host="paper-gateway.local",
+        port=4002,
+        client_id=31,
+        expected_account="DU654321",
+    )
+
+    result = asyncio.run(controls.update_broker_config(proposed))
+
+    assert load_ibkr_config(broker_path, Environment.PAPER).expected_account == "DU123456"
+    assert result.persisted is False
+    assert result.runtime_applied is False
+
+
+def test_custom_universe_edit_normalizes_persists_and_refreshes_affected_run(
+    tmp_path: Path,
+) -> None:
+    runs_path, broker_path = _write_control_files(tmp_path)
+    runtime = RecordingRuntime()
+    controls = RunControlService(runs_path, broker_path, runtime=runtime)
+    asyncio.run(
+        controls.replace_custom_universe_symbols(
+            "custom_ops", [" aapl ", "AAPL", "msft"], name="Operations"
+        )
+    )
+    asyncio.run(
         controls.update_run_config(
             "US-SH-PAPER",
-            risk_per_trade=-1,
-            max_concurrent_positions=4,
-            universe="NASDAQ",
+            risk_per_trade=0.002,
+            max_concurrent_positions=3,
+            universe="CUSTOM_OPS",
             strategy="SESSION_HARD",
         )
+    )
+    asyncio.run(controls.enable_run("US-SH-PAPER"))
+
+    result = asyncio.run(
+        controls.replace_custom_universe_symbols(
+            "CUSTOM_OPS", ["msft", " nvda "]
+        )
+    )
+
+    universe = next(
+        item
+        for item in load_runs_config(runs_path).universes
+        if item.universe_id == "CUSTOM_OPS"
+    )
+    assert [member.symbol for member in universe.members] == ["MSFT", "NVDA"]
+    assert runtime.run_updates[-1][1] == {"US-SH-PAPER"}
+    assert result.runtime_applied is True
+
+
+def test_custom_universe_edit_reports_authoritative_degraded_run(
+    tmp_path: Path,
+) -> None:
+    runs_path, broker_path = _write_control_files(tmp_path)
+    config = load_runs_config(runs_path)
+    custom = UniverseDefinition(
+        universe_id="CUSTOM_OPS",
+        name="Operations",
+        members=(
+            InstrumentReference(
+                symbol="AAPL",
+                exchange="SMART",
+                primary_exchange="NASDAQ",
+                currency="USD",
+            ),
+        ),
+    )
+    updated = RunsConfig(
+        universes=(*config.universes, custom),
+        runs=tuple(
+            run.model_copy(update={"enabled": True, "universe": "CUSTOM_OPS"})
+            if run.run_id == "US-SH-PAPER"
+            else run
+            for run in config.runs
+        ),
+    )
+    runs_path.write_text(
+        yaml.safe_dump(updated.model_dump(mode="json")), encoding="utf-8"
+    )
+    controls = RunControlService(
+        runs_path, broker_path, runtime=DegradingRuntime()
+    )
+
+    result = asyncio.run(
+        controls.replace_custom_universe_symbols("CUSTOM_OPS", ["AAPL", "MSFT"])
+    )
+
+    assert result.persisted is True
+    assert result.runtime_applied is True
+    assert result.detail == (
+        "Saved and applied; runtime degraded: "
+        "US-SH-PAPER: instrument preparation failed"
+    )
+
+
+def test_settings_http_api_exposes_editable_broker_and_custom_universe_fields(
+    tmp_path: Path,
+) -> None:
+    service = _seed_authoritative_state(tmp_path)
+    runs_path, broker_path = _write_control_files(tmp_path)
+    controls = RunControlService(runs_path, broker_path)
+    client = TestClient(create_dashboard_app(service, controls))
+
+    broker_response = client.put(
+        "/api/settings/broker/PAPER",
+        json={
+            "host": "paper-gateway.local",
+            "port": 4002,
+            "client_id": 31,
+            "expected_account": "DU123456",
+        },
+    )
+    universe_response = client.put(
+        "/api/settings/universes/CUSTOM_DESK",
+        json={"name": "Desk", "symbols": [" aapl ", "AAPL", "msft"]},
+    )
+
+    assert broker_response.status_code == 200
+    assert broker_response.json()["runtime_applied"] is False
+    assert universe_response.status_code == 200
+    settings = client.get("/api/settings").json()
+    assert settings["broker_configuration"][0]["host"] == "paper-gateway.local"
+    assert [
+        member["symbol"] for member in settings["custom_universes"][0]["members"]
+    ] == ["AAPL", "MSFT"]
+
+
+def test_integrated_dashboard_startup_failure_does_not_stop_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import uvicorn
+
+    import stocker_dashboard.factory
+    import stocker_execution.runtime
+
+    class FakeRuntime:
+        def __init__(self) -> None:
+            self.stopping = False
+            self.stop_calls = 0
+
+        async def run_forever(self, *, poll_interval_seconds: float) -> None:
+            while not self.stopping:
+                await asyncio.sleep(0)
+
+        async def stop(self) -> None:
+            self.stop_calls += 1
+            self.stopping = True
+
+    class FakeConfig:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+    runtime = FakeRuntime()
+
+    class FakeServer:
+        attempts = 0
+
+        def __init__(self, _config: object) -> None:
+            pass
+
+        async def serve(self) -> None:
+            type(self).attempts += 1
+            if self.attempts == 1:
+                raise SystemExit(1)
+            assert runtime.stop_calls == 0
+
+    monkeypatch.setattr(stocker_execution.runtime, "build_runtime", lambda **_kwargs: runtime)
+    monkeypatch.setattr(
+        stocker_dashboard.factory, "build_dashboard_app", lambda **_kwargs: object()
+    )
+    monkeypatch.setattr(uvicorn, "Config", FakeConfig)
+    monkeypatch.setattr(uvicorn, "Server", FakeServer)
+
+    stage10_run(
+        runs_config=tmp_path / "runs.yaml",
+        ibkr_config=tmp_path / "ibkr.yaml",
+        database=tmp_path / "runtime.sqlite3",
+        host="127.0.0.1",
+        port=8000,
+        poll_seconds=0.001,
+    )
+
+    assert FakeServer.attempts == 2
+    assert runtime.stop_calls == 1
 
 
 def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:

@@ -10,10 +10,10 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from zoneinfo import ZoneInfo
 
-from stocker_core.config import RunsConfig, load_ibkr_config, load_runs_config
+from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
 from stocker_core.logging import configure_logging
 from stocker_core.runs import Environment, RunConfig, RunInstance, RunManager
 from stocker_core.universes import UniverseCatalog
@@ -281,6 +281,8 @@ class RuntimeBroker(ExecutionBroker, Protocol):
     async def connect(self) -> BrokerSession: ...
 
     def disconnect(self) -> None: ...
+
+    def reconfigure(self, config: IbkrConfig) -> None: ...
 
 
 class SessionResolver(Protocol):
@@ -659,6 +661,7 @@ class StockerRuntime:
         clock: Callable[[], datetime] | None = None,
         logger: Any | None = None,
         broker_sync_interval_seconds: float = 5.0,
+        broker_factory: Callable[[IbkrConfig], RuntimeBroker] | None = None,
     ) -> None:
         if execution_router is None:
             if broker is None or expected_account is None or not expected_account.strip():
@@ -688,13 +691,20 @@ class StockerRuntime:
         self._session_resolver = session_resolver or ExchangeSessionResolver()
         self._clock = clock or (lambda: datetime.now(tz=UTC))
         self._logger = logger or configure_logging()
+        self._broker_factory = broker_factory or (
+            lambda config: IbkrConnection(config, execution_enabled=True)
+        )
         self._broker_sync_interval = timedelta(seconds=broker_sync_interval_seconds)
+        self._config = config
         self._manager = RunManager(UniverseCatalog(config.universes), config.runs)
         self._state = ApplicationState.STOPPED
         self._run_states: dict[str, RunRuntimeState] = {}
         self._run_reasons: dict[str, str] = {}
         self._sessions: dict[str, MarketSession] = {}
         self._execution: dict[str, Stage7ExecutionService] = {}
+        self._legacy_execution: dict[
+            tuple[str, Environment], Stage7ExecutionService
+        ] = {}
         self._strategy_runtimes: dict[str, Stage7StrategyRuntime] = {}
         self._environment_ready: dict[Environment, bool] = {
             environment: False for environment in self._destinations
@@ -716,6 +726,7 @@ class StockerRuntime:
         self._state = ApplicationState.STARTING
         self._stopping = False
         self._execution.clear()
+        self._legacy_execution.clear()
         self._strategy_runtimes.clear()
         self._strategies.clear()
         self._sessions.clear()
@@ -907,9 +918,232 @@ class StockerRuntime:
 
         return self._store
 
+    async def apply_runs_config(
+        self,
+        config: RunsConfig,
+        changed_run_ids: frozenset[str],
+    ) -> RuntimeStatus:
+        """Apply validated run changes under the scheduler's existing cycle lock."""
+
+        if not changed_run_ids:
+            return self.status()
+        current_by_id = {item.run_id: item for item in self._config.runs}
+        updated_by_id = {item.run_id: item for item in config.runs}
+        current_universes = {item.universe_id: item for item in self._config.universes}
+        updated_universes = {item.universe_id: item for item in config.universes}
+        if set(current_by_id) != set(updated_by_id):
+            raise ValueError("hot apply cannot add or remove run identities")
+        unknown = changed_run_ids - set(current_by_id)
+        if unknown:
+            raise ValueError(f"unknown changed runs: {', '.join(sorted(unknown))}")
+        if any(
+            current_by_id[run_id] != updated_by_id[run_id]
+            for run_id in set(current_by_id) - changed_run_ids
+        ):
+            raise ValueError("hot apply payload changed an undeclared run")
+
+        async with self._cycle_lock:
+            now = _aware(self._clock())
+            previous_states = dict(self._run_states)
+            prepared_runs: list[RunInstance] = []
+            previous_environments: dict[str, Environment] = {}
+            self._config = config
+            self._manager = RunManager(UniverseCatalog(config.universes), config.runs)
+            for run_id, state in previous_states.items():
+                if run_id in updated_by_id and updated_by_id[run_id].enabled and state in {
+                    RunRuntimeState.READY,
+                    RunRuntimeState.ACTIVE,
+                    RunRuntimeState.STARTING,
+                }:
+                    self._manager.start_run(run_id)
+
+            for run_id in (
+                item.run_id for item in config.runs if item.run_id in changed_run_ids
+            ):
+                current = current_by_id[run_id]
+                updated = updated_by_id[run_id]
+                if not updated.enabled:
+                    self._set_run(run_id, RunRuntimeState.DISABLED, "disabled by configuration")
+                    self._replace_qualification_for(
+                        {run_id}, Stage5QualificationResult((), ())
+                    )
+                    continue
+                execution = self._execution.get(run_id)
+                restart_required = any(
+                    (
+                        current.universe != updated.universe,
+                        current_universes[current.universe]
+                        != updated_universes[updated.universe],
+                        current.strategy != updated.strategy,
+                        current.environment is not updated.environment,
+                        current.session != updated.session,
+                        not current.enabled,
+                    )
+                )
+                if not restart_required and execution is not None:
+                    execution.update_run_config(updated)
+                    continue
+                try:
+                    destination = self._router.for_environment(updated.environment)
+                except ExecutionEnvironmentUnavailableError:
+                    self._set_run(
+                        run_id,
+                        RunRuntimeState.DEGRADED,
+                        "EXECUTION_ENVIRONMENT_UNAVAILABLE",
+                    )
+                    continue
+                self._set_run(run_id, RunRuntimeState.STARTING, "")
+                self._manager.start_run(run_id)
+                execution = Stage7ExecutionService(
+                    run=updated,
+                    expected_account=destination.expected_account,
+                    broker=destination.broker,
+                    ledger=self._ledger,
+                    clock=self._clock,
+                )
+                if (
+                    current.environment is not updated.environment
+                    and run_id in self._execution
+                ):
+                    # A newly current service can also manage older exposure in its account.
+                    self._legacy_execution.pop((run_id, updated.environment), None)
+                    self._legacy_execution[(run_id, current.environment)] = self._execution[
+                        run_id
+                    ]
+                self._execution[run_id] = execution
+                result = await execution.reconcile()
+                if not result.ok:
+                    self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
+                    continue
+                strategy = self._strategies.get(run_id)
+                if strategy is None:
+                    self._ensure_strategy(run_id, execution, now)
+                else:
+                    self._strategy_runtimes[run_id] = Stage7StrategyRuntime(
+                        strategy=strategy,
+                        execution=execution,
+                    )
+                instance = self._manager.get_run(run_id)
+                market = self._resolve_market(instance, now)
+                if market is None:
+                    continue
+                self._sessions[run_id] = market
+                prepared_runs.append(instance)
+                previous_environments[run_id] = current.environment
+
+            prepared_run_ids = {instance.config.run_id for instance in prepared_runs}
+            if prepared_runs:
+                try:
+                    qualification = await self._qualify(tuple(prepared_runs))
+                except Exception as exc:
+                    self._replace_qualification_for(
+                        prepared_run_ids, Stage5QualificationResult((), ())
+                    )
+                    for run_id in prepared_run_ids:
+                        self._set_run(
+                            run_id,
+                            RunRuntimeState.DEGRADED,
+                            f"instrument preparation failed: {exc}",
+                        )
+                else:
+                    self._replace_qualification_for(prepared_run_ids, qualification)
+                    for run_id in prepared_run_ids:
+                        self._run_ready_at[run_id] = now
+                    self._mark_missed_before(now, prepared_run_ids)
+                    for instance in prepared_runs:
+                        run_id = instance.config.run_id
+                        market = self._sessions[run_id]
+                        self._set_run(
+                            run_id,
+                            RunRuntimeState.ACTIVE
+                            if market.state is MarketSessionState.ACTIVE_SESSION
+                            else RunRuntimeState.READY,
+                            "",
+                        )
+                        self._logger.info(
+                            "run_config_applied",
+                            run_id=run_id,
+                            previous_environment=previous_environments[run_id].value,
+                            environment=instance.config.environment.value,
+                        )
+            self._state = (
+                ApplicationState.READY
+                if any(self._environment_ready.values())
+                else ApplicationState.DEGRADED
+            )
+            return self.status()
+
+    async def replace_broker_config(self, config: IbkrConfig) -> RuntimeStatus:
+        """Reconnect and reconcile only one edited execution environment."""
+
+        if config.expected_account is None:
+            raise ValueError(
+                f"{config.environment.value} broker configuration requires expected_account"
+            )
+        async with self._cycle_lock:
+            environment = config.environment
+            current = self._destinations.get(environment)
+            if current is None:
+                broker = self._broker_factory(config)
+            else:
+                position_exposure = any(
+                    item.environment is environment
+                    for item in self._ledger.broker_position_snapshots()
+                )
+                order_exposure = any(
+                    item.environment is environment
+                    for item in self._ledger.broker_open_order_snapshots()
+                )
+                ledger_exposure = bool(
+                    self._ledger.active_records(environment, current.expected_account)
+                )
+                if (
+                    current.expected_account != config.expected_account
+                    and (position_exposure or order_exposure or ledger_exposure)
+                ):
+                    raise ValueError(
+                        "cannot change expected account while broker exposure exists"
+                    )
+                broker = cast(RuntimeBroker, current.broker)
+                broker.disconnect()
+                reconfigure = getattr(broker, "reconfigure", None)
+                if reconfigure is None:
+                    raise ValueError("runtime broker does not support connection reconfiguration")
+                reconfigure(config)
+            replacement = ExecutionDestination(environment, config.expected_account, broker)
+            destinations = {**self._destinations, environment: replacement}
+            self._router = ExecutionRouter(tuple(destinations.values()))
+            self._destinations = destinations
+            self._environment_ready[environment] = False
+            self._environment_reconciled[environment] = False
+            for run_id, execution in self._execution_services():
+                if execution.run_environment is not environment:
+                    continue
+                replacement_execution = Stage7ExecutionService(
+                    run=execution.run_config,
+                    expected_account=config.expected_account,
+                    broker=broker,
+                    ledger=self._ledger,
+                    clock=self._clock,
+                )
+                legacy_key = (run_id, environment)
+                if self._legacy_execution.get(legacy_key) is execution:
+                    self._legacy_execution[legacy_key] = replacement_execution
+                    continue
+                self._execution[run_id] = replacement_execution
+                strategy = self._strategies.get(run_id)
+                if strategy is not None:
+                    self._strategy_runtimes[run_id] = Stage7StrategyRuntime(
+                        strategy=strategy,
+                        execution=replacement_execution,
+                    )
+            return await self._reconnect(environment)
+
     async def poll_once(self) -> RuntimeStatus:
         """Process currently due checkpoints and causal entry observations once."""
 
+        if self._state is not ApplicationState.READY:
+            return self.status()
         async with self._cycle_lock:
             return await self._poll_once()
 
@@ -920,7 +1154,8 @@ class StockerRuntime:
         if self._state is not ApplicationState.READY or self._stopping:
             return self.status()
         required_environments = {
-            execution.run_environment for execution in self._execution.values()
+            execution.run_environment
+            for _run_id, execution in self._execution_services()
         }
         for environment in required_environments:
             if not self._destinations[environment].broker.is_connected:
@@ -979,8 +1214,17 @@ class StockerRuntime:
     async def reconnect(self, environment: Environment | None = None) -> RuntimeStatus:
         """Reconnect only affected environments, then verify and reconcile each one."""
 
+        async with self._cycle_lock:
+            return await self._reconnect(environment)
+
+    async def _reconnect(self, environment: Environment | None = None) -> RuntimeStatus:
+        """Internal reconnect path shared by recovery and serialized controls."""
+
         now = _aware(self._clock())
-        required = {execution.run_environment for execution in self._execution.values()}
+        required = {
+            execution.run_environment
+            for _run_id, execution in self._execution_services()
+        }
         targets = (
             {environment}
             if environment is not None
@@ -1001,8 +1245,15 @@ class StockerRuntime:
                 for instance in self._manager.list_runs()
                 if instance.config.run_id in self._execution
                 and instance.config.environment is target
+                and instance.config.enabled
             ]
-            destination.broker.disconnect()
+            services = tuple(
+                (run_id, execution)
+                for run_id, execution in self._execution_services()
+                if execution.run_environment is target
+            )
+            if destination.broker.is_connected:
+                destination.broker.disconnect()
             self._environment_ready[target] = False
             self._environment_reconciled[target] = False
             try:
@@ -1026,9 +1277,7 @@ class StockerRuntime:
                 continue
 
             reconciled = True
-            for instance in affected:
-                run_id = instance.config.run_id
-                execution = self._execution[run_id]
+            for run_id, execution in services:
                 result = await execution.refresh_broker_state()
                 self._store.record_reconciliation(
                     environment=target,
@@ -1049,7 +1298,9 @@ class StockerRuntime:
                         reason=result.detail,
                     )
                 else:
-                    self._ensure_strategy(run_id, execution, now)
+                    current_execution = self._execution.get(run_id)
+                    if current_execution is execution:
+                        self._ensure_strategy(run_id, execution, now)
             self._environment_reconciled[target] = reconciled
             self._environment_ready[target] = reconciled
             if reconciled:
@@ -1065,6 +1316,7 @@ class StockerRuntime:
                 instance.config.run_id not in self._execution
                 or instance.config.environment not in targets
                 or not self._environment_ready[instance.config.environment]
+                or not instance.config.enabled
             ):
                 continue
             market = self._resolve_market(instance, now)
@@ -1127,11 +1379,13 @@ class StockerRuntime:
         while not self._stopping:
             if self._state is ApplicationState.READY:
                 await self.poll_once()
-            if self._execution and any(
+            execution_services = self._execution_services()
+            if execution_services and any(
                 not self._environment_ready[environment]
                 or not self._destinations[environment].broker.is_connected
                 for environment in {
-                    execution.run_environment for execution in self._execution.values()
+                    execution.run_environment
+                    for _run_id, execution in execution_services
                 }
             ):
                 await self.reconnect()
@@ -1311,16 +1565,11 @@ class StockerRuntime:
                     instruments_ready=ready,
                     signals_today=run_counters.signals,
                     open_positions=sum(
-                        record.run_id == run.run_id
-                        and record.filled_quantity > record.closed_quantity
-                        for record in (
-                            self._ledger.active_records(
-                                run.environment,
-                                self._destinations[run.environment].expected_account,
-                            )
-                            if run.environment in self._destinations
-                            else ()
-                        )
+                        record.filled_quantity > record.closed_quantity
+                        for record in self._ledger.list_records(
+                            run_id=run.run_id,
+                            limit=500,
+                        )[0]
                     ),
                 )
             )
@@ -1640,7 +1889,7 @@ class StockerRuntime:
     def _note_disconnect(self, environment: Environment, now: datetime) -> None:
         self._environment_ready[environment] = False
         self._environment_reconciled[environment] = False
-        for run_id, execution in self._execution.items():
+        for run_id, execution in self._execution_services():
             if execution.run_environment is not environment:
                 continue
             self._set_run(run_id, RunRuntimeState.DEGRADED, "BROKER_DISCONNECTED")
@@ -1656,13 +1905,16 @@ class StockerRuntime:
         """Poll durable broker state without allowing orders during the refresh."""
 
         self._state = ApplicationState.RECONCILING
-        for environment in {execution.run_environment for execution in self._execution.values()}:
+        for environment in {
+            execution.run_environment
+            for _run_id, execution in self._execution_services()
+        }:
             destination = self._destinations[environment]
             if not destination.broker.is_connected:
                 self._note_disconnect(environment, now)
                 continue
             environment_ok = True
-            for run_id, execution in self._execution.items():
+            for run_id, execution in self._execution_services():
                 if execution.run_environment is not environment:
                     continue
                 try:
@@ -1708,6 +1960,15 @@ class StockerRuntime:
             else ApplicationState.DEGRADED
         )
         return self._state is ApplicationState.READY
+
+    def _execution_services(self) -> tuple[tuple[str, Stage7ExecutionService], ...]:
+        return (
+            *self._execution.items(),
+            *(
+                (run_id, service)
+                for (run_id, _environment), service in self._legacy_execution.items()
+            ),
+        )
 
 
 def _session_matches_destination(session: BrokerSession, destination: ExecutionDestination) -> bool:

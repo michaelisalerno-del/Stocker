@@ -281,6 +281,25 @@ class Stage7ExecutionService:
     def run_environment(self) -> Environment:
         return self._run.environment
 
+    @property
+    def run_config(self) -> RunConfig:
+        """Return the immutable config that owns this execution lineage."""
+
+        return self._run
+
+    def update_run_config(self, run: RunConfig) -> None:
+        """Apply future-only risk changes without resetting reconciliation state."""
+
+        if (
+            run.run_id != self._run.run_id
+            or run.universe != self._run.universe
+            or run.strategy != self._run.strategy
+            or run.environment is not self._run.environment
+            or run.session != self._run.session
+        ):
+            raise ValueError("Stage 7 hot apply accepts risk/enabled changes only")
+        self._run = run
+
     async def reconcile(self) -> ReconciliationResult:
         """Compare broker orders/positions/fills with local execution state."""
 

@@ -11,9 +11,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from stocker_core.config import load_runs_config
+from stocker_core.config import IbkrConfig, load_runs_config
 from stocker_core.runs import Environment
-from stocker_dashboard.controls import LiveConfirmation, RunControlService
+from stocker_dashboard.controls import ControlResult, LiveConfirmation, RunControlService
 from stocker_dashboard.read_service import DashboardReadService
 
 
@@ -31,6 +31,24 @@ class RunUpdateBody(ConfirmationBody):
 
 class EnvironmentBody(ConfirmationBody):
     environment: Environment
+
+
+class BrokerConfigBody(BaseModel):
+    host: str
+    port: int
+    client_id: int
+    expected_account: str | None = None
+    connect_timeout_seconds: float = 5.0
+    request_timeout_seconds: float = 60.0
+
+
+class CustomUniverseBody(BaseModel):
+    name: str | None = None
+    symbols: list[str]
+    exchange: str = "SMART"
+    primary_exchange: str | None = None
+    currency: str = "USD"
+    security_type: str = "STK"
 
 
 def create_dashboard_app(reads: DashboardReadService, controls: RunControlService) -> FastAPI:
@@ -135,7 +153,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
 
     @app.get("/api/settings")
     def settings() -> dict[str, Any]:
-        return reads.settings()
+        return {**reads.settings(), **controls.configuration()}
 
     @app.get("/api/runs/{run_id}/live-confirmation")
     def live_confirmation(run_id: str) -> dict[str, object]:
@@ -146,29 +164,31 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             return None
         return LiveConfirmation(body.confirmed, body.target_account)
 
-    def changed(run: Any) -> dict[str, Any]:
+    def changed(result: ControlResult) -> dict[str, object]:
         reads.config = load_runs_config(controls.runs_config_path)
-        return {"run": run.model_dump(mode="json"), "restart_required": True}
+        return result.as_dict()
 
     @app.post("/api/runs/{run_id}/enable")
-    def enable(run_id: str, body: ConfirmationBody) -> dict[str, Any]:
+    async def enable(run_id: str, body: ConfirmationBody) -> dict[str, Any]:
         try:
-            return changed(controls.enable_run(run_id, confirmation=confirmation(body)))
+            return changed(
+                await controls.enable_run(run_id, confirmation=confirmation(body))
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/runs/{run_id}/disable")
-    def disable(run_id: str) -> dict[str, Any]:
+    async def disable(run_id: str) -> dict[str, Any]:
         try:
-            return changed(controls.disable_run(run_id))
+            return changed(await controls.disable_run(run_id))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.put("/api/runs/{run_id}")
-    def update(run_id: str, body: RunUpdateBody) -> dict[str, Any]:
+    async def update(run_id: str, body: RunUpdateBody) -> dict[str, Any]:
         try:
             return changed(
-                controls.update_run_config(
+                await controls.update_run_config(
                     run_id,
                     universe=body.universe,
                     strategy=body.strategy,
@@ -181,13 +201,44 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/runs/{run_id}/environment")
-    def environment(run_id: str, body: EnvironmentBody) -> dict[str, Any]:
+    async def environment(run_id: str, body: EnvironmentBody) -> dict[str, Any]:
         try:
             return changed(
-                controls.change_execution_environment(
+                await controls.change_execution_environment(
                     run_id, body.environment, confirmation=confirmation(body)
                 )
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/api/settings/broker/{environment}")
+    async def broker_config(
+        environment: Environment, body: BrokerConfigBody
+    ) -> dict[str, Any]:
+        try:
+            result = await controls.update_broker_config(
+                IbkrConfig(environment=environment, **body.model_dump())
+            )
+            return result.as_dict()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/api/settings/universes/{universe_id}")
+    async def custom_universe(
+        universe_id: str, body: CustomUniverseBody
+    ) -> dict[str, Any]:
+        try:
+            result = await controls.replace_custom_universe_symbols(
+                universe_id,
+                body.symbols,
+                name=body.name,
+                exchange=body.exchange,
+                primary_exchange=body.primary_exchange,
+                currency=body.currency,
+                security_type=body.security_type,
+            )
+            reads.config = load_runs_config(controls.runs_config_path)
+            return result.as_dict()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

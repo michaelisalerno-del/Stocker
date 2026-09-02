@@ -4,20 +4,25 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
-from math import log
 
 from stocker_core.runs import Environment
 from stocker_execution.ibkr import (
     CurrentQuote,
     IbkrApiError,
     IbkrConnection,
-    IbkrError,
     OptionChainDefinition,
-    OptionContractRequest,
+    OptionMarketSnapshot,
     QualifiedInstrument,
     QualifiedOption,
+    sanitize_ibkr_message,
+)
+from stocker_execution.pre_context import (
+    build_pre_context_option_request_groups,
+    next_pre_context_target_session,
+    pre_context_session_contract,
+    select_nearest_pre_context_qualified_options,
 )
 
 
@@ -61,7 +66,7 @@ class IbkrDataDiagnosticReport:
     checks: tuple[IbkrDataCheck, ...]
 
 
-_NOT_ENTITLED_CODES = frozenset({354, 10090, 10186})
+_NOT_ENTITLED_CODES = frozenset({354, 10089, 10090, 10186})
 _SESSION_ERROR_CODES = frozenset({501, 502, 503, 504, 1100, 1101, 1102, 1300, 10197})
 _CONTRACT_ERROR_CODES = frozenset({200, 203, 321, 322})
 
@@ -74,19 +79,8 @@ def classify_ibkr_data_failure(
 ) -> IbkrDataStatus:
     """Classify a failed request without disguising unknown broker responses."""
 
-    if delayed_available:
-        return IbkrDataStatus.DELAYED_ONLY
     codes = {error.code for error in errors}
     text = " ".join([*(error.message.lower() for error in errors), str(exception or "").lower()])
-    if codes & _NOT_ENTITLED_CODES or any(
-        phrase in text
-        for phrase in (
-            "not subscribed",
-            "market data permissions",
-            "no market data permission",
-        )
-    ):
-        return IbkrDataStatus.NOT_ENTITLED
     if codes & _SESSION_ERROR_CODES or any(
         phrase in text
         for phrase in (
@@ -107,6 +101,18 @@ def classify_ibkr_data_failure(
         )
     ):
         return IbkrDataStatus.CONTRACT_ERROR
+    if delayed_available:
+        return IbkrDataStatus.DELAYED_ONLY
+    if codes & _NOT_ENTITLED_CODES or any(
+        phrase in text
+        for phrase in (
+            "not subscribed",
+            "requires additional subscription",
+            "market data permissions",
+            "no market data permission",
+        )
+    ):
+        return IbkrDataStatus.NOT_ENTITLED
     return IbkrDataStatus.UNKNOWN
 
 
@@ -130,6 +136,14 @@ async def diagnose_ibkr_data(
     instrument: QualifiedInstrument | None = None
     quote: CurrentQuote | None = None
     reference_price: float | None = None
+    option_observation_date: date | None = None
+    try:
+        target_session = next_pre_context_target_session(now)
+        option_observation_date, _, previous_close_at, _ = pre_context_session_contract(
+            target_session
+        )
+    except ValueError:
+        previous_close_at = None
     chains: tuple[OptionChainDefinition, ...] = ()
 
     try:
@@ -196,9 +210,6 @@ async def diagnose_ibkr_data(
 
         quote, quote_check = await _diagnose_stock_snapshot(connection, instrument)
         checks.append(quote_check)
-        if quote is not None:
-            reference_price = quote.last or quote.close
-
         with connection.capture_api_errors() as errors:
             try:
                 bars = await connection.historical_bars(
@@ -207,6 +218,7 @@ async def diagnose_ibkr_data(
                     duration="1 D",
                     what_to_show="TRADES",
                     regular_trading_hours=True,
+                    end_time=previous_close_at,
                 )
             except Exception as exc:
                 checks.append(
@@ -254,11 +266,11 @@ async def diagnose_ibkr_data(
                     )
                 )
 
-        if not chains or reference_price is None:
+        if not chains or reference_price is None or option_observation_date is None:
             reason = (
                 "option-chain metadata was unavailable"
                 if not chains
-                else "no stock reference price was available for the diagnostic option pair"
+                else "no historical reference was available for the PRE option selector"
             )
             _append_option_not_checked(checks, reason, instrument)
         else:
@@ -267,7 +279,7 @@ async def diagnose_ibkr_data(
                 instrument,
                 chains,
                 reference_price=reference_price,
-                as_of=now,
+                observation_date=option_observation_date,
             )
             checks.extend(option_checks)
         return IbkrDataDiagnosticReport(environment, masked_account, symbol, tuple(checks))
@@ -295,10 +307,16 @@ async def _diagnose_stock_snapshot(
                         instrument=instrument,
                         required_for="read-only current quote diagnostics",
                     )
+            status = classify_ibkr_data_failure(
+                tuple([*live_errors, *delayed_errors]),
+                exception=live_exc,
+                delayed_available=True,
+            )
             return delayed, IbkrDataCheck(
                 IbkrDataCapability.STOCK_SNAPSHOT,
-                IbkrDataStatus.DELAYED_ONLY,
-                f"live request failed ({live_exc}); delayed quote is available",
+                status,
+                "live request failed "
+                f"({sanitize_ibkr_message(live_exc)}); delayed quote is available",
                 tuple([*live_errors, *delayed_errors]),
                 instrument.symbol,
                 instrument.primary_exchange or instrument.exchange,
@@ -306,11 +324,14 @@ async def _diagnose_stock_snapshot(
                 "read-only current quote diagnostics",
                 _underlying_entitlement(instrument),
             )
-    if quote.market_data_type in {3, 4}:
+    if quote.market_data_type in {1, 2}:
+        status = IbkrDataStatus.AVAILABLE
+        delayed_available = False
+    elif quote.market_data_type in {3, 4}:
         status = IbkrDataStatus.DELAYED_ONLY
         delayed_available = True
     else:
-        status = IbkrDataStatus.AVAILABLE
+        status = IbkrDataStatus.UNKNOWN
         delayed_available = False
     return quote, IbkrDataCheck(
         IbkrDataCapability.STOCK_SNAPSHOT,
@@ -331,23 +352,21 @@ async def _diagnose_option_data(
     chains: tuple[OptionChainDefinition, ...],
     *,
     reference_price: float,
-    as_of: datetime,
+    observation_date: date,
 ) -> tuple[IbkrDataCheck, IbkrDataCheck]:
-    with connection.capture_api_errors() as errors:
+    with connection.capture_api_errors() as qualification_errors:
         try:
-            options = await _qualify_diagnostic_option_pair(
+            options = await _qualify_pre_context_option_set(
                 connection,
+                instrument,
                 chains,
-                symbol=instrument.symbol,
-                currency=instrument.currency,
                 reference_price=reference_price,
-                as_of=as_of,
+                observation_date=observation_date,
             )
-            snapshots = await connection.option_snapshots(options)
         except Exception as exc:
             failure = _failure_check(
                 IbkrDataCapability.OPTION_QUOTE,
-                errors,
+                qualification_errors,
                 exc,
                 instrument=instrument,
                 required_for="Stage 4 call/put bid, ask, and open-interest selection",
@@ -355,7 +374,7 @@ async def _diagnose_option_data(
             )
             iv_failure = _failure_check(
                 IbkrDataCapability.OPTION_MODEL_IV,
-                errors,
+                qualification_errors,
                 exc,
                 instrument=instrument,
                 required_for="canonical PRE_CONTEXT_V1 ATM IV",
@@ -363,42 +382,70 @@ async def _diagnose_option_data(
             )
             return failure, iv_failure
 
-    quote_complete = all(
-        item.bid is not None and item.ask is not None and item.open_interest is not None
-        for item in snapshots
+    live_exception: Exception | None = None
+    with connection.capture_api_errors() as live_errors:
+        try:
+            live_snapshots = await connection.option_snapshots(options, market_data_type=1)
+        except Exception as exc:
+            live_exception = exc
+            live_snapshots = ()
+
+    live_quote_complete = _option_quote_complete(live_snapshots, market_data_types={1, 2})
+    live_iv_complete = _option_iv_complete(live_snapshots, market_data_types={1, 2})
+    delayed_snapshots: tuple[OptionMarketSnapshot, ...] = ()
+    delayed_errors: list[IbkrApiError] = []
+    delayed_exception: Exception | None = None
+    if not (live_quote_complete and live_iv_complete):
+        with connection.capture_api_errors() as delayed_errors:
+            try:
+                delayed_snapshots = await connection.option_snapshots(
+                    options, market_data_type=3
+                )
+            except Exception as exc:
+                delayed_exception = exc
+
+    errors = tuple([*qualification_errors, *live_errors, *delayed_errors])
+    delayed_quote_available = _option_quote_complete(
+        delayed_snapshots, market_data_types={3, 4}
     )
-    iv_complete = all(
-        item.model_iv is not None and item.market_data_type in {1, 2} for item in snapshots
+    delayed_iv_available = _option_iv_complete(
+        delayed_snapshots, market_data_types={3, 4}
     )
-    live_or_frozen = bool(snapshots) and all(
-        item.market_data_type in {1, 2} for item in snapshots
-    )
-    delayed = any(item.market_data_type in {3, 4} for item in snapshots)
+    failure_exception = delayed_exception or live_exception
+
     option_exchange = options[0].exchange if options else instrument.exchange
-    if quote_complete and live_or_frozen:
+    if live_quote_complete:
         quote_status = IbkrDataStatus.AVAILABLE
         quote_detail = "call/put bid, ask, and open interest received"
-    elif quote_complete and delayed:
-        quote_status = IbkrDataStatus.DELAYED_ONLY
+    elif delayed_quote_available:
+        quote_status = classify_ibkr_data_failure(
+            errors,
+            exception=failure_exception,
+            delayed_available=True,
+        )
         quote_detail = "only delayed call/put bid, ask, and open interest received"
     else:
-        quote_status = classify_ibkr_data_failure(tuple(errors), delayed_available=delayed)
+        quote_status = classify_ibkr_data_failure(errors, exception=failure_exception)
         quote_detail = "call/put bid, ask, or open interest missing"
-    if iv_complete:
+    if live_iv_complete:
         iv_status = IbkrDataStatus.AVAILABLE
         iv_detail = "live/frozen tick-13 model implied volatility received for call and put"
     else:
-        iv_status = classify_ibkr_data_failure(tuple(errors), delayed_available=delayed)
+        iv_status = classify_ibkr_data_failure(
+            errors,
+            exception=failure_exception,
+            delayed_available=delayed_iv_available,
+        )
         iv_detail = "required live/frozen tick-13 model implied volatility missing"
     return (
         IbkrDataCheck(
             IbkrDataCapability.OPTION_QUOTE,
             quote_status,
             quote_detail,
-            tuple(errors),
+            errors,
             instrument.symbol,
             option_exchange,
-            quote_status is IbkrDataStatus.DELAYED_ONLY,
+            delayed_quote_available,
             "Stage 4 call/put bid, ask, and open-interest selection",
             _option_entitlement(instrument),
         ),
@@ -406,72 +453,63 @@ async def _diagnose_option_data(
             IbkrDataCapability.OPTION_MODEL_IV,
             iv_status,
             iv_detail,
-            tuple(errors),
+            errors,
             instrument.symbol,
             option_exchange,
-            iv_status is IbkrDataStatus.DELAYED_ONLY,
+            delayed_iv_available,
             "canonical PRE_CONTEXT_V1 ATM IV",
             _option_model_entitlement(instrument),
         ),
     )
 
 
-async def _qualify_diagnostic_option_pair(
+def _option_quote_complete(
+    snapshots: tuple[OptionMarketSnapshot, ...], *, market_data_types: set[int]
+) -> bool:
+    return bool(snapshots) and all(
+        item.market_data_type in market_data_types
+        and item.bid is not None
+        and item.ask is not None
+        and item.open_interest is not None
+        for item in snapshots
+    )
+
+
+def _option_iv_complete(
+    snapshots: tuple[OptionMarketSnapshot, ...], *, market_data_types: set[int]
+) -> bool:
+    return bool(snapshots) and all(
+        item.market_data_type in market_data_types and item.model_iv is not None
+        for item in snapshots
+    )
+
+
+async def _qualify_pre_context_option_set(
     connection: IbkrConnection,
+    instrument: QualifiedInstrument,
     chains: tuple[OptionChainDefinition, ...],
     *,
-    symbol: str,
-    currency: str,
     reference_price: float,
-    as_of: datetime,
+    observation_date: date,
 ) -> tuple[QualifiedOption, ...]:
-    """Choose one small current pair only to exercise the existing data calls."""
+    """Use the frozen PRE request and nearest-strike selectors without redefining them."""
 
-    attempts = 0
-    observation_date = as_of.date()
-    expiries = sorted(
-        {
-            expiry
-            for chain in chains
-            if chain.exchange.upper() == "SMART"
-            for expiry in chain.expirations
-            if 7 <= (expiry - observation_date).days <= 45
-        }
+    request_groups = build_pre_context_option_request_groups(
+        instrument,
+        chains,
+        previous_close=reference_price,
+        observation_date=observation_date,
     )
-    for expiry in expiries:
-        for chain in chains:
-            if chain.exchange.upper() != "SMART" or expiry not in chain.expirations:
-                continue
-            strikes = sorted(
-                (
-                    strike
-                    for strike in chain.strikes
-                    if reference_price * 0.75 <= strike <= reference_price * 1.25
-                ),
-                key=lambda strike: (abs(log(strike / reference_price)), strike),
+    for requests in request_groups:
+        qualified = await connection.qualify_options(requests)
+        try:
+            return select_nearest_pre_context_qualified_options(
+                qualified,
+                previous_close=reference_price,
             )
-            for strike in strikes:
-                attempts += 1
-                requests = tuple(
-                    OptionContractRequest(
-                        symbol,
-                        chain.exchange,
-                        currency,
-                        expiry,
-                        strike,
-                        right,
-                        chain.multiplier,
-                        chain.trading_class,
-                    )
-                    for right in ("C", "P")
-                )
-                qualified = await connection.qualify_options(requests)
-                rights = {item.right.upper()[0] for item in qualified}
-                if rights == {"C", "P"}:
-                    return qualified
-                if attempts >= 12:
-                    raise IbkrError("diagnostic option pair did not qualify within 12 attempts")
-    raise IbkrError("no current 7-45 DTE SMART diagnostic option pair could be qualified")
+        except ValueError:
+            continue
+    raise ValueError("no eligible qualified common-strike expiry")
 
 
 def _success_check(
@@ -516,7 +554,7 @@ def _failure_check(
     return IbkrDataCheck(
         capability,
         classify_ibkr_data_failure(normalized_errors, exception=exception),
-        str(exception),
+        sanitize_ibkr_message(exception),
         normalized_errors,
         resolved_symbol,
         resolved_exchange,

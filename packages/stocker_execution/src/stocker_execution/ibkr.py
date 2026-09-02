@@ -1,6 +1,7 @@
 """Minimal IBKR connection, market-data, and explicit execution boundary."""
 
 import asyncio
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
@@ -40,6 +41,20 @@ class IbkrApiError:
     con_id: int | None
     symbol: str | None
     exchange: str | None
+
+
+_IBKR_ACCOUNT_IDENTIFIER = re.compile(
+    r"\b((?:DU|U|F|FA|D|DF|I|IB|M|S))(\d{4,})\b", re.IGNORECASE
+)
+
+
+def sanitize_ibkr_message(message: object) -> str:
+    """Mask recognizable IBKR account identifiers in diagnostic text."""
+
+    return _IBKR_ACCOUNT_IDENTIFIER.sub(
+        lambda match: f"{match.group(1)}***{match.group(2)[-3:]}",
+        str(message),
+    )
 
 
 class _IbClient(Protocol):
@@ -404,7 +419,7 @@ class IbkrConnection:
                 IbkrApiError(
                     request_id=int(request_id),
                     code=int(code),
-                    message=str(message),
+                    message=sanitize_ibkr_message(message),
                     con_id=_optional_contract_integer(contract, "conId"),
                     symbol=_optional_contract_text(contract, "symbol"),
                     exchange=_optional_contract_text(contract, "exchange"),
@@ -836,17 +851,19 @@ class IbkrConnection:
         )
 
     async def option_snapshots(
-        self, options: tuple[QualifiedOption, ...]
+        self, options: tuple[QualifiedOption, ...], *, market_data_type: int = 1
     ) -> tuple[OptionMarketSnapshot, ...]:
         """Capture tick-13 model computations plus generic-101 open interest."""
 
         self._require_connected()
         if not options:
             raise IbkrError("At least one qualified option is required")
+        if market_data_type not in {1, 2, 3, 4}:
+            raise IbkrError("IBKR market data type must be one of 1, 2, 3, or 4")
         unique_options = tuple({option.con_id: option for option in options}.values())
         contracts = tuple(_to_ib_option_contract(option) for option in unique_options)
         try:
-            self._client.reqMarketDataType(1)
+            self._client.reqMarketDataType(market_data_type)
             tickers = tuple(
                 self._client.reqMktData(
                     contract,
@@ -858,7 +875,11 @@ class IbkrConnection:
             )
             deadline = asyncio.get_running_loop().time() + self.config.request_timeout_seconds
             while not all(
-                _option_snapshot_complete(cast(_SourceOptionTicker, ticker), option)
+                _option_snapshot_complete(
+                    cast(_SourceOptionTicker, ticker),
+                    option,
+                    allow_delayed_model=market_data_type in {3, 4},
+                )
                 for ticker, option in zip(tickers, unique_options, strict=True)
             ):
                 if asyncio.get_running_loop().time() >= deadline:
@@ -874,8 +895,17 @@ class IbkrConnection:
         normalized: list[OptionMarketSnapshot] = []
         for option, source in zip(unique_options, tickers, strict=True):
             ticker = cast(_SourceOptionTicker, source)
-            market_data_type = _optional_integer(getattr(ticker, "marketDataType", None))
-            model = getattr(ticker, "modelGreeks", None) if market_data_type in {1, 2} else None
+            reported_market_data_type = _optional_integer(
+                getattr(ticker, "marketDataType", None)
+            )
+            accepted_model_types = (
+                {1, 2, 3, 4} if market_data_type in {3, 4} else {1, 2}
+            )
+            model = (
+                getattr(ticker, "modelGreeks", None)
+                if reported_market_data_type in accepted_model_types
+                else None
+            )
             normalized.append(
                 OptionMarketSnapshot(
                     option=option,
@@ -883,7 +913,7 @@ class IbkrConnection:
                     bid=_optional_number(getattr(ticker, "bid", None)),
                     ask=_optional_number(getattr(ticker, "ask", None)),
                     open_interest=_option_open_interest(ticker, option),
-                    market_data_type=market_data_type,
+                    market_data_type=reported_market_data_type,
                     model_iv=_optional_number(getattr(model, "impliedVol", None)),
                     model_delta=_optional_number(getattr(model, "delta", None)),
                     model_gamma=_optional_number(getattr(model, "gamma", None)),
@@ -1109,18 +1139,26 @@ def _option_open_interest(ticker: _SourceOptionTicker, option: QualifiedOption) 
     return _optional_number(right_specific)
 
 
-def _option_snapshot_complete(ticker: _SourceOptionTicker, option: QualifiedOption) -> bool:
+def _option_snapshot_complete(
+    ticker: _SourceOptionTicker,
+    option: QualifiedOption,
+    *,
+    allow_delayed_model: bool,
+) -> bool:
     market_data_type = _optional_integer(getattr(ticker, "marketDataType", None))
-    model = getattr(ticker, "modelGreeks", None) if market_data_type in {1, 2} else None
-    return all(
-        value is not None
-        for value in (
-            _optional_number(getattr(ticker, "bid", None)),
-            _optional_number(getattr(ticker, "ask", None)),
-            _option_open_interest(ticker, option),
-            _optional_number(getattr(model, "impliedVol", None)),
-        )
+    accepted_model_types = {1, 2, 3, 4} if allow_delayed_model else {1, 2}
+    model = (
+        getattr(ticker, "modelGreeks", None)
+        if market_data_type in accepted_model_types
+        else None
     )
+    values = [
+        _optional_number(getattr(ticker, "bid", None)),
+        _optional_number(getattr(ticker, "ask", None)),
+        _option_open_interest(ticker, option),
+    ]
+    values.append(_optional_number(getattr(model, "impliedVol", None)))
+    return all(value is not None for value in values)
 
 
 def _optional_integer(value: object) -> int | None:

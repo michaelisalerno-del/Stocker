@@ -411,7 +411,9 @@ class PriorSessionContextService:
             existing = self._context_store.get(instrument, session=session)
             if existing is not None:
                 return PriorSessionContextResult(ContextStatus.READY, existing, "cache hit", True)
-            observation, previous_open, previous_close, target_open = _session_contract(session)
+            observation, previous_open, previous_close, target_open = (
+                pre_context_session_contract(session)
+            )
             option_observation_at = _option_observation_at(observation)
             now = _aware_utc(self._clock())
             if (
@@ -448,7 +450,7 @@ class PriorSessionContextService:
             previous_reference = history.bars[-1].close
 
             chains = await self._ibkr.option_chains(instrument)
-            request_groups = _option_request_groups(
+            request_groups = build_pre_context_option_request_groups(
                 instrument,
                 chains,
                 previous_close=previous_reference,
@@ -458,7 +460,7 @@ class PriorSessionContextService:
             for requests in request_groups:
                 qualified = await self._ibkr.qualify_options(requests)
                 try:
-                    nearest_qualified = _nearest_common_qualified_options(
+                    nearest_qualified = select_nearest_pre_context_qualified_options(
                         qualified,
                         previous_close=previous_reference,
                     )
@@ -563,7 +565,11 @@ class PriorSessionContextService:
             )
 
 
-def _session_contract(session: date) -> tuple[date, datetime, datetime, datetime]:
+def pre_context_session_contract(
+    session: date,
+) -> tuple[date, datetime, datetime, datetime]:
+    """Return the frozen PRE observation and target-session schedule boundary."""
+
     from stocker_data.calendars import get_market_calendar
 
     calendar = get_market_calendar("XNYS")
@@ -581,6 +587,29 @@ def _session_contract(session: date) -> tuple[date, datetime, datetime, datetime
     observation, previous_open, previous_close = rows[target_index - 1]
     _, target_open, _ = rows[target_index]
     return observation, previous_open, previous_close, target_open
+
+
+def next_pre_context_target_session(as_of: datetime) -> date:
+    """Return the target session following the latest completed XNYS session."""
+
+    from stocker_data.calendars import get_market_calendar
+
+    as_of_utc = _aware_utc(as_of)
+    calendar = get_market_calendar("XNYS")
+    schedule = calendar.schedule(
+        start_date=as_of_utc.date() - timedelta(days=14),
+        end_date=as_of_utc.date() + timedelta(days=14),
+    )
+    rows: list[tuple[date, datetime]] = [
+        (cast(date, index.date()), _aware_utc(row["market_close"]))
+        for index, row in schedule.iterrows()
+    ]
+    completed_indices = [
+        index for index, (_, market_close) in enumerate(rows) if market_close <= as_of_utc
+    ]
+    if not completed_indices or completed_indices[-1] + 1 >= len(rows):
+        raise ValueError("latest completed and next XNYS sessions could not be established")
+    return rows[completed_indices[-1] + 1][0]
 
 
 def _five_minute_starts(start: datetime, end: datetime) -> tuple[datetime, ...]:
@@ -615,13 +644,14 @@ def _contiguous_five_minute_ranges(
     return tuple(tuple(group) for group in groups)
 
 
-def _option_request_groups(
+def build_pre_context_option_request_groups(
     instrument: QualifiedInstrument,
     chains: tuple[OptionChainDefinition, ...],
     *,
     previous_close: float,
     observation_date: date,
 ) -> tuple[tuple[OptionContractRequest, ...], ...]:
+    """Build the frozen PRE contract's expiry-ordered qualification requests."""
     smart = tuple(item for item in chains if item.exchange.upper() == "SMART")
     eligible_expiries = sorted(
         {
@@ -663,9 +693,10 @@ def _option_request_groups(
     return tuple(groups)
 
 
-def _nearest_common_qualified_options(
+def select_nearest_pre_context_qualified_options(
     options: tuple[QualifiedOption, ...], *, previous_close: float
 ) -> tuple[QualifiedOption, ...]:
+    """Return the frozen PRE contract's nearest common-strike call/put set."""
     calls = {item.strike for item in options if item.right.upper() in {"C", "CALL"}}
     puts = {item.strike for item in options if item.right.upper() in {"P", "PUT"}}
     common = calls & puts

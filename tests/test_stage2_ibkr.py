@@ -620,7 +620,13 @@ def test_current_quote_snapshot_is_converted_to_a_small_internal_result() -> Non
     assert client.market_data_types == [1]
 
 
-def test_ibkr_api_error_capture_retains_code_and_instrument_without_account_data() -> None:
+@pytest.mark.parametrize(
+    ("account_id", "masked_account_id"),
+    [("DU123456", "DU***456"), ("D1234567", "D***567")],
+)
+def test_ibkr_api_error_capture_masks_account_identifiers(
+    account_id: str, masked_account_id: str
+) -> None:
     client = FakeIbClient(accounts=["DU123456"])
     connection = IbkrConnection(
         IbkrConfig(
@@ -634,13 +640,18 @@ def test_ibkr_api_error_capture_retains_code_and_instrument_without_account_data
     contract = SimpleNamespace(conId=265598, symbol="AAPL", exchange="SMART")
 
     with connection.capture_api_errors() as errors:
-        client.errorEvent.emit(17, 354, "Not subscribed to requested market data", contract)
+        client.errorEvent.emit(
+            17,
+            354,
+            f"Account {account_id} is not subscribed to requested market data",
+            contract,
+        )
 
     assert errors == [
         IbkrApiError(
             request_id=17,
             code=354,
-            message="Not subscribed to requested market data",
+            message=f"Account {masked_account_id} is not subscribed to requested market data",
             con_id=265598,
             symbol="AAPL",
             exchange="SMART",

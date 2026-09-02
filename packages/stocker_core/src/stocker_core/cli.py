@@ -212,6 +212,11 @@ def ibkr_data_diagnostic(
     for check in report.checks:
         console.print(f"{check.capability.value}: {check.status.value}")
         console.print(f"  {check.detail}")
+        check_location = "/".join(
+            item for item in (check.symbol, check.exchange) if item
+        )
+        if check_location:
+            console.print(f"  instrument: {check_location}")
         for error in check.errors:
             location = "/".join(
                 item for item in (error.symbol, error.exchange, str(error.con_id or "")) if item

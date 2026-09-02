@@ -32,8 +32,9 @@ from stocker_execution.pre_context import (
     _contiguous_five_minute_ranges,
     _five_minute_starts,
     _option_observation_at,
-    _session_contract,
     calculate_volatility,
+    next_pre_context_target_session,
+    pre_context_session_contract,
     select_canonical_option_pair,
 )
 
@@ -142,7 +143,7 @@ def test_canonical_volatility_arithmetic_uses_row_specific_model_iv() -> None:
 
 
 def test_previous_session_grid_respects_known_xnys_half_day() -> None:
-    observation, session_open, session_close, target_open = _session_contract(
+    observation, session_open, session_close, target_open = pre_context_session_contract(
         date(2025, 12, 1)
     )
 
@@ -154,6 +155,15 @@ def test_previous_session_grid_respects_known_xnys_half_day() -> None:
     assert _option_observation_at(observation) == datetime(
         2025, 11, 28, 21, 0, tzinfo=UTC
     )
+
+
+def test_next_pre_context_target_uses_the_latest_completed_xnys_session() -> None:
+    assert next_pre_context_target_session(
+        datetime(2026, 9, 2, 14, 30, tzinfo=UTC)
+    ) == date(2026, 9, 2)
+    assert next_pre_context_target_session(
+        datetime(2026, 9, 2, 21, 0, tzinfo=UTC)
+    ) == date(2026, 9, 3)
 
 
 def test_missing_history_is_grouped_into_only_contiguous_fetch_ranges() -> None:
@@ -350,6 +360,27 @@ def test_delayed_model_computation_is_not_labelled_as_tick13() -> None:
 
     assert snapshots[0].model_iv is None
     assert client.market_data_types == [1]
+
+
+def test_diagnostic_can_explicitly_probe_finite_delayed_option_data() -> None:
+    ticker = SimpleNamespace(
+        bid=1.0,
+        ask=1.2,
+        callOpenInterest=120,
+        putOpenInterest=None,
+        marketDataType=3,
+        modelGreeks=SimpleNamespace(impliedVol=0.27, delta=0.51, gamma=0.02),
+    )
+
+    boundary, client = connected_snapshot_boundary(ticker)
+    snapshots = asyncio.run(
+        boundary.option_snapshots((option(),), market_data_type=3)
+    )
+
+    assert snapshots[0].market_data_type == 3
+    assert snapshots[0].model_iv == 0.27
+    assert client.market_data_types == [3]
+    assert client.cancelled_con_ids == [99001]
 
 
 class ContextBoundary(IbkrConnection):

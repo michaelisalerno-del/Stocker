@@ -340,6 +340,67 @@ class ExecutionLedger:
                 return False
         return True
 
+    def recover_entry_fill_order(self, fill: BrokerFill) -> bool:
+        """Recover a filled parent from its IBKR order reference after a crash."""
+
+        if not fill.order_plan_id:
+            return False
+        with self._connect() as connection:
+            plan = connection.execute(
+                """
+                SELECT environment, expected_account, side, status
+                FROM execution_plans WHERE order_plan_id = ?
+                """,
+                (fill.order_plan_id,),
+            ).fetchone()
+            if (
+                plan is None
+                or str(plan["environment"]) != fill.environment.value
+                or str(plan["expected_account"]) != fill.account
+                or str(plan["side"]) != fill.side.value
+                or str(plan["status"])
+                in {
+                    OrderLifecycle.CLOSED.value,
+                    OrderLifecycle.CANCELLED.value,
+                    OrderLifecycle.REJECTED.value,
+                }
+            ):
+                return False
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO execution_broker_orders (
+                        environment, account, order_id, order_plan_id, role, status
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        fill.environment.value,
+                        fill.account,
+                        fill.order_id,
+                        fill.order_plan_id,
+                        OrderRole.ENTRY.value,
+                        OrderLifecycle.FILLED.value,
+                    ),
+                )
+                connection.execute(
+                    """
+                    UPDATE execution_plans
+                    SET parent_order_id = ?, actual_account = ?, status = ?,
+                        submitted_at = COALESCE(submitted_at, ?)
+                    WHERE order_plan_id = ?
+                    """,
+                    (
+                        fill.order_id,
+                        fill.account,
+                        OrderLifecycle.SUBMITTED.value,
+                        fill.executed_at.isoformat(timespec="microseconds"),
+                        fill.order_plan_id,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                return False
+        return True
+
     def order_role(self, environment: Environment, account: str, order_id: int) -> OrderRole | None:
         with self._connect() as connection:
             row = connection.execute(

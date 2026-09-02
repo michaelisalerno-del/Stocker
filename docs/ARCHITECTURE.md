@@ -374,10 +374,11 @@ protection at the session boundary. For SHORT protection, the stop rounds down a
 to IBKR's qualified-contract minimum tick. Both move toward entry, so tick normalization cannot
 increase requested per-share risk.
 
-The execution service accepts normal batches of selected `ENTRY_TRIGGERED` Stage 6 intentions and
-contains failures to their individual candidate. It rejects an intention whose trigger timestamp is
-missing, internally inconsistent, in the future, or more than two minutes old; this is a transmission
-freshness guard and does not redo strategy qualification.
+`Stage7PaperRuntime.observe_and_execute` is the direct production seam: it advances the concrete
+Stage 6 strategy with entry bars, takes the resulting selected `ENTRY_TRIGGERED` intentions, and
+passes them to the execution service as a batch. Candidate failures remain isolated. Stage 7 does
+not impose another entry-expiry rule; the Stage 6 status and timestamps remain authoritative
+strategy output.
 
 `RunConfig.environment` remains independent of strategy and universe. The Stage 7 router state is:
 
@@ -408,9 +409,10 @@ Only fills create local exposure. Partial executions aggregate by quantity-weigh
 repeated IBKR execution callback is ignored. IBKR positions remain authoritative. At connect or
 reconnect, new execution stays blocked until broker statuses, fills, open orders, and positions agree
 with local records. A reserved plan can recover its broker IDs after a crash from the deterministic
-IBKR `orderRef`. Unknown orders, fills, positions, missing broker exposure, a filled position without
-both protective children, or unresolved local plans return `EXECUTION_RECONCILIATION_REQUIRED`;
-Stage 7 never auto-flattens or cancels everything.
+IBKR `orderRef`, including a parent that filled before its ID was persisted. Unknown orders, fills,
+positions, missing broker exposure, a filled position without both protective children, or
+unresolved local plans return `EXECUTION_RECONCILIATION_REQUIRED`; Stage 7 never auto-flattens or
+cancels everything.
 
 The explicit `stocker stage7-paper-diagnostic` command requires caller-specified signal, instrument,
 entry reference, M price, risk fraction, an expected PAPER account, and

@@ -77,6 +77,7 @@ class BrokerFill:
     price: float
     executed_at: datetime
     commission: float | None = None
+    order_plan_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)

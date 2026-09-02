@@ -19,8 +19,17 @@ from stocker_execution.execution_models import (
     OrderRole,
 )
 from stocker_execution.ibkr import QualifiedInstrument
-from stocker_execution.session_hard_structure_d import SignalStatus, StrategySignal
-from stocker_execution.stage7 import ExecutionResultCode, Stage7ExecutionService
+from stocker_execution.session_hard_structure_d import (
+    EntryBar,
+    SessionHardStructureDStrategy,
+    SignalStatus,
+    StrategySignal,
+)
+from stocker_execution.stage7 import (
+    ExecutionResultCode,
+    Stage7ExecutionService,
+    Stage7PaperRuntime,
+)
 
 
 class FakeExecutionBroker:
@@ -36,6 +45,7 @@ class FakeExecutionBroker:
         statuses: tuple[BrokerOrderStatus, ...] = (),
         reject: bool = False,
         minimum_tick_error: Exception | None = None,
+        account_state_error: Exception | None = None,
     ) -> None:
         self.environment = environment
         self.account = account
@@ -47,11 +57,14 @@ class FakeExecutionBroker:
         self._statuses = statuses
         self.reject = reject
         self.minimum_tick_error = minimum_tick_error
+        self.account_state_error = account_state_error
         self.submitted = []
         self.account_reads = 0
 
     async def account_state(self) -> BrokerAccountState:
         self.account_reads += 1
+        if self.account_state_error is not None:
+            raise self.account_state_error
         return BrokerAccountState(
             self.environment,
             self.account,
@@ -83,6 +96,11 @@ class FakeExecutionBroker:
 
     async def read_order_statuses(self) -> tuple[BrokerOrderStatus, ...]:
         return self._statuses
+
+
+class TriggeredStage6Strategy(SessionHardStructureDStrategy):
+    def observe_entry_bars(self, bars_by_con_id: object) -> tuple[StrategySignal, ...]:
+        return (_intent(),)
 
 
 def _run(environment: Environment = Environment.PAPER) -> RunConfig:
@@ -178,6 +196,7 @@ def test_live_run_is_disabled_before_any_broker_read_or_transmission(tmp_path: P
     result = asyncio.run(service.execute(_intent(), _instrument()))
 
     assert result.code is ExecutionResultCode.LIVE_EXECUTION_DISABLED
+    assert result.actual_account == "U123456"
     assert broker.account_reads == 0
     assert broker.submitted == []
 
@@ -220,7 +239,7 @@ def test_new_orders_require_reconciliation_and_reconnect_invalidates_it(tmp_path
     assert broker.submitted == []
 
 
-def test_stale_stage6_intent_is_rejected_before_planning(tmp_path: Path) -> None:
+def test_stage7_does_not_add_an_unowned_expiry_to_stage6_intent(tmp_path: Path) -> None:
     broker = FakeExecutionBroker()
     service = _service(tmp_path / "ledger.sqlite3", broker)
     assert asyncio.run(service.reconcile()).ok
@@ -229,8 +248,29 @@ def test_stale_stage6_intent_is_rejected_before_planning(tmp_path: Path) -> None
 
     result = asyncio.run(service.execute(stale, _instrument()))
 
-    assert result.code is ExecutionResultCode.STALE_ORDER_INTENT
+    assert result.code is ExecutionResultCode.SUBMITTED
+    assert len(broker.submitted) == 1
+
+
+def test_account_state_failure_is_candidate_local(tmp_path: Path) -> None:
+    broker = FakeExecutionBroker(account_state_error=RuntimeError("request interrupted"))
+    service = _service(tmp_path / "ledger.sqlite3", broker)
+
+    result = asyncio.run(service.execute(_intent(), _instrument()))
+
+    assert result.code is ExecutionResultCode.ACCOUNT_STATE_UNAVAILABLE
+    assert "request interrupted" in result.detail
     assert broker.submitted == []
+
+
+def test_account_state_failure_blocks_reconciliation_without_raising(tmp_path: Path) -> None:
+    broker = FakeExecutionBroker(account_state_error=RuntimeError("request interrupted"))
+
+    result = asyncio.run(_service(tmp_path / "ledger.sqlite3", broker).reconcile())
+
+    assert result.ok is False
+    assert result.code is ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED
+    assert "account state unavailable" in result.detail
 
 
 def test_minimum_tick_failure_rejects_only_that_candidate(tmp_path: Path) -> None:
@@ -342,6 +382,72 @@ def test_reconnect_recovers_pending_bracket_from_deterministic_order_reference(
 
     assert reconciliation.ok is True
     assert ledger.known_order_ids(Environment.PAPER, "DU123456") == {201, 202, 203}
+
+
+def test_reconnect_recovers_parent_that_filled_before_ids_were_persisted(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    plan = OrderPlan(
+        "recover-filled-plan",
+        "paper-run",
+        "recover-filled-signal",
+        "strategy",
+        "v1",
+        265598,
+        "AAPL",
+        OrderAction.SELL,
+        100,
+        EntryOrderType.MARKET,
+        100.0,
+        101.0,
+        98.0,
+        Environment.PAPER,
+        datetime(2026, 9, 2, 14, 31, tzinfo=UTC),
+    )
+    ledger = ExecutionLedger(path)
+    assert ledger.reserve(plan, expected_account="DU123456")
+    ledger.mark_submitting(plan.order_plan_id)
+    children = tuple(
+        BrokerOpenOrder(
+            order_id,
+            plan.order_plan_id,
+            "DU123456",
+            Environment.PAPER,
+            265598,
+            "AAPL",
+            role,
+            OrderLifecycle.SUBMITTED,
+        )
+        for order_id, role in ((202, OrderRole.STOP), (203, OrderRole.TARGET))
+    )
+    entry_fill = BrokerFill(
+        "filled-before-persist",
+        201,
+        "DU123456",
+        Environment.PAPER,
+        265598,
+        "AAPL",
+        OrderAction.SELL,
+        100,
+        100.0,
+        datetime(2026, 9, 2, 14, 31, 30, tzinfo=UTC),
+        0.0,
+        order_plan_id=plan.order_plan_id,
+    )
+    broker = FakeExecutionBroker(
+        open_orders=children,
+        fills=(entry_fill,),
+        positions=(BrokerPosition("DU123456", 265598, "AAPL", -100, 100.0),),
+    )
+
+    reconciliation = asyncio.run(_service(path, broker).reconcile())
+
+    record = ledger.get(plan.order_plan_id)
+    assert reconciliation.ok is True
+    assert record is not None
+    assert record.parent_order_id == 201
+    assert record.filled_quantity == 100
 
 
 def test_broker_rejection_is_recorded_without_position(tmp_path: Path) -> None:
@@ -533,3 +639,31 @@ def test_normal_runtime_batch_consumes_selected_stage6_intents(tmp_path: Path) -
 
     assert [result.code for result in results] == [ExecutionResultCode.SUBMITTED]
     assert len(broker.submitted) == 1
+
+
+def test_normal_runtime_observes_stage6_then_executes_its_intent(tmp_path: Path) -> None:
+    broker = FakeExecutionBroker()
+    service = _service(tmp_path / "ledger.sqlite3", broker)
+    assert asyncio.run(service.reconcile()).ok
+    runtime = Stage7PaperRuntime(strategy=TriggeredStage6Strategy(), execution=service)
+
+    results = asyncio.run(
+        runtime.observe_and_execute(
+            {265598: (EntryBar(datetime(2026, 9, 2, 14, 31, tzinfo=UTC), 100, 101, 99),)},
+            {265598: _instrument()},
+        )
+    )
+
+    assert [result.code for result in results] == [ExecutionResultCode.SUBMITTED]
+    assert len(broker.submitted) == 1
+
+
+def test_missing_instrument_attempt_preserves_known_connected_account(tmp_path: Path) -> None:
+    broker = FakeExecutionBroker()
+    service = _service(tmp_path / "ledger.sqlite3", broker)
+    assert asyncio.run(service.reconcile()).ok
+
+    results = asyncio.run(service.execute_ready_intents((_intent(),), {}))
+
+    assert results[0].code is ExecutionResultCode.ORDER_PLAN_UNAVAILABLE
+    assert results[0].actual_account == "DU123456"

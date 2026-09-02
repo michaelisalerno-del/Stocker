@@ -193,12 +193,8 @@ def test_live_plan_can_never_be_transmitted_in_stage7() -> None:
 def test_ambiguous_nonbase_account_equity_is_unavailable() -> None:
     client = FakeOrderClient()
     client.account_values = [
-        SimpleNamespace(
-            account="DU123456", tag="NetLiquidation", value="100000", currency="USD"
-        ),
-        SimpleNamespace(
-            account="DU123456", tag="NetLiquidation", value="90000", currency="GBP"
-        ),
+        SimpleNamespace(account="DU123456", tag="NetLiquidation", value="100000", currency="USD"),
+        SimpleNamespace(account="DU123456", tag="NetLiquidation", value="90000", currency="GBP"),
     ]
     connection = IbkrConnection(_config(), client=client, execution_enabled=True)
 
@@ -238,6 +234,7 @@ def test_open_orders_positions_and_fills_are_normalized_without_callback_leakage
             execution=SimpleNamespace(
                 execId="exec-1",
                 orderId=101,
+                orderRef="plan-1",
                 acctNumber="DU123456",
                 side="SLD",
                 shares=Decimal("4"),
@@ -264,6 +261,7 @@ def test_open_orders_positions_and_fills_are_normalized_without_callback_leakage
     assert positions[0].quantity == -4.0
     assert positions[0].average_price == 100.25
     assert fills[0].execution_id == "exec-1"
+    assert fills[0].order_plan_id == "plan-1"
     assert fills[0].side is OrderAction.SELL
     assert fills[0].quantity == 4.0
     assert fills[0].commission == 0.25

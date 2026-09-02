@@ -3,7 +3,7 @@
 import hashlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from enum import StrEnum
 from math import floor, isfinite
@@ -24,7 +24,12 @@ from stocker_execution.execution_models import (
     OrderPlan,
 )
 from stocker_execution.ibkr import QualifiedInstrument
-from stocker_execution.session_hard_structure_d import SignalStatus, StrategySignal
+from stocker_execution.session_hard_structure_d import (
+    EntryBar,
+    SessionHardStructureDStrategy,
+    SignalStatus,
+    StrategySignal,
+)
 
 
 class RiskRejection(StrEnum):
@@ -44,7 +49,6 @@ class ExecutionResultCode(StrEnum):
     EXECUTION_RECONCILIATION_REQUIRED = "EXECUTION_RECONCILIATION_REQUIRED"
     DUPLICATE_ORDER_BLOCKED = "DUPLICATE_ORDER_BLOCKED"
     BROKER_REJECTED = "BROKER_REJECTED"
-    STALE_ORDER_INTENT = "STALE_ORDER_INTENT"
     ORDER_PLAN_UNAVAILABLE = "ORDER_PLAN_UNAVAILABLE"
     INVALID_RISK_CONFIG = "INVALID_RISK_CONFIG"
     INVALID_STOP_DISTANCE = "INVALID_STOP_DISTANCE"
@@ -223,7 +227,10 @@ class Stage7ExecutionService:
             return self._reconciliation_failure("LIVE execution is disabled in Stage 7")
         if not self._broker.is_connected:
             return self._reconciliation_failure("broker is disconnected")
-        account_state = await self._broker.account_state()
+        try:
+            account_state = await self._broker.account_state()
+        except Exception as exc:
+            return self._reconciliation_failure(f"account state unavailable: {exc}")
         mismatch = self._account_mismatch(account_state)
         if mismatch is not None:
             return self._reconciliation_failure(mismatch)
@@ -259,7 +266,8 @@ class Stage7ExecutionService:
             }:
                 problems.append(f"unexpected broker order status {status.order_id}")
         for fill in broker_fills:
-            if self._ledger.order_role(fill.environment, fill.account, fill.order_id) is None:
+            role = self._ledger.order_role(fill.environment, fill.account, fill.order_id)
+            if role is None and not self._ledger.recover_entry_fill_order(fill):
                 problems.append(f"unexpected broker fill {fill.execution_id}")
                 continue
             self._ledger.record_fill(fill)
@@ -328,7 +336,15 @@ class Stage7ExecutionService:
         if not self._broker.is_connected:
             self._reconciled_epoch = None
             return self._outcome(order_intent.signal_id, ExecutionResultCode.BROKER_DISCONNECTED)
-        account_state = await self._broker.account_state()
+        try:
+            account_state = await self._broker.account_state()
+        except Exception as exc:
+            self._reconciled_epoch = None
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.ACCOUNT_STATE_UNAVAILABLE,
+                f"account state unavailable: {exc}",
+            )
         mismatch = self._account_mismatch(account_state)
         if mismatch is not None:
             return self._outcome(
@@ -359,14 +375,6 @@ class Stage7ExecutionService:
                 "run or qualified instrument does not match the Stage 6 intent",
                 actual_account=account_state.account,
             )
-        if not _is_fresh_order_intent(order_intent, self._clock()):
-            return self._outcome(
-                order_intent.signal_id,
-                ExecutionResultCode.STALE_ORDER_INTENT,
-                "Stage 6 order intent is missing a valid recent trigger timestamp",
-                actual_account=account_state.account,
-            )
-
         risk = Stage7RiskEngine().evaluate(
             order_intent=order_intent,
             account_state=account_state,
@@ -524,6 +532,8 @@ class Stage7ExecutionService:
         order_ids: BrokerOrderIds | None = None,
     ) -> ExecutionAttempt:
         resolved_detail = detail or code.value
+        if actual_account is None:
+            actual_account = self._known_broker_account()
         attempt = ExecutionAttempt(
             code=code,
             detail=resolved_detail,
@@ -545,6 +555,36 @@ class Stage7ExecutionService:
             attempted_at=self._clock(),
         )
         return attempt
+
+    def _known_broker_account(self) -> str | None:
+        try:
+            account = self._broker.account
+        except Exception:
+            return None
+        return account or None
+
+
+class Stage7PaperRuntime:
+    """Direct first-strategy runtime seam from Stage 6 observations to execution."""
+
+    def __init__(
+        self,
+        *,
+        strategy: SessionHardStructureDStrategy,
+        execution: Stage7ExecutionService,
+    ) -> None:
+        self._strategy = strategy
+        self._execution = execution
+
+    async def observe_and_execute(
+        self,
+        bars_by_con_id: Mapping[int, Sequence[EntryBar]],
+        instruments: Mapping[int, QualifiedInstrument],
+    ) -> tuple[ExecutionAttempt, ...]:
+        """Advance Stage 6 first-touch state and execute only its selected outputs."""
+
+        order_intents = self._strategy.observe_entry_bars(bars_by_con_id)
+        return await self._execution.execute_ready_intents(order_intents, instruments)
 
 
 def build_order_plan(
@@ -609,17 +649,3 @@ def _to_tick(value: float, minimum_tick: float, rounding: str) -> float:
 
 def _rejected(reason: RiskRejection) -> Stage7RiskDecision:
     return Stage7RiskDecision(approved=False, reason=reason.value)
-
-
-def _is_fresh_order_intent(intent: StrategySignal, now: datetime) -> bool:
-    if now.tzinfo is None or now.utcoffset() is None:
-        return False
-    entry_at = intent.entry_timestamp
-    signal_at = intent.signal_timestamp
-    if entry_at is None or signal_at is None:
-        return False
-    if entry_at.tzinfo is None or signal_at.tzinfo is None:
-        return False
-    if entry_at > signal_at or signal_at > now:
-        return False
-    return now - signal_at <= timedelta(minutes=2)

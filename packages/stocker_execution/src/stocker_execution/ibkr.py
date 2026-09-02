@@ -330,9 +330,7 @@ class IbkrConnection:
                 self.config.port,
                 clientId=self.config.client_id,
                 timeout=self.config.connect_timeout_seconds,
-                readonly=(
-                    not self._execution_enabled or self.environment is Environment.LIVE
-                ),
+                readonly=(not self._execution_enabled or self.environment is Environment.LIVE),
                 account=self.config.expected_account or "",
                 raiseSyncErrors=True,
                 fetchFields=_no_startup_fetches(),
@@ -569,6 +567,7 @@ class IbkrConnection:
                     price=float(execution.price),
                     executed_at=timestamp,
                     commission=commission,
+                    order_plan_id=str(getattr(execution, "orderRef", "")),
                 )
             )
         return tuple(fills)

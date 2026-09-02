@@ -13,7 +13,7 @@ from stocker_core.universes import UniverseDefinition
 from stocker_execution.execution_ledger import ExecutionLedger, ExecutionRecord
 from stocker_execution.execution_models import OrderLifecycle
 from stocker_execution.pre_context import PriorSessionContextStore
-from stocker_execution.runtime import RuntimeStatus, RuntimeStore
+from stocker_execution.runtime import ExecutionEnvironmentStatus, RuntimeStatus, RuntimeStore
 from stocker_execution.session_hard_structure_d import (
     STRATEGY_VERSION,
     SignalStatus,
@@ -51,15 +51,7 @@ class DashboardReadService:
         attention = []
         environments = {}
         for item in status.execution_environments:
-            environments[item.environment.value] = {
-                "connected": item.connected,
-                "account": item.account,
-                "expected_account": item.expected_account,
-                "reconciled": item.reconciled,
-                "ready": item.ready,
-                "equity": item.equity,
-                "buying_power": item.buying_power,
-            }
+            environments[item.environment.value] = self._environment_status(item)
             if not item.connected:
                 attention.append({"scope": item.environment.value, "message": "IBKR disconnected"})
             elif not item.reconciled:
@@ -492,14 +484,8 @@ class DashboardReadService:
         for item in status.execution_environments:
             environments.append(
                 {
+                    **self._environment_status(item),
                     "environment": item.environment.value,
-                    "connected": item.connected,
-                    "account": item.account,
-                    "expected_account": item.expected_account,
-                    "reconciled": item.reconciled,
-                    "ready": item.ready,
-                    "equity": item.equity,
-                    "buying_power": item.buying_power,
                     "open_orders": sum(
                         order.environment is item.environment for order in broker_orders
                     ),
@@ -540,6 +526,18 @@ class DashboardReadService:
             },
             "problems": problems,
             "events": events,
+        }
+
+    @staticmethod
+    def _environment_status(item: ExecutionEnvironmentStatus) -> dict[str, object]:
+        return {
+            "connected": item.connected,
+            "account": item.account,
+            "expected_account": item.expected_account,
+            "reconciled": item.reconciled,
+            "ready": item.ready,
+            "equity": item.equity,
+            "buying_power": item.buying_power,
         }
 
     def settings(self) -> dict[str, Any]:

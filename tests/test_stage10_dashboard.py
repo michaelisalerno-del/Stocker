@@ -376,6 +376,8 @@ def test_overview_and_runs_expose_runtime_environment_state(tmp_path: Path) -> N
     assert overview["environments"]["LIVE"]["connected"] is True
     assert overview["environments"]["PAPER"]["equity"] == 100_000.0
     assert overview["environments"]["PAPER"]["buying_power"] == 200_000.0
+    assert overview["environments"]["LIVE"]["equity"] == 50_000.0
+    assert overview["environments"]["LIVE"]["buying_power"] == 100_000.0
     assert overview["active_runs"] == 1
     assert overview["open_positions"] == 1
     assert overview["today"]["signals"] == 1

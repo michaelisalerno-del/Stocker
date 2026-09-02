@@ -162,10 +162,11 @@ artefact is unavailable and is not a blocker. Runtime inputs remain IBKR-only.
 
 `stocker_execution.ibkr.IbkrConnection` is the Stage 2 broker boundary for connection/session
 identity, stock and option qualification, option definitions/model snapshots, historical bars,
-current stock snapshots, and Stage 7 PAPER execution. Each instance owns its own
-client state, so PAPER and LIVE can later use separate Gateway sessions without a global singleton.
-The adapter is read-only unless PAPER execution is explicitly enabled. It exposes small Stocker
-models; strategies and calculations do not import IBKR objects.
+current stock snapshots, and Stage 7 protected execution. Each instance owns its own client state,
+so PAPER and LIVE use distinct Gateway sessions without a global singleton. The adapter is
+read-only unless execution is explicitly enabled by runtime composition, and a writable session
+still accepts only plans matching its configured environment and expected account. It exposes
+small Stocker models; strategies and calculations do not import IBKR objects.
 
 PAPER and LIVE host, port, client ID, and environment are separate explicit configuration blocks.
 The Stage 1 run environment selects one block. Connection verification uses the managed account ID,

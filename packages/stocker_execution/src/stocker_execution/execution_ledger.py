@@ -20,6 +20,25 @@ from stocker_execution.execution_models import (
     OrderRole,
 )
 
+_EXECUTION_FILLS_DDL = """
+CREATE TABLE execution_fills (
+    execution_id TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    account TEXT NOT NULL,
+    order_id INTEGER NOT NULL,
+    order_plan_id TEXT NOT NULL REFERENCES execution_plans(order_plan_id),
+    role TEXT NOT NULL,
+    con_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    price REAL NOT NULL,
+    executed_at TEXT NOT NULL,
+    commission REAL,
+    PRIMARY KEY (environment, account, execution_id)
+);
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class ExecutionRecord:
@@ -105,21 +124,6 @@ class ExecutionLedger:
                     PRIMARY KEY (environment, account, order_id),
                     UNIQUE (order_plan_id, role)
                 );
-                CREATE TABLE IF NOT EXISTS execution_fills (
-                    execution_id TEXT PRIMARY KEY,
-                    environment TEXT NOT NULL,
-                    account TEXT NOT NULL,
-                    order_id INTEGER NOT NULL,
-                    order_plan_id TEXT NOT NULL REFERENCES execution_plans(order_plan_id),
-                    role TEXT NOT NULL,
-                    con_id INTEGER NOT NULL,
-                    symbol TEXT NOT NULL,
-                    side TEXT NOT NULL,
-                    quantity REAL NOT NULL,
-                    price REAL NOT NULL,
-                    executed_at TEXT NOT NULL,
-                    commission REAL
-                );
                 CREATE TABLE IF NOT EXISTS execution_attempts (
                     attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT NOT NULL,
@@ -133,6 +137,37 @@ class ExecutionLedger:
                 );
                 """
             )
+            connection.execute(
+                _EXECUTION_FILLS_DDL.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1)
+            )
+            self._migrate_execution_fill_identity(connection)
+
+    @staticmethod
+    def _migrate_execution_fill_identity(connection: sqlite3.Connection) -> None:
+        """Upgrade Stage 7's global execution ID to an account-scoped identity."""
+
+        columns = connection.execute("PRAGMA table_info(execution_fills)").fetchall()
+        primary_key = tuple(
+            str(row["name"])
+            for row in sorted(columns, key=lambda row: int(row["pk"]))
+            if int(row["pk"]) > 0
+        )
+        if primary_key == ("environment", "account", "execution_id"):
+            return
+        connection.execute("ALTER TABLE execution_fills RENAME TO execution_fills_stage8")
+        connection.execute(_EXECUTION_FILLS_DDL)
+        connection.execute(
+            """
+            INSERT INTO execution_fills (
+                execution_id, environment, account, order_id, order_plan_id, role,
+                con_id, symbol, side, quantity, price, executed_at, commission
+            )
+            SELECT execution_id, environment, account, order_id, order_plan_id, role,
+                   con_id, symbol, side, quantity, price, executed_at, commission
+            FROM execution_fills_stage8
+            """
+        )
+        connection.execute("DROP TABLE execution_fills_stage8")
 
     def reserve(self, plan: OrderPlan, *, expected_account: str) -> bool:
         """Atomically reserve a Stage 6 signal before any broker transmission."""

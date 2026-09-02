@@ -64,7 +64,7 @@ class OrderPlan:
 
 @dataclass(frozen=True, slots=True)
 class BrokerFill:
-    """One normalized IBKR execution, deduplicated by execution_id."""
+    """One normalized IBKR execution, deduplicated within environment/account."""
 
     execution_id: str
     order_id: int

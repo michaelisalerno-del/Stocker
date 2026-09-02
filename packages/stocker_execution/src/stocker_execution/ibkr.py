@@ -290,7 +290,7 @@ def _no_startup_fetches() -> object:
 
 
 class IbkrConnection:
-    """One independent IBKR session; execution is opt-in and PAPER-only."""
+    """One independent PAPER or LIVE IBKR session with explicit execution opt-in."""
 
     def __init__(
         self,

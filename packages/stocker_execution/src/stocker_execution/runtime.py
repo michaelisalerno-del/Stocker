@@ -52,6 +52,7 @@ from stocker_execution.stage5 import (
     Stage5CurrentDataService,
     Stage5FeatureSnapshot,
     Stage5IneligibleInstrument,
+    Stage5Membership,
     Stage5QualificationResult,
     Stage5QualifiedRequest,
     Stage5SnapshotStore,
@@ -182,29 +183,27 @@ class RuntimeStatus:
 
     @property
     def broker_connected(self) -> bool:
-        """Stage 8 compatibility view of the PAPER (or sole) broker."""
+        """Stage 8 compatibility view of the PAPER broker."""
 
         selected = next(
             (item for item in self.execution_environments if item.environment is Environment.PAPER),
-            self.execution_environments[0] if self.execution_environments else None,
+            None,
         )
         return selected.connected if selected is not None else False
 
     @property
     def account(self) -> str | None:
-        """Stage 8 compatibility view of the PAPER (or sole) account."""
+        """Stage 8 compatibility view of the PAPER account."""
 
         selected = next(
             (item for item in self.execution_environments if item.environment is Environment.PAPER),
-            self.execution_environments[0] if self.execution_environments else None,
+            None,
         )
         return selected.account if selected is not None else None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "application": self.application.value,
-            "ibkr_paper": "connected" if self.broker_connected else "disconnected",
-            "account": self.account,
             "ibkr": {
                 item.environment.value: {
                     "connected": item.connected,
@@ -236,6 +235,14 @@ class RuntimeStatus:
                 for field in RuntimeCounters.__dataclass_fields__
             },
         }
+        paper = next(
+            (item for item in self.execution_environments if item.environment is Environment.PAPER),
+            None,
+        )
+        if paper is not None:
+            result["ibkr_paper"] = "connected" if paper.connected else "disconnected"
+            result["account"] = paper.account
+        return result
 
     def as_text(self) -> str:
         lines = [f"Application: {self.application.value}"]
@@ -671,7 +678,7 @@ class StockerRuntime:
             if Environment.PAPER in self._destinations
             else next(iter(self._destinations))
         )
-        self._broker = self._destinations[preferred_environment].broker
+        self._market_data_broker = self._destinations[preferred_environment].broker
         self._ledger = ledger
         self._store = store
         self._qualify = qualify
@@ -697,7 +704,7 @@ class StockerRuntime:
         }
         self._strategies: dict[str, SessionHardStructureDStrategy] = {}
         self._qualification = Stage5QualificationResult((), ())
-        self._ready_at: datetime | None = None
+        self._run_ready_at: dict[str, datetime] = {}
         self._last_sync: datetime | None = None
         self._stopping = False
         self._cycle_lock = asyncio.Lock()
@@ -712,6 +719,7 @@ class StockerRuntime:
         self._strategy_runtimes.clear()
         self._strategies.clear()
         self._sessions.clear()
+        self._run_ready_at.clear()
         self._qualification = Stage5QualificationResult((), ())
         for environment in self._environment_ready:
             self._environment_ready[environment] = False
@@ -775,12 +783,7 @@ class StockerRuntime:
                 environment=session.environment.value,
                 account=session.masked_account_id,
             )
-            if (
-                session.environment is not environment
-                or session.account_id != destination.expected_account
-                or destination.broker.environment is not environment
-                or destination.broker.account != destination.expected_account
-            ):
+            if not _session_matches_destination(session, destination):
                 self._degrade_runs(affected, "account or environment mismatch")
                 self._logger.error(
                     "account_verification_failed",
@@ -865,7 +868,7 @@ class StockerRuntime:
             self._state = ApplicationState.DEGRADED
             self._logger.error("instrument_preparation_failed", reason=str(exc))
             return self.status()
-        self._ready_at = now
+        self._run_ready_at.update({instance.config.run_id: now for instance in runnable_runs})
         self._last_sync = now
         self._mark_missed_before(now)
         self._state = ApplicationState.READY
@@ -954,11 +957,8 @@ class StockerRuntime:
                     continue
                 if self._store.checkpoint_state(run.run_id, market.session, t0) is not None:
                     continue
-                missed = (
-                    self._ready_at is None
-                    or t0 < self._ready_at
-                    or now >= t0 + timedelta(minutes=5)
-                )
+                ready_at = self._run_ready_at.get(run.run_id)
+                missed = ready_at is None or t0 < ready_at or now >= t0 + timedelta(minutes=5)
                 if missed:
                     self._store.mark_missed(run.run_id, market.session, t0, checkpoint, now)
                     self._logger.info(
@@ -1015,12 +1015,7 @@ class StockerRuntime:
                     reason=str(exc),
                 )
                 continue
-            if (
-                session.environment is not target
-                or session.account_id != destination.expected_account
-                or destination.broker.environment is not target
-                or destination.broker.account != destination.expected_account
-            ):
+            if not _session_matches_destination(session, destination):
                 self._degrade_runs(affected, "account or environment mismatch")
                 self._logger.error(
                     "account_verification_failed",
@@ -1064,10 +1059,11 @@ class StockerRuntime:
                     account=session.masked_account_id,
                 )
 
-        runnable: list[RunInstance] = []
+        recovered: list[RunInstance] = []
         for instance in self._manager.list_runs():
             if (
                 instance.config.run_id not in self._execution
+                or instance.config.environment not in targets
                 or not self._environment_ready[instance.config.environment]
             ):
                 continue
@@ -1075,21 +1071,36 @@ class StockerRuntime:
             if market is None:
                 continue
             self._sessions[instance.config.run_id] = market
-            runnable.append(instance)
-        if runnable:
+            recovered.append(instance)
+        if recovered:
             try:
-                self._qualification = await self._qualify(runnable)
+                recovered_qualification = await self._qualify(recovered)
             except Exception as exc:
-                self._degrade_runs(runnable, f"instrument preparation failed: {exc}")
-                self._logger.error("instrument_preparation_failed", reason=str(exc))
-                for target in targets:
+                self._degrade_runs(recovered, f"instrument preparation failed: {exc}")
+                self._logger.error(
+                    "instrument_preparation_failed",
+                    environments=sorted(
+                        {instance.config.environment.value for instance in recovered}
+                    ),
+                    reason=str(exc),
+                )
+                for target in {instance.config.environment for instance in recovered}:
                     self._environment_ready[target] = False
-                runnable = []
-        self._ready_at = now if runnable else self._ready_at
-        self._last_sync = now if runnable else self._last_sync
-        if runnable:
-            self._mark_missed_before(now)
-            for instance in runnable:
+                self._replace_qualification_for(
+                    {instance.config.run_id for instance in recovered},
+                    Stage5QualificationResult((), ()),
+                )
+                recovered = []
+            else:
+                self._replace_qualification_for(
+                    {instance.config.run_id for instance in recovered},
+                    recovered_qualification,
+                )
+        self._run_ready_at.update({instance.config.run_id: now for instance in recovered})
+        self._last_sync = now if recovered else self._last_sync
+        if recovered:
+            self._mark_missed_before(now, {instance.config.run_id for instance in recovered})
+            for instance in recovered:
                 market = self._sessions[instance.config.run_id]
                 self._set_run(
                     instance.config.run_id,
@@ -1134,7 +1145,7 @@ class StockerRuntime:
         request = next(iter(self._qualification.requests), None)
         if request is None:
             raise RuntimeError("no qualified instrument is available for market-data smoke")
-        broker = self._broker
+        broker = self._market_data_broker
         if not broker.is_connected:
             broker = next(
                 (
@@ -1265,7 +1276,7 @@ class StockerRuntime:
             run_id=matching.run_id,
             signal_id=matching.signal_id,
             order_plan_id=matching.order_plan_id,
-            con_id=matching.con_id,
+            conId=matching.con_id,
             ibkr_order_id=fill.order_id,
             execution_id=fill.execution_id,
         )
@@ -1372,9 +1383,11 @@ class StockerRuntime:
             )
             return None
 
-    def _mark_missed_before(self, ready_at: datetime) -> None:
+    def _mark_missed_before(self, ready_at: datetime, run_ids: set[str] | None = None) -> None:
         for instance in self._manager.list_runs():
             run_id = instance.config.run_id
+            if run_ids is not None and run_id not in run_ids:
+                continue
             market = self._sessions.get(run_id)
             if market is None:
                 continue
@@ -1524,7 +1537,7 @@ class StockerRuntime:
                     order_plan_id=(
                         attempt.order_plan.order_plan_id if attempt.order_plan else None
                     ),
-                    con_id=attempt.order_plan.con_id if attempt.order_plan else None,
+                    conId=attempt.order_plan.con_id if attempt.order_plan else None,
                     result=attempt.code.value,
                 )
                 if attempt.code is ExecutionResultCode.SUBMITTED:
@@ -1538,7 +1551,7 @@ class StockerRuntime:
                         order_plan_id=(
                             attempt.order_plan.order_plan_id if attempt.order_plan else None
                         ),
-                        con_id=attempt.order_plan.con_id if attempt.order_plan else None,
+                        conId=attempt.order_plan.con_id if attempt.order_plan else None,
                         ibkr_order_id=attempt.order_ids.parent if attempt.order_ids else None,
                     )
                 elif attempt.code is ExecutionResultCode.BROKER_REJECTED:
@@ -1552,7 +1565,7 @@ class StockerRuntime:
                         order_plan_id=(
                             attempt.order_plan.order_plan_id if attempt.order_plan else None
                         ),
-                        con_id=attempt.order_plan.con_id if attempt.order_plan else None,
+                        conId=attempt.order_plan.con_id if attempt.order_plan else None,
                         result=attempt.code.value,
                         reason=attempt.detail,
                     )
@@ -1567,7 +1580,7 @@ class StockerRuntime:
                         order_plan_id=(
                             attempt.order_plan.order_plan_id if attempt.order_plan else None
                         ),
-                        con_id=attempt.order_plan.con_id if attempt.order_plan else None,
+                        conId=attempt.order_plan.con_id if attempt.order_plan else None,
                         result=attempt.code.value,
                         reason=attempt.detail,
                     )
@@ -1598,6 +1611,18 @@ class StockerRuntime:
                     Stage5IneligibleInstrument(item.symbol, memberships, item.reason, item.status)
                 )
         return tuple(requests), tuple(ineligible)
+
+    def _replace_qualification_for(
+        self,
+        run_ids: set[str],
+        replacement: Stage5QualificationResult,
+    ) -> None:
+        retained_run_ids = set(self._execution) - run_ids
+        retained_requests, retained_ineligible = self._qualification_for(retained_run_ids)
+        self._qualification = _merge_qualification_results(
+            Stage5QualificationResult(retained_requests, retained_ineligible),
+            replacement,
+        )
 
     def _fail_checkpoint(
         self,
@@ -1683,6 +1708,41 @@ class StockerRuntime:
             else ApplicationState.DEGRADED
         )
         return self._state is ApplicationState.READY
+
+
+def _session_matches_destination(session: BrokerSession, destination: ExecutionDestination) -> bool:
+    return (
+        session.environment is destination.environment
+        and session.account_id == destination.expected_account
+        and destination.broker.environment is destination.environment
+        and destination.broker.account == destination.expected_account
+    )
+
+
+def _merge_qualification_results(
+    *results: Stage5QualificationResult,
+) -> Stage5QualificationResult:
+    qualified: dict[int, tuple[QualifiedInstrument, set[Stage5Membership]]] = {}
+    ineligible: list[Stage5IneligibleInstrument] = []
+    for result in results:
+        ineligible.extend(result.ineligible)
+        for request in result.requests:
+            existing = qualified.get(request.instrument.con_id)
+            if existing is None:
+                qualified[request.instrument.con_id] = (
+                    request.instrument,
+                    set(request.memberships),
+                )
+            else:
+                existing[1].update(request.memberships)
+    requests = tuple(
+        Stage5QualifiedRequest(
+            instrument,
+            tuple(sorted(memberships, key=lambda item: (item.universe_id, item.run_id))),
+        )
+        for _con_id, (instrument, memberships) in sorted(qualified.items())
+    )
+    return Stage5QualificationResult(requests, tuple(ineligible))
 
 
 def _signal_payload(signal: StrategySignal) -> dict[str, object]:
@@ -1953,16 +2013,16 @@ def build_runtime(
     data_environment = (
         Environment.PAPER if Environment.PAPER in connections else required_environments[0]
     )
-    broker = connections[data_environment]
+    market_data_broker = connections[data_environment]
     history_cache = IbkrHistoryCache(database_path)
     prior_context = PriorSessionContextService(
-        broker,
+        market_data_broker,
         history_cache,
         PriorSessionContextStore(database_path),
     )
     data_clock = clock or (lambda: datetime.now(tz=UTC))
     current_data = Stage5CurrentDataService(
-        broker,
+        market_data_broker,
         history_cache,
         prior_context,
         clock=data_clock,
@@ -1971,10 +2031,10 @@ def build_runtime(
         current_data,
         snapshot_store=Stage5SnapshotStore(database_path),
     )
-    session_data = IbkrSessionDataSource(broker, history_cache, logger=logger)
+    session_data = IbkrSessionDataSource(market_data_broker, history_cache, logger=logger)
 
     async def qualify(runs_to_prepare: Sequence[RunInstance]) -> Stage5QualificationResult:
-        return await qualify_active_runs(broker, runs_to_prepare)
+        return await qualify_active_runs(market_data_broker, runs_to_prepare)
 
     return StockerRuntime(
         config=runs,

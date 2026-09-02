@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import UTC, datetime
 
 import pytest
@@ -79,6 +80,47 @@ def test_signal_reservation_is_transactional_and_persistent_across_restart(
     assert first.reserve(_plan(), expected_account="DU123456") is True
     assert first.reserve(_plan(), expected_account="DU123456") is False
     assert ExecutionLedger(path).reserve(_plan(), expected_account="DU123456") is False
+
+
+def test_stage8_global_fill_identity_schema_is_migrated_without_data_loss(tmp_path) -> None:
+    path = tmp_path / "execution.sqlite3"
+    ledger = _submitted_ledger(tmp_path)
+    assert ledger.record_fill(_fill("stage8-exec", 101, 10, 100, side=OrderAction.SELL, minute=32))
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            ALTER TABLE execution_fills RENAME TO execution_fills_stage9;
+            CREATE TABLE execution_fills (
+                execution_id TEXT PRIMARY KEY,
+                environment TEXT NOT NULL,
+                account TEXT NOT NULL,
+                order_id INTEGER NOT NULL,
+                order_plan_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                con_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+                quantity REAL NOT NULL,
+                price REAL NOT NULL,
+                executed_at TEXT NOT NULL,
+                commission REAL
+            );
+            INSERT INTO execution_fills SELECT * FROM execution_fills_stage9;
+            DROP TABLE execution_fills_stage9;
+            """
+        )
+
+    migrated = ExecutionLedger(path)
+
+    with sqlite3.connect(path) as connection:
+        columns = connection.execute("PRAGMA table_info(execution_fills)").fetchall()
+        primary_key = tuple(row[1] for row in sorted(columns, key=lambda row: row[5]) if row[5] > 0)
+        rows = connection.execute(
+            "SELECT execution_id, environment, account FROM execution_fills"
+        ).fetchall()
+    assert primary_key == ("environment", "account", "execution_id")
+    assert rows == [("stage8-exec", "PAPER", "DU123456")]
+    assert migrated.get("plan-1").filled_quantity == 10  # type: ignore[union-attr]
 
 
 def test_submission_persists_all_protective_broker_order_ids(tmp_path: object) -> None:

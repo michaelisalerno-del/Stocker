@@ -5,10 +5,18 @@ from pathlib import Path
 
 from stocker_core.runs import Environment
 from stocker_execution.execution_ledger import ExecutionLedger
-from stocker_execution.execution_models import BrokerAccountState, BrokerPosition
+from stocker_execution.execution_models import (
+    BrokerAccountState,
+    BrokerFill,
+    BrokerOpenOrder,
+    BrokerPosition,
+    OrderLifecycle,
+    OrderRole,
+)
 from stocker_execution.ibkr import BrokerSession, IbkrConnection, IbkrError
 from stocker_execution.runtime import (
     ApplicationState,
+    CheckpointState,
     RuntimeStore,
     StockerRuntime,
     build_runtime,
@@ -23,6 +31,7 @@ from stocker_execution.stage5 import (
     Stage5Membership,
     Stage5QualificationResult,
     Stage5QualifiedRequest,
+    qualify_active_runs,
 )
 from stocker_execution.stage7 import (
     ExecutionDestination,
@@ -33,6 +42,7 @@ from stocker_execution.stage7 import (
     Stage7RiskEngine,
     build_order_plan,
 )
+from test_stage5_pipeline import QualificationBoundary, active_run
 from test_stage6_session_hard_strategy import ready_snapshot, strategy_context
 from test_stage7_execution import FakeExecutionBroker, _instrument, _intent, _run
 from test_stage7_ibkr import FakeOrderClient, _config, _plan
@@ -221,6 +231,60 @@ def test_ibkr_connection_rejects_a_cross_environment_plan_before_transmission() 
     assert client.placed == []
 
 
+def test_live_ibkr_connection_rejects_a_paper_plan_before_transmission() -> None:
+    client = FakeOrderClient(account="U123456")
+    connection = IbkrConnection(_config(Environment.LIVE), client=client, execution_enabled=True)
+
+    async def scenario() -> None:
+        await connection.connect()
+        await connection.submit_protected_order(_plan(Environment.PAPER), _instrument())
+
+    try:
+        asyncio.run(scenario())
+    except IbkrError as exc:
+        assert str(exc) == "ACCOUNT_OR_ENVIRONMENT_MISMATCH"
+    else:
+        raise AssertionError("LIVE connection must reject a PAPER plan")
+    assert client.placed == []
+
+
+def test_wrong_live_account_blocks_reconciliation_and_transmission(tmp_path) -> None:
+    broker = FakeExecutionBroker(environment=Environment.LIVE, account="U-WRONG")
+    service = Stage7ExecutionService(
+        run=_run(Environment.LIVE),
+        expected_account="U123456",
+        broker=broker,
+        ledger=ExecutionLedger(tmp_path / "ledger.sqlite3"),
+    )
+
+    reconciliation = asyncio.run(service.reconcile())
+    result = asyncio.run(service.execute(_intent(), _instrument()))
+
+    assert reconciliation.ok is False
+    assert result.code is ExecutionResultCode.ACCOUNT_OR_ENVIRONMENT_MISMATCH
+    assert broker.submitted == []
+
+
+def test_market_data_qualification_is_shared_across_execution_environments() -> None:
+    boundary = QualificationBoundary()
+    paper = active_run("paper-run", "NASDAQ", "AAPL")
+    live = replace(
+        active_run("live-run", "NASDAQ", "AAPL"),
+        config=active_run("live-run", "NASDAQ", "AAPL").config.model_copy(
+            update={"environment": Environment.LIVE}
+        ),
+    )
+
+    result = asyncio.run(qualify_active_runs(boundary, (paper, live)))
+
+    assert boundary.calls == ["AAPL"]
+    assert set(result.requests[0].memberships) == {
+        Stage5Membership("paper-run", "NASDAQ"),
+        Stage5Membership("live-run", "NASDAQ"),
+    }
+    assert result.ineligible == ()
+
+
 def test_mixed_runtime_connects_reconciles_and_reports_each_environment(tmp_path) -> None:
     paper = EnvironmentBroker(Environment.PAPER, "DU123456")
     live = EnvironmentBroker(Environment.LIVE, "U123456")
@@ -240,6 +304,24 @@ def test_mixed_runtime_connects_reconciles_and_reports_each_environment(tmp_path
     }
     assert paper.events[:1] == ["connect"]
     assert live.events[:1] == ["connect"]
+
+
+def test_mixed_runtime_dispatches_each_signal_to_its_selected_environment(tmp_path) -> None:
+    paper = EnvironmentBroker(Environment.PAPER, "DU123456")
+    live = EnvironmentBroker(Environment.LIVE, "U123456")
+    runtime = _mixed_runtime(tmp_path, paper, live)
+    asyncio.run(runtime.start())
+
+    paper_result = asyncio.run(runtime._execution["paper-run"].execute(_intent(), _instrument()))
+    live_intent = replace(_intent(), run_id="live-run", signal_id="live-signal")
+    live_result = asyncio.run(runtime._execution["live-run"].execute(live_intent, _instrument()))
+
+    assert paper_result.code is ExecutionResultCode.SUBMITTED
+    assert live_result.code is ExecutionResultCode.SUBMITTED
+    assert len(paper.submitted) == 1
+    assert len(live.submitted) == 1
+    assert paper.submitted[0].environment is Environment.PAPER
+    assert live.submitted[0].environment is Environment.LIVE
 
 
 def test_same_instrument_uses_isolated_paper_and_live_account_state(tmp_path) -> None:
@@ -274,6 +356,38 @@ def test_same_instrument_uses_isolated_paper_and_live_account_state(tmp_path) ->
     assert live_result.actual_account == "U123456"
     assert ledger.known_order_ids(Environment.PAPER, "DU123456") == {101, 102, 103}
     assert ledger.known_order_ids(Environment.LIVE, "U123456") == {101, 102, 103}
+
+    executed_at = datetime(2026, 9, 2, 14, 32, tzinfo=UTC)
+    assert ledger.record_fill(
+        BrokerFill(
+            "same-broker-execution-id",
+            101,
+            "DU123456",
+            Environment.PAPER,
+            265598,
+            "AAPL",
+            paper_result.order_plan.side,
+            10,
+            100.0,
+            executed_at,
+        )
+    )
+    assert ledger.record_fill(
+        BrokerFill(
+            "same-broker-execution-id",
+            101,
+            "U123456",
+            Environment.LIVE,
+            265598,
+            "AAPL",
+            live_result.order_plan.side,
+            10,
+            100.0,
+            executed_at,
+        )
+    )
+    assert ledger.get(paper_result.order_plan.order_plan_id).filled_quantity == 10  # type: ignore[union-attr]
+    assert ledger.get(live_result.order_plan.order_plan_id).filled_quantity == 10  # type: ignore[union-attr]
 
 
 def test_risk_arithmetic_and_order_geometry_are_environment_independent() -> None:
@@ -403,6 +517,81 @@ def test_unknown_live_exposure_blocks_only_live_environment(tmp_path) -> None:
     assert environments[Environment.LIVE].ready is False
 
 
+def test_unknown_paper_exposure_blocks_only_paper_environment(tmp_path) -> None:
+    paper = EnvironmentBroker(Environment.PAPER, "DU123456")
+    live = EnvironmentBroker(Environment.LIVE, "U123456")
+    paper.positions = (BrokerPosition("DU123456", 999, "UNKNOWN", 10, 50.0),)
+    runtime = _mixed_runtime(tmp_path, paper, live)
+
+    asyncio.run(runtime.start())
+    status = runtime.status()
+    runs = {run.run_id: run for run in status.runs}
+    environments = {item.environment: item for item in status.execution_environments}
+
+    assert status.application is ApplicationState.READY
+    assert runs["paper-run"].state.value == "DEGRADED"
+    assert runs["live-run"].state.value == "ACTIVE"
+    assert environments[Environment.PAPER].ready is False
+    assert environments[Environment.LIVE].ready is True
+
+
+def test_order_and_position_records_never_reconcile_across_environments(tmp_path) -> None:
+    cases = (
+        (Environment.PAPER, "DU123456", Environment.LIVE, "U123456"),
+        (Environment.LIVE, "U123456", Environment.PAPER, "DU123456"),
+    )
+    for index, (
+        source_environment,
+        source_account,
+        target_environment,
+        target_account,
+    ) in enumerate(cases):
+        ledger = ExecutionLedger(tmp_path / f"ledger-{index}.sqlite3")
+        source_run = _run(source_environment).model_copy(update={"run_id": f"source-{index}"})
+        source_intent = replace(
+            _intent(), run_id=source_run.run_id, signal_id=f"source-signal-{index}"
+        )
+        source_broker = FakeExecutionBroker(environment=source_environment, account=source_account)
+        source = Stage7ExecutionService(
+            run=source_run,
+            expected_account=source_account,
+            broker=source_broker,
+            ledger=ledger,
+        )
+        assert asyncio.run(source.reconcile()).ok
+        submitted = asyncio.run(source.execute(source_intent, _instrument()))
+        assert submitted.order_plan is not None
+
+        target_broker = FakeExecutionBroker(
+            environment=target_environment,
+            account=target_account,
+            open_orders=(
+                BrokerOpenOrder(
+                    101,
+                    submitted.order_plan.order_plan_id,
+                    target_account,
+                    target_environment,
+                    265598,
+                    "AAPL",
+                    OrderRole.ENTRY,
+                    OrderLifecycle.SUBMITTED,
+                ),
+            ),
+            positions=(BrokerPosition(target_account, 265598, "AAPL", -10, 100.0),),
+        )
+        target = Stage7ExecutionService(
+            run=_run(target_environment).model_copy(update={"run_id": f"target-{index}"}),
+            expected_account=target_account,
+            broker=target_broker,
+            ledger=ledger,
+        )
+
+        reconciliation = asyncio.run(target.reconcile())
+
+        assert reconciliation.ok is False
+        assert reconciliation.code is ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED
+
+
 def test_live_disconnect_blocks_only_live_environment(tmp_path) -> None:
     paper = EnvironmentBroker(Environment.PAPER, "DU123456")
     live = EnvironmentBroker(Environment.LIVE, "U123456")
@@ -439,6 +628,51 @@ def test_live_reconnect_does_not_cycle_paper_and_requires_live_reconciliation(tm
     assert environments[Environment.PAPER].ready is True
     assert environments[Environment.LIVE].reconciled is True
     assert environments[Environment.LIVE].ready is True
+
+
+def test_live_reconnect_marks_only_live_missed_checkpoints(tmp_path) -> None:
+    paper = EnvironmentBroker(Environment.PAPER, "DU123456")
+    live = EnvironmentBroker(Environment.LIVE, "U123456")
+    runtime = _mixed_runtime(tmp_path, paper, live)
+    asyncio.run(runtime.start())
+    live.is_connected = False
+    live.account = ""
+    asyncio.run(runtime.poll_once())
+    runtime._clock = MutableClock(datetime(2026, 9, 2, 14, 6, tzinfo=UTC))
+
+    asyncio.run(runtime.reconnect(Environment.LIVE))
+
+    checkpoint = datetime(2026, 9, 2, 14, 0, tzinfo=UTC)
+    assert runtime.store.checkpoint_state("paper-run", checkpoint.date(), checkpoint) is None
+    assert (
+        runtime.store.checkpoint_state("live-run", checkpoint.date(), checkpoint)
+        is CheckpointState.SKIPPED_MISSED
+    )
+
+
+def test_live_reconnect_preparation_failure_does_not_degrade_paper(tmp_path) -> None:
+    paper = EnvironmentBroker(Environment.PAPER, "DU123456")
+    live = EnvironmentBroker(Environment.LIVE, "U123456")
+    runtime = _mixed_runtime(tmp_path, paper, live)
+    asyncio.run(runtime.start())
+    live.is_connected = False
+    live.account = ""
+    asyncio.run(runtime.poll_once())
+
+    async def fail_preparation(_active_runs):
+        raise RuntimeError("LIVE preparation failed")
+
+    runtime._qualify = fail_preparation
+    asyncio.run(runtime.reconnect(Environment.LIVE))
+    status = runtime.status()
+    runs = {run.run_id: run for run in status.runs}
+    environments = {item.environment: item for item in status.execution_environments}
+
+    assert status.application is ApplicationState.READY
+    assert runs["paper-run"].state.value == "ACTIVE"
+    assert environments[Environment.PAPER].ready is True
+    assert runs["live-run"].state.value == "DEGRADED"
+    assert environments[Environment.LIVE].ready is False
 
 
 def test_live_readiness_diagnostic_reads_state_without_submitting_an_order(tmp_path) -> None:
@@ -506,3 +740,4 @@ LIVE:
     assert [item.environment for item in runtime.status().execution_environments] == [
         Environment.LIVE
     ]
+    assert "ibkr_paper" not in runtime.status().as_dict()

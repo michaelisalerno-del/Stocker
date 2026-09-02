@@ -424,16 +424,6 @@ async def qualify_active_runs(
         if run.state is not RunState.ACTIVE:
             continue
         membership = Stage5Membership(run.config.run_id, run.universe.universe_id)
-        if run.config.environment is not ibkr.config.environment:
-            for reference in run.universe.members:
-                ineligible.append(
-                    Stage5IneligibleInstrument(
-                        reference.symbol,
-                        (membership,),
-                        "run environment does not match this IBKR connection",
-                    )
-                )
-            continue
         for reference in run.universe.members:
             references.setdefault(reference, set()).add(membership)
 

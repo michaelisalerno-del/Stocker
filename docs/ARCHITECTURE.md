@@ -56,6 +56,14 @@ type; the universe does not manufacture a universe-specific security identity. T
 universes can share the same conceptual instrument while IBKR qualification and `conId` remain at
 the Stage 2 boundary. Exact duplicate members within one universe are removed in first-seen order.
 
+The production US named universes `NASDAQ`, `NYSE`, and `US_ALL` are materialized at configuration
+load from one locally persisted Nasdaq Trader Symbol Directory snapshot. The snapshot records its
+source URLs, retrieval time, both source-file creation times, and the universe names it supports.
+It includes non-ETF, non-test listed issues; Stage 2 remains responsible for proving that each issue
+is an IBKR `STK` and skips/reports failures. `CUSTOM` remains an inline broker-independent member
+list. Loading any universe performs no IBKR or historical-data request. The explicit
+`stocker universe refresh-us-listings` command is the only networked membership refresh path.
+
 ### Run
 
 A run is one active combination of universe, strategy, `PAPER` or `LIVE` environment, trading or
@@ -168,6 +176,13 @@ so PAPER and LIVE use distinct Gateway sessions without a global singleton. The 
 read-only unless execution is explicitly enabled by runtime composition, and a writable session
 still accepts only plans matching its configured environment and expected account. It exposes
 small Stocker models; strategies and calculations do not import IBKR objects.
+
+`stocker ibkr-data-diagnostic` uses that same boundary on one caller-selected stock. It captures
+sanitized IBKR error codes per request, probes live stock data before a distinct delayed-data check,
+and separately reports qualification, historical bars, option-chain metadata, option bid/ask/open
+interest, and contract-specific tick-13 model IV. The diagnostic is read-only, masks account
+identity, does not persist PRE context, and does not transmit orders. Normal PRE acquisition still
+requires live/frozen market-data types 1/2; delayed types 3/4 remain invalid.
 
 PAPER and LIVE host, port, client ID, and environment are separate explicit configuration blocks.
 The Stage 1 run environment selects one block. Connection verification uses the managed account ID,

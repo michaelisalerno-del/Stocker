@@ -15,10 +15,28 @@ from stocker_execution.ibkr import (
     BrokerSession,
     CurrentQuote,
     HistoricalBar,
+    IbkrApiError,
     IbkrConnection,
     IbkrError,
     QualifiedInstrument,
 )
+
+
+class FakeEvent:
+    def __init__(self) -> None:
+        self.handlers: list[object] = []
+
+    def __iadd__(self, handler: object) -> "FakeEvent":
+        self.handlers.append(handler)
+        return self
+
+    def __isub__(self, handler: object) -> "FakeEvent":
+        self.handlers.remove(handler)
+        return self
+
+    def emit(self, *args: object) -> None:
+        for handler in tuple(self.handlers):
+            handler(*args)  # type: ignore[operator]
 
 
 class FakeIbClient:
@@ -41,6 +59,8 @@ class FakeIbClient:
         self.historical_request: object | None = None
         self.historical_kwargs: dict[str, object] = {}
         self.ticker_request: object | None = None
+        self.market_data_types: list[int] = []
+        self.errorEvent = FakeEvent()
 
     async def connectAsync(self, host: str, port: int, **kwargs: object) -> None:
         self.connect_kwargs = {"host": host, "port": port, **kwargs}
@@ -78,6 +98,9 @@ class FakeIbClient:
         if isinstance(self.ticker_result, Exception):
             raise self.ticker_result
         return self.ticker_result
+
+    def reqMarketDataType(self, market_data_type: int) -> None:
+        self.market_data_types.append(market_data_type)
 
 
 def test_paper_and_live_ibkr_configurations_are_explicit_and_independent() -> None:
@@ -557,6 +580,7 @@ def test_current_quote_snapshot_is_converted_to_a_small_internal_result() -> Non
                 ask=230.9,
                 last=230.85,
                 close=229.7,
+                marketDataType=1,
             )
         ],
     )
@@ -591,7 +615,37 @@ def test_current_quote_snapshot_is_converted_to_a_small_internal_result() -> Non
     assert quote.ask == 230.9
     assert quote.last == 230.85
     assert quote.close == 229.7
+    assert quote.market_data_type == 1
     assert client.ticker_request.conId == 265598
+    assert client.market_data_types == [1]
+
+
+def test_ibkr_api_error_capture_retains_code_and_instrument_without_account_data() -> None:
+    client = FakeIbClient(accounts=["DU123456"])
+    connection = IbkrConnection(
+        IbkrConfig(
+            environment=Environment.PAPER,
+            host="127.0.0.1",
+            port=4002,
+            client_id=21,
+        ),
+        client=client,
+    )
+    contract = SimpleNamespace(conId=265598, symbol="AAPL", exchange="SMART")
+
+    with connection.capture_api_errors() as errors:
+        client.errorEvent.emit(17, 354, "Not subscribed to requested market data", contract)
+
+    assert errors == [
+        IbkrApiError(
+            request_id=17,
+            code=354,
+            message="Not subscribed to requested market data",
+            con_id=265598,
+            symbol="AAPL",
+            exchange="SMART",
+        )
+    ]
 
 
 def test_current_quote_with_only_a_previous_close_fails_clearly() -> None:

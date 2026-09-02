@@ -1,7 +1,8 @@
 """Minimal IBKR connection, market-data, and explicit execution boundary."""
 
 import asyncio
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -27,6 +28,18 @@ from stocker_execution.execution_models import (
 
 class IbkrError(RuntimeError):
     """A clear failure at the IBKR connection or data boundary."""
+
+
+@dataclass(frozen=True, slots=True)
+class IbkrApiError:
+    """One sanitized TWS/Gateway API error observed during a data request."""
+
+    request_id: int
+    code: int
+    message: str
+    con_id: int | None
+    symbol: str | None
+    exchange: str | None
 
 
 class _IbClient(Protocol):
@@ -136,6 +149,7 @@ class _SourceTicker(Protocol):
     ask: float
     last: float
     close: float
+    marketDataType: int
 
 
 class _SourceOptionComputation(Protocol):
@@ -275,6 +289,7 @@ class CurrentQuote:
     ask: float | None
     last: float | None
     close: float | None
+    market_data_type: int | None = None
 
 
 def _new_client() -> _IbClient:
@@ -373,6 +388,34 @@ class IbkrConnection:
         if config.environment is not self.environment:
             raise ValueError("IBKR reconfiguration cannot change execution environment")
         self.config = config
+
+    @contextmanager
+    def capture_api_errors(self) -> Iterator[list[IbkrApiError]]:
+        """Capture sanitized IBKR error callbacks for one diagnostic request scope."""
+
+        errors: list[IbkrApiError] = []
+        event = getattr(self._client, "errorEvent", None)
+        if event is None:
+            yield errors
+            return
+
+        def capture(request_id: int, code: int, message: str, contract: object) -> None:
+            errors.append(
+                IbkrApiError(
+                    request_id=int(request_id),
+                    code=int(code),
+                    message=str(message),
+                    con_id=_optional_contract_integer(contract, "conId"),
+                    symbol=_optional_contract_text(contract, "symbol"),
+                    exchange=_optional_contract_text(contract, "exchange"),
+                )
+            )
+
+        event += capture
+        try:
+            yield errors
+        finally:
+            event -= capture
 
     async def account_state(self) -> BrokerAccountState:
         """Read authoritative equity, buying power, and positions for this session."""
@@ -737,11 +780,16 @@ class IbkrConnection:
             )
         return bars
 
-    async def current_quote(self, instrument: QualifiedInstrument) -> CurrentQuote:
+    async def current_quote(
+        self, instrument: QualifiedInstrument, *, market_data_type: int = 1
+    ) -> CurrentQuote:
         """Request one finite IBKR market-data snapshot for a qualified instrument."""
 
         self._require_connected()
+        if market_data_type not in {1, 2, 3, 4}:
+            raise IbkrError("IBKR market data type must be one of 1, 2, 3, or 4")
         try:
+            self._client.reqMarketDataType(market_data_type)
             tickers = await asyncio.wait_for(
                 self._client.reqTickersAsync(_to_ib_contract(instrument), regulatorySnapshot=False),
                 timeout=self.config.request_timeout_seconds,
@@ -784,6 +832,7 @@ class IbkrConnection:
             ask=ask,
             last=last,
             close=close,
+            market_data_type=_optional_integer(getattr(ticker, "marketDataType", None)),
         )
 
     async def option_snapshots(
@@ -794,7 +843,8 @@ class IbkrConnection:
         self._require_connected()
         if not options:
             raise IbkrError("At least one qualified option is required")
-        contracts = tuple(_to_ib_option_contract(option) for option in options)
+        unique_options = tuple({option.con_id: option for option in options}.values())
+        contracts = tuple(_to_ib_option_contract(option) for option in unique_options)
         try:
             self._client.reqMarketDataType(1)
             tickers = tuple(
@@ -809,7 +859,7 @@ class IbkrConnection:
             deadline = asyncio.get_running_loop().time() + self.config.request_timeout_seconds
             while not all(
                 _option_snapshot_complete(cast(_SourceOptionTicker, ticker), option)
-                for ticker, option in zip(tickers, options, strict=True)
+                for ticker, option in zip(tickers, unique_options, strict=True)
             ):
                 if asyncio.get_running_loop().time() >= deadline:
                     break
@@ -822,7 +872,7 @@ class IbkrConnection:
 
         captured_at = datetime.now(tz=UTC)
         normalized: list[OptionMarketSnapshot] = []
-        for option, source in zip(options, tickers, strict=True):
+        for option, source in zip(unique_options, tickers, strict=True):
             ticker = cast(_SourceOptionTicker, source)
             market_data_type = _optional_integer(getattr(ticker, "marketDataType", None))
             model = getattr(ticker, "modelGreeks", None) if market_data_type in {1, 2} else None
@@ -1078,6 +1128,18 @@ def _optional_integer(value: object) -> int | None:
     if number is None or not number.is_integer():
         return None
     return int(number)
+
+
+def _optional_contract_integer(contract: object, field: str) -> int | None:
+    return _optional_integer(getattr(contract, field, None))
+
+
+def _optional_contract_text(contract: object, field: str) -> str | None:
+    value = getattr(contract, field, None)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _account_value(values: list[object], account: str, tag: str) -> float | None:

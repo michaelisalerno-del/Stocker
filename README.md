@@ -113,7 +113,14 @@ exposes multiple accounts, copy the example to the ignored `configs/ibkr.local.y
 
 ## Stage 3 Universes And Runs
 
-`configs/runs.example.yaml` defines named and custom universes plus independent PAPER/LIVE runs.
+`configs/runs.example.yaml` resolves `NASDAQ`, `NYSE`, and `US_ALL` from the timestamped
+`universes/us-listed.csv` Nasdaq Trader snapshot and defines inline `CUSTOM` members plus
+independent PAPER/LIVE runs. Refresh membership explicitly with:
+
+```bash
+uv run stocker universe refresh-us-listings --output universes/us-listed.csv
+```
+
 Inspect the configured state, or mark several runs active for this in-memory diagnostic, with:
 
 ```bash
@@ -124,6 +131,21 @@ uv run stocker runs-status \
 ```
 
 This command does not connect to IBKR, fetch data, schedule work, evaluate a strategy, or trade.
+
+For a one-symbol read-only entitlement check covering Stocker-required stock history, option-chain
+metadata, option bid/ask/open interest, and tick-13 model IV:
+
+```bash
+uv run stocker ibkr-data-diagnostic \
+  --run-config configs/run.example.yaml \
+  --ibkr-config configs/ibkr.local.yaml \
+  --runs-config configs/runs.example.yaml \
+  --symbol AAPL \
+  --primary-exchange NASDAQ
+```
+
+The command masks account identity, reports exact IBKR error codes and delayed availability, and
+never submits an order.
 
 ## Intentionally Not Implemented Yet
 

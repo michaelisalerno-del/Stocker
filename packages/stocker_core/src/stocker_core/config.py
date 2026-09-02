@@ -8,7 +8,11 @@ from pydantic import BaseModel, Field, StringConstraints, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from stocker_core.runs import Environment, RunConfig
-from stocker_core.universes import UniverseDefinition
+from stocker_core.universes import (
+    NAMED_US_UNIVERSES,
+    UniverseDefinition,
+    load_us_universe_snapshot,
+)
 
 
 class DataConfig(BaseModel):
@@ -191,7 +195,44 @@ def load_run_config(path: str | Path) -> RunConfig:
 def load_runs_config(path: str | Path) -> RunsConfig:
     """Load the broker-independent multiple-universe and multiple-run configuration."""
 
-    return load_config(path, RunsConfig)
+    config_path = Path(path)
+    raw = _read_yaml(config_path)
+    snapshot_value = raw.pop("named_universe_snapshot", None)
+    inline = raw.get("universes", [])
+    runs = raw.get("runs", [])
+    if not isinstance(inline, list) or not isinstance(runs, list):
+        return RunsConfig.model_validate(raw)
+    inline_ids = {str(item.get("universe_id", "")) for item in inline if isinstance(item, dict)}
+    referenced = tuple(
+        dict.fromkeys(
+            str(item.get("universe", ""))
+            for item in runs
+            if isinstance(item, dict) and item.get("universe")
+        )
+    )
+    missing_named = tuple(
+        universe_id
+        for universe_id in referenced
+        if universe_id in NAMED_US_UNIVERSES and universe_id not in inline_ids
+    )
+    if missing_named:
+        if not isinstance(snapshot_value, str) or not snapshot_value.strip():
+            names = ", ".join(missing_named)
+            raise ValueError(
+                f"Named universe {names} requires named_universe_snapshot in {config_path}"
+            )
+        snapshot_path = Path(snapshot_value)
+        if not snapshot_path.is_absolute():
+            snapshot_path = config_path.parent / snapshot_path
+        snapshot = load_us_universe_snapshot(snapshot_path)
+        raw["universes"] = [
+            *inline,
+            *(
+                snapshot.get_universe(universe_id).model_dump(mode="python")
+                for universe_id in missing_named
+            ),
+        ]
+    return RunsConfig.model_validate(raw)
 
 
 def load_ibkr_config(path: str | Path, environment: Environment) -> IbkrConfig:

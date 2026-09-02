@@ -1,6 +1,7 @@
 import sys
-from datetime import time
+from datetime import datetime, time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from typer.testing import CliRunner
@@ -8,7 +9,15 @@ from typer.testing import CliRunner
 from stocker_core.cli import app
 from stocker_core.config import load_runs_config
 from stocker_core.runs import Environment, RunConfig, RunManager, RunState, RunWindow
-from stocker_core.universes import InstrumentReference, UniverseCatalog, UniverseDefinition
+from stocker_core.universes import (
+    NASDAQ_LISTED_URL,
+    OTHER_LISTED_URL,
+    InstrumentReference,
+    UniverseCatalog,
+    UniverseDefinition,
+    load_us_universe_snapshot,
+    refresh_us_universe_snapshot,
+)
 
 
 def test_multiple_substantially_different_universes_can_coexist() -> None:
@@ -93,6 +102,119 @@ runs:
     ]
     assert [member.symbol for member in loaded.universes[1].members] == ["AAPL", "PLTR"]
     assert [run.run_id for run in loaded.runs] == ["nasdaq_main", "custom_experiment"]
+
+
+def test_named_us_universes_load_real_members_from_one_timestamped_snapshot(
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / "us-listed.csv"
+    snapshot_path.write_text(
+        """# schema_version=1
+# source=NASDAQ_TRADER_SYMBOL_DIRECTORY
+# source_urls=https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt,https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt
+# retrieved_at=2026-09-02T12:00:00+00:00
+# nasdaq_source_updated_at=0902202611:55
+# other_source_updated_at=0902202611:56
+# universes=US_ALL,NASDAQ,NYSE
+symbol,primary_exchange
+AAPL,NASDAQ
+MSFT,NASDAQ
+IBM,NYSE
+IBM,NYSE
+PLTR,NYSE
+""",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "runs.yaml"
+    config_path.write_text(
+        f"""
+named_universe_snapshot: {snapshot_path.name}
+universes:
+  - universe_id: CUSTOM
+    name: Custom stocks
+    members:
+      - {{symbol: aapl, exchange: smart, primary_exchange: nasdaq, currency: usd}}
+      - {{symbol: AAPL, exchange: SMART, primary_exchange: NASDAQ, currency: USD}}
+runs:
+  - run_id: nasdaq
+    universe: NASDAQ
+    strategy: SESSION_HARD
+    environment: PAPER
+  - run_id: nyse
+    universe: NYSE
+    strategy: SESSION_HARD
+    environment: PAPER
+  - run_id: all
+    universe: US_ALL
+    strategy: SESSION_HARD
+    environment: PAPER
+  - run_id: custom
+    universe: CUSTOM
+    strategy: SESSION_HARD
+    environment: PAPER
+""",
+        encoding="utf-8",
+    )
+
+    loaded = load_runs_config(config_path)
+    catalog = UniverseCatalog(loaded.universes)
+
+    assert [member.symbol for member in catalog.get_members("NASDAQ")] == ["AAPL", "MSFT"]
+    assert [member.symbol for member in catalog.get_members("NYSE")] == ["IBM", "PLTR"]
+    assert [member.symbol for member in catalog.get_members("US_ALL")] == [
+        "AAPL",
+        "IBM",
+        "MSFT",
+        "PLTR",
+    ]
+    assert catalog.get_members("CUSTOM") == (
+        InstrumentReference(
+            symbol="AAPL",
+            exchange="SMART",
+            primary_exchange="NASDAQ",
+            currency="USD",
+        ),
+    )
+
+
+def test_us_listing_refresh_filters_funds_and_test_issues_and_retains_provenance(
+    tmp_path: Path,
+) -> None:
+    source_files = {
+        NASDAQ_LISTED_URL: (
+            "Symbol|Security Name|Market Category|Test Issue|Financial Status|"
+            "Round Lot Size|ETF|NextShares\n"
+            "AAPL|Apple Inc. - Common Stock|Q|N|N|40|N|N\n"
+            "QQQ|Invesco QQQ Trust|G|N|N|100|Y|N\n"
+            "ZTEST|Test issue|S|Y|N|100|N|N\n"
+            "File Creation Time: 0902202611:55|||||||\n"
+        ),
+        OTHER_LISTED_URL: (
+            "ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|"
+            "Test Issue|NASDAQ Symbol\n"
+            "IBM|International Business Machines Common Stock|N|IBM|N|40|N|IBM\n"
+            "SPY|SPDR S&P 500 ETF Trust|P|SPY|Y|100|N|SPY\n"
+            "ATEST|Test issue|A|ATEST|N|100|Y|ATEST\n"
+            "File Creation Time: 0902202611:56|||||||\n"
+        ),
+    }
+    output = tmp_path / "us-listed.csv"
+
+    result = refresh_us_universe_snapshot(
+        output,
+        fetch_text=source_files.__getitem__,
+        clock=lambda: datetime(2026, 9, 2, 12, 0, tzinfo=ZoneInfo("UTC")),
+    )
+    snapshot = load_us_universe_snapshot(output)
+
+    assert result.us_all_count == 2
+    assert result.nasdaq_count == 1
+    assert result.nyse_count == 1
+    assert [member.symbol for member in snapshot.members] == ["AAPL", "IBM"]
+    assert snapshot.metadata.source == "NASDAQ_TRADER_SYMBOL_DIRECTORY"
+    assert snapshot.metadata.retrieved_at.isoformat() == "2026-09-02T12:00:00+00:00"
+    assert snapshot.metadata.nasdaq_source_updated_at == "0902202611:55"
+    assert snapshot.metadata.other_source_updated_at == "0902202611:56"
 
 
 def test_run_referencing_an_unknown_universe_is_rejected(tmp_path: Path) -> None:

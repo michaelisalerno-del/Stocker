@@ -44,6 +44,8 @@ class SnapshotClient:
         self.connected = False
         self.generic_tick_lists: list[str] = []
         self.market_data_types: list[int] = []
+        self.requested_con_ids: list[int] = []
+        self.cancelled_con_ids: list[int] = []
 
     async def connectAsync(self, *args: object, **kwargs: object) -> None:
         self.connected = True
@@ -78,9 +80,11 @@ class SnapshotClient:
         regulatorySnapshot: bool = False,
     ) -> object:
         self.generic_tick_lists.append(genericTickList)
+        self.requested_con_ids.append(contract.conId)  # type: ignore[attr-defined]
         return self.ticker
 
     def cancelMktData(self, contract: object) -> bool:
+        self.cancelled_con_ids.append(contract.conId)  # type: ignore[attr-defined]
         return True
 
     def reqMarketDataType(self, market_data_type: int) -> None:
@@ -289,6 +293,24 @@ def test_stage2_option_snapshot_uses_only_tick13_model_computation_iv() -> None:
     assert client.generic_tick_lists == ["101"]
     assert "106" not in client.generic_tick_lists
     assert client.market_data_types == [1]
+
+
+def test_stage2_option_snapshot_deduplicates_and_cancels_finite_streams() -> None:
+    ticker = SimpleNamespace(
+        bid=1.0,
+        ask=1.2,
+        callOpenInterest=120,
+        putOpenInterest=None,
+        marketDataType=1,
+        modelGreeks=SimpleNamespace(impliedVol=0.27, delta=0.51, gamma=0.02),
+    )
+    boundary, client = connected_snapshot_boundary(ticker)
+
+    snapshots = asyncio.run(boundary.option_snapshots((option(), option())))
+
+    assert [snapshot.option.con_id for snapshot in snapshots] == [99001]
+    assert client.requested_con_ids == [99001]
+    assert client.cancelled_con_ids == [99001]
 
 
 def test_stage2_does_not_fallback_when_tick13_model_computation_is_missing() -> None:

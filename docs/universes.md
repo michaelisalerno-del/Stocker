@@ -1,12 +1,49 @@
 # Universes
 
-Stocker uses universes so research starts from a reproducible symbol set instead of
-random manual ticker tests. A universe records where the symbols came from, what
-filters produced them, and what metadata was available at build time.
+Stocker uses universes so runtime and research start from reproducible symbol sets instead of
+random manual ticker tests.
 
-The current universe source is EODHD. FMP may be useful later as a secondary metadata
-provider, but this stage keeps one vendor path: EODHD screener for symbol discovery and
-EODHD history for local datasets.
+## Runtime US Named Universes
+
+Production runtime configuration supports:
+
+- `US_ALL`: all eligible issues in the cached Nasdaq Trader Nasdaq-listed and other-listed files;
+- `NASDAQ`: Nasdaq-listed eligible issues;
+- `NYSE`: issues whose primary listing code is NYSE;
+- `CUSTOM`: inline `InstrumentReference` members in the runs YAML.
+
+The committed `universes/us-listed.csv` snapshot is sourced from the official Nasdaq Trader Symbol
+Directory. It records source URLs, retrieval time, both source-file creation times, and supported
+universe names. Refresh it explicitly with:
+
+```bash
+uv run stocker universe refresh-us-listings --output universes/us-listed.csv
+```
+
+The refresh excludes rows marked as ETFs or test issues (and Nasdaq NextShares). It does not guess
+security type from issuer names. Stage 2 requests an IBKR stock contract for each member; warrants,
+units, stale symbols, ambiguous symbols, and other non-stock issues therefore fail qualification,
+are reported for that symbol, and do not stop the batch. Loading the snapshot itself makes no IBKR,
+historical-bar, option, PRE, or order request.
+
+Reference it from a multi-run config with:
+
+```yaml
+named_universe_snapshot: ../universes/us-listed.csv
+universes:
+  - universe_id: CUSTOM
+    name: My list
+    members:
+      - {symbol: AAPL, exchange: SMART, primary_exchange: NASDAQ, currency: USD}
+runs:
+  - run_id: nasdaq_paper
+    universe: NASDAQ
+    strategy: SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D
+    environment: PAPER
+```
+
+The older research universe data manager below remains separate. Its current provider is EODHD,
+and its history is not a production or PAPER PRE input.
 
 ## Files
 

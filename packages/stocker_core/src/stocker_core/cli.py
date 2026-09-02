@@ -160,6 +160,85 @@ def ibkr_check(
         raise typer.Exit(code=1) from exc
 
 
+@app.command("ibkr-data-diagnostic")
+def ibkr_data_diagnostic(
+    run_config: Annotated[
+        Path, typer.Option("--run-config", help="Run config selecting PAPER or LIVE.")
+    ] = DEFAULT_RUN_CONFIG,
+    ibkr_config: Annotated[
+        Path, typer.Option("--ibkr-config", help="Explicit PAPER and LIVE IBKR settings.")
+    ] = DEFAULT_IBKR_CONFIG,
+    runs_config: Annotated[
+        Path, typer.Option("--runs-config", help="Universe definitions to report.")
+    ] = DEFAULT_RUNS_CONFIG,
+    symbol: Annotated[str, typer.Option("--symbol")] = "AAPL",
+    exchange: Annotated[str, typer.Option("--exchange")] = "SMART",
+    primary_exchange: Annotated[str | None, typer.Option("--primary-exchange")] = "NASDAQ",
+    currency: Annotated[str, typer.Option("--currency")] = "USD",
+) -> None:
+    """Check required IBKR data and entitlements on one symbol without trading."""
+
+    from stocker_execution.ibkr import IbkrConnection
+    from stocker_execution.ibkr_data_diagnostic import (
+        IbkrDataStatus,
+        diagnose_ibkr_data,
+    )
+
+    try:
+        run = load_run_config(run_config)
+        broker_config = load_ibkr_config(ibkr_config, run.environment)
+        loaded_runs = load_runs_config(runs_config)
+        catalog = UniverseCatalog(loaded_runs.universes)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid IBKR data diagnostic configuration: {exc}") from exc
+
+    try:
+        report = asyncio.run(
+            diagnose_ibkr_data(
+                IbkrConnection(broker_config),
+                symbol=symbol,
+                exchange=exchange,
+                primary_exchange=primary_exchange,
+                currency=currency,
+            )
+        )
+    except (OSError, ValueError) as exc:
+        console.print(f"IBKR data diagnostic failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print("Stocker IBKR data diagnostic")
+    console.print(f"Configured environment: {run.environment.value}")
+    console.print(f"Account: {report.masked_account or 'unavailable'}")
+    for check in report.checks:
+        console.print(f"{check.capability.value}: {check.status.value}")
+        console.print(f"  {check.detail}")
+        for error in check.errors:
+            location = "/".join(
+                item for item in (error.symbol, error.exchange, str(error.con_id or "")) if item
+            )
+            console.print(
+                f"  IBKR error {error.code}: {error.message}{f' [{location}]' if location else ''}"
+            )
+        if check.status in {IbkrDataStatus.NOT_ENTITLED, IbkrDataStatus.DELAYED_ONLY}:
+            console.print(f"  delayed available: {'yes' if check.delayed_available else 'no'}")
+            if check.apparent_entitlement:
+                console.print(f"  smallest apparent entitlement: {check.apparent_entitlement}")
+            if check.required_for:
+                console.print(f"  Stocker requires this for: {check.required_for}")
+
+    console.print("Universes")
+    by_id = {universe.universe_id: universe for universe in catalog.list_universes()}
+    for universe_id in ("US_ALL", "NASDAQ", "NYSE", "CUSTOM"):
+        universe = by_id.get(universe_id)
+        if universe is None:
+            console.print(f"Universe {universe_id}: NOT_CONFIGURED")
+        else:
+            console.print(f"Universe {universe_id}: READY members={len(universe.members)}")
+    console.print("No order was transmitted by this diagnostic.")
+    if any(check.status != IbkrDataStatus.AVAILABLE for check in report.checks):
+        raise typer.Exit(code=1)
+
+
 @app.command("pre-context-check")
 def pre_context_check(
     target_session: Annotated[
@@ -867,6 +946,28 @@ def _require_vendor_for_live(
     raise typer.BadParameter(
         f"EODHD is disabled in research config {config_path}; enable it before live universe work."
     )
+
+
+@universe_app.command("refresh-us-listings")
+def universe_refresh_us_listings(
+    output: Annotated[Path, typer.Option("--output")] = Path("universes/us-listed.csv"),
+) -> None:
+    """Refresh NASDAQ, NYSE, and US_ALL membership from Nasdaq Trader directories."""
+
+    from stocker_core.universes import refresh_us_universe_snapshot
+
+    try:
+        result = refresh_us_universe_snapshot(output)
+    except (OSError, ValueError) as exc:
+        console.print(f"US listing refresh failed: {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print("US named-universe snapshot refreshed")
+    console.print("source: NASDAQ_TRADER_SYMBOL_DIRECTORY")
+    console.print(f"retrieved_at: {result.retrieved_at.isoformat()}")
+    console.print(f"US_ALL: {result.us_all_count}")
+    console.print(f"NASDAQ: {result.nasdaq_count}")
+    console.print(f"NYSE: {result.nyse_count}")
+    console.print(f"output: {result.output_path}")
 
 
 @universe_app.command("build-eodhd")

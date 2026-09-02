@@ -392,9 +392,7 @@ class Stage5SnapshotStore:
             status=Stage5Status(str(row["status"])),
             exclusion_reason=str(row["exclusion_reason"]),
             p0=_optional_float(row["p0"]),
-            expected_absolute_return_15m=_optional_float(
-                row["expected_absolute_return_15m"]
-            ),
+            expected_absolute_return_15m=_optional_float(row["expected_absolute_return_15m"]),
             m_price=_optional_float(row["m_price"]),
             raw_open_t0_minus_3m=_optional_float(row["raw_open_t0_minus_3m"]),
             raw_open_t0=_optional_float(row["raw_open_t0"]),
@@ -404,6 +402,89 @@ class Stage5SnapshotStore:
             pre_move_m=_optional_float(row["pre_move_m"]),
             calculation_version=str(row["calculation_version"]),
         )
+
+    def list_snapshots(
+        self,
+        *,
+        run_id: str | None = None,
+        universe_id: str | None = None,
+        session: date | None = None,
+        latest_checkpoint: bool = False,
+        status: Stage5Status | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[tuple[Stage5FeatureSnapshot, ...], int]:
+        """Page persisted feature rows without interpreting their values."""
+
+        if not 1 <= limit <= 500:
+            raise ValueError("Stage 5 snapshot limit must be between 1 and 500")
+        if offset < 0:
+            raise ValueError("Stage 5 snapshot offset cannot be negative")
+        clauses: list[str] = []
+        values: list[object] = []
+        if run_id is not None:
+            clauses.append("EXISTS (SELECT 1 FROM json_each(run_ids_json) WHERE value = ?)")
+            values.append(run_id)
+        if universe_id is not None:
+            clauses.append("universe_id = ?")
+            values.append(universe_id)
+        if session is not None:
+            clauses.append("session = ?")
+            values.append(session.isoformat())
+        if status is not None:
+            clauses.append("status = ?")
+            values.append(status.value)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._connect() as connection:
+            if latest_checkpoint:
+                latest = connection.execute(
+                    f"SELECT MAX(t0_utc) FROM stage5_feature_snapshots {where}", values
+                ).fetchone()[0]
+                clauses.append("t0_utc = ?")
+                values.append(latest)
+                where = f"WHERE {' AND '.join(clauses)}"
+            total = int(
+                connection.execute(
+                    f"SELECT COUNT(*) FROM stage5_feature_snapshots {where}", values
+                ).fetchone()[0]
+            )
+            rows = connection.execute(
+                f"""
+                SELECT * FROM stage5_feature_snapshots {where}
+                ORDER BY t0_utc DESC, symbol, con_id LIMIT ? OFFSET ?
+                """,
+                (*values, limit, offset),
+            ).fetchall()
+        snapshots: list[Stage5FeatureSnapshot] = []
+        for row in rows:
+            run_ids = json.loads(str(row["run_ids_json"]))
+            if not isinstance(run_ids, list) or not all(isinstance(item, str) for item in run_ids):
+                raise ValueError("invalid run_ids_json in Stage 5 feature snapshot")
+            snapshots.append(
+                Stage5FeatureSnapshot(
+                    run_ids=tuple(run_ids),
+                    universe_id=str(row["universe_id"]),
+                    con_id=int(row["con_id"]),
+                    symbol=str(row["symbol"]),
+                    session=date.fromisoformat(str(row["session"])),
+                    t0=datetime.fromisoformat(str(row["t0_utc"])),
+                    status=Stage5Status(str(row["status"])),
+                    exclusion_reason=str(row["exclusion_reason"]),
+                    p0=_optional_float(row["p0"]),
+                    expected_absolute_return_15m=_optional_float(
+                        row["expected_absolute_return_15m"]
+                    ),
+                    m_price=_optional_float(row["m_price"]),
+                    raw_open_t0_minus_3m=_optional_float(row["raw_open_t0_minus_3m"]),
+                    raw_open_t0=_optional_float(row["raw_open_t0"]),
+                    alignment_factor=_optional_float(row["alignment_factor"]),
+                    aligned_pre_open=_optional_float(row["aligned_pre_open"]),
+                    raw_pre_move_price=_optional_float(row["raw_pre_move_price"]),
+                    pre_move_m=_optional_float(row["pre_move_m"]),
+                    calculation_version=str(row["calculation_version"]),
+                )
+            )
+        return tuple(snapshots), total
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
@@ -658,9 +739,7 @@ def calculate_session_hard_inputs(
     previous_closes = (ordered[0].open, *(bar.close for bar in ordered[:-1]))
     widths = tuple(bar.high - bar.low for bar in ordered)
     ranges = tuple(
-        10_000.0
-        * max(width, abs(bar.high - previous), abs(bar.low - previous))
-        / previous
+        10_000.0 * max(width, abs(bar.high - previous), abs(bar.low - previous)) / previous
         for bar, previous, width in zip(ordered, previous_closes, widths, strict=True)
     )
     returns = tuple(
@@ -681,12 +760,8 @@ def calculate_session_hard_inputs(
     current = ordered[-1]
     current_width = widths[-1]
     body_fraction = abs(current.close - current.open) / max(current_width, 1e-12)
-    upper_wick = (current.high - max(current.open, current.close)) / max(
-        current_width, 1e-12
-    )
-    lower_wick = (min(current.open, current.close) - current.low) / max(
-        current_width, 1e-12
-    )
+    upper_wick = (current.high - max(current.open, current.close)) / max(current_width, 1e-12)
+    lower_wick = (min(current.open, current.close) - current.low) / max(current_width, 1e-12)
     volumes = tuple(bar.volume for bar in ordered)
     prior_six = volumes[max(0, checkpoint - 7) : checkpoint - 1]
     if not prior_six:
@@ -697,8 +772,7 @@ def calculate_session_hard_inputs(
         "range_effort": log1p(sum(ranges)),
         "travel_effort": log1p(total_travel),
         "absolute_efficiency": abs(net / max(total_travel, 1e-12)),
-        "close_retention": abs(current.close - ordered[0].open)
-        / max(sum(widths), 1e-12),
+        "close_retention": abs(current.close - ordered[0].open) / max(sum(widths), 1e-12),
         "directional_persistence": persistence,
         "prior_6_mean_range": mean_range,
         "prior_6_price_travel": sum(abs(value) for value in trailing_returns),

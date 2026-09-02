@@ -4960,5 +4960,32 @@ def stage9_run(
         console.print("Stage 9 runtime stopped")
 
 
+@app.command("stage10-dashboard")
+def stage10_dashboard(
+    runs_config: Annotated[Path, typer.Option("--runs-config")] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    database: Annotated[Path, typer.Option("--database")] = DEFAULT_RUNTIME_DATABASE,
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", min=1, max=65_535)] = 8000,
+) -> None:
+    """Serve the isolated operational dashboard without starting or trading any run."""
+
+    import uvicorn
+
+    from stocker_dashboard.factory import build_dashboard_app
+
+    try:
+        dashboard = build_dashboard_app(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid Stage 10 dashboard configuration: {exc}") from exc
+    console.print(f"Stocker dashboard: http://{host}:{port}")
+    console.print("Standalone read/control mode; no broker order is transmitted.")
+    uvicorn.run(dashboard, host=host, port=port, log_level="info")
+
+
 if __name__ == "__main__":
     app()

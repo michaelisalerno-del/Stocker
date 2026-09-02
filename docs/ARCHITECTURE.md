@@ -530,4 +530,30 @@ Avoid elaborate retry and fallback state machines.
 9. Enable controlled LIVE order transmission per run while preserving explicit PAPER/LIVE routing.
 10. Add the dashboard as a non-critical consumer of the Stage 8 status surface.
 
+### Operational dashboard
+
+Stage 10 is a replaceable FastAPI and vanilla-browser consumer over the existing runtime and
+storage boundaries:
+
+```text
+StockerRuntime / Stage 5--9 stores
+        ↓
+DashboardReadService + explicit RunControlService
+        ↓
+FastAPI JSON endpoints
+        ↓
+polling HTML/CSS/JavaScript control surface
+```
+
+The read service copies feature, strategy, order, fill, position, reconciliation, and run-status
+outputs. It does not calculate features, qualify candidates, size risk, create order geometry, or
+communicate with IBKR. The control service validates complete `RunConfig`/`RunsConfig` values and
+atomically updates the backend YAML configuration; LIVE enablement, risk edits, and PAPER-to-LIVE
+changes require one confirmation bound to the configured LIVE account. Existing execution ledger
+records are never rewritten during an environment change.
+
+The dashboard may run in the runtime process by receiving `runtime.status`, or as a standalone
+process over the persisted stores. In standalone mode connectivity is deliberately reported as
+unavailable rather than guessed. Browser and HTTP failures cannot stop the trading runtime.
+
 Future stages must not be implemented prematurely.

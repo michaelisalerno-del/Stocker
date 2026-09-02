@@ -287,6 +287,21 @@ each dataset, local liquidity and history qualification, then a research-ready J
 export consumed by `stocker research run-universe`. FMP and dashboard work are
 intentionally deferred.
 
+## Stage 10 Operational Dashboard
+
+Install the existing server dependency group, then start the dashboard in safe standalone mode:
+
+```bash
+uv sync --group server
+uv run stocker stage10-dashboard \
+  --runs-config configs/runs.example.yaml \
+  --ibkr-config configs/ibkr.example.yaml \
+  --database .stocker/stage8-runtime.sqlite3
+```
+
+Open `http://127.0.0.1:8000`. This command reads persisted runtime state and edits validated backend
+run configuration. It does not connect IBKR, start the trading runtime, or transmit an order.
+
 ## Next Development Stages
 
 1. Add stock-suitability scoring across qualified universes.

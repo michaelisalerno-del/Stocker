@@ -73,6 +73,16 @@ class ExecutionRecord:
     diagnostic: bool
 
 
+@dataclass(frozen=True, slots=True)
+class BrokerOrderRecord:
+    order_plan_id: str
+    environment: Environment
+    account: str
+    order_id: int
+    role: OrderRole
+    status: OrderLifecycle
+
+
 class ExecutionLedger:
     """SQLite execution store with an atomic signal idempotency reservation."""
 
@@ -565,6 +575,90 @@ class ExecutionLedger:
                 ),
             ).fetchall()
         return tuple(_record_from_row(row) for row in rows)
+
+    def list_records(
+        self,
+        *,
+        run_id: str | None = None,
+        environment: Environment | None = None,
+        symbol: str | None = None,
+        statuses: frozenset[OrderLifecycle] | None = None,
+        closed_only: bool = False,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[tuple[ExecutionRecord, ...], int]:
+        """Page execution lineage for operational read models."""
+
+        if not 1 <= limit <= 500:
+            raise ValueError("execution record limit must be between 1 and 500")
+        if offset < 0:
+            raise ValueError("execution record offset cannot be negative")
+        clauses: list[str] = ["diagnostic = 0"]
+        values: list[object] = []
+        if run_id is not None:
+            clauses.append("run_id = ?")
+            values.append(run_id)
+        if environment is not None:
+            clauses.append("environment = ?")
+            values.append(environment.value)
+        if symbol is not None:
+            clauses.append("symbol = ?")
+            values.append(symbol.upper())
+        if statuses:
+            placeholders = ", ".join("?" for _ in statuses)
+            clauses.append(f"status IN ({placeholders})")
+            values.extend(status.value for status in sorted(statuses, key=lambda item: item.value))
+        if closed_only:
+            clauses.append("status = ?")
+            values.append(OrderLifecycle.CLOSED.value)
+        if start is not None:
+            clauses.append("COALESCE(closed_at, submitted_at, created_at) >= ?")
+            values.append(start.isoformat(timespec="microseconds"))
+        if end is not None:
+            clauses.append("COALESCE(closed_at, submitted_at, created_at) <= ?")
+            values.append(end.isoformat(timespec="microseconds"))
+        where = f"WHERE {' AND '.join(clauses)}"
+        with self._connect() as connection:
+            total = int(
+                connection.execute(
+                    f"SELECT COUNT(*) FROM execution_plans {where}", values
+                ).fetchone()[0]
+            )
+            rows = connection.execute(
+                f"""
+                SELECT * FROM execution_plans {where}
+                ORDER BY COALESCE(closed_at, submitted_at, created_at) DESC, order_plan_id
+                LIMIT ? OFFSET ?
+                """,
+                (*values, limit, offset),
+            ).fetchall()
+        return tuple(_record_from_row(row) for row in rows), total
+
+    def broker_orders(self, order_plan_id: str) -> tuple[BrokerOrderRecord, ...]:
+        """Return normalized child-order state in meaningful bracket order."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT order_plan_id, environment, account, order_id, role, status
+                FROM execution_broker_orders WHERE order_plan_id = ?
+                ORDER BY CASE role WHEN 'ENTRY' THEN 0 WHEN 'STOP' THEN 1 ELSE 2 END
+                """,
+                (order_plan_id,),
+            ).fetchall()
+        return tuple(
+            BrokerOrderRecord(
+                order_plan_id=str(row["order_plan_id"]),
+                environment=Environment(str(row["environment"])),
+                account=str(row["account"]),
+                order_id=int(row["order_id"]),
+                role=OrderRole(str(row["role"])),
+                status=OrderLifecycle(str(row["status"])),
+            )
+            for row in rows
+        )
 
     def positions(self, environment: Environment, account: str) -> tuple[BrokerPosition, ...]:
         with self._connect() as connection:

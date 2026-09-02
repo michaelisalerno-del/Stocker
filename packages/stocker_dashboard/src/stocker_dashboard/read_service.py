@@ -5,11 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, date, datetime, time
-from typing import Any
+from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 from stocker_core.config import RunsConfig
+from stocker_core.markets import get_market
 from stocker_core.runs import Environment, RunConfig
 from stocker_core.universes import UniverseDefinition
+from stocker_dashboard.performance import PerformancePeriod, RunPerformanceService
+from stocker_execution.activity_shortlist import ActivityShortlistStore
 from stocker_execution.execution_ledger import ExecutionLedger, ExecutionRecord
 from stocker_execution.execution_models import OrderLifecycle
 from stocker_execution.pre_context import PriorSessionContextStore
@@ -34,6 +38,7 @@ class DashboardReadService:
         runtime_store: RuntimeStore,
         ledger: ExecutionLedger,
         pre_context_store: PriorSessionContextStore | None = None,
+        activity_store: ActivityShortlistStore | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.config = config
@@ -43,6 +48,8 @@ class DashboardReadService:
         self.ledger = ledger
         self.pre_context_store = pre_context_store
         self.clock = clock or (lambda: datetime.now(tz=UTC))
+        self.activity_store = activity_store
+        self.performance_service = RunPerformanceService(ledger, clock=self.clock)
 
     def overview(self) -> dict[str, Any]:
         status = self.runtime_status()
@@ -91,27 +98,62 @@ class DashboardReadService:
         result = []
         for run in self.config.runs:
             runtime = runtime_by_id.get(run.run_id)
+            market_definition = get_market(run.market_id) if run.market_id is not None else None
+            selected_session = (
+                runtime.session
+                if runtime is not None and runtime.session is not None
+                else self.clock()
+                .astimezone(ZoneInfo(market_definition.timezone if market_definition else "UTC"))
+                .date()
+            )
             _rows, count = self.stage5_store.list_snapshots(
                 run_id=run.run_id,
-                session=self.clock().date(),
+                session=selected_session,
                 latest_checkpoint=True,
                 limit=1,
             )
+            screen = (
+                self.activity_store.get(
+                    market_definition.market_id.value,
+                    run.cap_bucket,
+                    selected_session,
+                )
+                if self.activity_store is not None
+                and market_definition is not None
+                and run.cap_bucket is not None
+                else None
+            )
+            today = self.performance_service.performance(run, PerformancePeriod.TODAY)
+            recent = self.performance_service.performance(run, PerformancePeriod.SESSIONS_20)
             result.append(
                 {
                     "run_id": run.run_id,
+                    "display_name": run.display_name or run.run_id,
                     "universe": run.universe,
                     "strategy": run.strategy,
+                    "strategy_id": run.effective_strategy_id,
+                    "strategy_version": run.strategy_version,
+                    "market_id": run.market_id.value if run.market_id else None,
+                    "cap_bucket": run.cap_bucket.value if run.cap_bucket else None,
                     "environment": run.environment.value,
                     "account": accounts.get(run.environment),
                     "enabled": run.enabled,
                     "status": runtime.state.value if runtime else "CONFIGURED",
                     "market": runtime.market.value if runtime and runtime.market else None,
                     "current_or_next_checkpoint": None,
-                    "candidate_count": count,
+                    "candidate_count": (
+                        sum(item.selected for item in screen.candidates)
+                        if screen is not None
+                        else count
+                    ),
                     "signals_today": runtime.signals_today if runtime else 0,
                     "open_positions": runtime.open_positions if runtime else 0,
                     "reason": runtime.reason if runtime else "",
+                    "currency": today["currency"] or self._run_currency(run),
+                    "today_realised_pnl": today["realised_pnl"],
+                    "unrealised_pnl": today["unrealised_pnl"],
+                    "unrealised_status": today["unrealised_status"],
+                    "total_r": recent["total_r"],
                 }
             )
         return result
@@ -150,23 +192,60 @@ class DashboardReadService:
         )
         positions = self.positions()
         account = self._account(run.environment)
+        market = get_market(run.market_id) if run.market_id is not None else None
+        screen = None
+        if self.activity_store is not None and market is not None and run.cap_bucket is not None:
+            screen = self.activity_store.get(
+                market.market_id.value, run.cap_bucket, selected_session
+            )
+        today = self.performance_service.performance(run, PerformancePeriod.TODAY)
         return {
             "run_id": run.run_id,
+            "display_name": run.display_name or run.run_id,
             "universe": run.universe,
             "strategy": run.strategy,
-            "strategy_version": STRATEGY_VERSION if run.strategy == "SESSION_HARD" else None,
+            "strategy_id": run.effective_strategy_id,
+            "strategy_version": run.strategy_version
+            or (STRATEGY_VERSION if run.strategy == "SESSION_HARD" else None),
+            "market_id": run.market_id.value if run.market_id else None,
+            "market": market.display_name if market else None,
+            "cap_bucket": run.cap_bucket.value if run.cap_bucket else None,
+            "cap_bucket_version": run.cap_bucket_version,
+            "candidate_screen_id": run.effective_candidate_screen_id,
+            "candidate_screen_version": run.candidate_screen_version,
             "environment": run.environment.value,
             "account": account,
+            "currency": market.currency if market else self._run_currency(run),
             "enabled": run.enabled,
             "status": runtime.state.value if runtime else "CONFIGURED",
             "risk_per_trade": run.risk.risk_per_trade if run.risk else None,
             "max_concurrent_positions": run.risk.max_concurrent_positions if run.risk else None,
             "last_checkpoint": latest_checkpoint.isoformat() if latest_checkpoint else None,
             "next_checkpoint": None,
+            "market_state": runtime.market.value if runtime and runtime.market else None,
+            "session": selected_session.isoformat(),
+            "screen_state": screen.status.value if screen else None,
+            "screen_timestamp": screen.screen_timestamp.isoformat() if screen else None,
+            "watchlist_size": sum(item.selected for item in screen.candidates) if screen else 0,
+            "today_realised_pnl": today["realised_pnl"],
+            "current_unrealised_pnl": today["unrealised_pnl"],
+            "unrealised_status": today["unrealised_status"],
             "funnel": [
-                {"stage": "Universe", "count": len(self._universe(run.universe).members)},
                 {
-                    "stage": "Stage 5 ready",
+                    "stage": "Market / cap eligible",
+                    "count": len(self._universe(run.universe).members),
+                },
+                {
+                    "stage": "Activity scan union",
+                    "count": len(screen.candidates) if screen else 0,
+                },
+                {
+                    "stage": "Shortlist selected",
+                    "count": sum(item.selected for item in screen.candidates) if screen else 0,
+                },
+                {"stage": "Stage 2 qualified", "count": latest_total},
+                {
+                    "stage": "Stage 4 / Stage 5 PRE ready",
                     "count": ready_count,
                 },
                 {"stage": "Strategy evaluated", "count": min(len(signals), latest_total)},
@@ -188,6 +267,38 @@ class DashboardReadService:
                     ),
                 },
             ],
+        }
+
+    def run_performance(self, run_id: str, period: PerformancePeriod | str) -> dict[str, Any]:
+        return self.performance_service.performance(self._run(run_id), period)
+
+    def universe_runs(self) -> dict[str, list[dict[str, Any]]]:
+        rows = self.runs()
+        return {
+            environment.value: [item for item in rows if item["environment"] == environment.value]
+            for environment in Environment
+        }
+
+    def screen(self, market_id: str, cap_bucket: str, session: date) -> dict[str, Any]:
+        if self.activity_store is None:
+            raise ValueError("activity shortlist store is unavailable")
+        from stocker_core.markets import CapBucket
+
+        snapshot = self.activity_store.get(market_id, CapBucket(cap_bucket), session)
+        if snapshot is None:
+            raise ValueError("unknown activity shortlist snapshot")
+        return {
+            "market_id": snapshot.market_id,
+            "cap_bucket": snapshot.cap_bucket.value,
+            "cap_bucket_version": snapshot.cap_bucket_version,
+            "session": snapshot.session.isoformat(),
+            "screen_timestamp": snapshot.screen_timestamp.isoformat(),
+            "profile_id": snapshot.profile_id,
+            "profile_version": snapshot.profile_version,
+            "status": snapshot.status.value,
+            "components": [item.value for item in snapshot.components],
+            "reason": snapshot.reason,
+            "candidates": [asdict(item) for item in snapshot.candidates],
         }
 
     def candidates(
@@ -355,50 +466,106 @@ class DashboardReadService:
 
     def positions(self) -> list[dict[str, Any]]:
         records, _ = self.ledger.list_records(limit=500)
-        records_by_identity = {
-            (item.environment, item.actual_account or item.expected_account, item.con_id): item
-            for item in records
-            if item.filled_quantity > item.closed_quantity
-        }
-        return [
-            {
-                "symbol": snapshot.symbol,
-                "con_id": snapshot.con_id,
-                "run_id": record.run_id if record else None,
-                "strategy": record.strategy_id if record else None,
-                "strategy_version": record.strategy_version if record else None,
-                "signal_id": record.signal_id if record else None,
-                "order_plan_id": record.order_plan_id if record else None,
-                "environment": snapshot.environment.value,
-                "account": snapshot.account,
-                "side": "SHORT" if snapshot.quantity < 0 else "LONG",
-                "quantity": abs(snapshot.quantity),
-                "average_entry": snapshot.average_price,
-                "current_price": None,
-                "stop": record.stop_price if record else None,
-                "target": record.target_price if record else None,
-                "unrealised_pnl": None,
-                "opened_at": record.opened_at.isoformat() if record and record.opened_at else None,
-                "observed_at": snapshot.observed_at.isoformat(),
-                "source": "IBKR",
-                "orders": [
-                    {
-                        "role": order.role.value,
-                        "status": order.status.value,
-                        "ibkr_order_id": order.order_id,
-                    }
-                    for order in (
-                        self.ledger.broker_orders(record.order_plan_id) if record else ()
-                    )
-                ],
-            }
-            for snapshot in self.ledger.broker_position_snapshots()
-            for record in (
-                records_by_identity.get(
-                    (snapshot.environment, snapshot.account, snapshot.con_id)
-                ),
+        by_identity: dict[tuple[Environment, str, int], list[ExecutionRecord]] = {}
+        for record in records:
+            if record.filled_quantity <= record.closed_quantity:
+                continue
+            account = record.actual_account or record.expected_account
+            by_identity.setdefault((record.environment, account, record.con_id), []).append(record)
+
+        rows: list[dict[str, Any]] = []
+        for snapshot in self.ledger.broker_position_snapshots():
+            identity = (snapshot.environment, snapshot.account, snapshot.con_id)
+            attributed = by_identity.get(identity, [])
+            signed_quantity = sum(
+                (-1 if item.side.value == "SELL" else 1)
+                * (item.filled_quantity - item.closed_quantity)
+                for item in attributed
             )
+            if abs(signed_quantity - snapshot.quantity) > 1e-9:
+                rows.append(
+                    self._position_row(
+                        snapshot,
+                        (),
+                        run_id=None,
+                        quantity=abs(snapshot.quantity),
+                        average_entry=None,
+                        attribution_status="RECONCILIATION_REQUIRED",
+                    )
+                )
+                continue
+            records_by_run: dict[str, list[ExecutionRecord]] = {}
+            for record in attributed:
+                records_by_run.setdefault(record.run_id, []).append(record)
+            for run_id, run_records in sorted(records_by_run.items()):
+                quantities = [item.filled_quantity - item.closed_quantity for item in run_records]
+                quantity = sum(quantities)
+                prices = [item.average_fill_price for item in run_records]
+                average_entry = (
+                    sum(
+                        cast(float, price) * lot
+                        for price, lot in zip(prices, quantities, strict=True)
+                    )
+                    / quantity
+                    if quantity > 0 and all(price is not None for price in prices)
+                    else None
+                )
+                rows.append(
+                    self._position_row(
+                        snapshot,
+                        tuple(run_records),
+                        run_id=run_id,
+                        quantity=quantity,
+                        average_entry=average_entry,
+                        attribution_status="MARK_UNAVAILABLE",
+                    )
+                )
+        return rows
+
+    def _position_row(
+        self,
+        snapshot: Any,
+        records: tuple[ExecutionRecord, ...],
+        *,
+        run_id: str | None,
+        quantity: float,
+        average_entry: float | None,
+        attribution_status: str,
+    ) -> dict[str, Any]:
+        record = records[0] if len(records) == 1 else None
+        orders = [
+            order for item in records for order in self.ledger.broker_orders(item.order_plan_id)
         ]
+        return {
+            "symbol": snapshot.symbol,
+            "con_id": snapshot.con_id,
+            "run_id": run_id,
+            "strategy": record.strategy_id if record else None,
+            "strategy_version": record.strategy_version if record else None,
+            "signal_id": record.signal_id if record else None,
+            "order_plan_id": record.order_plan_id if record else None,
+            "environment": snapshot.environment.value,
+            "account": snapshot.account,
+            "side": "SHORT" if snapshot.quantity < 0 else "LONG",
+            "quantity": quantity,
+            "average_entry": average_entry,
+            "current_price": None,
+            "stop": record.stop_price if record else None,
+            "target": record.target_price if record else None,
+            "unrealised_pnl": None,
+            "attribution_status": attribution_status,
+            "opened_at": record.opened_at.isoformat() if record and record.opened_at else None,
+            "observed_at": snapshot.observed_at.isoformat(),
+            "source": "IBKR",
+            "orders": [
+                {
+                    "role": order.role.value,
+                    "status": order.status.value,
+                    "ibkr_order_id": order.order_id,
+                }
+                for order in orders
+            ],
+        }
 
     def position_detail(
         self,
@@ -406,21 +573,25 @@ class DashboardReadService:
         account: str,
         con_id: int,
     ) -> dict[str, Any]:
-        position = next(
-            (
-                item
-                for item in self.positions()
-                if item["environment"] == environment.value
-                and item["account"] == account
-                and item["con_id"] == con_id
-            ),
-            None,
-        )
-        if position is None:
-            raise ValueError(
-                f"Unknown broker position: {environment.value}/{account}/{con_id}"
-            )
-        return position
+        positions = [
+            item
+            for item in self.positions()
+            if item["environment"] == environment.value
+            and item["account"] == account
+            and item["con_id"] == con_id
+        ]
+        if not positions:
+            raise ValueError(f"Unknown broker position: {environment.value}/{account}/{con_id}")
+        if len(positions) == 1:
+            return positions[0]
+        return {
+            **positions[0],
+            "run_id": None,
+            "strategy": None,
+            "signal_id": None,
+            "order_plan_id": None,
+            "attributions": positions,
+        }
 
     def trades(
         self,
@@ -459,6 +630,12 @@ class DashboardReadService:
             start=start,
             end=end,
         )
+        currencies = {
+            get_market(run.market_id).currency
+            for run in self.config.runs
+            if run.run_id in selected_run_ids and run.market_id is not None
+        }
+        common_currency = next(iter(currencies)) if len(currencies) == 1 else None
         return {
             "items": [self._trade(item) for item in records],
             "total": total,
@@ -466,10 +643,10 @@ class DashboardReadService:
                 "trades": summary.trades,
                 "wins": summary.wins,
                 "losses": summary.losses,
-                "win_percent": (
-                    summary.wins / summary.trades * 100 if summary.trades else None
-                ),
-                "total_pnl": summary.total_pnl,
+                "win_percent": (summary.wins / summary.trades * 100 if summary.trades else None),
+                "total_pnl": summary.total_pnl if len(currencies) <= 1 else None,
+                "currency": common_currency,
+                "pnl_status": ("MULTIPLE_CURRENCIES" if len(currencies) > 1 else "AVAILABLE"),
                 "total_r": None,
                 "mean_r": None,
             },
@@ -642,6 +819,8 @@ class DashboardReadService:
         }
 
     def _trade(self, record: ExecutionRecord) -> dict[str, Any]:
+        run = self._run(record.run_id)
+        currency = get_market(run.market_id).currency if run.market_id is not None else None
         return {
             "date_time": record.closed_at.isoformat() if record.closed_at else None,
             "run_id": record.run_id,
@@ -656,6 +835,7 @@ class DashboardReadService:
             "exit": record.average_exit_price,
             "quantity": record.closed_quantity,
             "pnl": record.realized_pnl,
+            "currency": currency,
             "r": None,
             "exit_reason": None,
         }
@@ -673,6 +853,12 @@ class DashboardReadService:
         if universe is None:
             raise ValueError(f"Unknown universe: {universe_id}")
         return universe
+
+    def _run_currency(self, run: RunConfig) -> str | None:
+        if run.market_id is not None:
+            return get_market(run.market_id).currency
+        currencies = {item.currency for item in self._universe(run.universe).members}
+        return next(iter(currencies)) if len(currencies) == 1 else None
 
     def _account(self, environment: Environment) -> str | None:
         return next(

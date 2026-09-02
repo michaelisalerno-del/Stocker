@@ -15,9 +15,16 @@ from zoneinfo import ZoneInfo
 
 from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
 from stocker_core.logging import configure_logging
+from stocker_core.markets import MARKET_CATALOGUE, ActivityScanner, CapBucket, get_market
 from stocker_core.runs import Environment, RunConfig, RunInstance, RunManager
 from stocker_core.universes import UniverseCatalog
 from stocker_data.calendars import get_market_calendar
+from stocker_execution.activity_shortlist import (
+    ActivityShortlistService,
+    ActivityShortlistSnapshot,
+    ActivityShortlistStatus,
+    ActivityShortlistStore,
+)
 from stocker_execution.execution_ledger import ExecutionLedger
 from stocker_execution.execution_models import BrokerAccountState, BrokerFill, OrderLifecycle
 from stocker_execution.history import (
@@ -111,10 +118,17 @@ class MarketSession:
     state: MarketSessionState
     opens_at: datetime | None
     closes_at: datetime | None
+    active_bar_starts: tuple[datetime, ...] = ()
 
     def checkpoint_times(self) -> tuple[tuple[int, datetime], ...]:
         if self.opens_at is None or self.closes_at is None:
             return ()
+        if self.active_bar_starts:
+            return tuple(
+                (checkpoint, self.active_bar_starts[checkpoint])
+                for checkpoint in SESSION_HARD_CHECKPOINTS
+                if checkpoint < len(self.active_bar_starts)
+            )
         return tuple(
             (checkpoint, self.opens_at + timedelta(minutes=checkpoint * 5))
             for checkpoint in SESSION_HARD_CHECKPOINTS
@@ -349,7 +363,21 @@ class ExchangeSessionResolver:
             state = MarketSessionState.ACTIVE_SESSION
         else:
             state = MarketSessionState.AFTER_SESSION
-        return MarketSession(session, state, opens_at, closes_at)
+        break_start = _optional_schedule_time(schedule.iloc[0].get("break_start"))
+        break_end = _optional_schedule_time(schedule.iloc[0].get("break_end"))
+        segments: tuple[tuple[datetime, datetime], ...] = ((opens_at, closes_at),)
+        if (
+            break_start is not None
+            and break_end is not None
+            and opens_at < break_start < break_end < closes_at
+        ):
+            segments = ((opens_at, break_start), (break_end, closes_at))
+        active_bar_starts = tuple(
+            timestamp
+            for segment_open, segment_close in segments
+            for timestamp in _five_minute_slots(segment_open, segment_close)
+        )
+        return MarketSession(session, state, opens_at, closes_at, active_bar_starts)
 
 
 class RuntimeStore:
@@ -707,9 +735,7 @@ class StockerRuntime:
         self._run_reasons: dict[str, str] = {}
         self._sessions: dict[str, MarketSession] = {}
         self._execution: dict[str, Stage7ExecutionService] = {}
-        self._legacy_execution: dict[
-            tuple[str, Environment], Stage7ExecutionService
-        ] = {}
+        self._legacy_execution: dict[tuple[str, Environment], Stage7ExecutionService] = {}
         self._strategy_runtimes: dict[str, Stage7StrategyRuntime] = {}
         self._environment_ready: dict[Environment, bool] = {
             environment: False for environment in self._destinations
@@ -947,14 +973,15 @@ class StockerRuntime:
         updated_by_id = {item.run_id: item for item in config.runs}
         current_universes = {item.universe_id: item for item in self._config.universes}
         updated_universes = {item.universe_id: item for item in config.universes}
-        if set(current_by_id) != set(updated_by_id):
-            raise ValueError("hot apply cannot add or remove run identities")
-        unknown = changed_run_ids - set(current_by_id)
+        removed = set(current_by_id) - set(updated_by_id)
+        if removed:
+            raise ValueError("hot apply cannot delete run identities")
+        unknown = changed_run_ids - set(updated_by_id)
         if unknown:
             raise ValueError(f"unknown changed runs: {', '.join(sorted(unknown))}")
         if any(
             current_by_id[run_id] != updated_by_id[run_id]
-            for run_id in set(current_by_id) - changed_run_ids
+            for run_id in (set(current_by_id) & set(updated_by_id)) - changed_run_ids
         ):
             raise ValueError("hot apply payload changed an undeclared run")
 
@@ -966,30 +993,30 @@ class StockerRuntime:
             self._config = config
             self._manager = RunManager(UniverseCatalog(config.universes), config.runs)
             for run_id, state in previous_states.items():
-                if run_id in updated_by_id and updated_by_id[run_id].enabled and state in {
-                    RunRuntimeState.READY,
-                    RunRuntimeState.ACTIVE,
-                    RunRuntimeState.STARTING,
-                }:
+                if (
+                    run_id in updated_by_id
+                    and updated_by_id[run_id].enabled
+                    and state
+                    in {
+                        RunRuntimeState.READY,
+                        RunRuntimeState.ACTIVE,
+                        RunRuntimeState.STARTING,
+                    }
+                ):
                     self._manager.start_run(run_id)
 
-            for run_id in (
-                item.run_id for item in config.runs if item.run_id in changed_run_ids
-            ):
-                current = current_by_id[run_id]
+            for run_id in (item.run_id for item in config.runs if item.run_id in changed_run_ids):
+                current = current_by_id.get(run_id)
                 updated = updated_by_id[run_id]
                 if not updated.enabled:
                     self._set_run(run_id, RunRuntimeState.DISABLED, "disabled by configuration")
-                    self._replace_qualification_for(
-                        {run_id}, Stage5QualificationResult((), ())
-                    )
+                    self._replace_qualification_for({run_id}, Stage5QualificationResult((), ()))
                     continue
                 execution = self._execution.get(run_id)
-                restart_required = any(
+                restart_required = current is None or any(
                     (
                         current.universe != updated.universe,
-                        current_universes[current.universe]
-                        != updated_universes[updated.universe],
+                        current_universes[current.universe] != updated_universes[updated.universe],
                         current.strategy != updated.strategy,
                         current.environment is not updated.environment,
                         current.session != updated.session,
@@ -1018,14 +1045,13 @@ class StockerRuntime:
                     clock=self._clock,
                 )
                 if (
-                    current.environment is not updated.environment
+                    current is not None
+                    and current.environment is not updated.environment
                     and run_id in self._execution
                 ):
                     # A newly current service can also manage older exposure in its account.
                     self._legacy_execution.pop((run_id, updated.environment), None)
-                    self._legacy_execution[(run_id, current.environment)] = self._execution[
-                        run_id
-                    ]
+                    self._legacy_execution[(run_id, current.environment)] = self._execution[run_id]
                 self._execution[run_id] = execution
                 result = await execution.reconcile()
                 if not result.ok:
@@ -1045,7 +1071,8 @@ class StockerRuntime:
                     continue
                 self._sessions[run_id] = market
                 prepared_runs.append(instance)
-                previous_environments[run_id] = current.environment
+                if current is not None:
+                    previous_environments[run_id] = current.environment
 
             prepared_run_ids = {instance.config.run_id for instance in prepared_runs}
             if prepared_runs:
@@ -1079,7 +1106,11 @@ class StockerRuntime:
                         self._logger.info(
                             "run_config_applied",
                             run_id=run_id,
-                            previous_environment=previous_environments[run_id].value,
+                            previous_environment=(
+                                previous_environments[run_id].value
+                                if run_id in previous_environments
+                                else None
+                            ),
                             environment=instance.config.environment.value,
                         )
             self._state = (
@@ -1113,13 +1144,10 @@ class StockerRuntime:
                 ledger_exposure = bool(
                     self._ledger.active_records(environment, current.expected_account)
                 )
-                if (
-                    current.expected_account != config.expected_account
-                    and (position_exposure or order_exposure or ledger_exposure)
+                if current.expected_account != config.expected_account and (
+                    position_exposure or order_exposure or ledger_exposure
                 ):
-                    raise ValueError(
-                        "cannot change expected account while broker exposure exists"
-                    )
+                    raise ValueError("cannot change expected account while broker exposure exists")
                 broker = cast(RuntimeBroker, current.broker)
                 broker.disconnect()
                 reconfigure = getattr(broker, "reconfigure", None)
@@ -1170,8 +1198,7 @@ class StockerRuntime:
         if self._state is not ApplicationState.READY or self._stopping:
             return self.status()
         required_environments = {
-            execution.run_environment
-            for _run_id, execution in self._execution_services()
+            execution.run_environment for _run_id, execution in self._execution_services()
         }
         for environment in required_environments:
             if not self._destinations[environment].broker.is_connected:
@@ -1181,6 +1208,8 @@ class StockerRuntime:
         sync_due = self._last_sync is None or now - self._last_sync >= self._broker_sync_interval
         if sync_due and not await self._refresh_execution_state(now):
             return self.status()
+
+        await self._refresh_scheduled_activity_shortlists(now)
 
         due: dict[tuple[date, datetime, int], list[RunInstance]] = {}
         for instance in self._manager.list_runs():
@@ -1227,6 +1256,34 @@ class StockerRuntime:
         await self._observe_entries(now)
         return self.status()
 
+    async def _refresh_scheduled_activity_shortlists(self, now: datetime) -> None:
+        """Qualify fixed-time activity screens once they become causally due."""
+
+        pending_run_ids = {
+            membership.run_id
+            for item in self._qualification.ineligible
+            if item.symbol == "ACTIVITY_SHORTLIST_V1"
+            and item.reason in {"SCHEDULED", "ACTIVITY_SHORTLIST_NOT_READY"}
+            for membership in item.memberships
+        }
+        if not pending_run_ids:
+            return
+        due: list[RunInstance] = []
+        for instance in self._manager.list_runs():
+            if instance.config.run_id not in pending_run_ids:
+                continue
+            market = self._resolve_market(instance, now)
+            if market is None or len(market.active_bar_starts) <= 3:
+                continue
+            if market.active_bar_starts[3] <= now:
+                due.append(instance)
+        if not due:
+            return
+        qualification = await self._qualify(tuple(due))
+        run_ids = {instance.config.run_id for instance in due}
+        self._replace_qualification_for(run_ids, qualification)
+        _log_candidate_screen_failures(self._logger, qualification)
+
     async def reconnect(self, environment: Environment | None = None) -> RuntimeStatus:
         """Reconnect only affected environments, then verify and reconcile each one."""
 
@@ -1237,10 +1294,7 @@ class StockerRuntime:
         """Internal reconnect path shared by recovery and serialized controls."""
 
         now = _aware(self._clock())
-        required = {
-            execution.run_environment
-            for _run_id, execution in self._execution_services()
-        }
+        required = {execution.run_environment for _run_id, execution in self._execution_services()}
         targets = (
             {environment}
             if environment is not None
@@ -1401,8 +1455,7 @@ class StockerRuntime:
                 not self._environment_ready[environment]
                 or not self._destinations[environment].broker.is_connected
                 for environment in {
-                    execution.run_environment
-                    for _run_id, execution in execution_services
+                    execution.run_environment for _run_id, execution in execution_services
                 }
             ):
                 await self.reconnect()
@@ -1431,6 +1484,50 @@ class StockerRuntime:
             raise RuntimeError("runtime broker does not expose market data")
         quote: CurrentQuote = await current_quote(request.instrument)
         return quote
+
+    async def activity_scanner_readiness(self) -> dict[str, str]:
+        """Report catalogue readiness from the connected scanner vocabulary."""
+
+        broker = self._market_data_broker
+        if not broker.is_connected:
+            broker = next(
+                (
+                    destination.broker
+                    for environment, destination in self._destinations.items()
+                    if self._environment_ready.get(environment) and destination.broker.is_connected
+                ),
+                broker,
+            )
+        if not broker.is_connected:
+            return {market.market_id.value: "BROKER_NOT_CONNECTED" for market in MARKET_CATALOGUE}
+        discover = getattr(broker, "scanner_capabilities", None)
+        if discover is None:
+            return {market.market_id.value: "SCANNER_NOT_AVAILABLE" for market in MARKET_CATALOGUE}
+        try:
+            capabilities = await discover()
+        except Exception as exc:
+            message = str(exc).lower()
+            status = (
+                "DATA_NOT_ENTITLED"
+                if any(
+                    word in message
+                    for word in ("entitle", "subscription", "market data permission")
+                )
+                else "SCANNER_NOT_AVAILABLE"
+            )
+            return {market.market_id.value: status for market in MARKET_CATALOGUE}
+        supported_components = {component.value for component in ActivityScanner} & set(
+            capabilities.scan_codes
+        )
+        return {
+            market.market_id.value: (
+                "AVAILABLE"
+                if market.scanner_location in capabilities.locations
+                and len(supported_components) >= 2
+                else "SCANNER_NOT_AVAILABLE"
+            )
+            for market in MARKET_CATALOGUE
+        }
 
     async def execution_readiness_diagnostic(
         self, environment: Environment
@@ -1946,8 +2043,7 @@ class StockerRuntime:
 
         self._state = ApplicationState.RECONCILING
         for environment in {
-            execution.run_environment
-            for _run_id, execution in self._execution_services()
+            execution.run_environment for _run_id, execution in self._execution_services()
         }:
             destination = self._destinations[environment]
             if not destination.broker.is_connected:
@@ -2020,9 +2116,7 @@ def _session_matches_destination(session: BrokerSession, destination: ExecutionD
     )
 
 
-def _log_candidate_screen_failures(
-    logger: Any, result: Stage5QualificationResult
-) -> None:
+def _log_candidate_screen_failures(logger: Any, result: Stage5QualificationResult) -> None:
     for failure in result.ineligible:
         if failure.symbol != "HOT_BY_VOLUME":
             continue
@@ -2084,6 +2178,25 @@ def _signal_from_payload(payload: Mapping[str, object]) -> StrategySignal:
     return StrategySignal(**values)  # type: ignore[arg-type]
 
 
+def _optional_schedule_time(value: object) -> datetime | None:
+    if value is None or str(value) == "NaT":
+        return None
+    to_datetime = getattr(value, "to_pydatetime", None)
+    if to_datetime is None:
+        return None
+    return _aware(to_datetime())
+
+
+def _five_minute_slots(start: datetime, end: datetime) -> tuple[datetime, ...]:
+    cursor = _aware(start)
+    finish = _aware(end)
+    values: list[datetime] = []
+    while cursor < finish:
+        values.append(cursor)
+        cursor += timedelta(minutes=5)
+    return tuple(values)
+
+
 def _aware(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("runtime timestamps must be timezone-aware")
@@ -2136,10 +2249,18 @@ class IbkrSessionDataSource:
                 )
                 continue
             t0 = _aware(row.t0)
-            session_open = t0 - timedelta(minutes=checkpoint * 5)
-            required = tuple(
-                session_open + timedelta(minutes=index * 5) for index in range(checkpoint)
-            )
+            market_session = ExchangeSessionResolver().resolve(run, t0)
+            required = market_session.active_bar_starts[:checkpoint]
+            if len(required) != checkpoint:
+                self._logger.warning(
+                    "session_hard_input_unavailable",
+                    run_id=run.run_id,
+                    con_id=row.con_id,
+                    symbol=row.symbol,
+                    reason="active trading-bar prefix unavailable",
+                )
+                continue
+            session_open = required[0]
             try:
                 snapshot = self._cache.get_required_history(
                     instrument, self._FIVE_MINUTES, required, as_of=t0
@@ -2166,7 +2287,10 @@ class IbkrSessionDataSource:
                     )
                     continue
                 features = calculate_session_hard_inputs(
-                    snapshot.bars, checkpoint=checkpoint, session_open=session_open
+                    snapshot.bars,
+                    checkpoint=checkpoint,
+                    session_open=session_open,
+                    bar_starts=required,
                 )
                 key = StrategyOpportunityKey(instrument.con_id, row.session, t0)
                 assessments[key] = SessionHardAssessment.from_features(
@@ -2292,9 +2416,7 @@ def build_runtime(
     """Compose one runtime with explicit sessions for enabled run environments."""
 
     runs = load_runs_config(runs_config_path)
-    configured_environments = tuple(
-        dict.fromkeys(run.environment for run in runs.runs)
-    )
+    configured_environments = tuple(dict.fromkeys(run.environment for run in runs.runs))
     destinations: list[ExecutionDestination] = []
     connections: dict[Environment, IbkrConnection] = {}
     session_identities: set[tuple[str, int, int]] = set()
@@ -2345,9 +2467,57 @@ def build_runtime(
         snapshot_store=Stage5SnapshotStore(database_path),
     )
     session_data = IbkrSessionDataSource(market_data_broker, history_cache, logger=logger)
+    activity_service = ActivityShortlistService(ActivityShortlistStore(database_path))
 
     async def qualify(runs_to_prepare: Sequence[RunInstance]) -> Stage5QualificationResult:
-        return await qualify_active_runs(market_data_broker, runs_to_prepare)
+        snapshots: dict[str, ActivityShortlistSnapshot] = {}
+        now = _aware(data_clock())
+        resolver = ExchangeSessionResolver()
+        for instance in runs_to_prepare:
+            config = instance.config
+            if (
+                config.screen is None
+                or config.screen.method.value != "ACTIVITY_SHORTLIST_V1"
+                or config.market_id is None
+                or config.cap_bucket is None
+            ):
+                continue
+            market = resolver.resolve(config, now)
+            definition = get_market(config.market_id)
+            if len(market.active_bar_starts) <= 3:
+                snapshots[config.run_id] = ActivityShortlistSnapshot(
+                    market_id=config.market_id.value,
+                    cap_bucket=config.cap_bucket,
+                    cap_bucket_version=config.cap_bucket_version or "CAP_BUCKETS_V1",
+                    session=market.session,
+                    screen_timestamp=now,
+                    profile_id=config.candidate_screen_id or "ACTIVITY_SHORTLIST_V1",
+                    profile_version=(config.candidate_screen_version or "ACTIVITY_SHORTLIST_V1"),
+                    status=ActivityShortlistStatus.SCANNER_NOT_AVAILABLE,
+                    components=(),
+                    candidates=(),
+                    reason="SCANNER_NOT_AVAILABLE",
+                )
+                continue
+            allowed_symbols = (
+                frozenset(item.symbol for item in instance.universe.members)
+                if instance.universe.members
+                else None
+            )
+            snapshots[config.run_id] = await activity_service.get_or_create(
+                market_data_broker,
+                market=definition,
+                cap_bucket=CapBucket(config.cap_bucket),
+                session=market.session,
+                screen_at=market.active_bar_starts[3],
+                now=now,
+                allowed_symbols=allowed_symbols,
+            )
+        return await qualify_active_runs(
+            market_data_broker,
+            runs_to_prepare,
+            activity_snapshots=snapshots,
+        )
 
     return StockerRuntime(
         config=runs,

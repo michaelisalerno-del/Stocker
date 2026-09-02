@@ -209,9 +209,7 @@ class DegradingRuntime(RecordingRuntime):
     async def apply_runs_config(
         self, config: RunsConfig, *, changed_run_ids: frozenset[str]
     ) -> RuntimeStatus:
-        status = await super().apply_runs_config(
-            config, changed_run_ids=changed_run_ids
-        )
+        status = await super().apply_runs_config(config, changed_run_ids=changed_run_ids)
         if not changed_run_ids:
             return status
         degraded_id = sorted(changed_run_ids)[0]
@@ -393,8 +391,11 @@ def test_run_detail_uses_persisted_funnel_counts_and_config(tmp_path: Path) -> N
     assert detail["risk_per_trade"] == 0.001
     assert detail["strategy_version"] == "SESSION_HARD_STRUCTURE_D_V1"
     assert detail["funnel"] == [
-        {"stage": "Universe", "count": 2},
-        {"stage": "Stage 5 ready", "count": 1},
+        {"stage": "Market / cap eligible", "count": 2},
+        {"stage": "Activity scan union", "count": 0},
+        {"stage": "Shortlist selected", "count": 0},
+        {"stage": "Stage 2 qualified", "count": 1},
+        {"stage": "Stage 4 / Stage 5 PRE ready", "count": 1},
         {"stage": "Strategy evaluated", "count": 1},
         {"stage": "Strategy qualified", "count": 1},
         {"stage": "Rank selected", "count": 1},
@@ -603,12 +604,12 @@ def test_control_service_persists_and_returns_authoritative_runtime_state(
 
     result = asyncio.run(controls.enable_run("US-SH-PAPER"))
 
-    persisted = next(
-        run for run in load_runs_config(runs_path).runs if run.run_id == "US-SH-PAPER"
+    persisted = next(run for run in load_runs_config(runs_path).runs if run.run_id == "US-SH-PAPER")
+    runtime_run = (
+        next(run for run in result.runtime.runs if run.run_id == "US-SH-PAPER")
+        if result.runtime
+        else None
     )
-    runtime_run = next(
-        run for run in result.runtime.runs if run.run_id == "US-SH-PAPER"
-    ) if result.runtime else None
     assert persisted.enabled is True
     assert runtime.run_updates[-1][1] == {"US-SH-PAPER"}
     assert result.runtime_applied is True
@@ -621,9 +622,7 @@ def test_rejected_runtime_change_is_not_persisted_or_shown_as_applied(tmp_path: 
 
     result = asyncio.run(controls.disable_run("US-SH-LIVE"))
 
-    persisted = next(
-        run for run in load_runs_config(runs_path).runs if run.run_id == "US-SH-LIVE"
-    )
+    persisted = next(run for run in load_runs_config(runs_path).runs if run.run_id == "US-SH-LIVE")
     assert persisted.enabled is True
     assert result.persisted is False
     assert result.runtime_applied is False
@@ -729,16 +728,10 @@ def test_custom_universe_edit_normalizes_persists_and_refreshes_affected_run(
     )
     asyncio.run(controls.enable_run("US-SH-PAPER"))
 
-    result = asyncio.run(
-        controls.replace_custom_universe_symbols(
-            "CUSTOM_OPS", ["msft", " nvda "]
-        )
-    )
+    result = asyncio.run(controls.replace_custom_universe_symbols("CUSTOM_OPS", ["msft", " nvda "]))
 
     universe = next(
-        item
-        for item in load_runs_config(runs_path).universes
-        if item.universe_id == "CUSTOM_OPS"
+        item for item in load_runs_config(runs_path).universes if item.universe_id == "CUSTOM_OPS"
     )
     assert [member.symbol for member in universe.members] == ["MSFT", "NVDA"]
     assert runtime.run_updates[-1][1] == {"US-SH-PAPER"}
@@ -771,22 +764,15 @@ def test_custom_universe_edit_reports_authoritative_degraded_run(
             for run in config.runs
         ),
     )
-    runs_path.write_text(
-        yaml.safe_dump(updated.model_dump(mode="json")), encoding="utf-8"
-    )
-    controls = RunControlService(
-        runs_path, broker_path, runtime=DegradingRuntime()
-    )
+    runs_path.write_text(yaml.safe_dump(updated.model_dump(mode="json")), encoding="utf-8")
+    controls = RunControlService(runs_path, broker_path, runtime=DegradingRuntime())
 
-    result = asyncio.run(
-        controls.replace_custom_universe_symbols("CUSTOM_OPS", ["AAPL", "MSFT"])
-    )
+    result = asyncio.run(controls.replace_custom_universe_symbols("CUSTOM_OPS", ["AAPL", "MSFT"]))
 
     assert result.persisted is True
     assert result.runtime_applied is True
     assert result.detail == (
-        "Saved and applied; runtime degraded: "
-        "US-SH-PAPER: instrument preparation failed"
+        "Saved and applied; runtime degraded: US-SH-PAPER: instrument preparation failed"
     )
 
 
@@ -817,9 +803,10 @@ def test_settings_http_api_exposes_editable_broker_and_custom_universe_fields(
     assert universe_response.status_code == 200
     settings = client.get("/api/settings").json()
     assert settings["broker_configuration"][0]["host"] == "paper-gateway.local"
-    assert [
-        member["symbol"] for member in settings["custom_universes"][0]["members"]
-    ] == ["AAPL", "MSFT"]
+    assert [member["symbol"] for member in settings["custom_universes"][0]["members"]] == [
+        "AAPL",
+        "MSFT",
+    ]
 
 
 def test_integrated_dashboard_startup_failure_does_not_stop_runtime(
@@ -889,13 +876,11 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
 
     assert client.get("/api/overview").json()["system"] == "READY"
     assert client.get("/api/orders/plan-live-nvda").json()["signal_id"] == "signal-live-nvda"
-    assert (
-        client.get("/api/positions/LIVE/U123456/101").json()["order_plan_id"]
-        == "plan-live-nvda"
-    )
+    assert client.get("/api/positions/LIVE/U123456/101").json()["order_plan_id"] == "plan-live-nvda"
     for route in (
         "/",
         "/runs",
+        "/universes",
         "/candidates",
         "/orders",
         "/positions",
@@ -909,10 +894,11 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
         assert "PAPER" in response.text
         assert "LIVE" in response.text
     index = client.get("/").text
-    assert 'src="/static/dashboard.js?v=20260902-balances"' in index
+    assert 'src="/static/dashboard.js?v=20260902-universes-v1"' in index
     for label in (
         "Overview",
         "Runs",
+        "Universes",
         "Candidates",
         "Orders",
         "Positions",
@@ -921,6 +907,54 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
         "Settings",
     ):
         assert f">{label}<" in index
+
+
+def test_universe_builder_http_flow_keeps_paper_and_live_separate(
+    tmp_path: Path,
+) -> None:
+    service = _seed_authoritative_state(tmp_path)
+    runs_path, broker_path = _write_control_files(tmp_path)
+    client = TestClient(create_dashboard_app(service, RunControlService(runs_path, broker_path)))
+    body = {
+        "market_id": "UK_LSE",
+        "cap_bucket": "LARGE",
+        "strategy_id": "SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
+        "strategy_version": "SESSION_HARD_STRUCTURE_D_V1",
+        "risk_per_trade": 0.001,
+        "max_concurrent_positions": 2,
+    }
+
+    before_paper = client.post(
+        "/api/universe-runs/live",
+        json={**body, "confirmed": True, "target_account": "U123456"},
+    )
+    assert before_paper.status_code == 400
+    assert "matching PAPER" in before_paper.json()["detail"]
+
+    paper = client.post("/api/universe-runs/paper", json=body)
+    assert paper.status_code == 200
+    live = client.post(
+        "/api/universe-runs/live",
+        json={**body, "confirmed": True, "target_account": "U123456"},
+    )
+    assert live.status_code == 200
+    rows = client.get("/api/universe-runs").json()
+    paper_run = next(item for item in rows["PAPER"] if item["market_id"] == "UK_LSE")
+    live_run = next(item for item in rows["LIVE"] if item["market_id"] == "UK_LSE")
+    assert paper_run["run_id"] != live_run["run_id"]
+    assert paper_run["display_name"] == "LSE · HARD · LARGE"
+    assert live_run["display_name"] == "LSE · HARD · LARGE"
+
+    disabled = client.post(f"/api/universe-runs/{paper_run['run_id']}/disable")
+    assert disabled.status_code == 200
+    assert (
+        next(
+            item
+            for item in client.get("/api/universe-runs").json()["PAPER"]
+            if item["run_id"] == paper_run["run_id"]
+        )["enabled"]
+        is False
+    )
 
 
 def test_candidate_pagination_is_bounded_and_dashboard_has_no_trading_calculators(

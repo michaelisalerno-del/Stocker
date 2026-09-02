@@ -8,7 +8,15 @@ from io import StringIO
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
+
+from stocker_core.markets import MarketUniverseSpec
 
 Identifier = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
@@ -53,7 +61,14 @@ class UniverseDefinition(BaseModel):
 
     universe_id: Identifier
     name: Identifier
-    members: tuple[InstrumentReference, ...] = Field(min_length=1)
+    members: tuple[InstrumentReference, ...] = ()
+    market_spec: MarketUniverseSpec | None = None
+
+    @model_validator(mode="after")
+    def require_members_or_market_spec(self) -> "UniverseDefinition":
+        if not self.members and self.market_spec is None:
+            raise ValueError("universe requires static members or a market specification")
+        return self
 
     @field_validator("members")
     @classmethod

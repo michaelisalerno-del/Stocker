@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
@@ -12,8 +12,12 @@ from math import isfinite, log1p
 from pathlib import Path
 from typing import Protocol
 
-from stocker_core.runs import RunInstance, RunState
+from stocker_core.runs import CandidateScreen, RunInstance, RunState
 from stocker_core.universes import InstrumentReference
+from stocker_execution.activity_shortlist import (
+    ActivityShortlistSnapshot,
+    ActivityShortlistStatus,
+)
 from stocker_execution.history import (
     HistorySemantics,
     HistorySnapshot,
@@ -497,22 +501,28 @@ class Stage5SnapshotStore:
 
 
 async def qualify_active_runs(
-    ibkr: IbkrConnection, runs: Sequence[RunInstance]
+    ibkr: IbkrConnection,
+    runs: Sequence[RunInstance],
+    *,
+    activity_snapshots: Mapping[str, ActivityShortlistSnapshot] | None = None,
 ) -> Stage5QualificationResult:
     """Screen active memberships, qualify them, then deduplicate physical stocks by conId."""
 
     if not isinstance(ibkr, IbkrConnection):
         raise TypeError("Stage 5 qualification requires the Stage 2 IbkrConnection")
+    activity_snapshots = activity_snapshots or {}
     screened_symbols_by_run: dict[str, frozenset[str]] = {}
     ineligible: list[Stage5IneligibleInstrument] = []
     screened_runs = [
-        run for run in runs if run.state is RunState.ACTIVE and run.config.screen is not None
+        run
+        for run in runs
+        if run.state is RunState.ACTIVE
+        and run.config.screen is not None
+        and run.config.screen.method is CandidateScreen.HOT_BY_VOLUME
     ]
     if screened_runs:
         max_results = max(
-            run.config.screen.max_results
-            for run in screened_runs
-            if run.config.screen is not None
+            run.config.screen.max_results for run in screened_runs if run.config.screen is not None
         )
         try:
             ranked_symbols = await ibkr.hot_us_stocks_by_volume(max_results=max_results)
@@ -549,6 +559,36 @@ async def qualify_active_runs(
         if run.state is not RunState.ACTIVE:
             continue
         membership = Stage5Membership(run.config.run_id, run.universe.universe_id)
+        if (
+            run.config.screen is not None
+            and run.config.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
+        ):
+            snapshot = activity_snapshots.get(run.config.run_id)
+            if snapshot is None or snapshot.status is not ActivityShortlistStatus.READY:
+                reason = (
+                    snapshot.reason or snapshot.status.value
+                    if snapshot is not None
+                    else "ACTIVITY_SHORTLIST_NOT_READY"
+                )
+                ineligible.append(
+                    Stage5IneligibleInstrument(
+                        "ACTIVITY_SHORTLIST_V1",
+                        (membership,),
+                        reason,
+                    )
+                )
+                continue
+            for candidate in snapshot.candidates:
+                if not candidate.selected:
+                    continue
+                reference = InstrumentReference(
+                    symbol=candidate.symbol,
+                    exchange=candidate.exchange or "SMART",
+                    primary_exchange=candidate.primary_exchange,
+                    currency=candidate.currency,
+                )
+                references.setdefault(reference, set()).add(membership)
+            continue
         allowed_symbols = screened_symbols_by_run.get(run.config.run_id)
         for reference in run.universe.members:
             if allowed_symbols is not None and reference.symbol not in allowed_symbols:
@@ -761,6 +801,7 @@ def calculate_session_hard_inputs(
     *,
     checkpoint: int,
     session_open: datetime,
+    bar_starts: Sequence[datetime] | None = None,
 ) -> dict[str, float]:
     """Calculate the frozen 15 causal Model B inputs from completed native bars."""
 
@@ -768,7 +809,13 @@ def calculate_session_hard_inputs(
     if checkpoint < 6 or len(bars) != checkpoint:
         raise ValueError("Session HARD requires the exact completed checkpoint prefix")
     ordered = tuple(sorted(bars, key=_historical_bar_timestamp))
-    expected = tuple(opened + timedelta(minutes=5 * index) for index in range(checkpoint))
+    expected = (
+        tuple(_aware_utc(item) for item in bar_starts)
+        if bar_starts is not None
+        else tuple(opened + timedelta(minutes=5 * index) for index in range(checkpoint))
+    )
+    if len(expected) != checkpoint:
+        raise ValueError("Session HARD requires the exact active trading-bar prefix")
     observed = tuple(_historical_bar_timestamp(bar) for bar in ordered)
     if observed != expected:
         raise ValueError("Session HARD requires exact completed five-minute bar timestamps")

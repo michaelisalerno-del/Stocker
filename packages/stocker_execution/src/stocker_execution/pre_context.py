@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import cast
 from zoneinfo import ZoneInfo
 
+from stocker_core.markets import MarketDefinition, market_for_instrument
 from stocker_execution.history import (
     HistorySemantics,
     HistorySnapshot,
@@ -31,6 +32,7 @@ from stocker_execution.ibkr import (
 )
 
 PRE_CONTEXT_CALCULATION_VERSION = "PRE_CONTEXT_V1"
+PRE_CONTEXT_MARKET_CLOCK_VERSION = "PRE_CONTEXT_MARKET_CLOCK_V1"
 IBKR_MODEL_OPTION_COMPUTATION_TICK_TYPE = 13
 IBKR_MODEL_OPTION_IV_SOURCE = "IBKR_MODEL_OPTION_COMPUTATION_TICK_13"
 PRE_CONTEXT_NOT_READY = "PRE_CONTEXT_NOT_READY"
@@ -134,13 +136,20 @@ class CanonicalOptionPair:
     strike: float
 
 
-def calculate_volatility(*, call_model_iv: float, put_model_iv: float) -> VolatilityCalculation:
+def calculate_volatility(
+    *,
+    call_model_iv: float,
+    put_model_iv: float,
+    annual_regular_trading_minutes: int = 252 * 390,
+) -> VolatilityCalculation:
     """Calculate the frozen call/put ATM IV and 15-minute expected absolute return."""
 
     if not all(isfinite(value) and 0.005 <= value <= 5 for value in (call_model_iv, put_model_iv)):
         raise ValueError("call and put model IV must each be finite and in [0.005, 5]")
+    if annual_regular_trading_minutes <= 0:
+        raise ValueError("annual regular trading minutes must be positive")
     atm_iv = (call_model_iv + put_model_iv) / 2
-    expected_absolute_return_15m = atm_iv * sqrt(15 / (252 * 390)) * sqrt(2 / pi)
+    expected_absolute_return_15m = atm_iv * sqrt(15 / annual_regular_trading_minutes) * sqrt(2 / pi)
     return VolatilityCalculation(
         atm_iv=atm_iv,
         expected_absolute_return_15m=expected_absolute_return_15m,
@@ -333,28 +342,41 @@ class PriorSessionContextStore:
     ) -> PriorSessionVolatilityContext | None:
         """Load one environment-independent context by conId, session, and version."""
 
-        return self.get_by_identity(instrument.con_id, session=session)
+        market = _instrument_market(instrument)
+        return self.get_by_identity(
+            instrument.con_id,
+            session=session,
+            calculation_version=_calculation_version(market),
+        )
 
     def get_by_identity(
-        self, underlying_con_id: int, *, session: date
+        self,
+        underlying_con_id: int,
+        *,
+        session: date,
+        calculation_version: str | None = None,
     ) -> PriorSessionVolatilityContext | None:
         """Load authoritative context lineage without reconstructing an instrument."""
 
+        version_clause = "AND calculation_version = ?" if calculation_version is not None else ""
+        parameters: tuple[object, ...] = (
+            underlying_con_id,
+            session.isoformat(),
+            *((calculation_version,) if calculation_version is not None else ()),
+            IBKR_MODEL_OPTION_IV_SOURCE,
+        )
         with self._connect() as connection:
             row = connection.execute(
-                """
+                f"""
                 SELECT * FROM ibkr_pre_volatility_contexts
                 WHERE underlying_con_id = ?
                   AND target_session = ?
-                  AND calculation_version = ?
+                  {version_clause}
                   AND iv_source = ?
+                ORDER BY calculated_at_utc DESC
+                LIMIT 1
                 """,
-                (
-                    underlying_con_id,
-                    session.isoformat(),
-                    PRE_CONTEXT_CALCULATION_VERSION,
-                    IBKR_MODEL_OPTION_IV_SOURCE,
-                ),
+                parameters,
             ).fetchone()
         if row is None:
             return None
@@ -408,24 +430,38 @@ class PriorSessionContextService:
         """Return or causally capture one complete IBKR prior-session context."""
 
         try:
+            market = _instrument_market(instrument)
+            calculation_version = _calculation_version(market)
             existing = self._context_store.get(instrument, session=session)
             if existing is not None:
                 return PriorSessionContextResult(ContextStatus.READY, existing, "cache hit", True)
-            observation, previous_open, previous_close, target_open = (
-                pre_context_session_contract(session)
+            observation, previous_open, previous_close, target_open = pre_context_session_contract(
+                session, calendar=market.calendar
             )
-            option_observation_at = _option_observation_at(observation)
+            option_observation_at = (
+                _option_observation_at(observation)
+                if calculation_version == PRE_CONTEXT_CALCULATION_VERSION
+                else previous_close
+            )
             now = _aware_utc(self._clock())
             if (
                 now < option_observation_at
                 or now >= option_observation_at + PRE_CONTEXT_OBSERVATION_MINUTE
                 or now >= target_open
             ):
+                observation_label = (
+                    "16:00 America/New_York observation minute"
+                    if calculation_version == PRE_CONTEXT_CALCULATION_VERSION
+                    else "market-close observation minute"
+                )
                 raise ValueError(
                     "uncached option context must be captured during the canonical "
-                    "16:00 America/New_York observation minute"
+                    f"{observation_label}"
                 )
-            required = _five_minute_starts(previous_open, previous_close)
+            required = pre_context_bar_starts(
+                session,
+                calendar=market.calendar,
+            )
             history = self._history_cache.get_required_history(
                 instrument,
                 PRE_UNDERLYING_HISTORY,
@@ -486,6 +522,7 @@ class PriorSessionContextService:
             calculation = calculate_volatility(
                 call_model_iv=_required_iv(pair.call),
                 put_model_iv=_required_iv(pair.put),
+                annual_regular_trading_minutes=(252 * market.active_regular_minutes),
             )
             by_con_id = {item.option.con_id: item for item in snapshots}
             captured_at = max(
@@ -510,16 +547,12 @@ class PriorSessionContextService:
                 strike=pair.strike,
                 call_model_iv=_required_iv(pair.call),
                 put_model_iv=_required_iv(pair.put),
-                call_market_data_type=_required_market_data_type(
-                    by_con_id[pair.call.con_id]
-                ),
-                put_market_data_type=_required_market_data_type(
-                    by_con_id[pair.put.con_id]
-                ),
+                call_market_data_type=_required_market_data_type(by_con_id[pair.call.con_id]),
+                put_market_data_type=_required_market_data_type(by_con_id[pair.put.con_id]),
                 atm_iv=calculation.atm_iv,
                 expected_absolute_return_15m=calculation.expected_absolute_return_15m,
                 iv_source=IBKR_MODEL_OPTION_IV_SOURCE,
-                calculation_version=PRE_CONTEXT_CALCULATION_VERSION,
+                calculation_version=calculation_version,
                 captured_at=captured_at,
                 calculated_at=now,
             )
@@ -567,13 +600,15 @@ class PriorSessionContextService:
 
 def pre_context_session_contract(
     session: date,
+    *,
+    calendar: str = "XNYS",
 ) -> tuple[date, datetime, datetime, datetime]:
     """Return the frozen PRE observation and target-session schedule boundary."""
 
     from stocker_data.calendars import get_market_calendar
 
-    calendar = get_market_calendar("XNYS")
-    schedule = calendar.schedule(
+    exchange_calendar = get_market_calendar(calendar)
+    schedule = exchange_calendar.schedule(
         start_date=session - timedelta(days=14),
         end_date=session,
     )
@@ -589,14 +624,52 @@ def pre_context_session_contract(
     return observation, previous_open, previous_close, target_open
 
 
-def next_pre_context_target_session(as_of: datetime) -> date:
+def pre_context_bar_starts(
+    session: date,
+    *,
+    calendar: str = "XNYS",
+) -> tuple[datetime, ...]:
+    """Return completed five-minute slots for the exact previous local session."""
+
+    from stocker_data.calendars import get_market_calendar
+
+    exchange_calendar = get_market_calendar(calendar)
+    schedule = exchange_calendar.schedule(
+        start_date=session - timedelta(days=14),
+        end_date=session,
+    )
+    target_rows = [(index.date(), row) for index, row in schedule.iterrows()]
+    target_index = next(
+        (
+            index
+            for index, (session_date, _row) in enumerate(target_rows)
+            if session_date == session
+        ),
+        None,
+    )
+    if target_index is None or target_index == 0:
+        raise ValueError("target and previous trading sessions could not be established")
+    _observation, row = target_rows[target_index - 1]
+    market_open = _aware_utc(row["market_open"])
+    market_close = _aware_utc(row["market_close"])
+    break_start = _optional_schedule_datetime(row, "break_start")
+    break_end = _optional_schedule_datetime(row, "break_end")
+    if break_start is None or break_end is None:
+        return _five_minute_starts(market_open, market_close)
+    return _five_minute_starts(market_open, break_start) + _five_minute_starts(
+        break_end,
+        market_close,
+    )
+
+
+def next_pre_context_target_session(as_of: datetime, *, calendar: str = "XNYS") -> date:
     """Return the target session following the latest completed XNYS session."""
 
     from stocker_data.calendars import get_market_calendar
 
     as_of_utc = _aware_utc(as_of)
-    calendar = get_market_calendar("XNYS")
-    schedule = calendar.schedule(
+    exchange_calendar = get_market_calendar(calendar)
+    schedule = exchange_calendar.schedule(
         start_date=as_of_utc.date() - timedelta(days=14),
         end_date=as_of_utc.date() + timedelta(days=14),
     )
@@ -622,6 +695,27 @@ def _five_minute_starts(start: datetime, end: datetime) -> tuple[datetime, ...]:
     if not values or cursor != end_utc:
         raise ValueError("session cannot be represented as complete five-minute bars")
     return tuple(values)
+
+
+def _optional_schedule_datetime(row: object, name: str) -> datetime | None:
+    value = getattr(row, "get", lambda _name: None)(name)
+    if value is None or str(value) == "NaT":
+        return None
+    return _aware_utc(value)
+
+
+def _instrument_market(instrument: QualifiedInstrument) -> MarketDefinition:
+    return market_for_instrument(
+        primary_exchange=instrument.primary_exchange,
+        exchange=instrument.exchange,
+        currency=instrument.currency,
+    )
+
+
+def _calculation_version(market: MarketDefinition) -> str:
+    if market.market_id.value.startswith("US_"):
+        return PRE_CONTEXT_CALCULATION_VERSION
+    return PRE_CONTEXT_MARKET_CLOCK_VERSION
 
 
 def _option_observation_at(observation_session: date) -> datetime:
@@ -704,15 +798,12 @@ def select_nearest_pre_context_qualified_options(
         raise ValueError("qualified expiry has no common call/put strike")
     nearest_distance = min(abs(log(strike / previous_close)) for strike in common)
     nearest_strikes = {
-        strike
-        for strike in common
-        if abs(log(strike / previous_close)) == nearest_distance
+        strike for strike in common if abs(log(strike / previous_close)) == nearest_distance
     }
     return tuple(
         item
         for item in options
-        if item.strike in nearest_strikes
-        and item.right.upper() in {"C", "CALL", "P", "PUT"}
+        if item.strike in nearest_strikes and item.right.upper() in {"C", "CALL", "P", "PUT"}
     )
 
 
@@ -827,21 +918,36 @@ def _validate_context(context: PriorSessionVolatilityContext) -> None:
         or context.prior_session_reference_price <= 0
     ):
         raise ValueError("persisted PRE context contains invalid prior-session price")
+    market = market_for_instrument(
+        primary_exchange=context.primary_exchange,
+        exchange=context.exchange,
+        currency=context.currency,
+    )
+    expected_version = _calculation_version(market)
+    if context.calculation_version != expected_version:
+        raise ValueError("persisted PRE context has invalid market clock version")
     calculation = calculate_volatility(
         call_model_iv=context.call_model_iv,
         put_model_iv=context.put_model_iv,
+        annual_regular_trading_minutes=252 * market.active_regular_minutes,
     )
     if (
         calculation.atm_iv != context.atm_iv
-        or calculation.expected_absolute_return_15m
-        != context.expected_absolute_return_15m
+        or calculation.expected_absolute_return_15m != context.expected_absolute_return_15m
     ):
         raise ValueError("persisted PRE context does not match canonical arithmetic")
     if context.iv_source != IBKR_MODEL_OPTION_IV_SOURCE:
         raise ValueError("persisted PRE context has a non-canonical IV source")
     if {context.call_market_data_type, context.put_market_data_type} - {1, 2}:
         raise ValueError("persisted PRE context is not tick-13 market data")
-    expected_observation = _option_observation_at(context.observation_session)
+    expected_observation = (
+        _option_observation_at(context.observation_session)
+        if expected_version == PRE_CONTEXT_CALCULATION_VERSION
+        else pre_context_session_contract(
+            context.target_session,
+            calendar=market.calendar,
+        )[2]
+    )
     if context.option_observation_at != expected_observation or not (
         expected_observation
         <= context.captured_at

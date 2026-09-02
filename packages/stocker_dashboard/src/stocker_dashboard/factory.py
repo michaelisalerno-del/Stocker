@@ -11,6 +11,7 @@ from stocker_core.config import RunsConfig, load_ibkr_config, load_runs_config
 from stocker_dashboard.app import create_dashboard_app
 from stocker_dashboard.controls import ActiveRuntimeControl, RunControlService
 from stocker_dashboard.read_service import DashboardReadService
+from stocker_execution.activity_shortlist import ActivityShortlistStore
 from stocker_execution.execution_ledger import ExecutionLedger
 from stocker_execution.pre_context import PriorSessionContextStore
 from stocker_execution.runtime import (
@@ -48,6 +49,7 @@ def build_dashboard_app(
         runtime_store=RuntimeStore(database_path),
         ledger=ExecutionLedger(database_path),
         pre_context_store=PriorSessionContextStore(database_path),
+        activity_store=ActivityShortlistStore(database_path),
     )
     controls = RunControlService(runs_config_path, ibkr_config_path, runtime=runtime)
     return create_dashboard_app(reads, controls)

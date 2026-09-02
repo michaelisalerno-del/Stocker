@@ -13,8 +13,10 @@ from typing import Protocol
 import yaml
 
 from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
+from stocker_core.markets import CapBucket, MarketId
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig
 from stocker_core.universes import InstrumentReference, UniverseDefinition
+from stocker_dashboard.universe_runs import UniverseRunBuilder
 from stocker_execution.runtime import RuntimeStatus
 
 
@@ -78,6 +80,106 @@ class RunControlService:
         self.ibkr_config_path = Path(ibkr_config_path)
         self.runtime = runtime
         self._lock = asyncio.Lock()
+        self._builder = UniverseRunBuilder()
+
+    async def universe_builder_options(self) -> dict[str, object]:
+        """Return the finite backend-owned builder catalogue."""
+
+        options = self._builder.options(load_runs_config(self.runs_config_path))
+        readiness: dict[str, str] = {}
+        if self.runtime is not None:
+            inspect_readiness = getattr(self.runtime, "activity_scanner_readiness", None)
+            if inspect_readiness is not None:
+                readiness = await inspect_readiness()
+        markets = options["markets"]
+        assert isinstance(markets, list)
+        for market in markets:
+            assert isinstance(market, dict)
+            market_id = str(market["market_id"])
+            market["scanner_readiness"] = readiness.get(
+                market_id,
+                "BROKER_NOT_CONNECTED",
+            )
+        return options
+
+    async def add_universe_run(
+        self,
+        *,
+        market_id: MarketId,
+        cap_bucket: CapBucket,
+        strategy_id: str,
+        strategy_version: str,
+        environment: Environment,
+        risk_per_trade: float,
+        max_concurrent_positions: int | None,
+        confirmation: LiveConfirmation | None = None,
+    ) -> ControlResult:
+        """Create or re-enable one exact market/cap/method/environment lineage."""
+
+        if risk_per_trade <= 0 or risk_per_trade > 1:
+            raise ValueError("risk_per_trade must be greater than zero and no more than one")
+        if max_concurrent_positions is not None and max_concurrent_positions <= 0:
+            raise ValueError("max_concurrent_positions must be positive")
+        risk = RunRiskConfig(
+            risk_per_trade=risk_per_trade,
+            max_concurrent_positions=max_concurrent_positions,
+        )
+        async with self._lock:
+            current = load_runs_config(self.runs_config_path)
+            updated, run = self._builder.add(
+                current,
+                market_id=market_id,
+                cap_bucket=cap_bucket,
+                strategy_id=strategy_id,
+                strategy_version=strategy_version,
+                environment=environment,
+                risk=risk,
+            )
+            if environment is Environment.LIVE:
+                self._confirm_live(run, confirmation, risk=risk)
+            if updated == current:
+                return ControlResult(
+                    True,
+                    self.runtime is not None,
+                    ApplyMode.HOT_APPLY,
+                    "Run already active",
+                    self.runtime.status() if self.runtime else None,
+                    run,
+                )
+            if self.runtime is None:
+                self._write_runs(updated)
+                return ControlResult(
+                    True, False, ApplyMode.RESTART_RUN, "Saved; active runtime unavailable", run=run
+                )
+            runtime_environment = next(
+                (
+                    item
+                    for item in self.runtime.status().execution_environments
+                    if item.environment is environment
+                ),
+                None,
+            )
+            if runtime_environment is None or not runtime_environment.ready:
+                try:
+                    await self.runtime.replace_broker_config(
+                        load_ibkr_config(self.ibkr_config_path, environment)
+                    )
+                except Exception as exc:
+                    prefix = (
+                        "LIVE_NOT_READY" if environment is Environment.LIVE else "BROKER_NOT_READY"
+                    )
+                    return ControlResult(
+                        False,
+                        False,
+                        ApplyMode.RESTART_RUN,
+                        f"{prefix}: {exc}",
+                        self.runtime.status(),
+                        run,
+                    )
+            result = await self._apply_runs(updated, {run.run_id}, ApplyMode.RESTART_RUN, run=run)
+            if not result.runtime_applied:
+                return result
+            return await self._persist_runs_after_apply(updated, current, {run.run_id}, result)
 
     async def enable_run(
         self, run_id: str, *, confirmation: LiveConfirmation | None = None
@@ -97,9 +199,7 @@ class RunControlService:
     async def disable_run(self, run_id: str) -> ControlResult:
         async with self._lock:
             config, current = self._config_and_run(run_id)
-            return await self._replace_run(
-                config, current, ApplyMode.HOT_APPLY, enabled=False
-            )
+            return await self._replace_run(config, current, ApplyMode.HOT_APPLY, enabled=False)
 
     async def update_run_config(
         self,
@@ -119,6 +219,13 @@ class RunControlService:
                 raise ValueError("max_concurrent_positions must be positive")
             if strategy != "SESSION_HARD":
                 raise ValueError("active runtime supports only SESSION_HARD strategy config")
+            if current.market_id is not None and (
+                universe != current.universe or strategy != current.strategy
+            ):
+                raise ValueError(
+                    "market, capitalisation, method, and screen identity must be changed "
+                    "by creating a separate run"
+                )
             risk = RunRiskConfig(
                 risk_per_trade=risk_per_trade,
                 max_concurrent_positions=max_concurrent_positions,
@@ -148,6 +255,10 @@ class RunControlService:
     ) -> ControlResult:
         async with self._lock:
             config, current = self._config_and_run(run_id)
+            if current.market_id is not None and environment is not current.environment:
+                raise ValueError(
+                    "execution environment is run identity; create the separate PAPER or LIVE run"
+                )
             if environment is Environment.LIVE:
                 self._confirm_live(current, confirmation, target=environment)
             return await self._replace_run(
@@ -163,9 +274,7 @@ class RunControlService:
 
         async with self._lock:
             other_environment = (
-                Environment.LIVE
-                if config.environment is Environment.PAPER
-                else Environment.PAPER
+                Environment.LIVE if config.environment is Environment.PAPER else Environment.PAPER
             )
             try:
                 other = load_ibkr_config(self.ibkr_config_path, other_environment)
@@ -178,9 +287,7 @@ class RunControlService:
             ):
                 raise ValueError("PAPER and LIVE cannot share the same IBKR session identity")
             if not config.expected_account:
-                raise ValueError(
-                    f"{config.environment.value} expected_account is required"
-                )
+                raise ValueError(f"{config.environment.value} expected_account is required")
             raw = self._read_broker_yaml()
             raw[config.environment.value] = config.model_dump(mode="json")
             if self.runtime is None:
@@ -242,16 +349,13 @@ class RunControlService:
                 members=tuple(members),
             )
             universes = tuple(
-                universe if item.universe_id == normalized_id else item
-                for item in config.universes
+                universe if item.universe_id == normalized_id else item for item in config.universes
             )
             if existing is None:
                 universes = (*universes, universe)
             updated = RunsConfig(universes=universes, runs=config.runs)
             affected = {
-                run.run_id
-                for run in updated.runs
-                if run.universe == normalized_id and run.enabled
+                run.run_id for run in updated.runs if run.universe == normalized_id and run.enabled
             }
             if self.runtime is None:
                 self._write_runs(updated)
@@ -269,15 +373,11 @@ class RunControlService:
             )
             if not result.runtime_applied:
                 return result
-            return await self._persist_runs_after_apply(
-                updated, config, affected, result
-            )
+            return await self._persist_runs_after_apply(updated, config, affected, result)
 
     def live_confirmation_context(self, run_id: str) -> dict[str, object]:
         _, run = self._config_and_run(run_id)
-        account = load_ibkr_config(
-            self.ibkr_config_path, Environment.LIVE
-        ).expected_account
+        account = load_ibkr_config(self.ibkr_config_path, Environment.LIVE).expected_account
         if account is None:
             raise ValueError("LIVE expected_account is required")
         return {
@@ -367,14 +467,10 @@ class RunControlService:
                         self.runtime.status(),
                         updated,
                     )
-        result = await self._apply_runs(
-            validated, {current.run_id}, mode, run=updated
-        )
+        result = await self._apply_runs(validated, {current.run_id}, mode, run=updated)
         if not result.runtime_applied:
             return result
-        return await self._persist_runs_after_apply(
-            validated, config, {current.run_id}, result
-        )
+        return await self._persist_runs_after_apply(validated, config, {current.run_id}, result)
 
     async def _apply_runs(
         self,
@@ -424,18 +520,14 @@ class RunControlService:
                 status,
             )
         environment = next(
-            item
-            for item in status.execution_environments
-            if item.environment is config.environment
+            item for item in status.execution_environments if item.environment is config.environment
         )
         detail = (
             "Reconnected and reconciled"
             if environment.ready
             else "Applied; broker environment not ready"
         )
-        return ControlResult(
-            False, True, ApplyMode.RECONNECT_ENVIRONMENT, detail, status
-        )
+        return ControlResult(False, True, ApplyMode.RECONNECT_ENVIRONMENT, detail, status)
 
     @staticmethod
     def _persisted(result: ControlResult) -> ControlResult:
@@ -494,8 +586,7 @@ class RunControlService:
                 await self.runtime.replace_broker_config(previous)
             except Exception as rollback_error:
                 raise RuntimeError(
-                    "broker persistence failed and runtime rollback failed: "
-                    f"{rollback_error}"
+                    f"broker persistence failed and runtime rollback failed: {rollback_error}"
                 ) from persistence_error
             raise
         return self._persisted(result)

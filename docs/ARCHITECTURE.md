@@ -582,12 +582,55 @@ LIVE account. Existing execution ledger records are never rewritten during an en
 
 Editable IBKR configuration remains separated by PAPER/LIVE environment. A connection edit uses
 the Stage 8/9 reconnect path for only that environment, verifies the expected account, and
-reconciles broker orders and positions before new submissions resume. Editable `CUSTOM_...`
-membership reuses `InstrumentReference` normalization and re-prepares active consumers without
-bulk Stage 4/5 fetching; removing membership never cancels or flattens existing exposure.
+reconciles broker orders and positions before new submissions resume. Backend `CUSTOM_...`
+membership support remains available for configuration, CLI, and tests, but normal run creation
+and universe management has moved out of Settings and into the Universes page.
 
 The dashboard may run in the runtime process by receiving `runtime.status`, or as a standalone
 process over the persisted stores. In standalone mode connectivity is deliberately reported as
 unavailable rather than guessed. Browser and HTTP failures cannot stop the trading runtime.
+
+### Stage 10 universe and performance extension
+
+The Universes page is a market-run builder over a finite catalogue, not a general exchange
+framework. The semantic boundary is:
+
+```text
+market + CAP_BUCKETS_V1 bucket = MarketUniverseSpec
+        ↓
+ACTIVITY_SHORTLIST_V1 session snapshot
+        ↓
+run-specific strategy + environment + risk
+```
+
+`MarketUniverseSpec` describes eligible market/capitalisation space; its session shortlist is a
+separate immutable row set. Generated US market universes reuse configured NASDAQ/NYSE/US_ALL
+listing membership where present. Strategy and execution state never enter universe membership.
+Run lineage includes market, cap contract/version, strategy/version, candidate screen/version, and
+PAPER or LIVE. An exact disabled lineage is re-enabled; a changed semantic identity creates a new
+run. LIVE creation requires an existing exact PAPER counterpart and is always a deliberate action.
+
+`ACTIVITY_SHORTLIST_V1` is captured 15 active trading minutes after regular-session open. It
+discovers and caches IBKR scanner parameters, uses the supported subset of `TOP_TRADE_RATE`,
+`TOP_VOLUME_RATE`, and `HOT_BY_VOLUME` only when at least two are available, applies genuine
+market/cap restrictions, and requests at most 50 rows per component. Results are deduplicated and
+ranked by component-hit count, equal-weight normalized rank sum, best component rank, then stable
+symbol/conId. At most 50 are selected. One generic market/cap/session/profile snapshot is stored
+immutably and may be shared by PAPER/LIVE or multiple methods. Reconnect loads it; a late process
+with no snapshot records `SCREEN_MISSED` and does not create a substitute population.
+
+Exchange calendars generate valid active five-minute slots. Breaks do not count toward Session
+HARD checkpoints, while the existing US `6, 8, ..., 34` timestamps are unchanged. US Stage 4
+continues byte-for-byte with `PRE_CONTEXT_V1` and `252 * 390`. Non-US PAPER context uses
+`PRE_CONTEXT_MARKET_CLOCK_V1`, the exact previous local session and close, and
+`252 * active_regular_session_minutes`; breaks are excluded and no substitute volatility source
+is allowed.
+
+Per-run performance is derived from execution-ledger fills rather than current position state.
+Closed fills and recorded commissions provide realised P&L; historical R uses the risk captured on
+the original order plan. Open run lots are valued only when their signed quantities reconcile to
+the broker position for environment/account/conId and an authoritative mark is available. A
+mismatch is `RECONCILIATION_REQUIRED`, never an allocation guess. Native currencies remain on each
+run and mixed currencies are not summed.
 
 Future stages must not be implemented prematurely.

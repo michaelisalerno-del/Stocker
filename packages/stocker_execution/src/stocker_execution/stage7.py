@@ -732,6 +732,8 @@ def build_order_plan(
         target_price=target,
         environment=environment,
         created_at=created_at,
+        initial_risk_budget=risk_decision.risk_budget,
+        per_share_initial_risk=risk_decision.per_share_risk,
         diagnostic=diagnostic,
     )
 

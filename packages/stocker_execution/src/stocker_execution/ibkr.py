@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+import xml.etree.ElementTree as ElementTree
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
@@ -12,7 +13,9 @@ from math import isfinite
 from typing import Any, Protocol, cast
 
 from stocker_core.config import IbkrConfig
+from stocker_core.markets import CAP_BUCKETS_V1, ActivityScanner, CapBucket, MarketDefinition
 from stocker_core.runs import Environment
+from stocker_execution.activity_shortlist import ScannerCandidate, ScannerCapabilities
 from stocker_execution.execution_models import (
     BrokerAccountState,
     BrokerFill,
@@ -119,7 +122,14 @@ class _IbClient(Protocol):
         underlyingConId: int,
     ) -> list[object]: ...
 
-    async def reqScannerDataAsync(self, subscription: object) -> list[object]: ...
+    async def reqScannerDataAsync(
+        self,
+        subscription: object,
+        scannerSubscriptionOptions: list[object] | None = None,
+        scannerSubscriptionFilterOptions: list[object] | None = None,
+    ) -> list[object]: ...
+
+    async def reqScannerParametersAsync(self) -> str: ...
 
     async def accountSummaryAsync(self, account: str = "") -> list[object]: ...
 
@@ -344,6 +354,7 @@ class IbkrConnection:
         self._account_id: str | None = None
         self._execution_enabled = execution_enabled
         self._connection_epoch = 0
+        self._scanner_capabilities: ScannerCapabilities | None = None
 
     @property
     def environment(self) -> Environment:
@@ -402,6 +413,7 @@ class IbkrConnection:
         if self._client.isConnected():
             self._client.disconnect()
         self._account_id = None
+        self._scanner_capabilities = None
         if was_connected:
             self._connection_epoch += 1
 
@@ -766,8 +778,7 @@ class IbkrConnection:
             )
         except Exception as exc:
             raise IbkrError(
-                "IBKR HOT_BY_VOLUME scanner request failed: "
-                f"{sanitize_ibkr_message(exc)}"
+                f"IBKR HOT_BY_VOLUME scanner request failed: {sanitize_ibkr_message(exc)}"
             ) from exc
 
         symbols: list[str] = []
@@ -780,6 +791,132 @@ class IbkrConnection:
             seen.add(symbol)
             symbols.append(symbol)
         return tuple(symbols[:max_results])
+
+    async def scanner_capabilities(self) -> ScannerCapabilities:
+        """Discover and cache the connected broker's finite scanner vocabulary."""
+
+        self._require_connected()
+        if self._scanner_capabilities is not None:
+            return self._scanner_capabilities
+        try:
+            payload = await asyncio.wait_for(
+                self._client.reqScannerParametersAsync(),
+                timeout=self.config.request_timeout_seconds,
+            )
+            root = ElementTree.fromstring(payload)
+        except Exception as exc:
+            raise IbkrError(
+                f"IBKR scanner-parameter discovery failed: {sanitize_ibkr_message(exc)}"
+            ) from exc
+        values: dict[str, set[str]] = {
+            "locations": set(),
+            "scan_codes": set(),
+            "filters": set(),
+        }
+        for element in root.iter():
+            text = (element.text or "").strip()
+            if not text:
+                continue
+            tag = element.tag.rsplit("}", maxsplit=1)[-1]
+            if tag == "locationCode":
+                values["locations"].add(text)
+            elif tag == "scanCode":
+                values["scan_codes"].add(text)
+            elif tag in {"code", "fieldCode", "filterCode"}:
+                values["filters"].add(text)
+        discovered = ScannerCapabilities(
+            locations=frozenset(values["locations"]),
+            scan_codes=frozenset(values["scan_codes"]),
+            filters=frozenset(values["filters"]),
+        )
+        self._scanner_capabilities = discovered
+        return discovered
+
+    async def activity_scan(
+        self,
+        *,
+        market: MarketDefinition,
+        cap_bucket: CapBucket,
+        component: ActivityScanner,
+        max_results: int = 50,
+    ) -> tuple[ScannerCandidate, ...]:
+        """Run one bounded market/cap-restricted Activity Shortlist component."""
+
+        self._require_connected()
+        if not 1 <= max_results <= 50:
+            raise ValueError("IBKR market scanners support between 1 and 50 results")
+        capabilities = await self.scanner_capabilities()
+        if market.scanner_location not in capabilities.locations:
+            raise IbkrError("SCANNER_NOT_AVAILABLE")
+        if component.value not in capabilities.scan_codes:
+            raise IbkrError("SCANNER_NOT_AVAILABLE")
+        cap = CAP_BUCKETS_V1.definition(cap_bucket)
+        if cap_bucket is not CapBucket.ALL:
+            above_available = bool({"marketCapAbove", "usdMarketCapAbove"} & capabilities.filters)
+            below_available = bool({"marketCapBelow", "usdMarketCapBelow"} & capabilities.filters)
+            if not above_available or (
+                cap.maximum_usd_exclusive is not None and not below_available
+            ):
+                raise IbkrError("CAP_FILTER_UNAVAILABLE")
+
+        from ib_async import ScannerSubscription, TagValue
+
+        subscription = ScannerSubscription(
+            numberOfRows=max_results,
+            instrument=market.security_type,
+            locationCode=market.scanner_location,
+            scanCode=component.value,
+        )
+        filter_options: list[object] = []
+        if cap.scanner_minimum_millions is not None:
+            if "usdMarketCapAbove" in capabilities.filters:
+                filter_options.append(
+                    TagValue("usdMarketCapAbove", str(cap.scanner_minimum_millions))
+                )
+            else:
+                subscription.marketCapAbove = cap.scanner_minimum_millions
+        if cap.scanner_maximum_millions is not None:
+            if "usdMarketCapBelow" in capabilities.filters:
+                filter_options.append(
+                    TagValue("usdMarketCapBelow", str(cap.scanner_maximum_millions))
+                )
+            else:
+                subscription.marketCapBelow = cap.scanner_maximum_millions
+        try:
+            rows = await asyncio.wait_for(
+                self._client.reqScannerDataAsync(subscription, [], filter_options),
+                timeout=self.config.request_timeout_seconds,
+            )
+        except Exception as exc:
+            raise IbkrError(
+                f"IBKR {component.value} scanner request failed: {sanitize_ibkr_message(exc)}"
+            ) from exc
+        results: list[ScannerCandidate] = []
+        seen: set[tuple[str, int | None]] = set()
+        for raw in sorted(rows, key=lambda item: int(cast(Any, item).rank)):
+            contract = cast(Any, raw).contractDetails.contract
+            symbol = str(contract.symbol).strip().upper()
+            con_id = int(contract.conId) if int(getattr(contract, "conId", 0)) > 0 else None
+            identity = (symbol, con_id)
+            if str(contract.secType).upper() != "STK" or not symbol or identity in seen:
+                continue
+            seen.add(identity)
+            results.append(
+                ScannerCandidate(
+                    component=component,
+                    rank=int(cast(Any, raw).rank) + 1,
+                    symbol=symbol,
+                    con_id=con_id,
+                    exchange=str(contract.exchange or "SMART").upper(),
+                    primary_exchange=(
+                        str(contract.primaryExchange).upper()
+                        if getattr(contract, "primaryExchange", "")
+                        else None
+                    ),
+                    currency=str(contract.currency or market.currency).upper(),
+                )
+            )
+        return tuple(results[:max_results])
 
     async def historical_bars(
         self,
@@ -942,12 +1079,8 @@ class IbkrConnection:
         normalized: list[OptionMarketSnapshot] = []
         for option, source in zip(unique_options, tickers, strict=True):
             ticker = cast(_SourceOptionTicker, source)
-            reported_market_data_type = _optional_integer(
-                getattr(ticker, "marketDataType", None)
-            )
-            accepted_model_types = (
-                {1, 2, 3, 4} if market_data_type in {3, 4} else {1, 2}
-            )
+            reported_market_data_type = _optional_integer(getattr(ticker, "marketDataType", None))
+            accepted_model_types = {1, 2, 3, 4} if market_data_type in {3, 4} else {1, 2}
             model = (
                 getattr(ticker, "modelGreeks", None)
                 if reported_market_data_type in accepted_model_types
@@ -1195,9 +1328,7 @@ def _option_snapshot_complete(
     market_data_type = _optional_integer(getattr(ticker, "marketDataType", None))
     accepted_model_types = {1, 2, 3, 4} if allow_delayed_model else {1, 2}
     model = (
-        getattr(ticker, "modelGreeks", None)
-        if market_data_type in accepted_model_types
-        else None
+        getattr(ticker, "modelGreeks", None) if market_data_type in accepted_model_types else None
     )
     values = [
         _optional_number(getattr(ticker, "bid", None)),

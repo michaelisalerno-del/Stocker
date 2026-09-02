@@ -69,6 +69,8 @@ class ExecutionRecord:
     opened_at: datetime | None
     closed_at: datetime | None
     realized_pnl: float | None
+    initial_risk_budget: float | None
+    per_share_initial_risk: float | None
     rejection_reason: str | None
     diagnostic: bool
 
@@ -205,6 +207,16 @@ class ExecutionLedger:
                 _EXECUTION_FILLS_DDL.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1)
             )
             self._migrate_execution_fill_identity(connection)
+            self._ensure_column(connection, "execution_plans", "initial_risk_budget", "REAL")
+            self._ensure_column(connection, "execution_plans", "per_share_initial_risk", "REAL")
+
+    @staticmethod
+    def _ensure_column(
+        connection: sqlite3.Connection, table: str, column: str, declaration: str
+    ) -> None:
+        columns = {str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
     @staticmethod
     def _migrate_execution_fill_identity(connection: sqlite3.Connection) -> None:
@@ -245,8 +257,9 @@ class ExecutionLedger:
                         order_plan_id, signal_id, run_id, strategy_id, strategy_version,
                         environment, expected_account, con_id, symbol, side,
                         intended_quantity, entry_reference, stop_price, target_price,
-                        status, created_at, diagnostic
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        status, created_at, initial_risk_budget, per_share_initial_risk,
+                        diagnostic
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         plan.order_plan_id,
@@ -265,6 +278,8 @@ class ExecutionLedger:
                         plan.target_price,
                         OrderLifecycle.PLANNED.value,
                         plan.created_at.isoformat(timespec="microseconds"),
+                        plan.initial_risk_budget,
+                        plan.per_share_initial_risk,
                         int(plan.diagnostic),
                     ),
                 )
@@ -737,7 +752,7 @@ class ExecutionLedger:
                        SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,
                        SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END) AS losses,
                        COALESCE(SUM(realized_pnl), 0) AS total_pnl
-                FROM execution_plans WHERE {' AND '.join(clauses)}
+                FROM execution_plans WHERE {" AND ".join(clauses)}
                 """,
                 values,
             ).fetchone()
@@ -1034,6 +1049,8 @@ def _record_from_row(row: sqlite3.Row) -> ExecutionRecord:
         opened_at=_optional_datetime(row["opened_at"]),
         closed_at=_optional_datetime(row["closed_at"]),
         realized_pnl=_optional_float(row["realized_pnl"]),
+        initial_risk_budget=_optional_float(row["initial_risk_budget"]),
+        per_share_initial_risk=_optional_float(row["per_share_initial_risk"]),
         rejection_reason=(
             str(row["rejection_reason"]) if row["rejection_reason"] is not None else None
         ),

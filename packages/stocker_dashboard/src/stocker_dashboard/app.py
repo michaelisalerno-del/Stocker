@@ -12,8 +12,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from stocker_core.config import IbkrConfig, load_runs_config
+from stocker_core.markets import CapBucket, MarketId
 from stocker_core.runs import Environment
 from stocker_dashboard.controls import ControlResult, LiveConfirmation, RunControlService
+from stocker_dashboard.performance import PerformancePeriod
 from stocker_dashboard.read_service import DashboardReadService
 
 
@@ -51,6 +53,15 @@ class CustomUniverseBody(BaseModel):
     security_type: str = "STK"
 
 
+class UniverseRunBody(ConfirmationBody):
+    market_id: MarketId
+    cap_bucket: CapBucket
+    strategy_id: str
+    strategy_version: str
+    risk_per_trade: float
+    max_concurrent_positions: int | None = None
+
+
 def create_dashboard_app(reads: DashboardReadService, controls: RunControlService) -> FastAPI:
     """Create an isolated HTTP consumer over injected read/control boundaries."""
 
@@ -76,6 +87,69 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
     @app.get("/api/runs/{run_id}")
     def run_detail(run_id: str) -> dict[str, Any]:
         return reads.run_detail(run_id)
+
+    @app.get("/api/runs/{run_id}/performance")
+    def run_performance(
+        run_id: str,
+        period: PerformancePeriod = PerformancePeriod.TODAY,
+    ) -> dict[str, Any]:
+        return reads.run_performance(run_id, period)
+
+    @app.get("/api/universe-builder/options")
+    async def universe_builder_options() -> dict[str, object]:
+        return await controls.universe_builder_options()
+
+    @app.get("/api/universe-runs")
+    def universe_runs() -> dict[str, list[dict[str, Any]]]:
+        return reads.universe_runs()
+
+    async def add_universe_run(
+        body: UniverseRunBody, environment: Environment
+    ) -> dict[str, object]:
+        try:
+            return changed(
+                await controls.add_universe_run(
+                    market_id=body.market_id,
+                    cap_bucket=body.cap_bucket,
+                    strategy_id=body.strategy_id,
+                    strategy_version=body.strategy_version,
+                    environment=environment,
+                    risk_per_trade=body.risk_per_trade,
+                    max_concurrent_positions=body.max_concurrent_positions,
+                    confirmation=confirmation(body),
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/universe-runs/paper")
+    async def add_paper_run(body: UniverseRunBody) -> dict[str, object]:
+        return await add_universe_run(body, Environment.PAPER)
+
+    @app.post("/api/universe-runs/live")
+    async def add_live_run(body: UniverseRunBody) -> dict[str, object]:
+        return await add_universe_run(body, Environment.LIVE)
+
+    @app.post("/api/universe-runs/{run_id}/disable")
+    async def disable_universe_run(run_id: str) -> dict[str, object]:
+        try:
+            return changed(await controls.disable_run(run_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/universe-runs/{run_id}/enable")
+    async def enable_universe_run(run_id: str, body: ConfirmationBody) -> dict[str, object]:
+        try:
+            return changed(await controls.enable_run(run_id, confirmation=confirmation(body)))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/screens/{market_id}/{cap_bucket}/{session}")
+    def screen(market_id: str, cap_bucket: str, session: date) -> dict[str, Any]:
+        try:
+            return reads.screen(market_id, cap_bucket, session)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/api/candidates")
     def candidates(
@@ -171,9 +245,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
     @app.post("/api/runs/{run_id}/enable")
     async def enable(run_id: str, body: ConfirmationBody) -> dict[str, Any]:
         try:
-            return changed(
-                await controls.enable_run(run_id, confirmation=confirmation(body))
-            )
+            return changed(await controls.enable_run(run_id, confirmation=confirmation(body)))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -212,9 +284,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.put("/api/settings/broker/{environment}")
-    async def broker_config(
-        environment: Environment, body: BrokerConfigBody
-    ) -> dict[str, Any]:
+    async def broker_config(environment: Environment, body: BrokerConfigBody) -> dict[str, Any]:
         try:
             result = await controls.update_broker_config(
                 IbkrConfig(environment=environment, **body.model_dump())
@@ -224,9 +294,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.put("/api/settings/universes/{universe_id}")
-    async def custom_universe(
-        universe_id: str, body: CustomUniverseBody
-    ) -> dict[str, Any]:
+    async def custom_universe(universe_id: str, body: CustomUniverseBody) -> dict[str, Any]:
         try:
             result = await controls.replace_custom_universe_symbols(
                 universe_id,

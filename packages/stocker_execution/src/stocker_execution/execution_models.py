@@ -59,6 +59,8 @@ class OrderPlan:
     target_price: float
     environment: Environment
     created_at: datetime
+    initial_risk_budget: float | None = None
+    per_share_initial_risk: float | None = None
     diagnostic: bool = False
 
 

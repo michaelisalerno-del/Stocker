@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from stocker_core.markets import CapBucket, MarketId
 from stocker_core.universes import Identifier, UniverseCatalog, UniverseDefinition
 
 
@@ -39,6 +40,7 @@ class CandidateScreen(StrEnum):
     """Broker-independent candidate screen selected by one run."""
 
     HOT_BY_VOLUME = "HOT_BY_VOLUME"
+    ACTIVITY_SHORTLIST_V1 = "ACTIVITY_SHORTLIST_V1"
 
 
 class RunScreenConfig(BaseModel):
@@ -48,6 +50,8 @@ class RunScreenConfig(BaseModel):
 
     method: CandidateScreen
     max_results: int = Field(default=50, ge=1, le=50)
+    version: Identifier | None = None
+    scheduled_active_minutes: int = Field(default=15, ge=0)
 
 
 class RunConfig(BaseModel):
@@ -57,6 +61,14 @@ class RunConfig(BaseModel):
     enabled: bool = True
     universe: Identifier
     strategy: Identifier
+    strategy_id: Identifier | None = None
+    strategy_version: Identifier | None = None
+    market_id: MarketId | None = None
+    cap_bucket: CapBucket | None = None
+    cap_bucket_version: Identifier | None = None
+    candidate_screen_id: Identifier | None = None
+    candidate_screen_version: Identifier | None = None
+    display_name: Identifier | None = None
     environment: Environment
     risk: RunRiskConfig | None = None
     session: RunWindow | None = None
@@ -67,6 +79,16 @@ class RunConfig(BaseModel):
         """Explicit per-run execution destination; never inferred from broker state."""
 
         return self.environment
+
+    @property
+    def effective_strategy_id(self) -> str:
+        return str(self.strategy_id or self.strategy)
+
+    @property
+    def effective_candidate_screen_id(self) -> str | None:
+        if self.candidate_screen_id is not None:
+            return str(self.candidate_screen_id)
+        return self.screen.method.value if self.screen is not None else None
 
 
 class RunState(StrEnum):

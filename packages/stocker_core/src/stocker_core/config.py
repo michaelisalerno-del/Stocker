@@ -100,7 +100,7 @@ class RunsConfig(BaseModel):
     """Configured universes and the independent runs that reference them."""
 
     universes: tuple[UniverseDefinition, ...] = Field(min_length=1)
-    runs: tuple[RunConfig, ...] = Field(min_length=1)
+    runs: tuple[RunConfig, ...] = ()
 
     @model_validator(mode="after")
     def validate_run_references(self) -> "RunsConfig":

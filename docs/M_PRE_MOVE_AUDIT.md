@@ -58,6 +58,7 @@ raw_PRE_move_price =
 
 PRE_MOVE_M = raw_PRE_move_price / M_price
 
+# Stage 6 Session HARD strategy research reference:
 qualified = PRE_MOVE_M > 0.475764059845861
 ```
 
@@ -150,10 +151,13 @@ Stage 4 owns the qualified IBKR identity, IBKR-only persistent data substrate, e
 underlying/option context once its IBKR field contract is proven, and the dimensionless
 `expected_absolute_return_15m` derived from prior-session ATM IV.
 
-Stage 5 owns the current-session signal checkpoint, `T0`, `P0`, final dollar `M_price`, raw PRE
-movement, `PRE_MOVE_M`, its fixed threshold, cohort percentiles/bands, qualification, and ranking.
-This is required by the recovered code: `M_price` cannot be finalised until current-session `P0`
-arrives at `T0`.
+Stage 5 accepts a causally valid strategy-supplied `T0` and owns `P0`, final dollar `M_price`, raw
+PRE movement, `PRE_MOVE_M`, and the reusable feature snapshot. This is required by the recovered
+code: `M_price` cannot be finalised until current-session `P0` arrives at `T0`.
+
+The checkpoint schedule, fixed threshold, strategy cohort, cohort percentiles/bands,
+qualification, and ranking are Stage 6 strategy concerns. The threshold remains frozen research
+evidence but is not applied by the generic Stage 5 runtime.
 
 No Stage 5 runtime implementation is added by this audit.
 
@@ -185,7 +189,9 @@ bit-for-bit vendor equality or new parity research project is required. Runtime 
 
 `tests/test_pre_move_m_research_contract.py` freezes six representative input/output rows and
 checks row-specific `M`, repeated-stock time variation, cross-sectional variation, the exact
-normalisation arithmetic, current `P0` rather than prior-close scaling, and threshold placement.
-These remain reference arithmetic tests. `tests/test_stage4_pre_context.py` additionally freezes
+normalisation arithmetic, current `P0` rather than prior-close scaling, and the Stage 6 research
+threshold placement. `tests/test_stage6_strategy_research_reference.py` preserves the accepted
+percentile tie method and band boundaries as test-only lineage evidence. These are not Stage 5
+runtime qualification. `tests/test_stage4_pre_context.py` additionally freezes
 the pure Stage 4 ATM-IV/expected-return calculation, exact option selection, tick-13-only source,
 fail-closed model-IV behavior, `conId` lineage, persistence reuse, and absence of Stage 5 fields.

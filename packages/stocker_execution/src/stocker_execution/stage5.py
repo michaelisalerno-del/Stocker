@@ -1,4 +1,4 @@
-"""Causal, non-trading Stage 5 PRE features and cohort descriptions."""
+"""Causal, non-trading Stage 5 current-session PRE feature production."""
 
 from __future__ import annotations
 
@@ -24,23 +24,12 @@ from stocker_execution.history import (
 from stocker_execution.ibkr import HistoricalBar, IbkrConnection, IbkrError, QualifiedInstrument
 from stocker_execution.pre_context import ContextStatus, PriorSessionContextResult
 
-PRE_MOVE_M_THRESHOLD = 0.475764059845861
 STAGE5_CALCULATION_VERSION = "STAGE5_PRE_MOVE_V1"
-COHORT_LOOKBACK_SESSIONS = 20
-COHORT_MINIMUM_PRIOR_OBSERVATIONS = 30
-LOW_PERCENTILE_MAX = 33.33
-MID_PERCENTILE_MAX = 66.67
 STAGE5_FIVE_MINUTE_HISTORY = HistorySemantics("5 mins", "TRADES", True)
 STAGE5_ONE_MINUTE_HISTORY = HistorySemantics("1 min", "TRADES", True)
 
 
-class PREMoveBand(StrEnum):
-    LOW = "LOW"
-    MID = "MID"
-    HIGH = "HIGH"
-
-
-class CandidateStatus(StrEnum):
+class Stage5Status(StrEnum):
     READY = "READY"
     INELIGIBLE = "INELIGIBLE"
     PRE_CONTEXT_NOT_READY = "PRE_CONTEXT_NOT_READY"
@@ -58,18 +47,17 @@ class PreMoveCalculation:
     aligned_pre_open: float
     raw_pre_move_price: float
     pre_move_m: float
-    passes_pre_move_threshold: bool
 
 
 @dataclass(frozen=True, slots=True)
 class Stage5FeatureResult:
-    """One canonical conId/checkpoint feature outcome before cohort projection."""
+    """One canonical conId/checkpoint feature outcome."""
 
     con_id: int
     symbol: str
     session: date
     t0: datetime
-    status: CandidateStatus
+    status: Stage5Status
     exclusion_reason: str
     p0: float | None = None
     expected_absolute_return_15m: float | None = None
@@ -80,7 +68,6 @@ class Stage5FeatureResult:
     aligned_pre_open: float | None = None
     raw_pre_move_price: float | None = None
     pre_move_m: float | None = None
-    passes_pre_move_threshold: bool | None = None
     calculation_version: str = STAGE5_CALCULATION_VERSION
 
 
@@ -117,7 +104,7 @@ class Stage5IneligibleInstrument:
     symbol: str
     memberships: tuple[Stage5Membership, ...]
     reason: str
-    status: CandidateStatus = CandidateStatus.INELIGIBLE
+    status: Stage5Status = Stage5Status.INELIGIBLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,17 +114,16 @@ class Stage5QualificationResult:
 
 
 @dataclass(frozen=True, slots=True)
-class Stage5CandidateSnapshot:
-    """One deterministic non-trading candidate row projected to a universe."""
+class Stage5FeatureSnapshot:
+    """One deterministic reusable feature row projected to a universe."""
 
     run_ids: tuple[str, ...]
     universe_id: str
-    cohort_id: str | None
     con_id: int | None
     symbol: str
     session: date
     t0: datetime
-    status: CandidateStatus
+    status: Stage5Status
     exclusion_reason: str
     p0: float | None
     expected_absolute_return_15m: float | None
@@ -148,11 +134,6 @@ class Stage5CandidateSnapshot:
     aligned_pre_open: float | None
     raw_pre_move_price: float | None
     pre_move_m: float | None
-    passes_pre_move_threshold: bool | None
-    cohort_size: int | None
-    cohort_pre_move_percentile: float | None
-    pre_move_band: PREMoveBand | None
-    cohort_reason: str
     calculation_version: str
 
 
@@ -197,7 +178,7 @@ class Stage5CurrentDataService:
                 symbol=instrument.symbol,
                 session=session,
                 t0=signal_timestamp,
-                status=CandidateStatus.PRE_MOVE_NOT_READY,
+                status=Stage5Status.PRE_MOVE_NOT_READY,
                 exclusion_reason="PRE_MOVE_NOT_READY: T0 opening print is not yet causal",
             )
 
@@ -208,7 +189,7 @@ class Stage5CurrentDataService:
                 symbol=instrument.symbol,
                 session=session,
                 t0=signal_timestamp,
-                status=CandidateStatus.PRE_CONTEXT_NOT_READY,
+                status=Stage5Status.PRE_CONTEXT_NOT_READY,
                 exclusion_reason=context_result.reason,
             )
 
@@ -237,7 +218,7 @@ class Stage5CurrentDataService:
                 symbol=instrument.symbol,
                 session=session,
                 t0=signal_timestamp,
-                status=CandidateStatus.PRE_MOVE_NOT_READY,
+                status=Stage5Status.PRE_MOVE_NOT_READY,
                 exclusion_reason=f"PRE_MOVE_NOT_READY: {exc}",
                 expected_absolute_return_15m=(context_result.context.expected_absolute_return_15m),
             )
@@ -279,7 +260,7 @@ class Stage5CurrentDataService:
 
 
 class Stage5SnapshotStore:
-    """Small SQLite audit store and causal cohort-history source."""
+    """Small SQLite audit store for reusable Stage 5 feature snapshots."""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -287,8 +268,7 @@ class Stage5SnapshotStore:
         with self._connect() as connection:
             connection.execute(
                 """
-                CREATE TABLE IF NOT EXISTS stage5_candidate_snapshots (
-                    cohort_id TEXT,
+                CREATE TABLE IF NOT EXISTS stage5_feature_snapshots (
                     universe_id TEXT NOT NULL,
                     run_ids_json TEXT NOT NULL,
                     con_id INTEGER NOT NULL,
@@ -306,18 +286,13 @@ class Stage5SnapshotStore:
                     aligned_pre_open REAL,
                     raw_pre_move_price REAL,
                     pre_move_m REAL,
-                    passes_pre_move_threshold INTEGER,
-                    cohort_size INTEGER,
-                    cohort_pre_move_percentile REAL,
-                    pre_move_band TEXT,
-                    cohort_reason TEXT NOT NULL,
                     calculation_version TEXT NOT NULL,
                     PRIMARY KEY (universe_id, t0_utc, con_id, calculation_version)
                 )
                 """
             )
 
-    def save(self, snapshot: Stage5CandidateSnapshot) -> None:
+    def save(self, snapshot: Stage5FeatureSnapshot) -> None:
         """Persist one qualified row; a transient rerun cannot replace a READY row."""
 
         if snapshot.con_id is None:
@@ -326,17 +301,14 @@ class Stage5SnapshotStore:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT OR REPLACE INTO stage5_candidate_snapshots (
-                    cohort_id, universe_id, run_ids_json, con_id, symbol, session, t0_utc,
+                INSERT INTO stage5_feature_snapshots (
+                    universe_id, run_ids_json, con_id, symbol, session, t0_utc,
                     status, exclusion_reason, p0, expected_absolute_return_15m, m_price,
                     raw_open_t0_minus_3m, raw_open_t0, alignment_factor, aligned_pre_open,
-                    raw_pre_move_price, pre_move_m, passes_pre_move_threshold, cohort_size,
-                    cohort_pre_move_percentile, pre_move_band, cohort_reason,
-                    calculation_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    raw_pre_move_price, pre_move_m, calculation_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (universe_id, t0_utc, con_id, calculation_version)
                 DO UPDATE SET
-                    cohort_id = excluded.cohort_id,
                     run_ids_json = excluded.run_ids_json,
                     symbol = excluded.symbol,
                     session = excluded.session,
@@ -350,17 +322,11 @@ class Stage5SnapshotStore:
                     alignment_factor = excluded.alignment_factor,
                     aligned_pre_open = excluded.aligned_pre_open,
                     raw_pre_move_price = excluded.raw_pre_move_price,
-                    pre_move_m = excluded.pre_move_m,
-                    passes_pre_move_threshold = excluded.passes_pre_move_threshold,
-                    cohort_size = excluded.cohort_size,
-                    cohort_pre_move_percentile = excluded.cohort_pre_move_percentile,
-                    pre_move_band = excluded.pre_move_band,
-                    cohort_reason = excluded.cohort_reason
-                WHERE stage5_candidate_snapshots.status != ?
+                    pre_move_m = excluded.pre_move_m
+                WHERE stage5_feature_snapshots.status != ?
                   AND excluded.status = ?
                 """,
                 (
-                    snapshot.cohort_id,
                     snapshot.universe_id,
                     json.dumps(snapshot.run_ids, separators=(",", ":")),
                     snapshot.con_id,
@@ -378,75 +344,66 @@ class Stage5SnapshotStore:
                     snapshot.aligned_pre_open,
                     snapshot.raw_pre_move_price,
                     snapshot.pre_move_m,
-                    (
-                        None
-                        if snapshot.passes_pre_move_threshold is None
-                        else int(snapshot.passes_pre_move_threshold)
-                    ),
-                    snapshot.cohort_size,
-                    snapshot.cohort_pre_move_percentile,
-                    snapshot.pre_move_band.value if snapshot.pre_move_band else None,
-                    snapshot.cohort_reason,
                     snapshot.calculation_version,
-                    CandidateStatus.READY.value,
-                    CandidateStatus.READY.value,
+                    Stage5Status.READY.value,
+                    Stage5Status.READY.value,
                 ),
             )
 
-    def prior_qualifying_pre_move_m(
+    def get(
         self,
-        cohort_id: str,
+        universe_id: str,
+        t0: datetime,
+        con_id: int,
         *,
-        before_session: date,
-    ) -> tuple[float, ...]:
-        """Load qualifying rows from the preceding distinct cohort session dates."""
+        calculation_version: str = STAGE5_CALCULATION_VERSION,
+    ) -> Stage5FeatureSnapshot | None:
+        """Load one persisted generic feature snapshot by its stable audit key."""
 
         with self._connect() as connection:
-            session_rows = connection.execute(
+            row = connection.execute(
                 """
-                SELECT DISTINCT session
-                FROM stage5_candidate_snapshots
-                WHERE cohort_id = ?
-                  AND session < ?
-                  AND status = ?
-                  AND passes_pre_move_threshold = 1
-                  AND pre_move_m IS NOT NULL
+                SELECT *
+                FROM stage5_feature_snapshots
+                WHERE universe_id = ?
+                  AND t0_utc = ?
+                  AND con_id = ?
                   AND calculation_version = ?
-                ORDER BY session DESC
-                LIMIT ?
                 """,
                 (
-                    cohort_id,
-                    before_session.isoformat(),
-                    CandidateStatus.READY.value,
-                    STAGE5_CALCULATION_VERSION,
-                    COHORT_LOOKBACK_SESSIONS,
+                    universe_id,
+                    _aware_utc(t0).isoformat(timespec="microseconds"),
+                    con_id,
+                    calculation_version,
                 ),
-            ).fetchall()
-            sessions = tuple(str(row["session"]) for row in session_rows)
-            if not sessions:
-                return ()
-            placeholders = ", ".join("?" for _ in sessions)
-            rows = connection.execute(
-                f"""
-                SELECT pre_move_m
-                FROM stage5_candidate_snapshots
-                WHERE cohort_id = ?
-                  AND session IN ({placeholders})
-                  AND status = ?
-                  AND passes_pre_move_threshold = 1
-                  AND pre_move_m IS NOT NULL
-                  AND calculation_version = ?
-                ORDER BY session, t0_utc, con_id
-                """,  # noqa: S608 - placeholders are generated, not user supplied
-                (
-                    cohort_id,
-                    *sessions,
-                    CandidateStatus.READY.value,
-                    STAGE5_CALCULATION_VERSION,
-                ),
-            ).fetchall()
-        return tuple(float(row["pre_move_m"]) for row in rows)
+            ).fetchone()
+        if row is None:
+            return None
+        run_ids = json.loads(str(row["run_ids_json"]))
+        if not isinstance(run_ids, list) or not all(isinstance(item, str) for item in run_ids):
+            raise ValueError("invalid run_ids_json in Stage 5 feature snapshot")
+        return Stage5FeatureSnapshot(
+            run_ids=tuple(run_ids),
+            universe_id=str(row["universe_id"]),
+            con_id=int(row["con_id"]),
+            symbol=str(row["symbol"]),
+            session=date.fromisoformat(str(row["session"])),
+            t0=datetime.fromisoformat(str(row["t0_utc"])),
+            status=Stage5Status(str(row["status"])),
+            exclusion_reason=str(row["exclusion_reason"]),
+            p0=_optional_float(row["p0"]),
+            expected_absolute_return_15m=_optional_float(
+                row["expected_absolute_return_15m"]
+            ),
+            m_price=_optional_float(row["m_price"]),
+            raw_open_t0_minus_3m=_optional_float(row["raw_open_t0_minus_3m"]),
+            raw_open_t0=_optional_float(row["raw_open_t0"]),
+            alignment_factor=_optional_float(row["alignment_factor"]),
+            aligned_pre_open=_optional_float(row["aligned_pre_open"]),
+            raw_pre_move_price=_optional_float(row["raw_pre_move_price"]),
+            pre_move_m=_optional_float(row["pre_move_m"]),
+            calculation_version=str(row["calculation_version"]),
+        )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
@@ -493,6 +450,15 @@ async def qualify_active_runs(
     )
     for reference in reference_order:
         memberships = references[reference]
+        if reference.security_type != "STK":
+            ineligible.append(
+                Stage5IneligibleInstrument(
+                    reference.symbol,
+                    tuple(sorted(memberships, key=lambda item: (item.universe_id, item.run_id))),
+                    f"unsupported security type: {reference.security_type}",
+                )
+            )
+            continue
         try:
             instrument = await ibkr.resolve_stock(
                 reference.symbol,
@@ -553,7 +519,7 @@ class Stage5Analyzer:
         *,
         session: date,
         t0: datetime,
-    ) -> tuple[Stage5CandidateSnapshot, ...]:
+    ) -> tuple[Stage5FeatureSnapshot, ...]:
         """Compose active-run qualification, conId analysis, and failure projection."""
 
         qualification = await qualify_active_runs(ibkr, runs)
@@ -571,7 +537,7 @@ class Stage5Analyzer:
         ineligible: Sequence[Stage5IneligibleInstrument] = (),
         session: date,
         t0: datetime,
-    ) -> tuple[Stage5CandidateSnapshot, ...]:
+    ) -> tuple[Stage5FeatureSnapshot, ...]:
         grouped: dict[int, tuple[QualifiedInstrument, set[Stage5Membership]]] = {}
         for request in requests:
             existing = grouped.get(request.instrument.con_id)
@@ -596,11 +562,11 @@ class Stage5Analyzer:
                     symbol=instrument.symbol,
                     session=session,
                     t0=_aware_utc(t0),
-                    status=CandidateStatus.PRE_MOVE_NOT_READY,
+                    status=Stage5Status.PRE_MOVE_NOT_READY,
                     exclusion_reason=f"PRE_MOVE_NOT_READY: {exc}",
                 )
 
-        rows: list[Stage5CandidateSnapshot] = []
+        rows: list[Stage5FeatureSnapshot] = []
         for con_id in sorted(grouped):
             _instrument, memberships = grouped[con_id]
             feature = features[con_id]
@@ -608,15 +574,15 @@ class Stage5Analyzer:
             for membership in memberships:
                 by_universe.setdefault(membership.universe_id, []).append(membership.run_id)
             for universe_id in sorted(by_universe):
-                candidate = _candidate_from_feature(
+                snapshot = _snapshot_from_feature(
                     feature,
                     universe_id=universe_id,
                     run_ids=tuple(sorted(set(by_universe[universe_id]))),
                 )
-                rows.append(candidate)
+                rows.append(snapshot)
                 if self._snapshot_store is not None:
-                    self._snapshot_store.save(candidate)
-        rows.extend(_ineligible_candidates(ineligible, session=session, t0=t0))
+                    self._snapshot_store.save(snapshot)
+        rows.extend(_ineligible_snapshots(ineligible, session=session, t0=t0))
         return tuple(
             sorted(
                 rows,
@@ -669,39 +635,7 @@ def calculate_pre_move(
         aligned_pre_open=aligned_pre_open,
         raw_pre_move_price=raw_pre_move_price,
         pre_move_m=pre_move_m,
-        passes_pre_move_threshold=pre_move_m > PRE_MOVE_M_THRESHOLD,
     )
-
-
-def calculate_cohort_percentile(
-    current_pre_move_m: float,
-    prior_qualifying_pre_move_m: Sequence[float],
-) -> float | None:
-    """Return the frozen causal percentile against prior qualifying observations."""
-
-    if not isfinite(current_pre_move_m) or current_pre_move_m < 0.0:
-        raise ValueError("current PRE_MOVE_M must be finite and nonnegative")
-    history = tuple(prior_qualifying_pre_move_m)
-    if any(not isfinite(value) or value < 0.0 for value in history):
-        raise ValueError("cohort history must contain only finite nonnegative PRE_MOVE_M values")
-    if len(history) < COHORT_MINIMUM_PRIOR_OBSERVATIONS:
-        return None
-    less_than_or_equal_count = sum(value <= current_pre_move_m for value in history)
-    return 100.0 * less_than_or_equal_count / len(history)
-
-
-def classify_pre_move_band(percentile: float | None) -> PREMoveBand | None:
-    """Map an unrounded cohort percentile to the frozen LOW/MID/HIGH boundaries."""
-
-    if percentile is None:
-        return None
-    if not isfinite(percentile) or not 0.0 <= percentile <= 100.0:
-        raise ValueError("cohort percentile must be finite and between 0 and 100")
-    if percentile <= LOW_PERCENTILE_MAX:
-        return PREMoveBand.LOW
-    if percentile <= MID_PERCENTILE_MAX:
-        return PREMoveBand.MID
-    return PREMoveBand.HIGH
 
 
 def calculate_stage5_feature(
@@ -722,7 +656,7 @@ def calculate_stage5_feature(
             symbol=instrument.symbol,
             session=session,
             t0=signal_timestamp,
-            status=CandidateStatus.PRE_CONTEXT_NOT_READY,
+            status=Stage5Status.PRE_CONTEXT_NOT_READY,
             exclusion_reason="PRE_CONTEXT_NOT_READY: expected_absolute_return_15m unavailable",
         )
 
@@ -734,7 +668,7 @@ def calculate_stage5_feature(
             symbol=instrument.symbol,
             session=session,
             t0=signal_timestamp,
-            status=CandidateStatus.PRE_MOVE_NOT_READY,
+            status=Stage5Status.PRE_MOVE_NOT_READY,
             exclusion_reason=f"PRE_MOVE_NOT_READY: {exc}",
             expected_absolute_return_15m=expected_absolute_return_15m,
         )
@@ -744,7 +678,7 @@ def calculate_stage5_feature(
             symbol=instrument.symbol,
             session=session,
             t0=signal_timestamp,
-            status=CandidateStatus.PRE_MOVE_NOT_READY,
+            status=Stage5Status.PRE_MOVE_NOT_READY,
             exclusion_reason="PRE_MOVE_NOT_READY: missing native 5-minute open at T0",
             expected_absolute_return_15m=expected_absolute_return_15m,
         )
@@ -757,7 +691,7 @@ def calculate_stage5_feature(
             symbol=instrument.symbol,
             session=session,
             t0=signal_timestamp,
-            status=CandidateStatus.PRE_MOVE_NOT_READY,
+            status=Stage5Status.PRE_MOVE_NOT_READY,
             exclusion_reason=f"PRE_MOVE_NOT_READY: {exc}",
             p0=p0,
             expected_absolute_return_15m=expected_absolute_return_15m,
@@ -768,7 +702,7 @@ def calculate_stage5_feature(
             symbol=instrument.symbol,
             session=session,
             t0=signal_timestamp,
-            status=CandidateStatus.PRE_MOVE_NOT_READY,
+            status=Stage5Status.PRE_MOVE_NOT_READY,
             exclusion_reason="PRE_MOVE_NOT_READY: missing exact 1-minute open at T0-3m",
             p0=p0,
             expected_absolute_return_15m=expected_absolute_return_15m,
@@ -781,7 +715,7 @@ def calculate_stage5_feature(
             symbol=instrument.symbol,
             session=session,
             t0=signal_timestamp,
-            status=CandidateStatus.PRE_MOVE_NOT_READY,
+            status=Stage5Status.PRE_MOVE_NOT_READY,
             exclusion_reason=f"PRE_MOVE_NOT_READY: {exc}",
             p0=p0,
             expected_absolute_return_15m=expected_absolute_return_15m,
@@ -793,7 +727,7 @@ def calculate_stage5_feature(
             symbol=instrument.symbol,
             session=session,
             t0=signal_timestamp,
-            status=CandidateStatus.PRE_MOVE_NOT_READY,
+            status=Stage5Status.PRE_MOVE_NOT_READY,
             exclusion_reason="PRE_MOVE_NOT_READY: missing exact 1-minute open at T0",
             p0=p0,
             expected_absolute_return_15m=expected_absolute_return_15m,
@@ -812,7 +746,7 @@ def calculate_stage5_feature(
             symbol=instrument.symbol,
             session=session,
             t0=signal_timestamp,
-            status=CandidateStatus.PRE_MOVE_NOT_READY,
+            status=Stage5Status.PRE_MOVE_NOT_READY,
             exclusion_reason=f"PRE_MOVE_NOT_READY: {exc}",
             p0=p0,
             expected_absolute_return_15m=expected_absolute_return_15m,
@@ -824,7 +758,7 @@ def calculate_stage5_feature(
         symbol=instrument.symbol,
         session=session,
         t0=signal_timestamp,
-        status=CandidateStatus.READY,
+        status=Stage5Status.READY,
         exclusion_reason="",
         p0=calculation.p0,
         expected_absolute_return_15m=calculation.expected_absolute_return_15m,
@@ -835,7 +769,6 @@ def calculate_stage5_feature(
         aligned_pre_open=calculation.aligned_pre_open,
         raw_pre_move_price=calculation.raw_pre_move_price,
         pre_move_m=calculation.pre_move_m,
-        passes_pre_move_threshold=calculation.passes_pre_move_threshold,
     )
 
 
@@ -855,16 +788,15 @@ def _exact_open(bars: Sequence[HistoricalBar], timestamp: datetime) -> float | N
     return exact[0] if exact else None
 
 
-def _candidate_from_feature(
+def _snapshot_from_feature(
     feature: Stage5FeatureResult,
     *,
     universe_id: str,
     run_ids: tuple[str, ...],
-) -> Stage5CandidateSnapshot:
-    return Stage5CandidateSnapshot(
+) -> Stage5FeatureSnapshot:
+    return Stage5FeatureSnapshot(
         run_ids=run_ids,
         universe_id=universe_id,
-        cohort_id=None,
         con_id=feature.con_id,
         symbol=feature.symbol,
         session=feature.session,
@@ -880,22 +812,17 @@ def _candidate_from_feature(
         aligned_pre_open=feature.aligned_pre_open,
         raw_pre_move_price=feature.raw_pre_move_price,
         pre_move_m=feature.pre_move_m,
-        passes_pre_move_threshold=feature.passes_pre_move_threshold,
-        cohort_size=None,
-        cohort_pre_move_percentile=None,
-        pre_move_band=None,
-        cohort_reason="CANONICAL_COHORT_MEMBERSHIP_UNRESOLVED",
         calculation_version=feature.calculation_version,
     )
 
 
-def _ineligible_candidates(
+def _ineligible_snapshots(
     items: Sequence[Stage5IneligibleInstrument],
     *,
     session: date,
     t0: datetime,
-) -> tuple[Stage5CandidateSnapshot, ...]:
-    rows: list[Stage5CandidateSnapshot] = []
+) -> tuple[Stage5FeatureSnapshot, ...]:
+    rows: list[Stage5FeatureSnapshot] = []
     signal_timestamp = _aware_utc(t0)
     for item in items:
         by_universe: dict[str, set[str]] = {}
@@ -903,15 +830,14 @@ def _ineligible_candidates(
             by_universe.setdefault(membership.universe_id, set()).add(membership.run_id)
         for universe_id in sorted(by_universe):
             rows.append(
-                Stage5CandidateSnapshot(
+                Stage5FeatureSnapshot(
                     run_ids=tuple(sorted(by_universe[universe_id])),
                     universe_id=universe_id,
-                    cohort_id=None,
                     con_id=None,
                     symbol=item.symbol,
                     session=session,
                     t0=signal_timestamp,
-                    status=CandidateStatus.INELIGIBLE,
+                    status=Stage5Status.INELIGIBLE,
                     exclusion_reason=item.reason,
                     p0=None,
                     expected_absolute_return_15m=None,
@@ -922,11 +848,6 @@ def _ineligible_candidates(
                     aligned_pre_open=None,
                     raw_pre_move_price=None,
                     pre_move_m=None,
-                    passes_pre_move_threshold=None,
-                    cohort_size=None,
-                    cohort_pre_move_percentile=None,
-                    pre_move_band=None,
-                    cohort_reason="CANONICAL_COHORT_MEMBERSHIP_UNRESOLVED",
                     calculation_version=STAGE5_CALCULATION_VERSION,
                 )
             )
@@ -937,3 +858,11 @@ def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("T0 and bar timestamps must be timezone-aware")
     return value.astimezone(UTC)
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    raise ValueError("invalid numeric value in Stage 5 feature snapshot")

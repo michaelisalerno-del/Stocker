@@ -1,7 +1,7 @@
 """Golden arithmetic checks for the recovered research PRE_MOVE_M contract.
 
-These fixtures are research references only. They are not a production data source and do not
-implement the current-session Stage 5 feature pipeline.
+These fixtures are research references only. They are not a production data source. The frozen
+qualification threshold is a Stage 6 strategy reference and is not applied by Stage 5.
 """
 
 from __future__ import annotations
@@ -12,7 +12,9 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from stocker_execution.stage5 import PRE_MOVE_M_THRESHOLD, calculate_pre_move
+from stocker_execution.stage5 import calculate_pre_move
+
+STAGE6_PRE_MOVE_M_THRESHOLD = 0.475764059845861
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,9 +147,18 @@ def test_m_varies_cross_sectionally_with_row_specific_price_and_iv() -> None:
 
 def test_m_varies_for_one_stock_across_dates() -> None:
     oklo = [row for row in ROWS if row.symbol == "OKLO"]
+    results = [
+        calculate_pre_move(
+            expected_absolute_return_15m=expected_absolute_return_15m(row.atm_iv),
+            p0=row.p0,
+            raw_open_t0=row.raw_t0_open,
+            raw_open_t0_minus_3m=row.raw_t_minus_3_open,
+        )
+        for row in oklo
+    ]
 
     assert len(oklo) == 2
-    assert movement_scale(oklo[0]) != movement_scale(oklo[1])
+    assert results[0].m_price != results[1].m_price
 
 
 def test_current_p0_not_prior_close_scales_the_dollar_movement() -> None:
@@ -156,14 +167,14 @@ def test_current_p0_not_prior_close_scales_the_dollar_movement() -> None:
         assert movement_scale(row) != pytest.approx(incorrect_prior_close_scale, abs=1e-12)
 
 
-def test_fixed_value_is_only_applied_after_pre_move_normalisation() -> None:
+def test_stage6_strategy_threshold_is_only_applied_after_pre_move_normalisation() -> None:
     observed_qualification = {
         (row.symbol, row.session): aligned_raw_pre_move(row) / movement_scale(row)
-        > PRE_MOVE_M_THRESHOLD
+        > STAGE6_PRE_MOVE_M_THRESHOLD
         for row in ROWS
     }
 
-    assert PRE_MOVE_M_THRESHOLD not in {row.expected_m for row in ROWS}
+    assert STAGE6_PRE_MOVE_M_THRESHOLD not in {row.expected_m for row in ROWS}
     assert observed_qualification[("HOOD", "2025-02-20")] is True
     assert observed_qualification[("AXON", "2025-02-20")] is False
 
@@ -191,16 +202,26 @@ def test_production_calculator_matches_authoritative_rows(row: ReferenceRow) -> 
     assert result.alignment_factor == row.p0 / row.raw_t0_open
     assert result.aligned_pre_open == row.raw_t_minus_3_open * result.alignment_factor
     assert result.raw_pre_move_price == abs(row.p0 - result.aligned_pre_open)
-    assert result.passes_pre_move_threshold is (row.expected_pre_move_m > PRE_MOVE_M_THRESHOLD)
 
 
-def test_exact_threshold_equality_does_not_qualify() -> None:
+def test_stage6_strategy_threshold_equality_does_not_qualify() -> None:
     result = calculate_pre_move(
         expected_absolute_return_15m=1.0,
         p0=1.0,
         raw_open_t0=1.0,
-        raw_open_t0_minus_3m=1.0 - PRE_MOVE_M_THRESHOLD,
+        raw_open_t0_minus_3m=1.0 - STAGE6_PRE_MOVE_M_THRESHOLD,
     )
 
-    assert result.pre_move_m == PRE_MOVE_M_THRESHOLD
-    assert result.passes_pre_move_threshold is False
+    assert result.pre_move_m == STAGE6_PRE_MOVE_M_THRESHOLD
+    assert not (result.pre_move_m > STAGE6_PRE_MOVE_M_THRESHOLD)
+
+
+def test_generic_stage5_result_does_not_apply_strategy_qualification() -> None:
+    result = calculate_pre_move(
+        expected_absolute_return_15m=0.01,
+        p0=100.0,
+        raw_open_t0=100.0,
+        raw_open_t0_minus_3m=99.0,
+    )
+
+    assert not hasattr(result, "passes_pre_move_threshold")

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from stocker_execution.history import IbkrHistoryCache
 from stocker_execution.ibkr import HistoricalBar, IbkrConnection, QualifiedInstrument
 from stocker_execution.pre_context import ContextStatus
-from stocker_execution.stage5 import CandidateStatus, Stage5CurrentDataService
+from stocker_execution.stage5 import Stage5CurrentDataService, Stage5Status
 
 T0 = datetime(2025, 2, 20, 15, 0, tzinfo=UTC)
 
@@ -82,7 +82,7 @@ def test_current_data_service_fetches_only_ibkr_5m_and_1m_inputs_and_reuses_cach
     first = asyncio.run(service.get_feature(instrument(), session=T0.date(), t0=T0))
     second = asyncio.run(service.get_feature(instrument(), session=T0.date(), t0=T0))
 
-    assert first.status is CandidateStatus.READY
+    assert first.status is Stage5Status.READY
     assert second == first
     assert boundary.calls == ["5 mins", "1 min"]
 
@@ -97,7 +97,7 @@ def test_missing_exact_ibkr_minute_is_not_ready(tmp_path: Path) -> None:
 
     result = asyncio.run(service.get_feature(instrument(), session=T0.date(), t0=T0))
 
-    assert result.status is CandidateStatus.PRE_MOVE_NOT_READY
+    assert result.status is Stage5Status.PRE_MOVE_NOT_READY
     assert "T0-3m" in result.exclusion_reason
 
 
@@ -112,5 +112,5 @@ def test_missing_stage4_context_does_not_request_current_bars(tmp_path: Path) ->
 
     result = asyncio.run(service.get_feature(instrument(), session=T0.date(), t0=T0))
 
-    assert result.status is CandidateStatus.PRE_CONTEXT_NOT_READY
+    assert result.status is Stage5Status.PRE_CONTEXT_NOT_READY
     assert boundary.calls == []

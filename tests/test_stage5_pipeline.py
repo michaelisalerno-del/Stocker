@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,14 +10,13 @@ from stocker_core.runs import Environment, RunConfig, RunInstance, RunState
 from stocker_core.universes import InstrumentReference, UniverseDefinition
 from stocker_execution.ibkr import IbkrConnection, IbkrError, QualifiedInstrument
 from stocker_execution.stage5 import (
-    CandidateStatus,
     Stage5Analyzer,
-    Stage5CandidateSnapshot,
     Stage5FeatureResult,
+    Stage5FeatureSnapshot,
     Stage5Membership,
     Stage5QualifiedRequest,
     Stage5SnapshotStore,
-    calculate_cohort_percentile,
+    Stage5Status,
     qualify_active_runs,
 )
 
@@ -34,7 +33,7 @@ def ready_feature(instrument: QualifiedInstrument) -> Stage5FeatureResult:
         symbol=instrument.symbol,
         session=date(2025, 2, 20),
         t0=T0,
-        status=CandidateStatus.READY,
+        status=Stage5Status.READY,
         exclusion_reason="",
         p0=100.0,
         expected_absolute_return_15m=0.01,
@@ -45,7 +44,6 @@ def ready_feature(instrument: QualifiedInstrument) -> Stage5FeatureResult:
         aligned_pre_open=99.0,
         raw_pre_move_price=1.0,
         pre_move_m=1.0,
-        passes_pre_move_threshold=True,
     )
 
 
@@ -64,7 +62,7 @@ class FeatureService:
                 symbol=instrument.symbol,
                 session=session,
                 t0=t0,
-                status=CandidateStatus.PRE_MOVE_NOT_READY,
+                status=Stage5Status.PRE_MOVE_NOT_READY,
                 exclusion_reason="PRE_MOVE_NOT_READY: missing exact T0 open",
             )
         return replace(ready_feature(instrument), session=session, t0=t0)
@@ -98,11 +96,17 @@ def test_overlapping_universes_reuse_one_canonical_conid_feature_calculation() -
         ("US_ALL", ("RUN_ALL",)),
     ]
     assert {row.con_id for row in rows} == {123}
-    assert all(row.cohort_id is None for row in rows)
-    assert all(row.cohort_pre_move_percentile is None for row in rows)
-    assert all(row.pre_move_band is None for row in rows)
     assert all(
-        row.cohort_reason == "CANONICAL_COHORT_MEMBERSHIP_UNRESOLVED" for row in rows
+        not hasattr(row, field)
+        for row in rows
+        for field in (
+            "passes_pre_move_threshold",
+            "cohort_id",
+            "cohort_size",
+            "cohort_pre_move_percentile",
+            "pre_move_band",
+            "cohort_reason",
+        )
     )
 
 
@@ -129,21 +133,23 @@ def test_one_invalid_instrument_does_not_kill_the_rest_of_the_batch() -> None:
 
     assert [row.symbol for row in rows] == ["HOOD", "BAD"]
     assert [row.status for row in rows] == [
-        CandidateStatus.READY,
-        CandidateStatus.PRE_MOVE_NOT_READY,
+        Stage5Status.READY,
+        Stage5Status.PRE_MOVE_NOT_READY,
     ]
 
 
-def stored_row(session: date, con_id: int, pre_move_m: float) -> Stage5CandidateSnapshot:
-    return Stage5CandidateSnapshot(
+def test_snapshot_store_preserves_ready_feature_across_transient_rerun(
+    tmp_path: Path,
+) -> None:
+    store = Stage5SnapshotStore(tmp_path / "stage5.sqlite3")
+    ready = Stage5FeatureSnapshot(
         run_ids=("RUN",),
         universe_id="US_ALL",
-        cohort_id="US_ALL",
-        con_id=con_id,
-        symbol=f"S{con_id}",
-        session=session,
-        t0=datetime.combine(session, T0.timetz()),
-        status=CandidateStatus.READY,
+        con_id=123,
+        symbol="HOOD",
+        session=date(2025, 2, 20),
+        t0=T0,
+        status=Stage5Status.READY,
         exclusion_reason="",
         p0=100.0,
         expected_absolute_return_15m=0.01,
@@ -152,56 +158,23 @@ def stored_row(session: date, con_id: int, pre_move_m: float) -> Stage5Candidate
         raw_open_t0=100.0,
         alignment_factor=1.0,
         aligned_pre_open=99.0,
-        raw_pre_move_price=pre_move_m,
-        pre_move_m=pre_move_m,
-        passes_pre_move_threshold=True,
-        cohort_size=0,
-        cohort_pre_move_percentile=None,
-        pre_move_band=None,
-        cohort_reason="",
+        raw_pre_move_price=1.0,
+        pre_move_m=1.0,
         calculation_version="STAGE5_PRE_MOVE_V1",
     )
-
-
-def test_store_uses_only_preceding_20_distinct_explicit_cohort_sessions(
-    tmp_path: Path,
-) -> None:
-    store = Stage5SnapshotStore(tmp_path / "stage5.sqlite3")
-    current_session = date(2025, 2, 22)
-    for offset in range(21, 0, -1):
-        prior_session = current_session - timedelta(days=offset)
-        value_pair = (1.0, 1.0) if offset == 21 else (0.5, 2.0)
-        for index, value in enumerate(value_pair):
-            store.save(stored_row(prior_session, offset * 10 + index, value))
-    store.save(stored_row(current_session, 999, 100.0))
-
-    history = store.prior_qualifying_pre_move_m(
-        "US_ALL",
-        before_session=current_session,
-    )
-
-    assert len(history) == 40
-    assert calculate_cohort_percentile(1.0, history) == 50.0
-
-
-def test_transient_not_ready_rerun_cannot_replace_ready_snapshot(tmp_path: Path) -> None:
-    store = Stage5SnapshotStore(tmp_path / "stage5.sqlite3")
-    prior_session = date(2025, 2, 19)
-    ready = stored_row(prior_session, 123, 1.25)
     store.save(ready)
     store.save(
         replace(
             ready,
-            status=CandidateStatus.PRE_MOVE_NOT_READY,
+            status=Stage5Status.PRE_MOVE_NOT_READY,
             exclusion_reason="transient missing T0 open",
+            p0=None,
+            m_price=None,
             pre_move_m=None,
-            passes_pre_move_threshold=None,
         )
     )
 
-    assert store.prior_qualifying_pre_move_m(
-        "US_ALL", before_session=date(2025, 2, 20)
-    ) == (1.25,)
+    assert store.get("US_ALL", T0, 123) == ready
 
 
 class QualificationBoundary(IbkrConnection):
@@ -274,6 +247,39 @@ def test_active_run_qualification_reuses_reference_and_isolates_one_failure() ->
     assert result.ineligible[0].symbol == "BAD"
 
 
+def test_active_run_qualification_rejects_unsupported_security_type_locally() -> None:
+    boundary = QualificationBoundary()
+    universe = UniverseDefinition(
+        universe_id="OPTIONS",
+        name="OPTIONS",
+        members=(
+            InstrumentReference(
+                symbol="HOOD",
+                exchange="SMART",
+                currency="USD",
+                security_type="OPT",
+            ),
+        ),
+    )
+    run = RunInstance(
+        RunConfig(
+            run_id="RUN",
+            universe="OPTIONS",
+            strategy="LATER_STAGE",
+            environment=Environment.PAPER,
+        ),
+        universe,
+        RunState.ACTIVE,
+    )
+
+    result = asyncio.run(qualify_active_runs(boundary, (run,)))
+
+    assert boundary.calls == []
+    assert result.requests == ()
+    assert len(result.ineligible) == 1
+    assert result.ineligible[0].reason == "unsupported security type: OPT"
+
+
 def test_active_run_analysis_emits_ineligible_rows_and_places_no_orders() -> None:
     boundary = QualificationBoundary()
     analyzer = Stage5Analyzer(FeatureService())
@@ -288,7 +294,7 @@ def test_active_run_analysis_emits_ineligible_rows_and_places_no_orders() -> Non
     )
 
     assert [(row.symbol, row.con_id, row.status) for row in rows] == [
-        ("HOOD", 123, CandidateStatus.READY),
-        ("BAD", None, CandidateStatus.INELIGIBLE),
+        ("HOOD", 123, Stage5Status.READY),
+        ("BAD", None, Stage5Status.INELIGIBLE),
     ]
     assert boundary.order_calls == 0

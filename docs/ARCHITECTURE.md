@@ -25,9 +25,9 @@ Local IBKR History Cache
         ↓
 Prior-Session IV Context / Expected-Move Fraction
         ↓
-Current-Session M / PRE_MOVE / Feature / Cohort / Band Calculation
+Current-Session M / PRE_MOVE / Generic Feature Snapshot
         ↓
-Strategy Qualification
+Strategy Cohort / Percentile / Band / Qualification
         ↓
 Candidate Ranking
         ↓
@@ -176,23 +176,22 @@ multi-account session must configure `expected_account` so Stocker does not sele
 
 The Stage 4 pure calculator receives two normalized model IV values and exposes no IBKR objects.
 `PriorSessionContextService` composes the Stage 2 adapter, SQLite stores, calendar validation,
-selector, and pure calculation. Stage 5 will later combine the result with current-session `P0`
-and `T0`:
+selector, and pure calculation. Stage 5 combines the result with current-session `P0` and `T0`:
 
 ```python
 result = await pre_context_service.get_or_create(instrument, session=session)
-# Stage 5 later consumes result.context.expected_absolute_return_15m with P0/T0.
+# Stage 5 consumes result.context.expected_absolute_return_15m with P0/T0.
 ```
 
 The pure arithmetic and selector run without a Gateway. Stage 4 does not define or calculate
-`P0`, `T0`, `M_price`, `PRE_MOVE_M`, the `0.475764059845861` threshold, bands, or ranking; all are
-Stage 5 concerns.
+`P0`, `T0`, `M_price`, or `PRE_MOVE_M`; those current-session measurements are Stage 5 concerns.
+The `0.475764059845861` threshold, cohort bands, qualification, and ranking are strategy concerns
+owned by Stage 6.
 
-### Feature and band layer
+### Current-session feature layer
 
-This layer derives values required by strategies, including PRE_MOVE, percentiles, and LOW/MID/HIGH
-cohorts. Calculate a shared snapshot once where appropriate instead of duplicating it for PAPER,
-LIVE, or multiple strategies.
+This layer produces reusable market measurements for later strategies. Calculate a shared snapshot
+once where appropriate instead of duplicating it for PAPER, LIVE, or multiple strategies.
 
 Stage 5 implements this as a non-trading pipeline in `stocker_execution.stage5`:
 
@@ -205,9 +204,9 @@ Stage 4 expected_absolute_return_15m (demand-loaded)
         ↓
 exact IBKR native 5-minute T0 open plus raw 1-minute T0-3m/T0 opens
         ↓
-M_price → split-aligned raw PRE move → PRE_MOVE_M → strict absolute gate
+M_price → split-aligned raw PRE move → PRE_MOVE_M
         ↓
-deterministic non-trading candidate snapshot
+deterministic reusable feature snapshot
 ```
 
 There is no additional generic cheap price, volume, market-cap, or option-availability screen. The
@@ -234,43 +233,32 @@ alignment_factor = P0 / raw_1m_open[T0]
 aligned_pre_open = raw_1m_open[T0 - 3 minutes] * alignment_factor
 raw_PRE_move_price = abs(P0 - aligned_pre_open)
 PRE_MOVE_M = raw_PRE_move_price / M_price
-passes_PRE_MOVE_threshold = PRE_MOVE_M > 0.475764059845861
 ```
 
-The recovered `COHORT_PRE_MOVE_PERCENTILE` arithmetic uses qualifying observations from all
-symbols in the same named research cohort during the preceding 20 distinct cohort session dates,
-excludes every row from the current session, and requires at least 30 observations. It is
-calculated without rounding as
-`100 * count(prior PRE_MOVE_M <= current PRE_MOVE_M) / prior_count`; equality therefore counts on
-the lower side of a tie. `LOW` is `percentile <= 33.33`, `MID` is
-`33.33 < percentile <= 66.67`, and `HIGH` is `percentile > 66.67`.
+`PRE_MOVE_M` is a generic dimensionless measurement. The frozen strict comparison
+`PRE_MOVE_M > 0.475764059845861` came from accepted Session HARD research and is not a universal
+market-feature rule. Stage 5 neither applies it nor emits a qualification flag.
 
-The accepted executable lineage populated those named cohorts from a strategy-filtered
-`classified_trade_ledger`; it did not define a strategy-independent mapping from active runtime
-universes to canonical cohorts. Stage 5 therefore exposes and golden-tests the exact pure
-percentile and band functions, but does not substitute `universe_id` for the unrecovered canonical
-cohort membership. Runtime candidate rows leave cohort ID, size, percentile, and band unavailable
-with reason `CANONICAL_COHORT_MEMBERSHIP_UNRESOLVED`. Resolving this requires authoritative lineage,
-not importing Session HARD entry filters into Stage 5.
-
-Candidate rows retain run IDs, universe ID, qualified `conId`, exact input values, status/reason,
+Feature rows retain run IDs, universe ID, qualified `conId`, exact input values, status/reason,
 and calculation version in the existing SQLite storage approach. Core feature work is done once per
 `conId + session + T0`; overlapping universe projections reuse it. Rows are emitted deterministically
 by universe, qualified rows before unqualified rows, `conId`, and symbol. Once a READY snapshot is
-stored, a later transient NOT_READY diagnostic cannot replace it. The accepted five-slot ranking compared simultaneous already-
-qualified Session HARD trades under live capacity state, while the relative-rank research rejected
-a production ranking change. It is therefore Stage 6 strategy ownership; Stage 5 does not assign a
-purported canonical rank.
+stored, a later transient NOT_READY diagnostic cannot replace it.
 
 Stage 5 has no strategy entry rules, risk sizing, orders, fills, positions, trade management, or
 dashboard behavior. `stocker stage5-diagnostic` exercises the read-only PAPER data path for a small
-custom universe and labels rank as unavailable.
+custom universe and displays only generic feature fields.
 
 ### Strategy
 
 A strategy evaluates prepared candidates and market state. It does not download history, resolve
 universes, communicate with IBKR, or submit orders. Implement the first strategy concretely; let a
 second real strategy reveal the generalisation actually needed.
+
+Stage 6 will define the first strategy-specific eligible cohort, calculate the recovered causal
+`COHORT_PRE_MOVE_PERCENTILE`, derive LOW/MID/HIGH, apply the frozen strategy threshold, perform
+Session HARD qualification, and rank qualified candidates before producing any signal or order
+intention. None of those operations is Stage 5 runtime infrastructure.
 
 ### Ranking
 
@@ -306,8 +294,8 @@ Avoid elaborate retry and fallback state machines.
 2. Add the IBKR foundation: connection, accounts, contract resolution, and historical/current data.
 3. Add universes and multiple runs.
 4. Add the IBKR history cache and PRE-level calculation.
-5. Add screening, features/bands, and candidate ranking.
-6. Add the first real strategy.
+5. Add reusable current-session feature production.
+6. Add the first real strategy, including its cohort, bands, qualification, and ranking.
 7. Add risk and PAPER execution.
 8. Burn in paper trading and fix primarily real observed failures.
 9. Add LIVE execution alongside PAPER.

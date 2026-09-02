@@ -271,8 +271,8 @@ def stage5_diagnostic(
     )
     from stocker_execution.stage5 import (
         Stage5Analyzer,
-        Stage5CandidateSnapshot,
         Stage5CurrentDataService,
+        Stage5FeatureSnapshot,
         Stage5Membership,
         Stage5QualifiedRequest,
         Stage5SnapshotStore,
@@ -296,7 +296,7 @@ def stage5_diagnostic(
         raise typer.BadParameter(f"Invalid Stage 5 configuration: {exc}") from exc
 
     async def diagnose() -> tuple[
-        tuple[Stage5CandidateSnapshot, ...], tuple[tuple[str, str], ...]
+        tuple[Stage5FeatureSnapshot, ...], tuple[tuple[str, str], ...]
     ]:
         connection = IbkrConnection(broker_config)
         try:
@@ -343,30 +343,35 @@ def stage5_diagnostic(
         console.print(f"Stage 5 diagnostic failed: {exc}")
         raise typer.Exit(code=1) from exc
 
-    table = Table(title="Stocker Stage 5 — non-trading diagnostic")
+    table = Table(title="Stocker Stage 5 — generic feature diagnostic")
     headings = (
-        "symbol", "conId", "status", "T0", "P0", "expected_abs_15m", "M_price",
-        "raw_PRE", "PRE_MOVE_M", "pass", "cohort_pct", "band", "rank",
+        "symbol",
+        "conId",
+        "status",
+        "reason",
+        "T0",
+        "P0",
+        "expected_abs_15m",
+        "M_price",
+        "raw_PRE",
+        "PRE_MOVE_M",
     )
     for heading in headings:
         table.add_column(heading)
     for symbol, reason in failures:
-        table.add_row(symbol, "-", "INELIGIBLE", reason, *("-" for _ in range(9)))
+        table.add_row(symbol, "-", "INELIGIBLE", reason, *("-" for _ in range(6)))
     for row in rows:
         values = (
             row.symbol,
             str(row.con_id),
             row.status.value,
+            row.exclusion_reason or "-",
             row.t0.isoformat(),
             _display_optional(row.p0),
             _display_optional(row.expected_absolute_return_15m),
             _display_optional(row.m_price),
             _display_optional(row.raw_pre_move_price),
             _display_optional(row.pre_move_m),
-            _display_optional(row.passes_pre_move_threshold),
-            _display_optional(row.cohort_pre_move_percentile),
-            row.pre_move_band.value if row.pre_move_band is not None else "-",
-            "N/A",
         )
         table.add_row(*values)
     console.print(table)

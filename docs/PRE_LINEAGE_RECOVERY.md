@@ -4,6 +4,8 @@
 > row-specific M/PRE_MOVE_M equations, P0/T0 timing, threshold placement, and Stage 4/5 ownership.
 > That blocker was resolved by the user-approved IBKR tick-13 Model Option Computation contract;
 > the implemented Stage 4 mapping is documented in `ARCHITECTURE.md` and `M_PRE_MOVE_AUDIT.md`.
+> The final Stage 5 boundary treats PRE_MOVE_M as a generic feature; its frozen threshold,
+> strategy cohort, percentile/bands, qualification, and ranking are Stage 6 strategy ownership.
 
 ## Result
 

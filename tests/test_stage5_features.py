@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 
 from stocker_execution.ibkr import HistoricalBar, QualifiedInstrument
-from stocker_execution.stage5 import CandidateStatus, calculate_stage5_feature
+from stocker_execution.stage5 import Stage5Status, calculate_stage5_feature
 
 T0 = datetime(2025, 2, 20, 15, 0, tzinfo=UTC)
 
@@ -33,7 +33,7 @@ def test_feature_uses_native_five_minute_p0_and_exact_one_minute_endpoints() -> 
         ),
     )
 
-    assert result.status is CandidateStatus.READY
+    assert result.status is Stage5Status.READY
     assert result.p0 == 100.0
     assert result.raw_open_t0_minus_3m == 99.0
     assert result.raw_open_t0 == 100.0
@@ -60,7 +60,7 @@ def test_missing_exact_one_minute_endpoint_is_not_ready_without_interpolation(
         one_minute_bars=one_minute_bars,
     )
 
-    assert result.status is CandidateStatus.PRE_MOVE_NOT_READY
+    assert result.status is Stage5Status.PRE_MOVE_NOT_READY
     assert reason in result.exclusion_reason
     assert result.pre_move_m is None
 
@@ -75,7 +75,7 @@ def test_missing_stage4_context_is_not_ready() -> None:
         one_minute_bars=(bar(T0 - timedelta(minutes=3), 99.0), bar(T0, 100.0)),
     )
 
-    assert result.status is CandidateStatus.PRE_CONTEXT_NOT_READY
+    assert result.status is Stage5Status.PRE_CONTEXT_NOT_READY
     assert result.pre_move_m is None
 
 
@@ -101,7 +101,7 @@ def test_duplicate_required_one_minute_endpoint_is_not_ready(
         one_minute_bars=one_minute_bars,
     )
 
-    assert result.status is CandidateStatus.PRE_MOVE_NOT_READY
+    assert result.status is Stage5Status.PRE_MOVE_NOT_READY
     assert "duplicate" in result.exclusion_reason
     assert result.pre_move_m is None
 

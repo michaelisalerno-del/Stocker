@@ -160,12 +160,12 @@ artefact is unavailable and is not a blocker. Runtime inputs remain IBKR-only.
 
 ### IBKR boundary
 
-`stocker_execution.ibkr.IbkrConnection` is the Stage 2 read-only boundary for connection/session
+`stocker_execution.ibkr.IbkrConnection` is the Stage 2 broker boundary for connection/session
 identity, stock and option qualification, option definitions/model snapshots, historical bars,
-and current stock snapshots. Each instance owns its own
+current stock snapshots, and Stage 7 PAPER execution. Each instance owns its own
 client state, so PAPER and LIVE can later use separate Gateway sessions without a global singleton.
-The adapter exposes small Stocker models and no order methods; strategies and calculations must not
-import IBKR objects.
+The adapter is read-only unless PAPER execution is explicitly enabled. It exposes small Stocker
+models; strategies and calculations do not import IBKR objects.
 
 PAPER and LIVE host, port, client ID, and environment are separate explicit configuration blocks.
 The Stage 1 run environment selects one block. Connection verification uses the managed account ID,
@@ -369,8 +369,15 @@ entry mapping is a market SELL parent. The Stage 6 `entry_reference` remains the
 geometry reference. For the frozen SHORT strategy, Stage 7 calculates `stop = entry + 0.50M` and
 `target = entry - 1.00M`, then attaches a BUY stop and BUY limit target. The parent and target use
 `transmit=False`; the final attached stop uses `transmit=True`, following IBKR bracket transmission.
-For SHORT protection, the stop rounds down and target rounds up to IBKR's qualified-contract minimum
-tick. Both move toward entry, so tick normalization cannot increase requested per-share risk.
+The market parent is `DAY`; both protective children are `GTC`, so a filled entry cannot outlive its
+protection at the session boundary. For SHORT protection, the stop rounds down and target rounds up
+to IBKR's qualified-contract minimum tick. Both move toward entry, so tick normalization cannot
+increase requested per-share risk.
+
+The execution service accepts normal batches of selected `ENTRY_TRIGGERED` Stage 6 intentions and
+contains failures to their individual candidate. It rejects an intention whose trigger timestamp is
+missing, internally inconsistent, in the future, or more than two minutes old; this is a transmission
+freshness guard and does not redo strategy qualification.
 
 `RunConfig.environment` remains independent of strategy and universe. The Stage 7 router state is:
 
@@ -392,15 +399,18 @@ completed order status, executions, and positions instead of leaking `ib_async` 
 
 `ExecutionLedger` uses SQLite. An atomic unique `signal_id` reservation occurs before broker
 transmission, so repeated evaluation, replay, restart, or concurrent handling cannot submit the same
-Stage 6 opportunity twice. It stores run/strategy/signal/plan lineage, environment/account identity,
+Stage 6 opportunity twice. It stores every execution attempt—including pre-plan safety rejections—
+with run/environment/expected/actual account identity. Plans retain run/strategy/signal lineage,
 intended quantity and geometry, all three IBKR order IDs, meaningful lifecycle state, deduplicated
 IBKR execution IDs, aggregate entry/exit fills, timestamps, positions, and realized P&L.
 
 Only fills create local exposure. Partial executions aggregate by quantity-weighted price and a
 repeated IBKR execution callback is ignored. IBKR positions remain authoritative. At connect or
 reconnect, new execution stays blocked until broker statuses, fills, open orders, and positions agree
-with local records. Unknown orders, fills, positions, missing broker exposure, or unresolved local
-plans return `EXECUTION_RECONCILIATION_REQUIRED`; Stage 7 never auto-flattens or cancels everything.
+with local records. A reserved plan can recover its broker IDs after a crash from the deterministic
+IBKR `orderRef`. Unknown orders, fills, positions, missing broker exposure, a filled position without
+both protective children, or unresolved local plans return `EXECUTION_RECONCILIATION_REQUIRED`;
+Stage 7 never auto-flattens or cancels everything.
 
 The explicit `stocker stage7-paper-diagnostic` command requires caller-specified signal, instrument,
 entry reference, M price, risk fraction, an expected PAPER account, and

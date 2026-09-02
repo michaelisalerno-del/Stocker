@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -11,8 +12,10 @@ from stocker_execution.execution_models import (
     BrokerOrderIds,
     BrokerOrderStatus,
     BrokerPosition,
+    EntryOrderType,
     OrderAction,
     OrderLifecycle,
+    OrderPlan,
     OrderRole,
 )
 from stocker_execution.ibkr import QualifiedInstrument
@@ -32,6 +35,7 @@ class FakeExecutionBroker:
         fills: tuple[BrokerFill, ...] = (),
         statuses: tuple[BrokerOrderStatus, ...] = (),
         reject: bool = False,
+        minimum_tick_error: Exception | None = None,
     ) -> None:
         self.environment = environment
         self.account = account
@@ -42,6 +46,7 @@ class FakeExecutionBroker:
         self._fills = fills
         self._statuses = statuses
         self.reject = reject
+        self.minimum_tick_error = minimum_tick_error
         self.submitted = []
         self.account_reads = 0
 
@@ -57,6 +62,8 @@ class FakeExecutionBroker:
         )
 
     async def minimum_tick(self, instrument: QualifiedInstrument) -> float:
+        if self.minimum_tick_error is not None:
+            raise self.minimum_tick_error
         return 0.01
 
     async def submit_protected_order(self, plan: object, instrument: object) -> BrokerOrderIds:
@@ -182,6 +189,10 @@ def test_wrong_account_blocks_submission(tmp_path: Path) -> None:
     result = asyncio.run(service.execute(_intent(), _instrument()))
 
     assert result.code is ExecutionResultCode.ACCOUNT_OR_ENVIRONMENT_MISMATCH
+    assert result.run_id == "paper-run"
+    assert result.environment is Environment.PAPER
+    assert result.expected_account == "DU123456"
+    assert result.actual_account == "DU999999"
     assert broker.submitted == []
 
 
@@ -206,6 +217,31 @@ def test_new_orders_require_reconciliation_and_reconnect_invalidates_it(tmp_path
     broker.connection_epoch += 1
     after_reconnect = asyncio.run(service.execute(_intent(), _instrument()))
     assert after_reconnect.code is ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED
+    assert broker.submitted == []
+
+
+def test_stale_stage6_intent_is_rejected_before_planning(tmp_path: Path) -> None:
+    broker = FakeExecutionBroker()
+    service = _service(tmp_path / "ledger.sqlite3", broker)
+    assert asyncio.run(service.reconcile()).ok
+    stale_time = datetime(2026, 9, 2, 14, 20, tzinfo=UTC)
+    stale = replace(_intent(), entry_timestamp=stale_time, signal_timestamp=stale_time)
+
+    result = asyncio.run(service.execute(stale, _instrument()))
+
+    assert result.code is ExecutionResultCode.STALE_ORDER_INTENT
+    assert broker.submitted == []
+
+
+def test_minimum_tick_failure_rejects_only_that_candidate(tmp_path: Path) -> None:
+    broker = FakeExecutionBroker(minimum_tick_error=RuntimeError("no contract details"))
+    service = _service(tmp_path / "ledger.sqlite3", broker)
+    assert asyncio.run(service.reconcile()).ok
+
+    result = asyncio.run(service.execute(_intent(), _instrument()))
+
+    assert result.code is ExecutionResultCode.ORDER_PLAN_UNAVAILABLE
+    assert "no contract details" in result.detail
     assert broker.submitted == []
 
 
@@ -256,6 +292,56 @@ def test_restart_replay_reconciles_known_open_orders_then_blocks_duplicate(tmp_p
     result = asyncio.run(restarted.execute(_intent(), _instrument()))
     assert result.code is ExecutionResultCode.DUPLICATE_ORDER_BLOCKED
     assert restarted_broker.submitted == []
+
+
+def test_reconnect_recovers_pending_bracket_from_deterministic_order_reference(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    plan = OrderPlan(
+        "recover-plan",
+        "paper-run",
+        "recover-signal",
+        "strategy",
+        "v1",
+        265598,
+        "AAPL",
+        OrderAction.SELL,
+        100,
+        EntryOrderType.MARKET,
+        100.0,
+        101.0,
+        98.0,
+        Environment.PAPER,
+        datetime(2026, 9, 2, 14, 31, tzinfo=UTC),
+    )
+    ledger = ExecutionLedger(path)
+    assert ledger.reserve(plan, expected_account="DU123456")
+    ledger.mark_submitting(plan.order_plan_id)
+    orders = tuple(
+        BrokerOpenOrder(
+            order_id,
+            plan.order_plan_id,
+            "DU123456",
+            Environment.PAPER,
+            265598,
+            "AAPL",
+            role,
+            OrderLifecycle.SUBMITTED,
+        )
+        for order_id, role in (
+            (201, OrderRole.ENTRY),
+            (202, OrderRole.STOP),
+            (203, OrderRole.TARGET),
+        )
+    )
+
+    reconciliation = asyncio.run(
+        _service(path, FakeExecutionBroker(open_orders=orders)).reconcile()
+    )
+
+    assert reconciliation.ok is True
+    assert ledger.known_order_ids(Environment.PAPER, "DU123456") == {201, 202, 203}
 
 
 def test_broker_rejection_is_recorded_without_position(tmp_path: Path) -> None:
@@ -341,6 +427,39 @@ def test_known_broker_and_local_position_reconciles(tmp_path: Path) -> None:
     assert asyncio.run(_service(path, broker).reconcile()).ok is True
 
 
+def test_known_position_without_both_protective_children_blocks(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    broker = FakeExecutionBroker()
+    service = _service(path, broker)
+    assert asyncio.run(service.reconcile()).ok
+    assert (
+        asyncio.run(service.execute(_intent(), _instrument())).code is ExecutionResultCode.SUBMITTED
+    )
+    ledger = ExecutionLedger(path)
+    ledger.record_fill(
+        BrokerFill(
+            "entry",
+            101,
+            "DU123456",
+            Environment.PAPER,
+            265598,
+            "AAPL",
+            OrderAction.SELL,
+            100,
+            100.0,
+            datetime(2026, 9, 2, 14, 32, tzinfo=UTC),
+            0.0,
+        )
+    )
+    broker._positions = (BrokerPosition("DU123456", 265598, "AAPL", -100, 100.0),)
+    broker._open_orders = ()
+
+    reconciliation = asyncio.run(_service(path, broker).reconcile())
+
+    assert reconciliation.ok is False
+    assert "missing protective" in reconciliation.detail
+
+
 def test_unexpected_broker_position_blocks_new_orders(tmp_path: Path) -> None:
     broker = FakeExecutionBroker(positions=(BrokerPosition("DU123456", 999, "MSFT", 10, 250.0),))
     service = _service(tmp_path / "ledger.sqlite3", broker)
@@ -370,3 +489,47 @@ def test_unexpected_open_broker_order_blocks_new_orders(tmp_path: Path) -> None:
 
     assert reconciliation.ok is False
     assert "unexpected broker open order" in reconciliation.detail
+
+
+def test_unrelated_terminal_order_history_does_not_block_reconciliation(tmp_path: Path) -> None:
+    unrelated = BrokerOrderStatus(
+        999,
+        "manual-old-order",
+        "DU123456",
+        Environment.PAPER,
+        OrderLifecycle.CANCELLED,
+        0.0,
+        0.0,
+        "",
+    )
+
+    reconciliation = asyncio.run(
+        _service(
+            tmp_path / "ledger.sqlite3", FakeExecutionBroker(statuses=(unrelated,))
+        ).reconcile()
+    )
+
+    assert reconciliation.ok is True
+
+
+def test_refresh_rereconciles_new_unknown_exposure(tmp_path: Path) -> None:
+    broker = FakeExecutionBroker()
+    service = _service(tmp_path / "ledger.sqlite3", broker)
+    assert asyncio.run(service.reconcile()).ok
+    broker._positions = (BrokerPosition("DU123456", 999, "MSFT", 10, 250.0),)
+
+    refreshed = asyncio.run(service.refresh_broker_state())
+
+    assert refreshed.ok is False
+    assert "unexpected broker position" in refreshed.detail
+
+
+def test_normal_runtime_batch_consumes_selected_stage6_intents(tmp_path: Path) -> None:
+    broker = FakeExecutionBroker()
+    service = _service(tmp_path / "ledger.sqlite3", broker)
+    assert asyncio.run(service.reconcile()).ok
+
+    results = asyncio.run(service.execute_ready_intents((_intent(),), {265598: _instrument()}))
+
+    assert [result.code for result in results] == [ExecutionResultCode.SUBMITTED]
+    assert len(broker.submitted) == 1

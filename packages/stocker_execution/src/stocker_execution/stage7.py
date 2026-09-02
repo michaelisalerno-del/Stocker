@@ -1,9 +1,9 @@
 """Stage 7 risk, planning, and PAPER execution orchestration."""
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from enum import StrEnum
 from math import floor, isfinite
@@ -20,6 +20,7 @@ from stocker_execution.execution_models import (
     BrokerPosition,
     EntryOrderType,
     OrderAction,
+    OrderLifecycle,
     OrderPlan,
 )
 from stocker_execution.ibkr import QualifiedInstrument
@@ -43,6 +44,8 @@ class ExecutionResultCode(StrEnum):
     EXECUTION_RECONCILIATION_REQUIRED = "EXECUTION_RECONCILIATION_REQUIRED"
     DUPLICATE_ORDER_BLOCKED = "DUPLICATE_ORDER_BLOCKED"
     BROKER_REJECTED = "BROKER_REJECTED"
+    STALE_ORDER_INTENT = "STALE_ORDER_INTENT"
+    ORDER_PLAN_UNAVAILABLE = "ORDER_PLAN_UNAVAILABLE"
     INVALID_RISK_CONFIG = "INVALID_RISK_CONFIG"
     INVALID_STOP_DISTANCE = "INVALID_STOP_DISTANCE"
     ZERO_QUANTITY = "ZERO_QUANTITY"
@@ -67,6 +70,10 @@ class Stage7RiskDecision:
 class ExecutionAttempt:
     code: ExecutionResultCode
     detail: str
+    run_id: str
+    environment: Environment
+    expected_account: str
+    actual_account: str | None
     order_plan: OrderPlan | None = None
     order_ids: BrokerOrderIds | None = None
 
@@ -221,28 +228,41 @@ class Stage7ExecutionService:
         if mismatch is not None:
             return self._reconciliation_failure(mismatch)
 
-        open_orders = await self._broker.read_open_orders()
-        broker_statuses = await self._broker.read_order_statuses()
-        broker_fills = await self._broker.read_fills()
-        broker_positions = await self._broker.read_positions()
-        known_ids = self._ledger.known_order_ids(self._run.environment, self._expected_account)
+        try:
+            open_orders = await self._broker.read_open_orders()
+            broker_statuses = await self._broker.read_order_statuses()
+            broker_fills = await self._broker.read_fills()
+            broker_positions = await self._broker.read_positions()
+        except Exception as exc:
+            return self._reconciliation_failure(f"broker state unavailable: {exc}")
+
+        known_ids = set(self._ledger.known_order_ids(self._run.environment, self._expected_account))
         problems: list[str] = []
+        for order in open_orders:
+            if (
+                order.environment is not self._run.environment
+                or order.account != self._expected_account
+            ):
+                problems.append(f"unexpected broker open order {order.order_id}")
+            elif order.order_id not in known_ids:
+                if self._ledger.recover_open_order(order):
+                    known_ids.add(order.order_id)
+                else:
+                    problems.append(f"unexpected broker open order {order.order_id}")
         for status in broker_statuses:
-            if not self._ledger.record_order_status(status):
+            recorded = self._ledger.record_order_status(status)
+            if not recorded and status.status not in {
+                OrderLifecycle.FILLED,
+                OrderLifecycle.CANCELLED,
+                OrderLifecycle.REJECTED,
+                OrderLifecycle.CLOSED,
+            }:
                 problems.append(f"unexpected broker order status {status.order_id}")
         for fill in broker_fills:
             if self._ledger.order_role(fill.environment, fill.account, fill.order_id) is None:
                 problems.append(f"unexpected broker fill {fill.execution_id}")
                 continue
             self._ledger.record_fill(fill)
-        for order in open_orders:
-            if (
-                order.environment is not self._run.environment
-                or order.account != self._expected_account
-                or order.order_id not in known_ids
-            ):
-                problems.append(f"unexpected broker open order {order.order_id}")
-
         local_positions = self._ledger.positions(self._run.environment, self._expected_account)
         local_by_con_id = {position.con_id: position.quantity for position in local_positions}
         broker_by_con_id = {
@@ -272,6 +292,14 @@ class Stage7ExecutionService:
             local_quantity = local_by_con_id.get(record.con_id, 0.0)
             if not ids:
                 problems.append(f"local plan {record.order_plan_id} has no broker identity")
+            elif local_quantity != 0.0 and not {
+                record.stop_order_id,
+                record.target_order_id,
+            }.issubset(open_ids):
+                problems.append(
+                    f"position {record.con_id} missing protective stop/target "
+                    f"for {record.order_plan_id}"
+                )
             elif not ids.intersection(open_ids) and local_quantity == 0.0:
                 problems.append(f"local order state is unresolved for {record.order_plan_id}")
 
@@ -294,25 +322,49 @@ class Stage7ExecutionService:
         """Submit one selected intent, returning a candidate-local outcome."""
 
         if self._run.environment is Environment.LIVE:
-            return _attempt(ExecutionResultCode.LIVE_EXECUTION_DISABLED)
+            return self._outcome(
+                order_intent.signal_id, ExecutionResultCode.LIVE_EXECUTION_DISABLED
+            )
         if not self._broker.is_connected:
             self._reconciled_epoch = None
-            return _attempt(ExecutionResultCode.BROKER_DISCONNECTED)
+            return self._outcome(order_intent.signal_id, ExecutionResultCode.BROKER_DISCONNECTED)
         account_state = await self._broker.account_state()
         mismatch = self._account_mismatch(account_state)
         if mismatch is not None:
-            return _attempt(ExecutionResultCode.ACCOUNT_OR_ENVIRONMENT_MISMATCH, mismatch)
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.ACCOUNT_OR_ENVIRONMENT_MISMATCH,
+                mismatch,
+                actual_account=account_state.account,
+            )
         if self._ledger.has_signal(order_intent.signal_id):
-            return _attempt(ExecutionResultCode.DUPLICATE_ORDER_BLOCKED)
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.DUPLICATE_ORDER_BLOCKED,
+                actual_account=account_state.account,
+            )
         if self._reconciled_epoch != self._broker.connection_epoch:
-            return _attempt(ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED)
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED,
+                actual_account=account_state.account,
+            )
         if (
             order_intent.run_id != self._run.run_id
             or instrument.con_id != order_intent.underlying_con_id
         ):
-            return _attempt(
+            return self._outcome(
+                order_intent.signal_id,
                 ExecutionResultCode.ACCOUNT_OR_ENVIRONMENT_MISMATCH,
                 "run or qualified instrument does not match the Stage 6 intent",
+                actual_account=account_state.account,
+            )
+        if not _is_fresh_order_intent(order_intent, self._clock()):
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.STALE_ORDER_INTENT,
+                "Stage 6 order intent is missing a valid recent trigger timestamp",
+                actual_account=account_state.account,
             )
 
         risk = Stage7RiskEngine().evaluate(
@@ -321,8 +373,21 @@ class Stage7ExecutionService:
             risk_config=self._run.risk,
         )
         if not risk.approved:
-            return _attempt(ExecutionResultCode(risk.reason), risk.reason)
-        minimum_tick = await self._broker.minimum_tick(instrument)
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode(risk.reason),
+                risk.reason,
+                actual_account=account_state.account,
+            )
+        try:
+            minimum_tick = await self._broker.minimum_tick(instrument)
+        except Exception as exc:
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.ORDER_PLAN_UNAVAILABLE,
+                str(exc).strip() or "instrument minimum tick is unavailable",
+                actual_account=account_state.account,
+            )
         try:
             plan = build_order_plan(
                 order_intent=order_intent,
@@ -333,52 +398,86 @@ class Stage7ExecutionService:
                 diagnostic=diagnostic,
             )
         except ValueError as exc:
-            return _attempt(ExecutionResultCode.INVALID_STOP_DISTANCE, str(exc))
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.INVALID_STOP_DISTANCE,
+                str(exc),
+                actual_account=account_state.account,
+            )
         if not self._ledger.reserve(plan, expected_account=self._expected_account):
-            return _attempt(ExecutionResultCode.DUPLICATE_ORDER_BLOCKED)
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.DUPLICATE_ORDER_BLOCKED,
+                actual_account=account_state.account,
+            )
         self._ledger.mark_submitting(plan.order_plan_id)
         try:
             order_ids = await self._broker.submit_protected_order(plan, instrument)
+        except Exception as exc:
+            reason = str(exc).strip() or "broker rejected protected order"
+            self._ledger.record_rejection(plan.order_plan_id, reason)
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.BROKER_REJECTED,
+                reason,
+                actual_account=account_state.account,
+                order_plan=plan,
+            )
+        try:
             self._ledger.record_submission(
                 plan.order_plan_id, order_ids, actual_account=account_state.account
             )
         except Exception as exc:
-            reason = str(exc).strip() or "broker rejected protected order"
-            self._ledger.record_rejection(plan.order_plan_id, reason)
-            return ExecutionAttempt(
-                code=ExecutionResultCode.BROKER_REJECTED,
-                detail=reason,
+            self._reconciled_epoch = None
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED,
+                f"broker order submitted but ledger persistence failed: {exc}",
+                actual_account=account_state.account,
                 order_plan=plan,
+                order_ids=order_ids,
             )
-        return ExecutionAttempt(
-            code=ExecutionResultCode.SUBMITTED,
-            detail="protected PAPER order submitted",
+        return self._outcome(
+            order_intent.signal_id,
+            ExecutionResultCode.SUBMITTED,
+            "protected PAPER order submitted",
+            actual_account=account_state.account,
             order_plan=plan,
             order_ids=order_ids,
         )
 
-    async def refresh_broker_state(self) -> ReconciliationResult:
-        """Apply normalized broker status/fill updates after submission."""
+    async def execute_ready_intents(
+        self,
+        order_intents: Sequence[StrategySignal],
+        instruments: Mapping[int, QualifiedInstrument],
+    ) -> tuple[ExecutionAttempt, ...]:
+        """Execute selected Stage 6 entry intents while isolating candidate failures."""
 
-        if not self._broker.is_connected:
-            return self._reconciliation_failure("broker is disconnected")
-        unknown: list[str] = []
-        for status in await self._broker.read_order_statuses():
-            if not self._ledger.record_order_status(status):
-                unknown.append(f"unknown broker order status {status.order_id}")
-        for fill in await self._broker.read_fills():
-            role = self._ledger.order_role(fill.environment, fill.account, fill.order_id)
-            if role is None:
-                unknown.append(f"unknown broker fill {fill.execution_id}")
-            else:
-                self._ledger.record_fill(fill)
-        if unknown:
-            return self._reconciliation_failure("; ".join(unknown))
-        return ReconciliationResult(
-            ok=True,
-            code=ExecutionResultCode.SUBMITTED,
-            detail="broker status and fills applied",
-        )
+        results: list[ExecutionAttempt] = []
+        for intent in order_intents:
+            if intent.status is not SignalStatus.ENTRY_TRIGGERED or not intent.selected:
+                continue
+            instrument = (
+                instruments.get(intent.underlying_con_id)
+                if intent.underlying_con_id is not None
+                else None
+            )
+            if instrument is None:
+                results.append(
+                    self._outcome(
+                        intent.signal_id,
+                        ExecutionResultCode.ORDER_PLAN_UNAVAILABLE,
+                        "qualified instrument is unavailable",
+                    )
+                )
+                continue
+            results.append(await self.execute(intent, instrument))
+        return tuple(results)
+
+    async def refresh_broker_state(self) -> ReconciliationResult:
+        """Re-read and reconcile all broker execution state."""
+
+        return await self.reconcile()
 
     def record_fill(self, fill: BrokerFill) -> bool:
         """Apply a normalized callback once; unknown fills force reconciliation."""
@@ -413,6 +512,39 @@ class Stage7ExecutionService:
             code=ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED,
             detail=detail,
         )
+
+    def _outcome(
+        self,
+        signal_id: str,
+        code: ExecutionResultCode,
+        detail: str | None = None,
+        *,
+        actual_account: str | None = None,
+        order_plan: OrderPlan | None = None,
+        order_ids: BrokerOrderIds | None = None,
+    ) -> ExecutionAttempt:
+        resolved_detail = detail or code.value
+        attempt = ExecutionAttempt(
+            code=code,
+            detail=resolved_detail,
+            run_id=self._run.run_id,
+            environment=self._run.environment,
+            expected_account=self._expected_account,
+            actual_account=actual_account,
+            order_plan=order_plan,
+            order_ids=order_ids,
+        )
+        self._ledger.record_attempt(
+            run_id=attempt.run_id,
+            signal_id=signal_id,
+            environment=attempt.environment,
+            expected_account=attempt.expected_account,
+            actual_account=attempt.actual_account,
+            result_code=attempt.code.value,
+            detail=attempt.detail,
+            attempted_at=self._clock(),
+        )
+        return attempt
 
 
 def build_order_plan(
@@ -479,5 +611,15 @@ def _rejected(reason: RiskRejection) -> Stage7RiskDecision:
     return Stage7RiskDecision(approved=False, reason=reason.value)
 
 
-def _attempt(code: ExecutionResultCode, detail: str | None = None) -> ExecutionAttempt:
-    return ExecutionAttempt(code=code, detail=detail or code.value)
+def _is_fresh_order_intent(intent: StrategySignal, now: datetime) -> bool:
+    if now.tzinfo is None or now.utcoffset() is None:
+        return False
+    entry_at = intent.entry_timestamp
+    signal_at = intent.signal_timestamp
+    if entry_at is None or signal_at is None:
+        return False
+    if entry_at.tzinfo is None or signal_at.tzinfo is None:
+        return False
+    if entry_at > signal_at or signal_at > now:
+        return False
+    return now - signal_at <= timedelta(minutes=2)

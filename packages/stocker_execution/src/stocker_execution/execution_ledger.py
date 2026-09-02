@@ -10,6 +10,7 @@ from pathlib import Path
 from stocker_core.runs import Environment
 from stocker_execution.execution_models import (
     BrokerFill,
+    BrokerOpenOrder,
     BrokerOrderIds,
     BrokerOrderStatus,
     BrokerPosition,
@@ -118,6 +119,17 @@ class ExecutionLedger:
                     price REAL NOT NULL,
                     executed_at TEXT NOT NULL,
                     commission REAL
+                );
+                CREATE TABLE IF NOT EXISTS execution_attempts (
+                    attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    signal_id TEXT NOT NULL,
+                    environment TEXT NOT NULL,
+                    expected_account TEXT NOT NULL,
+                    actual_account TEXT,
+                    result_code TEXT NOT NULL,
+                    detail TEXT NOT NULL,
+                    attempted_at TEXT NOT NULL
                 );
                 """
             )
@@ -230,6 +242,103 @@ class ExecutionLedger:
                 """,
                 (OrderLifecycle.REJECTED.value, reason, order_plan_id),
             )
+
+    def record_attempt(
+        self,
+        *,
+        run_id: str,
+        signal_id: str,
+        environment: Environment,
+        expected_account: str,
+        actual_account: str | None,
+        result_code: str,
+        detail: str,
+        attempted_at: datetime,
+    ) -> None:
+        """Persist every execution outcome, including pre-plan safety blocks."""
+
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO execution_attempts (
+                    run_id, signal_id, environment, expected_account, actual_account,
+                    result_code, detail, attempted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    signal_id,
+                    environment.value,
+                    expected_account,
+                    actual_account,
+                    result_code,
+                    detail,
+                    attempted_at.isoformat(timespec="microseconds"),
+                ),
+            )
+
+    def recover_open_order(self, order: BrokerOpenOrder) -> bool:
+        """Bind an open IBKR order to its reserved deterministic order reference."""
+
+        with self._connect() as connection:
+            plan = connection.execute(
+                """
+                SELECT environment, expected_account, status
+                FROM execution_plans WHERE order_plan_id = ?
+                """,
+                (order.order_plan_id,),
+            ).fetchone()
+            if (
+                plan is None
+                or str(plan["environment"]) != order.environment.value
+                or str(plan["expected_account"]) != order.account
+                or str(plan["status"])
+                in {
+                    OrderLifecycle.CLOSED.value,
+                    OrderLifecycle.CANCELLED.value,
+                    OrderLifecycle.REJECTED.value,
+                }
+            ):
+                return False
+            column = {
+                OrderRole.ENTRY: "parent_order_id",
+                OrderRole.STOP: "stop_order_id",
+                OrderRole.TARGET: "target_order_id",
+            }[order.role]
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO execution_broker_orders (
+                        environment, account, order_id, order_plan_id, role, status
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        order.environment.value,
+                        order.account,
+                        order.order_id,
+                        order.order_plan_id,
+                        order.role.value,
+                        order.status.value,
+                    ),
+                )
+                connection.execute(
+                    f"""
+                    UPDATE execution_plans
+                    SET {column} = ?, actual_account = ?, status = ?,
+                        submitted_at = COALESCE(submitted_at, ?)
+                    WHERE order_plan_id = ?
+                    """,
+                    (
+                        order.order_id,
+                        order.account,
+                        OrderLifecycle.SUBMITTED.value,
+                        datetime.now().astimezone().isoformat(timespec="microseconds"),
+                        order.order_plan_id,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                return False
+        return True
 
     def order_role(self, environment: Environment, account: str, order_id: int) -> OrderRole | None:
         with self._connect() as connection:

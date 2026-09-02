@@ -29,7 +29,11 @@ desktop responsibilities, not live execution responsibilities.
 
 The executor compares normalized IBKR open/completed orders, executions, and positions with its
 SQLite execution ledger at startup and after every reconnect. Unknown or unresolved exposure blocks
-new orders with `EXECUTION_RECONCILIATION_REQUIRED`; it is never automatically flattened.
+new orders with `EXECUTION_RECONCILIATION_REQUIRED`; it is never automatically flattened. Open
+orders can be recovered after a crash only when their deterministic IBKR `orderRef` matches a
+reserved local plan. A filled position is not reconciled unless both protective children remain
+open. Every candidate attempt, including pre-plan rejection, preserves its run, environment, and
+expected/actual account identity in SQLite.
 
 ## Sessions
 

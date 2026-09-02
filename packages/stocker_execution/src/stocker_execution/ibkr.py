@@ -330,7 +330,9 @@ class IbkrConnection:
                 self.config.port,
                 clientId=self.config.client_id,
                 timeout=self.config.connect_timeout_seconds,
-                readonly=not self._execution_enabled,
+                readonly=(
+                    not self._execution_enabled or self.environment is Environment.LIVE
+                ),
                 account=self.config.expected_account or "",
                 raiseSyncErrors=True,
                 fetchFields=_no_startup_fetches(),
@@ -428,8 +430,10 @@ class IbkrConnection:
         parent_id = int(self._client.client.getReqId())
         target_id = int(self._client.client.getReqId())
         stop_id = int(self._client.client.getReqId())
-        common = {"orderRef": plan.order_plan_id, "account": self.account, "tif": "DAY"}
-        parent = MarketOrder("SELL", plan.quantity, orderId=parent_id, transmit=False, **common)
+        common = {"orderRef": plan.order_plan_id, "account": self.account}
+        parent = MarketOrder(
+            "SELL", plan.quantity, orderId=parent_id, transmit=False, tif="DAY", **common
+        )
         target = LimitOrder(
             "BUY",
             plan.quantity,
@@ -437,6 +441,7 @@ class IbkrConnection:
             orderId=target_id,
             parentId=parent_id,
             transmit=False,
+            tif="GTC",
             **common,
         )
         stop = StopOrder(
@@ -446,6 +451,7 @@ class IbkrConnection:
             orderId=stop_id,
             parentId=parent_id,
             transmit=True,
+            tif="GTC",
             **common,
         )
         contract = _to_ib_contract(instrument)
@@ -1062,23 +1068,33 @@ def _optional_integer(value: object) -> int | None:
 
 
 def _account_value(values: list[object], account: str, tag: str) -> float | None:
-    matching: list[tuple[bool, float]] = []
+    matching: list[tuple[str, float]] = []
     for value_object in values:
         value = cast(Any, value_object)
         if str(value.account) != account or str(value.tag) != tag:
             continue
         number = _optional_number(value.value)
         if number is not None:
-            matching.append((str(value.currency).upper() == "BASE", number))
+            matching.append((str(value.currency).upper(), number))
     if not matching:
         return None
-    matching.sort(reverse=True)
-    return matching[0][1]
+    base_values = [number for currency, number in matching if currency == "BASE"]
+    if len(base_values) == 1:
+        return base_values[0]
+    if not base_values and len(matching) == 1:
+        return matching[0][1]
+    return None
 
 
 def _order_lifecycle(status: str) -> OrderLifecycle:
     normalized = status.strip().upper().replace(" ", "")
-    if normalized in {"PENDINGSUBMIT", "APIPENDING", "PRESUBMITTED", "SUBMITTED"}:
+    if normalized in {
+        "PENDINGSUBMIT",
+        "APIPENDING",
+        "PRESUBMITTED",
+        "SUBMITTED",
+        "PENDINGCANCEL",
+    }:
         return OrderLifecycle.SUBMITTED
     if normalized == "FILLED":
         return OrderLifecycle.FILLED

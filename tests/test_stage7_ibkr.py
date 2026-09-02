@@ -165,8 +165,11 @@ def test_paper_submission_transmits_one_coherent_market_stop_limit_bracket() -> 
     assert [order.action for order in orders] == ["SELL", "BUY", "BUY"]
     assert [order.totalQuantity for order in orders] == [10, 10, 10]
     assert orders[0].transmit is False
+    assert orders[0].tif == "DAY"
     assert orders[1].parentId == ids.parent and orders[1].transmit is False
     assert orders[2].parentId == ids.parent and orders[2].transmit is True
+    assert orders[1].tif == "GTC"
+    assert orders[2].tif == "GTC"
     assert orders[1].lmtPrice == 98.0
     assert orders[2].auxPrice == 101.0
     assert {order.orderRef for order in orders} == {"plan-1"}
@@ -179,11 +182,31 @@ def test_live_plan_can_never_be_transmitted_in_stage7() -> None:
 
     async def scenario() -> None:
         await connection.connect()
+        assert client.connect_kwargs["readonly"] is True
         await connection.submit_protected_order(_plan(Environment.LIVE), _instrument())
 
     with pytest.raises(IbkrError, match="LIVE_EXECUTION_DISABLED"):
         asyncio.run(scenario())
     assert client.placed == []
+
+
+def test_ambiguous_nonbase_account_equity_is_unavailable() -> None:
+    client = FakeOrderClient()
+    client.account_values = [
+        SimpleNamespace(
+            account="DU123456", tag="NetLiquidation", value="100000", currency="USD"
+        ),
+        SimpleNamespace(
+            account="DU123456", tag="NetLiquidation", value="90000", currency="GBP"
+        ),
+    ]
+    connection = IbkrConnection(_config(), client=client, execution_enabled=True)
+
+    async def scenario() -> object:
+        await connection.connect()
+        return await connection.account_state()
+
+    assert asyncio.run(scenario()).equity is None
 
 
 def test_open_orders_positions_and_fills_are_normalized_without_callback_leakage() -> None:
@@ -273,3 +296,28 @@ def test_broker_rejection_status_is_normalized() -> None:
 
     assert statuses[0].status is OrderLifecycle.REJECTED
     assert statuses[0].reason == "price precaution rejected"
+
+
+def test_pending_cancel_remains_active_until_ibkr_confirms_cancellation() -> None:
+    client = FakeOrderClient()
+    client.open_orders = [
+        SimpleNamespace(
+            contract=SimpleNamespace(conId=265598, symbol="AAPL"),
+            order=SimpleNamespace(
+                orderId=102,
+                orderRef="plan-1",
+                account="DU123456",
+                action="BUY",
+                orderType="LMT",
+                parentId=101,
+            ),
+            orderStatus=SimpleNamespace(status="PendingCancel", filled=0, remaining=10),
+        )
+    ]
+    connection = IbkrConnection(_config(), client=client, execution_enabled=True)
+
+    async def scenario() -> object:
+        await connection.connect()
+        return await connection.read_open_orders()
+
+    assert asyncio.run(scenario())[0].status is OrderLifecycle.SUBMITTED

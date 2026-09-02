@@ -17,6 +17,7 @@ from stocker_execution.ibkr import BrokerSession, IbkrConnection, IbkrError
 from stocker_execution.runtime import (
     ApplicationState,
     CheckpointState,
+    RunRuntimeState,
     RuntimeStore,
     StockerRuntime,
     build_runtime,
@@ -741,3 +742,52 @@ LIVE:
         Environment.LIVE
     ]
     assert "ibkr_paper" not in runtime.status().as_dict()
+
+
+def test_production_composition_starts_safely_with_all_runs_disabled(tmp_path) -> None:
+    runs_path = tmp_path / "runs.yaml"
+    runs_path.write_text(
+        """
+universes:
+  - universe_id: CUSTOM_DEPLOYMENT
+    name: Deployment configuration
+    members:
+      - {symbol: AAPL, exchange: SMART, primary_exchange: NASDAQ, currency: USD}
+runs:
+  - run_id: deployment-paper
+    enabled: false
+    universe: CUSTOM_DEPLOYMENT
+    strategy: SESSION_HARD
+    environment: PAPER
+    risk: {risk_per_trade: 0.001, max_concurrent_positions: 1}
+    session:
+      start: "09:30"
+      end: "16:00"
+      timezone: America/New_York
+      calendar: XNYS
+""",
+        encoding="utf-8",
+    )
+    ibkr_path = tmp_path / "ibkr.yaml"
+    ibkr_path.write_text(
+        """
+PAPER:
+  environment: PAPER
+  host: 127.0.0.1
+  port: 4003
+  client_id: 81
+  expected_account: DU_CONFIGURE_ME
+""",
+        encoding="utf-8",
+    )
+    runtime = build_runtime(
+        runs_config_path=runs_path,
+        ibkr_config_path=ibkr_path,
+        database_path=tmp_path / "runtime.sqlite3",
+    )
+
+    status = asyncio.run(runtime.start())
+
+    assert status.application is ApplicationState.READY
+    assert status.runs[0].state is RunRuntimeState.DISABLED
+    assert status.execution_environments[0].connected is False

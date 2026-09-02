@@ -772,7 +772,17 @@ class StockerRuntime:
                 )
 
         if not configured_runs:
-            self._state = ApplicationState.DEGRADED
+            if any(instance.config.enabled for instance in self._manager.list_runs()):
+                self._state = ApplicationState.DEGRADED
+            else:
+                self._state = ApplicationState.READY
+                self._logger.info(
+                    "application_ready",
+                    environments=0,
+                    runs=0,
+                    qualified=0,
+                    ineligible=0,
+                )
             return self.status()
 
         connected_environments: set[Environment] = set()
@@ -2238,20 +2248,18 @@ def build_runtime(
     """Compose one runtime with explicit sessions for enabled run environments."""
 
     runs = load_runs_config(runs_config_path)
-    required_environments = tuple(
-        dict.fromkeys(run.environment for run in runs.runs if run.enabled)
+    configured_environments = tuple(
+        dict.fromkeys(run.environment for run in runs.runs)
     )
-    if not required_environments:
-        raise ValueError("runtime requires at least one enabled run")
     destinations: list[ExecutionDestination] = []
     connections: dict[Environment, IbkrConnection] = {}
     session_identities: set[tuple[str, int, int]] = set()
-    for environment in required_environments:
+    for environment in configured_environments:
         try:
             broker_config = load_ibkr_config(ibkr_config_path, environment)
         except ValueError as exc:
             raise ValueError(
-                f"enabled {environment.value} run requires {environment.value} IBKR config"
+                f"configured {environment.value} run requires {environment.value} IBKR config"
             ) from exc
         if broker_config.expected_account is None:
             raise ValueError(
@@ -2272,7 +2280,7 @@ def build_runtime(
         )
     execution_router = ExecutionRouter(tuple(destinations))
     data_environment = (
-        Environment.PAPER if Environment.PAPER in connections else required_environments[0]
+        Environment.PAPER if Environment.PAPER in connections else configured_environments[0]
     )
     market_data_broker = connections[data_environment]
     history_cache = IbkrHistoryCache(database_path)

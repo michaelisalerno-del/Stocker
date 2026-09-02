@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
-from math import isfinite
+from math import isfinite, log1p
 from pathlib import Path
 from typing import Protocol
 
@@ -638,6 +638,95 @@ def calculate_pre_move(
     )
 
 
+def calculate_session_hard_inputs(
+    bars: Sequence[HistoricalBar],
+    *,
+    checkpoint: int,
+    session_open: datetime,
+) -> dict[str, float]:
+    """Calculate the frozen 15 causal Model B inputs from completed native bars."""
+
+    opened = _aware_utc(session_open)
+    if checkpoint < 6 or len(bars) != checkpoint:
+        raise ValueError("Session HARD requires the exact completed checkpoint prefix")
+    ordered = tuple(sorted(bars, key=_historical_bar_timestamp))
+    expected = tuple(opened + timedelta(minutes=5 * index) for index in range(checkpoint))
+    observed = tuple(_historical_bar_timestamp(bar) for bar in ordered)
+    if observed != expected:
+        raise ValueError("Session HARD requires exact completed five-minute bar timestamps")
+    for bar in ordered:
+        values = (bar.open, bar.high, bar.low, bar.close, bar.volume)
+        if (
+            not all(isfinite(value) for value in values)
+            or min(bar.open, bar.high, bar.low, bar.close) <= 0.0
+            or bar.volume < 0.0
+            or bar.high < max(bar.open, bar.low, bar.close)
+            or bar.low > min(bar.open, bar.high, bar.close)
+        ):
+            raise ValueError("Session HARD received an invalid completed bar")
+
+    previous_closes = (ordered[0].open, *(bar.close for bar in ordered[:-1]))
+    widths = tuple(bar.high - bar.low for bar in ordered)
+    ranges = tuple(
+        10_000.0
+        * max(width, abs(bar.high - previous), abs(bar.low - previous))
+        / previous
+        for bar, previous, width in zip(ordered, previous_closes, widths, strict=True)
+    )
+    returns = tuple(
+        10_000.0 * (bar.close / previous - 1.0)
+        for bar, previous in zip(ordered, previous_closes, strict=True)
+    )
+    total_travel = sum(abs(value) for value in returns)
+    net = sum(returns)
+    cumulative = 10_000.0 * (ordered[-1].close / ordered[0].open - 1.0)
+    if abs(cumulative) <= 1e-12:
+        persistence = 0.5
+    else:
+        direction = 1.0 if cumulative > 0.0 else -1.0
+        persistence = sum(_sign(value) == direction for value in returns) / checkpoint
+    trailing_ranges = ranges[-6:]
+    trailing_returns = returns[-6:]
+    mean_range = sum(trailing_ranges) / len(trailing_ranges)
+    current = ordered[-1]
+    current_width = widths[-1]
+    body_fraction = abs(current.close - current.open) / max(current_width, 1e-12)
+    upper_wick = (current.high - max(current.open, current.close)) / max(
+        current_width, 1e-12
+    )
+    lower_wick = (min(current.open, current.close) - current.low) / max(
+        current_width, 1e-12
+    )
+    volumes = tuple(bar.volume for bar in ordered)
+    prior_six = volumes[max(0, checkpoint - 7) : checkpoint - 1]
+    if not prior_six:
+        raise ValueError("Session HARD prior-six volume is unavailable")
+    first_three = volumes[:3]
+    last_three = volumes[-3:]
+    return {
+        "range_effort": log1p(sum(ranges)),
+        "travel_effort": log1p(total_travel),
+        "absolute_efficiency": abs(net / max(total_travel, 1e-12)),
+        "close_retention": abs(current.close - ordered[0].open)
+        / max(sum(widths), 1e-12),
+        "directional_persistence": persistence,
+        "prior_6_mean_range": mean_range,
+        "prior_6_price_travel": sum(abs(value) for value in trailing_returns),
+        "prior_6_absolute_net_movement": abs(sum(trailing_returns)),
+        "recent_vs_earlier_range_ratio": _mean(trailing_ranges[3:])
+        / max(_mean(trailing_ranges[:3]), 1e-12),
+        "current_bar_range_vs_prior_6": ranges[-1] / max(mean_range, 1e-12),
+        "current_bar_body_fraction": min(max(body_fraction, 0.0), 1.0),
+        "current_bar_extreme_wick_fraction": max(
+            min(max(upper_wick, 0.0), 1.0),
+            min(max(lower_wick, 0.0), 1.0),
+        ),
+        "current_volume_vs_session_mean": volumes[-1] / max(_mean(volumes), 1e-12),
+        "current_volume_vs_prior6_mean": volumes[-1] / max(_mean(prior_six), 1e-12),
+        "last3_vs_first3_volume": _mean(last_three) / max(_mean(first_three), 1e-12),
+    }
+
+
 def calculate_stage5_feature(
     *,
     instrument: QualifiedInstrument,
@@ -858,6 +947,26 @@ def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("T0 and bar timestamps must be timezone-aware")
     return value.astimezone(UTC)
+
+
+def _historical_bar_timestamp(bar: HistoricalBar) -> datetime:
+    if not isinstance(bar.timestamp, datetime):
+        raise ValueError("Session HARD requires intraday datetime bars")
+    return _aware_utc(bar.timestamp)
+
+
+def _mean(values: Sequence[float]) -> float:
+    if not values:
+        raise ValueError("cannot calculate a mean from no values")
+    return sum(values) / len(values)
+
+
+def _sign(value: float) -> float:
+    if value > 0.0:
+        return 1.0
+    if value < 0.0:
+        return -1.0
+    return 0.0
 
 
 def _optional_float(value: object) -> float | None:

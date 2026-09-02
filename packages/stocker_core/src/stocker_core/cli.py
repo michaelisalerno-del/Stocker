@@ -35,6 +35,7 @@ DEFAULT_RESEARCH_CONFIG = Path("configs/research.example.yaml")
 DEFAULT_RUN_CONFIG = Path("configs/run.example.yaml")
 DEFAULT_RUNS_CONFIG = Path("configs/runs.example.yaml")
 DEFAULT_IBKR_CONFIG = Path("configs/ibkr.example.yaml")
+DEFAULT_RUNTIME_DATABASE = Path(".stocker/stage8-runtime.sqlite3")
 
 
 @app.command()
@@ -4803,6 +4804,72 @@ def stage7_paper_diagnostic(
     console.print(f"target: {report.target_order_id}")
     console.print(f"position: {report.position_quantity}")
     console.print(f"ledger status: {report.ledger_status}")
+
+
+@app.command("stage8-paper-smoke")
+def stage8_paper_smoke(
+    runs_config: Annotated[Path, typer.Option("--runs-config")] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    database: Annotated[Path, typer.Option("--database")] = DEFAULT_RUNTIME_DATABASE,
+) -> None:
+    """Validate PAPER connect, account, reconciliation, preparation, and market data."""
+
+    from stocker_execution.runtime import ApplicationState, build_paper_runtime
+
+    async def diagnose() -> None:
+        runtime = build_paper_runtime(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+        )
+        try:
+            status = await runtime.start()
+            console.print(status.as_text())
+            if status.application is not ApplicationState.READY:
+                raise RuntimeError("Stage 8 runtime did not reach READY")
+            quote = await runtime.market_data_check()
+            console.print(
+                "Market data: "
+                f"{quote.symbol} conId={quote.con_id} "
+                f"bid={quote.bid} ask={quote.ask} last={quote.last}"
+            )
+            console.print("No order was transmitted by this smoke diagnostic.")
+        finally:
+            await runtime.stop()
+
+    try:
+        asyncio.run(diagnose())
+    except (OSError, RuntimeError, ValueError) as exc:
+        console.print(f"Stage 8 PAPER smoke failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("stage8-paper-run")
+def stage8_paper_run(
+    runs_config: Annotated[Path, typer.Option("--runs-config")] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    database: Annotated[Path, typer.Option("--database")] = DEFAULT_RUNTIME_DATABASE,
+    poll_seconds: Annotated[float, typer.Option("--poll-seconds", min=0.1)] = 1.0,
+) -> None:
+    """Run the continuously reconciled Stage 8 PAPER application until interrupted."""
+
+    from stocker_execution.runtime import build_paper_runtime
+
+    async def run() -> None:
+        runtime = build_paper_runtime(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+        )
+        try:
+            await runtime.run_forever(poll_interval_seconds=poll_seconds)
+        finally:
+            await runtime.stop()
+
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        console.print("Stage 8 PAPER runtime stopped")
 
 
 if __name__ == "__main__":

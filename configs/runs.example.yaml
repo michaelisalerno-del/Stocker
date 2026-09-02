@@ -20,24 +20,35 @@ universes:
 
 runs:
   - run_id: ftse_morning
+    enabled: true
     universe: FTSE_TEST
     strategy: SESSION_HARD
     environment: PAPER
+    risk:
+      risk_per_trade: 0.001
+      max_concurrent_positions: 5
     session:
       start: "08:00"
       end: "11:00"
       timezone: Europe/London
+      calendar: XLON
 
   - run_id: nasdaq_main
+    enabled: false
     universe: NASDAQ_TEST
     strategy: SESSION_HARD
     environment: LIVE
+    risk:
+      risk_per_trade: 0.001
+      max_concurrent_positions: 5
     session:
-      start: "14:30"
-      end: "18:00"
-      timezone: Europe/London
+      start: "09:30"
+      end: "16:00"
+      timezone: America/New_York
+      calendar: XNYS
 
   - run_id: nasdaq_experiment
+    enabled: false
     universe: NASDAQ_TEST
     strategy: NEW_IDEA
     environment: PAPER

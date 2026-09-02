@@ -16,13 +16,14 @@ class Environment(StrEnum):
 
 
 class RunWindow(BaseModel):
-    """Optional intended session window; Stage 3 does not schedule it."""
+    """Timezone-aware market window consumed by the Stage 8 scheduler."""
 
     model_config = ConfigDict(frozen=True)
 
     start: time
     end: time
     timezone: Identifier
+    calendar: Identifier = "XNYS"
 
 
 class RunRiskConfig(BaseModel):
@@ -38,6 +39,7 @@ class RunConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     run_id: Identifier
+    enabled: bool = True
     universe: Identifier
     strategy: Identifier
     environment: Environment

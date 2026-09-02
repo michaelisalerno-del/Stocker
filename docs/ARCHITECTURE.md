@@ -418,6 +418,67 @@ The explicit `stocker stage7-paper-diagnostic` command requires caller-specified
 entry reference, M price, risk fraction, an expected PAPER account, and
 `--confirm-paper-order`. The normal test suite never invokes broker transmission.
 
+### Production runtime and recovery
+
+Stage 8 is the orchestration layer over the existing public boundaries; it adds no second source of
+trading decisions. `StockerRuntime` composes `RunManager`/`UniverseCatalog`, Stage 2 qualification,
+`PriorSessionContextService`, `Stage5Analyzer`, the concrete Session HARD strategy,
+`Stage7ExecutionService`, and `ExecutionLedger`. `build_paper_runtime` is the production composition
+entry point and `runtime.start()` is the single lifecycle entry point.
+
+Startup is deterministic:
+
+```text
+load run and PAPER IBKR config
+        ↓
+open the shared SQLite stores
+        ↓
+connect and verify the configured PAPER account
+        ↓
+Stage 7 reads broker orders, statuses/fills, and positions and reconciles the ledger
+        ↓
+load/start enabled PAPER runs and qualify shared instruments by conId
+        ↓
+resolve each timezone-aware exchange session
+        ↓
+READY and normal checkpoint processing
+```
+
+The invariant is absolute: no new order is submitted before account verification and successful
+reconciliation for the current IBKR connection epoch. Disconnection changes global readiness to
+`DEGRADED`; one bounded reconnect is followed by account verification and complete reconciliation
+before `READY` is restored. Unknown broker exposure remains untouched and returns
+`EXECUTION_RECONCILIATION_REQUIRED`. Stage 8 never guesses ownership, cancels all orders, or flattens
+positions.
+
+Run configuration remains per-run: `run_id`, `enabled`, universe, strategy, environment, risk, and
+an optional timezone/calendar session. PAPER and future LIVE runs can coexist in configuration.
+Stage 8 activates only supported PAPER runs. An enabled LIVE run reports `LIVE_EXECUTION_DISABLED`
+and is never silently sent to PAPER. A run-local data or strategy failure degrades that run while
+unrelated reconciled runs continue.
+
+Session HARD uses its frozen `6, 8, ..., 34` completed-five-minute checkpoints relative to the
+configured exchange-local session open. Stage 5 work is shared for overlapping runs at the same
+session/T0 and retains the exact `conId + session + T0` identity. A checkpoint is atomically reserved
+and durably completed once. A process that starts after T0, misses the five-minute processing
+window, or restarts after an interrupted checkpoint records the opportunity as skipped; it does not
+manufacture a historical live signal. Stage 4 continues to receive the exact target session, so its
+previous-session context cache cannot drift across trade sessions.
+
+Shutdown stops evaluation and transmission first, records stopped run state, and disconnects. It
+does not cancel protective children or flatten positions. Restart reconnects and lets Stage 7
+reconcile pending, partially filled, open, closed-offline, and rejected-offline orders against the
+same durable ledger before resuming. Runtime checkpoint/counter/cohort rows share the existing
+SQLite approach and expose a small text/JSON status snapshot for the later dashboard.
+
+`stocker stage8-paper-smoke` deliberately validates connection, account identity, reconciliation,
+qualification, readiness, and one market-data snapshot. It does not transmit an order. The separate
+Stage 7 diagnostic remains the only explicit manual diagnostic order path.
+
+Extended PAPER burn-in can continue while Stages 9 and 10 are developed; Stage 8 code completion is
+based on runtime, recovery, deterministic integration tests, and the manual diagnostic rather than
+elapsed observation time.
+
 ## Failure philosophy
 
 - Trading-critical invalid state: do not initiate a new trade until valid.
@@ -436,8 +497,9 @@ Avoid elaborate retry and fallback state machines.
 5. Add reusable current-session feature production.
 6. Add the first real strategy, including its cohort, bands, qualification, and ranking.
 7. Add risk and PAPER execution.
-8. Burn in paper trading and fix primarily real observed failures.
-9. Add LIVE execution alongside PAPER.
-10. Add the dashboard.
+8. Add production PAPER orchestration, restart/reconnect recovery, deterministic scheduling,
+   operational status, and burn-in support over Stages 1--7.
+9. Enable controlled LIVE order transmission per run while preserving explicit PAPER/LIVE routing.
+10. Add the dashboard as a non-critical consumer of the Stage 8 status surface.
 
 Future stages must not be implemented prematurely.

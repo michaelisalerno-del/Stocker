@@ -7,6 +7,7 @@ import yaml
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from stocker_core.markets import get_market
 from stocker_core.runs import Environment, RunConfig
 from stocker_core.universes import (
     NAMED_US_UNIVERSES,
@@ -239,14 +240,67 @@ def load_runs_config(path: str | Path) -> RunsConfig:
         if not snapshot_path.is_absolute():
             snapshot_path = config_path.parent / snapshot_path
         snapshot = load_us_universe_snapshot(snapshot_path)
+        hydrated_inline: list[object] = []
+        for item in inline:
+            if not isinstance(item, dict) or item.get("members"):
+                hydrated_inline.append(item)
+                continue
+            market_spec = item.get("market_spec")
+            market_id = market_spec.get("market_id") if isinstance(market_spec, dict) else None
+            try:
+                listing_membership = get_market(str(market_id)).listing_membership
+            except ValueError:
+                listing_membership = None
+            if listing_membership not in NAMED_US_UNIVERSES:
+                hydrated_inline.append(item)
+                continue
+            hydrated = dict(item)
+            hydrated["members"] = [
+                member.model_dump(mode="python")
+                for member in snapshot.get_universe(listing_membership).members
+            ]
+            hydrated_inline.append(hydrated)
         raw["universes"] = [
-            *inline,
+            *hydrated_inline,
             *(
                 snapshot.get_universe(universe_id).model_dump(mode="python")
                 for universe_id in missing_named
             ),
         ]
     return RunsConfig.model_validate(raw)
+
+
+def runs_config_storage_payload(
+    config: RunsConfig,
+    *,
+    named_universe_snapshot: str | None = None,
+) -> dict[str, object]:
+    """Serialize runs without duplicating snapshot-owned listing membership."""
+
+    payload = config.model_dump(mode="json")
+    if named_universe_snapshot is None:
+        return payload
+    named = {
+        universe.universe_id: universe
+        for universe in config.universes
+        if universe.universe_id in NAMED_US_UNIVERSES
+    }
+    persisted_universes: list[dict[str, object]] = []
+    for universe in config.universes:
+        if universe.universe_id in NAMED_US_UNIVERSES:
+            continue
+        item = universe.model_dump(mode="json")
+        market = get_market(universe.market_spec.market_id) if universe.market_spec else None
+        listing_membership = market.listing_membership if market else None
+        source = named.get(listing_membership or "")
+        if source is not None and universe.members == source.members:
+            item["members"] = []
+        persisted_universes.append(item)
+    return {
+        "named_universe_snapshot": named_universe_snapshot,
+        "universes": persisted_universes,
+        "runs": payload["runs"],
+    }
 
 
 def load_ibkr_config(path: str | Path, environment: Environment) -> IbkrConfig:

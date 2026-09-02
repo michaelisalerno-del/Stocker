@@ -32,8 +32,7 @@ from stocker_core.universes import UniverseDefinition
 class UniverseRunBuilder:
     """Create, disable, or re-enable one immutable semantic run lineage."""
 
-    def options(self, config: RunsConfig) -> dict[str, object]:
-        del config
+    def options(self) -> dict[str, object]:
         return {
             "markets": [
                 {

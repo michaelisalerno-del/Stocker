@@ -12,7 +12,13 @@ from typing import Protocol
 
 import yaml
 
-from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
+from stocker_core.config import (
+    IbkrConfig,
+    RunsConfig,
+    load_ibkr_config,
+    load_runs_config,
+    runs_config_storage_payload,
+)
 from stocker_core.markets import CapBucket, MarketId
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig
 from stocker_core.universes import InstrumentReference, UniverseDefinition
@@ -81,11 +87,12 @@ class RunControlService:
         self.runtime = runtime
         self._lock = asyncio.Lock()
         self._builder = UniverseRunBuilder()
+        self._named_universe_snapshot = self._read_named_universe_snapshot_reference()
 
     async def universe_builder_options(self) -> dict[str, object]:
         """Return the finite backend-owned builder catalogue."""
 
-        options = self._builder.options(load_runs_config(self.runs_config_path))
+        options = self._builder.options()
         readiness: dict[str, str] = {}
         if self.runtime is not None:
             inspect_readiness = getattr(self.runtime, "activity_scanner_readiness", None)
@@ -617,7 +624,27 @@ class RunControlService:
         return raw
 
     def _write_runs(self, config: RunsConfig) -> None:
-        self._write_yaml(self.runs_config_path, config.model_dump(mode="json"))
+        self._write_yaml(
+            self.runs_config_path,
+            runs_config_storage_payload(
+                config,
+                named_universe_snapshot=self._named_universe_snapshot,
+            ),
+        )
+
+    def _read_named_universe_snapshot_reference(self) -> str | None:
+        """Read the one top-level storage directive without parsing a large YAML tree."""
+
+        if not self.runs_config_path.exists():
+            return None
+        with self.runs_config_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.startswith("named_universe_snapshot:"):
+                    continue
+                parsed = yaml.safe_load(line)
+                value = parsed.get("named_universe_snapshot") if isinstance(parsed, dict) else None
+                return value if isinstance(value, str) and value.strip() else None
+        return None
 
     @staticmethod
     def _write_yaml(path: Path, payload: object) -> None:

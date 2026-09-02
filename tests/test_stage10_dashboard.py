@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from stocker_core.cli import stage10_run
 from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig, RunWindow
+from stocker_core.strategies import SESSION_HARD_METHOD
 from stocker_core.universes import InstrumentReference, UniverseDefinition
 from stocker_dashboard.app import create_dashboard_app
 from stocker_dashboard.controls import LiveConfirmation, RunControlService
@@ -572,6 +573,77 @@ def _write_control_files(tmp_path: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     return runs_path, broker_path
+
+
+def test_universe_builder_options_do_not_reload_the_large_runs_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_path, broker_path = _write_control_files(tmp_path)
+    controls = RunControlService(runs_path, broker_path)
+
+    def unexpected_load(_path: Path) -> RunsConfig:
+        raise AssertionError("builder options must not parse the runs config")
+
+    monkeypatch.setattr("stocker_dashboard.controls.load_runs_config", unexpected_load)
+
+    options = asyncio.run(controls.universe_builder_options())
+
+    assert options["markets"]
+    assert options["strategies"]
+
+
+def test_dashboard_run_write_preserves_named_snapshot_without_expanding_members(
+    tmp_path: Path,
+) -> None:
+    snapshot_path = tmp_path / "us-listed.csv"
+    snapshot_path.write_text(
+        """# schema_version=1
+# source=NASDAQ_TRADER_SYMBOL_DIRECTORY
+# source_urls=https://example.test/nasdaq.txt,https://example.test/other.txt
+# retrieved_at=2026-09-02T12:00:00+00:00
+# nasdaq_source_updated_at=0902202611:55
+# other_source_updated_at=0902202611:56
+# universes=US_ALL,NASDAQ,NYSE
+symbol,primary_exchange
+AAPL,NASDAQ
+MSFT,NASDAQ
+IBM,NYSE
+""",
+        encoding="utf-8",
+    )
+    runs_path, broker_path = _write_control_files(tmp_path)
+    runs_path.write_text(
+        f"named_universe_snapshot: {snapshot_path.name}\nuniverses: []\nruns: []\n",
+        encoding="utf-8",
+    )
+    controls = RunControlService(runs_path, broker_path)
+
+    asyncio.run(
+        controls.add_universe_run(
+            market_id="US_NASDAQ",
+            cap_bucket="MID",
+            strategy_id=SESSION_HARD_METHOD.strategy_id,
+            strategy_version=SESSION_HARD_METHOD.strategy_version,
+            environment=Environment.PAPER,
+            risk_per_trade=0.001,
+            max_concurrent_positions=1,
+        )
+    )
+
+    persisted = yaml.safe_load(runs_path.read_text(encoding="utf-8"))
+    assert persisted["named_universe_snapshot"] == snapshot_path.name
+    assert [item["universe_id"] for item in persisted["universes"]] == [
+        "US_NASDAQ_MID_CAP_BUCKETS_V1"
+    ]
+    assert persisted["universes"][0]["members"] == []
+    reloaded = load_runs_config(runs_path)
+    nasdaq = next(item for item in reloaded.universes if item.universe_id == "NASDAQ")
+    derived = next(
+        item
+        for item in reloaded.universes
+        if item.universe_id == "US_NASDAQ_MID_CAP_BUCKETS_V1"
+    )
+    assert derived.members == nasdaq.members
 
 
 def test_run_controls_validate_through_backend_and_require_live_confirmation(

@@ -44,7 +44,7 @@ def empty_config() -> RunsConfig:
 
 def test_builder_options_are_backend_owned_and_include_installed_method() -> None:
     builder = UniverseRunBuilder()
-    options = builder.options(empty_config())
+    options = builder.options()
 
     assert {item["market_id"] for item in options["markets"]} == set(MarketId)
     assert {item["cap_bucket"] for item in options["capitalisation"]} == set(CapBucket)

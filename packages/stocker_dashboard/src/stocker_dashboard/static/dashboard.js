@@ -4,6 +4,7 @@ const main = document.querySelector("#main");
 const fmt = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
 let timer;
 let lastOutcome = null;
+const INTERACTIVE_ROUTES = new Set(["universes", "candidates", "trades", "settings"]);
 
 const RUN_COLUMNS = [
   { key: "display_name", label: "Run" },
@@ -405,7 +406,20 @@ async function render() {
   } catch (error) {
     main.innerHTML = `${head("Read-only unavailable", "The trading runtime is isolated from this dashboard failure.")}<div class="section error">${esc(error.message)}</div>`;
   }
-  timer = setTimeout(render, route() === "orders" || route() === "positions" ? 5000 : 10000);
+  scheduleRefresh();
+}
+function scheduleRefresh() {
+  clearTimeout(timer);
+  timer = setTimeout(refreshCurrentPage, route() === "orders" || route() === "positions" ? 5000 : 10000);
+}
+async function refreshCurrentPage() {
+  if (INTERACTIVE_ROUTES.has(route())) {
+    try { await refreshHeader(); }
+    catch (_) { /* Keep unsaved form state intact during a transient status failure. */ }
+    scheduleRefresh();
+    return;
+  }
+  await render();
 }
 document.addEventListener("click", (event) => {
   const row = event.target.closest("[data-action]");

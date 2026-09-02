@@ -1044,7 +1044,7 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
         assert "PAPER" in response.text
         assert "LIVE" in response.text
     index = client.get("/").text
-    assert 'src="/static/dashboard.js?v=20260902-active-candidates"' in index
+    assert 'src="/static/dashboard.js?v=20260902-preserve-form-state"' in index
     for label in (
         "Overview",
         "Runs",
@@ -1061,6 +1061,22 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
     script = client.get("/static/dashboard.js").text
     assert "IBKR API RESOURCES" in script
     assert "Stocker market-data budget" in script
+
+
+def test_periodic_refresh_preserves_interactive_page_dom(tmp_path: Path) -> None:
+    service = _seed_authoritative_state(tmp_path)
+    runs_path, broker_path = _write_control_files(tmp_path)
+    client = TestClient(create_dashboard_app(service, RunControlService(runs_path, broker_path)))
+
+    script = client.get("/static/dashboard.js").text
+
+    assert (
+        'const INTERACTIVE_ROUTES = new Set(["universes", "candidates", "trades", "settings"]);'
+        in script
+    )
+    assert "if (INTERACTIVE_ROUTES.has(route()))" in script
+    assert "timer = setTimeout(refreshCurrentPage" in script
+    assert "timer = setTimeout(render" not in script
 
 
 def test_universe_builder_http_flow_keeps_paper_and_live_separate(

@@ -229,7 +229,7 @@ def test_multiple_accounts_require_an_explicit_expected_account() -> None:
     assert connection.is_connected is False
 
 
-def test_separate_broker_instances_do_not_share_connection_state_or_order_methods() -> None:
+def test_separate_broker_instances_do_not_share_connection_state() -> None:
     paper_client = FakeIbClient(accounts=["DU123456"])
     live_client = FakeIbClient(accounts=["U1234567"])
     paper = IbkrConnection(
@@ -258,7 +258,8 @@ def test_separate_broker_instances_do_not_share_connection_state_or_order_method
     assert paper.is_connected is False
     assert live.is_connected is True
     assert not hasattr(IbkrConnection, "place_order")
-    assert not hasattr(IbkrConnection, "cancel_order")
+    with pytest.raises(IbkrError, match="verified active connection"):
+        asyncio.run(paper.cancel_order(1))
 
 
 def test_resolve_stock_returns_stable_qualified_instrument_identity() -> None:

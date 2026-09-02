@@ -4702,5 +4702,108 @@ def server_dry_run(
     )
 
 
+@app.command("stage7-paper-diagnostic")
+def stage7_paper_diagnostic(
+    signal_id: Annotated[
+        str, typer.Option("--signal-id", help="Unique diagnostic signal identity.")
+    ],
+    symbol: Annotated[str, typer.Option("--symbol", help="Stock symbol to qualify.")],
+    entry_reference: Annotated[float, typer.Option("--entry-reference", min=0.000001)],
+    m_price: Annotated[float, typer.Option("--m-price", min=0.000001)],
+    risk_per_trade: Annotated[
+        float, typer.Option("--risk-per-trade", min=0.000000001, max=1.0)
+    ],
+    confirm_paper_order: Annotated[
+        bool,
+        typer.Option(
+            "--confirm-paper-order",
+            help="Required acknowledgement that this command transmits an IBKR PAPER order.",
+        ),
+    ] = False,
+    run_config: Annotated[Path, typer.Option("--run-config")] = DEFAULT_RUN_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    exchange: Annotated[str, typer.Option("--exchange")] = "SMART",
+    primary_exchange: Annotated[str | None, typer.Option("--primary-exchange")] = "NASDAQ",
+    currency: Annotated[str, typer.Option("--currency")] = "USD",
+    max_concurrent_positions: Annotated[
+        int | None, typer.Option("--max-concurrent-positions", min=1)
+    ] = None,
+    ledger_path: Annotated[Path, typer.Option("--ledger")] = Path(
+        ".stocker/stage7-execution.sqlite3"
+    ),
+    wait_seconds: Annotated[float, typer.Option("--wait-seconds", min=0.0)] = 0.0,
+) -> None:
+    """Deliberately submit one caller-specified, protected IBKR PAPER diagnostic."""
+
+    from stocker_core.runs import Environment, RunRiskConfig
+    from stocker_execution.ibkr import IbkrError
+    from stocker_execution.stage7_diagnostic import run_paper_diagnostic
+
+    if not confirm_paper_order:
+        raise typer.BadParameter("--confirm-paper-order is required; no order was transmitted")
+    try:
+        run = load_run_config(run_config)
+        if run.environment is not Environment.PAPER:
+            raise ValueError("LIVE_EXECUTION_DISABLED")
+        broker = load_ibkr_config(ibkr_config, Environment.PAPER)
+        if broker.expected_account is None:
+            raise ValueError("Stage 7 diagnostic requires expected_account in PAPER IBKR config")
+        run = run.model_copy(
+            update={
+                "risk": RunRiskConfig(
+                    risk_per_trade=risk_per_trade,
+                    max_concurrent_positions=max_concurrent_positions,
+                )
+            }
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid Stage 7 diagnostic configuration: {exc}") from exc
+
+    try:
+        report = asyncio.run(
+            run_paper_diagnostic(
+                run=run,
+                broker_config=broker,
+                signal_id=signal_id,
+                symbol=symbol,
+                exchange=exchange,
+                primary_exchange=primary_exchange,
+                currency=currency,
+                entry_reference=entry_reference,
+                m_price=m_price,
+                ledger_path=ledger_path,
+                wait_seconds=wait_seconds,
+            )
+        )
+    except IbkrError as exc:
+        console.print(f"Stage 7 PAPER diagnostic failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print("Stage 7 IBKR PAPER diagnostic")
+    console.print(f"run: {report.run_id}")
+    console.print("environment: PAPER")
+    console.print(f"account: {report.account}")
+    console.print(f"signal_id: {report.signal_id}")
+    console.print(f"symbol / conId: {report.symbol} / {report.con_id}")
+    console.print(f"account equity: {report.account_equity}")
+    console.print(f"risk fraction: {report.risk_fraction}")
+    console.print(f"risk budget: {report.risk_budget}")
+    console.print(f"entry: {report.entry}")
+    console.print(f"stop: {report.stop}")
+    console.print(f"target: {report.target}")
+    console.print(f"quantity: {report.quantity}")
+    console.print(
+        "IBKR parent/order IDs: "
+        f"{report.parent_order_id}/{report.stop_order_id}/{report.target_order_id}"
+    )
+    console.print(f"entry status: {report.entry_status}")
+    console.print(f"filled quantity: {report.filled_quantity}")
+    console.print(f"average fill: {report.average_fill_price}")
+    console.print(f"protective stop: {report.stop_order_id}")
+    console.print(f"target: {report.target_order_id}")
+    console.print(f"position: {report.position_quantity}")
+    console.print(f"ledger status: {report.ledger_status}")
+
+
 if __name__ == "__main__":
     app()

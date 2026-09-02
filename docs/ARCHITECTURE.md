@@ -328,21 +328,83 @@ Ranking remains strategy-specific in Stage 6. There is no generic ranking framew
 
 ### Risk
 
-Stage 7 risk will convert a Stage 6 intention into permitted size. Account equity, risk percentage,
-share quantity, buying power, and account-position capacity do not exist in Stage 6.
+Stage 7 consumes the selected, `ENTRY_TRIGGERED` Stage 6 `StrategySignal` as the authoritative
+`OrderIntent`. It does not recalculate `PRE_MOVE_M`, cohort percentile/band, Session HARD,
+Structure D, ranking, direction, or entry qualification.
+
+Each run may carry an explicit `RunRiskConfig`. `risk_per_trade` has no default and is required by
+Stage 7 execution; `max_concurrent_positions` is the only optional capacity setting. Actual PAPER
+`NetLiquidation` from the connected IBKR account is authoritative. The pure calculation is:
+
+```text
+risk_budget = account_equity * risk_per_trade
+per_share_risk = abs(entry_reference - stop_price)
+quantity = floor(risk_budget / per_share_risk)
+```
+
+Stock quantities are whole shares and never round upward. Missing/invalid equity, nonpositive risk,
+invalid protection, zero quantity, an existing same-`conId` position, or reached configured capacity
+rejects that candidate without broker transmission.
 
 ### Execution
 
-Stage 7 execution will own broker order IDs, order construction, PAPER placement, fills, positions,
-and stop/target management. Stage 6 imports no broker adapter and places no orders. PAPER and LIVE
-routing remains explicit at the later execution boundary; they may eventually run simultaneously
-through separate IBKR Gateway sessions or accounts.
+Stage 7 is implemented as:
+
+```text
+Stage 6 OrderIntent
+        ↓
+Stage7RiskDecision
+        ↓
+OrderPlan
+        ↓
+IBKR PAPER parent + protective children
+        ↓
+broker statuses / fills / positions / execution ledger
+        ↓
+startup and reconnect reconciliation
+```
+
+The first-touch signal becomes actionable only at its Stage 6 `signal_timestamp`, so its executable
+entry mapping is a market SELL parent. The Stage 6 `entry_reference` remains the sizing and strategy
+geometry reference. For the frozen SHORT strategy, Stage 7 calculates `stop = entry + 0.50M` and
+`target = entry - 1.00M`, then attaches a BUY stop and BUY limit target. The parent and target use
+`transmit=False`; the final attached stop uses `transmit=True`, following IBKR bracket transmission.
+For SHORT protection, the stop rounds down and target rounds up to IBKR's qualified-contract minimum
+tick. Both move toward entry, so tick normalization cannot increase requested per-share risk.
+
+`RunConfig.environment` remains independent of strategy and universe. The Stage 7 router state is:
+
+```text
+PAPER execution: ENABLED
+LIVE execution: DISABLED (LIVE_EXECUTION_DISABLED)
+```
+
+The execution environment, expected account, and actual connected account are checked immediately
+before planning/transmission. This retains the future shape in which individual
+`strategy + universe + run` combinations can be promoted independently; there is no global
+PAPER-to-LIVE switch and no LIVE order routing in Stage 7.
+
+The Stage 2 `IbkrConnection` remains read-only by default for data consumers. Stage 7 explicitly
+constructs a writable instance only for PAPER. It normalizes account state, minimum tick, open and
+completed order status, executions, and positions instead of leaking `ib_async` callbacks upward.
 
 ### Storage and audit
 
-Store enough to explain the run, universe, strategy, environment, instrument/conId, relevant
-feature and level snapshot, signal, order, fill, position, exit, and P&L. Do not build elaborate
-event sourcing unless it becomes necessary.
+`ExecutionLedger` uses SQLite. An atomic unique `signal_id` reservation occurs before broker
+transmission, so repeated evaluation, replay, restart, or concurrent handling cannot submit the same
+Stage 6 opportunity twice. It stores run/strategy/signal/plan lineage, environment/account identity,
+intended quantity and geometry, all three IBKR order IDs, meaningful lifecycle state, deduplicated
+IBKR execution IDs, aggregate entry/exit fills, timestamps, positions, and realized P&L.
+
+Only fills create local exposure. Partial executions aggregate by quantity-weighted price and a
+repeated IBKR execution callback is ignored. IBKR positions remain authoritative. At connect or
+reconnect, new execution stays blocked until broker statuses, fills, open orders, and positions agree
+with local records. Unknown orders, fills, positions, missing broker exposure, or unresolved local
+plans return `EXECUTION_RECONCILIATION_REQUIRED`; Stage 7 never auto-flattens or cancels everything.
+
+The explicit `stocker stage7-paper-diagnostic` command requires caller-specified signal, instrument,
+entry reference, M price, risk fraction, an expected PAPER account, and
+`--confirm-paper-order`. The normal test suite never invokes broker transmission.
 
 ## Failure philosophy
 

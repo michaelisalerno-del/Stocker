@@ -3,17 +3,18 @@
 The execution server must be boring. It should do fewer things than the research
 machine, with fewer dependencies and more hard stops.
 
-## Kill Switches
+## Environment Gate
 
-Trading must be disabled by default. A future live executor needs explicit kill
-switches at config, process, and broker-adapter levels. If any switch is off, orders are
-blocked.
+Stage 7 broker transmission is enabled only for an explicitly writable PAPER connection whose
+verified connected account matches the run's expected `D`-prefixed IBKR account. LIVE exists in the
+run model but returns `LIVE_EXECUTION_DISABLED` before broker transmission.
 
 ## Risk Checks
 
-No order should reach a broker adapter without passing risk checks. Required checks
-include max order size, max position size, max daily loss, max orders per day, and
-trading-enabled state.
+No Stage 7 order reaches IBKR without an explicit per-run `risk_per_trade`, authoritative IBKR
+account equity, valid Stage 6 protection geometry, conservative whole-share sizing, no existing
+same-instrument position, and optional actual-position capacity. The earlier generic placeholder
+risk limits remain separate from this Stage 7 runtime contract.
 
 ## Stale Data
 
@@ -26,8 +27,9 @@ desktop responsibilities, not live execution responsibilities.
 
 ## State Reconciliation
 
-The server must compare broker positions and cash with internal state. If they disagree
-outside an allowed tolerance, trading stops until the discrepancy is resolved.
+The executor compares normalized IBKR open/completed orders, executions, and positions with its
+SQLite execution ledger at startup and after every reconnect. Unknown or unresolved exposure blocks
+new orders with `EXECUTION_RECONCILIATION_REQUIRED`; it is never automatically flattened.
 
 ## Sessions
 
@@ -36,5 +38,5 @@ exchange calendars, instrument-specific trading hours, and broker availability.
 
 ## Broker Boundaries
 
-Broker implementations must sit behind `stocker_execution.broker.Broker`. Research
-code, notebooks, and backtests must not call broker APIs directly.
+Stage 7 reuses the concrete Stage 2 `IbkrConnection`; IBKR is the only broker. Strategy, risk, and
+research code receive normalized models and never call `ib_async` or submit orders directly.

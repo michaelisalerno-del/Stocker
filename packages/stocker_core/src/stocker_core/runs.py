@@ -25,6 +25,15 @@ class RunWindow(BaseModel):
     timezone: Identifier
 
 
+class RunRiskConfig(BaseModel):
+    """Explicit Stage 7 risk inputs owned by one run."""
+
+    model_config = ConfigDict(frozen=True)
+
+    risk_per_trade: float
+    max_concurrent_positions: int | None = None
+
+
 class RunConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -32,6 +41,7 @@ class RunConfig(BaseModel):
     universe: Identifier
     strategy: Identifier
     environment: Environment
+    risk: RunRiskConfig | None = None
     session: RunWindow | None = None
 
 

@@ -1,6 +1,7 @@
-"""Minimal read-only IBKR connection and market-data boundary."""
+"""Minimal IBKR connection, market-data, and PAPER execution boundary."""
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -10,6 +11,18 @@ from typing import Any, Protocol, cast
 
 from stocker_core.config import IbkrConfig
 from stocker_core.runs import Environment
+from stocker_execution.execution_models import (
+    BrokerAccountState,
+    BrokerFill,
+    BrokerOpenOrder,
+    BrokerOrderIds,
+    BrokerOrderStatus,
+    BrokerPosition,
+    OrderAction,
+    OrderLifecycle,
+    OrderPlan,
+    OrderRole,
+)
 
 
 class IbkrError(RuntimeError):
@@ -17,6 +30,8 @@ class IbkrError(RuntimeError):
 
 
 class _IbClient(Protocol):
+    client: Any
+
     async def connectAsync(
         self,
         host: str,
@@ -65,6 +80,22 @@ class _IbClient(Protocol):
         underlyingSecType: str,
         underlyingConId: int,
     ) -> list[object]: ...
+
+    async def accountSummaryAsync(self, account: str = "") -> list[object]: ...
+
+    async def reqContractDetailsAsync(self, contract: object) -> list[object]: ...
+
+    def placeOrder(self, contract: object, order: object) -> object: ...
+
+    async def reqAllOpenOrdersAsync(self) -> list[object]: ...
+
+    async def reqCompletedOrdersAsync(self, apiOnly: bool) -> list[object]: ...
+
+    async def reqPositionsAsync(self) -> list[object]: ...
+
+    async def reqExecutionsAsync(self, execFilter: object = None) -> list[object]: ...
+
+    def cancelOrder(self, order: object, manualCancelOrderTime: str = "") -> object: ...
 
 
 class _QualifiedContract(Protocol):
@@ -228,9 +259,7 @@ def validate_historical_bar(bar: HistoricalBar) -> HistoricalBar:
     values = (bar.open, bar.high, bar.low, bar.close, bar.volume)
     if not all(isfinite(value) for value in values) or bar.volume < 0:
         raise ValueError("invalid historical bar values")
-    if bar.high < max(bar.open, bar.low, bar.close) or bar.low > min(
-        bar.open, bar.high, bar.close
-    ):
+    if bar.high < max(bar.open, bar.low, bar.close) or bar.low > min(bar.open, bar.high, bar.close):
         raise ValueError("inconsistent historical bar OHLC values")
     return bar
 
@@ -261,12 +290,32 @@ def _no_startup_fetches() -> object:
 
 
 class IbkrConnection:
-    """One independent, read-only IBKR Gateway or TWS API session."""
+    """One independent IBKR session; execution is opt-in and PAPER-only."""
 
-    def __init__(self, config: IbkrConfig, *, client: _IbClient | None = None) -> None:
+    def __init__(
+        self,
+        config: IbkrConfig,
+        *,
+        client: _IbClient | None = None,
+        execution_enabled: bool = False,
+    ) -> None:
         self.config = config
         self._client = client if client is not None else _new_client()
         self._account_id: str | None = None
+        self._execution_enabled = execution_enabled
+        self._connection_epoch = 0
+
+    @property
+    def environment(self) -> Environment:
+        return self.config.environment
+
+    @property
+    def account(self) -> str:
+        return self._account_id or ""
+
+    @property
+    def connection_epoch(self) -> int:
+        return self._connection_epoch
 
     @property
     def is_connected(self) -> bool:
@@ -281,7 +330,7 @@ class IbkrConnection:
                 self.config.port,
                 clientId=self.config.client_id,
                 timeout=self.config.connect_timeout_seconds,
-                readonly=True,
+                readonly=not self._execution_enabled,
                 account=self.config.expected_account or "",
                 raiseSyncErrors=True,
                 fetchFields=_no_startup_fetches(),
@@ -291,6 +340,7 @@ class IbkrConnection:
             account_id = self._select_account(self._client.managedAccounts())
             self._verify_environment(account_id)
             self._account_id = account_id
+            self._connection_epoch += 1
             return BrokerSession(
                 environment=self.config.environment,
                 account_id=account_id,
@@ -308,9 +358,248 @@ class IbkrConnection:
     def disconnect(self) -> None:
         """Disconnect this instance and clear its confirmed account state."""
 
+        was_connected = self._client.isConnected() or self._account_id is not None
         if self._client.isConnected():
             self._client.disconnect()
         self._account_id = None
+        if was_connected:
+            self._connection_epoch += 1
+
+    async def account_state(self) -> BrokerAccountState:
+        """Read authoritative PAPER equity, buying power, and positions."""
+
+        self._require_connected()
+        try:
+            values = await self._client.accountSummaryAsync(self.account)
+            positions = await self.read_positions()
+        except Exception as exc:
+            if isinstance(exc, IbkrError):
+                raise
+            raise IbkrError(f"IBKR account state request failed: {exc}") from exc
+        equity = _account_value(values, self.account, "NetLiquidation")
+        buying_power = _account_value(values, self.account, "BuyingPower")
+        return BrokerAccountState(
+            environment=self.environment,
+            account=self.account,
+            equity=equity,
+            buying_power=buying_power,
+            connected=self.is_connected,
+            positions=positions,
+        )
+
+    async def minimum_tick(self, instrument: QualifiedInstrument) -> float:
+        """Read the qualified contract's IBKR minimum price increment."""
+
+        self._require_connected()
+        try:
+            details = await self._client.reqContractDetailsAsync(_to_ib_contract(instrument))
+            if len(details) != 1:
+                raise IbkrError(
+                    f"IBKR returned {len(details)} contract details for {instrument.symbol}"
+                )
+            tick = float(cast(Any, details[0]).minTick)
+        except Exception as exc:
+            if isinstance(exc, IbkrError):
+                raise
+            raise IbkrError(
+                f"IBKR minimum tick request failed for {instrument.symbol}: {exc}"
+            ) from exc
+        if not isfinite(tick) or tick <= 0.0:
+            raise IbkrError(f"IBKR returned invalid minimum tick for {instrument.symbol}")
+        return tick
+
+    async def submit_protected_order(
+        self, plan: OrderPlan, instrument: QualifiedInstrument
+    ) -> BrokerOrderIds:
+        """Transmit one atomic-style IBKR PAPER parent/target/stop bracket."""
+
+        self._require_connected()
+        if self.environment is Environment.LIVE or plan.environment is Environment.LIVE:
+            raise IbkrError("LIVE_EXECUTION_DISABLED")
+        if not self._execution_enabled:
+            raise IbkrError("IBKR connection is read-only; PAPER execution was not enabled")
+        if not self.account.upper().startswith("D") or instrument.con_id != plan.con_id:
+            raise IbkrError("ACCOUNT_OR_ENVIRONMENT_MISMATCH")
+        if plan.side is not OrderAction.SELL:
+            raise IbkrError("Stage 7 supports only the first strategy's SHORT order plans")
+
+        from ib_async import LimitOrder, MarketOrder, StopOrder
+
+        parent_id = int(self._client.client.getReqId())
+        target_id = int(self._client.client.getReqId())
+        stop_id = int(self._client.client.getReqId())
+        common = {"orderRef": plan.order_plan_id, "account": self.account, "tif": "DAY"}
+        parent = MarketOrder("SELL", plan.quantity, orderId=parent_id, transmit=False, **common)
+        target = LimitOrder(
+            "BUY",
+            plan.quantity,
+            plan.target_price,
+            orderId=target_id,
+            parentId=parent_id,
+            transmit=False,
+            **common,
+        )
+        stop = StopOrder(
+            "BUY",
+            plan.quantity,
+            plan.stop_price,
+            orderId=stop_id,
+            parentId=parent_id,
+            transmit=True,
+            **common,
+        )
+        contract = _to_ib_contract(instrument)
+        placed: list[object] = []
+        try:
+            for bracket_order in (parent, target, stop):
+                self._client.placeOrder(contract, bracket_order)
+                placed.append(bracket_order)
+        except Exception as exc:
+            for placed_order in placed:
+                with suppress(Exception):
+                    self._client.cancelOrder(placed_order)
+            raise IbkrError(f"IBKR protected PAPER order submission failed: {exc}") from exc
+        return BrokerOrderIds(parent=parent_id, stop=stop_id, target=target_id)
+
+    async def read_open_orders(self) -> tuple[BrokerOpenOrder, ...]:
+        """Read and normalize all open orders visible to this IBKR session."""
+
+        self._require_connected()
+        try:
+            trades = await self._client.reqAllOpenOrdersAsync()
+            return tuple(self._normalize_open_order(trade) for trade in trades)
+        except Exception as exc:
+            if isinstance(exc, IbkrError):
+                raise
+            raise IbkrError(f"IBKR open-order request failed: {exc}") from exc
+
+    async def read_order_statuses(self) -> tuple[BrokerOrderStatus, ...]:
+        """Read normalized open and completed order states, including rejections."""
+
+        self._require_connected()
+        try:
+            trades = [
+                *(await self._client.reqAllOpenOrdersAsync()),
+                *(await self._client.reqCompletedOrdersAsync(apiOnly=False)),
+            ]
+        except Exception as exc:
+            raise IbkrError(f"IBKR order-status request failed: {exc}") from exc
+        by_order: dict[int, BrokerOrderStatus] = {}
+        for trade in trades:
+            source = cast(Any, trade)
+            order = source.order
+            status = source.orderStatus
+            if str(order.account) != self.account:
+                continue
+            messages = [str(item.message) for item in getattr(source, "log", ()) if item.message]
+            normalized = BrokerOrderStatus(
+                order_id=int(order.orderId),
+                order_plan_id=str(order.orderRef),
+                account=str(order.account),
+                environment=self.environment,
+                status=_order_lifecycle(str(status.status)),
+                filled_quantity=float(status.filled),
+                remaining_quantity=float(status.remaining),
+                reason=messages[-1] if messages else "",
+            )
+            by_order[normalized.order_id] = normalized
+        return tuple(by_order[order_id] for order_id in sorted(by_order))
+
+    async def read_positions(self) -> tuple[BrokerPosition, ...]:
+        """Read normalized actual positions for the connected account."""
+
+        self._require_connected()
+        try:
+            sources = await self._client.reqPositionsAsync()
+        except Exception as exc:
+            raise IbkrError(f"IBKR position request failed: {exc}") from exc
+        positions: list[BrokerPosition] = []
+        for source_object in sources:
+            source = cast(Any, source_object)
+            if str(source.account) != self.account:
+                continue
+            positions.append(
+                BrokerPosition(
+                    account=str(source.account),
+                    con_id=int(source.contract.conId),
+                    symbol=str(source.contract.symbol),
+                    quantity=float(source.position),
+                    average_price=float(source.avgCost),
+                )
+            )
+        return tuple(positions)
+
+    async def read_fills(self) -> tuple[BrokerFill, ...]:
+        """Read normalized executions; execution IDs make repeated reads idempotent."""
+
+        self._require_connected()
+        try:
+            sources = await self._client.reqExecutionsAsync()
+        except Exception as exc:
+            raise IbkrError(f"IBKR execution request failed: {exc}") from exc
+        fills: list[BrokerFill] = []
+        for source_object in sources:
+            source = cast(Any, source_object)
+            execution = source.execution
+            if str(execution.acctNumber) != self.account:
+                continue
+            timestamp = execution.time
+            if not isinstance(timestamp, datetime) or timestamp.tzinfo is None:
+                raise IbkrError("IBKR returned an execution without a timezone-aware timestamp")
+            side_text = str(execution.side).upper()
+            side = OrderAction.SELL if side_text in {"SLD", "SELL"} else OrderAction.BUY
+            report = getattr(source, "commissionReport", None)
+            commission = _optional_number(getattr(report, "commission", None))
+            fills.append(
+                BrokerFill(
+                    execution_id=str(execution.execId),
+                    order_id=int(execution.orderId),
+                    account=str(execution.acctNumber),
+                    environment=self.environment,
+                    con_id=int(source.contract.conId),
+                    symbol=str(source.contract.symbol),
+                    side=side,
+                    quantity=float(execution.shares),
+                    price=float(execution.price),
+                    executed_at=timestamp,
+                    commission=commission,
+                )
+            )
+        return tuple(fills)
+
+    async def cancel_order(self, order_id: int) -> None:
+        """Cancel one explicitly named open order."""
+
+        self._require_connected()
+        trades = await self._client.reqAllOpenOrdersAsync()
+        for trade in trades:
+            order = cast(Any, trade).order
+            if int(order.orderId) == order_id and str(order.account) == self.account:
+                self._client.cancelOrder(order)
+                return
+        raise IbkrError(f"IBKR open order {order_id} was not found for the connected account")
+
+    def _normalize_open_order(self, trade: object) -> BrokerOpenOrder:
+        source = cast(Any, trade)
+        order = source.order
+        contract = source.contract
+        order_type = str(order.orderType).upper()
+        if int(order.parentId) == 0:
+            role = OrderRole.ENTRY
+        elif order_type in {"STP", "STP LMT"}:
+            role = OrderRole.STOP
+        else:
+            role = OrderRole.TARGET
+        return BrokerOpenOrder(
+            order_id=int(order.orderId),
+            order_plan_id=str(order.orderRef),
+            account=str(order.account),
+            environment=self.environment,
+            con_id=int(contract.conId),
+            symbol=str(contract.symbol),
+            role=role,
+            status=_order_lifecycle(str(source.orderStatus.status)),
+        )
 
     async def resolve_stock(
         self,
@@ -517,11 +806,7 @@ class IbkrConnection:
         for option, source in zip(options, tickers, strict=True):
             ticker = cast(_SourceOptionTicker, source)
             market_data_type = _optional_integer(getattr(ticker, "marketDataType", None))
-            model = (
-                getattr(ticker, "modelGreeks", None)
-                if market_data_type in {1, 2}
-                else None
-            )
+            model = getattr(ticker, "modelGreeks", None) if market_data_type in {1, 2} else None
             normalized.append(
                 OptionMarketSnapshot(
                     option=option,
@@ -774,6 +1059,34 @@ def _optional_integer(value: object) -> int | None:
     if number is None or not number.is_integer():
         return None
     return int(number)
+
+
+def _account_value(values: list[object], account: str, tag: str) -> float | None:
+    matching: list[tuple[bool, float]] = []
+    for value_object in values:
+        value = cast(Any, value_object)
+        if str(value.account) != account or str(value.tag) != tag:
+            continue
+        number = _optional_number(value.value)
+        if number is not None:
+            matching.append((str(value.currency).upper() == "BASE", number))
+    if not matching:
+        return None
+    matching.sort(reverse=True)
+    return matching[0][1]
+
+
+def _order_lifecycle(status: str) -> OrderLifecycle:
+    normalized = status.strip().upper().replace(" ", "")
+    if normalized in {"PENDINGSUBMIT", "APIPENDING", "PRESUBMITTED", "SUBMITTED"}:
+        return OrderLifecycle.SUBMITTED
+    if normalized == "FILLED":
+        return OrderLifecycle.FILLED
+    if normalized in {"CANCELLED", "APICANCELLED"}:
+        return OrderLifecycle.CANCELLED
+    if normalized == "INACTIVE":
+        return OrderLifecycle.REJECTED
+    raise IbkrError(f"IBKR returned unsupported order status: {status}")
 
 
 def _parse_option_expiry(value: str) -> date:

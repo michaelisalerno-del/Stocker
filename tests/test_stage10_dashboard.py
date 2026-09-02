@@ -466,6 +466,38 @@ def test_candidates_expose_stage5_and_stage6_values_without_recalculation(tmp_pa
     assert detail["order_plan_id"] == "plan-live-nvda"
 
 
+def test_disabled_run_candidates_stay_in_audit_storage_but_not_operational_views(
+    tmp_path: Path,
+) -> None:
+    service = _seed_authoritative_state(tmp_path)
+    source = service.stage5_store.get("NASDAQ", NOW, 101)
+    assert source is not None
+    service.stage5_store.save(
+        replace(
+            source,
+            run_ids=("US-SH-PAPER",),
+            con_id=202,
+            symbol="AMD",
+        )
+    )
+    service.config = RunsConfig(
+        universes=service.config.universes,
+        runs=tuple(reversed(service.config.runs)),
+    )
+
+    disabled = next(item for item in service.runs() if item["run_id"] == "US-SH-PAPER")
+    explicit = service.candidates(
+        run_id="US-SH-PAPER",
+        session=date(2026, 9, 2),
+    )
+    default = service.candidates(session=date(2026, 9, 2))
+
+    assert disabled["candidate_count"] == 0
+    assert explicit == {"items": [], "total": 0, "limit": 100, "offset": 0}
+    assert default["items"][0]["symbol"] == "NVDA"
+    assert service.stage5_store.get("NASDAQ", NOW, 202) is not None
+
+
 def test_orders_positions_and_trades_preserve_account_environment(tmp_path: Path) -> None:
     service = _seed_authoritative_state(tmp_path)
 
@@ -1012,7 +1044,7 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
         assert "PAPER" in response.text
         assert "LIVE" in response.text
     index = client.get("/").text
-    assert 'src="/static/dashboard.js?v=20260902-risk-step-fix"' in index
+    assert 'src="/static/dashboard.js?v=20260902-active-candidates"' in index
     for label in (
         "Overview",
         "Runs",
@@ -1121,6 +1153,16 @@ def test_candidate_pagination_is_bounded_and_dashboard_has_no_trading_calculator
         "submit_protected_order",
     )
     assert not any(name in source for name in forbidden)
+
+
+def test_candidates_page_only_offers_enabled_runs(tmp_path: Path) -> None:
+    service = _seed_authoritative_state(tmp_path)
+    runs_path, broker_path = _write_control_files(tmp_path)
+    client = TestClient(create_dashboard_app(service, RunControlService(runs_path, broker_path)))
+
+    script = client.get("/static/dashboard.js").text
+
+    assert 'const runs = (await api("/api/runs")).filter((run) => run.enabled);' in script
 
 
 def test_dashboard_failure_is_confined_to_http_request(tmp_path: Path) -> None:

@@ -106,23 +106,26 @@ class DashboardReadService:
                 .astimezone(ZoneInfo(market_definition.timezone if market_definition else "UTC"))
                 .date()
             )
-            _rows, count = self.stage5_store.list_snapshots(
-                run_id=run.run_id,
-                session=selected_session,
-                latest_checkpoint=True,
-                limit=1,
-            )
-            screen = (
-                self.activity_store.get(
-                    market_definition.market_id.value,
-                    run.cap_bucket,
-                    selected_session,
+            count = 0
+            screen = None
+            if run.enabled:
+                _rows, count = self.stage5_store.list_snapshots(
+                    run_id=run.run_id,
+                    session=selected_session,
+                    latest_checkpoint=True,
+                    limit=1,
                 )
-                if self.activity_store is not None
-                and market_definition is not None
-                and run.cap_bucket is not None
-                else None
-            )
+                screen = (
+                    self.activity_store.get(
+                        market_definition.market_id.value,
+                        run.cap_bucket,
+                        selected_session,
+                    )
+                    if self.activity_store is not None
+                    and market_definition is not None
+                    and run.cap_bucket is not None
+                    else None
+                )
             today = self.performance_service.performance(run, PerformancePeriod.TODAY)
             recent = self.performance_service.performance(run, PerformancePeriod.SESSIONS_20)
             result.append(
@@ -313,7 +316,16 @@ class DashboardReadService:
     ) -> dict[str, Any]:
         if not 1 <= limit <= 500:
             raise ValueError("candidate limit must be between 1 and 500")
-        selected_run = run_id or self.config.runs[0].run_id
+        enabled_runs = tuple(run for run in self.config.runs if run.enabled)
+        if run_id is None:
+            if not enabled_runs:
+                return {"items": [], "total": 0, "limit": limit, "offset": offset}
+            selected_run = enabled_runs[0].run_id
+        else:
+            selected = self._run(run_id)
+            if not selected.enabled:
+                return {"items": [], "total": 0, "limit": limit, "offset": offset}
+            selected_run = selected.run_id
         selected_session = session or self.clock().date()
         signal_status = None
         stage5_status = None

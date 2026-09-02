@@ -225,8 +225,9 @@ async function candidatesPage() {
   const params = new URLSearchParams(location.search);
   const signal = params.get("signal");
   if (signal) return candidateDetail(signal);
-  const runs = await api("/api/runs");
-  const selected = params.get("run") || runs[0]?.run_id || "";
+  const runs = (await api("/api/runs")).filter((run) => run.enabled);
+  const requestedRun = params.get("run");
+  const selected = runs.some((run) => run.run_id === requestedRun) ? requestedRun : runs[0]?.run_id || "";
   const session = params.get("session") || new Date().toISOString().slice(0, 10);
   const checkpoint = params.get("checkpoint") || "";
   const status = params.get("status") || "";
@@ -234,7 +235,7 @@ async function candidatesPage() {
   const query = new URLSearchParams({ run_id: selected, session, limit: "100", offset: String(offset) });
   if (checkpoint) query.set("checkpoint", new Date(checkpoint).toISOString());
   if (status) query.set("status", status);
-  const data = await api(`/api/candidates?${query}`);
+  const data = selected ? await api(`/api/candidates?${query}`) : { items: [], total: 0, limit: 100, offset: 0 };
   const columns = [
     { key: "rank", label: "Rank", numeric: true }, { key: "symbol", label: "Symbol" }, { label: "PRE_MOVE_M", numeric: true, render: (row) => number(row.pre_move_m) },
     { label: "Percentile", numeric: true, render: (row) => number(row.cohort_percentile) }, { key: "band", label: "Band" },

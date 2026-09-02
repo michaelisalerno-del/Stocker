@@ -4,6 +4,7 @@ const main = document.querySelector("#main");
 const fmt = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
 let timer;
 let lastOutcome = null;
+let pageHasRendered = false;
 const INTERACTIVE_ROUTES = new Set(["universes", "candidates", "trades", "settings"]);
 
 const RUN_COLUMNS = [
@@ -64,6 +65,21 @@ async function refreshHeader() {
   document.querySelector("#open-positions").textContent = data.open_positions;
   document.querySelector("#last-refresh").textContent = new Date(data.as_of).toLocaleTimeString();
   return data;
+}
+function showRefreshWarning() {
+  let warning = main.querySelector("#refresh-warning");
+  if (!warning) {
+    warning = document.createElement("p");
+    warning.id = "refresh-warning";
+    warning.className = "notice";
+    warning.setAttribute("role", "status");
+    main.prepend(warning);
+  }
+  warning.textContent = "Dashboard update delayed. Showing last known data; retrying automatically.";
+  document.querySelector("#last-refresh").textContent = "RETRYING";
+}
+function clearRefreshWarning() {
+  main.querySelector("#refresh-warning")?.remove();
 }
 
 async function overview(cached) {
@@ -403,8 +419,11 @@ async function render() {
   try {
     const cached = await refreshHeader();
     await ({ overview, runs: runsPage, universes: universesPage, candidates: candidatesPage, orders: ordersPage, positions: positionsPage, trades: tradesPage, system: systemPage, settings: settingsPage })[name](cached);
+    pageHasRendered = true;
+    clearRefreshWarning();
   } catch (error) {
-    main.innerHTML = `${head("Read-only unavailable", "The trading runtime is isolated from this dashboard failure.")}<div class="section error">${esc(error.message)}</div>`;
+    if (pageHasRendered) showRefreshWarning();
+    else main.innerHTML = `${head("Read-only unavailable", "The trading runtime is isolated from this dashboard failure.")}<div class="section error">${esc(error.message)}</div>`;
   }
   scheduleRefresh();
 }
@@ -414,8 +433,10 @@ function scheduleRefresh() {
 }
 async function refreshCurrentPage() {
   if (INTERACTIVE_ROUTES.has(route())) {
-    try { await refreshHeader(); }
-    catch (_) { /* Keep unsaved form state intact during a transient status failure. */ }
+    try {
+      await refreshHeader();
+      clearRefreshWarning();
+    } catch (_) { showRefreshWarning(); }
     scheduleRefresh();
     return;
   }

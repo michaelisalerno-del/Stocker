@@ -212,9 +212,7 @@ def ibkr_data_diagnostic(
     for check in report.checks:
         console.print(f"{check.capability.value}: {check.status.value}")
         console.print(f"  {check.detail}")
-        check_location = "/".join(
-            item for item in (check.symbol, check.exchange) if item
-        )
+        check_location = "/".join(item for item in (check.symbol, check.exchange) if item)
         if check_location:
             console.print(f"  instrument: {check_location}")
         for error in check.errors:
@@ -341,13 +339,10 @@ def ibkr_resources(
                     )
                     for item in selected
                 }
-                physical_con_ids.update(
-                    item.con_id for item in selected if item.con_id is not None
-                )
+                physical_con_ids.update(item.con_id for item in selected if item.con_id is not None)
                 count = len(identities)
                 watchlists.append(
-                    f"{run.run_id}: {count} candidates "
-                    f"({stored.session} {stored.status})"
+                    f"{run.run_id}: {count} candidates ({stored.session} {stored.status})"
                 )
             else:
                 count = len(members)
@@ -400,33 +395,27 @@ def ibkr_resources(
             console.print(f"Unique physical conIds: {len(physical_con_ids)} known")
         else:
             console.print(
-                "Unique physical conIds: unavailable "
-                "(no qualified IDs in persisted watchlists)"
+                "Unique physical conIds: unavailable (no qualified IDs in persisted watchlists)"
             )
         if all_watchlists_available:
             console.print(
-                "Estimated duplicate savings: "
-                f"{configured_memberships - len(physical_identities)}"
+                f"Estimated duplicate savings: {configured_memberships - len(physical_identities)}"
             )
         else:
             console.print("Estimated duplicate savings: unavailable")
-        temporary = sum(
-            item.purpose == "OPTION_PRE_CONTEXT" for item in status.subscriptions
-        )
+        temporary = sum(item.purpose == "OPTION_PRE_CONTEXT" for item in status.subscriptions)
         console.print(f"Temporary Stage 4 subscriptions: {temporary}")
         now = datetime.now(tz=UTC)
         possible_leaks = sum(
             item.purpose == "OPTION_PRE_CONTEXT"
-            and (now - item.created_at).total_seconds()
-            > broker_config.request_timeout_seconds
+            and (now - item.created_at).total_seconds() > broker_config.request_timeout_seconds
             for item in status.subscriptions
         )
         console.print(f"Possible subscription leaks: {possible_leaks}")
         console.print(f"Last resource/pacing error: {status.last_resource_error or 'none'}")
         realistic = next(
-            item for item in simulate_capacity(
-                market_data_line_budget=status.market_data_line_budget
-            )
+            item
+            for item in simulate_capacity(market_data_line_budget=status.market_data_line_budget)
             if item.name == "REALISTIC_4_RUN"
         )
         console.print(
@@ -537,9 +526,7 @@ def stage5_diagnostic(
     exchange: Annotated[str, typer.Option("--exchange")] = "SMART",
     primary_exchange: Annotated[str | None, typer.Option("--primary-exchange")] = None,
     currency: Annotated[str, typer.Option("--currency")] = "USD",
-    cache_path: Annotated[Path, typer.Option("--cache")] = Path(
-        ".stocker/ibkr-stage5.sqlite3"
-    ),
+    cache_path: Annotated[Path, typer.Option("--cache")] = Path(".stocker/ibkr-stage5.sqlite3"),
 ) -> None:
     """Run the non-trading Stage 5 diagnostic for a small PAPER universe."""
 
@@ -570,17 +557,13 @@ def stage5_diagnostic(
         signal_timestamp = datetime.fromisoformat(t0)
         if signal_timestamp.tzinfo is None or signal_timestamp.utcoffset() is None:
             raise ValueError("--t0 must include a UTC offset")
-        selected_symbols = tuple(
-            dict.fromkeys(symbol.strip().upper() for symbol in symbols or ())
-        )
+        selected_symbols = tuple(dict.fromkeys(symbol.strip().upper() for symbol in symbols or ()))
         if not selected_symbols or any(not symbol for symbol in selected_symbols):
             raise ValueError("at least one non-empty --symbol is required")
     except (OSError, ValueError) as exc:
         raise typer.BadParameter(f"Invalid Stage 5 configuration: {exc}") from exc
 
-    async def diagnose() -> tuple[
-        tuple[Stage5FeatureSnapshot, ...], tuple[tuple[str, str], ...]
-    ]:
+    async def diagnose() -> tuple[tuple[Stage5FeatureSnapshot, ...], tuple[tuple[str, str], ...]]:
         connection = IbkrConnection(broker_config)
         try:
             await connection.connect()
@@ -590,9 +573,7 @@ def stage5_diagnostic(
                 history_cache,
                 PriorSessionContextStore(cache_path),
             )
-            current_service = Stage5CurrentDataService(
-                connection, history_cache, context_service
-            )
+            current_service = Stage5CurrentDataService(connection, history_cache, context_service)
             requests: list[Stage5QualifiedRequest] = []
             failures: list[tuple[str, str]] = []
             for symbol in selected_symbols:
@@ -1608,9 +1589,9 @@ def research_failure_anatomy(
 @research_app.command("intraday-session-integrity")
 def research_intraday_session_integrity(
     data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
-    output_dir: Annotated[
-        Path, typer.Option("--output-dir")
-    ] = Path("data/reports/research/stage3_8_intraday_session_integrity"),
+    output_dir: Annotated[Path, typer.Option("--output-dir")] = Path(
+        "data/reports/research/stage3_8_intraday_session_integrity"
+    ),
     stage3_7_summary: Annotated[
         Path, typer.Option("--stage3-7-summary", exists=True, file_okay=True)
     ] = Path("data/reports/research/stage3_7_intraday_5m_session_flat_smoke/summary.json"),
@@ -1663,12 +1644,12 @@ def research_intraday_session_integrity(
 @research_app.command("intraday-feature-audit")
 def research_intraday_feature_audit(
     data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
-    universe: Annotated[
-        Path, typer.Option("--universe", exists=True, file_okay=True)
-    ] = Path("data/universes/research_ready/us_liquid_25_5m_intraday.json"),
-    output_dir: Annotated[
-        Path, typer.Option("--output-dir")
-    ] = Path("data/reports/research/stage4_1_intraday_feature_audit"),
+    universe: Annotated[Path, typer.Option("--universe", exists=True, file_okay=True)] = Path(
+        "data/universes/research_ready/us_liquid_25_5m_intraday.json"
+    ),
+    output_dir: Annotated[Path, typer.Option("--output-dir")] = Path(
+        "data/reports/research/stage4_1_intraday_feature_audit"
+    ),
     source: Annotated[str, typer.Option("--source")] = "eodhd",
     instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
     timeframe: Annotated[str, typer.Option("--timeframe")] = "5m",
@@ -1997,9 +1978,7 @@ def research_frozen_template_technique(
             "state_event_report_dir": str(result.state_event_report_dir),
             "event_rows_csv_path": str(result.event_rows_csv_path),
             "template_transfer_report_dir": str(result.template_transfer_report_dir),
-            "template_transfer_summary_json_path": str(
-                result.template_transfer_summary_json_path
-            ),
+            "template_transfer_summary_json_path": str(result.template_transfer_summary_json_path),
             "decision_json_path": str(result.decision_json_path),
             "decision": result.decision,
         }
@@ -2039,9 +2018,7 @@ def research_event_failure_cutter(
         run_event_failure_cutter_lab,
     )
 
-    parsed_horizons = tuple(
-        int(part.strip()) for part in horizons.split(",") if part.strip()
-    )
+    parsed_horizons = tuple(int(part.strip()) for part in horizons.split(",") if part.strip())
     if not parsed_horizons:
         raise typer.BadParameter("Supply at least one horizon with --horizons.")
     result = run_event_failure_cutter_lab(
@@ -2069,9 +2046,7 @@ def research_event_failure_cutter(
             "decision_json_path": str(result.decision_json_path),
             "filter_oos_results_csv_path": str(result.filter_oos_results_csv_path),
             "random_filter_baseline_csv_path": str(result.random_filter_baseline_csv_path),
-            "blocker_quality_summary_csv_path": str(
-                result.blocker_quality_summary_csv_path
-            ),
+            "blocker_quality_summary_csv_path": str(result.blocker_quality_summary_csv_path),
             "decision": result.decision,
             "best_filter_count": result.best_filter_count,
         }
@@ -2098,9 +2073,7 @@ def research_state_event_directional_interpretation(
         run_state_directional_interpretation_report,
     )
 
-    parsed_horizons = tuple(
-        int(part.strip()) for part in horizons.split(",") if part.strip()
-    )
+    parsed_horizons = tuple(int(part.strip()) for part in horizons.split(",") if part.strip())
     if not parsed_horizons:
         raise typer.BadParameter("Supply at least one horizon with --horizons.")
     result = run_state_directional_interpretation_report(
@@ -2120,9 +2093,7 @@ def research_state_event_directional_interpretation(
             "input_dir": str(result.input_dir),
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
-            "directional_state_summary_csv_path": str(
-                result.directional_state_summary_csv_path
-            ),
+            "directional_state_summary_csv_path": str(result.directional_state_summary_csv_path),
             "blocker_quality_summary_csv_path": str(result.blocker_quality_summary_csv_path),
             "short_candidate_summary_csv_path": str(result.short_candidate_summary_csv_path),
             "no_trade_quality_summary_csv_path": str(result.no_trade_quality_summary_csv_path),
@@ -2164,9 +2135,7 @@ def research_role_aware_event_cutter(
         run_role_aware_event_cutter_lab,
     )
 
-    parsed_horizons = tuple(
-        int(part.strip()) for part in horizons.split(",") if part.strip()
-    )
+    parsed_horizons = tuple(int(part.strip()) for part in horizons.split(",") if part.strip())
     if not parsed_horizons:
         raise typer.BadParameter("Supply at least one horizon with --horizons.")
     result = run_role_aware_event_cutter_lab(
@@ -2252,9 +2221,7 @@ def research_personality_discovery(
         run_personality_discovery_lab,
     )
 
-    parsed_horizons = tuple(
-        int(part.strip()) for part in horizons.split(",") if part.strip()
-    )
+    parsed_horizons = tuple(int(part.strip()) for part in horizons.split(",") if part.strip())
     if not parsed_horizons:
         raise typer.BadParameter("Supply at least one horizon with --horizons.")
     result = run_personality_discovery_lab(
@@ -3183,9 +3150,7 @@ def research_personality_expression_lab(
             "summary_json_path": str(result.summary_json_path),
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
-            "expression_candidate_sweep_csv_path": str(
-                result.expression_candidate_sweep_csv_path
-            ),
+            "expression_candidate_sweep_csv_path": str(result.expression_candidate_sweep_csv_path),
             "selected_expressions_csv_path": str(result.selected_expressions_csv_path),
             "test_trades_csv_path": str(result.test_trades_csv_path),
             "decision": result.decision,
@@ -3254,9 +3219,7 @@ def research_state_lifecycle_context(
         run_state_lifecycle_context_lab,
     )
 
-    parsed_lookbacks = tuple(
-        int(part.strip()) for part in lookback_bars.split(",") if part.strip()
-    )
+    parsed_lookbacks = tuple(int(part.strip()) for part in lookback_bars.split(",") if part.strip())
     if not parsed_lookbacks:
         raise typer.BadParameter("Supply at least one lookback with --lookback-bars.")
     parsed_calendar = market_calendar.strip()
@@ -3292,9 +3255,7 @@ def research_state_lifecycle_context(
             "decision_json_path": str(result.decision_json_path),
             "trade_context_features_csv_path": str(result.trade_context_features_csv_path),
             "base_summary_csv_path": str(result.base_summary_csv_path),
-            "prior_regime_numeric_scan_csv_path": str(
-                result.prior_regime_numeric_scan_csv_path
-            ),
+            "prior_regime_numeric_scan_csv_path": str(result.prior_regime_numeric_scan_csv_path),
             "prior_regime_categorical_scan_csv_path": str(
                 result.prior_regime_categorical_scan_csv_path
             ),
@@ -3444,9 +3405,7 @@ def research_conditional_context_caveat(
             "summary_json_path": str(result.summary_json_path),
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
-            "conditional_caveat_results_csv_path": str(
-                result.conditional_caveat_results_csv_path
-            ),
+            "conditional_caveat_results_csv_path": str(result.conditional_caveat_results_csv_path),
             "selected_conditional_caveats_csv_path": str(
                 result.selected_conditional_caveats_csv_path
             ),
@@ -3587,13 +3546,9 @@ def research_personality_context_admission(
             "summary_json_path": str(result.summary_json_path),
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
-            "admission_rule_results_csv_path": str(
-                result.admission_rule_results_csv_path
-            ),
+            "admission_rule_results_csv_path": str(result.admission_rule_results_csv_path),
             "selected_admissions_csv_path": str(result.selected_admissions_csv_path),
-            "blocked_candidate_trades_csv_path": str(
-                result.blocked_candidate_trades_csv_path
-            ),
+            "blocked_candidate_trades_csv_path": str(result.blocked_candidate_trades_csv_path),
             "trade_admission_flags_csv_path": str(result.trade_admission_flags_csv_path),
             "decision": result.decision,
             "selected_admission_count": result.selected_admission_count,
@@ -3834,12 +3789,8 @@ def research_template_discovery_system(
             "summary_json_path": str(result.summary_json_path),
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
-            "behavior_loop_scorecard_csv_path": str(
-                result.behavior_loop_scorecard_csv_path
-            ),
-            "loop_regime_occupancy_csv_path": str(
-                result.loop_regime_occupancy_csv_path
-            ),
+            "behavior_loop_scorecard_csv_path": str(result.behavior_loop_scorecard_csv_path),
+            "loop_regime_occupancy_csv_path": str(result.loop_regime_occupancy_csv_path),
             "loop_mixed_regime_occupancy_csv_path": str(
                 result.loop_mixed_regime_occupancy_csv_path
             ),
@@ -3849,15 +3800,9 @@ def research_template_discovery_system(
             "c0_parent_readout_csv_path": str(result.c0_parent_readout_csv_path),
             "b0_state_summary_csv_path": str(result.b0_state_summary_csv_path),
             "b0_route_detail_csv_path": str(result.b0_route_detail_csv_path),
-            "loop_context_refinement_csv_path": str(
-                result.loop_context_refinement_csv_path
-            ),
-            "loop_context_admissions_csv_path": str(
-                result.loop_context_admissions_csv_path
-            ),
-            "loop_context_blockers_csv_path": str(
-                result.loop_context_blockers_csv_path
-            ),
+            "loop_context_refinement_csv_path": str(result.loop_context_refinement_csv_path),
+            "loop_context_admissions_csv_path": str(result.loop_context_admissions_csv_path),
+            "loop_context_blockers_csv_path": str(result.loop_context_blockers_csv_path),
             "atom_scorecard_csv_path": str(result.atom_scorecard_csv_path),
             "container_scorecard_csv_path": str(result.container_scorecard_csv_path),
             "loop_routing_detail_csv_path": str(result.loop_routing_detail_csv_path),
@@ -3891,8 +3836,7 @@ def research_template_discovery_system(
                 result.output_dir / "frozen_template_transfer_all_rows.csv"
             ),
             "frozen_template_transfer_exact_dedupe_trades_csv_path": str(
-                result.output_dir
-                / "frozen_template_transfer_exact_dedupe_trades.csv"
+                result.output_dir / "frozen_template_transfer_exact_dedupe_trades.csv"
             ),
             "frozen_template_transfer_template_audit_csv_path": str(
                 result.output_dir / "frozen_template_transfer_template_audit.csv"
@@ -4007,8 +3951,7 @@ def research_personality_context_workflow(
 
     result = run_personality_context_workflow_lab(
         report_pairs=tuple(
-            ReportPair(label, baseline, candidate)
-            for label, baseline, candidate in parsed_pairs
+            ReportPair(label, baseline, candidate) for label, baseline, candidate in parsed_pairs
         ),
         output_dir=output_dir,
         config=PersonalityContextWorkflowConfig(
@@ -4038,17 +3981,13 @@ def research_personality_context_workflow(
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
             "personality_ranking_csv_path": str(result.personality_ranking_csv_path),
-            "selected_no_prior_trades_csv_path": str(
-                result.selected_no_prior_trades_csv_path
-            ),
+            "selected_no_prior_trades_csv_path": str(result.selected_no_prior_trades_csv_path),
             "selected_candidate_only_trades_csv_path": str(
                 result.selected_candidate_only_trades_csv_path
             ),
             "categorical_commonality_csv_path": str(result.categorical_commonality_csv_path),
             "numeric_commonality_csv_path": str(result.numeric_commonality_csv_path),
-            "no_prior_defensive_screens_csv_path": str(
-                result.no_prior_defensive_screens_csv_path
-            ),
+            "no_prior_defensive_screens_csv_path": str(result.no_prior_defensive_screens_csv_path),
             "yaml_draft_path": str(result.yaml_draft_path),
             "selected_personality": result.selected_personality,
             "decision": result.decision,
@@ -4171,9 +4110,7 @@ def research_personality_context_rule_discovery(
             max_negative_windows=max_negative_windows,
             max_single_window_share=max_single_window_share,
             max_atomic_rules_per_personality=max_atomic_rules_per_personality,
-            max_union_base_rules_per_personality=(
-                max_union_base_rules_per_personality
-            ),
+            max_union_base_rules_per_personality=(max_union_base_rules_per_personality),
             max_union_rules_per_personality=max_union_rules_per_personality,
             random_iterations=random_iterations,
             random_seed=random_seed,
@@ -4303,14 +4240,10 @@ def research_shadow_candidate_trigger_audit(
             "summary_json_path": str(result.summary_json_path),
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
-            "shadow_candidate_features_csv_path": str(
-                result.shadow_candidate_features_csv_path
-            ),
+            "shadow_candidate_features_csv_path": str(result.shadow_candidate_features_csv_path),
             "monthly_policy_results_csv_path": str(result.monthly_policy_results_csv_path),
             "policy_summary_csv_path": str(result.policy_summary_csv_path),
-            "trade_shadow_trigger_flags_csv_path": str(
-                result.trade_shadow_trigger_flags_csv_path
-            ),
+            "trade_shadow_trigger_flags_csv_path": str(result.trade_shadow_trigger_flags_csv_path),
             "decision": result.decision,
         }
     )
@@ -4410,9 +4343,7 @@ def research_pre_registered_edge_proof(
             "registration_json_path": str(result.registration_json_path),
             "frozen_candidates_csv_path": str(result.frozen_candidates_csv_path),
             "frozen_caveats_csv_path": str(result.frozen_caveats_csv_path),
-            "evaluation_monthly_summary_csv_path": str(
-                result.evaluation_monthly_summary_csv_path
-            ),
+            "evaluation_monthly_summary_csv_path": str(result.evaluation_monthly_summary_csv_path),
             "evaluation_trades_csv_path": str(result.evaluation_trades_csv_path),
             "decision": result.decision,
             "trade_count": result.trade_count,
@@ -4614,9 +4545,7 @@ def research_walk_forward_staged_mixed_regime_caveat_exit(
         run_staged_mixed_regime_caveat_exit_lab,
     )
 
-    parsed_warmup_months = tuple(
-        part.strip() for part in warmup_months.split(",") if part.strip()
-    )
+    parsed_warmup_months = tuple(part.strip() for part in warmup_months.split(",") if part.strip())
     parsed_months = tuple(part.strip() for part in replay_months.split(",") if part.strip())
     parsed_combined_fields = tuple(
         part.strip() for part in combined_regime_fields.split(",") if part.strip()
@@ -4671,13 +4600,9 @@ def research_walk_forward_staged_mixed_regime_caveat_exit(
             min_personality_train_trades=min_personality_train_trades,
             min_personality_train_total_net_r=min_personality_train_total_net_r,
             min_personality_train_win_rate=min_personality_train_win_rate,
-            enable_prior_replay_personality_acceptance=(
-                enable_prior_replay_personality_acceptance
-            ),
+            enable_prior_replay_personality_acceptance=(enable_prior_replay_personality_acceptance),
             min_prior_replay_personality_trades=min_prior_replay_personality_trades,
-            min_prior_replay_personality_total_net_r=(
-                min_prior_replay_personality_total_net_r
-            ),
+            min_prior_replay_personality_total_net_r=(min_prior_replay_personality_total_net_r),
             min_prior_replay_personality_win_rate=min_prior_replay_personality_win_rate,
             min_staged_caveat_train_trades=min_staged_caveat_train_trades,
             min_staged_caveat_flagged_trades=min_staged_caveat_flagged_trades,
@@ -5015,9 +4940,7 @@ def stage7_paper_diagnostic(
     symbol: Annotated[str, typer.Option("--symbol", help="Stock symbol to qualify.")],
     entry_reference: Annotated[float, typer.Option("--entry-reference", min=0.000001)],
     m_price: Annotated[float, typer.Option("--m-price", min=0.000001)],
-    risk_per_trade: Annotated[
-        float, typer.Option("--risk-per-trade", min=0.000000001, max=1.0)
-    ],
+    risk_per_trade: Annotated[float, typer.Option("--risk-per-trade", min=0.000000001, max=1.0)],
     confirm_paper_order: Annotated[
         bool,
         typer.Option(
@@ -5208,8 +5131,7 @@ def stage9_readiness(
             console.print(f"Connected: {'yes' if report.connected else 'no'}")
             console.print(f"Account: {report.account or 'unavailable'}")
             console.print(
-                "Expected account match: "
-                f"{'yes' if report.expected_account_match else 'no'}"
+                f"Expected account match: {'yes' if report.expected_account_match else 'no'}"
             )
             console.print(
                 f"Account state available: {'yes' if report.account_state_available else 'no'}"
@@ -5220,8 +5142,7 @@ def stage9_readiness(
             console.print(f"Open orders: {open_orders}")
             console.print(f"Positions: {positions}")
             console.print(
-                f"{report.environment.value} readiness: "
-                f"{'READY' if report.ready else 'NOT_READY'}"
+                f"{report.environment.value} readiness: {'READY' if report.ready else 'NOT_READY'}"
             )
             console.print("No order was transmitted by this readiness diagnostic.")
             if not report.ready:
@@ -5319,6 +5240,7 @@ def stage10_run(
             database_path=database,
             runtime=runtime,
         )
+
         async def serve_dashboard() -> None:
             while True:
                 server = uvicorn.Server(
@@ -5329,22 +5251,16 @@ def stage10_run(
                 except SystemExit as exc:
                     if exc.code in (None, 0):
                         return
-                    console.print(
-                        f"Dashboard unavailable; trading runtime continues: {exc}"
-                    )
+                    console.print(f"Dashboard unavailable; trading runtime continues: {exc}")
                     await asyncio.sleep(1.0)
                     continue
                 except Exception as exc:
-                    console.print(
-                        f"Dashboard unavailable; trading runtime continues: {exc}"
-                    )
+                    console.print(f"Dashboard unavailable; trading runtime continues: {exc}")
                     await asyncio.sleep(1.0)
                     continue
                 return
 
-        runtime_task = asyncio.create_task(
-            runtime.run_forever(poll_interval_seconds=poll_seconds)
-        )
+        runtime_task = asyncio.create_task(runtime.run_forever(poll_interval_seconds=poll_seconds))
         server_task = asyncio.create_task(serve_dashboard())
         try:
             done, _pending = await asyncio.wait(

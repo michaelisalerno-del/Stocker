@@ -493,9 +493,7 @@ def test_timeout_and_exception_release_only_streams_that_were_opened() -> None:
     failing_client.raise_for.add(202)
     failing_connection = connected_stream_boundary(failing_client)
     with pytest.raises(IbkrError, match="market data request failed"):
-        asyncio.run(
-            failing_connection.option_snapshots((option(101), option(202, right="P")))
-        )
+        asyncio.run(failing_connection.option_snapshots((option(101), option(202, right="P"))))
     assert failing_connection.resource_status().active_market_data_lines == 0  # type: ignore[attr-defined]
     assert failing_client.requested == [101]
     assert failing_client.cancelled == [101]

@@ -1537,9 +1537,7 @@ def test_candidate_capacity_exhaustion_preserves_known_position_and_protection(
         )
     )
     asyncio.run(first.stop())
-    position = BrokerPosition(
-        "DU123456", plan.con_id, plan.symbol, -plan.quantity, 99.5
-    )
+    position = BrokerPosition("DU123456", plan.con_id, plan.symbol, -plan.quantity, 99.5)
     protective_orders = (
         _open_order(plan, 102, OrderRole.STOP),
         _open_order(plan, 103, OrderRole.TARGET),

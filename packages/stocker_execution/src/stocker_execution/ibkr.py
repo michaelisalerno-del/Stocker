@@ -413,9 +413,7 @@ class IbkrConnection:
         self._execution_enabled = execution_enabled
         self._connection_epoch = 0
         self._scanner_capabilities: ScannerCapabilities | None = None
-        self._qualified_stock_cache: dict[
-            tuple[str, str, str, str], QualifiedInstrument
-        ] = {}
+        self._qualified_stock_cache: dict[tuple[str, str, str, str], QualifiedInstrument] = {}
         self._option_chain_cache: dict[int, tuple[OptionChainDefinition, ...]] = {}
         self._active_market_data: dict[
             tuple[int, str, str, str, int], _ActiveMarketDataSubscription
@@ -461,14 +459,10 @@ class IbkrConnection:
             market_data_line_budget=self.config.market_data_line_budget,
             ib_async_max_requests=(int(max_requests) if isinstance(max_requests, int) else None),
             ib_async_requests_interval=(
-                float(requests_interval)
-                if isinstance(requests_interval, (int, float))
-                else None
+                float(requests_interval) if isinstance(requests_interval, (int, float)) else None
             ),
             active_market_data_lines=len(subscriptions),
-            active_underlying_lines=sum(
-                item.security_type != "OPT" for item in subscriptions
-            ),
+            active_underlying_lines=sum(item.security_type != "OPT" for item in subscriptions),
             active_option_lines=sum(item.security_type == "OPT" for item in subscriptions),
             subscriptions=subscriptions,
             market_data_requests_today=self._market_data_requests_today,
@@ -542,8 +536,10 @@ class IbkrConnection:
         *_extra: object,
     ) -> None:
         normalized = str(message).lower()
-        pacing = code == 100 or "pacing violation" in normalized or (
-            code in {162, 420} and "pacing" in normalized
+        pacing = (
+            code == 100
+            or "pacing violation" in normalized
+            or (code in {162, 420} and "pacing" in normalized)
         )
         capacity = code == 101 or any(
             phrase in normalized

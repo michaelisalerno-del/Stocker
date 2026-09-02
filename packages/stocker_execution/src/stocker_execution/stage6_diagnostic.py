@@ -12,8 +12,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from stocker_execution.session_hard_structure_d import (
     CohortOpportunity,
     EntryBar,
+    SessionHardAssessment,
     SessionHardStructureDStrategy,
     StrategyContext,
+    StrategyOpportunityKey,
     StrategySignal,
 )
 from stocker_execution.stage5 import Stage5FeatureSnapshot, Stage5Status
@@ -70,8 +72,13 @@ def evaluate_strategy_fixture(path: Path) -> tuple[StrategySignal, ...]:
         for row in fixture.cohort_history
     )
     snapshots = tuple(_snapshot(fixture.run_id, row) for row in fixture.candidates)
-    scores = {row.con_id: row.session_hard_score for row in fixture.candidates}
-    checkpoints = {row.con_id: row.session_hard_checkpoint for row in fixture.candidates}
+    session_hard = {
+        StrategyOpportunityKey(row.con_id, row.session, row.t0): SessionHardAssessment(
+            row.session_hard_score,
+            row.session_hard_checkpoint,
+        )
+        for row in fixture.candidates
+    }
     entry_bars = {
         row.con_id: tuple(
             EntryBar(bar.timestamp, bar.open, bar.high, bar.low) for bar in row.entry_bars
@@ -85,8 +92,7 @@ def evaluate_strategy_fixture(path: Path) -> tuple[StrategySignal, ...]:
         snapshots,
         StrategyContext(
             run_id=fixture.run_id,
-            session_hard_scores=scores,
-            session_hard_checkpoints=checkpoints,
+            session_hard=session_hard,
             cohort_history=history,
         ),
     )

@@ -294,20 +294,21 @@ Session HARD is the frozen Model B movement score (`1 - quiet_probability`) over
 causal price/session-volume features and checkpoint one-hot, using completed native five-minute
 bars only through checkpoint minus one. Checkpoints are `6, 8, ..., 34`; `P0` is the next bar open.
 The exact frozen standardisation, coefficients, intercept, and inclusive
-`score >= 0.999361477` cutoff live beside the strategy. Prepared score inputs belong to the
-strategy context; the strategy does not fetch history itself.
+`score >= 0.999361477` cutoff live beside the strategy. Prepared score/checkpoint assessments are
+keyed by `conId + session + T0` in the strategy context; the strategy does not fetch history itself.
 
 Structure D sets `upper = P0 + 0.20M` and `lower = P0 - 0.20M`, then inspects the first five
-one-minute bars from T0 in time order. An opening gap through a level enters at that open. Otherwise
-a single lower-level touch establishes DOWN and enters at the level; an upper first touch rejects
-the candidate, and a bar touching both levels is ambiguous and rejected. A non-gap touch becomes
+one-minute bars from T0 in time order. A touch is interpreted only when the complete causal minute
+prefix through that bar is present. An opening gap through a level enters at that open. Otherwise a
+single lower-level touch establishes DOWN and enters at the level; an upper first touch rejects the
+candidate, and a bar touching both levels is ambiguous and rejected. A non-gap touch becomes
 actionable after that one-minute bar completes. DOWN is therefore a recovered first-touch state,
 not the sign of PRE or a generic `price < P0` test.
 
-Simultaneous entry candidates are ordered by Session HARD score descending, stock ascending, then
-the frozen `stock|session|checkpoint` row identity, with at most five Stage 6 intentions. This is
-strategy candidate capacity only. It does not model active account positions or available broker
-slots.
+Once every eligible candidate has a causal observation for the simultaneous timestamp, candidates
+within the same run are ordered by Session HARD score descending, stock ascending, then the frozen
+`stock|session|checkpoint` row identity, with at most five Stage 6 intentions. This is strategy
+candidate capacity only. It does not model active account positions or available broker slots.
 
 The intention records run, `conId`, symbol, session/T0, feature version, qualification and cohort
 details, score/checkpoint, direction/side, candidate rank, `P0`, `M_price`, entry level/reference,

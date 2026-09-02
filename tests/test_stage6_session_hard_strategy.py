@@ -11,9 +11,11 @@ from stocker_execution.session_hard_structure_d import (
     CohortOpportunity,
     EntryBar,
     PreMoveBand,
+    SessionHardAssessment,
     SessionHardStructureDStrategy,
     SignalStatus,
     StrategyContext,
+    StrategyOpportunityKey,
     calculate_cohort_percentile,
     calculate_session_hard_score,
     classify_pre_move_band,
@@ -48,6 +50,29 @@ def ready_snapshot(*, pre_move_m: float, con_id: int = 101) -> Stage5FeatureSnap
         raw_pre_move_price=pre_move_m,
         pre_move_m=pre_move_m,
         calculation_version="PRE_MOVE_M_V1",
+    )
+
+
+def strategy_context(
+    feature_rows: tuple[Stage5FeatureSnapshot, ...],
+    scores: dict[int, float],
+    *,
+    run_id: str = "RUN_A",
+    cohort_history: tuple[CohortOpportunity, ...] = (),
+    checkpoints: dict[int, int] | None = None,
+) -> StrategyContext:
+    checkpoint_by_con_id = checkpoints or {}
+    return StrategyContext(
+        run_id=run_id,
+        session_hard={
+            StrategyOpportunityKey(row.con_id, row.session, row.t0): SessionHardAssessment(
+                score=scores[row.con_id],
+                checkpoint=checkpoint_by_con_id.get(row.con_id, 6),
+            )
+            for row in feature_rows
+            if row.con_id is not None and row.con_id in scores
+        },
+        cohort_history=cohort_history,
     )
 
 
@@ -139,10 +164,7 @@ def test_exact_pre_move_threshold_is_not_qualified() -> None:
 
     signals = strategy.evaluate(
         (snapshot,),
-        StrategyContext(
-            run_id="RUN_A",
-            session_hard_scores={101: SESSION_HARD_THRESHOLD},
-        ),
+        strategy_context((snapshot,), {101: SESSION_HARD_THRESHOLD}),
     )
 
     assert len(signals) == 1
@@ -165,9 +187,9 @@ def test_known_mid_band_is_vetoed_from_strategy_entry() -> None:
 
     signal = SessionHardStructureDStrategy().evaluate(
         (snapshot,),
-        StrategyContext(
-            run_id="RUN_A",
-            session_hard_scores={101: SESSION_HARD_THRESHOLD},
+        strategy_context(
+            (snapshot,),
+            {101: SESSION_HARD_THRESHOLD},
             cohort_history=history,
         ),
     )[0]
@@ -194,9 +216,9 @@ def test_frozen_glw_down_first_touch_emits_short_intention_at_level() -> None:
     strategy = SessionHardStructureDStrategy()
     waiting = strategy.evaluate(
         (snapshot,),
-        StrategyContext(
-            run_id="RUN_A",
-            session_hard_scores={202: 0.999976342006068},
+        strategy_context(
+            (snapshot,),
+            {202: 0.999976342006068},
             cohort_history=history,
         ),
     )[0]
@@ -238,7 +260,7 @@ def test_simultaneous_candidates_rank_by_session_hard_score_and_cap_at_five() ->
     scores = {300 + index: 0.9994 + index / 100_000 for index in range(7)}
     strategy.evaluate(
         snapshots,
-        StrategyContext(run_id="RUN_A", session_hard_scores=scores),
+        strategy_context(snapshots, scores),
     )
     bars = {
         300 + index: (
@@ -269,6 +291,90 @@ def test_simultaneous_candidates_rank_by_session_hard_score_and_cap_at_five() ->
     ]
 
 
+def test_split_simultaneous_observations_wait_then_apply_one_global_cap() -> None:
+    snapshots = tuple(
+        replace(
+            ready_snapshot(pre_move_m=0.8, con_id=700 + index),
+            symbol=chr(ord("A") + index),
+        )
+        for index in range(7)
+    )
+    scores = {700 + index: 0.9994 + index / 100_000 for index in range(7)}
+    bars = {
+        snapshot.con_id: (EntryBar(snapshot.t0, 100.0, 100.0, 99.0),)
+        for snapshot in snapshots
+        if snapshot.con_id is not None
+    }
+    strategy = SessionHardStructureDStrategy()
+    strategy.evaluate(snapshots, strategy_context(snapshots, scores))
+
+    first = strategy.observe_entry_bars(dict(tuple(bars.items())[:3]))
+    second = strategy.observe_entry_bars(dict(tuple(bars.items())[3:]))
+
+    assert not any(signal.selected for signal in first)
+    assert sum(signal.selected for signal in second) == 5
+    selected = [signal for signal in strategy.signals if signal.selected]
+    assert [(signal.symbol, signal.candidate_rank) for signal in selected] == [
+        ("C", 5),
+        ("D", 4),
+        ("E", 3),
+        ("F", 2),
+        ("G", 1),
+    ]
+
+
+def test_candidate_capacity_is_independent_for_distinct_runs() -> None:
+    run_a = tuple(
+        replace(
+            ready_snapshot(pre_move_m=0.8, con_id=800 + index),
+            run_ids=("RUN_A",),
+            symbol=f"A{index}",
+        )
+        for index in range(6)
+    )
+    run_b = tuple(
+        replace(
+            ready_snapshot(pre_move_m=0.8, con_id=900 + index),
+            run_ids=("RUN_B",),
+            symbol=f"B{index}",
+        )
+        for index in range(6)
+    )
+    strategy = SessionHardStructureDStrategy()
+    strategy.evaluate(
+        run_a,
+        strategy_context(run_a, {800 + index: 0.9995 + index / 100_000 for index in range(6)}),
+    )
+    strategy.evaluate(
+        run_b,
+        strategy_context(
+            run_b,
+            {900 + index: 0.9995 + index / 100_000 for index in range(6)},
+            run_id="RUN_B",
+        ),
+    )
+    all_snapshots = (*run_a, *run_b)
+
+    strategy.observe_entry_bars(
+        {
+            snapshot.con_id: (EntryBar(snapshot.t0, 100.0, 100.0, 99.0),)
+            for snapshot in all_snapshots
+            if snapshot.con_id is not None
+        }
+    )
+
+    for run_id in ("RUN_A", "RUN_B"):
+        run_signals = [signal for signal in strategy.signals if signal.run_id == run_id]
+        assert sum(signal.selected for signal in run_signals) == 5
+        assert sorted(signal.candidate_rank for signal in run_signals if signal.selected) == [
+            1,
+            2,
+            3,
+            4,
+            5,
+        ]
+
+
 def test_frozen_broad2025_competition_reproduces_top_session_hard_five() -> None:
     # Frozen 2025-02-20 15:00 UTC group from enriched_context_ledger.csv.
     rows = (
@@ -294,12 +400,9 @@ def test_frozen_broad2025_competition_reproduces_top_session_hard_five() -> None
     strategy = SessionHardStructureDStrategy()
     strategy.evaluate(
         snapshots,
-        StrategyContext(
-            run_id="RUN_A",
-            session_hard_scores={
-                600 + index: score for index, (_, _, score, _, _) in enumerate(rows)
-            },
-            session_hard_checkpoints={600 + index: 6 for index in range(len(rows))},
+        strategy_context(
+            snapshots,
+            {600 + index: score for index, (_, _, score, _, _) in enumerate(rows)},
         ),
     )
 
@@ -349,9 +452,9 @@ def test_mid_veto_down_touch_still_enters_future_percentile_cohort() -> None:
     snapshot = ready_snapshot(pre_move_m=1.0)
     signal = strategy.evaluate(
         (snapshot,),
-        StrategyContext(
-            run_id="RUN_A",
-            session_hard_scores={101: SESSION_HARD_THRESHOLD},
+        strategy_context(
+            (snapshot,),
+            {101: SESSION_HARD_THRESHOLD},
             cohort_history=seed,
         ),
     )[0]
@@ -424,11 +527,12 @@ def test_cohort_uses_same_run_prior_twenty_distinct_sessions_only() -> None:
         )
     )
 
+    snapshot = ready_snapshot(pre_move_m=1.0)
     signal = SessionHardStructureDStrategy().evaluate(
-        (ready_snapshot(pre_move_m=1.0),),
-        StrategyContext(
-            run_id="RUN_A",
-            session_hard_scores={101: SESSION_HARD_THRESHOLD},
+        (snapshot,),
+        strategy_context(
+            (snapshot,),
+            {101: SESSION_HARD_THRESHOLD},
             cohort_history=tuple(history),
         ),
     )[0]
@@ -445,9 +549,9 @@ def test_session_hard_threshold_is_inclusive_but_lower_score_fails() -> None:
 
     signals = SessionHardStructureDStrategy().evaluate(
         snapshots,
-        StrategyContext(
-            run_id="RUN_A",
-            session_hard_scores={
+        strategy_context(
+            snapshots,
+            {
                 401: SESSION_HARD_THRESHOLD,
                 402: SESSION_HARD_THRESHOLD - 1e-12,
             },
@@ -457,6 +561,55 @@ def test_session_hard_threshold_is_inclusive_but_lower_score_fails() -> None:
     assert signals[0].status is SignalStatus.WAITING_FOR_ENTRY
     assert signals[1].status is SignalStatus.NOT_QUALIFIED
     assert signals[1].reason == "SESSION_HARD"
+
+
+def test_session_hard_assessment_is_keyed_by_con_id_session_and_t0() -> None:
+    first = ready_snapshot(pre_move_m=0.8, con_id=450)
+    second = replace(first, t0=first.t0 + timedelta(minutes=10))
+    context = StrategyContext(
+        run_id="RUN_A",
+        session_hard={
+            StrategyOpportunityKey(first.con_id, first.session, first.t0): SessionHardAssessment(
+                SESSION_HARD_THRESHOLD,
+                6,
+            ),
+            StrategyOpportunityKey(second.con_id, second.session, second.t0): SessionHardAssessment(
+                SESSION_HARD_THRESHOLD - 1e-12,
+                8,
+            ),
+        },
+    )
+
+    signals = SessionHardStructureDStrategy().evaluate((first, second), context)
+
+    assert signals[0].session_hard_checkpoint == 6
+    assert signals[0].status is SignalStatus.WAITING_FOR_ENTRY
+    assert signals[1].session_hard_checkpoint == 8
+    assert signals[1].reason == "SESSION_HARD"
+
+
+def test_invalid_checkpoint_and_score_are_isolated_to_their_candidates() -> None:
+    invalid_checkpoint = ready_snapshot(pre_move_m=0.8, con_id=460)
+    invalid_score = ready_snapshot(pre_move_m=0.8, con_id=461)
+    valid = ready_snapshot(pre_move_m=0.8, con_id=462)
+    snapshots = (invalid_checkpoint, invalid_score, valid)
+
+    signals = SessionHardStructureDStrategy().evaluate(
+        snapshots,
+        strategy_context(
+            snapshots,
+            {
+                460: SESSION_HARD_THRESHOLD,
+                461: 1.01,
+                462: SESSION_HARD_THRESHOLD,
+            },
+            checkpoints={460: 7},
+        ),
+    )
+
+    assert signals[0].reason == "SESSION_HARD_CHECKPOINT"
+    assert signals[1].reason == "SESSION_HARD_SCORE_UNAVAILABLE"
+    assert signals[2].status is SignalStatus.WAITING_FOR_ENTRY
 
 
 def test_invalid_stage5_candidate_does_not_stop_valid_candidate() -> None:
@@ -472,16 +625,36 @@ def test_invalid_stage5_candidate_does_not_stop_valid_candidate() -> None:
 
     signals = SessionHardStructureDStrategy().evaluate(
         (invalid, valid),
-        StrategyContext(
-            run_id="RUN_A",
-            session_hard_scores={502: SESSION_HARD_THRESHOLD},
-        ),
+        strategy_context((invalid, valid), {502: SESSION_HARD_THRESHOLD}),
     )
 
     assert [(signal.underlying_con_id, signal.status) for signal in signals] == [
         (501, SignalStatus.NOT_QUALIFIED),
         (502, SignalStatus.WAITING_FOR_ENTRY),
     ]
+
+
+def test_malformed_ready_values_are_rejected_without_stopping_batch() -> None:
+    nan_pre = replace(ready_snapshot(pre_move_m=0.8, con_id=510), pre_move_m=float("nan"))
+    infinite_p0 = replace(ready_snapshot(pre_move_m=0.8, con_id=511), p0=float("inf"))
+    zero_m = replace(ready_snapshot(pre_move_m=0.8, con_id=512), m_price=0.0)
+    valid = ready_snapshot(pre_move_m=0.8, con_id=513)
+    snapshots = (nan_pre, infinite_p0, zero_m, valid)
+
+    signals = SessionHardStructureDStrategy().evaluate(
+        snapshots,
+        strategy_context(
+            snapshots,
+            {con_id: SESSION_HARD_THRESHOLD for con_id in range(510, 514)},
+        ),
+    )
+
+    assert [signal.reason for signal in signals[:3]] == [
+        "STAGE5_INVALID_FEATURES",
+        "STAGE5_INVALID_FEATURES",
+        "STAGE5_INVALID_FEATURES",
+    ]
+    assert signals[3].status is SignalStatus.WAITING_FOR_ENTRY
 
 
 @pytest.mark.parametrize(
@@ -503,12 +676,10 @@ def test_up_or_ambiguous_first_touch_does_not_emit_short_intention(
     bar: EntryBar, reason: str, direction: str | None
 ) -> None:
     strategy = SessionHardStructureDStrategy()
+    snapshot = ready_snapshot(pre_move_m=0.8)
     strategy.evaluate(
-        (ready_snapshot(pre_move_m=0.8),),
-        StrategyContext(
-            run_id="RUN_A",
-            session_hard_scores={101: SESSION_HARD_THRESHOLD},
-        ),
+        (snapshot,),
+        strategy_context((snapshot,), {101: SESSION_HARD_THRESHOLD}),
     )
 
     signal = strategy.observe_entry_bars({101: (bar,)})[0]
@@ -524,10 +695,7 @@ def test_no_touch_waits_then_expires_after_complete_five_bar_window() -> None:
     snapshot = ready_snapshot(pre_move_m=0.8)
     strategy.evaluate(
         (snapshot,),
-        StrategyContext(
-            run_id="RUN_A",
-            session_hard_scores={101: SESSION_HARD_THRESHOLD},
-        ),
+        strategy_context((snapshot,), {101: SESSION_HARD_THRESHOLD}),
     )
     bars = tuple(
         EntryBar(snapshot.t0 + timedelta(minutes=index), 100.0, 100.1, 99.9) for index in range(5)
@@ -541,16 +709,74 @@ def test_no_touch_waits_then_expires_after_complete_five_bar_window() -> None:
     assert expired.reason == "STRUCTURE_D_NO_DOWN_FIRST_TOUCH"
 
 
+def test_later_touch_waits_for_complete_earlier_bar_prefix() -> None:
+    strategy = SessionHardStructureDStrategy()
+    snapshot = ready_snapshot(pre_move_m=0.8)
+    strategy.evaluate(
+        (snapshot,),
+        strategy_context((snapshot,), {101: SESSION_HARD_THRESHOLD}),
+    )
+    later_down = EntryBar(
+        snapshot.t0 + timedelta(minutes=1),
+        100.0,
+        100.0,
+        99.0,
+    )
+
+    incomplete = strategy.observe_entry_bars({101: (later_down,)})[0]
+    complete = strategy.observe_entry_bars({101: (EntryBar(snapshot.t0, 100.0, 100.1, 99.9),)})[0]
+
+    assert incomplete.status is SignalStatus.WAITING_FOR_ENTRY
+    assert incomplete.direction is None
+    assert not incomplete.selected
+    assert complete.status is SignalStatus.ENTRY_TRIGGERED
+    assert complete.direction == "DOWN"
+    assert complete.selected
+
+
+def test_prior_timestamp_entry_does_not_block_later_ranking_group() -> None:
+    first = replace(ready_snapshot(pre_move_m=0.8, con_id=520), symbol="FIRST")
+    later = replace(ready_snapshot(pre_move_m=0.8, con_id=521), symbol="LATER")
+    snapshots = (first, later)
+    strategy = SessionHardStructureDStrategy()
+    strategy.evaluate(
+        snapshots,
+        strategy_context(
+            snapshots,
+            {520: SESSION_HARD_THRESHOLD, 521: SESSION_HARD_THRESHOLD},
+        ),
+    )
+
+    first_group = strategy.observe_entry_bars(
+        {
+            520: (EntryBar(first.t0, 100.0, 100.0, 99.0),),
+            521: (EntryBar(later.t0, 100.0, 100.1, 99.9),),
+        }
+    )
+    later_group = strategy.observe_entry_bars(
+        {
+            521: (
+                EntryBar(
+                    later.t0 + timedelta(minutes=1),
+                    100.0,
+                    100.0,
+                    99.0,
+                ),
+            )
+        }
+    )
+
+    assert [signal.symbol for signal in first_group if signal.selected] == ["FIRST"]
+    assert [signal.symbol for signal in later_group if signal.selected] == ["LATER"]
+
+
 def test_gap_through_lower_level_uses_open_and_emits_only_once() -> None:
     strategy = SessionHardStructureDStrategy()
     snapshot = ready_snapshot(pre_move_m=0.8)
     original = replace(snapshot)
     evaluated = strategy.evaluate(
         (snapshot,),
-        StrategyContext(
-            run_id="RUN_A",
-            session_hard_scores={101: SESSION_HARD_THRESHOLD},
-        ),
+        strategy_context((snapshot,), {101: SESSION_HARD_THRESHOLD}),
     )
     bar = EntryBar(snapshot.t0, 99.5, 99.7, 99.4)
 
@@ -574,16 +800,18 @@ def test_run_identity_keeps_same_physical_opportunity_separate() -> None:
 
     first = strategy.evaluate(
         (snapshot,),
-        StrategyContext(
+        strategy_context(
+            (snapshot,),
+            {101: SESSION_HARD_THRESHOLD},
             run_id="RUN_A",
-            session_hard_scores={101: SESSION_HARD_THRESHOLD},
         ),
     )[0]
     second = strategy.evaluate(
         (snapshot,),
-        StrategyContext(
+        strategy_context(
+            (snapshot,),
+            {101: SESSION_HARD_THRESHOLD},
             run_id="RUN_B",
-            session_hard_scores={101: SESSION_HARD_THRESHOLD},
         ),
     )[0]
 

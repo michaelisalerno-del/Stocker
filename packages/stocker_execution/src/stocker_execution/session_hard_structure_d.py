@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from math import exp, isfinite
@@ -138,20 +138,42 @@ class CohortOpportunity:
 
 
 @dataclass(frozen=True, slots=True)
+class StrategyOpportunityKey:
+    underlying_con_id: int
+    session: date
+    t0: datetime
+
+    def __post_init__(self) -> None:
+        if self.underlying_con_id <= 0:
+            raise ValueError("strategy opportunity requires a positive conId")
+        if self.t0.tzinfo is None or self.t0.utcoffset() is None:
+            raise ValueError("strategy opportunity T0 must be timezone-aware")
+
+
+@dataclass(frozen=True, slots=True)
+class SessionHardAssessment:
+    score: float
+    checkpoint: int
+
+    @classmethod
+    def from_features(
+        cls, *, checkpoint: int, features: Mapping[str, float]
+    ) -> SessionHardAssessment:
+        return cls(
+            score=calculate_session_hard_score(checkpoint=checkpoint, features=features),
+            checkpoint=checkpoint,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class StrategyContext:
     run_id: str
-    session_hard_scores: Mapping[int, float]
-    session_hard_checkpoints: Mapping[int, int] = field(default_factory=dict)
+    session_hard: Mapping[StrategyOpportunityKey, SessionHardAssessment]
     cohort_history: tuple[CohortOpportunity, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.run_id.strip():
             raise ValueError("strategy run_id is required")
-        if any(
-            checkpoint not in SESSION_HARD_CHECKPOINTS
-            for checkpoint in self.session_hard_checkpoints.values()
-        ):
-            raise ValueError("strategy context contains an unsupported Session HARD checkpoint")
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +233,7 @@ class SessionHardStructureDStrategy:
     def __init__(self) -> None:
         self._signals: dict[str, StrategySignal] = {}
         self._cohort_watch_ids: set[str] = set()
+        self._strategy_candidate_ids: set[str] = set()
         self._cohort_opportunities: dict[str, CohortOpportunity] = {}
         self._observed_entry_bars: dict[str, dict[datetime, EntryBar]] = {}
 
@@ -245,15 +268,40 @@ class SessionHardStructureDStrategy:
             if existing is not None:
                 signals.append(existing)
                 continue
-            score = context.session_hard_scores.get(row.con_id) if row.con_id is not None else None
+            opportunity_key = (
+                StrategyOpportunityKey(row.con_id, row.session, row.t0)
+                if row.con_id is not None
+                and row.t0.tzinfo is not None
+                and row.t0.utcoffset() is not None
+                else None
+            )
+            assessment = context.session_hard.get(opportunity_key) if opportunity_key else None
+            score = assessment.score if assessment is not None else None
+            checkpoint = assessment.checkpoint if assessment is not None else None
             pre_move_m = row.pre_move_m
-            ready = (
+            stage5_ready = (
                 row.status is Stage5Status.READY
                 and row.con_id is not None
                 and pre_move_m is not None
                 and row.p0 is not None
                 and row.m_price is not None
             )
+            ready = (
+                stage5_ready
+                and pre_move_m is not None
+                and isfinite(pre_move_m)
+                and pre_move_m >= 0.0
+                and row.p0 is not None
+                and isfinite(row.p0)
+                and row.p0 > 0.0
+                and row.m_price is not None
+                and isfinite(row.m_price)
+                and row.m_price > 0.0
+                and row.t0.tzinfo is not None
+                and row.t0.utcoffset() is not None
+            )
+            checkpoint_valid = checkpoint in SESSION_HARD_CHECKPOINTS
+            score_valid = score is not None and isfinite(score) and 0.0 <= score <= 1.0
             percentile = None
             band = None
             if ready:
@@ -267,16 +315,25 @@ class SessionHardStructureDStrategy:
                     ),
                 )
                 band = classify_pre_move_band(percentile)
-            if not ready:
+            if not stage5_ready:
                 status = SignalStatus.NOT_QUALIFIED
                 reason = row.exclusion_reason or "STAGE5_NOT_READY"
-            elif pre_move_m is None or not isfinite(pre_move_m) or pre_move_m <= PRE_MOVE_THRESHOLD:
+            elif not ready:
+                status = SignalStatus.NOT_QUALIFIED
+                reason = "STAGE5_INVALID_FEATURES"
+            elif pre_move_m is None or pre_move_m <= PRE_MOVE_THRESHOLD:
                 status = SignalStatus.NOT_QUALIFIED
                 reason = "PRE_MOVE_THRESHOLD"
-            elif score is None or not isfinite(score):
+            elif assessment is None:
                 status = SignalStatus.NOT_QUALIFIED
                 reason = "SESSION_HARD_SCORE_UNAVAILABLE"
-            elif score < SESSION_HARD_THRESHOLD:
+            elif not checkpoint_valid:
+                status = SignalStatus.NOT_QUALIFIED
+                reason = "SESSION_HARD_CHECKPOINT"
+            elif not score_valid:
+                status = SignalStatus.NOT_QUALIFIED
+                reason = "SESSION_HARD_SCORE_UNAVAILABLE"
+            elif score is None or score < SESSION_HARD_THRESHOLD:
                 status = SignalStatus.NOT_QUALIFIED
                 reason = "SESSION_HARD"
             elif band is PreMoveBand.MID:
@@ -301,13 +358,12 @@ class SessionHardStructureDStrategy:
                 cohort_percentile=percentile,
                 band=band,
                 session_hard_score=score,
-                session_hard_checkpoint=(
-                    context.session_hard_checkpoints.get(row.con_id)
-                    if row.con_id is not None
-                    else None
-                ),
+                session_hard_checkpoint=checkpoint,
                 session_hard_qualified=(
-                    score is not None and isfinite(score) and score >= SESSION_HARD_THRESHOLD
+                    checkpoint_valid
+                    and score_valid
+                    and score is not None
+                    and score >= SESSION_HARD_THRESHOLD
                 ),
                 feature_calculation_version=row.calculation_version,
                 p0=row.p0,
@@ -323,11 +379,14 @@ class SessionHardStructureDStrategy:
                 ready
                 and pre_move_m is not None
                 and pre_move_m > PRE_MOVE_THRESHOLD
+                and checkpoint_valid
+                and score_valid
                 and score is not None
-                and isfinite(score)
                 and score >= SESSION_HARD_THRESHOLD
             ):
                 self._cohort_watch_ids.add(signal_id)
+                if band is not PreMoveBand.MID:
+                    self._strategy_candidate_ids.add(signal_id)
             signals.append(signal)
         return tuple(signals)
 
@@ -376,11 +435,20 @@ class SessionHardStructureDStrategy:
             self._signals[signal_id] = updated
             changed.append(updated)
 
-        triggered_by_timestamp: dict[datetime, list[StrategySignal]] = {}
+        triggered_groups: set[tuple[str, datetime]] = set()
         for signal in changed:
             if signal.status is SignalStatus.ENTRY_TRIGGERED and signal.entry_timestamp is not None:
-                triggered_by_timestamp.setdefault(signal.entry_timestamp, []).append(signal)
-        for simultaneous in triggered_by_timestamp.values():
+                triggered_groups.add((signal.run_id, signal.entry_timestamp))
+        for run_id, entry_timestamp in triggered_groups:
+            if not self._ranking_group_complete(run_id, entry_timestamp):
+                continue
+            simultaneous = [
+                signal
+                for signal in self._signals.values()
+                if signal.run_id == run_id
+                and signal.entry_timestamp == entry_timestamp
+                and signal.reason in {"STRUCTURE_D_DOWN_FIRST_TOUCH", "STRATEGY_CANDIDATE_CAPACITY"}
+            ]
             ranked = sorted(
                 simultaneous,
                 key=lambda item: (
@@ -401,7 +469,12 @@ class SessionHardStructureDStrategy:
                         selected=False,
                     )
                 self._signals[signal.signal_id] = updated
-                changed[changed.index(signal)] = updated
+                for index, prior in enumerate(changed):
+                    if prior.signal_id == signal.signal_id:
+                        changed[index] = updated
+                        break
+                else:
+                    changed.append(updated)
         return tuple(
             sorted(
                 changed,
@@ -413,6 +486,26 @@ class SessionHardStructureDStrategy:
                 ),
             )
         )
+
+    def _ranking_group_complete(self, run_id: str, timestamp: datetime) -> bool:
+        for signal_id in self._strategy_candidate_ids:
+            signal = self._signals[signal_id]
+            if signal.run_id != run_id:
+                continue
+            window_end = signal.t0.astimezone(UTC) + timedelta(minutes=ENTRY_WINDOW_MINUTES - 1)
+            observed_timestamp = timestamp.astimezone(UTC)
+            if not signal.t0.astimezone(UTC) <= observed_timestamp <= window_end:
+                continue
+            if signal.status is SignalStatus.EXPIRED:
+                continue
+            if (
+                signal.entry_timestamp is not None
+                and signal.entry_timestamp.astimezone(UTC) < observed_timestamp
+            ):
+                continue
+            if observed_timestamp not in self._observed_entry_bars.get(signal_id, {}):
+                return False
+        return True
 
 
 def _signal_id(row: Stage5FeatureSnapshot, run_id: str) -> str:
@@ -456,12 +549,20 @@ def _apply_first_touch(signal: StrategySignal, observed: Sequence[EntryBar]) -> 
     upper = signal.p0 + ENTRY_TRIGGER_M * signal.m_price
     lower = signal.p0 - ENTRY_TRIGGER_M * signal.m_price
     window_end = t0 + timedelta(minutes=ENTRY_WINDOW_MINUTES - 1)
-    bars = sorted(
-        (bar for bar in observed if t0 <= bar.timestamp.astimezone(UTC) <= window_end),
-        key=lambda bar: bar.timestamp,
+    expected_timestamps = tuple(
+        t0 + timedelta(minutes=index) for index in range(ENTRY_WINDOW_MINUTES)
     )
-    for bar in bars:
-        timestamp = bar.timestamp.astimezone(UTC)
+    expected_set = set(expected_timestamps)
+    bars_by_timestamp = {
+        bar.timestamp.astimezone(UTC): bar
+        for bar in observed
+        if t0 <= bar.timestamp.astimezone(UTC) <= window_end
+        and bar.timestamp.astimezone(UTC) in expected_set
+    }
+    for timestamp in expected_timestamps:
+        bar = bars_by_timestamp.get(timestamp)
+        if bar is None:
+            break
         if bar.open >= upper:
             return replace(
                 signal,
@@ -477,7 +578,7 @@ def _apply_first_touch(signal: StrategySignal, observed: Sequence[EntryBar]) -> 
                 reason="STRUCTURE_D_DOWN_FIRST_TOUCH",
                 side="SHORT",
                 direction="DOWN",
-                selected=True,
+                selected=False,
                 entry_level=lower,
                 entry_reference=bar.open,
                 entry_timestamp=timestamp,
@@ -507,15 +608,13 @@ def _apply_first_touch(signal: StrategySignal, observed: Sequence[EntryBar]) -> 
                 reason="STRUCTURE_D_DOWN_FIRST_TOUCH",
                 side="SHORT",
                 direction="DOWN",
-                selected=True,
+                selected=False,
                 entry_level=lower,
                 entry_reference=lower,
                 entry_timestamp=timestamp,
                 signal_timestamp=timestamp + timedelta(minutes=1),
             )
-    expected = {t0 + timedelta(minutes=index) for index in range(ENTRY_WINDOW_MINUTES)}
-    observed_timestamps = {bar.timestamp.astimezone(UTC) for bar in bars}
-    if expected.issubset(observed_timestamps):
+    if expected_set.issubset(bars_by_timestamp):
         return replace(
             signal,
             status=SignalStatus.EXPIRED,
@@ -577,5 +676,9 @@ def calculate_session_hard_score(*, checkpoint: int, features: Mapping[str, floa
             raise ValueError(f"Session HARD feature {name} must be finite")
         linear += ((value - mean) / scale) * coefficient
     linear += _SESSION_HARD_CHECKPOINT_COEFFICIENTS[SESSION_HARD_CHECKPOINTS.index(checkpoint)]
-    quiet_probability = 1.0 / (1.0 + exp(-linear))
+    if linear >= 0.0:
+        quiet_probability = 1.0 / (1.0 + exp(-linear))
+    else:
+        odds = exp(linear)
+        quiet_probability = odds / (1.0 + odds)
     return 1.0 - quiet_probability

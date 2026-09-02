@@ -385,11 +385,20 @@ def test_clean_startup_reconciles_before_reaching_ready(tmp_path: Path) -> None:
 
     asyncio.run(runtime.start())
 
-    assert runtime.status().application is ApplicationState.READY
-    assert runtime.status().runs[0].state is RunRuntimeState.ACTIVE
+    status = runtime.status()
+    assert status.application is ApplicationState.READY
+    assert status.runs[0].state is RunRuntimeState.ACTIVE
+    paper = status.execution_environments[0]
+    assert paper.equity == 100_000.0
+    assert paper.buying_power == 200_000.0
     assert broker.events.index("connect") < broker.events.index("open_orders")
     assert broker.events.index("open_orders") < broker.events.index("positions")
     assert "submit" not in broker.events
+
+    broker.disconnect()
+    disconnected = runtime.status().execution_environments[0]
+    assert disconnected.equity is None
+    assert disconnected.buying_power is None
 
 
 def test_wrong_account_prevents_readiness(tmp_path: Path) -> None:

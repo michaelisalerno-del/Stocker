@@ -99,8 +99,26 @@ def _runtime_status() -> RuntimeStatus:
     return RuntimeStatus(
         application=ApplicationState.READY,
         execution_environments=(
-            ExecutionEnvironmentStatus(Environment.PAPER, True, "DU123456", "DU123456", True, True),
-            ExecutionEnvironmentStatus(Environment.LIVE, True, "U123456", "U123456", True, True),
+            ExecutionEnvironmentStatus(
+                Environment.PAPER,
+                True,
+                "DU123456",
+                "DU123456",
+                True,
+                True,
+                equity=100_000.0,
+                buying_power=200_000.0,
+            ),
+            ExecutionEnvironmentStatus(
+                Environment.LIVE,
+                True,
+                "U123456",
+                "U123456",
+                True,
+                True,
+                equity=50_000.0,
+                buying_power=100_000.0,
+            ),
         ),
         runs=(
             RunStatus(
@@ -356,6 +374,8 @@ def test_overview_and_runs_expose_runtime_environment_state(tmp_path: Path) -> N
 
     assert overview["system"] == "READY"
     assert overview["environments"]["LIVE"]["connected"] is True
+    assert overview["environments"]["PAPER"]["equity"] == 100_000.0
+    assert overview["environments"]["PAPER"]["buying_power"] == 200_000.0
     assert overview["active_runs"] == 1
     assert overview["open_positions"] == 1
     assert overview["today"]["signals"] == 1

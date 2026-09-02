@@ -57,6 +57,8 @@ class DashboardReadService:
                 "expected_account": item.expected_account,
                 "reconciled": item.reconciled,
                 "ready": item.ready,
+                "equity": item.equity,
+                "buying_power": item.buying_power,
             }
             if not item.connected:
                 attention.append({"scope": item.environment.value, "message": "IBKR disconnected"})
@@ -496,6 +498,8 @@ class DashboardReadService:
                     "expected_account": item.expected_account,
                     "reconciled": item.reconciled,
                     "ready": item.ready,
+                    "equity": item.equity,
+                    "buying_power": item.buying_power,
                     "open_orders": sum(
                         order.environment is item.environment for order in broker_orders
                     ),

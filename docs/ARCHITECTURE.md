@@ -550,7 +550,9 @@ polling HTML/CSS/JavaScript control surface
 The read service copies feature, strategy, order, fill, reconciliation, and run-status outputs.
 Stage 7 persists its latest normalized broker position/open-order snapshot for dashboard reads, so
 unknown broker exposure stays visible and positions are never inferred merely from submitted
-orders. The dashboard does not calculate features, qualify candidates, size risk, create order
+orders. Reconciled runtime status also exposes the broker-authoritative `NetLiquidation` and
+`BuyingPower` already read from IBKR; disconnected environments expose neither value. The dashboard
+does not calculate features, qualify candidates, size risk, create order
 geometry, or communicate with IBKR. The control service serializes changes, validates complete
 `RunConfig`/`RunsConfig` values, atomically updates the backend YAML configuration, and invokes the
 active `StockerRuntime` command boundary when one is attached. Enabled state, risk, and maximum

@@ -276,6 +276,7 @@ class Stage7ExecutionService:
         self._ledger = ledger
         self._clock = clock or (lambda: datetime.now(tz=UTC))
         self._reconciled_epoch: int | None = None
+        self._last_account_state: BrokerAccountState | None = None
 
     @property
     def run_environment(self) -> Environment:
@@ -286,6 +287,12 @@ class Stage7ExecutionService:
         """Return the immutable config that owns this execution lineage."""
 
         return self._run
+
+    @property
+    def last_account_state(self) -> BrokerAccountState | None:
+        """Return the authoritative account state read during reconciliation."""
+
+        return self._last_account_state
 
     def update_run_config(self, run: RunConfig) -> None:
         """Apply future-only risk changes without resetting reconciliation state."""
@@ -303,12 +310,14 @@ class Stage7ExecutionService:
     async def reconcile(self) -> ReconciliationResult:
         """Compare broker orders/positions/fills with local execution state."""
 
+        self._last_account_state = None
         if not self._broker.is_connected:
             return self._reconciliation_failure("broker is disconnected")
         try:
             account_state = await self._broker.account_state()
         except Exception as exc:
             return self._reconciliation_failure(f"account state unavailable: {exc}")
+        self._last_account_state = account_state
         mismatch = self._account_mismatch(account_state)
         if mismatch is not None:
             return self._reconciliation_failure(mismatch)

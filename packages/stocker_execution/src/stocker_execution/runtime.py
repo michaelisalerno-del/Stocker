@@ -19,7 +19,7 @@ from stocker_core.runs import Environment, RunConfig, RunInstance, RunManager
 from stocker_core.universes import UniverseCatalog
 from stocker_data.calendars import get_market_calendar
 from stocker_execution.execution_ledger import ExecutionLedger
-from stocker_execution.execution_models import BrokerFill, OrderLifecycle
+from stocker_execution.execution_models import BrokerAccountState, BrokerFill, OrderLifecycle
 from stocker_execution.history import (
     HistorySemantics,
     HistoryStatus,
@@ -157,6 +157,8 @@ class ExecutionEnvironmentStatus:
     expected_account: str
     reconciled: bool
     ready: bool
+    equity: float | None = None
+    buying_power: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +213,8 @@ class RuntimeStatus:
                     "expected_account": item.expected_account,
                     "reconciled": item.reconciled,
                     "ready": item.ready,
+                    "equity": item.equity,
+                    "buying_power": item.buying_power,
                 }
                 for item in self.execution_environments
             },
@@ -1583,23 +1587,46 @@ class StockerRuntime:
                     ),
                 )
             )
-        execution_statuses = tuple(
-            ExecutionEnvironmentStatus(
-                environment=environment,
-                connected=destination.broker.is_connected,
-                account=destination.broker.account or None,
-                expected_account=destination.expected_account,
-                reconciled=self._environment_reconciled[environment],
-                ready=self._environment_ready[environment],
+        execution_statuses = []
+        for environment, destination in self._destinations.items():
+            account_state = self._account_state_for(environment)
+            execution_statuses.append(
+                ExecutionEnvironmentStatus(
+                    environment=environment,
+                    connected=destination.broker.is_connected,
+                    account=destination.broker.account or None,
+                    expected_account=destination.expected_account,
+                    reconciled=self._environment_reconciled[environment],
+                    ready=self._environment_ready[environment],
+                    equity=account_state.equity if account_state is not None else None,
+                    buying_power=(
+                        account_state.buying_power if account_state is not None else None
+                    ),
+                )
             )
-            for environment, destination in self._destinations.items()
-        )
         return RuntimeStatus(
             application=self._state,
-            execution_environments=execution_statuses,
+            execution_environments=tuple(execution_statuses),
             runs=tuple(run_statuses),
             counters=self._store.counters(),
         )
+
+    def _account_state_for(self, environment: Environment) -> BrokerAccountState | None:
+        destination = self._destinations[environment]
+        if not destination.broker.is_connected:
+            return None
+        for _run_id, execution in self._execution_services():
+            if execution.run_environment is not environment:
+                continue
+            state = execution.last_account_state
+            if (
+                state is not None
+                and state.connected
+                and state.environment is environment
+                and state.account == destination.expected_account
+            ):
+                return state
+        return None
 
     def _set_run(self, run_id: str, state: RunRuntimeState, reason: str) -> None:
         self._run_states[run_id] = state

@@ -59,7 +59,7 @@ async function overview(cached) {
   const data = cached || await api("/api/overview");
   const envCard = (name) => {
     const item = data.environments[name];
-    return `<article class="status-card"><span class="eyebrow">IBKR ${name}</span><strong>${item ? (item.connected ? "CONNECTED" : "DISCONNECTED") : "NOT CONFIGURED"}</strong><small>${item ? `${esc(item.account)} · ${item.reconciled ? "RECONCILED" : "NOT RECONCILED"}` : "No runtime destination"}</small></article>`;
+    return `<article class="status-card"><span class="eyebrow">IBKR ${name}</span><strong>${item ? (item.connected ? "CONNECTED" : "DISCONNECTED") : "NOT CONFIGURED"}</strong><small>${item ? `${esc(item.account)} · ${item.reconciled ? "RECONCILED" : "NOT RECONCILED"}<br>Net liquidation ${money(item.equity)} · Buying power ${money(item.buying_power)}` : "No runtime destination"}</small></article>`;
   };
   const positionColumns = [
     { key: "symbol", label: "Symbol" }, { key: "run_id", label: "Run" }, { label: "Env", render: (row) => environment(row.environment) },
@@ -279,7 +279,7 @@ async function tradesPage() {
 }
 async function systemPage() {
   const data = await api("/api/system");
-  const cards = data.environments.map((item) => `<article class="status-card"><span class="eyebrow">IBKR ${esc(item.environment)}</span><strong>${item.connected ? "CONNECTED" : "DISCONNECTED"}</strong><small>${esc(item.account)} · ${item.reconciled ? "RECONCILED" : "NOT RECONCILED"}<br>${item.open_orders} open orders · ${item.positions} positions</small></article>`).join("");
+  const cards = data.environments.map((item) => `<article class="status-card"><span class="eyebrow">IBKR ${esc(item.environment)}</span><strong>${item.connected ? "CONNECTED" : "DISCONNECTED"}</strong><small>${esc(item.account)} · ${item.reconciled ? "RECONCILED" : "NOT RECONCILED"}<br>Net liquidation ${money(item.equity)} · Buying power ${money(item.buying_power)}<br>${item.open_orders} open orders · ${item.positions} positions</small></article>`).join("");
   const problems = data.problems.length ? data.problems.map((message) => `<div class="attention-item"><b>PROBLEM</b><span>${esc(message)}</span></div>`).join("") : '<div class="empty">No execution-system problems.</div>';
   const events = data.events.length ? data.events.map((item) => `<div class="attention-item"><b>${new Date(item.timestamp).toLocaleTimeString()}</b><span>${esc(item.message)}</span></div>`).join("") : '<div class="empty">No recent operational events.</div>';
   main.innerHTML = `${head("System", "IBKR connectivity, reconciliation, runtime health, and concise operational events.")}<section class="status-grid">${cards}<article class="status-card"><span class="eyebrow">RUNTIME</span><strong>${esc(data.application)}</strong><small>${data.runtime.active_runs} active runs</small></article></section><section class="section"><div class="section-head"><h2>System problems</h2></div><div class="attention">${problems}</div></section><section class="section"><div class="section-head"><h2>Recent operational events</h2></div>${events}</section>`;

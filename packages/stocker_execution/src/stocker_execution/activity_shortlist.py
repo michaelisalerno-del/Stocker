@@ -277,7 +277,7 @@ class ActivityShortlistStore:
             return existing
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
+            inserted = connection.execute(
                 """
                 INSERT OR IGNORE INTO activity_shortlist_snapshots (
                     market_id, cap_bucket, cap_bucket_version, session, profile_id,
@@ -297,35 +297,36 @@ class ActivityShortlistStore:
                     snapshot.reason,
                 ),
             )
-            for item in snapshot.candidates:
-                connection.execute(
-                    """
+            if inserted.rowcount:
+                for item in snapshot.candidates:
+                    connection.execute(
+                        """
                     INSERT OR IGNORE INTO activity_shortlist_candidates VALUES (
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
-                    (
-                        snapshot.market_id,
-                        snapshot.cap_bucket.value,
-                        snapshot.cap_bucket_version,
-                        snapshot.session.isoformat(),
-                        snapshot.profile_id,
-                        snapshot.profile_version,
-                        item.symbol,
-                        item.con_id,
-                        item.exchange,
-                        item.primary_exchange,
-                        item.currency,
-                        item.top_trade_rate_rank,
-                        item.top_volume_rate_rank,
-                        item.hot_by_volume_rank,
-                        item.scan_hit_count,
-                        item.best_component_rank,
-                        item.aggregate_screen_score,
-                        item.final_shortlist_rank,
-                        int(item.selected),
-                    ),
-                )
+                        (
+                            snapshot.market_id,
+                            snapshot.cap_bucket.value,
+                            snapshot.cap_bucket_version,
+                            snapshot.session.isoformat(),
+                            snapshot.profile_id,
+                            snapshot.profile_version,
+                            item.symbol,
+                            item.con_id,
+                            item.exchange,
+                            item.primary_exchange,
+                            item.currency,
+                            item.top_trade_rate_rank,
+                            item.top_volume_rate_rank,
+                            item.hot_by_volume_rank,
+                            item.scan_hit_count,
+                            item.best_component_rank,
+                            item.aggregate_screen_score,
+                            item.final_shortlist_rank,
+                            int(item.selected),
+                        ),
+                    )
         return (
             self.get(
                 snapshot.market_id,

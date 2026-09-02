@@ -6,6 +6,7 @@ PAPER:
   expected_account: DU123456
   connect_timeout_seconds: 5
   request_timeout_seconds: 60
+  market_data_line_budget: 100
 
 LIVE:
   environment: LIVE
@@ -15,3 +16,4 @@ LIVE:
   expected_account: U123456
   connect_timeout_seconds: 5
   request_timeout_seconds: 60
+  market_data_line_budget: 100

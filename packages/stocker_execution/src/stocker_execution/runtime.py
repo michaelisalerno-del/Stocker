@@ -38,6 +38,7 @@ from stocker_execution.ibkr import (
     CurrentQuote,
     IbkrConnection,
     IbkrError,
+    IbkrResourceStatus,
     QualifiedInstrument,
     mask_ibkr_account,
 )
@@ -197,6 +198,7 @@ class RuntimeStatus:
     execution_environments: tuple[ExecutionEnvironmentStatus, ...]
     runs: tuple[RunStatus, ...]
     counters: RuntimeCounters
+    ibkr_resources: IbkrResourceStatus | None = None
 
     @property
     def broker_connected(self) -> bool:
@@ -254,6 +256,8 @@ class RuntimeStatus:
                 for field in RuntimeCounters.__dataclass_fields__
             },
         }
+        if self.ibkr_resources is not None:
+            result["ibkr_resources"] = asdict(self.ibkr_resources)
         paper = next(
             (item for item in self.execution_environments if item.environment is Environment.PAPER),
             None,
@@ -1190,7 +1194,7 @@ class StockerRuntime:
                         strategy=strategy,
                         execution=replacement_execution,
                     )
-            return await self._reconnect(environment)
+            return await self._reconnect(environment, disconnect_first=False)
 
     async def poll_once(self) -> RuntimeStatus:
         """Process currently due checkpoints and causal entry observations once."""
@@ -1340,7 +1344,12 @@ class StockerRuntime:
         async with self._cycle_lock:
             return await self._reconnect(environment)
 
-    async def _reconnect(self, environment: Environment | None = None) -> RuntimeStatus:
+    async def _reconnect(
+        self,
+        environment: Environment | None = None,
+        *,
+        disconnect_first: bool = True,
+    ) -> RuntimeStatus:
         """Internal reconnect path shared by recovery and serialized controls."""
 
         now = _aware(self._clock())
@@ -1372,7 +1381,7 @@ class StockerRuntime:
                 for run_id, execution in self._execution_services()
                 if execution.run_environment is target
             )
-            if destination.broker.is_connected:
+            if disconnect_first:
                 destination.broker.disconnect()
             self._environment_ready[target] = False
             self._environment_reconciled[target] = False
@@ -1774,11 +1783,13 @@ class StockerRuntime:
                     ),
                 )
             )
+        resource_status = getattr(self._market_data_broker, "resource_status", None)
         return RuntimeStatus(
             application=self._state,
             execution_environments=tuple(execution_statuses),
             runs=tuple(run_statuses),
             counters=self._store.counters(),
+            ibkr_resources=resource_status() if resource_status is not None else None,
         )
 
     def _account_state_for(self, environment: Environment) -> BrokerAccountState | None:

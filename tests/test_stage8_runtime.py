@@ -285,6 +285,19 @@ class TriggerContextProvider:
         )
 
 
+class CapacityContextProvider(TriggerContextProvider):
+    async def context_for(
+        self,
+        run: RunConfig,
+        rows: object,
+        checkpoint: int,
+        instruments: object,
+        cohort_history: object,
+    ) -> StrategyContext:
+        del run, rows, checkpoint, instruments, cohort_history
+        raise RuntimeError("IBKR_MARKET_DATA_CAPACITY_UNAVAILABLE")
+
+
 class TriggerEntrySource:
     async def bars_for(
         self,
@@ -1106,6 +1119,7 @@ def test_disconnect_blocks_work_and_reconnect_requires_reconciliation(tmp_path: 
         gate.set()
         await reconnecting
         assert runtime.status().application is ApplicationState.READY
+        assert broker.events.index("disconnect") < broker.events.index("connect", 1)
         assert broker.events[-4:] == ["open_orders", "statuses", "fills", "positions"]
 
     asyncio.run(scenario())
@@ -1506,6 +1520,48 @@ def test_restart_restores_known_open_position_with_protection(tmp_path: Path) ->
 
     assert restarted.status().application is ApplicationState.READY
     assert restarted.status().runs[0].open_positions == 1
+
+
+def test_candidate_capacity_exhaustion_preserves_known_position_and_protection(
+    tmp_path: Path,
+) -> None:
+    first, _first_broker, clock, plan = _submitted_runtime(tmp_path)
+    assert first.record_fill(
+        _fill(
+            plan,
+            execution_id="entry",
+            order_id=101,
+            side=OrderAction.SELL,
+            quantity=plan.quantity,
+            price=99.5,
+        )
+    )
+    asyncio.run(first.stop())
+    position = BrokerPosition(
+        "DU123456", plan.con_id, plan.symbol, -plan.quantity, 99.5
+    )
+    protective_orders = (
+        _open_order(plan, 102, OrderRole.STOP),
+        _open_order(plan, 103, OrderRole.TARGET),
+    )
+    broker = FakeBroker(positions=(position,), open_orders=protective_orders)
+    restarted = _runtime(
+        tmp_path,
+        broker,
+        clock=clock,
+        context_provider=CapacityContextProvider(),
+    )
+    asyncio.run(restarted.start())
+    broker.events.clear()
+    clock.now = datetime(2026, 9, 2, 14, 11, tzinfo=UTC)
+
+    asyncio.run(restarted.poll_once())
+
+    assert "IBKR_MARKET_DATA_CAPACITY_UNAVAILABLE" in restarted.status().runs[0].reason
+    assert broker.positions == (position,)
+    assert broker.open_orders == protective_orders
+    assert broker.is_connected is True
+    assert "disconnect" not in broker.events
 
 
 def test_restart_restores_partially_filled_entry(tmp_path: Path) -> None:

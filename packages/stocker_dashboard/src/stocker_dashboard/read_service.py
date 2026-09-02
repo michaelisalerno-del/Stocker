@@ -704,6 +704,9 @@ class DashboardReadService:
         return {
             "application": status.application.value,
             "environments": environments,
+            "ibkr_api_resources": (
+                asdict(status.ibkr_resources) if status.ibkr_resources is not None else None
+            ),
             "runtime": {
                 "active_runs": sum(run.state.value == "ACTIVE" for run in status.runs),
                 "counters": asdict(status.counters),

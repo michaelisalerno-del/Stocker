@@ -94,6 +94,7 @@ class IbkrConfig(BaseModel):
     expected_account: str | None = Field(default=None, min_length=1)
     connect_timeout_seconds: float = Field(default=5.0, gt=0.0)
     request_timeout_seconds: float = Field(default=60.0, gt=0.0)
+    market_data_line_budget: int = Field(default=100, ge=1)
 
 
 class RunsConfig(BaseModel):

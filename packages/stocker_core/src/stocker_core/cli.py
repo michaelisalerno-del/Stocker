@@ -1,7 +1,7 @@
 """Command-line interface for Stocker."""
 
 import asyncio
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -17,7 +17,7 @@ from stocker_core.config import (
     load_runs_config,
     load_server_config,
 )
-from stocker_core.runs import RunManager
+from stocker_core.runs import CandidateScreen, Environment, RunManager
 from stocker_core.universes import UniverseCatalog
 
 console = Console()
@@ -242,6 +242,204 @@ def ibkr_data_diagnostic(
     console.print("No order was transmitted by this diagnostic.")
     if any(check.status != IbkrDataStatus.AVAILABLE for check in report.checks):
         raise typer.Exit(code=1)
+
+
+@app.command("ibkr-resources")
+def ibkr_resources(
+    runs_config: Annotated[
+        Path, typer.Option("--runs-config", help="Configured runs and watchlists to inspect.")
+    ] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[
+        Path, typer.Option("--ibkr-config", help="Explicit PAPER and LIVE IBKR settings.")
+    ] = DEFAULT_IBKR_CONFIG,
+    environment: Annotated[
+        Environment, typer.Option("--environment", help="Broker session whose budget applies.")
+    ] = Environment.PAPER,
+    runtime_database: Annotated[
+        Path,
+        typer.Option("--database", help="Runtime database used only for persisted watchlists."),
+    ] = DEFAULT_RUNTIME_DATABASE,
+    connect: Annotated[
+        bool,
+        typer.Option(
+            "--connect/--no-connect",
+            help="Open one read-only session; disabled by default.",
+        ),
+    ] = False,
+) -> None:
+    """Report process-local IBKR resources and realistic capacity without trading."""
+
+    from stocker_execution.activity_shortlist import ActivityShortlistStore
+    from stocker_execution.ibkr import IbkrConnection, IbkrError
+    from stocker_execution.ibkr_resources import simulate_capacity
+
+    try:
+        configured_runs = load_runs_config(runs_config)
+        broker_config = load_ibkr_config(ibkr_config, environment)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid IBKR resource configuration: {exc}") from exc
+
+    connection = IbkrConnection(broker_config)
+    session_label = f"{environment.value} disconnected diagnostic"
+    if connect:
+
+        async def open_read_only() -> str:
+            session = await connection.connect()
+            return f"{session.environment.value} {session.masked_account_id} connected"
+
+        try:
+            session_label = asyncio.run(open_read_only())
+        except IbkrError as exc:
+            console.print(f"IBKR read-only connection unavailable: {exc}")
+
+    try:
+        status = connection.resource_status()
+        by_universe = {item.universe_id: item for item in configured_runs.universes}
+        physical_identities: set[tuple[object, ...]] = set()
+        physical_con_ids: set[int] = set()
+        configured_memberships = 0
+        watchlists: list[str] = []
+        all_watchlists_available = True
+        for run in configured_runs.runs:
+            if not run.enabled:
+                continue
+            universe = by_universe[run.universe]
+            members = universe.members
+            identities: set[tuple[object, ...]]
+            if (
+                run.screen is not None
+                and run.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
+            ):
+                if run.market_id is None or run.cap_bucket is None:
+                    all_watchlists_available = False
+                    watchlists.append(f"{run.run_id}: unavailable (missing market lineage)")
+                    continue
+                stored = ActivityShortlistStore.latest_read_only(
+                    runtime_database,
+                    market_id=run.market_id.value,
+                    cap_bucket=run.cap_bucket,
+                    cap_bucket_version=run.cap_bucket_version or "CAP_BUCKETS_V1",
+                    profile_id=run.candidate_screen_id or "ACTIVITY_SHORTLIST_V1",
+                    profile_version=run.candidate_screen_version or "ACTIVITY_SHORTLIST_V1",
+                )
+                if stored is None:
+                    all_watchlists_available = False
+                    watchlists.append(
+                        f"{run.run_id}: unavailable (no persisted Activity Shortlist)"
+                    )
+                    continue
+                selected = tuple(item for item in stored.candidates if item.selected)
+                identities = {
+                    ("CONID", item.con_id)
+                    if item.con_id is not None
+                    else (
+                        item.symbol,
+                        item.exchange,
+                        item.primary_exchange or "",
+                        item.currency,
+                        "STK",
+                    )
+                    for item in selected
+                }
+                physical_con_ids.update(
+                    item.con_id for item in selected if item.con_id is not None
+                )
+                count = len(identities)
+                watchlists.append(
+                    f"{run.run_id}: {count} candidates "
+                    f"({stored.session} {stored.status})"
+                )
+            else:
+                count = len(members)
+                identities = {
+                    (
+                        member.symbol,
+                        member.exchange,
+                        member.primary_exchange,
+                        member.currency,
+                        member.security_type,
+                    )
+                    for member in members
+                }
+                watchlists.append(f"{run.run_id}: {count} candidates (configured universe)")
+            configured_memberships += count
+            physical_identities.update(identities)
+
+        console.print("Stocker IBKR resource diagnostic")
+        console.print(f"Session: {session_label}")
+        console.print(
+            "Scope: this diagnostic connection plus read-only persisted watchlists; "
+            "live runtime counters are exposed on Dashboard / System"
+        )
+        console.print(f"Stocker API line budget: {status.market_data_line_budget}")
+        console.print(
+            f"Diagnostic connection active streaming lines: {status.active_market_data_lines}"
+        )
+        console.print(f"  underlying: {status.active_underlying_lines}")
+        console.print(f"  options: {status.active_option_lines}")
+        console.print(
+            f"Diagnostic connection active scanner subscriptions: {status.active_scanners}"
+        )
+        console.print(
+            "Historical work: "
+            f"pending={status.pending_historical_work} "
+            f"concurrency={status.historical_concurrency_limit}"
+        )
+        console.print(
+            "ib_async throttle: "
+            f"{status.ib_async_max_requests} requests / "
+            f"{status.ib_async_requests_interval:g} seconds"
+            if status.ib_async_requests_interval is not None
+            else "ib_async throttle: unavailable"
+        )
+        console.print("Current watchlists")
+        for watchlist in watchlists:
+            console.print(f"  {watchlist}")
+        console.print(f"Unique configured physical identities: {len(physical_identities)}")
+        if physical_con_ids:
+            console.print(f"Unique physical conIds: {len(physical_con_ids)} known")
+        else:
+            console.print(
+                "Unique physical conIds: unavailable "
+                "(no qualified IDs in persisted watchlists)"
+            )
+        if all_watchlists_available:
+            console.print(
+                "Estimated duplicate savings: "
+                f"{configured_memberships - len(physical_identities)}"
+            )
+        else:
+            console.print("Estimated duplicate savings: unavailable")
+        temporary = sum(
+            item.purpose == "OPTION_PRE_CONTEXT" for item in status.subscriptions
+        )
+        console.print(f"Temporary Stage 4 subscriptions: {temporary}")
+        now = datetime.now(tz=UTC)
+        possible_leaks = sum(
+            item.purpose == "OPTION_PRE_CONTEXT"
+            and (now - item.created_at).total_seconds()
+            > broker_config.request_timeout_seconds
+            for item in status.subscriptions
+        )
+        console.print(f"Possible subscription leaks: {possible_leaks}")
+        console.print(f"Last resource/pacing error: {status.last_resource_error or 'none'}")
+        realistic = next(
+            item for item in simulate_capacity(
+                market_data_line_budget=status.market_data_line_budget
+            )
+            if item.name == "REALISTIC_4_RUN"
+        )
+        console.print(
+            "Realistic 4-run simulation: "
+            f"unique_stocks={realistic.unique_stocks} "
+            f"peak_lines={realistic.peak_market_data_lines} "
+            f"scanner_peak={realistic.peak_scanner_concurrency} "
+            f"historical_requests={realistic.historical_requests} "
+            f"pacing_issues={realistic.pacing_issues}"
+        )
+        console.print("No order was transmitted by this diagnostic.")
+    finally:
+        connection.disconnect()
 
 
 @app.command("pre-context-check")

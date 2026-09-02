@@ -256,25 +256,83 @@ class ActivityShortlistStore:
             profile_version,
         )
         with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT * FROM activity_shortlist_snapshots
-                WHERE market_id = ? AND cap_bucket = ? AND cap_bucket_version = ?
-                  AND session = ? AND profile_id = ? AND profile_version = ?
-                """,
-                key,
-            ).fetchone()
-            if row is None:
-                return None
-            candidate_rows = connection.execute(
-                """
-                SELECT * FROM activity_shortlist_candidates
-                WHERE market_id = ? AND cap_bucket = ? AND cap_bucket_version = ?
-                  AND session = ? AND profile_id = ? AND profile_version = ?
-                ORDER BY selected DESC, COALESCE(final_shortlist_rank, 999999), symbol, con_id
-                """,
-                key,
-            ).fetchall()
+            return self._snapshot_for_key(connection, key)
+
+    @classmethod
+    def latest_read_only(
+        cls,
+        path: str | Path,
+        *,
+        market_id: str,
+        cap_bucket: CapBucket,
+        cap_bucket_version: str = "CAP_BUCKETS_V1",
+        profile_id: str = ACTIVITY_SHORTLIST_ID,
+        profile_version: str = ACTIVITY_SHORTLIST_VERSION,
+    ) -> ActivityShortlistSnapshot | None:
+        """Read the latest frozen screen without creating or changing its database."""
+
+        database = Path(path)
+        if not database.is_file():
+            return None
+        store = cls.__new__(cls)
+        store.path = database
+        try:
+            with store._connect(read_only=True) as connection:
+                row = connection.execute(
+                    """
+                    SELECT session
+                    FROM activity_shortlist_snapshots
+                    WHERE market_id = ? AND cap_bucket = ? AND cap_bucket_version = ?
+                      AND profile_id = ? AND profile_version = ?
+                    ORDER BY session DESC
+                    LIMIT 1
+                    """,
+                    (
+                        market_id,
+                        cap_bucket.value,
+                        cap_bucket_version,
+                        profile_id,
+                        profile_version,
+                    ),
+                ).fetchone()
+                if row is None:
+                    return None
+                key = (
+                    market_id,
+                    cap_bucket.value,
+                    cap_bucket_version,
+                    str(row["session"]),
+                    profile_id,
+                    profile_version,
+                )
+                return store._snapshot_for_key(connection, key)
+        except sqlite3.Error:
+            return None
+
+    def _snapshot_for_key(
+        self,
+        connection: sqlite3.Connection,
+        key: tuple[str, str, str, str, str, str],
+    ) -> ActivityShortlistSnapshot | None:
+        row = connection.execute(
+            """
+            SELECT * FROM activity_shortlist_snapshots
+            WHERE market_id = ? AND cap_bucket = ? AND cap_bucket_version = ?
+              AND session = ? AND profile_id = ? AND profile_version = ?
+            """,
+            key,
+        ).fetchone()
+        if row is None:
+            return None
+        candidate_rows = connection.execute(
+            """
+            SELECT * FROM activity_shortlist_candidates
+            WHERE market_id = ? AND cap_bucket = ? AND cap_bucket_version = ?
+              AND session = ? AND profile_id = ? AND profile_version = ?
+            ORDER BY selected DESC, COALESCE(final_shortlist_rank, 999999), symbol, con_id
+            """,
+            key,
+        ).fetchall()
         return ActivityShortlistSnapshot(
             market_id=str(row["market_id"]),
             cap_bucket=CapBucket(str(row["cap_bucket"])),
@@ -394,8 +452,12 @@ class ActivityShortlistStore:
             selected=bool(row["selected"]),
         )
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path)
+    def _connect(self, *, read_only: bool = False) -> sqlite3.Connection:
+        connection = (
+            sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True)
+            if read_only
+            else sqlite3.connect(self.path)
+        )
         connection.row_factory = sqlite3.Row
         return connection
 

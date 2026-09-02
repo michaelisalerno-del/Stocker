@@ -27,6 +27,7 @@ from stocker_execution.execution_models import (
     OrderLifecycle,
     OrderPlan,
 )
+from stocker_execution.ibkr import IbkrConnection
 from stocker_execution.runtime import (
     ApplicationState,
     ExecutionEnvironmentStatus,
@@ -384,6 +385,46 @@ def test_overview_and_runs_expose_runtime_environment_state(tmp_path: Path) -> N
     assert runs[1]["environment"] == "PAPER"
 
 
+def test_system_resource_view_is_read_only_and_labels_stocker_budget(tmp_path: Path) -> None:
+    service = _seed_authoritative_state(tmp_path)
+    client = type(
+        "ResourceClient",
+        (),
+        {
+            "client": type("Throttle", (), {"MaxRequests": 45, "RequestsInterval": 1})(),
+            "isConnected": lambda self: False,
+        },
+    )()
+    connection = IbkrConnection(
+        IbkrConfig(
+            environment=Environment.PAPER,
+            host="127.0.0.1",
+            port=4002,
+            client_id=77,
+            market_data_line_budget=80,
+        ),
+        client=client,  # type: ignore[arg-type]
+    )
+    status_reads = 0
+
+    def status() -> RuntimeStatus:
+        nonlocal status_reads
+        status_reads += 1
+        return replace(_runtime_status(), ibkr_resources=connection.resource_status())
+
+    service.runtime_status = status
+
+    first = service.system()["ibkr_api_resources"]
+    second = service.system()["ibkr_api_resources"]
+
+    assert first == second
+    assert status_reads == 2
+    assert first["market_data_budget_label"] == "Stocker API line budget"
+    assert first["market_data_line_budget"] == 80
+    assert first["ibkr_account_line_limit"] is None
+    assert first["active_market_data_lines"] == 0
+
+
 def test_run_detail_uses_persisted_funnel_counts_and_config(tmp_path: Path) -> None:
     detail = _seed_authoritative_state(tmp_path).run_detail("US-SH-LIVE")
 
@@ -640,6 +681,7 @@ def test_broker_config_edit_persists_and_targets_only_selected_environment(
         port=4002,
         client_id=31,
         expected_account="DU123456",
+        market_data_line_budget=80,
     )
 
     result = asyncio.run(controls.update_broker_config(paper))
@@ -791,6 +833,7 @@ def test_settings_http_api_exposes_editable_broker_and_custom_universe_fields(
             "port": 4002,
             "client_id": 31,
             "expected_account": "DU123456",
+            "market_data_line_budget": 80,
         },
     )
     universe_response = client.put(
@@ -803,6 +846,7 @@ def test_settings_http_api_exposes_editable_broker_and_custom_universe_fields(
     assert universe_response.status_code == 200
     settings = client.get("/api/settings").json()
     assert settings["broker_configuration"][0]["host"] == "paper-gateway.local"
+    assert settings["broker_configuration"][0]["market_data_line_budget"] == 80
     assert [member["symbol"] for member in settings["custom_universes"][0]["members"]] == [
         "AAPL",
         "MSFT",
@@ -907,6 +951,10 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
         "Settings",
     ):
         assert f">{label}<" in index
+
+    script = client.get("/static/dashboard.js").text
+    assert "IBKR API RESOURCES" in script
+    assert "Stocker market-data budget" in script
 
 
 def test_universe_builder_http_flow_keeps_paper_and_live_separate(

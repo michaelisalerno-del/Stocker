@@ -42,6 +42,7 @@ class BrokerConfigBody(BaseModel):
     expected_account: str | None = None
     connect_timeout_seconds: float = 5.0
     request_timeout_seconds: float = 60.0
+    market_data_line_budget: int = 100
 
 
 class CustomUniverseBody(BaseModel):

@@ -34,6 +34,10 @@ class IbkrError(RuntimeError):
     """A clear failure at the IBKR connection or data boundary."""
 
 
+MAX_ACTIVE_SCANNERS = 10
+HISTORICAL_REQUEST_CONCURRENCY = 4
+
+
 @dataclass(frozen=True, slots=True)
 class IbkrApiError:
     """One sanitized TWS/Gateway API error observed during a data request."""
@@ -220,6 +224,59 @@ class BrokerSession:
 
 
 @dataclass(frozen=True, slots=True)
+class MarketDataSubscriptionStatus:
+    """One physical streaming market-data request owned by this connection."""
+
+    request_id: int
+    con_id: int
+    security_type: str
+    exchange: str
+    purpose: str
+    snapshot: bool
+    created_at: datetime
+    consumer_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class IbkrResourceStatus:
+    """Broker-local resource facts Stocker can know without claiming account entitlement."""
+
+    market_data_line_budget: int
+    ib_async_max_requests: int | None
+    ib_async_requests_interval: float | None
+    active_market_data_lines: int
+    active_underlying_lines: int
+    active_option_lines: int
+    subscriptions: tuple[MarketDataSubscriptionStatus, ...]
+    market_data_requests_today: int
+    deduplicated_requests_today: int
+    capacity_rejects_today: int
+    active_scanners: int
+    pending_historical_work: int
+    historical_concurrency_limit: int
+    historical_requests_today: int
+    scanner_requests_today: int
+    pacing_state: str
+    pacing_violations_today: int
+    last_resource_error: str | None
+    market_data_budget_label: str = "Stocker API line budget"
+    ibkr_account_line_limit: int | None = None
+
+
+@dataclass(slots=True)
+class _ActiveMarketDataSubscription:
+    request_id: int
+    contract: object
+    ticker: object
+    con_id: int
+    security_type: str
+    exchange: str
+    purpose: str
+    created_at: datetime
+    consumer_count: int = 1
+
+
+@dataclass(frozen=True, slots=True)
 class QualifiedInstrument:
     """Stable Stocker identity copied from one qualified IBKR stock contract."""
 
@@ -351,10 +408,234 @@ class IbkrConnection:
     ) -> None:
         self.config = config
         self._client = client if client is not None else _new_client()
+        self._library_max_requests = self._configure_ib_async_throttle()
         self._account_id: str | None = None
         self._execution_enabled = execution_enabled
         self._connection_epoch = 0
         self._scanner_capabilities: ScannerCapabilities | None = None
+        self._qualified_stock_cache: dict[
+            tuple[str, str, str, str], QualifiedInstrument
+        ] = {}
+        self._option_chain_cache: dict[int, tuple[OptionChainDefinition, ...]] = {}
+        self._active_market_data: dict[
+            tuple[int, str, str, str, int], _ActiveMarketDataSubscription
+        ] = {}
+        self._next_local_request_id = 1
+        self._resource_counter_date = datetime.now(tz=UTC).date()
+        self._market_data_requests_today = 0
+        self._deduplicated_requests_today = 0
+        self._capacity_rejects_today = 0
+        self._scanner_semaphore = asyncio.Semaphore(MAX_ACTIVE_SCANNERS)
+        self._historical_semaphore = asyncio.Semaphore(HISTORICAL_REQUEST_CONCURRENCY)
+        self._active_scanners = 0
+        self._pending_historical_work = 0
+        self._historical_requests_today = 0
+        self._scanner_requests_today = 0
+        self._pacing_violations_today = 0
+        self._last_resource_error: str | None = None
+        self._observe_resource_errors()
+
+    def resource_status(self) -> IbkrResourceStatus:
+        """Return only connection-local resource facts Stocker can observe."""
+
+        self._reset_daily_resource_counters()
+        client = getattr(self._client, "client", None)
+        max_requests = getattr(client, "MaxRequests", None)
+        requests_interval = getattr(client, "RequestsInterval", None)
+        subscriptions = tuple(
+            MarketDataSubscriptionStatus(
+                request_id=item.request_id,
+                con_id=item.con_id,
+                security_type=item.security_type,
+                exchange=item.exchange,
+                purpose=item.purpose,
+                snapshot=False,
+                created_at=item.created_at,
+                consumer_count=item.consumer_count,
+            )
+            for item in sorted(
+                self._active_market_data.values(), key=lambda value: value.request_id
+            )
+        )
+        return IbkrResourceStatus(
+            market_data_line_budget=self.config.market_data_line_budget,
+            ib_async_max_requests=(int(max_requests) if isinstance(max_requests, int) else None),
+            ib_async_requests_interval=(
+                float(requests_interval)
+                if isinstance(requests_interval, (int, float))
+                else None
+            ),
+            active_market_data_lines=len(subscriptions),
+            active_underlying_lines=sum(
+                item.security_type != "OPT" for item in subscriptions
+            ),
+            active_option_lines=sum(item.security_type == "OPT" for item in subscriptions),
+            subscriptions=subscriptions,
+            market_data_requests_today=self._market_data_requests_today,
+            deduplicated_requests_today=self._deduplicated_requests_today,
+            capacity_rejects_today=self._capacity_rejects_today,
+            active_scanners=self._active_scanners,
+            pending_historical_work=self._pending_historical_work,
+            historical_concurrency_limit=HISTORICAL_REQUEST_CONCURRENCY,
+            historical_requests_today=self._historical_requests_today,
+            scanner_requests_today=self._scanner_requests_today,
+            pacing_state=(
+                "THROTTLING"
+                if bool(getattr(client, "_isThrottling", False))
+                else "VIOLATION_RECORDED"
+                if self._pacing_violations_today
+                else "OK"
+            ),
+            pacing_violations_today=self._pacing_violations_today,
+            last_resource_error=self._last_resource_error,
+        )
+
+    def _configure_ib_async_throttle(self) -> int | None:
+        client = getattr(self._client, "client", None)
+        if client is None:
+            return None
+        configured = getattr(client, "MaxRequests", None)
+        if not isinstance(configured, int) or configured <= 0:
+            return None
+        self._set_ib_async_throttle(configured)
+        return configured
+
+    def _apply_ib_async_throttle(self) -> None:
+        """Reapply Stocker's budget without losing ib_async's native ceiling."""
+
+        if self._library_max_requests is None:
+            return
+        self._set_ib_async_throttle(self._library_max_requests)
+
+    def _set_ib_async_throttle(self, library_ceiling: int) -> None:
+        client = getattr(self._client, "client", None)
+        if client is None:
+            return
+        derived = max(1, self.config.market_data_line_budget // 2)
+        client.MaxRequests = min(library_ceiling, derived)
+
+    def _reset_daily_resource_counters(self, today: date | None = None) -> None:
+        """Keep operational counters scoped to the current UTC day."""
+
+        current = today or datetime.now(tz=UTC).date()
+        if current == self._resource_counter_date:
+            return
+        self._resource_counter_date = current
+        self._market_data_requests_today = 0
+        self._deduplicated_requests_today = 0
+        self._capacity_rejects_today = 0
+        self._historical_requests_today = 0
+        self._scanner_requests_today = 0
+        self._pacing_violations_today = 0
+
+    def _observe_resource_errors(self) -> None:
+        event = getattr(self._client, "errorEvent", None)
+        if event is not None:
+            event += self._record_resource_error
+
+    def _record_resource_error(
+        self,
+        _request_id: int,
+        code: int,
+        message: str,
+        _contract: object,
+        *_extra: object,
+    ) -> None:
+        normalized = str(message).lower()
+        pacing = code == 100 or "pacing violation" in normalized or (
+            code in {162, 420} and "pacing" in normalized
+        )
+        capacity = code == 101 or any(
+            phrase in normalized
+            for phrase in (
+                "market data lines",
+                "market data subscriptions reached",
+                "scanner subscription limit",
+                "too many scanner",
+            )
+        )
+        entitlement = code == 354 or any(
+            phrase in normalized
+            for phrase in ("not subscribed", "market data permission", "not entitled")
+        )
+        if not (pacing or capacity or entitlement):
+            return
+        self._reset_daily_resource_counters()
+        if pacing:
+            self._pacing_violations_today += 1
+        if capacity:
+            self._capacity_rejects_today += 1
+        self._last_resource_error = f"{int(code)}: {sanitize_ibkr_message(message)}"
+
+    def _acquire_market_data_stream(
+        self,
+        contract: object,
+        *,
+        generic_tick_list: str,
+        market_data_type: int,
+        purpose: str,
+    ) -> tuple[tuple[int, str, str, str, int], object]:
+        self._reset_daily_resource_counters()
+        con_id = int(cast(Any, contract).conId)
+        security_type = str(getattr(contract, "secType", "")).upper()
+        exchange = str(getattr(contract, "exchange", "")).upper()
+        key = (con_id, security_type, exchange, generic_tick_list, market_data_type)
+        existing = self._active_market_data.get(key)
+        if existing is not None:
+            existing.consumer_count += 1
+            self._deduplicated_requests_today += 1
+            return key, existing.ticker
+        if len(self._active_market_data) >= self.config.market_data_line_budget:
+            self._capacity_rejects_today += 1
+            self._last_resource_error = "IBKR_MARKET_DATA_CAPACITY_UNAVAILABLE"
+            raise IbkrError("IBKR_MARKET_DATA_CAPACITY_UNAVAILABLE")
+        ticker = self._client.reqMktData(
+            contract,
+            genericTickList=generic_tick_list,
+            snapshot=False,
+            regulatorySnapshot=False,
+        )
+        request_id = self._market_data_request_id(ticker)
+        self._active_market_data[key] = _ActiveMarketDataSubscription(
+            request_id=request_id,
+            contract=contract,
+            ticker=ticker,
+            con_id=con_id,
+            security_type=security_type,
+            exchange=exchange,
+            purpose=purpose,
+            created_at=datetime.now(tz=UTC),
+        )
+        self._market_data_requests_today += 1
+        return key, ticker
+
+    def _release_market_data_stream(self, key: tuple[int, str, str, str, int]) -> None:
+        active = self._active_market_data.get(key)
+        if active is None:
+            return
+        active.consumer_count -= 1
+        if active.consumer_count > 0:
+            return
+        try:
+            self._client.cancelMktData(active.contract)
+        finally:
+            self._active_market_data.pop(key, None)
+
+    def _cancel_all_market_data_streams(self) -> None:
+        active = tuple(self._active_market_data.values())
+        self._active_market_data.clear()
+        for item in active:
+            with suppress(Exception):
+                self._client.cancelMktData(item.contract)
+
+    def _market_data_request_id(self, ticker: object) -> int:
+        wrapper = getattr(self._client, "wrapper", None)
+        for request_id, candidate in getattr(wrapper, "reqId2Ticker", {}).items():
+            if candidate is ticker:
+                return int(request_id)
+        request_id = self._next_local_request_id
+        self._next_local_request_id += 1
+        return request_id
 
     @property
     def environment(self) -> Environment:
@@ -410,10 +691,13 @@ class IbkrConnection:
         """Disconnect this instance and clear its confirmed account state."""
 
         was_connected = self._client.isConnected() or self._account_id is not None
+        self._cancel_all_market_data_streams()
         if self._client.isConnected():
             self._client.disconnect()
         self._account_id = None
         self._scanner_capabilities = None
+        self._qualified_stock_cache.clear()
+        self._option_chain_cache.clear()
         if was_connected:
             self._connection_epoch += 1
 
@@ -425,6 +709,7 @@ class IbkrConnection:
         if config.environment is not self.environment:
             raise ValueError("IBKR reconfiguration cannot change execution environment")
         self.config = config
+        self._apply_ib_async_throttle()
 
     @contextmanager
     def capture_api_errors(self) -> Iterator[list[IbkrApiError]]:
@@ -712,16 +997,30 @@ class IbkrConnection:
 
         self._require_connected()
         normalized_symbol = symbol.strip().upper()
-        if not normalized_symbol or not exchange.strip() or not currency.strip():
+        normalized_exchange = exchange.strip().upper()
+        normalized_currency = currency.strip().upper()
+        normalized_primary_exchange = (primary_exchange or "").strip().upper()
+        if not normalized_symbol or not normalized_exchange or not normalized_currency:
             raise IbkrError("Stock symbol, exchange, and currency are required")
+        cache_key = (
+            normalized_symbol,
+            normalized_exchange,
+            normalized_currency,
+            normalized_primary_exchange,
+        )
+        cached = self._qualified_stock_cache.get(cache_key)
+        if cached is not None:
+            self._reset_daily_resource_counters()
+            self._deduplicated_requests_today += 1
+            return cached
 
         from ib_async import Stock
 
         requested = Stock(
             normalized_symbol,
-            exchange.strip().upper(),
-            currency.strip().upper(),
-            primaryExchange=(primary_exchange or "").strip().upper(),
+            normalized_exchange,
+            normalized_currency,
+            primaryExchange=normalized_primary_exchange,
         )
         try:
             results = await asyncio.wait_for(
@@ -747,7 +1046,7 @@ class IbkrConnection:
             raise IbkrError(
                 f"IBKR returned an invalid qualified stock contract for {normalized_symbol}"
             )
-        return QualifiedInstrument(
+        qualified = QualifiedInstrument(
             symbol=contract.symbol,
             con_id=contract.conId,
             exchange=contract.exchange,
@@ -755,6 +1054,8 @@ class IbkrConnection:
             currency=contract.currency,
             security_type=contract.secType,
         )
+        self._qualified_stock_cache[cache_key] = qualified
+        return qualified
 
     async def hot_us_stocks_by_volume(self, *, max_results: int = 50) -> tuple[str, ...]:
         """Return one finite IBKR US-stock volume scan, ordered by scanner rank."""
@@ -772,10 +1073,7 @@ class IbkrConnection:
             scanCode="HOT_BY_VOLUME",
         )
         try:
-            rows = await asyncio.wait_for(
-                self._client.reqScannerDataAsync(subscription),
-                timeout=self.config.request_timeout_seconds,
-            )
+            rows = await self._bounded_scanner_data(subscription)
         except Exception as exc:
             raise IbkrError(
                 f"IBKR HOT_BY_VOLUME scanner request failed: {sanitize_ibkr_message(exc)}"
@@ -791,6 +1089,49 @@ class IbkrConnection:
             seen.add(symbol)
             symbols.append(symbol)
         return tuple(symbols[:max_results])
+
+    async def _bounded_scanner_data(
+        self,
+        subscription: object,
+        filter_options: list[object] | None = None,
+    ) -> list[object]:
+        """Collect one scan and guarantee broker-side cancellation on every exit."""
+
+        self._reset_daily_resource_counters()
+        async with self._scanner_semaphore:
+            self._active_scanners += 1
+            self._scanner_requests_today += 1
+            try:
+                request = getattr(self._client, "reqScannerSubscription", None)
+                cancel = getattr(self._client, "cancelScannerSubscription", None)
+                wrapper = getattr(self._client, "wrapper", None)
+                if callable(request) and callable(cancel) and wrapper is not None:
+                    data_list = request(subscription, [], filter_options or [])
+                    future = wrapper.startReq(data_list.reqId, container=data_list)
+                    try:
+                        result = await asyncio.wait_for(
+                            future,
+                            timeout=self.config.request_timeout_seconds,
+                        )
+                        return list(result)
+                    finally:
+                        cancel(data_list)
+                        end_request = getattr(wrapper, "_endReq", None)
+                        if callable(end_request):
+                            end_request(data_list.reqId)
+                if filter_options is None:
+                    result = await asyncio.wait_for(
+                        self._client.reqScannerDataAsync(subscription),
+                        timeout=self.config.request_timeout_seconds,
+                    )
+                else:
+                    result = await asyncio.wait_for(
+                        self._client.reqScannerDataAsync(subscription, [], filter_options),
+                        timeout=self.config.request_timeout_seconds,
+                    )
+                return list(result)
+            finally:
+                self._active_scanners -= 1
 
     async def scanner_capabilities(self) -> ScannerCapabilities:
         """Discover and cache the connected broker's finite scanner vocabulary."""
@@ -917,10 +1258,7 @@ class IbkrConnection:
             else:
                 subscription.marketCapBelow = cap.scanner_maximum_millions
         try:
-            rows = await asyncio.wait_for(
-                self._client.reqScannerDataAsync(subscription, [], filter_options),
-                timeout=self.config.request_timeout_seconds,
-            )
+            rows = await self._bounded_scanner_data(subscription, filter_options)
         except Exception as exc:
             raise IbkrError(
                 f"IBKR {component.value} scanner request failed: {sanitize_ibkr_message(exc)}"
@@ -971,22 +1309,28 @@ class IbkrConnection:
         if minimum_bars < 1:
             raise IbkrError("Historical minimum_bars must be at least 1")
 
+        self._pending_historical_work += 1
+        self._reset_daily_resource_counters()
         try:
-            source_bars = await self._client.reqHistoricalDataAsync(
-                _to_ib_contract(instrument),
-                endDateTime=end_time or "",
-                durationStr=duration.strip(),
-                barSizeSetting=bar_size.strip(),
-                whatToShow=what_to_show.strip().upper(),
-                useRTH=regular_trading_hours,
-                formatDate=2,
-                keepUpToDate=False,
-                timeout=self.config.request_timeout_seconds,
-            )
+            async with self._historical_semaphore:
+                self._historical_requests_today += 1
+                source_bars = await self._client.reqHistoricalDataAsync(
+                    _to_ib_contract(instrument),
+                    endDateTime=end_time or "",
+                    durationStr=duration.strip(),
+                    barSizeSetting=bar_size.strip(),
+                    whatToShow=what_to_show.strip().upper(),
+                    useRTH=regular_trading_hours,
+                    formatDate=2,
+                    keepUpToDate=False,
+                    timeout=self.config.request_timeout_seconds,
+                )
         except Exception as exc:
             raise IbkrError(
                 f"IBKR historical data request failed for {instrument.symbol}: {exc}"
             ) from exc
+        finally:
+            self._pending_historical_work -= 1
 
         if not source_bars:
             raise IbkrError(f"IBKR historical data returned no bars for {instrument.symbol}")
@@ -1023,6 +1367,8 @@ class IbkrConnection:
             raise IbkrError("IBKR market data type must be one of 1, 2, 3, or 4")
         try:
             self._client.reqMarketDataType(market_data_type)
+            self._reset_daily_resource_counters()
+            self._market_data_requests_today += 1
             tickers = await asyncio.wait_for(
                 self._client.reqTickersAsync(_to_ib_contract(instrument), regulatorySnapshot=False),
                 timeout=self.config.request_timeout_seconds,
@@ -1069,7 +1415,11 @@ class IbkrConnection:
         )
 
     async def option_snapshots(
-        self, options: tuple[QualifiedOption, ...], *, market_data_type: int = 1
+        self,
+        options: tuple[QualifiedOption, ...],
+        *,
+        market_data_type: int = 1,
+        purpose: str = "OPTION_PRE_CONTEXT",
     ) -> tuple[OptionMarketSnapshot, ...]:
         """Capture tick-13 model computations plus generic-101 open interest."""
 
@@ -1080,17 +1430,21 @@ class IbkrConnection:
             raise IbkrError("IBKR market data type must be one of 1, 2, 3, or 4")
         unique_options = tuple({option.con_id: option for option in options}.values())
         contracts = tuple(_to_ib_option_contract(option) for option in unique_options)
+        acquired: list[tuple[int, str, str, str, int]] = []
+        tickers: tuple[object, ...] = ()
         try:
             self._client.reqMarketDataType(market_data_type)
-            tickers = tuple(
-                self._client.reqMktData(
+            requested: list[object] = []
+            for contract in contracts:
+                key, ticker = self._acquire_market_data_stream(
                     contract,
-                    genericTickList="101",
-                    snapshot=False,
-                    regulatorySnapshot=False,
+                    generic_tick_list="101",
+                    market_data_type=market_data_type,
+                    purpose=purpose,
                 )
-                for contract in contracts
-            )
+                acquired.append(key)
+                requested.append(ticker)
+            tickers = tuple(requested)
             deadline = asyncio.get_running_loop().time() + self.config.request_timeout_seconds
             while not all(
                 _option_snapshot_complete(
@@ -1104,10 +1458,12 @@ class IbkrConnection:
                     break
                 await asyncio.sleep(0.05)
         except Exception as exc:
+            if isinstance(exc, IbkrError):
+                raise
             raise IbkrError(f"IBKR option market data request failed: {exc}") from exc
         finally:
-            for contract in locals().get("contracts", ()):
-                self._client.cancelMktData(contract)
+            for key in reversed(acquired):
+                self._release_market_data_stream(key)
 
         captured_at = datetime.now(tz=UTC)
         normalized: list[OptionMarketSnapshot] = []
@@ -1141,6 +1497,11 @@ class IbkrConnection:
         """Return normalized IBKR option-chain security definitions."""
 
         self._require_connected()
+        cached = self._option_chain_cache.get(instrument.con_id)
+        if cached is not None:
+            self._reset_daily_resource_counters()
+            self._deduplicated_requests_today += 1
+            return cached
         try:
             sources = await asyncio.wait_for(
                 self._client.reqSecDefOptParamsAsync(
@@ -1182,7 +1543,9 @@ class IbkrConnection:
             )
         if not chains:
             raise IbkrError(f"IBKR returned no option chain for {instrument.symbol}")
-        return tuple(chains)
+        result = tuple(chains)
+        self._option_chain_cache[instrument.con_id] = result
+        return result
 
     async def qualify_options(
         self, requests: tuple[OptionContractRequest, ...]

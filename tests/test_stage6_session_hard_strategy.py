@@ -323,6 +323,27 @@ def test_split_simultaneous_observations_wait_then_apply_one_global_cap() -> Non
     ]
 
 
+def test_pending_ranking_finalizes_when_missing_candidate_reports_no_touch() -> None:
+    triggered = replace(ready_snapshot(pre_move_m=0.8, con_id=750), symbol="TRIGGERED")
+    no_touch = replace(ready_snapshot(pre_move_m=0.8, con_id=751), symbol="NO_TOUCH")
+    snapshots = (triggered, no_touch)
+    strategy = SessionHardStructureDStrategy()
+    strategy.evaluate(
+        snapshots,
+        strategy_context(
+            snapshots,
+            {750: SESSION_HARD_THRESHOLD, 751: SESSION_HARD_THRESHOLD},
+        ),
+    )
+
+    incomplete = strategy.observe_entry_bars({750: (EntryBar(triggered.t0, 100.0, 100.0, 99.0),)})
+    finalized = strategy.observe_entry_bars({751: (EntryBar(no_touch.t0, 100.0, 100.1, 99.9),)})
+
+    assert not any(signal.selected for signal in incomplete)
+    selected = [signal for signal in finalized if signal.selected]
+    assert [(signal.symbol, signal.candidate_rank) for signal in selected] == [("TRIGGERED", 1)]
+
+
 def test_candidate_capacity_is_independent_for_distinct_runs() -> None:
     run_a = tuple(
         replace(

@@ -236,6 +236,7 @@ class SessionHardStructureDStrategy:
         self._strategy_candidate_ids: set[str] = set()
         self._cohort_opportunities: dict[str, CohortOpportunity] = {}
         self._observed_entry_bars: dict[str, dict[datetime, EntryBar]] = {}
+        self._pending_ranking_groups: set[tuple[str, datetime]] = set()
 
     @property
     def cohort_opportunities(self) -> tuple[CohortOpportunity, ...]:
@@ -435,11 +436,10 @@ class SessionHardStructureDStrategy:
             self._signals[signal_id] = updated
             changed.append(updated)
 
-        triggered_groups: set[tuple[str, datetime]] = set()
         for signal in changed:
             if signal.status is SignalStatus.ENTRY_TRIGGERED and signal.entry_timestamp is not None:
-                triggered_groups.add((signal.run_id, signal.entry_timestamp))
-        for run_id, entry_timestamp in triggered_groups:
+                self._pending_ranking_groups.add((signal.run_id, signal.entry_timestamp))
+        for run_id, entry_timestamp in tuple(self._pending_ranking_groups):
             if not self._ranking_group_complete(run_id, entry_timestamp):
                 continue
             simultaneous = [
@@ -475,6 +475,7 @@ class SessionHardStructureDStrategy:
                         break
                 else:
                     changed.append(updated)
+            self._pending_ranking_groups.discard((run_id, entry_timestamp))
         return tuple(
             sorted(
                 changed,

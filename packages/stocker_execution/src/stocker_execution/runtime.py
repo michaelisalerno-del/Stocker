@@ -32,6 +32,7 @@ from stocker_execution.ibkr import (
     IbkrConnection,
     IbkrError,
     QualifiedInstrument,
+    mask_ibkr_account,
 )
 from stocker_execution.pre_context import PriorSessionContextService, PriorSessionContextStore
 from stocker_execution.session_hard_structure_d import (
@@ -209,8 +210,8 @@ class RuntimeStatus:
             "ibkr": {
                 item.environment.value: {
                     "connected": item.connected,
-                    "account": item.account,
-                    "expected_account": item.expected_account,
+                    "account": mask_ibkr_account(item.account),
+                    "expected_account": mask_ibkr_account(item.expected_account),
                     "reconciled": item.reconciled,
                     "ready": item.ready,
                     "equity": item.equity,
@@ -245,7 +246,7 @@ class RuntimeStatus:
         )
         if paper is not None:
             result["ibkr_paper"] = "connected" if paper.connected else "disconnected"
-            result["account"] = paper.account
+            result["account"] = mask_ibkr_account(paper.account)
         return result
 
     def as_text(self) -> str:
@@ -255,7 +256,7 @@ class RuntimeStatus:
                 (
                     f"IBKR {item.environment.value}: "
                     f"{'connected' if item.connected else 'disconnected'}",
-                    f"  account: {item.account or 'unavailable'}",
+                    f"  account: {mask_ibkr_account(item.account) or 'unavailable'}",
                     f"  reconciled: {'yes' if item.reconciled else 'no'}",
                     f"  readiness: {'READY' if item.ready else 'NOT_READY'}",
                 )
@@ -850,7 +851,7 @@ class StockerRuntime:
                     self._logger.error(
                         "reconciliation_required",
                         environment=environment.value,
-                        account=destination.expected_account,
+                        account=mask_ibkr_account(destination.expected_account),
                         run_id=instance.config.run_id,
                         reason=result.detail,
                     )
@@ -878,7 +879,7 @@ class StockerRuntime:
             self._logger.info(
                 "reconciliation_complete",
                 environment=environment.value,
-                account=destination.expected_account,
+                account=mask_ibkr_account(destination.expected_account),
                 runs=len(affected),
             )
 
@@ -893,6 +894,7 @@ class StockerRuntime:
             self._state = ApplicationState.DEGRADED
             self._logger.error("instrument_preparation_failed", reason=str(exc))
             return self.status()
+        _log_candidate_screen_failures(self._logger, self._qualification)
         self._run_ready_at.update({instance.config.run_id: now for instance in runnable_runs})
         self._last_sync = now
         self._mark_missed_before(now)
@@ -1358,6 +1360,7 @@ class StockerRuntime:
                 )
                 recovered = []
             else:
+                _log_candidate_screen_failures(self._logger, recovered_qualification)
                 self._replace_qualification_for(
                     {instance.config.run_id for instance in recovered},
                     recovered_qualification,
@@ -1540,7 +1543,7 @@ class StockerRuntime:
         self._logger.info(
             event,
             environment=fill.environment.value,
-            account=fill.account,
+            account=mask_ibkr_account(fill.account),
             run_id=matching.run_id,
             signal_id=matching.signal_id,
             order_plan_id=matching.order_plan_id,
@@ -1817,7 +1820,7 @@ class StockerRuntime:
                 self._logger.info(
                     "strategy_signal",
                     environment=attempt.environment.value,
-                    account=attempt.actual_account,
+                    account=mask_ibkr_account(attempt.actual_account),
                     run_id=run.run_id,
                     signal_id=attempt.signal_id,
                     order_plan_id=(
@@ -1831,7 +1834,7 @@ class StockerRuntime:
                     self._logger.info(
                         "order_submitted",
                         environment=attempt.environment.value,
-                        account=attempt.actual_account,
+                        account=mask_ibkr_account(attempt.actual_account),
                         run_id=run.run_id,
                         signal_id=attempt.signal_id,
                         order_plan_id=(
@@ -1845,7 +1848,7 @@ class StockerRuntime:
                     self._logger.error(
                         "broker_order_rejected",
                         environment=attempt.environment.value,
-                        account=attempt.actual_account,
+                        account=mask_ibkr_account(attempt.actual_account),
                         run_id=run.run_id,
                         signal_id=attempt.signal_id,
                         order_plan_id=(
@@ -1860,7 +1863,7 @@ class StockerRuntime:
                     self._logger.warning(
                         "execution_rejected",
                         environment=attempt.environment.value,
-                        account=attempt.actual_account,
+                        account=mask_ibkr_account(attempt.actual_account),
                         run_id=run.run_id,
                         signal_id=attempt.signal_id,
                         order_plan_id=(
@@ -2015,6 +2018,20 @@ def _session_matches_destination(session: BrokerSession, destination: ExecutionD
         and destination.broker.environment is destination.environment
         and destination.broker.account == destination.expected_account
     )
+
+
+def _log_candidate_screen_failures(
+    logger: Any, result: Stage5QualificationResult
+) -> None:
+    for failure in result.ineligible:
+        if failure.symbol != "HOT_BY_VOLUME":
+            continue
+        logger.warning(
+            "candidate_screen_ineligible",
+            runs=[membership.run_id for membership in failure.memberships],
+            universes=[membership.universe_id for membership in failure.memberships],
+            reason=failure.reason,
+        )
 
 
 def _merge_qualification_results(

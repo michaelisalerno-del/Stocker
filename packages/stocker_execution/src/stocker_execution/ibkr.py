@@ -44,7 +44,7 @@ class IbkrApiError:
 
 
 _IBKR_ACCOUNT_IDENTIFIER = re.compile(
-    r"\b((?:DU|U|F|FA|D|DF|I|IB|M|S))(\d{4,})\b", re.IGNORECASE
+    r"\b((?:DUP|DU|U|F|FA|D|DF|I|IB|M|S))(\d{4,})\b", re.IGNORECASE
 )
 
 
@@ -55,6 +55,16 @@ def sanitize_ibkr_message(message: object) -> str:
         lambda match: f"{match.group(1)}***{match.group(2)[-3:]}",
         str(message),
     )
+
+
+def mask_ibkr_account(account_id: str | None) -> str | None:
+    """Mask an account identifier for logs and human-readable status output."""
+
+    if account_id is None:
+        return None
+    if len(account_id) <= 5:
+        return "***"
+    return f"{account_id[:2]}***{account_id[-3:]}"
 
 
 class _IbClient(Protocol):
@@ -108,6 +118,8 @@ class _IbClient(Protocol):
         underlyingSecType: str,
         underlyingConId: int,
     ) -> list[object]: ...
+
+    async def reqScannerDataAsync(self, subscription: object) -> list[object]: ...
 
     async def accountSummaryAsync(self, account: str = "") -> list[object]: ...
 
@@ -194,9 +206,7 @@ class BrokerSession:
     def masked_account_id(self) -> str:
         """Return an account identifier suitable for normal human-readable output."""
 
-        if len(self.account_id) <= 5:
-            return "***"
-        return f"{self.account_id[:2]}***{self.account_id[-3:]}"
+        return mask_ibkr_account(self.account_id) or "***"
 
 
 @dataclass(frozen=True, slots=True)
@@ -733,6 +743,43 @@ class IbkrConnection:
             currency=contract.currency,
             security_type=contract.secType,
         )
+
+    async def hot_us_stocks_by_volume(self, *, max_results: int = 50) -> tuple[str, ...]:
+        """Return one finite IBKR US-stock volume scan, ordered by scanner rank."""
+
+        self._require_connected()
+        if not 1 <= max_results <= 50:
+            raise ValueError("IBKR market scanners support between 1 and 50 results")
+
+        from ib_async import ScannerSubscription
+
+        subscription = ScannerSubscription(
+            numberOfRows=max_results,
+            instrument="STK",
+            locationCode="STK.US.MAJOR",
+            scanCode="HOT_BY_VOLUME",
+        )
+        try:
+            rows = await asyncio.wait_for(
+                self._client.reqScannerDataAsync(subscription),
+                timeout=self.config.request_timeout_seconds,
+            )
+        except Exception as exc:
+            raise IbkrError(
+                "IBKR HOT_BY_VOLUME scanner request failed: "
+                f"{sanitize_ibkr_message(exc)}"
+            ) from exc
+
+        symbols: list[str] = []
+        seen: set[str] = set()
+        for row in sorted(rows, key=lambda item: int(cast(Any, item).rank)):
+            contract = cast(Any, row).contractDetails.contract
+            symbol = str(contract.symbol).strip().upper()
+            if str(contract.secType).upper() != "STK" or not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            symbols.append(symbol)
+        return tuple(symbols[:max_results])
 
     async def historical_bars(
         self,

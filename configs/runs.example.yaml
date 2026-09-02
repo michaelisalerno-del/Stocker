@@ -33,6 +33,9 @@ runs:
     universe: NASDAQ
     strategy: SESSION_HARD
     environment: LIVE
+    screen:
+      method: HOT_BY_VOLUME
+      max_results: 50
     risk:
       risk_per_trade: 0.001
       max_concurrent_positions: 5

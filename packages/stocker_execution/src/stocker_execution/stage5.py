@@ -499,17 +499,60 @@ class Stage5SnapshotStore:
 async def qualify_active_runs(
     ibkr: IbkrConnection, runs: Sequence[RunInstance]
 ) -> Stage5QualificationResult:
-    """Qualify active universe members once, then deduplicate physical stocks by conId."""
+    """Screen active memberships, qualify them, then deduplicate physical stocks by conId."""
 
     if not isinstance(ibkr, IbkrConnection):
         raise TypeError("Stage 5 qualification requires the Stage 2 IbkrConnection")
-    references: dict[InstrumentReference, set[Stage5Membership]] = {}
+    screened_symbols_by_run: dict[str, frozenset[str]] = {}
     ineligible: list[Stage5IneligibleInstrument] = []
+    screened_runs = [
+        run for run in runs if run.state is RunState.ACTIVE and run.config.screen is not None
+    ]
+    if screened_runs:
+        max_results = max(
+            run.config.screen.max_results
+            for run in screened_runs
+            if run.config.screen is not None
+        )
+        try:
+            ranked_symbols = await ibkr.hot_us_stocks_by_volume(max_results=max_results)
+        except IbkrError as exc:
+            for run in screened_runs:
+                screened_symbols_by_run[run.config.run_id] = frozenset()
+                ineligible.append(
+                    Stage5IneligibleInstrument(
+                        "HOT_BY_VOLUME",
+                        (Stage5Membership(run.config.run_id, run.universe.universe_id),),
+                        f"candidate screen HOT_BY_VOLUME failed: {exc}",
+                    )
+                )
+        else:
+            for run in screened_runs:
+                screen = run.config.screen
+                assert screen is not None
+                selected_symbols = frozenset(ranked_symbols[: screen.max_results])
+                screened_symbols_by_run[run.config.run_id] = selected_symbols
+                if not any(
+                    reference.symbol in selected_symbols for reference in run.universe.members
+                ):
+                    ineligible.append(
+                        Stage5IneligibleInstrument(
+                            "HOT_BY_VOLUME",
+                            (Stage5Membership(run.config.run_id, run.universe.universe_id),),
+                            "candidate screen HOT_BY_VOLUME returned no "
+                            f"{run.universe.universe_id} universe members",
+                        )
+                    )
+
+    references: dict[InstrumentReference, set[Stage5Membership]] = {}
     for run in runs:
         if run.state is not RunState.ACTIVE:
             continue
         membership = Stage5Membership(run.config.run_id, run.universe.universe_id)
+        allowed_symbols = screened_symbols_by_run.get(run.config.run_id)
         for reference in run.universe.members:
+            if allowed_symbols is not None and reference.symbol not in allowed_symbols:
+                continue
             references.setdefault(reference, set()).add(membership)
 
     qualified: dict[int, tuple[QualifiedInstrument, set[Stage5Membership]]] = {}

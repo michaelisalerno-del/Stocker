@@ -6,7 +6,14 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-from stocker_core.runs import Environment, RunConfig, RunInstance, RunState
+from stocker_core.runs import (
+    CandidateScreen,
+    Environment,
+    RunConfig,
+    RunInstance,
+    RunScreenConfig,
+    RunState,
+)
 from stocker_core.universes import InstrumentReference, UniverseDefinition
 from stocker_execution.ibkr import IbkrConnection, IbkrError, QualifiedInstrument
 from stocker_execution.stage5 import (
@@ -178,9 +185,17 @@ def test_snapshot_store_preserves_ready_feature_across_transient_rerun(
 
 
 class QualificationBoundary(IbkrConnection):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        scan_result: tuple[str, ...] = ("AAPL", "MSFT", "HOOD"),
+        scan_error: Exception | None = None,
+    ) -> None:
         self.config = SimpleNamespace(environment=Environment.PAPER)
         self.calls: list[str] = []
+        self.scan_calls: list[int] = []
+        self.scan_result = scan_result
+        self.scan_error = scan_error
         self.order_calls = 0
 
     async def resolve_stock(
@@ -196,6 +211,12 @@ class QualificationBoundary(IbkrConnection):
         if symbol == "BAD":
             raise IbkrError("unresolved")
         return qualified(symbol, 123 if symbol == "HOOD" else 456)
+
+    async def hot_us_stocks_by_volume(self, *, max_results: int = 50) -> tuple[str, ...]:
+        self.scan_calls.append(max_results)
+        if self.scan_error is not None:
+            raise self.scan_error
+        return self.scan_result
 
     async def place_order(self, *_args: object, **_kwargs: object) -> None:
         self.order_calls += 1
@@ -278,6 +299,109 @@ def test_active_run_qualification_rejects_unsupported_security_type_locally() ->
     assert result.requests == ()
     assert len(result.ineligible) == 1
     assert result.ineligible[0].reason == "unsupported security type: OPT"
+
+
+def test_hot_volume_screen_intersects_membership_before_stage2_qualification() -> None:
+    boundary = QualificationBoundary()
+    run = active_run("RUN", "NASDAQ", "HOOD", "MSFT", "NVDA")
+    run = replace(
+        run,
+        config=run.config.model_copy(
+            update={
+                "screen": RunScreenConfig(
+                    method=CandidateScreen.HOT_BY_VOLUME,
+                    max_results=2,
+                )
+            }
+        ),
+    )
+
+    result = asyncio.run(qualify_active_runs(boundary, (run,)))
+
+    assert boundary.scan_calls == [2]
+    assert boundary.calls == ["MSFT"]
+    assert [request.instrument.con_id for request in result.requests] == [456]
+    assert result.requests[0].memberships == (Stage5Membership("RUN", "NASDAQ"),)
+
+
+def test_overlapping_screened_runs_share_one_bounded_scanner_request() -> None:
+    boundary = QualificationBoundary()
+
+    def screened(run: RunInstance, max_results: int) -> RunInstance:
+        return replace(
+            run,
+            config=run.config.model_copy(
+                update={
+                    "screen": RunScreenConfig(
+                        method=CandidateScreen.HOT_BY_VOLUME,
+                        max_results=max_results,
+                    )
+                }
+            ),
+        )
+
+    result = asyncio.run(
+        qualify_active_runs(
+            boundary,
+            (
+                screened(active_run("RUN_A", "NASDAQ", "MSFT", "HOOD"), 2),
+                screened(active_run("RUN_B", "US_ALL", "HOOD"), 3),
+            ),
+        )
+    )
+
+    assert boundary.scan_calls == [3]
+    assert boundary.calls == ["HOOD", "MSFT"]
+    assert {request.instrument.symbol for request in result.requests} == {"HOOD", "MSFT"}
+
+
+def test_screen_failure_isolated_from_unscreened_run_and_reported() -> None:
+    boundary = QualificationBoundary(scan_error=IbkrError("scanner unavailable"))
+    screened = active_run("SCREENED", "NASDAQ", "MSFT")
+    screened = replace(
+        screened,
+        config=screened.config.model_copy(
+            update={
+                "screen": RunScreenConfig(method=CandidateScreen.HOT_BY_VOLUME)
+            }
+        ),
+    )
+
+    result = asyncio.run(
+        qualify_active_runs(
+            boundary,
+            (screened, active_run("PLAIN", "CUSTOM", "HOOD")),
+        )
+    )
+
+    assert boundary.calls == ["HOOD"]
+    assert [request.instrument.symbol for request in result.requests] == ["HOOD"]
+    assert len(result.ineligible) == 1
+    assert result.ineligible[0].symbol == "HOT_BY_VOLUME"
+    assert result.ineligible[0].memberships == (Stage5Membership("SCREENED", "NASDAQ"),)
+    assert "scanner unavailable" in result.ineligible[0].reason
+
+
+def test_screen_with_no_universe_matches_reports_reason() -> None:
+    boundary = QualificationBoundary(scan_result=("IBM",))
+    run = active_run("RUN", "NASDAQ", "MSFT")
+    run = replace(
+        run,
+        config=run.config.model_copy(
+            update={
+                "screen": RunScreenConfig(method=CandidateScreen.HOT_BY_VOLUME)
+            }
+        ),
+    )
+
+    result = asyncio.run(qualify_active_runs(boundary, (run,)))
+
+    assert result.requests == ()
+    assert len(result.ineligible) == 1
+    assert result.ineligible[0].symbol == "HOT_BY_VOLUME"
+    assert result.ineligible[0].reason == (
+        "candidate screen HOT_BY_VOLUME returned no NASDAQ universe members"
+    )
 
 
 def test_active_run_analysis_emits_ineligible_rows_and_places_no_orders() -> None:

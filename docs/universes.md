@@ -40,7 +40,14 @@ runs:
     universe: NASDAQ
     strategy: SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D
     environment: PAPER
+    screen:
+      method: HOT_BY_VOLUME
+      max_results: 50
 ```
+
+`HOT_BY_VOLUME` is an optional finite IBKR runtime shortlist, capped at 50 scanner rows. Stocker
+intersects it with NASDAQ membership before Stage 2 qualification; it does not change or replace
+the broker-independent NASDAQ universe snapshot.
 
 The older research universe data manager below remains separate. Its current provider is EODHD,
 and its history is not a production or PAPER PRE input.

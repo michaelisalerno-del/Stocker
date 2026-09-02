@@ -226,12 +226,16 @@ M_price → split-aligned raw PRE move → PRE_MOVE_M
 deterministic reusable feature snapshot
 ```
 
-There is no additional generic cheap price, volume, market-cap, or option-availability screen. The
-accepted broad-universe runner used a pre-frozen 511-security universe and data completeness; the
-older `$5`, first-six-bar dollar-volume, and 100-session rules belonged to an unseen-cohort builder
-and were not the frozen broad-universe Stage 5 contract. Stage 5 therefore narrows through active
-membership and Stage 2 qualification, deduplicates overlapping members by `conId`, and requests
-Stage 4 context only for the survivors. A failed symbol is recorded and does not stop the batch.
+An active run may select the bounded `HOT_BY_VOLUME` candidate screen. Stocker performs one finite
+IBKR `STK.US.MAJOR` scan (at most 50 rows), intersects its ranked symbols with that run's
+broker-independent universe membership, and sends only the intersection through the existing
+Stage 2 qualification boundary. This is a coarse runtime shortlist, not a universe-membership
+source or a substitute for Stage 5/6 research logic. Runs without the setting retain full-universe
+qualification. The accepted broad-universe runner used a pre-frozen 511-security universe and data
+completeness; the older `$5`, first-six-bar dollar-volume, and 100-session rules belonged to an
+unseen-cohort builder and were not the frozen broad-universe Stage 5 contract. Stage 5 deduplicates
+overlapping qualified members by `conId` and requests Stage 4 context only for survivors. A failed
+symbol is recorded and does not stop the batch.
 
 The caller supplies timezone-aware `T0`. The accepted Session HARD research generated checkpoints
 at completed native five-minute RTH prefix counts `6, 8, ..., 34`: with a 09:30 America/New_York

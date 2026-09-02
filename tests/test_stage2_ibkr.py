@@ -47,11 +47,13 @@ class FakeIbClient:
         qualification_result: list[object] | None = None,
         historical_result: list[object] | Exception | None = None,
         ticker_result: list[object] | Exception | None = None,
+        scanner_result: list[object] | Exception | None = None,
     ) -> None:
         self.accounts = accounts
         self.qualification_result = qualification_result or []
         self.historical_result = historical_result or []
         self.ticker_result = ticker_result or []
+        self.scanner_result = scanner_result or []
         self.connected = False
         self.connect_kwargs: dict[str, object] = {}
         self.disconnect_count = 0
@@ -60,6 +62,7 @@ class FakeIbClient:
         self.historical_kwargs: dict[str, object] = {}
         self.ticker_request: object | None = None
         self.market_data_types: list[int] = []
+        self.scanner_request: object | None = None
         self.errorEvent = FakeEvent()
 
     async def connectAsync(self, host: str, port: int, **kwargs: object) -> None:
@@ -101,6 +104,12 @@ class FakeIbClient:
 
     def reqMarketDataType(self, market_data_type: int) -> None:
         self.market_data_types.append(market_data_type)
+
+    async def reqScannerDataAsync(self, subscription: object) -> list[object]:
+        self.scanner_request = subscription
+        if isinstance(self.scanner_result, Exception):
+            raise self.scanner_result
+        return self.scanner_result
 
 
 def test_paper_and_live_ibkr_configurations_are_explicit_and_independent() -> None:
@@ -327,6 +336,72 @@ def test_resolve_stock_returns_stable_qualified_instrument_identity() -> None:
     assert instrument.security_type == "STK"
     assert client.qualification_request.symbol == "AAPL"
     assert client.qualification_request.primaryExchange == "NASDAQ"
+
+
+def test_hot_us_volume_scan_is_finite_bounded_and_deduplicated() -> None:
+    def row(rank: int, symbol: str, security_type: str = "STK") -> object:
+        return SimpleNamespace(
+            rank=rank,
+            contractDetails=SimpleNamespace(
+                contract=SimpleNamespace(symbol=symbol, secType=security_type)
+            ),
+        )
+
+    client = FakeIbClient(
+        accounts=["DU123456"],
+        scanner_result=[
+            row(1, "MSFT"),
+            row(0, "AAPL"),
+            row(2, "AAPL"),
+            row(3, "SPY", "ETF"),
+        ],
+    )
+    connection = IbkrConnection(
+        IbkrConfig(
+            environment=Environment.PAPER,
+            host="127.0.0.1",
+            port=4002,
+            client_id=21,
+        ),
+        client=client,
+    )
+
+    async def scenario() -> tuple[str, ...]:
+        await connection.connect()
+        return await connection.hot_us_stocks_by_volume(max_results=3)
+
+    assert asyncio.run(scenario()) == ("AAPL", "MSFT")
+    assert client.scanner_request.instrument == "STK"
+    assert client.scanner_request.locationCode == "STK.US.MAJOR"
+    assert client.scanner_request.scanCode == "HOT_BY_VOLUME"
+    assert client.scanner_request.numberOfRows == 3
+
+
+@pytest.mark.parametrize("account_id", ["DU123456", "DUP123456"])
+def test_hot_us_volume_scan_sanitizes_broker_errors(account_id: str) -> None:
+    client = FakeIbClient(
+        accounts=[account_id],
+        scanner_result=RuntimeError(f"account {account_id} is not entitled"),
+    )
+    connection = IbkrConnection(
+        IbkrConfig(
+            environment=Environment.PAPER,
+            host="127.0.0.1",
+            port=4002,
+            client_id=21,
+        ),
+        client=client,
+    )
+
+    async def scenario() -> None:
+        await connection.connect()
+        await connection.hot_us_stocks_by_volume()
+
+    with pytest.raises(IbkrError) as captured:
+        asyncio.run(scenario())
+
+    assert "***456" in str(captured.value)
+    assert account_id not in str(captured.value)
 
 
 @pytest.mark.parametrize(

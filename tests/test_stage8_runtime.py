@@ -139,6 +139,20 @@ class FakeBroker:
         return self.statuses
 
 
+class CapturingLogger:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, object]]] = []
+
+    def info(self, event: str, **values: object) -> None:
+        self.events.append((event, values))
+
+    def warning(self, event: str, **values: object) -> None:
+        self.events.append((event, values))
+
+    def error(self, event: str, **values: object) -> None:
+        self.events.append((event, values))
+
+
 class FakeFeatureService:
     def __init__(self, *, session_offset: int = 0) -> None:
         self.calls = 0
@@ -331,6 +345,7 @@ def _runtime(
     entry_source: object | None = None,
     qualification_log: list[tuple[str, ...]] | None = None,
     live_broker: FakeBroker | None = None,
+    logger: object | None = None,
 ) -> StockerRuntime:
     selected_runs = runs or (_run(),)
     features = feature_service or FakeFeatureService()
@@ -375,6 +390,7 @@ def _runtime(
         entry_source=entry_source or EmptyEntrySource(),
         session_resolver=FixedSessionResolver(),
         clock=clock or MutableClock(),
+        logger=logger,
         **broker_arguments,
     )
 
@@ -1167,12 +1183,14 @@ def test_deterministic_paper_flow_fills_position_and_protective_exit(
 ) -> None:
     clock = MutableClock()
     broker = FakeBroker()
+    logger = CapturingLogger()
     runtime = _runtime(
         tmp_path,
         broker,
         clock=clock,
         context_provider=TriggerContextProvider(),
         entry_source=TriggerEntrySource(),
+        logger=logger,
     )
     asyncio.run(runtime.start())
     clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
@@ -1226,6 +1244,13 @@ def test_deterministic_paper_flow_fills_position_and_protective_exit(
     )
     assert runtime.status().counters.orders == 1
     assert runtime.status().counters.fills == 2
+    account_values = [
+        values["account"]
+        for _event, values in logger.events
+        if values.get("account") is not None
+    ]
+    assert "DU***456" in account_values
+    assert "DU123456" not in account_values
 
 
 def test_duplicate_runtime_poll_does_not_duplicate_order(tmp_path: Path) -> None:
@@ -1532,6 +1557,9 @@ def test_status_has_text_and_json_ready_for_future_dashboard(tmp_path: Path) -> 
 
     assert "Application: READY" in status.as_text()
     assert "IBKR PAPER: connected" in status.as_text()
+    assert "DU***456" in status.as_text()
+    assert "DU123456" not in status.as_text()
+    assert status.as_dict()["ibkr"]["PAPER"]["account"] == "DU***456"
     assert status.as_dict()["runs"][0]["environment"] == "PAPER"
 
 

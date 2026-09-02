@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from datetime import time
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from stocker_core.universes import Identifier, UniverseCatalog, UniverseDefinition
 
@@ -35,6 +35,21 @@ class RunRiskConfig(BaseModel):
     max_concurrent_positions: int | None = None
 
 
+class CandidateScreen(StrEnum):
+    """Broker-independent candidate screen selected by one run."""
+
+    HOT_BY_VOLUME = "HOT_BY_VOLUME"
+
+
+class RunScreenConfig(BaseModel):
+    """One bounded pre-qualification screen for a broad run universe."""
+
+    model_config = ConfigDict(frozen=True)
+
+    method: CandidateScreen
+    max_results: int = Field(default=50, ge=1, le=50)
+
+
 class RunConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -45,6 +60,7 @@ class RunConfig(BaseModel):
     environment: Environment
     risk: RunRiskConfig | None = None
     session: RunWindow | None = None
+    screen: RunScreenConfig | None = None
 
     @property
     def execution_environment(self) -> Environment:

@@ -255,23 +255,87 @@ A strategy evaluates prepared candidates and market state. It does not download 
 universes, communicate with IBKR, or submit orders. Implement the first strategy concretely; let a
 second real strategy reveal the generalisation actually needed.
 
-Stage 6 will define the first strategy-specific eligible cohort, calculate the recovered causal
-`COHORT_PRE_MOVE_PERCENTILE`, derive LOW/MID/HIGH, apply the frozen strategy threshold, perform
-Session HARD qualification, and rank qualified candidates before producing any signal or order
-intention. None of those operations is Stage 5 runtime infrastructure.
+Stage 6 implements the one concrete
+`SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D` strategy in
+`stocker_execution.session_hard_structure_d`. It consumes immutable Stage 5 snapshots plus causal
+Session HARD score inputs. It neither mutates nor recalculates Stage 5 `P0`, `M_price`, or
+`PRE_MOVE_M`. The frozen flow is:
+
+```text
+Stage 5 snapshot + run-specific strategy context
+        ↓
+prior HIGH_PRE_MOVE_DOWN_ONLY baseline-opportunity cohort
+        ↓
+COHORT_PRE_MOVE_PERCENTILE → LOW / MID / HIGH
+        ↓
+strict PRE_MOVE_M > 0.475764059845861 + Session HARD
+        ↓
+global known-MID veto; LOW, HIGH, and unavailable percentile remain eligible
+        ↓
+Structure D DOWN-first-touch within the five one-minute bars from T0
+        ↓
+simultaneous-candidate TOP_SESSION_HARD_SCORE_5 ranking
+        ↓
+deterministic SHORT order intention
+```
+
+The run-specific percentile cohort is the accepted `HIGH_PRE_MOVE_DOWN_ONLY` baseline opportunity
+ledger: all symbols in the same named cohort that passed the strict absolute PRE gate, Session
+HARD, and Structure D DOWN-first-touch. Its history is the previous 20 distinct qualifying session
+dates, excludes the current session, and requires at least 30 prior qualifying observations.
+Percentile is exactly
+`100 * count(prior PRE_MOVE_M <= current PRE_MOVE_M) / prior_count`; ties therefore count below the
+current value and no rounding is applied. Bands are LOW `<= 33.33`, MID `> 33.33 and <= 66.67`,
+and HIGH `> 66.67`. A missing percentile is retained as unavailable rather than treated as MID.
+The later global MID veto suppresses an order intention but does not rewrite the earlier baseline
+cohort definition.
+
+Session HARD is the frozen Model B movement score (`1 - quiet_probability`) over its 15 named
+causal price/session-volume features and checkpoint one-hot, using completed native five-minute
+bars only through checkpoint minus one. Checkpoints are `6, 8, ..., 34`; `P0` is the next bar open.
+The exact frozen standardisation, coefficients, intercept, and inclusive
+`score >= 0.999361477` cutoff live beside the strategy. Prepared score inputs belong to the
+strategy context; the strategy does not fetch history itself.
+
+Structure D sets `upper = P0 + 0.20M` and `lower = P0 - 0.20M`, then inspects the first five
+one-minute bars from T0 in time order. An opening gap through a level enters at that open. Otherwise
+a single lower-level touch establishes DOWN and enters at the level; an upper first touch rejects
+the candidate, and a bar touching both levels is ambiguous and rejected. A non-gap touch becomes
+actionable after that one-minute bar completes. DOWN is therefore a recovered first-touch state,
+not the sign of PRE or a generic `price < P0` test.
+
+Simultaneous entry candidates are ordered by Session HARD score descending, stock ascending, then
+the frozen `stock|session|checkpoint` row identity, with at most five Stage 6 intentions. This is
+strategy candidate capacity only. It does not model active account positions or available broker
+slots.
+
+The intention records run, `conId`, symbol, session/T0, feature version, qualification and cohort
+details, score/checkpoint, direction/side, candidate rank, `P0`, `M_price`, entry level/reference,
+timestamps, and the frozen `0.50M` stop and `1.00M` target distances as metadata. Its ID is derived
+from the strategy/version/run/`conId`/session/T0/feature version so repeated observations do not
+emit a second intention. PAPER and LIVE produce the same deterministic strategy result.
+
+The 10 bps cost, T0+15 outcome horizon, and conservative same-bar stop/target resolution are
+historical research accounting rules. They are not runtime signal rules, live forced exits, or
+broker-order behavior. The offline
+`python -m stocker_execution.stage6_diagnostic --fixture <path>` command evaluates a frozen fixture
+and prints cohort, qualification, ranking, and entry state without broker or account access.
 
 ### Ranking
 
-Ranking orders already-qualified candidates when research or capacity selection requires it.
+Ranking remains strategy-specific in Stage 6. There is no generic ranking framework.
 
 ### Risk
 
-Risk converts a qualified trade intention into permitted size and risk parameters.
+Stage 7 risk will convert a Stage 6 intention into permitted size. Account equity, risk percentage,
+share quantity, buying power, and account-position capacity do not exist in Stage 6.
 
 ### Execution
 
-Execution owns broker-facing order activity. PAPER and LIVE routing is explicit. Later they may run
-simultaneously through separate IBKR Gateway sessions or accounts.
+Stage 7 execution will own broker order IDs, order construction, PAPER placement, fills, positions,
+and stop/target management. Stage 6 imports no broker adapter and places no orders. PAPER and LIVE
+routing remains explicit at the later execution boundary; they may eventually run simultaneously
+through separate IBKR Gateway sessions or accounts.
 
 ### Storage and audit
 

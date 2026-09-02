@@ -99,3 +99,20 @@ def test_exchange_session_resolver_uses_run_timezone_and_closed_day() -> None:
     assert active.opens_at == datetime(2026, 9, 2, 7, 0, tzinfo=UTC)
     assert closed.state is MarketSessionState.CLOSED_DAY
     assert closed.checkpoint_times() == ()
+
+
+def test_exchange_session_resolver_rejects_missing_session_instead_of_assuming_us() -> None:
+    resolver = ExchangeSessionResolver()
+    run = RunConfig(
+        run_id="missing-session",
+        universe="FTSE",
+        strategy="SESSION_HARD",
+        environment=Environment.PAPER,
+    )
+
+    try:
+        resolver.resolve(run, datetime(2026, 9, 2, 8, 30, tzinfo=UTC))
+    except ValueError as exc:
+        assert "explicit market session" in str(exc)
+    else:
+        raise AssertionError("missing run session silently received a market fallback")

@@ -452,7 +452,8 @@ before `READY` is restored. Unknown broker exposure remains untouched and return
 positions.
 
 Run configuration remains per-run: `run_id`, `enabled`, universe, strategy, environment, risk, and
-an optional timezone/calendar session. PAPER and future LIVE runs can coexist in configuration.
+an explicit timezone/calendar session for every enabled executable run. No market or timezone is
+silently substituted. PAPER and future LIVE runs can coexist in configuration.
 Stage 8 activates only supported PAPER runs. An enabled LIVE run reports `LIVE_EXECUTION_DISABLED`
 and is never silently sent to PAPER. A run-local data or strategy failure degrades that run while
 unrelated reconciled runs continue.
@@ -464,6 +465,11 @@ and durably completed once. A process that starts after T0, misses the five-minu
 window, or restarts after an interrupted checkpoint records the opportunity as skipped; it does not
 manufacture a historical live signal. Stage 4 continues to receive the exact target session, so its
 previous-session context cache cannot drift across trade sessions.
+
+Stage 6 signal state is durably upserted as it is produced and after entry observation. On restart,
+waiting signals inside their original five-minute causal entry window are restored without
+reevaluating the checkpoint. Waiting signals whose live window elapsed while Stocker was offline
+are marked expired and never reconstructed from historical bars for broker submission.
 
 Shutdown stops evaluation and transmission first, records stopped run state, and disconnects. It
 does not cancel protective children or flatten positions. Restart reconnects and lets Stage 7

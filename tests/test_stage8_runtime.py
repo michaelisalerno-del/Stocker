@@ -157,6 +157,20 @@ class FakeFeatureService:
         )
 
 
+class BlockingFeatureService(FakeFeatureService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def get_feature(
+        self, instrument: QualifiedInstrument, *, session: date, t0: datetime
+    ) -> Stage5FeatureResult:
+        self.started.set()
+        await self.release.wait()
+        return await super().get_feature(instrument, session=session, t0=t0)
+
+
 class FixedSessionResolver:
     def resolve(self, run: RunConfig, now: datetime) -> MarketSession:
         return MarketSession(
@@ -356,6 +370,26 @@ def test_broker_unavailable_leaves_execution_safely_unavailable(tmp_path: Path) 
     assert broker.submitted == []
 
 
+def test_enabled_run_requires_explicit_market_session_before_broker_connect(
+    tmp_path: Path,
+) -> None:
+    broker = FakeBroker()
+    run = RunConfig(
+        run_id="missing-session",
+        universe="NASDAQ",
+        strategy="SESSION_HARD",
+        environment=Environment.PAPER,
+        risk=RunRiskConfig(risk_per_trade=0.001, max_concurrent_positions=5),
+    )
+    runtime = _runtime(tmp_path, broker, run)
+
+    asyncio.run(runtime.start())
+
+    assert runtime.status().application is ApplicationState.DEGRADED
+    assert runtime.status().runs[0].reason == "explicit market session required"
+    assert broker.events == []
+
+
 def test_multiple_runs_coexist_and_disabled_run_never_activates(tmp_path: Path) -> None:
     runtime = _runtime(
         tmp_path,
@@ -400,6 +434,34 @@ def test_stop_blocks_new_work_and_preserves_broker_orders(tmp_path: Path) -> Non
     assert runtime.status().runs[0].state is RunRuntimeState.STOPPED
     assert broker.events[-1] == "disconnect"
     assert not hasattr(broker, "cancel_order")
+
+
+def test_stop_waits_for_in_flight_cycle_before_disconnect(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker = FakeBroker()
+        clock = MutableClock()
+        features = BlockingFeatureService()
+        runtime = _runtime(
+            tmp_path,
+            broker,
+            clock=clock,
+            feature_service=features,
+            context_provider=TriggerContextProvider(),
+        )
+        await runtime.start()
+        clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+        polling = asyncio.create_task(runtime.poll_once())
+        await features.started.wait()
+        stopping = asyncio.create_task(runtime.stop())
+        await asyncio.sleep(0)
+
+        assert broker.is_connected is True
+        features.release.set()
+        await polling
+        await stopping
+        assert broker.is_connected is False
+
+    asyncio.run(scenario())
 
 
 def test_checkpoint_is_evaluated_once_and_overlapping_runs_share_feature_work(
@@ -659,6 +721,66 @@ def test_duplicate_runtime_poll_does_not_duplicate_order(tmp_path: Path) -> None
     assert len(broker.submitted) == 1
 
 
+def test_restart_restores_waiting_signal_without_reevaluating_checkpoint(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock()
+    first_broker = FakeBroker()
+    first = _runtime(
+        tmp_path,
+        first_broker,
+        clock=clock,
+        context_provider=TriggerContextProvider(),
+    )
+    asyncio.run(first.start())
+    clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+    asyncio.run(first.poll_once())
+    asyncio.run(first.stop())
+    assert first_broker.submitted == []
+
+    second_broker = FakeBroker()
+    restored = _runtime(
+        tmp_path,
+        second_broker,
+        clock=clock,
+        context_provider=TriggerContextProvider(),
+        entry_source=TriggerEntrySource(),
+    )
+    asyncio.run(restored.start())
+    clock.now = datetime(2026, 9, 2, 14, 2, tzinfo=UTC)
+    asyncio.run(restored.poll_once())
+
+    assert len(second_broker.submitted) == 1
+
+
+def test_restart_does_not_replay_expired_waiting_signal(tmp_path: Path) -> None:
+    clock = MutableClock()
+    first = _runtime(
+        tmp_path,
+        FakeBroker(),
+        clock=clock,
+        context_provider=TriggerContextProvider(),
+    )
+    asyncio.run(first.start())
+    clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+    asyncio.run(first.poll_once())
+    asyncio.run(first.stop())
+
+    clock.now = datetime(2026, 9, 2, 14, 6, tzinfo=UTC)
+    broker = FakeBroker()
+    restored = _runtime(
+        tmp_path,
+        broker,
+        clock=clock,
+        context_provider=TriggerContextProvider(),
+        entry_source=TriggerEntrySource(),
+    )
+    asyncio.run(restored.start())
+    asyncio.run(restored.poll_once())
+
+    assert broker.submitted == []
+
+
 def _submitted_runtime(
     tmp_path: Path,
 ) -> tuple[StockerRuntime, FakeBroker, MutableClock, object]:
@@ -885,3 +1007,16 @@ def test_status_has_text_and_json_ready_for_future_dashboard(tmp_path: Path) -> 
     assert "Application: READY" in status.as_text()
     assert "IBKR PAPER: connected" in status.as_text()
     assert status.as_dict()["runs"][0]["environment"] == "PAPER"
+
+
+def test_no_signal_is_not_an_operational_failure(tmp_path: Path) -> None:
+    clock = MutableClock()
+    runtime = _runtime(tmp_path, FakeBroker(), clock=clock)
+    asyncio.run(runtime.start())
+    clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+
+    asyncio.run(runtime.poll_once())
+
+    assert runtime.status().application is ApplicationState.READY
+    assert runtime.status().runs[0].state is RunRuntimeState.ACTIVE
+    assert runtime.status().runs[0].signals_today == 0

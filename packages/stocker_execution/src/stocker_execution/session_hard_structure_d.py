@@ -255,6 +255,43 @@ class SessionHardStructureDStrategy:
             )
         )
 
+    def restore_signals(self, signals: Sequence[StrategySignal]) -> None:
+        """Restore durable Stage 6 state without reevaluating a past checkpoint."""
+
+        if self._signals:
+            raise ValueError("strategy signals may only be restored into an empty strategy")
+        for signal in signals:
+            if signal.strategy_id != STRATEGY_ID or signal.strategy_version != STRATEGY_VERSION:
+                raise ValueError("restored signal does not belong to this strategy version")
+            self._signals[signal.signal_id] = signal
+            if signal.status is SignalStatus.WAITING_FOR_ENTRY:
+                self._cohort_watch_ids.add(signal.signal_id)
+                self._strategy_candidate_ids.add(signal.signal_id)
+
+    def expire_waiting_before(self, now: datetime) -> tuple[StrategySignal, ...]:
+        """Expire live entry windows that elapsed while the runtime was unavailable."""
+
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("strategy expiry time must be timezone-aware")
+        cutoff = now.astimezone(UTC)
+        expired: list[StrategySignal] = []
+        for signal_id, signal in tuple(self._signals.items()):
+            if signal.status is not SignalStatus.WAITING_FOR_ENTRY:
+                continue
+            deadline = signal.t0.astimezone(UTC) + timedelta(minutes=ENTRY_WINDOW_MINUTES)
+            if cutoff <= deadline:
+                continue
+            updated = replace(
+                signal,
+                status=SignalStatus.EXPIRED,
+                reason="MISSED_RUNTIME_ENTRY_WINDOW",
+            )
+            self._signals[signal_id] = updated
+            self._cohort_watch_ids.discard(signal_id)
+            self._strategy_candidate_ids.discard(signal_id)
+            expired.append(updated)
+        return tuple(expired)
+
     def evaluate(
         self,
         feature_rows: Sequence[Stage5FeatureSnapshot],

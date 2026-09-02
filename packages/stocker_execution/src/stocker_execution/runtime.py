@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from dataclasses import asdict, dataclass
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
@@ -14,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 from stocker_core.config import RunsConfig, load_ibkr_config, load_runs_config
 from stocker_core.logging import configure_logging
-from stocker_core.runs import Environment, RunConfig, RunInstance, RunManager, RunWindow
+from stocker_core.runs import Environment, RunConfig, RunInstance, RunManager
 from stocker_core.universes import UniverseCatalog
 from stocker_data.calendars import get_market_calendar
 from stocker_execution.execution_ledger import ExecutionLedger
@@ -38,6 +39,7 @@ from stocker_execution.session_hard_structure_d import (
     STRATEGY_ID,
     CohortOpportunity,
     EntryBar,
+    PreMoveBand,
     SessionHardAssessment,
     SessionHardStructureDStrategy,
     SignalStatus,
@@ -243,16 +245,11 @@ Qualifier = Callable[[Sequence[RunInstance]], Awaitable[Stage5QualificationResul
 class ExchangeSessionResolver:
     """Resolve a run's configured exchange day without using machine-local time."""
 
-    _DEFAULT = RunWindow(
-        start=time(9, 30),
-        end=time(16, 0),
-        timezone="America/New_York",
-        calendar="XNYS",
-    )
-
     def resolve(self, run: RunConfig, now: datetime) -> MarketSession:
         aware_now = _aware(now)
-        window = run.session or self._DEFAULT
+        if run.session is None:
+            raise ValueError(f"run {run.run_id} requires an explicit market session")
+        window = run.session
         timezone = ZoneInfo(str(window.timezone))
         local_now = aware_now.astimezone(timezone)
         session = local_now.date()
@@ -317,6 +314,14 @@ class RuntimeStore:
                     run_id TEXT NOT NULL,
                     session TEXT NOT NULL,
                     pre_move_m REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS runtime_signals (
+                    signal_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    session TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
                 """
             )
@@ -512,6 +517,49 @@ class RuntimeStore:
             for row in rows
         )
 
+    def save_signals(self, signals: Sequence[StrategySignal], now: datetime) -> None:
+        """Durably upsert Stage 6 signal state used by restart recovery."""
+
+        rows = tuple(
+            (
+                signal.signal_id,
+                signal.run_id,
+                signal.session.isoformat(),
+                signal.status.value,
+                json.dumps(_signal_payload(signal), sort_keys=True),
+                _aware(now).isoformat(),
+            )
+            for signal in signals
+        )
+        if not rows:
+            return
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO runtime_signals
+                (signal_id, run_id, session, status, payload, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (signal_id) DO UPDATE SET
+                    status = excluded.status,
+                    payload = excluded.payload,
+                    updated_at = excluded.updated_at
+                """,
+                rows,
+            )
+
+    def load_signals(self, run_id: str) -> tuple[StrategySignal, ...]:
+        """Load signals for one run; callers apply the live session/window rules."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT payload FROM runtime_signals
+                WHERE run_id = ? ORDER BY session, signal_id
+                """,
+                (run_id,),
+            ).fetchall()
+        return tuple(_signal_from_payload(json.loads(str(row["payload"]))) for row in rows)
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
@@ -544,7 +592,6 @@ class StockerRuntime:
             raise ValueError("Stage 8 PAPER runtime requires expected_account")
         if broker_sync_interval_seconds <= 0.0:
             raise ValueError("broker sync interval must be positive")
-        self._config = config
         self._broker = broker
         self._expected_account = expected_account
         self._ledger = ledger
@@ -569,6 +616,7 @@ class StockerRuntime:
         self._ready_at: datetime | None = None
         self._last_sync: datetime | None = None
         self._stopping = False
+        self._cycle_lock = asyncio.Lock()
 
     async def start(self) -> RuntimeStatus:
         """Connect, verify, reconcile, prepare, and only then expose READY."""
@@ -591,6 +639,10 @@ class StockerRuntime:
                 self._set_run(run.run_id, RunRuntimeState.DEGRADED, "LIVE_EXECUTION_DISABLED")
             elif run.strategy not in self._SUPPORTED_STRATEGIES:
                 self._set_run(run.run_id, RunRuntimeState.DEGRADED, "unsupported strategy")
+            elif run.session is None:
+                self._set_run(
+                    run.run_id, RunRuntimeState.DEGRADED, "explicit market session required"
+                )
             elif run.risk is None:
                 self._set_run(run.run_id, RunRuntimeState.DEGRADED, "risk config is required")
             else:
@@ -626,7 +678,14 @@ class StockerRuntime:
         ):
             self._degrade_paper_runs(paper_runs, "account or environment mismatch")
             self._state = ApplicationState.DEGRADED
+            self._logger.error(
+                "account_verification_failed",
+                expected_environment=Environment.PAPER.value,
+                actual_environment=session.environment.value,
+                account=session.masked_account_id,
+            )
             return self.status()
+        self._logger.info("account_verified", account=session.masked_account_id)
 
         self._state = ApplicationState.RECONCILING
         all_reconciled = True
@@ -651,11 +710,7 @@ class StockerRuntime:
                     reason=result.detail,
                 )
                 continue
-            strategy = SessionHardStructureDStrategy()
-            self._strategies[instance.config.run_id] = strategy
-            self._paper_runtimes[instance.config.run_id] = Stage7PaperRuntime(
-                strategy=strategy, execution=execution
-            )
+            self._ensure_strategy(instance.config.run_id, execution, now)
             market = self._resolve_market(instance, now)
             if market is None:
                 continue
@@ -670,6 +725,7 @@ class StockerRuntime:
         if not all_reconciled:
             self._state = ApplicationState.DEGRADED
             return self.status()
+        self._logger.info("reconciliation_complete", runs=len(paper_runs))
         runnable_runs = tuple(
             instance
             for instance in paper_runs
@@ -684,6 +740,7 @@ class StockerRuntime:
         except Exception as exc:
             self._degrade_paper_runs(paper_runs, f"instrument preparation failed: {exc}")
             self._state = ApplicationState.DEGRADED
+            self._logger.error("instrument_preparation_failed", reason=str(exc))
             return self.status()
         self._ready_at = now
         self._last_sync = now
@@ -703,14 +760,15 @@ class StockerRuntime:
 
         self._stopping = True
         self._state = ApplicationState.STOPPING
-        for instance in self._manager.list_runs():
-            if self._run_states.get(instance.config.run_id) is not RunRuntimeState.DISABLED:
-                self._set_run(instance.config.run_id, RunRuntimeState.STOPPED, "")
-                if instance.state.value == "ACTIVE":
-                    self._manager.stop_run(instance.config.run_id)
-        self._broker.disconnect()
-        self._state = ApplicationState.STOPPED
-        self._logger.info("application_stop")
+        async with self._cycle_lock:
+            for instance in self._manager.list_runs():
+                if self._run_states.get(instance.config.run_id) is not RunRuntimeState.DISABLED:
+                    self._set_run(instance.config.run_id, RunRuntimeState.STOPPED, "")
+                    if instance.state.value == "ACTIVE":
+                        self._manager.stop_run(instance.config.run_id)
+            self._broker.disconnect()
+            self._state = ApplicationState.STOPPED
+            self._logger.info("application_stop")
         return self.status()
 
     @property
@@ -721,6 +779,12 @@ class StockerRuntime:
 
     async def poll_once(self) -> RuntimeStatus:
         """Process currently due checkpoints and causal entry observations once."""
+
+        async with self._cycle_lock:
+            return await self._poll_once()
+
+    async def _poll_once(self) -> RuntimeStatus:
+        """Process one cycle while graceful shutdown is excluded."""
 
         now = _aware(self._clock())
         if self._state is not ApplicationState.READY or self._stopping:
@@ -792,6 +856,7 @@ class StockerRuntime:
             self._state = ApplicationState.DEGRADED
             for run_id in self._execution:
                 self._set_run(run_id, RunRuntimeState.DEGRADED, f"broker unavailable: {exc}")
+            self._logger.error("ibkr_reconnect_failed", reason=str(exc))
             return self.status()
         if (
             session.environment is not Environment.PAPER
@@ -800,7 +865,14 @@ class StockerRuntime:
             self._state = ApplicationState.DEGRADED
             for run_id in self._execution:
                 self._set_run(run_id, RunRuntimeState.DEGRADED, "account or environment mismatch")
+            self._logger.error(
+                "account_verification_failed",
+                expected_environment=Environment.PAPER.value,
+                actual_environment=session.environment.value,
+                account=session.masked_account_id,
+            )
             return self.status()
+        self._logger.info("account_verified", account=session.masked_account_id)
 
         reconciled = True
         for run_id, execution in self._execution.items():
@@ -817,15 +889,13 @@ class StockerRuntime:
                 reconciled = False
                 self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
                 self._store.increment(run_id, now.date(), "reconciliation_issues")
+                self._logger.error("reconciliation_required", run_id=run_id, reason=result.detail)
             elif run_id not in self._strategies:
-                strategy = SessionHardStructureDStrategy()
-                self._strategies[run_id] = strategy
-                self._paper_runtimes[run_id] = Stage7PaperRuntime(
-                    strategy=strategy, execution=execution
-                )
+                self._ensure_strategy(run_id, execution, now)
         if not reconciled:
             self._state = ApplicationState.DEGRADED
             return self.status()
+        self._logger.info("reconciliation_complete", runs=len(self._execution))
         active = tuple(
             instance
             for instance in self._manager.list_runs()
@@ -843,6 +913,7 @@ class StockerRuntime:
         except Exception as exc:
             self._state = ApplicationState.DEGRADED
             self._degrade_paper_runs(runnable, f"instrument preparation failed: {exc}")
+            self._logger.error("instrument_preparation_failed", reason=str(exc))
             return self.status()
         self._ready_at = now
         self._last_sync = now
@@ -871,7 +942,7 @@ class StockerRuntime:
         while not self._stopping:
             if self._state is ApplicationState.READY:
                 await self.poll_once()
-            elif not self._broker.is_connected and self._execution:
+            elif self._execution:
                 await self.reconnect()
             await asyncio.sleep(poll_interval_seconds)
 
@@ -987,6 +1058,21 @@ class StockerRuntime:
         for instance in runs:
             self._set_run(instance.config.run_id, RunRuntimeState.DEGRADED, reason)
 
+    def _ensure_strategy(
+        self, run_id: str, execution: Stage7ExecutionService, now: datetime
+    ) -> None:
+        if run_id in self._strategies:
+            return
+        strategy = SessionHardStructureDStrategy()
+        restored = self._store.load_signals(run_id)
+        strategy.restore_signals(restored)
+        expired = strategy.expire_waiting_before(now)
+        if expired:
+            self._store.save_signals(expired, now)
+            self._logger.info("signals_expired_during_recovery", run_id=run_id, count=len(expired))
+        self._strategies[run_id] = strategy
+        self._paper_runtimes[run_id] = Stage7PaperRuntime(strategy=strategy, execution=execution)
+
     def _resolve_market(self, instance: RunInstance, now: datetime) -> MarketSession | None:
         try:
             return self._session_resolver.resolve(instance.config, now)
@@ -1067,11 +1153,30 @@ class StockerRuntime:
                 if context.run_id != run.run_id:
                     raise ValueError("strategy context run identity mismatch")
                 strategy = self._strategies[run.run_id]
-                strategy.evaluate(valid_rows, context)
             except Exception as exc:
                 self._fail_checkpoint(instance, session, t0, str(exc), now)
                 continue
+            evaluated: list[StrategySignal] = []
+            candidate_errors = 0
+            for row in valid_rows:
+                try:
+                    evaluated.extend(strategy.evaluate((row,), context))
+                except Exception as exc:
+                    candidate_errors += 1
+                    self._logger.error(
+                        "strategy_candidate_failed",
+                        run_id=run.run_id,
+                        con_id=row.con_id,
+                        symbol=row.symbol,
+                        reason=str(exc),
+                    )
+            self._store.save_signals(evaluated, now)
+            waiting = sum(signal.status is SignalStatus.WAITING_FOR_ENTRY for signal in evaluated)
+            self._store.increment(run.run_id, session, "signals", waiting)
             ready_count = sum(row.status is Stage5Status.READY for row in valid_rows)
+            context_not_ready = sum(
+                row.status is Stage5Status.PRE_CONTEXT_NOT_READY for row in valid_rows
+            )
             self._store.increment(run.run_id, session, "checkpoints_processed")
             self._store.increment(run.run_id, session, "instruments_ready", ready_count)
             self._store.mark_checkpoint(
@@ -1079,7 +1184,7 @@ class StockerRuntime:
                 session,
                 t0,
                 CheckpointState.COMPLETED,
-                f"Stage 5 ready={ready_count}",
+                f"Stage 5 ready={ready_count}; candidate_errors={candidate_errors}",
                 now,
             )
             self._logger.info(
@@ -1089,6 +1194,9 @@ class StockerRuntime:
                 t0=t0.isoformat(),
                 checkpoint=checkpoint,
                 instruments_ready=ready_count,
+                pre_context_not_ready=context_not_ready,
+                strategy_signals=waiting,
+                candidate_errors=candidate_errors,
             )
 
     async def _observe_entries(self, now: datetime) -> None:
@@ -1107,6 +1215,9 @@ class StockerRuntime:
             instruments = {request.instrument.con_id: request.instrument for request in requests}
             try:
                 strategy = self._strategies[run.run_id]
+                expired = strategy.expire_waiting_before(now)
+                if expired:
+                    self._store.save_signals(expired, now)
                 bars = await self._entry_source.bars_for(
                     run,
                     instruments,
@@ -1115,12 +1226,18 @@ class StockerRuntime:
                     signals=strategy.signals,
                 )
                 attempts = await paper_runtime.observe_and_execute(bars, instruments)
+                self._store.save_signals(strategy.signals, now)
             except Exception as exc:
                 self._set_run(run.run_id, RunRuntimeState.DEGRADED, str(exc))
                 self._logger.error("run_degraded", run_id=run.run_id, reason=str(exc))
                 continue
             for attempt in attempts:
-                self._store.increment(run.run_id, market.session, "signals")
+                self._logger.info(
+                    "strategy_signal",
+                    run_id=run.run_id,
+                    signal_id=attempt.order_plan.signal_id if attempt.order_plan else None,
+                    result=attempt.code.value,
+                )
                 if attempt.code is ExecutionResultCode.SUBMITTED:
                     self._store.increment(run.run_id, market.session, "orders")
                     self._logger.info(
@@ -1134,11 +1251,23 @@ class StockerRuntime:
                     )
                 elif attempt.code is ExecutionResultCode.BROKER_REJECTED:
                     self._store.increment(run.run_id, market.session, "broker_rejects")
+                    self._logger.error(
+                        "broker_order_rejected",
+                        run_id=run.run_id,
+                        result=attempt.code.value,
+                        reason=attempt.detail,
+                    )
                 elif attempt.code not in {
                     ExecutionResultCode.DUPLICATE_ORDER_BLOCKED,
                     ExecutionResultCode.LIVE_EXECUTION_DISABLED,
                 }:
                     self._store.increment(run.run_id, market.session, "risk_rejects")
+                    self._logger.warning(
+                        "execution_rejected",
+                        run_id=run.run_id,
+                        result=attempt.code.value,
+                        reason=attempt.detail,
+                    )
             for index, opportunity in enumerate(strategy.cohort_opportunities):
                 identity = (
                     f"{opportunity.run_id}|{opportunity.session.isoformat()}|"
@@ -1192,7 +1321,15 @@ class StockerRuntime:
 
         self._state = ApplicationState.RECONCILING
         for run_id, execution in self._execution.items():
-            result = await execution.refresh_broker_state()
+            try:
+                result = await execution.refresh_broker_state()
+            except Exception as exc:
+                detail = f"broker reconciliation unavailable: {exc}"
+                self._set_run(run_id, RunRuntimeState.DEGRADED, detail)
+                self._store.increment(run_id, now.date(), "reconciliation_issues")
+                self._logger.error("reconciliation_failed", run_id=run_id, reason=str(exc))
+                self._state = ApplicationState.DEGRADED
+                return False
             self._store.record_reconciliation(
                 environment=Environment.PAPER,
                 account=self._expected_account,
@@ -1204,11 +1341,37 @@ class StockerRuntime:
             if not result.ok:
                 self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
                 self._store.increment(run_id, now.date(), "reconciliation_issues")
+                self._logger.error("reconciliation_required", run_id=run_id, reason=result.detail)
                 self._state = ApplicationState.DEGRADED
                 return False
+            self._ensure_strategy(run_id, execution, now)
         self._last_sync = now
         self._state = ApplicationState.READY
         return True
+
+
+def _signal_payload(signal: StrategySignal) -> dict[str, object]:
+    payload: dict[str, object] = asdict(signal)
+    payload["session"] = signal.session.isoformat()
+    payload["t0"] = _aware(signal.t0).isoformat()
+    payload["status"] = signal.status.value
+    payload["band"] = signal.band.value if signal.band is not None else None
+    for name in ("entry_timestamp", "signal_timestamp"):
+        value = getattr(signal, name)
+        payload[name] = _aware(value).isoformat() if value is not None else None
+    return payload
+
+
+def _signal_from_payload(payload: Mapping[str, object]) -> StrategySignal:
+    values = dict(payload)
+    values["session"] = date.fromisoformat(str(values["session"]))
+    values["t0"] = datetime.fromisoformat(str(values["t0"]))
+    values["status"] = SignalStatus(str(values["status"]))
+    values["band"] = PreMoveBand(str(values["band"])) if values.get("band") else None
+    for name in ("entry_timestamp", "signal_timestamp"):
+        if values.get(name) is not None:
+            values[name] = datetime.fromisoformat(str(values[name]))
+    return StrategySignal(**values)  # type: ignore[arg-type]
 
 
 def _aware(value: datetime) -> datetime:
@@ -1229,9 +1392,16 @@ class IbkrSessionDataSource:
     _FIVE_MINUTES = HistorySemantics("5 mins", "TRADES", True)
     _ONE_MINUTE = HistorySemantics("1 min", "TRADES", True)
 
-    def __init__(self, ibkr: IbkrConnection, history_cache: IbkrHistoryCache) -> None:
+    def __init__(
+        self,
+        ibkr: IbkrConnection,
+        history_cache: IbkrHistoryCache,
+        *,
+        logger: Any | None = None,
+    ) -> None:
         self._cache = history_cache
         self._history = IbkrHistoryService(ibkr, history_cache)
+        self._logger = logger or configure_logging()
 
     async def context_for(
         self,
@@ -1247,6 +1417,13 @@ class IbkrSessionDataSource:
                 continue
             instrument = instruments.get(row.con_id)
             if instrument is None:
+                self._logger.warning(
+                    "session_hard_input_unavailable",
+                    run_id=run.run_id,
+                    con_id=row.con_id,
+                    symbol=row.symbol,
+                    reason="qualified instrument identity missing",
+                )
                 continue
             t0 = _aware(row.t0)
             session_open = t0 - timedelta(minutes=checkpoint * 5)
@@ -1270,6 +1447,13 @@ class IbkrSessionDataSource:
                         instrument, self._FIVE_MINUTES, required, as_of=t0
                     )
                 if snapshot.status is not HistoryStatus.READY:
+                    self._logger.debug(
+                        "session_hard_input_unavailable",
+                        run_id=run.run_id,
+                        con_id=instrument.con_id,
+                        symbol=instrument.symbol,
+                        reason=snapshot.reason,
+                    )
                     continue
                 features = calculate_session_hard_inputs(
                     snapshot.bars, checkpoint=checkpoint, session_open=session_open
@@ -1278,7 +1462,14 @@ class IbkrSessionDataSource:
                 assessments[key] = SessionHardAssessment.from_features(
                     checkpoint=checkpoint, features=features
                 )
-            except (IbkrError, ValueError):
+            except (IbkrError, ValueError) as exc:
+                self._logger.warning(
+                    "session_hard_input_failed",
+                    run_id=run.run_id,
+                    con_id=instrument.con_id,
+                    symbol=instrument.symbol,
+                    reason=str(exc),
+                )
                 continue
         return StrategyContext(
             run_id=run.run_id,
@@ -1307,6 +1498,14 @@ class IbkrSessionDataSource:
             ):
                 continue
             start = _aware(signal.t0)
+            if causal_now > start + timedelta(minutes=5):
+                self._logger.info(
+                    "entry_window_not_replayed",
+                    run_id=run.run_id,
+                    signal_id=signal.signal_id,
+                    con_id=signal.underlying_con_id,
+                )
+                continue
             end = min(start + timedelta(minutes=4), completed_minute)
             if end < start:
                 continue
@@ -1319,6 +1518,12 @@ class IbkrSessionDataSource:
         for con_id, required_set in required_by_con_id.items():
             instrument = instruments.get(con_id)
             if instrument is None:
+                self._logger.warning(
+                    "entry_data_unavailable",
+                    run_id=run.run_id,
+                    con_id=con_id,
+                    reason="qualified instrument identity missing",
+                )
                 continue
             required = tuple(sorted(required_set))
             try:
@@ -1337,6 +1542,14 @@ class IbkrSessionDataSource:
                     snapshot = self._cache.get_required_history(
                         instrument, self._ONE_MINUTE, required, as_of=causal_now
                     )
+                if snapshot.status is not HistoryStatus.READY:
+                    self._logger.debug(
+                        "entry_data_incomplete",
+                        run_id=run.run_id,
+                        con_id=instrument.con_id,
+                        symbol=instrument.symbol,
+                        reason=snapshot.reason,
+                    )
                 result[con_id] = tuple(
                     EntryBar(
                         timestamp=_intraday_timestamp(bar.timestamp),
@@ -1346,7 +1559,14 @@ class IbkrSessionDataSource:
                     )
                     for bar in snapshot.bars
                 )
-            except (IbkrError, ValueError):
+            except (IbkrError, ValueError) as exc:
+                self._logger.warning(
+                    "entry_data_failed",
+                    run_id=run.run_id,
+                    con_id=instrument.con_id,
+                    symbol=instrument.symbol,
+                    reason=str(exc),
+                )
                 continue
         return result
 
@@ -1383,7 +1603,7 @@ def build_paper_runtime(
         current_data,
         snapshot_store=Stage5SnapshotStore(database_path),
     )
-    session_data = IbkrSessionDataSource(broker, history_cache)
+    session_data = IbkrSessionDataSource(broker, history_cache, logger=logger)
 
     async def qualify(runs_to_prepare: Sequence[RunInstance]) -> Stage5QualificationResult:
         return await qualify_active_runs(broker, runs_to_prepare)

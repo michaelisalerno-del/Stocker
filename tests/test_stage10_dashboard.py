@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 import pytest
@@ -18,6 +18,7 @@ from stocker_execution.execution_models import (
     BrokerFill,
     BrokerOrderIds,
     BrokerOrderStatus,
+    BrokerPosition,
     EntryOrderType,
     OrderAction,
     OrderLifecycle,
@@ -61,7 +62,12 @@ def _config() -> RunsConfig:
             ),
         ),
     )
-    session = RunWindow(start="09:30", end="16:00", timezone="America/New_York", calendar="XNYS")
+    session = RunWindow(
+        start=time(9, 30),
+        end=time(16),
+        timezone="America/New_York",
+        calendar="XNYS",
+    )
     return RunsConfig(
         universes=(universe,),
         runs=(
@@ -237,6 +243,21 @@ def _seed_authoritative_state(tmp_path: Path) -> DashboardReadService:
             executed_at=NOW,
         )
     )
+    ledger.replace_broker_snapshot(
+        environment=Environment.LIVE,
+        account="U123456",
+        positions=(
+            BrokerPosition(
+                account="U123456",
+                con_id=101,
+                symbol="NVDA",
+                quantity=-12,
+                average_price=179.68,
+            ),
+        ),
+        open_orders=(),
+        observed_at=NOW,
+    )
     return DashboardReadService(
         config=_config(),
         runtime_status=_runtime_status,
@@ -308,11 +329,75 @@ def test_orders_positions_and_trades_preserve_account_environment(tmp_path: Path
     assert orders["items"][0]["environment"] == "LIVE"
     assert orders["items"][0]["account"] == "U123456"
     assert [child["role"] for child in orders["items"][0]["orders"]] == ["ENTRY", "STOP", "TARGET"]
-    assert positions[0]["source"] == "IBKR_RECONCILED"
+    assert positions[0]["source"] == "IBKR"
     assert positions[0]["environment"] == "LIVE"
     assert positions[0]["account"] == "U123456"
     assert trades["items"] == []
     assert trades["summary"]["trades"] == 0
+
+
+def test_unknown_broker_position_remains_visible_without_invented_lineage(tmp_path: Path) -> None:
+    service = _seed_authoritative_state(tmp_path)
+    service.ledger.replace_broker_snapshot(
+        environment=Environment.LIVE,
+        account="U123456",
+        positions=(
+            BrokerPosition("U123456", 101, "NVDA", -12, 179.68),
+            BrokerPosition("U123456", 202, "UNKNOWN", 5, 25.0),
+        ),
+        open_orders=(),
+        observed_at=NOW,
+    )
+
+    unknown = next(item for item in service.positions() if item["symbol"] == "UNKNOWN")
+
+    assert unknown["source"] == "IBKR"
+    assert unknown["run_id"] is None
+    assert unknown["order_plan_id"] is None
+    assert unknown["side"] == "LONG"
+
+
+def test_trade_filters_and_summary_cover_the_complete_filtered_ledger(tmp_path: Path) -> None:
+    service = _seed_authoritative_state(tmp_path)
+    assert service.ledger.record_fill(
+        BrokerFill(
+            execution_id="fill-target-1",
+            order_id=102,
+            account="U123456",
+            environment=Environment.LIVE,
+            con_id=101,
+            symbol="NVDA",
+            side=OrderAction.BUY,
+            quantity=12,
+            price=178.0,
+            executed_at=NOW + timedelta(minutes=1),
+        )
+    )
+
+    trades = service.trades(
+        environment=Environment.LIVE,
+        start=NOW,
+        end=NOW + timedelta(minutes=2),
+        run_id="US-SH-LIVE",
+        strategy="SESSION_HARD",
+        universe="NASDAQ",
+        symbol="nvda",
+        limit=1,
+    )
+    excluded = service.trades(
+        environment=None,
+        start=None,
+        end=None,
+        universe="NOT_CONFIGURED",
+    )
+
+    assert trades["total"] == 1
+    assert trades["items"][0]["universe"] == "NASDAQ"
+    assert trades["summary"]["trades"] == 1
+    assert trades["summary"]["wins"] == 1
+    assert trades["summary"]["total_pnl"] == pytest.approx(20.16)
+    assert excluded["total"] == 0
+    assert excluded["summary"]["trades"] == 0
 
 
 def _write_control_files(tmp_path: Path) -> tuple[Path, Path]:
@@ -347,12 +432,7 @@ def test_run_controls_validate_through_backend_and_require_live_confirmation(
     tmp_path: Path,
 ) -> None:
     runs_path, broker_path = _write_control_files(tmp_path)
-    observed: list[tuple[str, str]] = []
-    controls = RunControlService(
-        runs_path,
-        broker_path,
-        on_change=lambda operation, run: observed.append((operation, run.run_id)),
-    )
+    controls = RunControlService(runs_path, broker_path)
 
     controls.disable_run("US-SH-LIVE")
     controls.enable_run(
@@ -379,12 +459,6 @@ def test_run_controls_validate_through_backend_and_require_live_confirmation(
     assert changed.environment is Environment.LIVE
     assert changed.strategy == "SESSION_HARD"
     assert loaded.runs[1].risk == RunRiskConfig(risk_per_trade=0.003, max_concurrent_positions=4)
-    assert observed == [
-        ("disable_run", "US-SH-LIVE"),
-        ("enable_run", "US-SH-LIVE"),
-        ("update_run_config", "US-SH-PAPER"),
-        ("change_execution_environment", "US-SH-PAPER"),
-    ]
 
 
 def test_invalid_live_account_and_invalid_config_are_rejected(tmp_path: Path) -> None:
@@ -414,6 +488,11 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
     client = TestClient(app)
 
     assert client.get("/api/overview").json()["system"] == "READY"
+    assert client.get("/api/orders/plan-live-nvda").json()["signal_id"] == "signal-live-nvda"
+    assert (
+        client.get("/api/positions/LIVE/U123456/101").json()["order_plan_id"]
+        == "plan-live-nvda"
+    )
     for route in (
         "/",
         "/runs",

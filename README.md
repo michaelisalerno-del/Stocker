@@ -282,10 +282,10 @@ uv run stocker universe fetch \
   --max-symbols 2
 ```
 
-The intended flow is EODHD screener or manual YAML, batch EODHD fetch, audit/QA for
+The intended research flow is EODHD screener or manual YAML, batch EODHD fetch, audit/QA for
 each dataset, local liquidity and history qualification, then a research-ready JSON
-export consumed by `stocker research run-universe`. FMP and dashboard work are
-intentionally deferred.
+export consumed by `stocker research run-universe`. FMP work remains deferred; the operational
+dashboard is available as described below.
 
 ## Stage 10 Operational Dashboard
 

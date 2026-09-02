@@ -4,6 +4,12 @@ const main = document.querySelector("#main");
 const fmt = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
 let timer;
 
+const RUN_COLUMNS = [
+  { key: "run_id", label: "Run" }, { key: "universe", label: "Universe" }, { key: "strategy", label: "Strategy" },
+  { label: "Env", render: (row) => environment(row.environment) }, { label: "Status", render: (row) => badge(row.status) },
+  { key: "candidate_count", label: "Candidates", numeric: true }, { key: "signals_today", label: "Signals", numeric: true }, { key: "open_positions", label: "Positions", numeric: true },
+];
+
 function esc(value) {
   return String(value ?? "—").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 }
@@ -54,11 +60,6 @@ async function overview(cached) {
     const item = data.environments[name];
     return `<article class="status-card"><span class="eyebrow">IBKR ${name}</span><strong>${item ? (item.connected ? "CONNECTED" : "DISCONNECTED") : "NOT CONFIGURED"}</strong><small>${item ? `${esc(item.account)} · ${item.reconciled ? "RECONCILED" : "NOT RECONCILED"}` : "No runtime destination"}</small></article>`;
   };
-  const runColumns = [
-    { key: "run_id", label: "Run" }, { key: "universe", label: "Universe" }, { key: "strategy", label: "Strategy" },
-    { label: "Env", render: (row) => environment(row.environment) }, { label: "Status", render: (row) => badge(row.status) },
-    { key: "candidate_count", label: "Candidates", numeric: true }, { key: "signals_today", label: "Signals", numeric: true }, { key: "open_positions", label: "Positions", numeric: true },
-  ];
   const positionColumns = [
     { key: "symbol", label: "Symbol" }, { key: "run_id", label: "Run" }, { label: "Env", render: (row) => environment(row.environment) },
     { key: "side", label: "Side" }, { key: "quantity", label: "Qty", numeric: true }, { label: "Entry", numeric: true, render: (row) => number(row.average_entry) },
@@ -68,7 +69,7 @@ async function overview(cached) {
   const attention = data.attention.length ? data.attention.map((item) => `<div class="attention-item"><b>${esc(item.scope)}</b><span>${esc(item.message)}</span></div>`).join("") : `<div class="empty">No current operational issues.</div>`;
   main.innerHTML = `${head("Overview", "Current PAPER, LIVE, run, and broker-authoritative exposure at a glance.")}
     <section class="status-grid">${envCard("PAPER")}${envCard("LIVE")}<article class="status-card"><span class="eyebrow">SYSTEM</span><strong>${esc(data.system)}</strong><small>${data.active_runs} active runs · ${data.open_positions} open positions</small></article></section>
-    <section class="section"><div class="section-head"><h2>Active runs</h2><span class="muted">Backend status is authoritative</span></div>${table(runColumns, data.runs, (row) => `run:${row.run_id}`)}</section>
+    <section class="section"><div class="section-head"><h2>Active runs</h2><span class="muted">Backend status is authoritative</span></div>${table(RUN_COLUMNS, data.runs, (row) => `run:${row.run_id}`)}</section>
     <section class="section"><div class="section-head"><h2>Open positions</h2></div>${table(positionColumns, data.positions)}</section>
     <section class="section"><div class="section-head"><h2>Today</h2></div><div class="metric-strip">${metrics}</div></section>
     <section class="section"><div class="section-head"><h2>Attention</h2></div><div class="attention">${attention}</div></section>`;
@@ -79,12 +80,7 @@ async function runsPage() {
   const runId = params.get("run");
   if (runId) return runDetail(runId);
   const rows = await api("/api/runs");
-  const columns = [
-    { key: "run_id", label: "Run" }, { key: "universe", label: "Universe" }, { key: "strategy", label: "Strategy" },
-    { label: "Env", render: (row) => environment(row.environment) }, { label: "Status", render: (row) => badge(row.status) },
-    { key: "candidate_count", label: "Candidates", numeric: true }, { key: "signals_today", label: "Signals", numeric: true }, { key: "open_positions", label: "Positions", numeric: true },
-  ];
-  main.innerHTML = `${head("Runs", "Independent universe, strategy, execution environment, and risk configurations.")}<section class="section">${table(columns, rows, (row) => `run:${row.run_id}`)}</section>`;
+  main.innerHTML = `${head("Runs", "Independent universe, strategy, execution environment, and risk configurations.")}<section class="section">${table(RUN_COLUMNS, rows, (row) => `run:${row.run_id}`)}</section>`;
 }
 async function runDetail(runId) {
   const run = await api(`/api/runs/${encodeURIComponent(runId)}`);
@@ -112,22 +108,27 @@ async function runControl(run, control) {
       await api(`/api/runs/${encodeURIComponent(run.run_id)}/environment`, { method: "POST", body: JSON.stringify(body) });
     }
     if (control === "edit") {
+      const universe = prompt("Universe", run.universe);
+      const strategy = prompt("Strategy", run.strategy);
       const risk = prompt("Risk per trade", run.risk_per_trade);
       const slots = prompt("Maximum concurrent positions", run.max_concurrent_positions ?? "");
-      if (risk === null || slots === null) return;
-      let body = { universe: run.universe, strategy: run.strategy, risk_per_trade: Number(risk), max_concurrent_positions: slots === "" ? null : Number(slots) };
-      if (run.environment === "LIVE") body = { ...body, ...(await confirmLive(run.run_id)) };
+      if (universe === null || strategy === null || risk === null || slots === null) return;
+      let body = { universe, strategy, risk_per_trade: Number(risk), max_concurrent_positions: slots === "" ? null : Number(slots) };
+      if (run.environment === "LIVE") {
+        body = { ...body, ...(await confirmLive(run.run_id, { risk_per_trade: body.risk_per_trade, max_concurrent_positions: body.max_concurrent_positions })) };
+      }
       await api(`/api/runs/${encodeURIComponent(run.run_id)}`, { method: "PUT", body: JSON.stringify(body) });
     }
     await render();
   } catch (error) { if (error.message !== "cancelled") alert(error.message); }
 }
-async function confirmLive(runId) {
+async function confirmLive(runId, proposedRisk = null) {
   const context = await api(`/api/runs/${encodeURIComponent(runId)}/live-confirmation`);
   const dialog = document.querySelector("#live-dialog");
   const check = document.querySelector("#live-check");
   check.checked = false;
-  document.querySelector("#live-context").innerHTML = `<div class="detail-grid">${["run_id", "universe", "strategy", "target_environment", "target_account"].map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${esc(context[key])}</strong></div>`).join("")}<div class="detail-cell"><span>risk configuration</span><strong>${esc(JSON.stringify(context.risk))}</strong></div></div>`;
+  const risk = proposedRisk || context.risk;
+  document.querySelector("#live-context").innerHTML = `<div class="detail-grid">${["run_id", "universe", "strategy", "target_environment", "target_account"].map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${esc(context[key])}</strong></div>`).join("")}<div class="detail-cell"><span>risk configuration</span><strong>${esc(JSON.stringify(risk))}</strong></div></div>`;
   dialog.showModal();
   return new Promise((resolve, reject) => dialog.addEventListener("close", () => {
     if (dialog.returnValue === "confirm" && check.checked) resolve({ confirmed: true, target_account: context.target_account });
@@ -141,7 +142,14 @@ async function candidatesPage() {
   if (signal) return candidateDetail(signal);
   const runs = await api("/api/runs");
   const selected = params.get("run") || runs[0]?.run_id || "";
-  const data = await api(`/api/candidates?run_id=${encodeURIComponent(selected)}&limit=100`);
+  const session = params.get("session") || new Date().toISOString().slice(0, 10);
+  const checkpoint = params.get("checkpoint") || "";
+  const status = params.get("status") || "";
+  const offset = Number(params.get("offset") || 0);
+  const query = new URLSearchParams({ run_id: selected, session, limit: "100", offset: String(offset) });
+  if (checkpoint) query.set("checkpoint", new Date(checkpoint).toISOString());
+  if (status) query.set("status", status);
+  const data = await api(`/api/candidates?${query}`);
   const columns = [
     { key: "rank", label: "Rank", numeric: true }, { key: "symbol", label: "Symbol" }, { label: "PRE_MOVE_M", numeric: true, render: (row) => number(row.pre_move_m) },
     { label: "Percentile", numeric: true, render: (row) => number(row.cohort_percentile) }, { key: "band", label: "Band" },
@@ -149,38 +157,122 @@ async function candidatesPage() {
     { key: "direction", label: "Direction" }, { label: "Entry", numeric: true, render: (row) => number(row.entry) }, { label: "Status", render: (row) => badge(row.status) },
   ];
   const options = runs.map((run) => `<option ${run.run_id === selected ? "selected" : ""}>${esc(run.run_id)}</option>`).join("");
-  main.innerHTML = `${head("Candidates", "Authoritative Stage 5 feature and Stage 6 strategy evaluation snapshots.")}<div class="toolbar"><label>Run<select id="candidate-run">${options}</select></label><label>Session<input type="date" value="${new Date().toISOString().slice(0, 10)}"></label><label>Status<select><option>All</option><option>WAITING_FOR_ENTRY</option><option>ENTRY_TRIGGERED</option><option>NOT_QUALIFIED</option></select></label></div><section>${table(columns, data.items, (row) => row.signal_id ? `candidate:${row.signal_id}` : "")}</section>`;
-  document.querySelector("#candidate-run")?.addEventListener("change", (event) => { location.href = `/candidates?run=${encodeURIComponent(event.target.value)}`; });
+  const statuses = ["", "PRE_CONTEXT_NOT_READY", "PRE_MOVE_NOT_READY", "INELIGIBLE", "WAITING_FOR_ENTRY", "ENTRY_TRIGGERED", "NOT_QUALIFIED", "EXPIRED"];
+  const statusOptions = statuses.map((value) => `<option value="${esc(value)}" ${value === status ? "selected" : ""}>${esc(value || "ALL")}</option>`).join("");
+  const pageStart = data.total ? offset + 1 : 0;
+  const pageEnd = Math.min(offset + data.items.length, data.total);
+  const pager = `<div class="toolbar"><button id="candidate-prev" class="secondary" ${offset === 0 ? "disabled" : ""}>Previous</button><span>${pageStart}–${pageEnd} of ${data.total}</span><button id="candidate-next" class="secondary" ${offset + data.items.length >= data.total ? "disabled" : ""}>Next</button></div>`;
+  main.innerHTML = `${head("Candidates", "Authoritative Stage 5 feature and Stage 6 strategy evaluation snapshots.")}<div class="toolbar"><label>Run<select id="candidate-run">${options}</select></label><label>Session<input id="candidate-session" type="date" value="${esc(session)}"></label><label>Checkpoint<input id="candidate-checkpoint" type="datetime-local" value="${esc(checkpoint)}"></label><label>Status<select id="candidate-status">${statusOptions}</select></label></div><section>${table(columns, data.items, (row) => row.signal_id ? `candidate:${row.signal_id}` : "")}</section>${pager}`;
+  const updateCandidateFilters = () => {
+    const next = new URLSearchParams();
+    next.set("run", document.querySelector("#candidate-run").value);
+    next.set("session", document.querySelector("#candidate-session").value);
+    const nextCheckpoint = document.querySelector("#candidate-checkpoint").value;
+    const nextStatus = document.querySelector("#candidate-status").value;
+    if (nextCheckpoint) next.set("checkpoint", nextCheckpoint);
+    if (nextStatus) next.set("status", nextStatus);
+    location.href = `/candidates?${next}`;
+  };
+  for (const id of ["candidate-run", "candidate-session", "candidate-checkpoint", "candidate-status"]) {
+    document.querySelector(`#${id}`)?.addEventListener("change", updateCandidateFilters);
+  }
+  document.querySelector("#candidate-prev")?.addEventListener("click", () => { params.set("offset", String(Math.max(0, offset - 100))); location.href = `/candidates?${params}`; });
+  document.querySelector("#candidate-next")?.addEventListener("click", () => { params.set("offset", String(offset + 100)); location.href = `/candidates?${params}`; });
 }
 async function candidateDetail(signalId) {
   const item = await api(`/api/candidates/${encodeURIComponent(signalId)}`);
-  const fields = ["symbol", "con_id", "run_id", "universe", "strategy", "strategy_version", "environment", "account", "t0", "p0", "expected_absolute_return_15m", "m_price", "raw_pre_move", "pre_move_m", "cohort_percentile", "band", "session_hard_score", "structure", "direction", "rank", "entry", "entry_reference", "status", "signal_id", "order_plan_id"];
+  const fields = ["symbol", "con_id", "run_id", "universe", "strategy", "strategy_version", "environment", "account", "t0", "p0", "call_model_iv", "put_model_iv", "atm_iv", "expected_absolute_return_15m", "m_price", "raw_pre_move", "pre_move_m", "cohort_percentile", "band", "session_hard_score", "structure", "direction", "rank", "entry", "entry_reference", "status", "signal_id", "order_plan_id"];
   main.innerHTML = `${head(item.symbol, "Candidate calculation lineage copied from authoritative Stage 5/6 outputs.")}<section class="section"><div class="detail-grid">${fields.map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${key === "environment" ? environment(item[key]) : esc(item[key])}</strong></div>`).join("")}</div></section>`;
 }
 
 async function ordersPage() {
-  const scope = new URLSearchParams(location.search).get("scope") || "open";
+  const params = new URLSearchParams(location.search);
+  const plan = params.get("plan");
+  if (plan) return orderDetail(plan);
+  const scope = params.get("scope") || "open";
   const data = await api(`/api/orders?scope=${scope}`);
   const tabs = ["open", "today", "rejected", "all"].map((name) => `<button class="${name === scope ? "active" : ""}" data-scope="${name}">${name.toUpperCase()}</button>`).join("");
-  const groups = data.items.map((item) => `<article class="order-group"><div class="order-title"><strong>${esc(item.symbol)}</strong>${environment(item.environment)}<span>${esc(item.run_id)}</span><span class="muted">${esc(item.account)}</span></div>${item.orders.map((leg, index) => `<div class="order-leg ${index ? "child" : ""}"><b>${index ? "└─ " : ""}${esc(leg.role)}</b>${badge(leg.status)}<span>${leg.role === "ENTRY" ? `${number(item.filled)} @ ${number(item.average_fill || item.entry)}` : (leg.role === "STOP" ? number(item.stop) : number(item.target))}</span><span>#${esc(leg.ibkr_order_id)}</span></div>`).join("")}<div class="muted">Signal ${esc(item.signal_id)} · Plan ${esc(item.order_plan_id)}${item.rejection_reason ? ` · ${esc(item.rejection_reason)}` : ""}</div></article>`).join("");
+  const groups = data.items.map((item) => `<article class="order-group" data-action="order:${esc(item.order_plan_id)}"><div class="order-title"><strong>${esc(item.symbol)}</strong>${environment(item.environment)}<span>${esc(item.run_id)}</span><span class="muted">${esc(item.account)}</span></div>${item.orders.map((leg, index) => `<div class="order-leg ${index ? "child" : ""}"><b>${index ? "└─ " : ""}${esc(leg.role)}</b>${badge(leg.status)}<span>${leg.role === "ENTRY" ? `${number(item.filled)} @ ${number(item.average_fill || item.entry)}` : (leg.role === "STOP" ? number(item.stop) : number(item.target))}</span><span>#${esc(leg.ibkr_order_id)}</span></div>`).join("")}<div class="muted">Signal ${esc(item.signal_id)} · Plan ${esc(item.order_plan_id)}${item.rejection_reason ? ` · ${esc(item.rejection_reason)}` : ""}</div></article>`).join("");
   main.innerHTML = `${head("Orders", "Protected orders grouped by plan; broker identifiers remain visible.")}<div class="toolbar tabs">${tabs}</div>${groups || '<div class="empty">No orders in this view.</div>'}`;
   main.querySelectorAll("[data-scope]").forEach((button) => button.addEventListener("click", () => { location.href = `/orders?scope=${button.dataset.scope}`; }));
 }
+async function orderDetail(orderPlanId) {
+  const item = await api(`/api/orders/${encodeURIComponent(orderPlanId)}`);
+  const fields = ["order_plan_id", "signal_id", "run_id", "strategy", "strategy_version", "environment", "account", "con_id", "symbol", "side", "quantity", "order_type", "entry", "stop", "target", "status", "filled", "average_fill", "time", "rejection_reason"];
+  const legs = item.orders.map((leg) => `<div class="order-leg"><b>${esc(leg.role)}</b>${badge(leg.status)}<span>IBKR #${esc(leg.ibkr_order_id)}</span></div>`).join("");
+  main.innerHTML = `${head(item.symbol, "Broker order state and protected-order lineage.")}<section class="section"><div class="detail-grid">${fields.map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${key === "environment" ? environment(item[key]) : esc(item[key])}</strong></div>`).join("")}</div></section><section class="section"><div class="section-head"><h2>IBKR order legs</h2></div>${legs}</section>`;
+}
 async function positionsPage() {
+  const params = new URLSearchParams(location.search);
+  if (params.has("environment") && params.has("account") && params.has("con_id")) {
+    return positionDetail(params.get("environment"), params.get("account"), params.get("con_id"));
+  }
   const rows = await api("/api/positions");
   const columns = [
     { key: "symbol", label: "Symbol" }, { key: "run_id", label: "Run" }, { label: "Env", render: (row) => environment(row.environment) }, { key: "account", label: "Account" }, { key: "side", label: "Side" },
     { key: "quantity", label: "Qty", numeric: true }, { label: "Average entry", numeric: true, render: (row) => number(row.average_entry) }, { label: "Current", numeric: true, render: (row) => number(row.current_price) },
-    { label: "Stop", numeric: true, render: (row) => number(row.stop) }, { label: "Target", numeric: true, render: (row) => number(row.target) }, { label: "Unrealised P/L", numeric: true, render: (row) => money(row.unrealised_pnl) }, { label: "Source", render: (row) => badge(row.source, row.source === "IBKR_RECONCILED" ? "good" : "warn") },
+    { label: "Stop", numeric: true, render: (row) => number(row.stop) }, { label: "Target", numeric: true, render: (row) => number(row.target) }, { label: "Unrealised P/L", numeric: true, render: (row) => money(row.unrealised_pnl) }, { label: "Source", render: (row) => badge(row.source, row.source === "IBKR" ? "good" : "warn") },
   ];
-  main.innerHTML = `${head("Positions", "Open exposure is shown only from reconciled Stage 7 broker-normalized state.")}<section class="section">${table(columns, rows)}</section>`;
+  main.innerHTML = `${head("Positions", "Latest normalized IBKR snapshot; unknown broker exposure remains visible.")}<section class="section">${table(columns, rows, (row) => `position:${row.environment}/${encodeURIComponent(row.account)}/${row.con_id}`)}</section>`;
+}
+async function positionDetail(environmentName, account, conId) {
+  const item = await api(`/api/positions/${encodeURIComponent(environmentName)}/${encodeURIComponent(account)}/${encodeURIComponent(conId)}`);
+  const fields = ["symbol", "con_id", "run_id", "strategy", "strategy_version", "signal_id", "order_plan_id", "environment", "account", "side", "quantity", "average_entry", "current_price", "stop", "target", "unrealised_pnl", "opened_at", "observed_at", "source"];
+  const legs = item.orders.map((leg) => `<div class="order-leg"><b>${esc(leg.role)}</b>${badge(leg.status)}<span>IBKR #${esc(leg.ibkr_order_id)}</span></div>`).join("") || '<div class="empty">No Stocker order lineage for this broker position.</div>';
+  main.innerHTML = `${head(`${item.symbol} — ${item.environment}`, "Broker-authoritative position with Stocker lineage when known.")}<section class="section"><div class="detail-grid">${fields.map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${key === "environment" ? environment(item[key]) : esc(item[key])}</strong></div>`).join("")}</div></section><section class="section"><div class="section-head"><h2>Protection</h2></div>${legs}</section>`;
 }
 async function tradesPage() {
-  const data = await api("/api/trades?limit=100");
+  const params = new URLSearchParams(location.search);
+  const settings = await api("/api/settings");
+  const period = params.get("period") || "today";
+  const selectedEnvironment = params.get("environment") || "";
+  const selectedRun = params.get("run") || "";
+  const selectedStrategy = params.get("strategy") || "";
+  const selectedUniverse = params.get("universe") || "";
+  const selectedSymbol = params.get("symbol") || "";
+  const offset = Number(params.get("offset") || 0);
+  const now = new Date();
+  let startDate = params.get("start") || "";
+  let endDate = params.get("end") || "";
+  if (period !== "custom") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    if (period === "week") start.setDate(start.getDate() - 6);
+    if (period === "month") start.setDate(1);
+    startDate = start.toISOString();
+    endDate = now.toISOString();
+  }
+  const query = new URLSearchParams({ limit: "100", offset: String(offset) });
+  for (const [key, value] of Object.entries({ environment: selectedEnvironment, run_id: selectedRun, strategy: selectedStrategy, universe: selectedUniverse, symbol: selectedSymbol, start: startDate, end: endDate })) {
+    if (value) query.set(key, value);
+  }
+  const data = await api(`/api/trades?${query}`);
   const summary = data.summary;
   const metrics = [["Trades", summary.trades], ["Wins", summary.wins], ["Losses", summary.losses], ["Win %", summary.win_percent], ["Total P/L", money(summary.total_pnl)], ["Total R", summary.total_r], ["Mean R", summary.mean_r]].map(([label, value]) => `<div class="metric"><span>${label}</span><strong>${typeof value === "number" ? number(value) : esc(value)}</strong></div>`).join("");
-  const columns = [{ key: "date_time", label: "Date/time" }, { key: "run_id", label: "Run" }, { label: "Env", render: (row) => environment(row.environment) }, { key: "symbol", label: "Symbol" }, { key: "side", label: "Side" }, { key: "entry", label: "Entry", numeric: true }, { key: "exit", label: "Exit", numeric: true }, { key: "quantity", label: "Qty", numeric: true }, { label: "P/L", numeric: true, render: (row) => money(row.pnl) }, { key: "r", label: "R", numeric: true }, { key: "exit_reason", label: "Exit reason" }];
-  main.innerHTML = `${head("Trades", "Completed execution ledger. PAPER and LIVE remain explicitly labelled.")}<div class="toolbar"><button>Today</button><button class="secondary">Week</button><button class="secondary">Month</button><select aria-label="Environment"><option>ALL</option><option>PAPER</option><option>LIVE</option></select></div><div class="metric-strip">${metrics}</div><section class="section">${table(columns, data.items)}</section>`;
+  const columns = [{ key: "date_time", label: "Date/time" }, { key: "run_id", label: "Run" }, { key: "strategy", label: "Strategy" }, { key: "universe", label: "Universe" }, { label: "Env", render: (row) => environment(row.environment) }, { key: "account", label: "Account" }, { key: "symbol", label: "Symbol" }, { key: "side", label: "Side" }, { key: "entry", label: "Entry", numeric: true }, { key: "exit", label: "Exit", numeric: true }, { key: "quantity", label: "Qty", numeric: true }, { label: "P/L", numeric: true, render: (row) => money(row.pnl) }, { key: "r", label: "R", numeric: true }, { key: "exit_reason", label: "Exit reason" }];
+  const options = (values, selected, allLabel) => `<option value="">${allLabel}</option>${values.map((value) => `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(value)}</option>`).join("")}`;
+  const runValues = settings.runs.map((item) => item.run_id);
+  const strategyValues = [...new Set(settings.runs.map((item) => item.strategy))];
+  const universeValues = settings.universes.map((item) => item.universe_id);
+  const periodButtons = ["today", "week", "month", "custom"].map((value) => `<button data-period="${value}" class="${value === period ? "active" : "secondary"}">${value.toUpperCase()}</button>`).join("");
+  main.innerHTML = `${head("Trades", "Completed execution ledger. PAPER and LIVE remain explicitly labelled.")}<div class="toolbar tabs">${periodButtons}</div><div class="toolbar"><label>Environment<select id="trade-environment">${options(["PAPER", "LIVE"], selectedEnvironment, "ALL")}</select></label><label>Run<select id="trade-run">${options(runValues, selectedRun, "ALL")}</select></label><label>Strategy<select id="trade-strategy">${options(strategyValues, selectedStrategy, "ALL")}</select></label><label>Universe<select id="trade-universe">${options(universeValues, selectedUniverse, "ALL")}</select></label><label>Symbol<input id="trade-symbol" value="${esc(selectedSymbol)}"></label><label>Start<input id="trade-start" type="datetime-local" value="${esc(period === "custom" ? startDate : "")}"></label><label>End<input id="trade-end" type="datetime-local" value="${esc(period === "custom" ? endDate : "")}"></label></div><div class="metric-strip">${metrics}</div><section class="section">${table(columns, data.items)}</section>`;
+  const applyTradeFilters = () => {
+    const next = new URLSearchParams({ period });
+    for (const [key, id] of Object.entries({ environment: "trade-environment", run: "trade-run", strategy: "trade-strategy", universe: "trade-universe", symbol: "trade-symbol" })) {
+      const value = document.querySelector(`#${id}`).value.trim();
+      if (value) next.set(key, value);
+    }
+    if (period === "custom") {
+      const customStart = document.querySelector("#trade-start").value;
+      const customEnd = document.querySelector("#trade-end").value;
+      if (customStart) next.set("start", new Date(customStart).toISOString());
+      if (customEnd) next.set("end", new Date(customEnd).toISOString());
+    }
+    location.href = `/trades?${next}`;
+  };
+  for (const id of ["trade-environment", "trade-run", "trade-strategy", "trade-universe", "trade-start", "trade-end"]) document.querySelector(`#${id}`)?.addEventListener("change", applyTradeFilters);
+  document.querySelector("#trade-symbol")?.addEventListener("change", applyTradeFilters);
+  main.querySelectorAll("[data-period]").forEach((button) => button.addEventListener("click", () => { params.set("period", button.dataset.period); params.delete("offset"); location.href = `/trades?${params}`; }));
 }
 async function systemPage() {
   const data = await api("/api/system");
@@ -215,6 +307,11 @@ document.addEventListener("click", (event) => {
   const [type, id] = row.dataset.action.split(":");
   if (type === "run") location.href = `/runs?run=${encodeURIComponent(id)}`;
   if (type === "candidate") location.href = `/candidates?signal=${encodeURIComponent(id)}`;
+  if (type === "order") location.href = `/orders?plan=${encodeURIComponent(id)}`;
+  if (type === "position") {
+    const [environmentName, account, conId] = id.split("/");
+    location.href = `/positions?environment=${encodeURIComponent(environmentName)}&account=${encodeURIComponent(decodeURIComponent(account))}&con_id=${encodeURIComponent(conId)}`;
+  }
 });
 document.querySelector("#menu-button").addEventListener("click", (event) => {
   const open = document.querySelector("#sidebar").classList.toggle("open");

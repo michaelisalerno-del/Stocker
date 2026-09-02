@@ -89,9 +89,21 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
     ) -> dict[str, Any]:
         return reads.orders(scope=scope, limit=limit, offset=offset)
 
+    @app.get("/api/orders/{order_plan_id}")
+    def order_detail(order_plan_id: str) -> dict[str, Any]:
+        return reads.order_detail(order_plan_id)
+
     @app.get("/api/positions")
     def positions() -> list[dict[str, Any]]:
         return reads.positions()
+
+    @app.get("/api/positions/{environment}/{account}/{con_id}")
+    def position_detail(
+        environment: Environment,
+        account: str,
+        con_id: int,
+    ) -> dict[str, Any]:
+        return reads.position_detail(environment, account, con_id)
 
     @app.get("/api/trades")
     def trades(
@@ -99,6 +111,8 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
         start: datetime | None = None,
         end: datetime | None = None,
         run_id: str | None = None,
+        strategy: str | None = None,
+        universe: str | None = None,
         symbol: str | None = None,
         limit: int = Query(default=100, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
@@ -108,6 +122,8 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             start=start,
             end=end,
             run_id=run_id,
+            strategy=strategy,
+            universe=universe,
             symbol=symbol,
             limit=limit,
             offset=offset,

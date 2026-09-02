@@ -333,6 +333,13 @@ class PriorSessionContextStore:
     ) -> PriorSessionVolatilityContext | None:
         """Load one environment-independent context by conId, session, and version."""
 
+        return self.get_by_identity(instrument.con_id, session=session)
+
+    def get_by_identity(
+        self, underlying_con_id: int, *, session: date
+    ) -> PriorSessionVolatilityContext | None:
+        """Load authoritative context lineage without reconstructing an instrument."""
+
         with self._connect() as connection:
             row = connection.execute(
                 """
@@ -343,7 +350,7 @@ class PriorSessionContextStore:
                   AND iv_source = ?
                 """,
                 (
-                    instrument.con_id,
+                    underlying_con_id,
                     session.isoformat(),
                     PRE_CONTEXT_CALCULATION_VERSION,
                     IBKR_MODEL_OPTION_IV_SOURCE,

@@ -12,6 +12,7 @@ from stocker_dashboard.app import create_dashboard_app
 from stocker_dashboard.controls import RunControlService
 from stocker_dashboard.read_service import DashboardReadService
 from stocker_execution.execution_ledger import ExecutionLedger
+from stocker_execution.pre_context import PriorSessionContextStore
 from stocker_execution.runtime import (
     ApplicationState,
     ExecutionEnvironmentStatus,
@@ -41,6 +42,7 @@ def build_dashboard_app(
         stage5_store=Stage5SnapshotStore(database_path),
         runtime_store=RuntimeStore(database_path),
         ledger=ExecutionLedger(database_path),
+        pre_context_store=PriorSessionContextStore(database_path),
     )
     controls = RunControlService(runs_config_path, ibkr_config_path)
     return create_dashboard_app(reads, controls)

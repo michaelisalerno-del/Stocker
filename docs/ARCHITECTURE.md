@@ -5,7 +5,8 @@
 Stocker V1 is a deliberately simple modular trading application. It will navigate between stock
 universes, run multiple or overlapping universes, screen instruments, obtain IBKR history,
 calculate PRE levels and features, qualify and rank candidates, apply risk rules, paper trade, and
-eventually run LIVE alongside PAPER. A later dashboard may expose status and control.
+run LIVE alongside PAPER. A replaceable dashboard exposes operational status and deliberate run
+configuration controls.
 
 Modularity supports real new strategies and universes. It must not become speculative framework
 building.
@@ -40,7 +41,7 @@ Execution
 Trade/Event Ledger
 ```
 
-The dashboard is a later consumer/controller. Trading must not depend on it.
+The dashboard is a non-critical consumer/controller. Trading does not depend on it.
 
 ## Core concepts
 
@@ -545,12 +546,14 @@ FastAPI JSON endpoints
 polling HTML/CSS/JavaScript control surface
 ```
 
-The read service copies feature, strategy, order, fill, position, reconciliation, and run-status
-outputs. It does not calculate features, qualify candidates, size risk, create order geometry, or
-communicate with IBKR. The control service validates complete `RunConfig`/`RunsConfig` values and
-atomically updates the backend YAML configuration; LIVE enablement, risk edits, and PAPER-to-LIVE
-changes require one confirmation bound to the configured LIVE account. Existing execution ledger
-records are never rewritten during an environment change.
+The read service copies feature, strategy, order, fill, reconciliation, and run-status outputs.
+Stage 7 persists its latest normalized broker position/open-order snapshot for dashboard reads, so
+unknown broker exposure stays visible and positions are never inferred merely from submitted
+orders. The dashboard does not calculate features, qualify candidates, size risk, create order
+geometry, or communicate with IBKR. The control service serializes changes, validates complete
+`RunConfig`/`RunsConfig` values, and atomically updates the backend YAML configuration; LIVE
+enablement, risk edits, and PAPER-to-LIVE changes require one confirmation bound to the configured
+LIVE account. Existing execution ledger records are never rewritten during an environment change.
 
 The dashboard may run in the runtime process by receiving `runtime.status`, or as a standalone
 process over the persisted stores. In standalone mode connectivity is deliberately reported as

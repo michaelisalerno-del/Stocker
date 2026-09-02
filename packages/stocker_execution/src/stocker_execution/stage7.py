@@ -302,6 +302,14 @@ class Stage7ExecutionService:
         except Exception as exc:
             return self._reconciliation_failure(f"broker state unavailable: {exc}")
 
+        self._ledger.replace_broker_snapshot(
+            environment=self._run.environment,
+            account=self._expected_account,
+            positions=broker_positions,
+            open_orders=open_orders,
+            observed_at=self._clock(),
+        )
+
         known_ids = set(self._ledger.known_order_ids(self._run.environment, self._expected_account))
         problems: list[str] = []
         for order in open_orders:

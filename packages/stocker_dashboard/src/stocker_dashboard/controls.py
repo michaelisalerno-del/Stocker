@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 
 import yaml
 
@@ -27,21 +27,21 @@ class RunControlService:
         self,
         runs_config_path: str | Path,
         ibkr_config_path: str | Path,
-        *,
-        on_change: Callable[[str, RunConfig], None] | None = None,
     ) -> None:
         self.runs_config_path = Path(runs_config_path)
         self.ibkr_config_path = Path(ibkr_config_path)
-        self.on_change = on_change
+        self._lock = RLock()
 
     def enable_run(self, run_id: str, *, confirmation: LiveConfirmation | None = None) -> RunConfig:
-        current = self._run(run_id)
-        if current.environment is Environment.LIVE:
-            self._confirm_live(current, confirmation)
-        return self._replace("enable_run", current, enabled=True)
+        with self._lock:
+            current = self._run(run_id)
+            if current.environment is Environment.LIVE:
+                self._confirm_live(current, confirmation)
+            return self._replace(current, enabled=True)
 
     def disable_run(self, run_id: str) -> RunConfig:
-        return self._replace("disable_run", self._run(run_id), enabled=False)
+        with self._lock:
+            return self._replace(self._run(run_id), enabled=False)
 
     def update_run_config(
         self,
@@ -53,24 +53,24 @@ class RunControlService:
         strategy: str,
         confirmation: LiveConfirmation | None = None,
     ) -> RunConfig:
-        current = self._run(run_id)
-        if risk_per_trade <= 0 or risk_per_trade > 1:
-            raise ValueError("risk_per_trade must be greater than zero and no more than one")
-        if max_concurrent_positions is not None and max_concurrent_positions <= 0:
-            raise ValueError("max_concurrent_positions must be positive")
-        if current.environment is Environment.LIVE:
-            self._confirm_live(current, confirmation)
-        risk = RunRiskConfig(
-            risk_per_trade=risk_per_trade,
-            max_concurrent_positions=max_concurrent_positions,
-        )
-        return self._replace(
-            "update_run_config",
-            current,
-            universe=universe,
-            strategy=strategy,
-            risk=risk.model_dump(mode="json"),
-        )
+        with self._lock:
+            current = self._run(run_id)
+            if risk_per_trade <= 0 or risk_per_trade > 1:
+                raise ValueError("risk_per_trade must be greater than zero and no more than one")
+            if max_concurrent_positions is not None and max_concurrent_positions <= 0:
+                raise ValueError("max_concurrent_positions must be positive")
+            risk = RunRiskConfig(
+                risk_per_trade=risk_per_trade,
+                max_concurrent_positions=max_concurrent_positions,
+            )
+            if current.environment is Environment.LIVE:
+                self._confirm_live(current, confirmation, risk=risk)
+            return self._replace(
+                current,
+                universe=universe,
+                strategy=strategy,
+                risk=risk.model_dump(mode="json"),
+            )
 
     def change_execution_environment(
         self,
@@ -79,24 +79,28 @@ class RunControlService:
         *,
         confirmation: LiveConfirmation | None = None,
     ) -> RunConfig:
-        current = self._run(run_id)
-        if environment is Environment.LIVE:
-            self._confirm_live(current, confirmation, target=environment)
-        return self._replace("change_execution_environment", current, environment=environment.value)
+        with self._lock:
+            current = self._run(run_id)
+            if environment is Environment.LIVE:
+                self._confirm_live(current, confirmation, target=environment)
+            return self._replace(current, environment=environment.value)
 
     def live_confirmation_context(self, run_id: str) -> dict[str, object]:
-        run = self._run(run_id)
-        account = load_ibkr_config(self.ibkr_config_path, Environment.LIVE).expected_account
-        if account is None:
-            raise ValueError("LIVE expected_account is required")
-        return {
-            "run_id": run.run_id,
-            "universe": run.universe,
-            "strategy": run.strategy,
-            "target_environment": "LIVE",
-            "target_account": account,
-            "risk": run.risk.model_dump(mode="json") if run.risk else None,
-        }
+        with self._lock:
+            run = self._run(run_id)
+            account = load_ibkr_config(
+                self.ibkr_config_path, Environment.LIVE
+            ).expected_account
+            if account is None:
+                raise ValueError("LIVE expected_account is required")
+            return {
+                "run_id": run.run_id,
+                "universe": run.universe,
+                "strategy": run.strategy,
+                "target_environment": "LIVE",
+                "target_account": account,
+                "risk": run.risk.model_dump(mode="json") if run.risk else None,
+            }
 
     def _confirm_live(
         self,
@@ -104,6 +108,7 @@ class RunControlService:
         confirmation: LiveConfirmation | None,
         *,
         target: Environment = Environment.LIVE,
+        risk: RunRiskConfig | None = None,
     ) -> None:
         broker = load_ibkr_config(self.ibkr_config_path, target)
         if broker.expected_account is None:
@@ -112,7 +117,7 @@ class RunControlService:
             raise ValueError("LIVE confirmation is required")
         if confirmation.target_account != broker.expected_account:
             raise ValueError("LIVE target account does not match configured expected_account")
-        if run.risk is None:
+        if risk is None and run.risk is None:
             raise ValueError("LIVE run requires explicit risk configuration")
 
     def _run(self, run_id: str) -> RunConfig:
@@ -122,7 +127,7 @@ class RunControlService:
             raise ValueError(f"Unknown run: {run_id}")
         return run
 
-    def _replace(self, operation: str, current: RunConfig, **updates: object) -> RunConfig:
+    def _replace(self, current: RunConfig, **updates: object) -> RunConfig:
         config = load_runs_config(self.runs_config_path)
         payload = current.model_dump(mode="json")
         payload.update(updates)
@@ -130,8 +135,6 @@ class RunControlService:
         runs = tuple(updated if item.run_id == current.run_id else item for item in config.runs)
         validated = RunsConfig(universes=config.universes, runs=runs)
         self._write(validated)
-        if self.on_change is not None:
-            self.on_change(operation, updated)
         return updated
 
     def _write(self, config: RunsConfig) -> None:

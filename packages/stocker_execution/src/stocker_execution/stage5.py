@@ -409,6 +409,7 @@ class Stage5SnapshotStore:
         run_id: str | None = None,
         universe_id: str | None = None,
         session: date | None = None,
+        checkpoint: datetime | None = None,
         latest_checkpoint: bool = False,
         status: Stage5Status | None = None,
         limit: int = 100,
@@ -431,6 +432,9 @@ class Stage5SnapshotStore:
         if session is not None:
             clauses.append("session = ?")
             values.append(session.isoformat())
+        if checkpoint is not None:
+            clauses.append("t0_utc = ?")
+            values.append(checkpoint.isoformat(timespec="microseconds"))
         if status is not None:
             clauses.append("status = ?")
             values.append(status.value)

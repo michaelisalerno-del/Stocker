@@ -12,6 +12,7 @@ from stocker_core.runs import Environment, RunConfig
 from stocker_core.universes import UniverseDefinition
 from stocker_execution.execution_ledger import ExecutionLedger, ExecutionRecord
 from stocker_execution.execution_models import OrderLifecycle
+from stocker_execution.pre_context import PriorSessionContextStore
 from stocker_execution.runtime import RuntimeStatus, RuntimeStore
 from stocker_execution.session_hard_structure_d import (
     STRATEGY_VERSION,
@@ -32,6 +33,7 @@ class DashboardReadService:
         stage5_store: Stage5SnapshotStore,
         runtime_store: RuntimeStore,
         ledger: ExecutionLedger,
+        pre_context_store: PriorSessionContextStore | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.config = config
@@ -39,6 +41,7 @@ class DashboardReadService:
         self.stage5_store = stage5_store
         self.runtime_store = runtime_store
         self.ledger = ledger
+        self.pre_context_store = pre_context_store
         self.clock = clock or (lambda: datetime.now(tz=UTC))
 
     def overview(self) -> dict[str, Any]:
@@ -76,7 +79,6 @@ class DashboardReadService:
             "positions": positions,
             "today": {
                 "instruments_evaluated": counters.instruments_ready,
-                "strategy_qualified": counters.signals,
                 "signals": counters.signals,
                 "orders": counters.orders,
                 "filled": counters.fills,
@@ -125,15 +127,34 @@ class DashboardReadService:
         status = self.runtime_status()
         runtime = next((item for item in status.runs if item.run_id == run_id), None)
         selected_session = runtime.session if runtime and runtime.session else self.clock().date()
-        rows, _ = self.stage5_store.list_snapshots(
-            run_id=run_id, session=selected_session, latest_checkpoint=True, limit=500
+        latest_rows, latest_total = self.stage5_store.list_snapshots(
+            run_id=run_id,
+            session=selected_session,
+            latest_checkpoint=True,
+            limit=1,
         )
+        latest_checkpoint = latest_rows[0].t0 if latest_rows else None
+        ready_count = 0
+        if latest_checkpoint is not None:
+            _ready_rows, ready_count = self.stage5_store.list_snapshots(
+                run_id=run_id,
+                session=selected_session,
+                checkpoint=latest_checkpoint,
+                status=Stage5Status.READY,
+                limit=1,
+            )
         signals = tuple(
             item
             for item in self.runtime_store.load_signals(run_id)
-            if item.session == selected_session
+            if item.session == selected_session and item.t0 == latest_checkpoint
         )
-        plans, _ = self.ledger.list_records(run_id=run_id, limit=500)
+        signal_ids = {item.signal_id for item in signals}
+        plans = tuple(
+            item
+            for item in self.ledger.list_records(run_id=run_id, limit=500)[0]
+            if item.signal_id in signal_ids
+        )
+        positions = self.positions()
         account = self._account(run.environment)
         return {
             "run_id": run.run_id,
@@ -146,15 +167,15 @@ class DashboardReadService:
             "status": runtime.state.value if runtime else "CONFIGURED",
             "risk_per_trade": run.risk.risk_per_trade if run.risk else None,
             "max_concurrent_positions": run.risk.max_concurrent_positions if run.risk else None,
-            "last_checkpoint": max((item.t0.isoformat() for item in rows), default=None),
+            "last_checkpoint": latest_checkpoint.isoformat() if latest_checkpoint else None,
             "next_checkpoint": None,
             "funnel": [
                 {"stage": "Universe", "count": len(self._universe(run.universe).members)},
                 {
                     "stage": "Stage 5 ready",
-                    "count": sum(item.status is Stage5Status.READY for item in rows),
+                    "count": ready_count,
                 },
-                {"stage": "Strategy evaluated", "count": len(signals)},
+                {"stage": "Strategy evaluated", "count": min(len(signals), latest_total)},
                 {
                     "stage": "Strategy qualified",
                     "count": sum(item.status is not SignalStatus.NOT_QUALIFIED for item in signals),
@@ -167,7 +188,10 @@ class DashboardReadService:
                 {"stage": "Orders", "count": len(plans)},
                 {
                     "stage": "Positions",
-                    "count": sum(item.filled_quantity > item.closed_quantity for item in plans),
+                    "count": sum(
+                        item["run_id"] == run_id and item["signal_id"] in signal_ids
+                        for item in positions
+                    ),
                 },
             ],
         }
@@ -185,16 +209,69 @@ class DashboardReadService:
         if not 1 <= limit <= 500:
             raise ValueError("candidate limit must be between 1 and 500")
         selected_run = run_id or self.config.runs[0].run_id
+        selected_session = session or self.clock().date()
+        signal_status = None
+        stage5_status = None
+        if status is not None:
+            try:
+                signal_status = SignalStatus(status)
+            except ValueError:
+                try:
+                    stage5_status = Stage5Status(status)
+                except ValueError as exc:
+                    raise ValueError(f"Unknown candidate status: {status}") from exc
+        selected_checkpoint = checkpoint
+        if selected_checkpoint is None:
+            latest_rows, _ = self.stage5_store.list_snapshots(
+                run_id=selected_run,
+                session=selected_session,
+                latest_checkpoint=True,
+                limit=1,
+            )
+            selected_checkpoint = latest_rows[0].t0 if latest_rows else None
+        if signal_status is not None:
+            matching_signals = sorted(
+                (
+                    item
+                    for item in self.runtime_store.load_signals(selected_run)
+                    if item.session == selected_session
+                    and item.t0 == selected_checkpoint
+                    and item.status is signal_status
+                ),
+                key=lambda item: (
+                    item.candidate_rank if item.candidate_rank is not None else 10**9,
+                    item.symbol,
+                    item.signal_id,
+                ),
+            )
+            page = matching_signals[offset : offset + limit]
+            items = [
+                self._candidate(
+                    self.stage5_store.get(
+                        item.universe_id,
+                        item.t0,
+                        item.underlying_con_id or 0,
+                        calculation_version=item.feature_calculation_version,
+                    ),
+                    item,
+                )
+                for item in page
+            ]
+            return {
+                "items": items,
+                "total": len(matching_signals),
+                "limit": limit,
+                "offset": offset,
+            }
         rows, total = self.stage5_store.list_snapshots(
             run_id=selected_run,
-            session=session or self.clock().date(),
-            latest_checkpoint=checkpoint is None,
+            session=selected_session,
+            checkpoint=selected_checkpoint,
+            latest_checkpoint=False,
+            status=stage5_status,
             limit=limit,
             offset=offset,
         )
-        if checkpoint is not None:
-            rows = tuple(item for item in rows if item.t0 == checkpoint)
-            total = len(rows)
         signals = {
             (item.underlying_con_id, item.session, item.t0): item
             for item in self.runtime_store.load_signals(selected_run)
@@ -202,9 +279,6 @@ class DashboardReadService:
         items = [
             self._candidate(row, signals.get((row.con_id, row.session, row.t0))) for row in rows
         ]
-        if status is not None:
-            items = [item for item in items if item["status"] == status]
-            total = len(items)
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
     def candidate_detail(self, signal_id: str) -> dict[str, Any]:
@@ -224,6 +298,14 @@ class DashboardReadService:
             None,
         )
         run = self._run(signal.run_id)
+        context = (
+            self.pre_context_store.get_by_identity(
+                signal.underlying_con_id or 0,
+                session=signal.session,
+            )
+            if self.pre_context_store is not None
+            else None
+        )
         return {
             **self._candidate(snapshot, signal),
             "con_id": signal.underlying_con_id,
@@ -235,6 +317,9 @@ class DashboardReadService:
             "account": self._account(run.environment),
             "t0": signal.t0.isoformat(),
             "p0": signal.p0,
+            "call_model_iv": context.call_model_iv if context else None,
+            "put_model_iv": context.put_model_iv if context else None,
+            "atm_iv": context.atm_iv if context else None,
             "expected_absolute_return_15m": (
                 snapshot.expected_absolute_return_15m if snapshot else None
             ),
@@ -268,41 +353,80 @@ class DashboardReadService:
         )
         return {"items": [self._order(item) for item in records], "total": total}
 
+    def order_detail(self, order_plan_id: str) -> dict[str, Any]:
+        record = self.ledger.get(order_plan_id)
+        if record is None or record.diagnostic:
+            raise ValueError(f"Unknown order plan: {order_plan_id}")
+        return self._order(record)
+
     def positions(self) -> list[dict[str, Any]]:
-        status = self.runtime_status()
-        reconciled = {item.environment: item.reconciled for item in status.execution_environments}
         records, _ = self.ledger.list_records(limit=500)
+        records_by_identity = {
+            (item.environment, item.actual_account or item.expected_account, item.con_id): item
+            for item in records
+            if item.filled_quantity > item.closed_quantity
+        }
         return [
             {
-                "symbol": item.symbol,
-                "run_id": item.run_id,
-                "strategy": item.strategy_id,
-                "strategy_version": item.strategy_version,
-                "signal_id": item.signal_id,
-                "order_plan_id": item.order_plan_id,
-                "environment": item.environment.value,
-                "account": item.actual_account or item.expected_account,
-                "side": "SHORT" if item.side.value == "SELL" else "LONG",
-                "quantity": item.filled_quantity - item.closed_quantity,
-                "average_entry": item.average_fill_price,
+                "symbol": snapshot.symbol,
+                "con_id": snapshot.con_id,
+                "run_id": record.run_id if record else None,
+                "strategy": record.strategy_id if record else None,
+                "strategy_version": record.strategy_version if record else None,
+                "signal_id": record.signal_id if record else None,
+                "order_plan_id": record.order_plan_id if record else None,
+                "environment": snapshot.environment.value,
+                "account": snapshot.account,
+                "side": "SHORT" if snapshot.quantity < 0 else "LONG",
+                "quantity": abs(snapshot.quantity),
+                "average_entry": snapshot.average_price,
                 "current_price": None,
-                "stop": item.stop_price,
-                "target": item.target_price,
+                "stop": record.stop_price if record else None,
+                "target": record.target_price if record else None,
                 "unrealised_pnl": None,
-                "opened_at": item.opened_at.isoformat() if item.opened_at else None,
-                "source": "IBKR_RECONCILED" if reconciled.get(item.environment) else "UNRECONCILED",
+                "opened_at": record.opened_at.isoformat() if record and record.opened_at else None,
+                "observed_at": snapshot.observed_at.isoformat(),
+                "source": "IBKR",
                 "orders": [
                     {
                         "role": order.role.value,
                         "status": order.status.value,
                         "ibkr_order_id": order.order_id,
                     }
-                    for order in self.ledger.broker_orders(item.order_plan_id)
+                    for order in (
+                        self.ledger.broker_orders(record.order_plan_id) if record else ()
+                    )
                 ],
             }
-            for item in records
-            if item.filled_quantity > item.closed_quantity
+            for snapshot in self.ledger.broker_position_snapshots()
+            for record in (
+                records_by_identity.get(
+                    (snapshot.environment, snapshot.account, snapshot.con_id)
+                ),
+            )
         ]
+
+    def position_detail(
+        self,
+        environment: Environment,
+        account: str,
+        con_id: int,
+    ) -> dict[str, Any]:
+        position = next(
+            (
+                item
+                for item in self.positions()
+                if item["environment"] == environment.value
+                and item["account"] == account
+                and item["con_id"] == con_id
+            ),
+            None,
+        )
+        if position is None:
+            raise ValueError(
+                f"Unknown broker position: {environment.value}/{account}/{con_id}"
+            )
+        return position
 
     def trades(
         self,
@@ -313,10 +437,19 @@ class DashboardReadService:
         limit: int = 100,
         offset: int = 0,
         run_id: str | None = None,
+        strategy: str | None = None,
+        universe: str | None = None,
         symbol: str | None = None,
     ) -> dict[str, Any]:
+        selected_run_ids = frozenset(
+            run.run_id
+            for run in self.config.runs
+            if (run_id is None or run.run_id == run_id)
+            and (strategy is None or run.strategy == strategy)
+            and (universe is None or run.universe == universe)
+        )
         records, total = self.ledger.list_records(
-            run_id=run_id,
+            run_ids=selected_run_ids,
             environment=environment,
             symbol=symbol,
             closed_only=True,
@@ -325,18 +458,24 @@ class DashboardReadService:
             limit=limit,
             offset=offset,
         )
-        pnls = [item.realized_pnl for item in records if item.realized_pnl is not None]
-        wins = sum(value > 0 for value in pnls)
-        losses = sum(value < 0 for value in pnls)
+        summary = self.ledger.closed_trade_summary(
+            run_ids=selected_run_ids,
+            environment=environment,
+            symbol=symbol,
+            start=start,
+            end=end,
+        )
         return {
             "items": [self._trade(item) for item in records],
             "total": total,
             "summary": {
-                "trades": len(records),
-                "wins": wins,
-                "losses": losses,
-                "win_percent": wins / len(pnls) * 100 if pnls else None,
-                "total_pnl": sum(pnls),
+                "trades": summary.trades,
+                "wins": summary.wins,
+                "losses": summary.losses,
+                "win_percent": (
+                    summary.wins / summary.trades * 100 if summary.trades else None
+                ),
+                "total_pnl": summary.total_pnl,
                 "total_r": None,
                 "mean_r": None,
             },
@@ -344,11 +483,11 @@ class DashboardReadService:
 
     def system(self) -> dict[str, Any]:
         status = self.runtime_status()
-        records, _ = self.ledger.list_records(limit=500)
+        broker_positions = self.ledger.broker_position_snapshots()
+        broker_orders = self.ledger.broker_open_order_snapshots()
         environments = []
         problems = []
         for item in status.execution_environments:
-            scoped = [record for record in records if record.environment is item.environment]
             environments.append(
                 {
                     "environment": item.environment.value,
@@ -358,16 +497,10 @@ class DashboardReadService:
                     "reconciled": item.reconciled,
                     "ready": item.ready,
                     "open_orders": sum(
-                        record.status
-                        not in {
-                            OrderLifecycle.CANCELLED,
-                            OrderLifecycle.REJECTED,
-                            OrderLifecycle.CLOSED,
-                        }
-                        for record in scoped
+                        order.environment is item.environment for order in broker_orders
                     ),
                     "positions": sum(
-                        record.filled_quantity > record.closed_quantity for record in scoped
+                        position.environment is item.environment for position in broker_positions
                     ),
                 }
             )
@@ -375,6 +508,7 @@ class DashboardReadService:
                 problems.append(f"IBKR {item.environment.value} disconnected")
             elif not item.reconciled:
                 problems.append(f"IBKR {item.environment.value} reconciliation required")
+        records, _ = self.ledger.list_records(limit=20)
         events = []
         for record in records[:20]:
             timestamp = record.closed_at or record.opened_at or record.submitted_at
@@ -388,6 +522,11 @@ class DashboardReadService:
                         ),
                     }
                 )
+        problems.extend(
+            f"{run.run_id}: {run.reason}"
+            for run in status.runs
+            if run.state.value == "DEGRADED" and run.reason
+        )
         return {
             "application": status.application.value,
             "environments": environments,
@@ -455,6 +594,7 @@ class DashboardReadService:
             "signal_id": None,
             "rank": None,
             "symbol": snapshot.symbol,
+            "con_id": snapshot.con_id,
             "pre_move_m": snapshot.pre_move_m,
             "cohort_percentile": None,
             "band": None,
@@ -472,6 +612,7 @@ class DashboardReadService:
             "order_plan_id": record.order_plan_id,
             "signal_id": record.signal_id,
             "run_id": record.run_id,
+            "universe": self._run(record.run_id).universe,
             "strategy": record.strategy_id,
             "strategy_version": record.strategy_version,
             "environment": record.environment.value,
@@ -498,11 +639,11 @@ class DashboardReadService:
             ],
         }
 
-    @staticmethod
-    def _trade(record: ExecutionRecord) -> dict[str, Any]:
+    def _trade(self, record: ExecutionRecord) -> dict[str, Any]:
         return {
             "date_time": record.closed_at.isoformat() if record.closed_at else None,
             "run_id": record.run_id,
+            "universe": self._run(record.run_id).universe,
             "strategy": record.strategy_id,
             "strategy_version": record.strategy_version,
             "environment": record.environment.value,

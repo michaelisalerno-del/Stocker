@@ -83,6 +83,38 @@ class BrokerOrderRecord:
     status: OrderLifecycle
 
 
+@dataclass(frozen=True, slots=True)
+class BrokerPositionSnapshot:
+    environment: Environment
+    account: str
+    con_id: int
+    symbol: str
+    quantity: float
+    average_price: float
+    observed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class BrokerOpenOrderSnapshot:
+    environment: Environment
+    account: str
+    order_id: int
+    order_plan_id: str
+    con_id: int
+    symbol: str
+    role: OrderRole
+    status: OrderLifecycle
+    observed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ClosedTradeSummary:
+    trades: int
+    wins: int
+    losses: int
+    total_pnl: float
+
+
 class ExecutionLedger:
     """SQLite execution store with an atomic signal idempotency reservation."""
 
@@ -144,6 +176,28 @@ class ExecutionLedger:
                     result_code TEXT NOT NULL,
                     detail TEXT NOT NULL,
                     attempted_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS broker_position_snapshot (
+                    environment TEXT NOT NULL,
+                    account TEXT NOT NULL,
+                    con_id INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    quantity REAL NOT NULL,
+                    average_price REAL NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    PRIMARY KEY (environment, account, con_id)
+                );
+                CREATE TABLE IF NOT EXISTS broker_open_order_snapshot (
+                    environment TEXT NOT NULL,
+                    account TEXT NOT NULL,
+                    order_id INTEGER NOT NULL,
+                    order_plan_id TEXT NOT NULL,
+                    con_id INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    PRIMARY KEY (environment, account, order_id)
                 );
                 """
             )
@@ -580,6 +634,7 @@ class ExecutionLedger:
         self,
         *,
         run_id: str | None = None,
+        run_ids: frozenset[str] | None = None,
         environment: Environment | None = None,
         symbol: str | None = None,
         statuses: frozenset[OrderLifecycle] | None = None,
@@ -600,6 +655,13 @@ class ExecutionLedger:
         if run_id is not None:
             clauses.append("run_id = ?")
             values.append(run_id)
+        if run_ids is not None:
+            if run_ids:
+                placeholders = ", ".join("?" for _ in run_ids)
+                clauses.append(f"run_id IN ({placeholders})")
+                values.extend(sorted(run_ids))
+            else:
+                clauses.append("1 = 0")
         if environment is not None:
             clauses.append("environment = ?")
             values.append(environment.value)
@@ -636,6 +698,56 @@ class ExecutionLedger:
             ).fetchall()
         return tuple(_record_from_row(row) for row in rows), total
 
+    def closed_trade_summary(
+        self,
+        *,
+        run_ids: frozenset[str] | None = None,
+        environment: Environment | None = None,
+        symbol: str | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> ClosedTradeSummary:
+        """Aggregate the complete filtered closed ledger, independent of page size."""
+
+        clauses = ["diagnostic = 0", "status = ?"]
+        values: list[object] = [OrderLifecycle.CLOSED.value]
+        if run_ids is not None:
+            if run_ids:
+                placeholders = ", ".join("?" for _ in run_ids)
+                clauses.append(f"run_id IN ({placeholders})")
+                values.extend(sorted(run_ids))
+            else:
+                clauses.append("1 = 0")
+        if environment is not None:
+            clauses.append("environment = ?")
+            values.append(environment.value)
+        if symbol is not None:
+            clauses.append("symbol = ?")
+            values.append(symbol.upper())
+        if start is not None:
+            clauses.append("COALESCE(closed_at, submitted_at, created_at) >= ?")
+            values.append(start.isoformat(timespec="microseconds"))
+        if end is not None:
+            clauses.append("COALESCE(closed_at, submitted_at, created_at) <= ?")
+            values.append(end.isoformat(timespec="microseconds"))
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT COUNT(*) AS trades,
+                       SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                       SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END) AS losses,
+                       COALESCE(SUM(realized_pnl), 0) AS total_pnl
+                FROM execution_plans WHERE {' AND '.join(clauses)}
+                """,
+                values,
+            ).fetchone()
+        return ClosedTradeSummary(
+            trades=int(row["trades"]),
+            wins=int(row["wins"] or 0),
+            losses=int(row["losses"] or 0),
+            total_pnl=float(row["total_pnl"]),
+        )
+
     def broker_orders(self, order_plan_id: str) -> tuple[BrokerOrderRecord, ...]:
         """Return normalized child-order state in meaningful bracket order."""
 
@@ -656,6 +768,116 @@ class ExecutionLedger:
                 order_id=int(row["order_id"]),
                 role=OrderRole(str(row["role"])),
                 status=OrderLifecycle(str(row["status"])),
+            )
+            for row in rows
+        )
+
+    def replace_broker_snapshot(
+        self,
+        *,
+        environment: Environment,
+        account: str,
+        positions: tuple[BrokerPosition, ...],
+        open_orders: tuple[BrokerOpenOrder, ...],
+        observed_at: datetime,
+    ) -> None:
+        """Atomically retain the latest normalized IBKR exposure for dashboard reads."""
+
+        timestamp = observed_at.isoformat(timespec="microseconds")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "DELETE FROM broker_position_snapshot WHERE environment = ? AND account = ?",
+                (environment.value, account),
+            )
+            connection.execute(
+                "DELETE FROM broker_open_order_snapshot WHERE environment = ? AND account = ?",
+                (environment.value, account),
+            )
+            connection.executemany(
+                """
+                INSERT INTO broker_position_snapshot
+                (environment, account, con_id, symbol, quantity, average_price, observed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        environment.value,
+                        account,
+                        item.con_id,
+                        item.symbol,
+                        item.quantity,
+                        item.average_price,
+                        timestamp,
+                    )
+                    for item in positions
+                    if item.account == account and item.quantity != 0.0
+                ),
+            )
+            connection.executemany(
+                """
+                INSERT INTO broker_open_order_snapshot
+                (environment, account, order_id, order_plan_id, con_id, symbol, role, status,
+                 observed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (
+                        environment.value,
+                        account,
+                        item.order_id,
+                        item.order_plan_id,
+                        item.con_id,
+                        item.symbol,
+                        item.role.value,
+                        item.status.value,
+                        timestamp,
+                    )
+                    for item in open_orders
+                    if item.environment is environment and item.account == account
+                ),
+            )
+
+    def broker_position_snapshots(self) -> tuple[BrokerPositionSnapshot, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM broker_position_snapshot
+                ORDER BY environment, account, symbol, con_id
+                """
+            ).fetchall()
+        return tuple(
+            BrokerPositionSnapshot(
+                environment=Environment(str(row["environment"])),
+                account=str(row["account"]),
+                con_id=int(row["con_id"]),
+                symbol=str(row["symbol"]),
+                quantity=float(row["quantity"]),
+                average_price=float(row["average_price"]),
+                observed_at=datetime.fromisoformat(str(row["observed_at"])),
+            )
+            for row in rows
+        )
+
+    def broker_open_order_snapshots(self) -> tuple[BrokerOpenOrderSnapshot, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM broker_open_order_snapshot
+                ORDER BY environment, account, order_id
+                """
+            ).fetchall()
+        return tuple(
+            BrokerOpenOrderSnapshot(
+                environment=Environment(str(row["environment"])),
+                account=str(row["account"]),
+                order_id=int(row["order_id"]),
+                order_plan_id=str(row["order_plan_id"]),
+                con_id=int(row["con_id"]),
+                symbol=str(row["symbol"]),
+                role=OrderRole(str(row["role"])),
+                status=OrderLifecycle(str(row["status"])),
+                observed_at=datetime.fromisoformat(str(row["observed_at"])),
             )
             for row in rows
         )

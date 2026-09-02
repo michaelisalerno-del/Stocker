@@ -409,7 +409,7 @@ def test_multiple_runs_coexist_and_disabled_run_never_activates(tmp_path: Path) 
     }
 
 
-def test_live_run_is_never_routed_to_paper(tmp_path: Path) -> None:
+def test_unconfigured_live_environment_is_never_routed_to_paper(tmp_path: Path) -> None:
     broker = FakeBroker()
     runtime = _runtime(tmp_path, broker, _run("future-live", environment=Environment.LIVE))
 
@@ -418,7 +418,7 @@ def test_live_run_is_never_routed_to_paper(tmp_path: Path) -> None:
     status = runtime.status()
     assert status.application is ApplicationState.DEGRADED
     assert status.runs[0].state is RunRuntimeState.DEGRADED
-    assert status.runs[0].reason == "LIVE_EXECUTION_DISABLED"
+    assert status.runs[0].reason == "EXECUTION_ENVIRONMENT_UNAVAILABLE"
     assert broker.events == []
     assert broker.submitted == []
 

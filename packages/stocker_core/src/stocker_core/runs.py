@@ -46,6 +46,12 @@ class RunConfig(BaseModel):
     risk: RunRiskConfig | None = None
     session: RunWindow | None = None
 
+    @property
+    def execution_environment(self) -> Environment:
+        """Explicit per-run execution destination; never inferred from broker state."""
+
+        return self.environment
+
 
 class RunState(StrEnum):
     CONFIGURED = "CONFIGURED"

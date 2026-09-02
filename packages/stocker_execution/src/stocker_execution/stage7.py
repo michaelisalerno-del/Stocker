@@ -1,4 +1,4 @@
-"""Stage 7 risk, planning, and PAPER execution orchestration."""
+"""Stage 7 risk, planning, and environment-scoped execution orchestration."""
 
 import hashlib
 from collections.abc import Callable, Mapping, Sequence
@@ -23,7 +23,7 @@ from stocker_execution.execution_models import (
     OrderLifecycle,
     OrderPlan,
 )
-from stocker_execution.ibkr import QualifiedInstrument
+from stocker_execution.ibkr import BrokerSession, QualifiedInstrument
 from stocker_execution.session_hard_structure_d import (
     EntryBar,
     SessionHardStructureDStrategy,
@@ -43,7 +43,7 @@ class RiskRejection(StrEnum):
 
 class ExecutionResultCode(StrEnum):
     SUBMITTED = "SUBMITTED"
-    LIVE_EXECUTION_DISABLED = "LIVE_EXECUTION_DISABLED"
+    EXECUTION_ENVIRONMENT_UNAVAILABLE = "EXECUTION_ENVIRONMENT_UNAVAILABLE"
     ACCOUNT_OR_ENVIRONMENT_MISMATCH = "ACCOUNT_OR_ENVIRONMENT_MISMATCH"
     BROKER_DISCONNECTED = "BROKER_DISCONNECTED"
     EXECUTION_RECONCILIATION_REQUIRED = "EXECUTION_RECONCILIATION_REQUIRED"
@@ -75,6 +75,7 @@ class ExecutionAttempt:
     code: ExecutionResultCode
     detail: str
     run_id: str
+    signal_id: str
     environment: Environment
     expected_account: str
     actual_account: str | None
@@ -102,6 +103,10 @@ class ExecutionBroker(Protocol):
     @property
     def connection_epoch(self) -> int: ...
 
+    async def connect(self) -> BrokerSession: ...
+
+    def disconnect(self) -> None: ...
+
     async def account_state(self) -> BrokerAccountState: ...
 
     async def minimum_tick(self, instrument: QualifiedInstrument) -> float: ...
@@ -117,6 +122,58 @@ class ExecutionBroker(Protocol):
     async def read_positions(self) -> tuple[BrokerPosition, ...]: ...
 
     async def read_order_statuses(self) -> tuple[BrokerOrderStatus, ...]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionDestination:
+    """One explicit broker environment/account destination."""
+
+    environment: Environment
+    expected_account: str
+    broker: ExecutionBroker
+
+
+class ExecutionEnvironmentUnavailableError(RuntimeError):
+    """Raised when a run requests an unconfigured execution environment."""
+
+
+class ExecutionRouter:
+    """Resolve a run environment without cross-environment fallback."""
+
+    def __init__(self, destinations: Sequence[ExecutionDestination]) -> None:
+        self._destinations: dict[Environment, ExecutionDestination] = {}
+        broker_ids: set[int] = set()
+        expected_accounts: set[str] = set()
+        for destination in destinations:
+            if not destination.expected_account.strip():
+                raise ValueError(
+                    f"{destination.environment.value} execution requires expected_account"
+                )
+            if destination.environment is not destination.broker.environment:
+                raise ValueError("ACCOUNT_OR_ENVIRONMENT_MISMATCH")
+            if destination.environment in self._destinations:
+                raise ValueError(
+                    f"Duplicate execution environment: {destination.environment.value}"
+                )
+            if id(destination.broker) in broker_ids:
+                raise ValueError("PAPER and LIVE require distinct broker session objects")
+            if destination.expected_account in expected_accounts:
+                raise ValueError("PAPER and LIVE require distinct expected accounts")
+            self._destinations[destination.environment] = destination
+            broker_ids.add(id(destination.broker))
+            expected_accounts.add(destination.expected_account)
+
+    @property
+    def environments(self) -> tuple[Environment, ...]:
+        return tuple(self._destinations)
+
+    def for_environment(self, environment: Environment) -> ExecutionDestination:
+        try:
+            return self._destinations[environment]
+        except KeyError as exc:
+            raise ExecutionEnvironmentUnavailableError(
+                f"EXECUTION_ENVIRONMENT_UNAVAILABLE: {environment.value}"
+            ) from exc
 
 
 class Stage7RiskEngine:
@@ -202,7 +259,7 @@ class Stage7RiskEngine:
 
 
 class Stage7ExecutionService:
-    """Turn selected Stage 6 intents into PAPER orders after reconciliation."""
+    """Turn selected Stage 6 intents into orders for one explicit destination."""
 
     def __init__(
         self,
@@ -220,11 +277,13 @@ class Stage7ExecutionService:
         self._clock = clock or (lambda: datetime.now(tz=UTC))
         self._reconciled_epoch: int | None = None
 
+    @property
+    def run_environment(self) -> Environment:
+        return self._run.environment
+
     async def reconcile(self) -> ReconciliationResult:
         """Compare broker orders/positions/fills with local execution state."""
 
-        if self._run.environment is Environment.LIVE:
-            return self._reconciliation_failure("LIVE execution is disabled in Stage 7")
         if not self._broker.is_connected:
             return self._reconciliation_failure("broker is disconnected")
         try:
@@ -329,10 +388,6 @@ class Stage7ExecutionService:
     ) -> ExecutionAttempt:
         """Submit one selected intent, returning a candidate-local outcome."""
 
-        if self._run.environment is Environment.LIVE:
-            return self._outcome(
-                order_intent.signal_id, ExecutionResultCode.LIVE_EXECUTION_DISABLED
-            )
         if not self._broker.is_connected:
             self._reconciled_epoch = None
             return self._outcome(order_intent.signal_id, ExecutionResultCode.BROKER_DISCONNECTED)
@@ -448,7 +503,7 @@ class Stage7ExecutionService:
         return self._outcome(
             order_intent.signal_id,
             ExecutionResultCode.SUBMITTED,
-            "protected PAPER order submitted",
+            f"protected {self._run.environment.value} order submitted",
             actual_account=account_state.account,
             order_plan=plan,
             order_ids=order_ids,
@@ -501,9 +556,8 @@ class Stage7ExecutionService:
     def _account_mismatch(self, state: BrokerAccountState) -> str | None:
         if (
             not state.connected
-            or state.environment is not Environment.PAPER
-            or self._broker.environment is not Environment.PAPER
-            or self._run.environment is not Environment.PAPER
+            or state.environment is not self._run.environment
+            or self._broker.environment is not self._run.environment
             or state.account != self._expected_account
             or self._broker.account != self._expected_account
         ):
@@ -538,6 +592,7 @@ class Stage7ExecutionService:
             code=code,
             detail=resolved_detail,
             run_id=self._run.run_id,
+            signal_id=signal_id,
             environment=self._run.environment,
             expected_account=self._expected_account,
             actual_account=actual_account,
@@ -564,7 +619,7 @@ class Stage7ExecutionService:
         return account or None
 
 
-class Stage7PaperRuntime:
+class Stage7StrategyRuntime:
     """Direct first-strategy runtime seam from Stage 6 observations to execution."""
 
     def __init__(
@@ -585,6 +640,10 @@ class Stage7PaperRuntime:
 
         order_intents = self._strategy.observe_entry_bars(bars_by_con_id)
         return await self._execution.execute_ready_intents(order_intents, instruments)
+
+
+# Backwards-compatible Stage 7 name; both environments use the same implementation.
+Stage7PaperRuntime = Stage7StrategyRuntime
 
 
 def build_order_plan(

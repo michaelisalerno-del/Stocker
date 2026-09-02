@@ -357,7 +357,11 @@ Stage7RiskDecision
         ↓
 OrderPlan
         ↓
-IBKR PAPER parent + protective children
+ExecutionRouter
+      ↙     ↘
+   PAPER    LIVE
+      ↓     ↓
+IBKR parent + protective children
         ↓
 broker statuses / fills / positions / execution ledger
         ↓
@@ -374,27 +378,29 @@ protection at the session boundary. For SHORT protection, the stop rounds down a
 to IBKR's qualified-contract minimum tick. Both move toward entry, so tick normalization cannot
 increase requested per-share risk.
 
-`Stage7PaperRuntime.observe_and_execute` is the direct production seam: it advances the concrete
+`Stage7StrategyRuntime.observe_and_execute` is the direct production seam: it advances the concrete
 Stage 6 strategy with entry bars, takes the resulting selected `ENTRY_TRIGGERED` intentions, and
 passes them to the execution service as a batch. Candidate failures remain isolated. Stage 7 does
 not impose another entry-expiry rule; the Stage 6 status and timestamps remain authoritative
 strategy output.
 
-`RunConfig.environment` remains independent of strategy and universe. The Stage 7 router state is:
+`RunConfig.environment` (also exposed as `execution_environment`) is independent of strategy and
+universe. `ExecutionRouter` resolves only an exact configured destination:
 
 ```text
-PAPER execution: ENABLED
-LIVE execution: DISABLED (LIVE_EXECUTION_DISABLED)
+run_id → execution_environment → explicit IBKR session → expected account
 ```
 
-The execution environment, expected account, and actual connected account are checked immediately
-before planning/transmission. This retains the future shape in which individual
-`strategy + universe + run` combinations can be promoted independently; there is no global
-PAPER-to-LIVE switch and no LIVE order routing in Stage 7.
+There is no fallback. A missing destination is `EXECUTION_ENVIRONMENT_UNAVAILABLE`; PAPER is never
+used for a LIVE run and LIVE is never used for a PAPER run. The run environment, broker-session
+environment, configured expected account, returned account state, and connected account are checked
+immediately before planning/transmission.
 
-The Stage 2 `IbkrConnection` remains read-only by default for data consumers. Stage 7 explicitly
-constructs a writable instance only for PAPER. It normalizes account state, minimum tick, open and
-completed order status, executions, and positions instead of leaking `ib_async` callbacks upward.
+The Stage 2 `IbkrConnection` remains read-only by default for data consumers. Runtime composition
+constructs a writable instance only for an enabled execution destination. PAPER and LIVE use
+distinct configuration and connection objects. The adapter normalizes account state, minimum tick,
+open and completed order status, executions, and positions instead of leaking `ib_async` callbacks
+upward.
 
 ### Storage and audit
 
@@ -423,21 +429,21 @@ entry reference, M price, risk fraction, an expected PAPER account, and
 Stage 8 is the orchestration layer over the existing public boundaries; it adds no second source of
 trading decisions. `StockerRuntime` composes `RunManager`/`UniverseCatalog`, Stage 2 qualification,
 `PriorSessionContextService`, `Stage5Analyzer`, the concrete Session HARD strategy,
-`Stage7ExecutionService`, and `ExecutionLedger`. `build_paper_runtime` is the production composition
-entry point and `runtime.start()` is the single lifecycle entry point.
+`Stage7ExecutionService`, and `ExecutionLedger`. `build_runtime` is the mixed-environment production
+composition entry point and `runtime.start()` is the single lifecycle entry point.
 
 Startup is deterministic:
 
 ```text
-load run and PAPER IBKR config
+load enabled runs and only their required PAPER/LIVE IBKR configs
         ↓
 open the shared SQLite stores
         ↓
-connect and verify the configured PAPER account
+connect and verify each required configured account
         ↓
-Stage 7 reads broker orders, statuses/fills, and positions and reconciles the ledger
+Stage 7 reads that account's orders, statuses/fills, and positions and reconciles its ledger scope
         ↓
-load/start enabled PAPER runs and qualify shared instruments by conId
+load/start runs whose execution environment is ready; qualify shared instruments by conId
         ↓
 resolve each timezone-aware exchange session
         ↓
@@ -445,18 +451,16 @@ READY and normal checkpoint processing
 ```
 
 The invariant is absolute: no new order is submitted before account verification and successful
-reconciliation for the current IBKR connection epoch. Disconnection changes global readiness to
-`DEGRADED`; one bounded reconnect is followed by account verification and complete reconciliation
-before `READY` is restored. Unknown broker exposure remains untouched and returns
-`EXECUTION_RECONCILIATION_REQUIRED`. Stage 8 never guesses ownership, cancels all orders, or flattens
-positions.
+reconciliation for that environment/account and current connection epoch. A disconnect blocks only
+the affected environment where another environment remains understood. Reconnect always repeats
+account verification and full reconciliation before that environment is ready. Unknown broker
+exposure remains untouched and returns `EXECUTION_RECONCILIATION_REQUIRED`; runtime never guesses
+ownership, cancels all orders, or flattens positions.
 
 Run configuration remains per-run: `run_id`, `enabled`, universe, strategy, environment, risk, and
-an explicit timezone/calendar session for every enabled executable run. No market or timezone is
-silently substituted. PAPER and future LIVE runs can coexist in configuration.
-Stage 8 activates only supported PAPER runs. An enabled LIVE run reports `LIVE_EXECUTION_DISABLED`
-and is never silently sent to PAPER. A run-local data or strategy failure degrades that run while
-unrelated reconciled runs continue.
+an explicit timezone/calendar session for every enabled executable run. No market, timezone, broker
+environment, or account is silently substituted. PAPER and LIVE runs coexist; a run-local data or
+strategy failure degrades that run while unrelated reconciled runs continue.
 
 Session HARD uses its frozen `6, 8, ..., 34` completed-five-minute checkpoints relative to the
 configured exchange-local session open. Stage 5 work is shared for overlapping runs at the same
@@ -481,9 +485,26 @@ SQLite approach and expose a small text/JSON status snapshot for the later dashb
 qualification, readiness, and one market-data snapshot. It does not transmit an order. The separate
 Stage 7 diagnostic remains the only explicit manual diagnostic order path.
 
-Extended PAPER burn-in can continue while Stages 9 and 10 are developed; Stage 8 code completion is
-based on runtime, recovery, deterministic integration tests, and the manual diagnostic rather than
-elapsed observation time.
+### Controlled LIVE execution
+
+Stage 9 changes only the execution destination. Universe selection, Stage 4 context, Stage 5
+features, Stage 6 strategy/`OrderIntent`, Stage 7 risk arithmetic, `OrderPlan` geometry, and Stage 8
+orchestration are shared. Account equity/buying power, positions, orders, fills, broker IDs, ledger
+records, idempotency, reconciliation, connection epochs, and readiness remain scoped by explicit
+environment/account/run identity. The same `conId` may therefore be active in deliberately distinct
+PAPER and LIVE runs without crossing broker state.
+
+Promotion is an operational configuration change: observe a PAPER run, change only that run's
+`environment` to `LIVE` (or create a separate LIVE run), restart/reload, verify the configured LIVE
+account, reconcile it, and allow the run to become LIVE-ready. No strategy copy or code change is
+required and there is no automatic promotion. Demotion changes future execution routing only; it
+does not transfer, flatten, or relabel existing LIVE positions.
+
+`stocker stage9-readiness --environment LIVE` connects the environments required by enabled runs,
+shows per-environment status, verifies the selected account/state/order/position reads and clean
+reconciliation, and never submits an order. `stocker stage9-run` runs mixed PAPER/LIVE configuration.
+The Stage 7 PAPER order diagnostic remains separately and unmistakably opt-in; tests and normal
+startup never invoke diagnostic order transmission.
 
 ## Failure philosophy
 

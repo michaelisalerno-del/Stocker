@@ -4872,5 +4872,93 @@ def stage8_paper_run(
         console.print("Stage 8 PAPER runtime stopped")
 
 
+@app.command("stage9-readiness")
+def stage9_readiness(
+    environment: Annotated[str, typer.Option("--environment")] = "LIVE",
+    runs_config: Annotated[Path, typer.Option("--runs-config")] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    database: Annotated[Path, typer.Option("--database")] = DEFAULT_RUNTIME_DATABASE,
+) -> None:
+    """Verify one configured execution environment without submitting an order."""
+
+    from stocker_core.runs import Environment
+    from stocker_execution.runtime import build_runtime
+
+    try:
+        selected = Environment(environment.strip().upper())
+    except ValueError as exc:
+        raise typer.BadParameter("--environment must be PAPER or LIVE") from exc
+
+    async def diagnose() -> None:
+        runtime = build_runtime(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+        )
+        try:
+            await runtime.start()
+            report = await runtime.execution_readiness_diagnostic(selected)
+            console.print(runtime.status().as_text())
+            console.print("")
+            console.print(f"Environment: {report.environment.value}")
+            console.print(f"Connected: {'yes' if report.connected else 'no'}")
+            console.print(f"Account: {report.account or 'unavailable'}")
+            console.print(
+                "Expected account match: "
+                f"{'yes' if report.expected_account_match else 'no'}"
+            )
+            console.print(
+                f"Account state available: {'yes' if report.account_state_available else 'no'}"
+            )
+            console.print(f"Reconciled: {'yes' if report.reconciled else 'no'}")
+            open_orders = report.open_orders if report.open_orders is not None else "unavailable"
+            positions = report.positions if report.positions is not None else "unavailable"
+            console.print(f"Open orders: {open_orders}")
+            console.print(f"Positions: {positions}")
+            console.print(
+                f"{report.environment.value} readiness: "
+                f"{'READY' if report.ready else 'NOT_READY'}"
+            )
+            console.print("No order was transmitted by this readiness diagnostic.")
+            if not report.ready:
+                raise RuntimeError(report.detail)
+        finally:
+            await runtime.stop()
+
+    try:
+        asyncio.run(diagnose())
+    except (OSError, RuntimeError, ValueError) as exc:
+        console.print(f"Stage 9 readiness diagnostic failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("stage9-run")
+def stage9_run(
+    runs_config: Annotated[Path, typer.Option("--runs-config")] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    database: Annotated[Path, typer.Option("--database")] = DEFAULT_RUNTIME_DATABASE,
+    poll_seconds: Annotated[float, typer.Option("--poll-seconds", min=0.1)] = 1.0,
+) -> None:
+    """Run enabled PAPER and LIVE runs with per-run execution routing."""
+
+    from stocker_execution.runtime import build_runtime
+
+    async def run() -> None:
+        runtime = build_runtime(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+        )
+        try:
+            await runtime.run_forever(poll_interval_seconds=poll_seconds)
+        finally:
+            await runtime.stop()
+
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        console.print("Stage 9 runtime stopped")
+
+
 if __name__ == "__main__":
     app()

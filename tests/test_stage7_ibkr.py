@@ -3,8 +3,6 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
-import pytest
-
 from stocker_core.config import IbkrConfig
 from stocker_core.runs import Environment
 from stocker_execution.execution_models import (
@@ -14,7 +12,7 @@ from stocker_execution.execution_models import (
     OrderPlan,
     OrderRole,
 )
-from stocker_execution.ibkr import IbkrConnection, IbkrError, QualifiedInstrument
+from stocker_execution.ibkr import IbkrConnection, QualifiedInstrument
 
 
 class FakeOrderClient:
@@ -176,18 +174,18 @@ def test_paper_submission_transmits_one_coherent_market_stop_limit_bracket() -> 
     assert {order.account for order in orders} == {"DU123456"}
 
 
-def test_live_plan_can_never_be_transmitted_in_stage7() -> None:
+def test_explicitly_enabled_live_plan_uses_a_writable_live_session() -> None:
     client = FakeOrderClient(account="U123456")
     connection = IbkrConnection(_config(Environment.LIVE), client=client, execution_enabled=True)
 
     async def scenario() -> None:
         await connection.connect()
-        assert client.connect_kwargs["readonly"] is True
+        assert client.connect_kwargs["readonly"] is False
         await connection.submit_protected_order(_plan(Environment.LIVE), _instrument())
 
-    with pytest.raises(IbkrError, match="LIVE_EXECUTION_DISABLED"):
-        asyncio.run(scenario())
-    assert client.placed == []
+    asyncio.run(scenario())
+    assert len(client.placed) == 3
+    assert {order.account for _, order in client.placed} == {"U123456"}
 
 
 def test_ambiguous_nonbase_account_equity_is_unavailable() -> None:

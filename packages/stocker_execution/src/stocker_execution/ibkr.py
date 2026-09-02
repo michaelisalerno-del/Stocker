@@ -1,4 +1,4 @@
-"""Minimal IBKR connection, market-data, and PAPER execution boundary."""
+"""Minimal IBKR connection, market-data, and explicit execution boundary."""
 
 import asyncio
 from contextlib import suppress
@@ -322,7 +322,7 @@ class IbkrConnection:
         return self._client.isConnected()
 
     async def connect(self) -> BrokerSession:
-        """Connect read-only and verify the configured environment against the account."""
+        """Connect and verify the configured environment against the account."""
 
         try:
             await self._client.connectAsync(
@@ -330,7 +330,7 @@ class IbkrConnection:
                 self.config.port,
                 clientId=self.config.client_id,
                 timeout=self.config.connect_timeout_seconds,
-                readonly=(not self._execution_enabled or self.environment is Environment.LIVE),
+                readonly=not self._execution_enabled,
                 account=self.config.expected_account or "",
                 raiseSyncErrors=True,
                 fetchFields=_no_startup_fetches(),
@@ -366,7 +366,7 @@ class IbkrConnection:
             self._connection_epoch += 1
 
     async def account_state(self) -> BrokerAccountState:
-        """Read authoritative PAPER equity, buying power, and positions."""
+        """Read authoritative equity, buying power, and positions for this session."""
 
         self._require_connected()
         try:
@@ -411,14 +411,17 @@ class IbkrConnection:
     async def submit_protected_order(
         self, plan: OrderPlan, instrument: QualifiedInstrument
     ) -> BrokerOrderIds:
-        """Transmit one atomic-style IBKR PAPER parent/target/stop bracket."""
+        """Transmit one protected bracket to this explicitly configured account."""
 
         self._require_connected()
-        if self.environment is Environment.LIVE or plan.environment is Environment.LIVE:
-            raise IbkrError("LIVE_EXECUTION_DISABLED")
         if not self._execution_enabled:
-            raise IbkrError("IBKR connection is read-only; PAPER execution was not enabled")
-        if not self.account.upper().startswith("D") or instrument.con_id != plan.con_id:
+            raise IbkrError("IBKR connection is read-only; execution was not enabled")
+        if (
+            plan.environment is not self.environment
+            or self.config.expected_account is None
+            or self.account != self.config.expected_account
+            or instrument.con_id != plan.con_id
+        ):
             raise IbkrError("ACCOUNT_OR_ENVIRONMENT_MISMATCH")
         if plan.side is not OrderAction.SELL:
             raise IbkrError("Stage 7 supports only the first strategy's SHORT order plans")
@@ -462,7 +465,9 @@ class IbkrConnection:
             for placed_order in placed:
                 with suppress(Exception):
                     self._client.cancelOrder(placed_order)
-            raise IbkrError(f"IBKR protected PAPER order submission failed: {exc}") from exc
+            raise IbkrError(
+                f"IBKR protected {self.environment.value} order submission failed: {exc}"
+            ) from exc
         return BrokerOrderIds(parent=parent_id, stop=stop_id, target=target_id)
 
     async def read_open_orders(self) -> tuple[BrokerOpenOrder, ...]:

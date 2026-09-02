@@ -184,7 +184,7 @@ def test_paper_run_reconciles_then_submits_one_protected_plan(tmp_path: Path) ->
     assert result.order_ids == BrokerOrderIds(101, 102, 103)
 
 
-def test_live_run_is_disabled_before_any_broker_read_or_transmission(tmp_path: Path) -> None:
+def test_live_run_requires_reconciliation_before_transmission(tmp_path: Path) -> None:
     broker = FakeExecutionBroker(environment=Environment.LIVE, account="U123456")
     service = _service(
         tmp_path / "ledger.sqlite3",
@@ -195,9 +195,9 @@ def test_live_run_is_disabled_before_any_broker_read_or_transmission(tmp_path: P
 
     result = asyncio.run(service.execute(_intent(), _instrument()))
 
-    assert result.code is ExecutionResultCode.LIVE_EXECUTION_DISABLED
+    assert result.code is ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED
     assert result.actual_account == "U123456"
-    assert broker.account_reads == 0
+    assert broker.account_reads == 1
     assert broker.submitted == []
 
 

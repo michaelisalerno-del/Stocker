@@ -61,9 +61,12 @@ from stocker_execution.stage5 import (
 )
 from stocker_execution.stage7 import (
     ExecutionBroker,
+    ExecutionDestination,
+    ExecutionEnvironmentUnavailableError,
     ExecutionResultCode,
+    ExecutionRouter,
     Stage7ExecutionService,
-    Stage7PaperRuntime,
+    Stage7StrategyRuntime,
 )
 
 
@@ -146,18 +149,72 @@ class RunStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionEnvironmentStatus:
+    environment: Environment
+    connected: bool
+    account: str | None
+    expected_account: str
+    reconciled: bool
+    ready: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionReadinessDiagnostic:
+    environment: Environment
+    connected: bool
+    account: str | None
+    expected_account: str
+    expected_account_match: bool
+    account_state_available: bool
+    open_orders: int | None
+    positions: int | None
+    reconciled: bool
+    ready: bool
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeStatus:
     application: ApplicationState
-    broker_connected: bool
-    account: str | None
+    execution_environments: tuple[ExecutionEnvironmentStatus, ...]
     runs: tuple[RunStatus, ...]
     counters: RuntimeCounters
+
+    @property
+    def broker_connected(self) -> bool:
+        """Stage 8 compatibility view of the PAPER (or sole) broker."""
+
+        selected = next(
+            (item for item in self.execution_environments if item.environment is Environment.PAPER),
+            self.execution_environments[0] if self.execution_environments else None,
+        )
+        return selected.connected if selected is not None else False
+
+    @property
+    def account(self) -> str | None:
+        """Stage 8 compatibility view of the PAPER (or sole) account."""
+
+        selected = next(
+            (item for item in self.execution_environments if item.environment is Environment.PAPER),
+            self.execution_environments[0] if self.execution_environments else None,
+        )
+        return selected.account if selected is not None else None
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "application": self.application.value,
             "ibkr_paper": "connected" if self.broker_connected else "disconnected",
             "account": self.account,
+            "ibkr": {
+                item.environment.value: {
+                    "connected": item.connected,
+                    "account": item.account,
+                    "expected_account": item.expected_account,
+                    "reconciled": item.reconciled,
+                    "ready": item.ready,
+                }
+                for item in self.execution_environments
+            },
             "runs": [
                 {
                     "run_id": run.run_id,
@@ -181,13 +238,20 @@ class RuntimeStatus:
         }
 
     def as_text(self) -> str:
-        account = self.account or "unavailable"
-        lines = [
-            f"Application: {self.application.value}",
-            f"IBKR PAPER: {'connected' if self.broker_connected else 'disconnected'}",
-            f"Account: {account}",
-            f"Runs: {sum(run.state is RunRuntimeState.ACTIVE for run in self.runs)} active",
-        ]
+        lines = [f"Application: {self.application.value}"]
+        for item in self.execution_environments:
+            lines.extend(
+                (
+                    f"IBKR {item.environment.value}: "
+                    f"{'connected' if item.connected else 'disconnected'}",
+                    f"  account: {item.account or 'unavailable'}",
+                    f"  reconciled: {'yes' if item.reconciled else 'no'}",
+                    f"  readiness: {'READY' if item.ready else 'NOT_READY'}",
+                )
+            )
+        lines.append(
+            f"Runs: {sum(run.state is RunRuntimeState.ACTIVE for run in self.runs)} active"
+        )
         for run in self.runs:
             lines.extend(
                 (
@@ -567,7 +631,7 @@ class RuntimeStore:
 
 
 class StockerRuntime:
-    """One restartable PAPER application with explicit Stage 1--7 composition."""
+    """One restartable application with per-run execution routing."""
 
     _SUPPORTED_STRATEGIES = {"SESSION_HARD", STRATEGY_ID}
 
@@ -575,25 +639,39 @@ class StockerRuntime:
         self,
         *,
         config: RunsConfig,
-        broker: RuntimeBroker,
-        expected_account: str,
         ledger: ExecutionLedger,
         store: RuntimeStore,
         qualify: Qualifier,
         stage5: Stage5Analyzer,
         context_provider: StrategyContextProvider,
         entry_source: EntryBarSource,
+        execution_router: ExecutionRouter | None = None,
+        broker: RuntimeBroker | None = None,
+        expected_account: str | None = None,
         session_resolver: SessionResolver | None = None,
         clock: Callable[[], datetime] | None = None,
         logger: Any | None = None,
         broker_sync_interval_seconds: float = 5.0,
     ) -> None:
-        if not expected_account.strip():
-            raise ValueError("Stage 8 PAPER runtime requires expected_account")
+        if execution_router is None:
+            if broker is None or expected_account is None or not expected_account.strip():
+                raise ValueError("runtime requires an execution router or PAPER expected_account")
+            execution_router = ExecutionRouter(
+                (ExecutionDestination(Environment.PAPER, expected_account, broker),)
+            )
         if broker_sync_interval_seconds <= 0.0:
             raise ValueError("broker sync interval must be positive")
-        self._broker = broker
-        self._expected_account = expected_account
+        self._router = execution_router
+        self._destinations = {
+            environment: execution_router.for_environment(environment)
+            for environment in execution_router.environments
+        }
+        preferred_environment = (
+            Environment.PAPER
+            if Environment.PAPER in self._destinations
+            else next(iter(self._destinations))
+        )
+        self._broker = self._destinations[preferred_environment].broker
         self._ledger = ledger
         self._store = store
         self._qualify = qualify
@@ -610,7 +688,13 @@ class StockerRuntime:
         self._run_reasons: dict[str, str] = {}
         self._sessions: dict[str, MarketSession] = {}
         self._execution: dict[str, Stage7ExecutionService] = {}
-        self._paper_runtimes: dict[str, Stage7PaperRuntime] = {}
+        self._strategy_runtimes: dict[str, Stage7StrategyRuntime] = {}
+        self._environment_ready: dict[Environment, bool] = {
+            environment: False for environment in self._destinations
+        }
+        self._environment_reconciled: dict[Environment, bool] = {
+            environment: False for environment in self._destinations
+        }
         self._strategies: dict[str, SessionHardStructureDStrategy] = {}
         self._qualification = Stage5QualificationResult((), ())
         self._ready_at: datetime | None = None
@@ -625,18 +709,20 @@ class StockerRuntime:
         self._state = ApplicationState.STARTING
         self._stopping = False
         self._execution.clear()
-        self._paper_runtimes.clear()
+        self._strategy_runtimes.clear()
         self._strategies.clear()
+        self._sessions.clear()
         self._qualification = Stage5QualificationResult((), ())
+        for environment in self._environment_ready:
+            self._environment_ready[environment] = False
+            self._environment_reconciled[environment] = False
         self._store.recover_interrupted(now)
         self._logger.info("application_start")
-        paper_runs: list[RunInstance] = []
+        configured_runs: list[RunInstance] = []
         for instance in self._manager.list_runs():
             run = instance.config
             if not run.enabled:
                 self._set_run(run.run_id, RunRuntimeState.DISABLED, "disabled by configuration")
-            elif run.environment is Environment.LIVE:
-                self._set_run(run.run_id, RunRuntimeState.DEGRADED, "LIVE_EXECUTION_DISABLED")
             elif run.strategy not in self._SUPPORTED_STRATEGIES:
                 self._set_run(run.run_id, RunRuntimeState.DEGRADED, "unsupported strategy")
             elif run.session is None:
@@ -646,99 +732,136 @@ class StockerRuntime:
             elif run.risk is None:
                 self._set_run(run.run_id, RunRuntimeState.DEGRADED, "risk config is required")
             else:
+                try:
+                    destination = self._router.for_environment(run.execution_environment)
+                except ExecutionEnvironmentUnavailableError:
+                    self._set_run(
+                        run.run_id,
+                        RunRuntimeState.DEGRADED,
+                        "EXECUTION_ENVIRONMENT_UNAVAILABLE",
+                    )
+                    continue
                 self._set_run(run.run_id, RunRuntimeState.STARTING, "")
-                paper_runs.append(self._manager.start_run(run.run_id))
+                active = self._manager.start_run(run.run_id)
+                configured_runs.append(active)
+                self._execution[run.run_id] = Stage7ExecutionService(
+                    run=run,
+                    expected_account=destination.expected_account,
+                    broker=destination.broker,
+                    ledger=self._ledger,
+                    clock=self._clock,
+                )
 
-        if not paper_runs:
+        if not configured_runs:
             self._state = ApplicationState.DEGRADED
             return self.status()
-        for instance in paper_runs:
-            self._execution[instance.config.run_id] = Stage7ExecutionService(
-                run=instance.config,
-                expected_account=self._expected_account,
-                broker=self._broker,
-                ledger=self._ledger,
-                clock=self._clock,
-            )
-        try:
-            session = await self._broker.connect()
-        except Exception as exc:
-            self._degrade_paper_runs(paper_runs, f"broker unavailable: {exc}")
-            self._state = ApplicationState.DEGRADED
-            self._logger.error("ibkr_connection_failed", reason=str(exc))
-            return self.status()
-        self._logger.info(
-            "ibkr_connected",
-            environment=session.environment.value,
-            account=session.masked_account_id,
-        )
-        if (
-            session.environment is not Environment.PAPER
-            or session.account_id != self._expected_account
-        ):
-            self._degrade_paper_runs(paper_runs, "account or environment mismatch")
-            self._state = ApplicationState.DEGRADED
-            self._logger.error(
-                "account_verification_failed",
-                expected_environment=Environment.PAPER.value,
-                actual_environment=session.environment.value,
-                account=session.masked_account_id,
-            )
-            return self.status()
-        self._logger.info("account_verified", account=session.masked_account_id)
 
-        self._state = ApplicationState.RECONCILING
-        all_reconciled = True
-        for instance in paper_runs:
-            execution = self._execution[instance.config.run_id]
-            result = await execution.reconcile()
-            self._store.record_reconciliation(
-                environment=Environment.PAPER,
-                account=self._expected_account,
-                connection_epoch=self._broker.connection_epoch,
-                ok=result.ok,
-                detail=result.detail,
-                now=now,
-            )
-            if not result.ok:
-                all_reconciled = False
-                self._set_run(instance.config.run_id, RunRuntimeState.DEGRADED, result.detail)
-                self._store.increment(instance.config.run_id, now.date(), "reconciliation_issues")
+        connected_environments: set[Environment] = set()
+        for environment in dict.fromkeys(run.config.environment for run in configured_runs):
+            destination = self._destinations[environment]
+            affected = [run for run in configured_runs if run.config.environment is environment]
+            try:
+                session = await destination.broker.connect()
+            except Exception as exc:
+                self._degrade_runs(affected, f"broker unavailable: {exc}")
                 self._logger.error(
-                    "reconciliation_required",
-                    run_id=instance.config.run_id,
-                    reason=result.detail,
+                    "ibkr_connection_failed",
+                    environment=environment.value,
+                    reason=str(exc),
                 )
                 continue
-            self._ensure_strategy(instance.config.run_id, execution, now)
-            market = self._resolve_market(instance, now)
-            if market is None:
-                continue
-            self._sessions[instance.config.run_id] = market
-            state = (
-                RunRuntimeState.ACTIVE
-                if market.state is MarketSessionState.ACTIVE_SESSION
-                else RunRuntimeState.READY
+            self._logger.info(
+                "ibkr_connected",
+                environment=session.environment.value,
+                account=session.masked_account_id,
             )
-            self._set_run(instance.config.run_id, state, "")
+            if (
+                session.environment is not environment
+                or session.account_id != destination.expected_account
+                or destination.broker.environment is not environment
+                or destination.broker.account != destination.expected_account
+            ):
+                self._degrade_runs(affected, "account or environment mismatch")
+                self._logger.error(
+                    "account_verification_failed",
+                    expected_environment=environment.value,
+                    actual_environment=session.environment.value,
+                    account=session.masked_account_id,
+                )
+                continue
+            connected_environments.add(environment)
+            self._logger.info(
+                "account_verified",
+                environment=environment.value,
+                account=session.masked_account_id,
+            )
 
-        if not all_reconciled:
-            self._state = ApplicationState.DEGRADED
-            return self.status()
-        self._logger.info("reconciliation_complete", runs=len(paper_runs))
-        runnable_runs = tuple(
-            instance
-            for instance in paper_runs
-            if self._run_states.get(instance.config.run_id)
-            in {RunRuntimeState.READY, RunRuntimeState.ACTIVE}
-        )
+        self._state = ApplicationState.RECONCILING
+        runnable: list[RunInstance] = []
+        for environment in connected_environments:
+            destination = self._destinations[environment]
+            affected = [run for run in configured_runs if run.config.environment is environment]
+            environment_ok = True
+            for instance in affected:
+                execution = self._execution[instance.config.run_id]
+                result = await execution.reconcile()
+                self._store.record_reconciliation(
+                    environment=environment,
+                    account=destination.expected_account,
+                    connection_epoch=destination.broker.connection_epoch,
+                    ok=result.ok,
+                    detail=result.detail,
+                    now=now,
+                )
+                if not result.ok:
+                    environment_ok = False
+                    self._set_run(instance.config.run_id, RunRuntimeState.DEGRADED, result.detail)
+                    self._store.increment(
+                        instance.config.run_id, now.date(), "reconciliation_issues"
+                    )
+                    self._logger.error(
+                        "reconciliation_required",
+                        environment=environment.value,
+                        account=destination.expected_account,
+                        run_id=instance.config.run_id,
+                        reason=result.detail,
+                    )
+            self._environment_reconciled[environment] = environment_ok
+            self._environment_ready[environment] = environment_ok
+            if not environment_ok:
+                continue
+            for instance in affected:
+                execution = self._execution[instance.config.run_id]
+                self._ensure_strategy(instance.config.run_id, execution, now)
+                market = self._resolve_market(instance, now)
+                if market is None:
+                    continue
+                self._sessions[instance.config.run_id] = market
+                self._set_run(
+                    instance.config.run_id,
+                    (
+                        RunRuntimeState.ACTIVE
+                        if market.state is MarketSessionState.ACTIVE_SESSION
+                        else RunRuntimeState.READY
+                    ),
+                    "",
+                )
+                runnable.append(instance)
+            self._logger.info(
+                "reconciliation_complete",
+                environment=environment.value,
+                account=destination.expected_account,
+                runs=len(affected),
+            )
+
+        runnable_runs = tuple(runnable)
         if not runnable_runs:
             self._state = ApplicationState.DEGRADED
             return self.status()
         try:
             self._qualification = await self._qualify(runnable_runs)
         except Exception as exc:
-            self._degrade_paper_runs(paper_runs, f"instrument preparation failed: {exc}")
+            self._degrade_runs(runnable_runs, f"instrument preparation failed: {exc}")
             self._state = ApplicationState.DEGRADED
             self._logger.error("instrument_preparation_failed", reason=str(exc))
             return self.status()
@@ -748,8 +871,8 @@ class StockerRuntime:
         self._state = ApplicationState.READY
         self._logger.info(
             "application_ready",
-            account=session.masked_account_id,
-            runs=len(paper_runs),
+            environments=len({run.config.environment for run in runnable_runs}),
+            runs=len(runnable_runs),
             qualified=len(self._qualification.requests),
             ineligible=len(self._qualification.ineligible),
         )
@@ -766,7 +889,11 @@ class StockerRuntime:
                     self._set_run(instance.config.run_id, RunRuntimeState.STOPPED, "")
                     if instance.state.value == "ACTIVE":
                         self._manager.stop_run(instance.config.run_id)
-            self._broker.disconnect()
+            for destination in self._destinations.values():
+                if destination.broker.is_connected:
+                    destination.broker.disconnect()
+                self._environment_ready[destination.environment] = False
+                self._environment_reconciled[destination.environment] = False
             self._state = ApplicationState.STOPPED
             self._logger.info("application_stop")
         return self.status()
@@ -789,8 +916,13 @@ class StockerRuntime:
         now = _aware(self._clock())
         if self._state is not ApplicationState.READY or self._stopping:
             return self.status()
-        if not self._broker.is_connected:
-            self._note_disconnect(now)
+        required_environments = {
+            execution.run_environment for execution in self._execution.values()
+        }
+        for environment in required_environments:
+            if not self._destinations[environment].broker.is_connected:
+                self._note_disconnect(environment, now)
+        if not any(self._environment_ready.values()):
             return self.status()
         sync_due = self._last_sync is None or now - self._last_sync >= self._broker_sync_interval
         if sync_due and not await self._refresh_execution_state(now):
@@ -844,93 +976,135 @@ class StockerRuntime:
         await self._observe_entries(now)
         return self.status()
 
-    async def reconnect(self) -> RuntimeStatus:
-        """Perform one bounded reconnect followed by mandatory reconciliation."""
+    async def reconnect(self, environment: Environment | None = None) -> RuntimeStatus:
+        """Reconnect only affected environments, then verify and reconcile each one."""
 
         now = _aware(self._clock())
-        self._state = ApplicationState.RECONCILING
-        self._broker.disconnect()
-        try:
-            session = await self._broker.connect()
-        except Exception as exc:
-            self._state = ApplicationState.DEGRADED
-            for run_id in self._execution:
-                self._set_run(run_id, RunRuntimeState.DEGRADED, f"broker unavailable: {exc}")
-            self._logger.error("ibkr_reconnect_failed", reason=str(exc))
-            return self.status()
-        if (
-            session.environment is not Environment.PAPER
-            or session.account_id != self._expected_account
-        ):
-            self._state = ApplicationState.DEGRADED
-            for run_id in self._execution:
-                self._set_run(run_id, RunRuntimeState.DEGRADED, "account or environment mismatch")
-            self._logger.error(
-                "account_verification_failed",
-                expected_environment=Environment.PAPER.value,
-                actual_environment=session.environment.value,
-                account=session.masked_account_id,
-            )
-            return self.status()
-        self._logger.info("account_verified", account=session.masked_account_id)
-
-        reconciled = True
-        for run_id, execution in self._execution.items():
-            result = await execution.refresh_broker_state()
-            self._store.record_reconciliation(
-                environment=Environment.PAPER,
-                account=self._expected_account,
-                connection_epoch=self._broker.connection_epoch,
-                ok=result.ok,
-                detail=result.detail,
-                now=now,
-            )
-            if not result.ok:
-                reconciled = False
-                self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
-                self._store.increment(run_id, now.date(), "reconciliation_issues")
-                self._logger.error("reconciliation_required", run_id=run_id, reason=result.detail)
-            elif run_id not in self._strategies:
-                self._ensure_strategy(run_id, execution, now)
-        if not reconciled:
-            self._state = ApplicationState.DEGRADED
-            return self.status()
-        self._logger.info("reconciliation_complete", runs=len(self._execution))
-        active = tuple(
-            instance
-            for instance in self._manager.list_runs()
-            if instance.config.run_id in self._execution
+        required = {execution.run_environment for execution in self._execution.values()}
+        targets = (
+            {environment}
+            if environment is not None
+            else {
+                item
+                for item in required
+                if not self._environment_ready[item]
+                or not self._destinations[item].broker.is_connected
+            }
         )
+        if not targets:
+            return self.status()
+        self._state = ApplicationState.RECONCILING
+        for target in targets:
+            destination = self._destinations[target]
+            affected = [
+                instance
+                for instance in self._manager.list_runs()
+                if instance.config.run_id in self._execution
+                and instance.config.environment is target
+            ]
+            destination.broker.disconnect()
+            self._environment_ready[target] = False
+            self._environment_reconciled[target] = False
+            try:
+                session = await destination.broker.connect()
+            except Exception as exc:
+                self._degrade_runs(affected, f"broker unavailable: {exc}")
+                self._logger.error(
+                    "ibkr_reconnect_failed",
+                    environment=target.value,
+                    reason=str(exc),
+                )
+                continue
+            if (
+                session.environment is not target
+                or session.account_id != destination.expected_account
+                or destination.broker.environment is not target
+                or destination.broker.account != destination.expected_account
+            ):
+                self._degrade_runs(affected, "account or environment mismatch")
+                self._logger.error(
+                    "account_verification_failed",
+                    expected_environment=target.value,
+                    actual_environment=session.environment.value,
+                    account=session.masked_account_id,
+                )
+                continue
+
+            reconciled = True
+            for instance in affected:
+                run_id = instance.config.run_id
+                execution = self._execution[run_id]
+                result = await execution.refresh_broker_state()
+                self._store.record_reconciliation(
+                    environment=target,
+                    account=destination.expected_account,
+                    connection_epoch=destination.broker.connection_epoch,
+                    ok=result.ok,
+                    detail=result.detail,
+                    now=now,
+                )
+                if not result.ok:
+                    reconciled = False
+                    self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
+                    self._store.increment(run_id, now.date(), "reconciliation_issues")
+                    self._logger.error(
+                        "reconciliation_required",
+                        environment=target.value,
+                        run_id=run_id,
+                        reason=result.detail,
+                    )
+                else:
+                    self._ensure_strategy(run_id, execution, now)
+            self._environment_reconciled[target] = reconciled
+            self._environment_ready[target] = reconciled
+            if reconciled:
+                self._logger.info(
+                    "ibkr_reconnected",
+                    environment=target.value,
+                    account=session.masked_account_id,
+                )
+
         runnable: list[RunInstance] = []
-        for instance in active:
+        for instance in self._manager.list_runs():
+            if (
+                instance.config.run_id not in self._execution
+                or not self._environment_ready[instance.config.environment]
+            ):
+                continue
             market = self._resolve_market(instance, now)
             if market is None:
                 continue
             self._sessions[instance.config.run_id] = market
             runnable.append(instance)
-        try:
-            self._qualification = await self._qualify(runnable)
-        except Exception as exc:
-            self._state = ApplicationState.DEGRADED
-            self._degrade_paper_runs(runnable, f"instrument preparation failed: {exc}")
-            self._logger.error("instrument_preparation_failed", reason=str(exc))
-            return self.status()
-        self._ready_at = now
-        self._last_sync = now
-        self._mark_missed_before(now)
-        for instance in runnable:
-            market = self._sessions[instance.config.run_id]
-            self._set_run(
-                instance.config.run_id,
-                (
-                    RunRuntimeState.ACTIVE
-                    if market.state is MarketSessionState.ACTIVE_SESSION
-                    else RunRuntimeState.READY
-                ),
-                "",
-            )
-        self._state = ApplicationState.READY
-        self._logger.info("ibkr_reconnected", account=session.masked_account_id)
+        if runnable:
+            try:
+                self._qualification = await self._qualify(runnable)
+            except Exception as exc:
+                self._degrade_runs(runnable, f"instrument preparation failed: {exc}")
+                self._logger.error("instrument_preparation_failed", reason=str(exc))
+                for target in targets:
+                    self._environment_ready[target] = False
+                runnable = []
+        self._ready_at = now if runnable else self._ready_at
+        self._last_sync = now if runnable else self._last_sync
+        if runnable:
+            self._mark_missed_before(now)
+            for instance in runnable:
+                market = self._sessions[instance.config.run_id]
+                self._set_run(
+                    instance.config.run_id,
+                    (
+                        RunRuntimeState.ACTIVE
+                        if market.state is MarketSessionState.ACTIVE_SESSION
+                        else RunRuntimeState.READY
+                    ),
+                    "",
+                )
+        self._state = (
+            ApplicationState.READY
+            if any(self._environment_ready.values())
+            else ApplicationState.DEGRADED
+        )
         return self.status()
 
     async def run_forever(self, *, poll_interval_seconds: float = 1.0) -> None:
@@ -942,7 +1116,13 @@ class StockerRuntime:
         while not self._stopping:
             if self._state is ApplicationState.READY:
                 await self.poll_once()
-            elif self._execution:
+            if self._execution and any(
+                not self._environment_ready[environment]
+                or not self._destinations[environment].broker.is_connected
+                for environment in {
+                    execution.run_environment for execution in self._execution.values()
+                }
+            ):
                 await self.reconnect()
             await asyncio.sleep(poll_interval_seconds)
 
@@ -954,11 +1134,86 @@ class StockerRuntime:
         request = next(iter(self._qualification.requests), None)
         if request is None:
             raise RuntimeError("no qualified instrument is available for market-data smoke")
-        current_quote = getattr(self._broker, "current_quote", None)
+        broker = self._broker
+        if not broker.is_connected:
+            broker = next(
+                (
+                    destination.broker
+                    for destination in self._destinations.values()
+                    if destination.broker.is_connected
+                ),
+                broker,
+            )
+        current_quote = getattr(broker, "current_quote", None)
         if current_quote is None:
             raise RuntimeError("runtime broker does not expose market data")
         quote: CurrentQuote = await current_quote(request.instrument)
         return quote
+
+    async def execution_readiness_diagnostic(
+        self, environment: Environment
+    ) -> ExecutionReadinessDiagnostic:
+        """Read one environment's execution readiness without transmitting an order."""
+
+        destination = self._router.for_environment(environment)
+        broker = destination.broker
+        connected = broker.is_connected
+        account = broker.account or None
+        account_match = (
+            connected
+            and broker.environment is environment
+            and account == destination.expected_account
+        )
+        account_state_available = False
+        open_order_count: int | None = None
+        position_count: int | None = None
+        detail = "READY"
+        if not connected:
+            detail = "BROKER_DISCONNECTED"
+        elif not account_match:
+            detail = "ACCOUNT_OR_ENVIRONMENT_MISMATCH"
+        else:
+            try:
+                state = await broker.account_state()
+                account_state_available = (
+                    state.connected
+                    and state.environment is environment
+                    and state.account == destination.expected_account
+                    and state.equity is not None
+                )
+                open_order_count = len(await broker.read_open_orders())
+                position_count = len(await broker.read_positions())
+            except Exception as exc:
+                detail = f"broker state unavailable: {exc}"
+            else:
+                if not account_state_available:
+                    detail = "ACCOUNT_OR_ENVIRONMENT_MISMATCH"
+                elif not self._environment_reconciled[environment]:
+                    detail = "EXECUTION_RECONCILIATION_REQUIRED"
+        ready = (
+            connected
+            and account_match
+            and account_state_available
+            and open_order_count is not None
+            and position_count is not None
+            and self._environment_reconciled[environment]
+            and self._environment_ready[environment]
+        )
+        if not ready and detail == "READY":
+            detail = "EXECUTION_RECONCILIATION_REQUIRED"
+        return ExecutionReadinessDiagnostic(
+            environment=environment,
+            connected=connected,
+            account=account,
+            expected_account=destination.expected_account,
+            expected_account_match=account_match,
+            account_state_available=account_state_available,
+            open_orders=open_order_count,
+            positions=position_count,
+            reconciled=self._environment_reconciled[environment],
+            ready=ready,
+            detail=detail,
+        )
 
     def record_fill(self, fill: BrokerFill) -> bool:
         """Persist one broker fill idempotently and expose its run-level operational count."""
@@ -973,19 +1228,26 @@ class StockerRuntime:
                 matching = record
                 break
         if matching is None:
-            execution = next(iter(self._execution.values()), None)
-            if execution is not None:
+            for run_id, execution in self._execution.items():
+                if execution.run_environment is not fill.environment:
+                    continue
                 execution.record_fill(fill)
-            self._state = ApplicationState.DEGRADED
-            for run_id in self._execution:
                 self._set_run(
                     run_id,
                     RunRuntimeState.DEGRADED,
                     "EXECUTION_RECONCILIATION_REQUIRED: unexpected broker fill",
                 )
+            if fill.environment in self._environment_ready:
+                self._environment_ready[fill.environment] = False
+                self._environment_reconciled[fill.environment] = False
+            self._state = (
+                ApplicationState.READY
+                if any(self._environment_ready.values())
+                else ApplicationState.DEGRADED
+            )
             return False
-        execution = self._execution.get(matching.run_id)
-        if execution is None or not execution.record_fill(fill):
+        matching_execution = self._execution.get(matching.run_id)
+        if matching_execution is None or not matching_execution.record_fill(fill):
             return False
         market = self._sessions.get(matching.run_id)
         session = market.session if market is not None else _aware(fill.executed_at).date()
@@ -998,7 +1260,10 @@ class StockerRuntime:
         )
         self._logger.info(
             event,
+            environment=fill.environment.value,
+            account=fill.account,
             run_id=matching.run_id,
+            signal_id=matching.signal_id,
             order_plan_id=matching.order_plan_id,
             con_id=matching.con_id,
             ibkr_order_id=fill.order_id,
@@ -1008,7 +1273,6 @@ class StockerRuntime:
 
     def status(self) -> RuntimeStatus:
         now = _aware(self._clock())
-        active_records = self._ledger.active_records(Environment.PAPER, self._expected_account)
         run_statuses: list[RunStatus] = []
         for instance in self._manager.list_runs():
             run = instance.config
@@ -1038,14 +1302,31 @@ class StockerRuntime:
                     open_positions=sum(
                         record.run_id == run.run_id
                         and record.filled_quantity > record.closed_quantity
-                        for record in active_records
+                        for record in (
+                            self._ledger.active_records(
+                                run.environment,
+                                self._destinations[run.environment].expected_account,
+                            )
+                            if run.environment in self._destinations
+                            else ()
+                        )
                     ),
                 )
             )
+        execution_statuses = tuple(
+            ExecutionEnvironmentStatus(
+                environment=environment,
+                connected=destination.broker.is_connected,
+                account=destination.broker.account or None,
+                expected_account=destination.expected_account,
+                reconciled=self._environment_reconciled[environment],
+                ready=self._environment_ready[environment],
+            )
+            for environment, destination in self._destinations.items()
+        )
         return RuntimeStatus(
             application=self._state,
-            broker_connected=self._broker.is_connected,
-            account=self._broker.account or None,
+            execution_environments=execution_statuses,
             runs=tuple(run_statuses),
             counters=self._store.counters(),
         )
@@ -1054,7 +1335,7 @@ class StockerRuntime:
         self._run_states[run_id] = state
         self._run_reasons[run_id] = reason
 
-    def _degrade_paper_runs(self, runs: Sequence[RunInstance], reason: str) -> None:
+    def _degrade_runs(self, runs: Sequence[RunInstance], reason: str) -> None:
         for instance in runs:
             self._set_run(instance.config.run_id, RunRuntimeState.DEGRADED, reason)
 
@@ -1071,7 +1352,9 @@ class StockerRuntime:
             self._store.save_signals(expired, now)
             self._logger.info("signals_expired_during_recovery", run_id=run_id, count=len(expired))
         self._strategies[run_id] = strategy
-        self._paper_runtimes[run_id] = Stage7PaperRuntime(strategy=strategy, execution=execution)
+        self._strategy_runtimes[run_id] = Stage7StrategyRuntime(
+            strategy=strategy, execution=execution
+        )
 
     def _resolve_market(self, instance: RunInstance, now: datetime) -> MarketSession | None:
         try:
@@ -1208,8 +1491,8 @@ class StockerRuntime:
             }:
                 continue
             market = self._sessions.get(run.run_id)
-            paper_runtime = self._paper_runtimes.get(run.run_id)
-            if market is None or paper_runtime is None:
+            strategy_runtime = self._strategy_runtimes.get(run.run_id)
+            if market is None or strategy_runtime is None:
                 continue
             requests, _ineligible = self._qualification_for({run.run_id})
             instruments = {request.instrument.con_id: request.instrument for request in requests}
@@ -1225,7 +1508,7 @@ class StockerRuntime:
                     now=now,
                     signals=strategy.signals,
                 )
-                attempts = await paper_runtime.observe_and_execute(bars, instruments)
+                attempts = await strategy_runtime.observe_and_execute(bars, instruments)
                 self._store.save_signals(strategy.signals, now)
             except Exception as exc:
                 self._set_run(run.run_id, RunRuntimeState.DEGRADED, str(exc))
@@ -1234,37 +1517,57 @@ class StockerRuntime:
             for attempt in attempts:
                 self._logger.info(
                     "strategy_signal",
+                    environment=attempt.environment.value,
+                    account=attempt.actual_account,
                     run_id=run.run_id,
-                    signal_id=attempt.order_plan.signal_id if attempt.order_plan else None,
+                    signal_id=attempt.signal_id,
+                    order_plan_id=(
+                        attempt.order_plan.order_plan_id if attempt.order_plan else None
+                    ),
+                    con_id=attempt.order_plan.con_id if attempt.order_plan else None,
                     result=attempt.code.value,
                 )
                 if attempt.code is ExecutionResultCode.SUBMITTED:
                     self._store.increment(run.run_id, market.session, "orders")
                     self._logger.info(
                         "order_submitted",
+                        environment=attempt.environment.value,
+                        account=attempt.actual_account,
                         run_id=run.run_id,
-                        signal_id=attempt.order_plan.signal_id if attempt.order_plan else None,
+                        signal_id=attempt.signal_id,
                         order_plan_id=(
                             attempt.order_plan.order_plan_id if attempt.order_plan else None
                         ),
+                        con_id=attempt.order_plan.con_id if attempt.order_plan else None,
                         ibkr_order_id=attempt.order_ids.parent if attempt.order_ids else None,
                     )
                 elif attempt.code is ExecutionResultCode.BROKER_REJECTED:
                     self._store.increment(run.run_id, market.session, "broker_rejects")
                     self._logger.error(
                         "broker_order_rejected",
+                        environment=attempt.environment.value,
+                        account=attempt.actual_account,
                         run_id=run.run_id,
+                        signal_id=attempt.signal_id,
+                        order_plan_id=(
+                            attempt.order_plan.order_plan_id if attempt.order_plan else None
+                        ),
+                        con_id=attempt.order_plan.con_id if attempt.order_plan else None,
                         result=attempt.code.value,
                         reason=attempt.detail,
                     )
-                elif attempt.code not in {
-                    ExecutionResultCode.DUPLICATE_ORDER_BLOCKED,
-                    ExecutionResultCode.LIVE_EXECUTION_DISABLED,
-                }:
+                elif attempt.code is not ExecutionResultCode.DUPLICATE_ORDER_BLOCKED:
                     self._store.increment(run.run_id, market.session, "risk_rejects")
                     self._logger.warning(
                         "execution_rejected",
+                        environment=attempt.environment.value,
+                        account=attempt.actual_account,
                         run_id=run.run_id,
+                        signal_id=attempt.signal_id,
+                        order_plan_id=(
+                            attempt.order_plan.order_plan_id if attempt.order_plan else None
+                        ),
+                        con_id=attempt.order_plan.con_id if attempt.order_plan else None,
                         result=attempt.code.value,
                         reason=attempt.detail,
                     )
@@ -1309,45 +1612,77 @@ class StockerRuntime:
         self._set_run(run_id, RunRuntimeState.DEGRADED, detail)
         self._logger.error("run_degraded", run_id=run_id, reason=detail)
 
-    def _note_disconnect(self, now: datetime) -> None:
-        self._state = ApplicationState.DEGRADED
-        for run_id in self._execution:
+    def _note_disconnect(self, environment: Environment, now: datetime) -> None:
+        self._environment_ready[environment] = False
+        self._environment_reconciled[environment] = False
+        for run_id, execution in self._execution.items():
+            if execution.run_environment is not environment:
+                continue
             self._set_run(run_id, RunRuntimeState.DEGRADED, "BROKER_DISCONNECTED")
             self._store.increment(run_id, now.date(), "disconnects")
-        self._logger.error("ibkr_disconnected")
+        self._state = (
+            ApplicationState.READY
+            if any(self._environment_ready.values())
+            else ApplicationState.DEGRADED
+        )
+        self._logger.error("ibkr_disconnected", environment=environment.value)
 
     async def _refresh_execution_state(self, now: datetime) -> bool:
         """Poll durable broker state without allowing orders during the refresh."""
 
         self._state = ApplicationState.RECONCILING
-        for run_id, execution in self._execution.items():
-            try:
-                result = await execution.refresh_broker_state()
-            except Exception as exc:
-                detail = f"broker reconciliation unavailable: {exc}"
-                self._set_run(run_id, RunRuntimeState.DEGRADED, detail)
-                self._store.increment(run_id, now.date(), "reconciliation_issues")
-                self._logger.error("reconciliation_failed", run_id=run_id, reason=str(exc))
-                self._state = ApplicationState.DEGRADED
-                return False
-            self._store.record_reconciliation(
-                environment=Environment.PAPER,
-                account=self._expected_account,
-                connection_epoch=self._broker.connection_epoch,
-                ok=result.ok,
-                detail=result.detail,
-                now=now,
-            )
-            if not result.ok:
-                self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
-                self._store.increment(run_id, now.date(), "reconciliation_issues")
-                self._logger.error("reconciliation_required", run_id=run_id, reason=result.detail)
-                self._state = ApplicationState.DEGRADED
-                return False
-            self._ensure_strategy(run_id, execution, now)
+        for environment in {execution.run_environment for execution in self._execution.values()}:
+            destination = self._destinations[environment]
+            if not destination.broker.is_connected:
+                self._note_disconnect(environment, now)
+                continue
+            environment_ok = True
+            for run_id, execution in self._execution.items():
+                if execution.run_environment is not environment:
+                    continue
+                try:
+                    result = await execution.refresh_broker_state()
+                except Exception as exc:
+                    detail = f"broker reconciliation unavailable: {exc}"
+                    self._set_run(run_id, RunRuntimeState.DEGRADED, detail)
+                    self._store.increment(run_id, now.date(), "reconciliation_issues")
+                    self._logger.error(
+                        "reconciliation_failed",
+                        environment=environment.value,
+                        run_id=run_id,
+                        reason=str(exc),
+                    )
+                    environment_ok = False
+                    continue
+                self._store.record_reconciliation(
+                    environment=environment,
+                    account=destination.expected_account,
+                    connection_epoch=destination.broker.connection_epoch,
+                    ok=result.ok,
+                    detail=result.detail,
+                    now=now,
+                )
+                if not result.ok:
+                    self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
+                    self._store.increment(run_id, now.date(), "reconciliation_issues")
+                    self._logger.error(
+                        "reconciliation_required",
+                        environment=environment.value,
+                        run_id=run_id,
+                        reason=result.detail,
+                    )
+                    environment_ok = False
+                    continue
+                self._ensure_strategy(run_id, execution, now)
+            self._environment_reconciled[environment] = environment_ok
+            self._environment_ready[environment] = environment_ok
         self._last_sync = now
-        self._state = ApplicationState.READY
-        return True
+        self._state = (
+            ApplicationState.READY
+            if any(self._environment_ready.values())
+            else ApplicationState.DEGRADED
+        )
+        return self._state is ApplicationState.READY
 
 
 def _signal_payload(signal: StrategySignal) -> dict[str, object]:
@@ -1571,7 +1906,7 @@ class IbkrSessionDataSource:
         return result
 
 
-def build_paper_runtime(
+def build_runtime(
     *,
     runs_config_path: str | Path,
     ibkr_config_path: str | Path,
@@ -1579,13 +1914,46 @@ def build_paper_runtime(
     clock: Callable[[], datetime] | None = None,
     logger: Any | None = None,
 ) -> StockerRuntime:
-    """Load configuration and compose the real Stage 2--7 PAPER dependencies once."""
+    """Compose one runtime with explicit sessions for enabled run environments."""
 
     runs = load_runs_config(runs_config_path)
-    broker_config = load_ibkr_config(ibkr_config_path, Environment.PAPER)
-    if broker_config.expected_account is None:
-        raise ValueError("Stage 8 PAPER runtime requires PAPER expected_account")
-    broker = IbkrConnection(broker_config, execution_enabled=True)
+    required_environments = tuple(
+        dict.fromkeys(run.environment for run in runs.runs if run.enabled)
+    )
+    if not required_environments:
+        raise ValueError("runtime requires at least one enabled run")
+    destinations: list[ExecutionDestination] = []
+    connections: dict[Environment, IbkrConnection] = {}
+    session_identities: set[tuple[str, int, int]] = set()
+    for environment in required_environments:
+        try:
+            broker_config = load_ibkr_config(ibkr_config_path, environment)
+        except ValueError as exc:
+            raise ValueError(
+                f"enabled {environment.value} run requires {environment.value} IBKR config"
+            ) from exc
+        if broker_config.expected_account is None:
+            raise ValueError(
+                f"Stage 9 {environment.value} runtime requires {environment.value} expected_account"
+            )
+        session_identity = (
+            broker_config.host,
+            broker_config.port,
+            broker_config.client_id,
+        )
+        if session_identity in session_identities:
+            raise ValueError("PAPER and LIVE require distinct IBKR session identities")
+        session_identities.add(session_identity)
+        connection = IbkrConnection(broker_config, execution_enabled=True)
+        connections[environment] = connection
+        destinations.append(
+            ExecutionDestination(environment, broker_config.expected_account, connection)
+        )
+    execution_router = ExecutionRouter(tuple(destinations))
+    data_environment = (
+        Environment.PAPER if Environment.PAPER in connections else required_environments[0]
+    )
+    broker = connections[data_environment]
     history_cache = IbkrHistoryCache(database_path)
     prior_context = PriorSessionContextService(
         broker,
@@ -1610,8 +1978,7 @@ def build_paper_runtime(
 
     return StockerRuntime(
         config=runs,
-        broker=broker,
-        expected_account=broker_config.expected_account,
+        execution_router=execution_router,
         ledger=ExecutionLedger(database_path),
         store=RuntimeStore(database_path),
         qualify=qualify,
@@ -1619,5 +1986,29 @@ def build_paper_runtime(
         context_provider=session_data,
         entry_source=session_data,
         clock=data_clock,
+        logger=logger,
+    )
+
+
+def build_paper_runtime(
+    *,
+    runs_config_path: str | Path,
+    ibkr_config_path: str | Path,
+    database_path: str | Path,
+    clock: Callable[[], datetime] | None = None,
+    logger: Any | None = None,
+) -> StockerRuntime:
+    """Stage 8 compatibility entry point that can never enable a LIVE run."""
+
+    runs = load_runs_config(runs_config_path)
+    if any(run.enabled and run.environment is Environment.LIVE for run in runs.runs):
+        raise ValueError(
+            "Stage 8 PAPER runtime cannot start enabled LIVE runs; use Stage 9 runtime"
+        )
+    return build_runtime(
+        runs_config_path=runs_config_path,
+        ibkr_config_path=ibkr_config_path,
+        database_path=database_path,
+        clock=clock,
         logger=logger,
     )

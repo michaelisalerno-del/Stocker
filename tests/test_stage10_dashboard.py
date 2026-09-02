@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -938,7 +940,7 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
         assert "PAPER" in response.text
         assert "LIVE" in response.text
     index = client.get("/").text
-    assert 'src="/static/dashboard.js?v=20260902-universes-v1"' in index
+    assert 'src="/static/dashboard.js?v=20260902-risk-step-fix"' in index
     for label in (
         "Overview",
         "Runs",
@@ -1003,6 +1005,27 @@ def test_universe_builder_http_flow_keeps_paper_and_live_separate(
         )["enabled"]
         is False
     )
+
+
+def test_universe_builder_default_risk_is_valid_for_html_number_input(
+    tmp_path: Path,
+) -> None:
+    service = _seed_authoritative_state(tmp_path)
+    runs_path, broker_path = _write_control_files(tmp_path)
+    client = TestClient(create_dashboard_app(service, RunControlService(runs_path, broker_path)))
+
+    script = client.get("/static/dashboard.js").text
+    match = re.search(
+        r'name="risk_per_trade"[^>]*min="([^"]+)"[^>]*max="([^"]+)"'
+        r'[^>]*step="([^"]+)"[^>]*value="([^"]+)"',
+        script,
+    )
+    assert match is not None
+    minimum, maximum, step, default = match.groups()
+    default_value = Decimal(default)
+    assert Decimal(minimum) <= default_value <= Decimal(maximum)
+    if step != "any":
+        assert (default_value - Decimal(minimum)) % Decimal(step) == 0
 
 
 def test_candidate_pagination_is_bounded_and_dashboard_has_no_trading_calculators(

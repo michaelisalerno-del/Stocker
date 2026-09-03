@@ -1598,6 +1598,9 @@ class StockerRuntime:
                 if market.market_id in failed_markets and market.market_id not in qualified_markets
                 else "AVAILABLE"
                 if market.scanner_location in capabilities.locations
+                and capabilities.supports_instrument(
+                    market.scanner_location, market.scanner_instrument
+                )
                 and len(
                     {component.value for component in ActivityScanner}
                     & set(capabilities.scan_codes_for(market.scanner_location))

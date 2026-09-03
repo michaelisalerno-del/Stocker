@@ -40,6 +40,20 @@ def test_supported_market_catalogue_has_stable_v1_identity_and_metadata() -> Non
     assert lse.scanner_instrument == "STOCK.EU"
     assert lse.security_type == "STK"
 
+    expected_scanner_identities = {
+        MarketId.CANADA_TSX: ("STK.NA.CANADA", "STOCK.NA"),
+        MarketId.GERMANY_XETRA: ("STK.EU.IBIS", "STOCK.EU"),
+        MarketId.FRANCE_PARIS: ("STK.EU.SBF", "STOCK.EU"),
+        MarketId.NETHERLANDS_AMSTERDAM: ("STK.EU.AEB", "STOCK.EU"),
+        MarketId.SWITZERLAND_SIX: ("STK.EU.EBS", "STOCK.EU"),
+        MarketId.HONG_KONG_HKEX: ("STK.HK.SEHK", "STOCK.HK"),
+        MarketId.JAPAN_TSE: ("STK.HK.TSE_JPN", "STOCK.HK"),
+        MarketId.SOUTH_KOREA_KRX: ("STK.HK.KRX", "STOCK.HK"),
+    }
+    for market_id, expected in expected_scanner_identities.items():
+        market = next(item for item in MARKET_CATALOGUE if item.market_id is market_id)
+        assert (market.scanner_location, market.scanner_instrument) == expected
+
 
 def test_cap_buckets_v1_use_the_frozen_usd_equivalent_boundaries() -> None:
     assert CAP_BUCKETS_V1.version == "CAP_BUCKETS_V1"

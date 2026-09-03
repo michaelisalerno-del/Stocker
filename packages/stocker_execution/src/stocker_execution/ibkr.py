@@ -1152,6 +1152,7 @@ class IbkrConnection:
         }
         location_scan_codes: dict[str, set[str]] = {}
         location_filters: dict[str, set[str]] = {}
+        location_instruments: dict[str, set[str]] = {}
         for element in root.iter():
             text = (element.text or "").strip()
             tag = element.tag.rsplit("}", maxsplit=1)[-1]
@@ -1183,10 +1184,21 @@ class IbkrConnection:
                     if child.tag.rsplit("}", maxsplit=1)[-1] in {"code", "fieldCode", "filterCode"}
                     and (child.text or "").strip()
                 }
+                local_instruments = {
+                    value.strip()
+                    for child in element
+                    if child.tag.rsplit("}", maxsplit=1)[-1] == "instruments"
+                    for value in (child.text or "").replace(";", ",").split(",")
+                    if value.strip()
+                }
                 if local_codes:
                     location_scan_codes.setdefault(direct_location, set()).update(local_codes)
                 if local_filters:
                     location_filters.setdefault(direct_location, set()).update(local_filters)
+                if local_instruments:
+                    location_instruments.setdefault(direct_location, set()).update(
+                        local_instruments
+                    )
         discovered = ScannerCapabilities(
             locations=frozenset(values["locations"]),
             scan_codes=frozenset(values["scan_codes"]),
@@ -1196,6 +1208,10 @@ class IbkrConnection:
             },
             location_filters={
                 location: frozenset(filters) for location, filters in location_filters.items()
+            },
+            location_instruments={
+                location: frozenset(instruments)
+                for location, instruments in location_instruments.items()
             },
         )
         self._scanner_capabilities = discovered
@@ -1216,6 +1232,10 @@ class IbkrConnection:
             raise ValueError("IBKR market scanners support between 1 and 50 results")
         capabilities = await self.scanner_capabilities()
         if market.scanner_location not in capabilities.locations:
+            raise IbkrError("SCANNER_NOT_AVAILABLE")
+        if not capabilities.supports_instrument(
+            market.scanner_location, market.scanner_instrument
+        ):
             raise IbkrError("SCANNER_NOT_AVAILABLE")
         if component.value not in capabilities.scan_codes_for(market.scanner_location):
             raise IbkrError("SCANNER_NOT_AVAILABLE")

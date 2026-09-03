@@ -192,7 +192,8 @@ MARKET_CATALOGUE = (
         "XTSE",
         "America/Toronto",
         (_segment("09:30", "16:00"),),
-        "STK.CA.TSE",
+        "STK.NA.CANADA",
+        scanner_instrument="STOCK.NA",
     ),
     MarketDefinition(
         MarketId.UK_LSE,
@@ -218,6 +219,7 @@ MARKET_CATALOGUE = (
         "Europe/Berlin",
         (_segment("09:00", "17:30"),),
         "STK.EU.IBIS",
+        scanner_instrument="STOCK.EU",
     ),
     MarketDefinition(
         MarketId.FRANCE_PARIS,
@@ -230,6 +232,7 @@ MARKET_CATALOGUE = (
         "Europe/Paris",
         (_segment("09:00", "17:30"),),
         "STK.EU.SBF",
+        scanner_instrument="STOCK.EU",
     ),
     MarketDefinition(
         MarketId.NETHERLANDS_AMSTERDAM,
@@ -242,6 +245,7 @@ MARKET_CATALOGUE = (
         "Europe/Amsterdam",
         (_segment("09:00", "17:30"),),
         "STK.EU.AEB",
+        scanner_instrument="STOCK.EU",
     ),
     MarketDefinition(
         MarketId.SWITZERLAND_SIX,
@@ -253,7 +257,8 @@ MARKET_CATALOGUE = (
         "XSWX",
         "Europe/Zurich",
         (_segment("09:00", "17:30"),),
-        "STK.EU.SWX",
+        "STK.EU.EBS",
+        scanner_instrument="STOCK.EU",
     ),
     MarketDefinition(
         MarketId.AUSTRALIA_ASX,
@@ -279,6 +284,7 @@ MARKET_CATALOGUE = (
         "Asia/Hong_Kong",
         (_segment("09:30", "12:00"), _segment("13:00", "16:00")),
         "STK.HK.SEHK",
+        scanner_instrument="STOCK.HK",
     ),
     MarketDefinition(
         MarketId.JAPAN_TSE,
@@ -290,7 +296,8 @@ MARKET_CATALOGUE = (
         "XTKS",
         "Asia/Tokyo",
         (_segment("09:00", "11:30"), _segment("12:30", "15:30")),
-        "STK.JP.TSE",
+        "STK.HK.TSE_JPN",
+        scanner_instrument="STOCK.HK",
     ),
     MarketDefinition(
         MarketId.SOUTH_KOREA_KRX,
@@ -302,7 +309,8 @@ MARKET_CATALOGUE = (
         "XKRX",
         "Asia/Seoul",
         (_segment("09:00", "15:30"),),
-        "STK.KR.KSE",
+        "STK.HK.KRX",
+        scanner_instrument="STOCK.HK",
     ),
     MarketDefinition(
         MarketId.SOUTH_AFRICA_JSE,

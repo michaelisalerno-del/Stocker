@@ -86,6 +86,7 @@ class ScannerCapabilities:
     filters: frozenset[str]
     location_scan_codes: Mapping[str, frozenset[str]] | None = None
     location_filters: Mapping[str, frozenset[str]] | None = None
+    location_instruments: Mapping[str, frozenset[str]] | None = None
 
     def scan_codes_for(self, location: str) -> frozenset[str]:
         if self.location_scan_codes and location in self.location_scan_codes:
@@ -96,6 +97,11 @@ class ScannerCapabilities:
         if self.location_filters and location in self.location_filters:
             return self.location_filters[location]
         return self.filters
+
+    def supports_instrument(self, location: str, instrument: str) -> bool:
+        if not self.location_instruments or location not in self.location_instruments:
+            return True
+        return instrument in self.location_instruments[location]
 
 
 class ActivityScannerBoundary(Protocol):

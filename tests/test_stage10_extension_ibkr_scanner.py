@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
+
+import pytest
 
 from stocker_core.config import IbkrConfig
 from stocker_core.markets import ActivityScanner, CapBucket, MarketId, get_market
 from stocker_core.runs import Environment
-from stocker_execution.ibkr import IbkrConnection
+from stocker_execution.ibkr import IbkrConnection, IbkrError
 
 
 class ScannerClient:
@@ -133,6 +136,7 @@ def test_scanner_capabilities_retain_location_specific_components() -> None:
             <ScanParameterResponse>
               <Location>
                 <locationCode>STK.US.MAJOR</locationCode>
+                <instruments>STK</instruments>
                 <ScanType><scanCode>TOP_TRADE_RATE</scanCode></ScanType>
                 <ScanType><scanCode>TOP_VOLUME_RATE</scanCode></ScanType>
                 <RangeFilter><code>marketCapAbove</code></RangeFilter>
@@ -140,6 +144,7 @@ def test_scanner_capabilities_retain_location_specific_components() -> None:
               </Location>
               <Location>
                 <locationCode>STK.EU</locationCode>
+                <instruments>STOCK.EU</instruments>
                 <ScanType><scanCode>HOT_BY_VOLUME</scanCode></ScanType>
               </Location>
             </ScanParameterResponse>
@@ -153,6 +158,9 @@ def test_scanner_capabilities_retain_location_specific_components() -> None:
     assert capabilities.filters_for("STK.US.MAJOR") == frozenset(
         {"marketCapAbove", "marketCapBelow"}
     )
+    assert capabilities.supports_instrument("STK.US.MAJOR", "STK")
+    assert capabilities.supports_instrument("STK.EU", "STOCK.EU")
+    assert not capabilities.supports_instrument("STK.EU", "STK")
 
 
 def test_activity_scan_sends_exact_market_cap_component_and_bound() -> None:
@@ -200,3 +208,23 @@ def test_asx_activity_scan_uses_live_ibkr_scanner_identity_and_cap_filter_names(
         ("marketCapBelow1e6", "10000"),
     ]
     assert rows[0].symbol == "BHP"
+
+
+def test_activity_scan_rejects_an_instrument_not_advertised_for_the_location() -> None:
+    client = CurrentAsxScannerClient()
+    broker = connection(client)
+    incorrect_market = replace(
+        get_market(MarketId.AUSTRALIA_ASX), scanner_instrument="STK"
+    )
+
+    with pytest.raises(IbkrError, match="SCANNER_NOT_AVAILABLE"):
+        asyncio.run(
+            broker.activity_scan(
+                market=incorrect_market,
+                cap_bucket=CapBucket.MID,
+                component=ActivityScanner.TOP_TRADE_RATE,
+                max_results=50,
+            )
+        )
+
+    assert client.scanner_requests == []

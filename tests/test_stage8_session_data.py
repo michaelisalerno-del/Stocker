@@ -1,12 +1,21 @@
+import asyncio
 from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
 
 from stocker_core.runs import Environment, RunConfig, RunWindow
-from stocker_execution.ibkr import HistoricalBar
+from stocker_execution.history import IbkrHistoryCache
+from stocker_execution.ibkr import HistoricalBar, IbkrConnection, QualifiedInstrument
 from stocker_execution.runtime import (
     ExchangeSessionResolver,
+    IbkrSessionDataSource,
     MarketSessionState,
 )
-from stocker_execution.stage5 import calculate_session_hard_inputs
+from stocker_execution.session_hard_structure_d import StrategyOpportunityKey
+from stocker_execution.stage5 import (
+    Stage5FeatureSnapshot,
+    Stage5Status,
+    calculate_session_hard_inputs,
+)
 
 
 def _bar(index: int) -> HistoricalBar:
@@ -74,6 +83,86 @@ def test_session_hard_inputs_reject_a_gap_or_future_bar() -> None:
         assert "exact completed" in str(exc)
     else:
         raise AssertionError("mismatched bar timestamp was accepted")
+
+
+class SessionHistoryBoundary(IbkrConnection):
+    def __init__(self) -> None:
+        self.durations: list[str] = []
+
+    async def historical_bars(
+        self,
+        requested: QualifiedInstrument,
+        *,
+        bar_size: str,
+        duration: str,
+        what_to_show: str,
+        regular_trading_hours: bool,
+        end_time: date | datetime | None = None,
+        minimum_bars: int = 1,
+    ) -> tuple[HistoricalBar, ...]:
+        del requested, end_time, minimum_bars
+        assert bar_size == "5 mins"
+        assert what_to_show == "TRADES"
+        assert regular_trading_hours is True
+        self.durations.append(duration)
+        seconds = int(duration.removesuffix(" S"))
+        covered_bars = max(1, (seconds + 299) // 300)
+        return tuple(_bar(index) for index in range(6))[-covered_bars:]
+
+
+def test_session_hard_context_requests_full_checkpoint_history_prefix(tmp_path: Path) -> None:
+    boundary = SessionHistoryBoundary()
+    source = IbkrSessionDataSource(
+        boundary,
+        IbkrHistoryCache(tmp_path / "history.sqlite3"),
+    )
+    run = RunConfig(
+        run_id="us-hard-hv",
+        universe="US_ALL_MID_CAP_BUCKETS_V1",
+        strategy="SESSION_HARD_HV",
+        environment=Environment.PAPER,
+        session=RunWindow(
+            start=time(9, 30),
+            end=time(16),
+            timezone="America/New_York",
+            calendar="XNYS",
+        ),
+    )
+    instrument = QualifiedInstrument("TEST", 123, "SMART", "NASDAQ", "USD", "STK")
+    t0 = datetime(2026, 9, 2, 14, 0, tzinfo=UTC)
+    row = Stage5FeatureSnapshot(
+        run_ids=(run.run_id,),
+        universe_id=run.universe,
+        con_id=instrument.con_id,
+        symbol=instrument.symbol,
+        session=t0.date(),
+        t0=t0,
+        status=Stage5Status.READY,
+        exclusion_reason="",
+        p0=100.0,
+        expected_absolute_return_15m=0.01,
+        m_price=1.0,
+        raw_open_t0_minus_3m=99.0,
+        raw_open_t0=100.0,
+        alignment_factor=1.0,
+        aligned_pre_open=99.0,
+        raw_pre_move_price=1.0,
+        pre_move_m=1.0,
+        calculation_version="STAGE5_PRE_MOVE_HV_V1",
+    )
+
+    context = asyncio.run(
+        source.context_for(
+            run,
+            (row,),
+            6,
+            {instrument.con_id: instrument},
+            (),
+        )
+    )
+
+    assert boundary.durations == ["2100 S"]
+    assert StrategyOpportunityKey(instrument.con_id, row.session, t0) in context.session_hard
 
 
 def test_exchange_session_resolver_uses_run_timezone_and_closed_day() -> None:

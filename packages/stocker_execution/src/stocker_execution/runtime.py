@@ -2568,7 +2568,7 @@ class IbkrSessionDataSource:
                     await self._history.fetch_and_store(
                         instrument,
                         bar_size="5 mins",
-                        duration=f"{checkpoint * 5 + 300} S",
+                        duration=f"{checkpoint * 5 * 60 + 300} S",
                         what_to_show="TRADES",
                         regular_trading_hours=True,
                         end_time=t0,

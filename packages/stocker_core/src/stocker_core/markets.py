@@ -205,6 +205,7 @@ MARKET_CATALOGUE = (
         "Europe/London",
         (_segment("08:00", "16:30"),),
         "STK.EU.LSE",
+        scanner_instrument="STOCK.EU",
     ),
     MarketDefinition(
         MarketId.GERMANY_XETRA,

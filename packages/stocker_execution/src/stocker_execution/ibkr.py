@@ -1222,8 +1222,12 @@ class IbkrConnection:
         cap = CAP_BUCKETS_V1.definition(cap_bucket)
         if cap_bucket is not CapBucket.ALL:
             filters = capabilities.filters_for(market.scanner_location)
-            above_available = bool({"marketCapAbove", "usdMarketCapAbove"} & filters)
-            below_available = bool({"marketCapBelow", "usdMarketCapBelow"} & filters)
+            above_available = bool(
+                {"marketCapAbove", "usdMarketCapAbove", "marketCapAbove1e6"} & filters
+            )
+            below_available = bool(
+                {"marketCapBelow", "usdMarketCapBelow", "marketCapBelow1e6"} & filters
+            )
             if not above_available or (
                 cap.maximum_usd_exclusive is not None and not below_available
             ):
@@ -1233,7 +1237,7 @@ class IbkrConnection:
 
         subscription = ScannerSubscription(
             numberOfRows=max_results,
-            instrument=market.security_type,
+            instrument=market.scanner_instrument,
             locationCode=market.scanner_location,
             scanCode=component.value,
         )
@@ -1244,12 +1248,20 @@ class IbkrConnection:
                 filter_options.append(
                     TagValue("usdMarketCapAbove", str(cap.scanner_minimum_millions))
                 )
+            elif "marketCapAbove1e6" in filters:
+                filter_options.append(
+                    TagValue("marketCapAbove1e6", f"{cap.scanner_minimum_millions:g}")
+                )
             else:
                 subscription.marketCapAbove = cap.scanner_minimum_millions
         if cap.scanner_maximum_millions is not None:
             if "usdMarketCapBelow" in filters:
                 filter_options.append(
                     TagValue("usdMarketCapBelow", str(cap.scanner_maximum_millions))
+                )
+            elif "marketCapBelow1e6" in filters:
+                filter_options.append(
+                    TagValue("marketCapBelow1e6", f"{cap.scanner_maximum_millions:g}")
                 )
             else:
                 subscription.marketCapBelow = cap.scanner_maximum_millions

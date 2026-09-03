@@ -318,3 +318,30 @@ def test_non_all_cap_requires_broker_cap_filters(tmp_path: Path) -> None:
     )
     assert result.status is ActivityShortlistStatus.CAP_FILTER_UNAVAILABLE
     assert result.reason == "CAP_FILTER_UNAVAILABLE"
+
+
+def test_current_ibkr_million_cap_filter_names_are_supported(tmp_path: Path) -> None:
+    class CurrentCapFilters(FakeScanner):
+        async def scanner_capabilities(self) -> ScannerCapabilities:
+            market = get_market(MarketId.US_NASDAQ)
+            return ScannerCapabilities(
+                locations=frozenset({market.scanner_location}),
+                scan_codes=frozenset(item.value for item in ActivityScanner),
+                filters=frozenset({"marketCapAbove1e6", "marketCapBelow1e6"}),
+            )
+
+    screen_at = datetime(2026, 9, 2, 13, 45, tzinfo=UTC)
+    result = asyncio.run(
+        ActivityShortlistService(
+            ActivityShortlistStore(tmp_path / "screens.sqlite3")
+        ).get_or_create(
+            CurrentCapFilters(tuple(ActivityScanner)),
+            market=get_market(MarketId.US_NASDAQ),
+            cap_bucket=CapBucket.MID,
+            session=date(2026, 9, 2),
+            screen_at=screen_at,
+            now=screen_at,
+        )
+    )
+
+    assert result.status is ActivityShortlistStatus.READY

@@ -30,6 +30,11 @@ def test_supported_market_catalogue_has_stable_v1_identity_and_metadata() -> Non
     assert nasdaq.scanner_location == "STK.US.MAJOR"
     assert nasdaq.listing_membership == "NASDAQ"
 
+    asx = next(item for item in MARKET_CATALOGUE if item.market_id is MarketId.AUSTRALIA_ASX)
+    assert asx.scanner_location == "STK.HK.ASX"
+    assert asx.scanner_instrument == "STOCK.HK"
+    assert asx.security_type == "STK"
+
 
 def test_cap_buckets_v1_use_the_frozen_usd_equivalent_boundaries() -> None:
     assert CAP_BUCKETS_V1.version == "CAP_BUCKETS_V1"

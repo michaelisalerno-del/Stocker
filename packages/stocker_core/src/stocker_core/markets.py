@@ -124,6 +124,7 @@ class MarketDefinition:
     timezone: str
     regular_sessions: tuple[RegularSessionSegment, ...]
     scanner_location: str
+    scanner_instrument: str = "STK"
     security_type: str = "STK"
     listing_membership: str | None = None
     experimental: bool = False
@@ -263,7 +264,8 @@ MARKET_CATALOGUE = (
         "XASX",
         "Australia/Sydney",
         (_segment("10:00", "16:00"),),
-        "STK.AU.ASX",
+        "STK.HK.ASX",
+        scanner_instrument="STOCK.HK",
     ),
     MarketDefinition(
         MarketId.HONG_KONG_HKEX,

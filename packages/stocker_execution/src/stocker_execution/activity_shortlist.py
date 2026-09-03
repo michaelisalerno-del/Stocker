@@ -643,8 +643,12 @@ class ActivityShortlistService:
 
 
 def _supports_cap_bucket(filters: frozenset[str], bucket: CapBucket) -> bool:
-    above = bool({"marketCapAbove", "usdMarketCapAbove"} & filters)
-    below = bool({"marketCapBelow", "usdMarketCapBelow"} & filters)
+    above = bool(
+        {"marketCapAbove", "usdMarketCapAbove", "marketCapAbove1e6"} & filters
+    )
+    below = bool(
+        {"marketCapBelow", "usdMarketCapBelow", "marketCapBelow1e6"} & filters
+    )
     if bucket is CapBucket.MEGA:
         return above
     return above and below

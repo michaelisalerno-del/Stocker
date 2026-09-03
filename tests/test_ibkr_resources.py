@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -597,7 +597,9 @@ def test_daily_resource_counters_roll_over() -> None:
     client.errorEvent.emit(7, 100, "pacing violation", None)
     assert connection.resource_status().pacing_violations_today == 1
 
-    connection._reset_daily_resource_counters(date(2026, 9, 3))
+    connection._reset_daily_resource_counters(
+        connection._resource_counter_date + timedelta(days=1)
+    )
 
     assert connection._pacing_violations_today == 0
     assert connection._market_data_requests_today == 0

@@ -55,6 +55,47 @@ class ScannerClient:
         ]
 
 
+class CurrentAsxScannerClient(ScannerClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.filter_options: list[object] = []
+
+    async def reqScannerParametersAsync(self) -> str:
+        self.parameter_requests += 1
+        return """
+        <ScanParameterResponse>
+          <Location>
+            <locationCode>STK.HK.ASX</locationCode>
+            <instruments>STOCK.HK</instruments>
+          </Location>
+          <ScanType><scanCode>TOP_TRADE_RATE</scanCode></ScanType>
+          <ScanType><scanCode>TOP_VOLUME_RATE</scanCode></ScanType>
+          <ScanType><scanCode>HOT_BY_VOLUME</scanCode></ScanType>
+          <RangeFilter><code>marketCapAbove1e6</code></RangeFilter>
+          <RangeFilter><code>marketCapBelow1e6</code></RangeFilter>
+        </ScanParameterResponse>
+        """
+
+    async def reqScannerDataAsync(
+        self,
+        subscription: object,
+        scanner_subscription_options: list[object] | None = None,
+        scanner_subscription_filter_options: list[object] | None = None,
+    ) -> list[object]:
+        assert scanner_subscription_options == []
+        self.scanner_requests.append(subscription)
+        self.filter_options = list(scanner_subscription_filter_options or [])
+        contract = SimpleNamespace(
+            symbol="BHP",
+            conId=4036813,
+            exchange="SMART",
+            primaryExchange="ASX",
+            currency="AUD",
+            secType="STK",
+        )
+        return [SimpleNamespace(rank=0, contractDetails=SimpleNamespace(contract=contract))]
+
+
 def connection(client: ScannerClient) -> IbkrConnection:
     broker = IbkrConnection(
         IbkrConfig(
@@ -136,3 +177,26 @@ def test_activity_scan_sends_exact_market_cap_component_and_bound() -> None:
     assert rows[0].symbol == "MSFT"
     assert rows[0].con_id == 272093
     assert rows[0].rank == 1
+
+
+def test_asx_activity_scan_uses_live_ibkr_scanner_identity_and_cap_filter_names() -> None:
+    client = CurrentAsxScannerClient()
+    broker = connection(client)
+
+    rows = asyncio.run(
+        broker.activity_scan(
+            market=get_market(MarketId.AUSTRALIA_ASX),
+            cap_bucket=CapBucket.MID,
+            component=ActivityScanner.TOP_TRADE_RATE,
+            max_results=50,
+        )
+    )
+
+    subscription = client.scanner_requests[0]
+    assert subscription.instrument == "STOCK.HK"  # type: ignore[attr-defined]
+    assert subscription.locationCode == "STK.HK.ASX"  # type: ignore[attr-defined]
+    assert [(item.tag, item.value) for item in client.filter_options] == [  # type: ignore[attr-defined]
+        ("marketCapAbove1e6", "2000"),
+        ("marketCapBelow1e6", "10000"),
+    ]
+    assert rows[0].symbol == "BHP"

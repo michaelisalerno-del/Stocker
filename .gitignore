@@ -17,6 +17,9 @@ htmlcov/
 
 .ipynb_checkpoints/
 data_smoke/
+
+# Broker-supplied raw bars stay local; commit measured and derived research artifacts only.
+research/realized_m_20_ibkr_fast_v0/artifacts/raw/*_ibkr_1m.csv
 universes/generated/*
 !universes/generated/.gitkeep
 data/universes/

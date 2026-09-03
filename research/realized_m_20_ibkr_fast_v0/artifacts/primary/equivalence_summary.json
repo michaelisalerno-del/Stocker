@@ -1,0 +1,20 @@
+{
+  "both_qualify": 13,
+  "both_reject": 8,
+  "classification_agreement_pct": 100.0,
+  "existing_only_qualify": 0,
+  "existing_recalculation_max_ledger_price_difference": 4.440892098500626e-15,
+  "ibkr_only_qualify": 0,
+  "jaccard_overlap": 1.0,
+  "median_absolute_percentage_difference": 0.6580571684600336,
+  "median_ratio_ibkr_existing": 0.999001503637859,
+  "n_comparisons": 21,
+  "pearson": 0.9899114971129662,
+  "pre_move_median_absolute_difference": 0.003915347396824753,
+  "pre_move_pearson": 0.9973646443249016,
+  "pre_move_spearman": 0.996103896103896,
+  "spearman": 0.9857142857142858,
+  "within_10_pct": 90.47619047619048,
+  "within_20_pct": 95.23809523809523,
+  "within_5_pct": 90.47619047619048
+}

@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from stocker_core.cli import stage10_run
 from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig, RunWindow
-from stocker_core.strategies import SESSION_HARD_METHOD
+from stocker_core.strategies import SESSION_HARD_HV_METHOD, SESSION_HARD_METHOD
 from stocker_core.universes import InstrumentReference, UniverseDefinition
 from stocker_dashboard.app import create_dashboard_app
 from stocker_dashboard.controls import LiveConfirmation, RunControlService
@@ -671,9 +671,7 @@ IBM,NYSE
     reloaded = load_runs_config(runs_path)
     nasdaq = next(item for item in reloaded.universes if item.universe_id == "NASDAQ")
     derived = next(
-        item
-        for item in reloaded.universes
-        if item.universe_id == "US_NASDAQ_MID_CAP_BUCKETS_V1"
+        item for item in reloaded.universes if item.universe_id == "US_NASDAQ_MID_CAP_BUCKETS_V1"
     )
     assert derived.members == nasdaq.members
 
@@ -716,6 +714,43 @@ def test_run_controls_validate_through_backend_and_require_live_confirmation(
     assert changed.run.environment is Environment.LIVE
     assert changed.run.strategy == "SESSION_HARD"
     assert loaded.runs[1].risk == RunRiskConfig(risk_per_trade=0.003, max_concurrent_positions=4)
+
+
+def test_run_controls_update_session_hard_hv_risk_without_changing_lineage(
+    tmp_path: Path,
+) -> None:
+    runs_path, broker_path = _write_control_files(tmp_path)
+    controls = RunControlService(runs_path, broker_path)
+    created = asyncio.run(
+        controls.add_universe_run(
+            market_id="US_NASDAQ",
+            cap_bucket="MID",
+            strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+            strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
+            environment=Environment.PAPER,
+            risk_per_trade=0.001,
+            max_concurrent_positions=1,
+        )
+    )
+    assert created.run is not None
+
+    updated = asyncio.run(
+        controls.update_run_config(
+            created.run.run_id,
+            risk_per_trade=0.002,
+            max_concurrent_positions=3,
+            universe=created.run.universe,
+            strategy=SESSION_HARD_HV_METHOD.config_name,
+        )
+    )
+
+    assert updated.run is not None
+    assert updated.run.strategy_id == SESSION_HARD_HV_METHOD.strategy_id
+    assert updated.run.strategy_version == SESSION_HARD_HV_METHOD.strategy_version
+    assert updated.run.risk == RunRiskConfig(
+        risk_per_trade=0.002,
+        max_concurrent_positions=3,
+    )
 
 
 def test_invalid_live_account_and_invalid_config_are_rejected(tmp_path: Path) -> None:
@@ -1185,6 +1220,20 @@ def test_candidate_pagination_is_bounded_and_dashboard_has_no_trading_calculator
         "submit_protected_order",
     )
     assert not any(name in source for name in forbidden)
+
+
+def test_universes_builder_disables_strategies_outside_declared_environments(
+    tmp_path: Path,
+) -> None:
+    service = _seed_authoritative_state(tmp_path)
+    runs_path, broker_path = _write_control_files(tmp_path)
+    client = TestClient(create_dashboard_app(service, RunControlService(runs_path, broker_path)))
+
+    script = client.get("/static/dashboard.js").text
+
+    assert "data-environments" in script
+    assert 'includes("LIVE")' in script
+    assert "is PAPER-only" in script
 
 
 def test_candidates_page_only_offers_enabled_runs(tmp_path: Path) -> None:

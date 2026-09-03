@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from stocker_core.config import RunsConfig
 from stocker_core.markets import get_market
 from stocker_core.runs import Environment, RunConfig
+from stocker_core.strategies import installed_strategies
 from stocker_core.universes import UniverseDefinition
 from stocker_dashboard.performance import PerformancePeriod, RunPerformanceService
 from stocker_execution.activity_shortlist import ActivityShortlistStore
@@ -420,7 +421,7 @@ class DashboardReadService:
                 signal.underlying_con_id or 0,
                 session=signal.session,
             )
-            if self.pre_context_store is not None
+            if self.pre_context_store is not None and signal.strategy_version == STRATEGY_VERSION
             else None
         )
         return {
@@ -437,6 +438,18 @@ class DashboardReadService:
             "call_model_iv": context.call_model_iv if context else None,
             "put_model_iv": context.put_model_iv if context else None,
             "atm_iv": context.atm_iv if context else None,
+            "expected_move_source": snapshot.expected_move_source if snapshot else None,
+            "expected_move_observation_at": (
+                snapshot.expected_move_observation_at.isoformat()
+                if snapshot and snapshot.expected_move_observation_at
+                else None
+            ),
+            "expected_move_calculation_version": (
+                snapshot.expected_move_calculation_version if snapshot else None
+            ),
+            "raw_historical_volatility": (snapshot.raw_historical_volatility if snapshot else None),
+            "historical_volatility": snapshot.historical_volatility if snapshot else None,
+            "market_regular_minutes": snapshot.market_regular_minutes if snapshot else None,
             "expected_absolute_return_15m": (
                 snapshot.expected_absolute_return_15m if snapshot else None
             ),
@@ -761,12 +774,14 @@ class DashboardReadService:
             "runs": [item.model_dump(mode="json") for item in self.config.runs],
             "strategies": [
                 {
-                    "strategy": "SESSION_HARD",
-                    "identity": "SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
-                    "version": STRATEGY_VERSION,
+                    "strategy": item.config_name,
+                    "identity": item.strategy_id,
+                    "version": item.strategy_version,
+                    "environments": list(item.environments),
                     "editable_parameters": [],
-                    "description": "Frozen Session HARD / Structure D strategy definition",
+                    "description": f"Frozen {item.label} / Structure D strategy definition",
                 }
+                for item in installed_strategies()
             ],
         }
 

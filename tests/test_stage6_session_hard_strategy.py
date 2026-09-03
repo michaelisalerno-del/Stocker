@@ -6,6 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from stocker_core.strategies import (
+    SESSION_HARD_HV_METHOD,
+    SESSION_HARD_METHOD,
+    StrategyDefinition,
+)
 from stocker_execution.session_hard_structure_d import (
     SESSION_HARD_THRESHOLD,
     CohortOpportunity,
@@ -28,6 +33,7 @@ from stocker_execution.stage6_diagnostic import (
 from stocker_execution.stage6_diagnostic import (
     main as diagnostic_main,
 )
+from stocker_execution.strategy_factory import create_strategy
 
 
 def ready_snapshot(*, pre_move_m: float, con_id: int = 101) -> Stage5FeatureSnapshot:
@@ -173,7 +179,30 @@ def test_exact_pre_move_threshold_is_not_qualified() -> None:
     assert snapshot.pre_move_m == 0.475764059845861
 
 
-def test_known_mid_band_is_vetoed_from_strategy_entry() -> None:
+@pytest.mark.parametrize("method", (SESSION_HARD_METHOD, SESSION_HARD_HV_METHOD))
+def test_installed_session_hard_variants_share_frozen_mechanics_and_keep_identity(
+    method: StrategyDefinition,
+) -> None:
+    snapshot = ready_snapshot(pre_move_m=0.475764059845861)
+    strategy = create_strategy(method.strategy_id, method.strategy_version)
+
+    signal = strategy.evaluate(
+        (snapshot,), strategy_context((snapshot,), {101: SESSION_HARD_THRESHOLD})
+    )[0]
+
+    assert signal.strategy_id == method.strategy_id
+    assert signal.strategy_version == method.strategy_version
+    assert signal.reason == "PRE_MOVE_THRESHOLD"
+    assert signal.stop_distance_m == 0.50
+    assert signal.target_distance_m == 1.00
+
+    restored = create_strategy(method.strategy_id, method.strategy_version)
+    restored.restore_signals((signal,))
+    assert restored.signals == (signal,)
+
+
+@pytest.mark.parametrize("method", (SESSION_HARD_METHOD, SESSION_HARD_HV_METHOD))
+def test_known_mid_band_is_vetoed_from_strategy_entry(method: StrategyDefinition) -> None:
     start = date(2025, 1, 1)
     history = tuple(
         CohortOpportunity(
@@ -185,7 +214,7 @@ def test_known_mid_band_is_vetoed_from_strategy_entry() -> None:
     )
     snapshot = ready_snapshot(pre_move_m=1.0)
 
-    signal = SessionHardStructureDStrategy().evaluate(
+    signal = create_strategy(method.strategy_id, method.strategy_version).evaluate(
         (snapshot,),
         strategy_context(
             (snapshot,),
@@ -200,7 +229,10 @@ def test_known_mid_band_is_vetoed_from_strategy_entry() -> None:
     assert signal.reason == "COHORT_MID_VETO"
 
 
-def test_frozen_glw_down_first_touch_emits_short_intention_at_level() -> None:
+@pytest.mark.parametrize("method", (SESSION_HARD_METHOD, SESSION_HARD_HV_METHOD))
+def test_frozen_glw_down_first_touch_emits_short_intention_at_level(
+    method: StrategyDefinition,
+) -> None:
     p0 = 52.150001
     m_price = 0.275429305778967
     snapshot = replace(
@@ -213,7 +245,7 @@ def test_frozen_glw_down_first_touch_emits_short_intention_at_level() -> None:
         CohortOpportunity("RUN_A", date(2025, 1, 1) + timedelta(days=index % 20), 0.6)
         for index in range(30)
     )
-    strategy = SessionHardStructureDStrategy()
+    strategy = create_strategy(method.strategy_id, method.strategy_version)
     waiting = strategy.evaluate(
         (snapshot,),
         strategy_context(
@@ -248,8 +280,11 @@ def test_frozen_glw_down_first_touch_emits_short_intention_at_level() -> None:
     assert triggered.target_distance_m == 1.00
 
 
-def test_simultaneous_candidates_rank_by_session_hard_score_and_cap_at_five() -> None:
-    strategy = SessionHardStructureDStrategy()
+@pytest.mark.parametrize("method", (SESSION_HARD_METHOD, SESSION_HARD_HV_METHOD))
+def test_simultaneous_candidates_rank_by_session_hard_score_and_cap_at_five(
+    method: StrategyDefinition,
+) -> None:
+    strategy = create_strategy(method.strategy_id, method.strategy_version)
     snapshots = tuple(
         replace(
             ready_snapshot(pre_move_m=0.8 + index / 100, con_id=300 + index),

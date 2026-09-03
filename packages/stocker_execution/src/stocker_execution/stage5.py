@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from collections.abc import Callable, Mapping, Sequence
@@ -10,14 +11,16 @@ from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from math import isfinite, log1p
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TypedDict
 
+from stocker_core.markets import market_for_instrument
 from stocker_core.runs import CandidateScreen, RunInstance, RunState
 from stocker_core.universes import InstrumentReference
 from stocker_execution.activity_shortlist import (
     ActivityShortlistSnapshot,
     ActivityShortlistStatus,
 )
+from stocker_execution.expected_move import ExpectedMoveService, ExpectedMoveStatus
 from stocker_execution.history import (
     HistorySemantics,
     HistorySnapshot,
@@ -26,9 +29,9 @@ from stocker_execution.history import (
     IbkrHistoryService,
 )
 from stocker_execution.ibkr import HistoricalBar, IbkrConnection, IbkrError, QualifiedInstrument
-from stocker_execution.pre_context import ContextStatus, PriorSessionContextResult
 
 STAGE5_CALCULATION_VERSION = "STAGE5_PRE_MOVE_V1"
+STAGE5_HV_CALCULATION_VERSION = "STAGE5_PRE_MOVE_HV_V1"
 STAGE5_FIVE_MINUTE_HISTORY = HistorySemantics("5 mins", "TRADES", True)
 STAGE5_ONE_MINUTE_HISTORY = HistorySemantics("1 min", "TRADES", True)
 
@@ -73,6 +76,12 @@ class Stage5FeatureResult:
     raw_pre_move_price: float | None = None
     pre_move_m: float | None = None
     calculation_version: str = STAGE5_CALCULATION_VERSION
+    expected_move_source: str | None = None
+    expected_move_observation_at: datetime | None = None
+    expected_move_calculation_version: str | None = None
+    raw_historical_volatility: float | None = None
+    historical_volatility: float | None = None
+    market_regular_minutes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +148,12 @@ class Stage5FeatureSnapshot:
     raw_pre_move_price: float | None
     pre_move_m: float | None
     calculation_version: str
+    expected_move_source: str | None = None
+    expected_move_observation_at: datetime | None = None
+    expected_move_calculation_version: str | None = None
+    raw_historical_volatility: float | None = None
+    historical_volatility: float | None = None
+    market_regular_minutes: int | None = None
 
 
 class _FeatureService(Protocol):
@@ -147,10 +162,14 @@ class _FeatureService(Protocol):
     ) -> Stage5FeatureResult: ...
 
 
-class _ContextService(Protocol):
-    async def get_or_create(
-        self, instrument: QualifiedInstrument, *, session: date
-    ) -> PriorSessionContextResult: ...
+class _Stage5Lineage(TypedDict):
+    calculation_version: str
+    expected_move_source: str | None
+    expected_move_observation_at: datetime | None
+    expected_move_calculation_version: str | None
+    raw_historical_volatility: float | None
+    historical_volatility: float | None
+    market_regular_minutes: int | None
 
 
 class Stage5CurrentDataService:
@@ -160,16 +179,51 @@ class Stage5CurrentDataService:
         self,
         ibkr: IbkrConnection,
         history_cache: IbkrHistoryCache,
-        context_service: _ContextService,
+        expected_move_service: ExpectedMoveService,
         *,
+        calculation_version: str = STAGE5_CALCULATION_VERSION,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not isinstance(ibkr, IbkrConnection):
             raise TypeError("Stage 5 current-session data requires the Stage 2 IbkrConnection")
         self._history_cache = history_cache
         self._history_service = IbkrHistoryService(ibkr, history_cache)
-        self._context_service = context_service
+        self._expected_move_service = expected_move_service
+        self._calculation_version = calculation_version
         self._clock = clock or (lambda: datetime.now(tz=UTC))
+
+    async def prepare_expected_moves(
+        self,
+        requests: Sequence[Stage5QualifiedRequest],
+        *,
+        session: date,
+        t0: datetime,
+    ) -> None:
+        """Capture source-specific observations before the causal T0 cutoff."""
+
+        await asyncio.gather(
+            *(self._prepare_expected_move(request, session=session, t0=t0) for request in requests),
+            return_exceptions=True,
+        )
+
+    async def _prepare_expected_move(
+        self,
+        request: Stage5QualifiedRequest,
+        *,
+        session: date,
+        t0: datetime,
+    ) -> None:
+        instrument = request.instrument
+        await self._expected_move_service.prepare_expected_move(
+            instrument,
+            market=market_for_instrument(
+                primary_exchange=instrument.primary_exchange,
+                exchange=instrument.exchange,
+                currency=instrument.currency,
+            ),
+            session=session,
+            t0=t0,
+        )
 
     async def get_feature(
         self, instrument: QualifiedInstrument, *, session: date, t0: datetime
@@ -184,17 +238,40 @@ class Stage5CurrentDataService:
                 t0=signal_timestamp,
                 status=Stage5Status.PRE_MOVE_NOT_READY,
                 exclusion_reason="PRE_MOVE_NOT_READY: T0 opening print is not yet causal",
+                calculation_version=self._calculation_version,
             )
 
-        context_result = await self._context_service.get_or_create(instrument, session=session)
-        if context_result.status is not ContextStatus.READY or context_result.context is None:
+        expected_move = await self._expected_move_service.get_expected_move(
+            instrument,
+            market=market_for_instrument(
+                primary_exchange=instrument.primary_exchange,
+                exchange=instrument.exchange,
+                currency=instrument.currency,
+            ),
+            session=session,
+            t0=signal_timestamp,
+        )
+        lineage: _Stage5Lineage = {
+            "calculation_version": self._calculation_version,
+            "expected_move_source": expected_move.source,
+            "expected_move_observation_at": expected_move.observation_timestamp,
+            "expected_move_calculation_version": expected_move.calculation_version,
+            "raw_historical_volatility": expected_move.raw_historical_volatility,
+            "historical_volatility": expected_move.historical_volatility,
+            "market_regular_minutes": expected_move.market_regular_minutes,
+        }
+        if (
+            expected_move.status is not ExpectedMoveStatus.READY
+            or expected_move.expected_absolute_return_15m is None
+        ):
             return Stage5FeatureResult(
                 con_id=instrument.con_id,
                 symbol=instrument.symbol,
                 session=session,
                 t0=signal_timestamp,
                 status=Stage5Status.PRE_CONTEXT_NOT_READY,
-                exclusion_reason=context_result.reason,
+                exclusion_reason=expected_move.reason,
+                **lineage,
             )
 
         five_required = (signal_timestamp,)
@@ -224,15 +301,17 @@ class Stage5CurrentDataService:
                 t0=signal_timestamp,
                 status=Stage5Status.PRE_MOVE_NOT_READY,
                 exclusion_reason=f"PRE_MOVE_NOT_READY: {exc}",
-                expected_absolute_return_15m=(context_result.context.expected_absolute_return_15m),
+                expected_absolute_return_15m=expected_move.expected_absolute_return_15m,
+                **lineage,
             )
         return calculate_stage5_feature(
             instrument=instrument,
             session=session,
             t0=signal_timestamp,
-            expected_absolute_return_15m=(context_result.context.expected_absolute_return_15m),
+            expected_absolute_return_15m=expected_move.expected_absolute_return_15m,
             five_minute_bars=five.bars,
             one_minute_bars=one.bars,
+            **lineage,
         )
 
     async def _required_history(
@@ -291,10 +370,32 @@ class Stage5SnapshotStore:
                     raw_pre_move_price REAL,
                     pre_move_m REAL,
                     calculation_version TEXT NOT NULL,
+                    expected_move_source TEXT,
+                    expected_move_observation_at_utc TEXT,
+                    expected_move_calculation_version TEXT,
+                    raw_historical_volatility REAL,
+                    historical_volatility REAL,
+                    market_regular_minutes INTEGER,
                     PRIMARY KEY (universe_id, t0_utc, con_id, calculation_version)
                 )
                 """
             )
+            existing_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(stage5_feature_snapshots)")
+            }
+            for name, data_type in (
+                ("expected_move_source", "TEXT"),
+                ("expected_move_observation_at_utc", "TEXT"),
+                ("expected_move_calculation_version", "TEXT"),
+                ("raw_historical_volatility", "REAL"),
+                ("historical_volatility", "REAL"),
+                ("market_regular_minutes", "INTEGER"),
+            ):
+                if name not in existing_columns:
+                    connection.execute(
+                        f"ALTER TABLE stage5_feature_snapshots ADD COLUMN {name} {data_type}"
+                    )
 
     def save(self, snapshot: Stage5FeatureSnapshot) -> None:
         """Persist one qualified row; a transient rerun cannot replace a READY row."""
@@ -309,8 +410,10 @@ class Stage5SnapshotStore:
                     universe_id, run_ids_json, con_id, symbol, session, t0_utc,
                     status, exclusion_reason, p0, expected_absolute_return_15m, m_price,
                     raw_open_t0_minus_3m, raw_open_t0, alignment_factor, aligned_pre_open,
-                    raw_pre_move_price, pre_move_m, calculation_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    raw_pre_move_price, pre_move_m, calculation_version, expected_move_source,
+                    expected_move_observation_at_utc, expected_move_calculation_version,
+                    raw_historical_volatility, historical_volatility, market_regular_minutes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (universe_id, t0_utc, con_id, calculation_version)
                 DO UPDATE SET
                     run_ids_json = excluded.run_ids_json,
@@ -326,7 +429,13 @@ class Stage5SnapshotStore:
                     alignment_factor = excluded.alignment_factor,
                     aligned_pre_open = excluded.aligned_pre_open,
                     raw_pre_move_price = excluded.raw_pre_move_price,
-                    pre_move_m = excluded.pre_move_m
+                    pre_move_m = excluded.pre_move_m,
+                    expected_move_source = excluded.expected_move_source,
+                    expected_move_observation_at_utc = excluded.expected_move_observation_at_utc,
+                    expected_move_calculation_version = excluded.expected_move_calculation_version,
+                    raw_historical_volatility = excluded.raw_historical_volatility,
+                    historical_volatility = excluded.historical_volatility,
+                    market_regular_minutes = excluded.market_regular_minutes
                 WHERE stage5_feature_snapshots.status != ?
                   AND excluded.status = ?
                 """,
@@ -349,6 +458,18 @@ class Stage5SnapshotStore:
                     snapshot.raw_pre_move_price,
                     snapshot.pre_move_m,
                     snapshot.calculation_version,
+                    snapshot.expected_move_source,
+                    (
+                        _aware_utc(snapshot.expected_move_observation_at).isoformat(
+                            timespec="microseconds"
+                        )
+                        if snapshot.expected_move_observation_at is not None
+                        else None
+                    ),
+                    snapshot.expected_move_calculation_version,
+                    snapshot.raw_historical_volatility,
+                    snapshot.historical_volatility,
+                    snapshot.market_regular_minutes,
                     Stage5Status.READY.value,
                     Stage5Status.READY.value,
                 ),
@@ -405,6 +526,16 @@ class Stage5SnapshotStore:
             raw_pre_move_price=_optional_float(row["raw_pre_move_price"]),
             pre_move_m=_optional_float(row["pre_move_m"]),
             calculation_version=str(row["calculation_version"]),
+            expected_move_source=_optional_str(row["expected_move_source"]),
+            expected_move_observation_at=_optional_datetime(
+                row["expected_move_observation_at_utc"]
+            ),
+            expected_move_calculation_version=_optional_str(
+                row["expected_move_calculation_version"]
+            ),
+            raw_historical_volatility=_optional_float(row["raw_historical_volatility"]),
+            historical_volatility=_optional_float(row["historical_volatility"]),
+            market_regular_minutes=_optional_int(row["market_regular_minutes"]),
         )
 
     def list_snapshots(
@@ -490,6 +621,16 @@ class Stage5SnapshotStore:
                     raw_pre_move_price=_optional_float(row["raw_pre_move_price"]),
                     pre_move_m=_optional_float(row["pre_move_m"]),
                     calculation_version=str(row["calculation_version"]),
+                    expected_move_source=_optional_str(row["expected_move_source"]),
+                    expected_move_observation_at=_optional_datetime(
+                        row["expected_move_observation_at_utc"]
+                    ),
+                    expected_move_calculation_version=_optional_str(
+                        row["expected_move_calculation_version"]
+                    ),
+                    raw_historical_volatility=_optional_float(row["raw_historical_volatility"]),
+                    historical_volatility=_optional_float(row["historical_volatility"]),
+                    market_regular_minutes=_optional_int(row["market_regular_minutes"]),
                 )
             )
         return tuple(snapshots), total
@@ -666,9 +807,22 @@ class Stage5Analyzer:
         feature_service: _FeatureService,
         *,
         snapshot_store: Stage5SnapshotStore | None = None,
+        calculation_version: str = STAGE5_CALCULATION_VERSION,
     ) -> None:
         self._feature_service = feature_service
         self._snapshot_store = snapshot_store
+        self._calculation_version = calculation_version
+
+    async def prepare_expected_moves(
+        self,
+        requests: Sequence[Stage5QualifiedRequest],
+        *,
+        session: date,
+        t0: datetime,
+    ) -> None:
+        prepare = getattr(self._feature_service, "prepare_expected_moves", None)
+        if prepare is not None:
+            await prepare(requests, session=session, t0=t0)
 
     async def analyze_active_runs(
         self,
@@ -722,6 +876,7 @@ class Stage5Analyzer:
                     t0=_aware_utc(t0),
                     status=Stage5Status.PRE_MOVE_NOT_READY,
                     exclusion_reason=f"PRE_MOVE_NOT_READY: {exc}",
+                    calculation_version=self._calculation_version,
                 )
 
         rows: list[Stage5FeatureSnapshot] = []
@@ -740,7 +895,14 @@ class Stage5Analyzer:
                 rows.append(snapshot)
                 if self._snapshot_store is not None:
                     self._snapshot_store.save(snapshot)
-        rows.extend(_ineligible_snapshots(ineligible, session=session, t0=t0))
+        rows.extend(
+            _ineligible_snapshots(
+                ineligible,
+                session=session,
+                t0=t0,
+                calculation_version=self._calculation_version,
+            )
+        )
         return tuple(
             sorted(
                 rows,
@@ -893,10 +1055,26 @@ def calculate_stage5_feature(
     expected_absolute_return_15m: float | None,
     five_minute_bars: Sequence[HistoricalBar],
     one_minute_bars: Sequence[HistoricalBar],
+    calculation_version: str = STAGE5_CALCULATION_VERSION,
+    expected_move_source: str | None = None,
+    expected_move_observation_at: datetime | None = None,
+    expected_move_calculation_version: str | None = None,
+    raw_historical_volatility: float | None = None,
+    historical_volatility: float | None = None,
+    market_regular_minutes: int | None = None,
 ) -> Stage5FeatureResult:
     """Select exact causal IBKR bar inputs and calculate one conId/checkpoint feature."""
 
     signal_timestamp = _aware_utc(t0)
+    lineage: _Stage5Lineage = {
+        "calculation_version": calculation_version,
+        "expected_move_source": expected_move_source,
+        "expected_move_observation_at": expected_move_observation_at,
+        "expected_move_calculation_version": expected_move_calculation_version,
+        "raw_historical_volatility": raw_historical_volatility,
+        "historical_volatility": historical_volatility,
+        "market_regular_minutes": market_regular_minutes,
+    }
     if expected_absolute_return_15m is None:
         return Stage5FeatureResult(
             con_id=instrument.con_id,
@@ -905,6 +1083,7 @@ def calculate_stage5_feature(
             t0=signal_timestamp,
             status=Stage5Status.PRE_CONTEXT_NOT_READY,
             exclusion_reason="PRE_CONTEXT_NOT_READY: expected_absolute_return_15m unavailable",
+            **lineage,
         )
 
     try:
@@ -918,6 +1097,7 @@ def calculate_stage5_feature(
             status=Stage5Status.PRE_MOVE_NOT_READY,
             exclusion_reason=f"PRE_MOVE_NOT_READY: {exc}",
             expected_absolute_return_15m=expected_absolute_return_15m,
+            **lineage,
         )
     if p0 is None:
         return Stage5FeatureResult(
@@ -928,6 +1108,7 @@ def calculate_stage5_feature(
             status=Stage5Status.PRE_MOVE_NOT_READY,
             exclusion_reason="PRE_MOVE_NOT_READY: missing native 5-minute open at T0",
             expected_absolute_return_15m=expected_absolute_return_15m,
+            **lineage,
         )
     t0_minus_3m = signal_timestamp - timedelta(minutes=3)
     try:
@@ -942,6 +1123,7 @@ def calculate_stage5_feature(
             exclusion_reason=f"PRE_MOVE_NOT_READY: {exc}",
             p0=p0,
             expected_absolute_return_15m=expected_absolute_return_15m,
+            **lineage,
         )
     if raw_open_t0_minus_3m is None:
         return Stage5FeatureResult(
@@ -953,6 +1135,7 @@ def calculate_stage5_feature(
             exclusion_reason="PRE_MOVE_NOT_READY: missing exact 1-minute open at T0-3m",
             p0=p0,
             expected_absolute_return_15m=expected_absolute_return_15m,
+            **lineage,
         )
     try:
         raw_open_t0 = _exact_open(one_minute_bars, signal_timestamp)
@@ -967,6 +1150,7 @@ def calculate_stage5_feature(
             p0=p0,
             expected_absolute_return_15m=expected_absolute_return_15m,
             raw_open_t0_minus_3m=raw_open_t0_minus_3m,
+            **lineage,
         )
     if raw_open_t0 is None:
         return Stage5FeatureResult(
@@ -979,6 +1163,7 @@ def calculate_stage5_feature(
             p0=p0,
             expected_absolute_return_15m=expected_absolute_return_15m,
             raw_open_t0_minus_3m=raw_open_t0_minus_3m,
+            **lineage,
         )
     try:
         calculation = calculate_pre_move(
@@ -999,6 +1184,7 @@ def calculate_stage5_feature(
             expected_absolute_return_15m=expected_absolute_return_15m,
             raw_open_t0_minus_3m=raw_open_t0_minus_3m,
             raw_open_t0=raw_open_t0,
+            **lineage,
         )
     return Stage5FeatureResult(
         con_id=instrument.con_id,
@@ -1016,6 +1202,7 @@ def calculate_stage5_feature(
         aligned_pre_open=calculation.aligned_pre_open,
         raw_pre_move_price=calculation.raw_pre_move_price,
         pre_move_m=calculation.pre_move_m,
+        **lineage,
     )
 
 
@@ -1060,6 +1247,12 @@ def _snapshot_from_feature(
         raw_pre_move_price=feature.raw_pre_move_price,
         pre_move_m=feature.pre_move_m,
         calculation_version=feature.calculation_version,
+        expected_move_source=feature.expected_move_source,
+        expected_move_observation_at=feature.expected_move_observation_at,
+        expected_move_calculation_version=feature.expected_move_calculation_version,
+        raw_historical_volatility=feature.raw_historical_volatility,
+        historical_volatility=feature.historical_volatility,
+        market_regular_minutes=feature.market_regular_minutes,
     )
 
 
@@ -1068,6 +1261,7 @@ def _ineligible_snapshots(
     *,
     session: date,
     t0: datetime,
+    calculation_version: str = STAGE5_CALCULATION_VERSION,
 ) -> tuple[Stage5FeatureSnapshot, ...]:
     rows: list[Stage5FeatureSnapshot] = []
     signal_timestamp = _aware_utc(t0)
@@ -1095,7 +1289,7 @@ def _ineligible_snapshots(
                     aligned_pre_open=None,
                     raw_pre_move_price=None,
                     pre_move_m=None,
-                    calculation_version=STAGE5_CALCULATION_VERSION,
+                    calculation_version=calculation_version,
                 )
             )
     return tuple(rows)
@@ -1133,3 +1327,19 @@ def _optional_float(value: object) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     raise ValueError("invalid numeric value in Stage 5 feature snapshot")
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    raise ValueError("invalid integer value in Stage 5 feature snapshot")
+
+
+def _optional_str(value: object) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _optional_datetime(value: object) -> datetime | None:
+    return _aware_utc(datetime.fromisoformat(str(value))) if value is not None else None

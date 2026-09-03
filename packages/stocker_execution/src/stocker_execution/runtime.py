@@ -17,6 +17,7 @@ from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_r
 from stocker_core.logging import configure_logging
 from stocker_core.markets import MARKET_CATALOGUE, ActivityScanner, CapBucket, get_market
 from stocker_core.runs import CandidateScreen, Environment, RunConfig, RunInstance, RunManager
+from stocker_core.strategies import SESSION_HARD_HV_METHOD, SESSION_HARD_METHOD
 from stocker_core.universes import UniverseCatalog
 from stocker_data.calendars import get_market_calendar
 from stocker_execution.activity_shortlist import (
@@ -27,6 +28,10 @@ from stocker_execution.activity_shortlist import (
 )
 from stocker_execution.execution_ledger import ExecutionLedger
 from stocker_execution.execution_models import BrokerAccountState, BrokerFill, OrderLifecycle
+from stocker_execution.expected_move import (
+    IbkrHistoricalVolatilityExpectedMoveService,
+    PriorSessionContextExpectedMoveService,
+)
 from stocker_execution.history import (
     HistorySemantics,
     HistoryStatus,
@@ -45,7 +50,6 @@ from stocker_execution.ibkr import (
 from stocker_execution.pre_context import PriorSessionContextService, PriorSessionContextStore
 from stocker_execution.session_hard_structure_d import (
     SESSION_HARD_CHECKPOINTS,
-    STRATEGY_ID,
     CohortOpportunity,
     EntryBar,
     PreMoveBand,
@@ -57,6 +61,7 @@ from stocker_execution.session_hard_structure_d import (
     StrategySignal,
 )
 from stocker_execution.stage5 import (
+    STAGE5_HV_CALCULATION_VERSION,
     Stage5Analyzer,
     Stage5CurrentDataService,
     Stage5FeatureSnapshot,
@@ -78,6 +83,7 @@ from stocker_execution.stage7 import (
     Stage7ExecutionService,
     Stage7StrategyRuntime,
 )
+from stocker_execution.strategy_factory import create_strategy
 
 
 class ApplicationState(StrEnum):
@@ -111,6 +117,9 @@ class CheckpointState(StrEnum):
     SKIPPED_MISSED = "SKIPPED_MISSED"
     SKIPPED_INTERRUPTED = "SKIPPED_INTERRUPTED"
     FAILED = "FAILED"
+
+
+HV_EXPECTED_MOVE_PREFETCH_LEAD = timedelta(minutes=5)
 
 
 @dataclass(frozen=True, slots=True)
@@ -679,7 +688,12 @@ class RuntimeStore:
 class StockerRuntime:
     """One restartable application with per-run execution routing."""
 
-    _SUPPORTED_STRATEGIES = {"SESSION_HARD", STRATEGY_ID}
+    _SUPPORTED_STRATEGIES = {
+        SESSION_HARD_METHOD.config_name,
+        SESSION_HARD_METHOD.strategy_id,
+        SESSION_HARD_HV_METHOD.config_name,
+        SESSION_HARD_HV_METHOD.strategy_id,
+    }
 
     def __init__(
         self,
@@ -689,6 +703,7 @@ class StockerRuntime:
         store: RuntimeStore,
         qualify: Qualifier,
         stage5: Stage5Analyzer,
+        stage5_by_strategy: Mapping[str, Stage5Analyzer] | None = None,
         context_provider: StrategyContextProvider,
         entry_source: EntryBarSource,
         execution_router: ExecutionRouter | None = None,
@@ -722,7 +737,10 @@ class StockerRuntime:
         self._ledger = ledger
         self._store = store
         self._qualify = qualify
-        self._stage5 = stage5
+        self._stage5_by_strategy = {
+            SESSION_HARD_METHOD.strategy_version: stage5,
+            **dict(stage5_by_strategy or {}),
+        }
         self._context_provider = context_provider
         self._entry_source = entry_source
         self._session_resolver = session_resolver or ExchangeSessionResolver()
@@ -750,6 +768,7 @@ class StockerRuntime:
         }
         self._strategies: dict[str, SessionHardStructureDStrategy] = {}
         self._qualification = Stage5QualificationResult((), ())
+        self._expected_move_prepared: set[tuple[str, date, datetime, tuple[int, ...]]] = set()
         self._run_ready_at: dict[str, datetime] = {}
         self._last_sync: datetime | None = None
         self._stopping = False
@@ -768,6 +787,7 @@ class StockerRuntime:
         self._sessions.clear()
         self._run_ready_at.clear()
         self._qualification = Stage5QualificationResult((), ())
+        self._expected_move_prepared.clear()
         for environment in self._environment_ready:
             self._environment_ready[environment] = False
             self._environment_reconciled[environment] = False
@@ -892,7 +912,7 @@ class StockerRuntime:
                 continue
             for instance in affected:
                 execution = self._execution[instance.config.run_id]
-                self._ensure_strategy(instance.config.run_id, execution, now)
+                self._ensure_strategy(instance.config, execution, now)
                 market = self._resolve_market(instance, now)
                 if market is None:
                     continue
@@ -1071,7 +1091,7 @@ class StockerRuntime:
                     continue
                 strategy = self._strategies.get(run_id)
                 if strategy is None:
-                    self._ensure_strategy(run_id, execution, now)
+                    self._ensure_strategy(updated, execution, now)
                 else:
                     self._strategy_runtimes[run_id] = Stage7StrategyRuntime(
                         strategy=strategy,
@@ -1224,6 +1244,7 @@ class StockerRuntime:
 
         await self._refresh_activity_sessions(now)
         await self._refresh_scheduled_activity_shortlists(now)
+        await self._prepare_upcoming_expected_moves(now)
 
         due: dict[tuple[date, datetime, int], list[RunInstance]] = {}
         for instance in self._manager.list_runs():
@@ -1269,6 +1290,46 @@ class StockerRuntime:
             await self._evaluate_group(instances, session=session, t0=t0, checkpoint=checkpoint)
         await self._observe_entries(now)
         return self.status()
+
+    async def _prepare_upcoming_expected_moves(self, now: datetime) -> None:
+        self._expected_move_prepared = {
+            key for key in self._expected_move_prepared if key[2] >= now
+        }
+        upcoming: dict[tuple[date, datetime], set[str]] = {}
+        for instance in self._manager.list_runs():
+            run_id = instance.config.run_id
+            if self._run_states.get(run_id) not in {
+                RunRuntimeState.READY,
+                RunRuntimeState.ACTIVE,
+            }:
+                continue
+            strategy = self._strategies.get(run_id)
+            if (
+                strategy is None
+                or strategy.strategy_version != SESSION_HARD_HV_METHOD.strategy_version
+            ):
+                continue
+            market = self._sessions.get(run_id) or self._resolve_market(instance, now)
+            if market is None:
+                continue
+            for _checkpoint, t0 in market.checkpoint_times():
+                if not now < t0 <= now + HV_EXPECTED_MOVE_PREFETCH_LEAD:
+                    continue
+                if self._store.checkpoint_state(run_id, market.session, t0) is not None:
+                    continue
+                upcoming.setdefault((market.session, t0), set()).add(run_id)
+
+        stage5 = self._stage5_by_strategy.get(SESSION_HARD_HV_METHOD.strategy_version)
+        if stage5 is None:
+            return
+        for (session, t0), run_ids in sorted(upcoming.items()):
+            requests, _ineligible = self._qualification_for(run_ids)
+            con_ids = tuple(sorted(request.instrument.con_id for request in requests))
+            key = (SESSION_HARD_HV_METHOD.strategy_version, session, t0, con_ids)
+            if key in self._expected_move_prepared:
+                continue
+            self._expected_move_prepared.add(key)
+            await stage5.prepare_expected_moves(requests, session=session, t0=t0)
 
     async def _refresh_scheduled_activity_shortlists(self, now: datetime) -> None:
         """Qualify fixed-time activity screens once they become causally due."""
@@ -1429,7 +1490,7 @@ class StockerRuntime:
                 else:
                     current_execution = self._execution.get(run_id)
                     if current_execution is execution:
-                        self._ensure_strategy(run_id, execution, now)
+                        self._ensure_strategy(self._manager.get_run(run_id).config, execution, now)
             self._environment_reconciled[target] = reconciled
             self._environment_ready[target] = reconciled
             if reconciled:
@@ -1821,11 +1882,20 @@ class StockerRuntime:
             self._set_run(instance.config.run_id, RunRuntimeState.DEGRADED, reason)
 
     def _ensure_strategy(
-        self, run_id: str, execution: Stage7ExecutionService, now: datetime
+        self, run: RunConfig, execution: Stage7ExecutionService, now: datetime
     ) -> None:
+        run_id = run.run_id
         if run_id in self._strategies:
             return
-        strategy = SessionHardStructureDStrategy()
+        default_method = (
+            SESSION_HARD_HV_METHOD
+            if run.strategy
+            in {SESSION_HARD_HV_METHOD.config_name, SESSION_HARD_HV_METHOD.strategy_id}
+            else SESSION_HARD_METHOD
+        )
+        strategy_id = str(run.strategy_id or default_method.strategy_id)
+        strategy_version = str(run.strategy_version or default_method.strategy_version)
+        strategy = create_strategy(strategy_id, strategy_version)
         restored = self._store.load_signals(run_id)
         strategy.restore_signals(restored)
         expired = strategy.expire_waiting_before(now)
@@ -1873,11 +1943,55 @@ class StockerRuntime:
         t0: datetime,
         checkpoint: int,
     ) -> None:
+        grouped: dict[str, list[RunInstance]] = {}
+        for instance in instances:
+            strategy = self._strategies.get(instance.config.run_id)
+            if strategy is None:
+                self._fail_checkpoint(
+                    instance,
+                    session,
+                    t0,
+                    "Runtime strategy is not initialized",
+                    _aware(self._clock()),
+                )
+                continue
+            version = strategy.strategy_version
+            grouped.setdefault(version, []).append(instance)
+        for version in sorted(grouped):
+            stage5 = self._stage5_by_strategy.get(version)
+            if stage5 is None:
+                now = _aware(self._clock())
+                for instance in grouped[version]:
+                    self._fail_checkpoint(
+                        instance,
+                        session,
+                        t0,
+                        f"No Stage 5 service configured for {version}",
+                        now,
+                    )
+                continue
+            await self._evaluate_strategy_group(
+                grouped[version],
+                stage5=stage5,
+                session=session,
+                t0=t0,
+                checkpoint=checkpoint,
+            )
+
+    async def _evaluate_strategy_group(
+        self,
+        instances: Sequence[RunInstance],
+        *,
+        stage5: Stage5Analyzer,
+        session: date,
+        t0: datetime,
+        checkpoint: int,
+    ) -> None:
         now = _aware(self._clock())
         run_ids = {instance.config.run_id for instance in instances}
         requests, ineligible = self._qualification_for(run_ids)
         try:
-            rows = await self._stage5.analyze(
+            rows = await stage5.analyze(
                 requests,
                 ineligible=ineligible,
                 session=session,
@@ -1905,6 +2019,17 @@ class StockerRuntime:
                     now,
                 )
                 continue
+            for row in valid_rows:
+                if row.status is Stage5Status.READY:
+                    continue
+                self._logger.warning(
+                    "stage5_candidate_rejected",
+                    run_id=run.run_id,
+                    con_id=row.con_id,
+                    symbol=row.symbol,
+                    status=row.status.value,
+                    reason=row.exclusion_reason,
+                )
             try:
                 instruments = {
                     request.instrument.con_id: request.instrument for request in requests
@@ -2170,7 +2295,7 @@ class StockerRuntime:
                     )
                     environment_ok = False
                     continue
-                self._ensure_strategy(run_id, execution, now)
+                self._ensure_strategy(self._manager.get_run(run_id).config, execution, now)
             self._environment_reconciled[environment] = environment_ok
             self._environment_ready[environment] = environment_ok
             if environment_ok:
@@ -2633,13 +2758,29 @@ def build_runtime(
     current_data = Stage5CurrentDataService(
         market_data_broker,
         history_cache,
-        prior_context,
+        PriorSessionContextExpectedMoveService(prior_context),
         clock=data_clock,
     )
+    hv_current_data = Stage5CurrentDataService(
+        market_data_broker,
+        history_cache,
+        IbkrHistoricalVolatilityExpectedMoveService(market_data_broker, clock=data_clock),
+        calculation_version=STAGE5_HV_CALCULATION_VERSION,
+        clock=data_clock,
+    )
+    snapshot_store = Stage5SnapshotStore(database_path)
     stage5 = Stage5Analyzer(
         current_data,
-        snapshot_store=Stage5SnapshotStore(database_path),
+        snapshot_store=snapshot_store,
     )
+    stage5_by_strategy = {
+        SESSION_HARD_METHOD.strategy_version: stage5,
+        SESSION_HARD_HV_METHOD.strategy_version: Stage5Analyzer(
+            hv_current_data,
+            snapshot_store=snapshot_store,
+            calculation_version=STAGE5_HV_CALCULATION_VERSION,
+        ),
+    }
     session_data = IbkrSessionDataSource(market_data_broker, history_cache, logger=logger)
     activity_service = ActivityShortlistService(ActivityShortlistStore(database_path))
 
@@ -2700,6 +2841,7 @@ def build_runtime(
         store=RuntimeStore(database_path),
         qualify=qualify,
         stage5=stage5,
+        stage5_by_strategy=stage5_by_strategy,
         context_provider=session_data,
         entry_source=session_data,
         clock=data_clock,

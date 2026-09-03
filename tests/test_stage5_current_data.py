@@ -3,12 +3,21 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 
+import pytest
+
+from stocker_core.markets import MarketDefinition
+from stocker_execution.expected_move import ExpectedMoveResult, ExpectedMoveStatus
 from stocker_execution.history import IbkrHistoryCache
 from stocker_execution.ibkr import HistoricalBar, IbkrConnection, QualifiedInstrument
-from stocker_execution.pre_context import ContextStatus
-from stocker_execution.stage5 import Stage5CurrentDataService, Stage5Status
+from stocker_execution.stage5 import (
+    STAGE5_HV_CALCULATION_VERSION,
+    Stage5Analyzer,
+    Stage5CurrentDataService,
+    Stage5Membership,
+    Stage5QualifiedRequest,
+    Stage5Status,
+)
 
 T0 = datetime(2025, 2, 20, 15, 0, tzinfo=UTC)
 
@@ -53,17 +62,30 @@ class ContextService:
     def __init__(self, *, ready: bool = True) -> None:
         self.ready = ready
 
-    async def get_or_create(self, requested: QualifiedInstrument, *, session: date) -> object:
-        del requested, session
+    async def get_expected_move(
+        self,
+        requested: QualifiedInstrument,
+        *,
+        market: MarketDefinition,
+        session: date,
+        t0: datetime,
+    ) -> ExpectedMoveResult:
+        del requested, market, session, t0
         if not self.ready:
-            return SimpleNamespace(
-                status=ContextStatus.NOT_READY,
-                context=None,
+            return ExpectedMoveResult(
+                status=ExpectedMoveStatus.NOT_READY,
+                expected_absolute_return_15m=None,
+                source="IBKR_MODEL_OPTION_COMPUTATION_TICK_13",
+                observation_timestamp=None,
+                calculation_version="PRE_CONTEXT_V1",
                 reason="PRE_CONTEXT_NOT_READY: missing frozen context",
             )
-        return SimpleNamespace(
-            status=ContextStatus.READY,
-            context=SimpleNamespace(expected_absolute_return_15m=0.01),
+        return ExpectedMoveResult(
+            status=ExpectedMoveStatus.READY,
+            expected_absolute_return_15m=0.01,
+            source="IBKR_MODEL_OPTION_COMPUTATION_TICK_13",
+            observation_timestamp=T0 - timedelta(days=1),
+            calculation_version="PRE_CONTEXT_V1",
             reason="cache hit",
         )
 
@@ -114,3 +136,147 @@ def test_missing_stage4_context_does_not_request_current_bars(tmp_path: Path) ->
 
     assert result.status is Stage5Status.PRE_CONTEXT_NOT_READY
     assert boundary.calls == []
+
+
+class HvExpectedMoveService:
+    async def get_expected_move(
+        self,
+        requested: QualifiedInstrument,
+        *,
+        market: MarketDefinition,
+        session: date,
+        t0: datetime,
+    ) -> ExpectedMoveResult:
+        del requested, session
+        return ExpectedMoveResult(
+            status=ExpectedMoveStatus.READY,
+            expected_absolute_return_15m=0.00333310044188278,
+            source="IBKR_HISTORICAL_VOLATILITY_TICK_104",
+            observation_timestamp=t0,
+            calculation_version="EXPECTED_MOVE_HV_V1",
+            reason="",
+            raw_historical_volatility=0.40,
+            historical_volatility=0.40,
+            market_regular_minutes=market.active_regular_minutes,
+        )
+
+
+class CapturingExpectedMovePreparation(HvExpectedMoveService):
+    def __init__(self) -> None:
+        self.con_ids: list[int] = []
+
+    async def prepare_expected_move(
+        self,
+        requested: QualifiedInstrument,
+        *,
+        market: MarketDefinition,
+        session: date,
+        t0: datetime,
+    ) -> None:
+        del market, session, t0
+        self.con_ids.append(requested.con_id)
+
+
+def test_expected_move_preparation_isolates_one_unmappable_instrument(tmp_path: Path) -> None:
+    expected_move = CapturingExpectedMovePreparation()
+    service = Stage5CurrentDataService(
+        HistoryBoundary(),
+        IbkrHistoryCache(tmp_path / "history.sqlite3"),
+        expected_move,
+    )
+    bad = QualifiedInstrument("BAD", 456, "SMART", "UNKNOWN", "ZZZ", "STK")
+
+    asyncio.run(
+        service.prepare_expected_moves(
+            (
+                Stage5QualifiedRequest(
+                    instrument(),
+                    (Stage5Membership("HV_RUN", "US_ALL"),),
+                ),
+                Stage5QualifiedRequest(
+                    bad,
+                    (Stage5Membership("HV_RUN", "UNKNOWN"),),
+                ),
+            ),
+            session=T0.date(),
+            t0=T0,
+        )
+    )
+
+    assert expected_move.con_ids == [123]
+
+
+def test_hv_stage5_reuses_pre_move_arithmetic_with_distinct_lineage(tmp_path: Path) -> None:
+    result = asyncio.run(
+        Stage5CurrentDataService(
+            HistoryBoundary(),
+            IbkrHistoryCache(tmp_path / "history.sqlite3"),
+            HvExpectedMoveService(),
+            calculation_version=STAGE5_HV_CALCULATION_VERSION,
+            clock=lambda: T0 + timedelta(minutes=5),
+        ).get_feature(instrument(), session=T0.date(), t0=T0)
+    )
+
+    assert result.status is Stage5Status.READY
+    assert result.calculation_version == "STAGE5_PRE_MOVE_HV_V1"
+    assert result.expected_move_source == "IBKR_HISTORICAL_VOLATILITY_TICK_104"
+    assert result.expected_move_observation_at == T0
+    assert result.expected_move_calculation_version == "EXPECTED_MOVE_HV_V1"
+    assert result.raw_historical_volatility == 0.40
+    assert result.historical_volatility == 0.40
+    assert result.market_regular_minutes == 390
+    assert result.m_price == pytest.approx(0.333310044188278)
+    assert result.pre_move_m == pytest.approx(3.000209182540385)
+
+
+class MixedHvExpectedMoveService(HvExpectedMoveService):
+    async def get_expected_move(
+        self,
+        requested: QualifiedInstrument,
+        *,
+        market: MarketDefinition,
+        session: date,
+        t0: datetime,
+    ) -> ExpectedMoveResult:
+        if requested.symbol == "BAD":
+            return ExpectedMoveResult(
+                status=ExpectedMoveStatus.NOT_READY,
+                expected_absolute_return_15m=None,
+                source="IBKR_HISTORICAL_VOLATILITY_TICK_104",
+                observation_timestamp=None,
+                calculation_version="EXPECTED_MOVE_HV_V1",
+                reason="HV_NOT_READY: missing, invalid, or unavailable tick 104",
+            )
+        return await super().get_expected_move(requested, market=market, session=session, t0=t0)
+
+
+def test_one_missing_hv_rejects_only_that_symbol_and_batch_continues(tmp_path: Path) -> None:
+    boundary = HistoryBoundary()
+    analyzer = Stage5Analyzer(
+        Stage5CurrentDataService(
+            boundary,
+            IbkrHistoryCache(tmp_path / "history.sqlite3"),
+            MixedHvExpectedMoveService(),
+            calculation_version=STAGE5_HV_CALCULATION_VERSION,
+            clock=lambda: T0 + timedelta(minutes=5),
+        )
+    )
+    requests = tuple(
+        Stage5QualifiedRequest(
+            QualifiedInstrument(symbol, con_id, "SMART", "NASDAQ", "USD", "STK"),
+            (Stage5Membership("HV_RUN", "US_ALL"),),
+        )
+        for symbol, con_id in (("GOOD", 123), ("BAD", 456))
+    )
+
+    rows = asyncio.run(analyzer.analyze(requests, session=T0.date(), t0=T0))
+
+    assert [(row.symbol, row.status, row.exclusion_reason) for row in rows] == [
+        ("GOOD", Stage5Status.READY, ""),
+        (
+            "BAD",
+            Stage5Status.PRE_CONTEXT_NOT_READY,
+            "HV_NOT_READY: missing, invalid, or unavailable tick 104",
+        ),
+    ]
+    assert boundary.calls == ["5 mins", "1 min"]

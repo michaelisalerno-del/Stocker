@@ -10,7 +10,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from itertools import pairwise
 from math import isfinite
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 from stocker_core.config import IbkrConfig
 from stocker_core.markets import CAP_BUCKETS_V1, ActivityScanner, CapBucket, MarketDefinition
@@ -382,6 +382,18 @@ class CurrentQuote:
     last: float | None
     close: float | None
     market_data_type: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalVolatilitySnapshot:
+    """One temporary generic-tick-104 observation for a qualified stock."""
+
+    symbol: str
+    con_id: int
+    raw_historical_volatility: float
+    observation_timestamp: datetime
+    market_data_type: int
+    unit: Literal["DECIMAL", "PERCENT"] = "DECIMAL"
 
 
 def _new_client() -> _IbClient:
@@ -1233,9 +1245,7 @@ class IbkrConnection:
         capabilities = await self.scanner_capabilities()
         if market.scanner_location not in capabilities.locations:
             raise IbkrError("SCANNER_NOT_AVAILABLE")
-        if not capabilities.supports_instrument(
-            market.scanner_location, market.scanner_instrument
-        ):
+        if not capabilities.supports_instrument(market.scanner_location, market.scanner_instrument):
             raise IbkrError("SCANNER_NOT_AVAILABLE")
         if component.value not in capabilities.scan_codes_for(market.scanner_location):
             raise IbkrError("SCANNER_NOT_AVAILABLE")
@@ -1518,6 +1528,56 @@ class IbkrConnection:
                 )
             )
         return tuple(normalized)
+
+    async def historical_volatility_snapshot(
+        self,
+        instrument: QualifiedInstrument,
+        *,
+        market_data_type: int = 1,
+        purpose: str = "SESSION_HARD_HV",
+    ) -> HistoricalVolatilitySnapshot:
+        """Capture stock generic tick 104 and always release its temporary line."""
+
+        self._require_connected()
+        if instrument.security_type != "STK":
+            raise IbkrError("HV_NOT_READY: historical volatility requires a stock")
+        if market_data_type not in {1, 2}:
+            raise IbkrError("HV_NOT_READY: historical volatility requires live or frozen data")
+        key: tuple[int, str, str, str, int] | None = None
+        ticker: object | None = None
+        try:
+            self._client.reqMarketDataType(market_data_type)
+            key, ticker = self._acquire_market_data_stream(
+                _to_ib_contract(instrument),
+                generic_tick_list="104",
+                market_data_type=market_data_type,
+                purpose=purpose,
+            )
+            deadline = asyncio.get_running_loop().time() + self.config.request_timeout_seconds
+            while True:
+                value = _optional_number(getattr(ticker, "histVolatility", None))
+                reported_type = _optional_integer(getattr(ticker, "marketDataType", None))
+                if value is not None and value > 0.0 and reported_type in {1, 2}:
+                    return HistoricalVolatilitySnapshot(
+                        symbol=instrument.symbol,
+                        con_id=instrument.con_id,
+                        raw_historical_volatility=value,
+                        observation_timestamp=datetime.now(tz=UTC),
+                        market_data_type=reported_type,
+                        unit="DECIMAL",
+                    )
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise IbkrError("HV_NOT_READY: missing, invalid, or unavailable tick 104")
+                await asyncio.sleep(0.05)
+        except Exception as exc:
+            if isinstance(exc, IbkrError):
+                raise
+            raise IbkrError(
+                f"HV_NOT_READY: tick 104 request failed for {instrument.symbol}: {exc}"
+            ) from exc
+        finally:
+            if key is not None:
+                self._release_market_data_stream(key)
 
     async def option_chains(
         self, instrument: QualifiedInstrument

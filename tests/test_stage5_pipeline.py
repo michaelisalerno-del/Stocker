@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +17,7 @@ from stocker_core.runs import (
 from stocker_core.universes import InstrumentReference, UniverseDefinition
 from stocker_execution.ibkr import IbkrConnection, IbkrError, QualifiedInstrument
 from stocker_execution.stage5 import (
+    STAGE5_HV_CALCULATION_VERSION,
     Stage5Analyzer,
     Stage5FeatureResult,
     Stage5FeatureSnapshot,
@@ -145,6 +146,36 @@ def test_one_invalid_instrument_does_not_kill_the_rest_of_the_batch() -> None:
     ]
 
 
+def test_hv_analyzer_preserves_lineage_when_feature_service_raises() -> None:
+    class RaisingFeatureService:
+        async def get_feature(
+            self, instrument: QualifiedInstrument, *, session: date, t0: datetime
+        ) -> Stage5FeatureResult:
+            raise IbkrError("HV_NOT_READY: unavailable")
+
+    analyzer = Stage5Analyzer(
+        RaisingFeatureService(),
+        calculation_version=STAGE5_HV_CALCULATION_VERSION,
+    )
+
+    rows = asyncio.run(
+        analyzer.analyze(
+            (
+                Stage5QualifiedRequest(
+                    qualified("HOOD", 123),
+                    (Stage5Membership("HV_RUN", "US_ALL"),),
+                ),
+            ),
+            session=date(2025, 2, 20),
+            t0=T0,
+        )
+    )
+
+    assert rows[0].status is Stage5Status.PRE_MOVE_NOT_READY
+    assert rows[0].calculation_version == STAGE5_HV_CALCULATION_VERSION
+    assert "HV_NOT_READY" in rows[0].exclusion_reason
+
+
 def test_snapshot_store_preserves_ready_feature_across_transient_rerun(
     tmp_path: Path,
 ) -> None:
@@ -182,6 +213,34 @@ def test_snapshot_store_preserves_ready_feature_across_transient_rerun(
     )
 
     assert store.get("US_ALL", T0, 123) == ready
+
+
+def test_snapshot_store_keeps_iv_and_hv_rows_separate_with_hv_audit_lineage(
+    tmp_path: Path,
+) -> None:
+    store = Stage5SnapshotStore(tmp_path / "stage5.sqlite3")
+    iv = replace(ready_feature(qualified("HOOD", 123)), calculation_version="STAGE5_PRE_MOVE_V1")
+    iv_snapshot = Stage5FeatureSnapshot(run_ids=("IV_RUN",), universe_id="US_ALL", **asdict(iv))
+    hv_snapshot = replace(
+        iv_snapshot,
+        run_ids=("HV_RUN",),
+        expected_absolute_return_15m=0.00333310044188278,
+        m_price=0.333310044188278,
+        pre_move_m=3.000209182540385,
+        calculation_version="STAGE5_PRE_MOVE_HV_V1",
+        expected_move_source="IBKR_HISTORICAL_VOLATILITY_TICK_104",
+        expected_move_observation_at=T0,
+        expected_move_calculation_version="EXPECTED_MOVE_HV_V1",
+        raw_historical_volatility=0.40,
+        historical_volatility=0.40,
+        market_regular_minutes=390,
+    )
+
+    store.save(iv_snapshot)
+    store.save(hv_snapshot)
+
+    assert store.get("US_ALL", T0, 123, calculation_version="STAGE5_PRE_MOVE_V1") == iv_snapshot
+    assert store.get("US_ALL", T0, 123, calculation_version="STAGE5_PRE_MOVE_HV_V1") == hv_snapshot
 
 
 class QualificationBoundary(IbkrConnection):
@@ -361,9 +420,7 @@ def test_screen_failure_isolated_from_unscreened_run_and_reported() -> None:
     screened = replace(
         screened,
         config=screened.config.model_copy(
-            update={
-                "screen": RunScreenConfig(method=CandidateScreen.HOT_BY_VOLUME)
-            }
+            update={"screen": RunScreenConfig(method=CandidateScreen.HOT_BY_VOLUME)}
         ),
     )
 
@@ -388,9 +445,7 @@ def test_screen_with_no_universe_matches_reports_reason() -> None:
     run = replace(
         run,
         config=run.config.model_copy(
-            update={
-                "screen": RunScreenConfig(method=CandidateScreen.HOT_BY_VOLUME)
-            }
+            update={"screen": RunScreenConfig(method=CandidateScreen.HOT_BY_VOLUME)}
         ),
     )
 

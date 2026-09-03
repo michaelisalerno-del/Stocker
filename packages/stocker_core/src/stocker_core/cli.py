@@ -533,6 +533,7 @@ def stage5_diagnostic(
     from rich.table import Table
 
     from stocker_core.runs import Environment
+    from stocker_execution.expected_move import PriorSessionContextExpectedMoveService
     from stocker_execution.history import IbkrHistoryCache
     from stocker_execution.ibkr import IbkrConnection, IbkrError
     from stocker_execution.pre_context import (
@@ -573,7 +574,11 @@ def stage5_diagnostic(
                 history_cache,
                 PriorSessionContextStore(cache_path),
             )
-            current_service = Stage5CurrentDataService(connection, history_cache, context_service)
+            current_service = Stage5CurrentDataService(
+                connection,
+                history_cache,
+                PriorSessionContextExpectedMoveService(context_service),
+            )
             requests: list[Stage5QualifiedRequest] = []
             failures: list[tuple[str, str]] = []
             for symbol in selected_symbols:

@@ -5,7 +5,11 @@ import pytest
 from stocker_core.config import RunsConfig
 from stocker_core.markets import CapBucket, MarketId
 from stocker_core.runs import CandidateScreen, Environment, RunConfig, RunScreenConfig
-from stocker_core.strategies import SESSION_HARD_METHOD, installed_strategies
+from stocker_core.strategies import (
+    SESSION_HARD_HV_METHOD,
+    SESSION_HARD_METHOD,
+    installed_strategies,
+)
 from stocker_core.universes import UniverseDefinition
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 
@@ -53,9 +57,16 @@ def test_builder_options_are_backend_owned_and_include_installed_method() -> Non
             "strategy_id": SESSION_HARD_METHOD.strategy_id,
             "strategy_version": SESSION_HARD_METHOD.strategy_version,
             "label": "Session HARD",
-        }
+            "environments": ["PAPER", "LIVE"],
+        },
+        {
+            "strategy_id": SESSION_HARD_HV_METHOD.strategy_id,
+            "strategy_version": SESSION_HARD_HV_METHOD.strategy_version,
+            "label": "Session HARD · HV",
+            "environments": ["PAPER"],
+        },
     ]
-    assert installed_strategies() == (SESSION_HARD_METHOD,)
+    assert installed_strategies() == (SESSION_HARD_METHOD, SESSION_HARD_HV_METHOD)
 
 
 def test_any_installed_method_can_be_created_as_paper_on_any_supported_market() -> None:
@@ -84,6 +95,60 @@ def test_any_installed_method_can_be_created_as_paper_on_any_supported_market() 
     assert universe.market_spec is not None
     assert universe.market_spec.market_id is MarketId.SOUTH_KOREA_KRX
     assert universe.market_spec.cap_bucket is CapBucket.MID
+
+
+@pytest.mark.parametrize(
+    ("market_id", "cap_bucket"),
+    (
+        (MarketId.UK_LSE, CapBucket.SMALL),
+        (MarketId.AUSTRALIA_ASX, CapBucket.MID),
+        (MarketId.US_ALL, CapBucket.SMALL),
+    ),
+)
+def test_session_hard_hv_is_a_paper_strategy_for_every_supported_market(
+    market_id: MarketId, cap_bucket: CapBucket
+) -> None:
+    _config, run = UniverseRunBuilder().add(
+        empty_config(),
+        market_id=market_id,
+        cap_bucket=cap_bucket,
+        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
+        environment=Environment.PAPER,
+    )
+
+    assert run.strategy == "SESSION_HARD_HV"
+    assert run.strategy_id == "SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D"
+    assert run.strategy_version == "SESSION_HARD_HV_V1"
+    assert "hard-hv" in run.run_id
+    assert run.environment is Environment.PAPER
+
+
+def test_session_hard_hv_rejects_live_explicitly_even_with_matching_paper() -> None:
+    builder = UniverseRunBuilder()
+    paper_config, _paper = builder.add(
+        empty_config(),
+        market_id=MarketId.UK_LSE,
+        cap_bucket=CapBucket.SMALL,
+        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
+        environment=Environment.PAPER,
+    )
+
+    with pytest.raises(ValueError, match="SESSION_HARD_HV_V1 is PAPER-only"):
+        builder.add(
+            paper_config,
+            market_id=MarketId.UK_LSE,
+            cap_bucket=CapBucket.SMALL,
+            strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+            strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
+            environment=Environment.LIVE,
+        )
+
+    live_payload = paper_config.runs[0].model_dump(mode="python")
+    live_payload["environment"] = Environment.LIVE
+    with pytest.raises(ValueError, match="SESSION_HARD_HV_V1 is PAPER-only"):
+        RunConfig.model_validate(live_payload)
 
 
 def test_live_requires_exact_paper_counterpart_and_does_not_modify_it() -> None:

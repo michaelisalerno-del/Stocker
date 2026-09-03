@@ -21,6 +21,7 @@ from stocker_core.config import (
 )
 from stocker_core.markets import CapBucket, MarketId
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig
+from stocker_core.strategies import installed_strategies
 from stocker_core.universes import InstrumentReference, UniverseDefinition
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 from stocker_execution.runtime import RuntimeStatus
@@ -224,8 +225,8 @@ class RunControlService:
                 raise ValueError("risk_per_trade must be greater than zero and no more than one")
             if max_concurrent_positions is not None and max_concurrent_positions <= 0:
                 raise ValueError("max_concurrent_positions must be positive")
-            if strategy != "SESSION_HARD":
-                raise ValueError("active runtime supports only SESSION_HARD strategy config")
+            if strategy not in {item.config_name for item in installed_strategies()}:
+                raise ValueError("active runtime does not support this strategy config")
             if current.market_id is not None and (
                 universe != current.universe or strategy != current.strategy
             ):

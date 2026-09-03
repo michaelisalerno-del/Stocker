@@ -67,6 +67,7 @@ class StreamClient(ConfigClient):
         self.tickers: dict[int, SimpleNamespace] = {}
         self.requested: list[int] = []
         self.cancelled: list[int] = []
+        self.generic_tick_lists: list[str] = []
         self.raise_for: set[int] = set()
 
     def isConnected(self) -> bool:
@@ -85,11 +86,12 @@ class StreamClient(ConfigClient):
         snapshot: bool = False,
         regulatorySnapshot: bool = False,
     ) -> object:
-        del genericTickList, snapshot, regulatorySnapshot
+        del snapshot, regulatorySnapshot
         con_id = int(contract.conId)  # type: ignore[attr-defined]
         if con_id in self.raise_for:
             raise RuntimeError("market data request failed")
         self.requested.append(con_id)
+        self.generic_tick_lists.append(genericTickList)
         return self.tickers.setdefault(con_id, incomplete_ticker())
 
     def cancelMktData(self, contract: object) -> bool:
@@ -364,6 +366,7 @@ def incomplete_ticker() -> SimpleNamespace:
         putOpenInterest=float("nan"),
         marketDataType=1,
         modelGreeks=None,
+        histVolatility=float("nan"),
     )
 
 
@@ -414,6 +417,59 @@ def test_active_stream_registry_increments_and_final_release_cancels() -> None:
     assert active.subscriptions[0].purpose == "OPTION_PRE_CONTEXT"  # type: ignore[attr-defined]
     assert active.subscriptions[0].consumer_count == 1  # type: ignore[attr-defined]
     assert released.active_market_data_lines == 0  # type: ignore[attr-defined]
+
+
+def test_historical_volatility_uses_only_temporary_generic_tick_104(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "stocker_execution.ibkr._to_ib_contract",
+        lambda instrument: SimpleNamespace(
+            conId=instrument.con_id, secType="STK", exchange=instrument.exchange
+        ),
+    )
+
+    async def scenario() -> tuple[StreamClient, object, object, object]:
+        client = StreamClient()
+        connection = connected_stream_boundary(client)
+        task = asyncio.create_task(connection.historical_volatility_snapshot(stock(101)))
+        await asyncio.sleep(0)
+        active = connection.resource_status()
+        client.tickers[101].histVolatility = 0.40
+        result = await task
+        return client, active, result, connection.resource_status()
+
+    client, active, result, released = asyncio.run(scenario())
+
+    assert client.generic_tick_lists == ["104"]
+    assert client.cancelled == [101]
+    assert active.active_market_data_lines == 1  # type: ignore[attr-defined]
+    assert active.active_underlying_lines == 1  # type: ignore[attr-defined]
+    assert active.active_option_lines == 0  # type: ignore[attr-defined]
+    assert active.subscriptions[0].purpose == "SESSION_HARD_HV"  # type: ignore[attr-defined]
+    assert result.raw_historical_volatility == 0.40
+    assert result.unit == "DECIMAL"
+    assert released.active_market_data_lines == 0  # type: ignore[attr-defined]
+
+
+def test_invalid_historical_volatility_releases_subscription_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "stocker_execution.ibkr._to_ib_contract",
+        lambda instrument: SimpleNamespace(
+            conId=instrument.con_id, secType="STK", exchange=instrument.exchange
+        ),
+    )
+    client = StreamClient()
+    connection = connected_stream_boundary(client, timeout=0.01)
+
+    with pytest.raises(IbkrError, match="HV_NOT_READY"):
+        asyncio.run(connection.historical_volatility_snapshot(stock(101)))
+
+    assert client.generic_tick_lists == ["104"]
+    assert client.cancelled == [101]
+    assert connection.resource_status().active_market_data_lines == 0
 
 
 def test_fifty_member_activity_watchlist_opens_no_streaming_quote() -> None:
@@ -597,9 +653,7 @@ def test_daily_resource_counters_roll_over() -> None:
     client.errorEvent.emit(7, 100, "pacing violation", None)
     assert connection.resource_status().pacing_violations_today == 1
 
-    connection._reset_daily_resource_counters(
-        connection._resource_counter_date + timedelta(days=1)
-    )
+    connection._reset_daily_resource_counters(connection._resource_counter_date + timedelta(days=1))
 
     assert connection._pacing_violations_today == 0
     assert connection._market_data_requests_today == 0

@@ -66,6 +66,7 @@ class UniverseRunBuilder:
                     "strategy_id": item.strategy_id,
                     "strategy_version": item.strategy_version,
                     "label": item.label,
+                    "environments": list(item.environments),
                 }
                 for item in installed_strategies()
             ],
@@ -92,6 +93,8 @@ class UniverseRunBuilder:
         market = get_market(market_id)
         cap = CapBucket(cap_bucket)
         method = get_strategy(strategy_id, strategy_version)
+        if environment.value not in method.environments:
+            raise ValueError(f"{method.strategy_version} is PAPER-only")
         identity = self._identity(
             market.market_id,
             cap,

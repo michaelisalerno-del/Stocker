@@ -121,7 +121,7 @@ async function universesPage() {
   ]);
   const marketOptions = options.markets.map((item) => `<option value="${esc(item.market_id)}">${esc(item.label)}</option>`).join("");
   const capOptions = options.capitalisation.map((item) => `<option value="${esc(item.cap_bucket)}" ${item.cap_bucket === "MID" ? "selected" : ""}>${esc(item.label)}</option>`).join("");
-  const strategyOptions = options.strategies.map((item) => `<option value="${esc(item.strategy_id)}" data-version="${esc(item.strategy_version)}">${esc(item.label)}</option>`).join("");
+  const strategyOptions = options.strategies.map((item) => `<option value="${esc(item.strategy_id)}" data-version="${esc(item.strategy_version)}" data-environments="${esc(item.environments.join(","))}">${esc(item.label)}</option>`).join("");
   const runCard = (row) => `<article class="run-card ${row.enabled ? "" : "disabled"}">
     <div class="run-card-title"><div><span class="eyebrow">${esc(row.market_id || row.universe)} · ${esc(row.currency || "NATIVE")}</span><h3>${esc(row.display_name)}</h3></div>${badge(row.enabled ? row.status : "DISABLED", row.enabled ? row.status : "warn")}</div>
     <div class="run-stats"><div><span>Watch</span><strong>${number(row.candidate_count)}</strong></div><div><span>Signals today</span><strong>${number(row.signals_today)}</strong></div><div><span>Positions</span><strong>${number(row.open_positions)}</strong></div><div><span>Today realised</span><strong>${money(row.today_realised_pnl, row.currency)}</strong></div><div><span>Unrealised</span><strong>${row.unrealised_status === "AVAILABLE" ? money(row.unrealised_pnl, row.currency) : esc(row.unrealised_status)}</strong></div><div><span>20-session R</span><strong>${row.total_r == null ? "—" : `${number(row.total_r)}R`}</strong></div></div>
@@ -137,6 +137,7 @@ async function universesPage() {
   const form = document.querySelector("#universe-builder");
   const marketSelect = form.elements.market_id;
   const strategySelect = form.elements.strategy_id;
+  const selectedStrategy = () => strategySelect.selectedOptions[0];
   const selectedDefinition = () => options.markets.find((item) => item.market_id === marketSelect.value);
   const matchingPaper = () => grouped.PAPER.some((item) => item.market_id === marketSelect.value && item.cap_bucket === form.elements.cap_bucket.value && item.strategy_id === strategySelect.value);
   const refreshBuilderContext = () => {
@@ -144,18 +145,19 @@ async function universesPage() {
     document.querySelector("#builder-session").textContent = market ? `${market.session} ${market.timezone}` : "—";
     document.querySelector("#builder-readiness").textContent = market?.scanner_readiness || "—";
     const liveButton = form.querySelector('[data-add-environment="LIVE"]');
-    liveButton.disabled = !matchingPaper();
-    document.querySelector("#live-prerequisite").textContent = matchingPaper() ? "PAPER prerequisite satisfied." : "Matching PAPER run required.";
+    const supportsLive = selectedStrategy().dataset.environments.split(",").includes("LIVE");
+    liveButton.disabled = !supportsLive || !matchingPaper();
+    document.querySelector("#live-prerequisite").textContent = !supportsLive ? `${selectedStrategy().dataset.version} is PAPER-only.` : (matchingPaper() ? "PAPER prerequisite satisfied." : "Matching PAPER run required.");
   };
   refreshBuilderContext();
   form.addEventListener("change", refreshBuilderContext);
   const submitRun = async (target) => {
-    const selectedStrategy = strategySelect.selectedOptions[0];
+    const selectedStrategyOption = selectedStrategy();
     const body = {
       market_id: marketSelect.value,
       cap_bucket: form.elements.cap_bucket.value,
       strategy_id: strategySelect.value,
-      strategy_version: selectedStrategy.dataset.version,
+      strategy_version: selectedStrategyOption.dataset.version,
       risk_per_trade: Number(form.elements.risk_per_trade.value),
       max_concurrent_positions: form.elements.max_concurrent_positions.value ? Number(form.elements.max_concurrent_positions.value) : null,
     };
@@ -163,7 +165,7 @@ async function universesPage() {
       const settings = await api("/api/settings");
       const broker = settings.broker_configuration.find((item) => item.environment === "LIVE");
       if (!broker?.expected_account) throw new Error("LIVE expected account is not configured");
-      if (!window.confirm(`Create a separate LIVE run for ${selectedDefinition().label} / ${form.elements.cap_bucket.value} / ${selectedStrategy.textContent} on ${broker.expected_account}?`)) return;
+      if (!window.confirm(`Create a separate LIVE run for ${selectedDefinition().label} / ${form.elements.cap_bucket.value} / ${selectedStrategyOption.textContent} on ${broker.expected_account}?`)) return;
       body.confirmed = true;
       body.target_account = broker.expected_account;
     }
@@ -284,7 +286,7 @@ async function candidatesPage() {
 }
 async function candidateDetail(signalId) {
   const item = await api(`/api/candidates/${encodeURIComponent(signalId)}`);
-  const fields = ["symbol", "con_id", "run_id", "universe", "strategy", "strategy_version", "environment", "account", "t0", "p0", "call_model_iv", "put_model_iv", "atm_iv", "expected_absolute_return_15m", "m_price", "raw_pre_move", "pre_move_m", "cohort_percentile", "band", "session_hard_score", "structure", "direction", "rank", "entry", "entry_reference", "status", "signal_id", "order_plan_id"];
+  const fields = ["symbol", "con_id", "run_id", "universe", "strategy", "strategy_version", "environment", "account", "t0", "p0", "expected_move_source", "expected_move_observation_at", "expected_move_calculation_version", "raw_historical_volatility", "historical_volatility", "market_regular_minutes", "call_model_iv", "put_model_iv", "atm_iv", "expected_absolute_return_15m", "m_price", "raw_pre_move", "pre_move_m", "cohort_percentile", "band", "session_hard_score", "structure", "direction", "rank", "entry", "entry_reference", "status", "signal_id", "order_plan_id"];
   main.innerHTML = `${head(item.symbol, "Candidate calculation lineage copied from authoritative Stage 5/6 outputs.")}<section class="section"><div class="detail-grid">${fields.map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${key === "environment" ? environment(item[key]) : esc(item[key])}</strong></div>`).join("")}</div></section>`;
 }
 

@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from stocker_core.runs import (
     RunScreenConfig,
     RunWindow,
 )
+from stocker_core.strategies import SESSION_HARD_HV_METHOD
 from stocker_core.universes import InstrumentReference, UniverseDefinition
 from stocker_execution.execution_ledger import ExecutionLedger
 from stocker_execution.execution_models import (
@@ -162,9 +164,25 @@ class CapturingLogger:
 
 
 class FakeFeatureService:
-    def __init__(self, *, session_offset: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        session_offset: int = 0,
+        calculation_version: str = "STAGE5_PRE_MOVE_V1",
+    ) -> None:
         self.calls = 0
+        self.prepared: list[tuple[date, datetime, tuple[int, ...]]] = []
         self.session_offset = session_offset
+        self.calculation_version = calculation_version
+
+    async def prepare_expected_moves(
+        self,
+        requests: Sequence[Stage5QualifiedRequest],
+        *,
+        session: date,
+        t0: datetime,
+    ) -> None:
+        self.prepared.append((session, t0, tuple(item.instrument.con_id for item in requests)))
 
     async def get_feature(
         self, instrument: QualifiedInstrument, *, session: date, t0: datetime
@@ -186,6 +204,7 @@ class FakeFeatureService:
             aligned_pre_open=100.8,
             raw_pre_move_price=0.8,
             pre_move_m=0.8,
+            calculation_version=self.calculation_version,
         )
 
 
@@ -387,6 +406,27 @@ def _run(
     )
 
 
+def _hv_run(run_id: str = "hv-run") -> RunConfig:
+    return _run(run_id).model_copy(
+        update={
+            "strategy": SESSION_HARD_HV_METHOD.config_name,
+            "strategy_id": SESSION_HARD_HV_METHOD.strategy_id,
+            "strategy_version": SESSION_HARD_HV_METHOD.strategy_version,
+            "market_id": MarketId.US_NASDAQ,
+            "cap_bucket": CapBucket.MID,
+            "cap_bucket_version": "CAP_BUCKETS_V1",
+            "candidate_screen_id": "ACTIVITY_SHORTLIST_V1",
+            "candidate_screen_version": "ACTIVITY_SHORTLIST_V1",
+            "screen": RunScreenConfig(
+                method=CandidateScreen.ACTIVITY_SHORTLIST_V1,
+                max_results=50,
+                version="ACTIVITY_SHORTLIST_V1",
+                scheduled_active_minutes=15,
+            ),
+        }
+    )
+
+
 def _runtime(
     tmp_path: Path,
     broker: FakeBroker,
@@ -398,6 +438,7 @@ def _runtime(
     qualification_log: list[tuple[str, ...]] | None = None,
     live_broker: FakeBroker | None = None,
     logger: object | None = None,
+    stage5_by_strategy: dict[str, Stage5Analyzer] | None = None,
 ) -> StockerRuntime:
     selected_runs = runs or (_run(),)
     features = feature_service or FakeFeatureService()
@@ -438,6 +479,7 @@ def _runtime(
         store=RuntimeStore(tmp_path / "runtime.sqlite3"),
         qualify=qualify,
         stage5=Stage5Analyzer(features),
+        stage5_by_strategy=stage5_by_strategy,
         context_provider=context_provider or EmptyContextProvider(),
         entry_source=entry_source or EmptyEntrySource(),
         session_resolver=FixedSessionResolver(),
@@ -992,6 +1034,130 @@ def test_checkpoint_is_evaluated_once_and_overlapping_runs_share_feature_work(
 
     assert features.calls == 1
     assert runtime.status().counters.checkpoints_processed == 2
+
+
+def test_simultaneous_iv_and_hv_runs_use_isolated_stage5_lineage(tmp_path: Path) -> None:
+    clock = MutableClock()
+    iv_features = FakeFeatureService(calculation_version="STAGE5_PRE_MOVE_V1")
+    hv_features = FakeFeatureService(calculation_version="STAGE5_PRE_MOVE_HV_V1")
+    hv_run = _hv_run()
+    runtime = _runtime(
+        tmp_path,
+        FakeBroker(),
+        _run("iv-run"),
+        hv_run,
+        clock=clock,
+        feature_service=iv_features,
+        stage5_by_strategy={SESSION_HARD_HV_METHOD.strategy_version: Stage5Analyzer(hv_features)},
+        context_provider=TriggerContextProvider(),
+    )
+    asyncio.run(runtime.start())
+    clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+
+    asyncio.run(runtime.poll_once())
+
+    assert iv_features.calls == 1
+    assert hv_features.calls == 1
+    iv_signal = runtime.store.load_signals("iv-run")[0]
+    hv_signal = runtime.store.load_signals("hv-run")[0]
+    assert iv_signal.feature_calculation_version == "STAGE5_PRE_MOVE_V1"
+    assert hv_signal.feature_calculation_version == "STAGE5_PRE_MOVE_HV_V1"
+    assert hv_signal.strategy_id == SESSION_HARD_HV_METHOD.strategy_id
+    assert hv_signal.strategy_version == SESSION_HARD_HV_METHOD.strategy_version
+
+
+def test_hv_expected_move_is_prepared_before_the_checkpoint(tmp_path: Path) -> None:
+    clock = MutableClock()
+    hv_features = FakeFeatureService(calculation_version="STAGE5_PRE_MOVE_HV_V1")
+    runtime = _runtime(
+        tmp_path,
+        FakeBroker(),
+        _hv_run(),
+        clock=clock,
+        stage5_by_strategy={SESSION_HARD_HV_METHOD.strategy_version: Stage5Analyzer(hv_features)},
+    )
+    asyncio.run(runtime.start())
+    clock.now = datetime(2026, 9, 2, 13, 56, tzinfo=UTC)
+
+    asyncio.run(runtime.poll_once())
+
+    assert hv_features.prepared == [
+        (
+            SESSION,
+            datetime(2026, 9, 2, 14, 0, tzinfo=UTC),
+            (1000,),
+        )
+    ]
+    assert hv_features.calls == 0
+
+
+def test_hv_signal_uses_normal_stage7_paper_path_and_duplicate_protection(tmp_path: Path) -> None:
+    clock = MutableClock()
+    broker = FakeBroker()
+    hv_features = FakeFeatureService(calculation_version="STAGE5_PRE_MOVE_HV_V1")
+    runtime = _runtime(
+        tmp_path,
+        broker,
+        _hv_run(),
+        clock=clock,
+        stage5_by_strategy={SESSION_HARD_HV_METHOD.strategy_version: Stage5Analyzer(hv_features)},
+        context_provider=TriggerContextProvider(),
+        entry_source=TriggerEntrySource(),
+    )
+    asyncio.run(runtime.start())
+    clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+
+    asyncio.run(runtime.poll_once())
+    asyncio.run(runtime.poll_once())
+
+    assert len(broker.submitted) == 1
+    plan = broker.submitted[0]
+    assert plan.strategy_id == SESSION_HARD_HV_METHOD.strategy_id
+    assert plan.strategy_version == SESSION_HARD_HV_METHOD.strategy_version
+    assert plan.environment is Environment.PAPER
+
+
+def test_restart_restores_hv_signal_and_executes_without_recalculating_stage5(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock()
+    first_features = FakeFeatureService(calculation_version="STAGE5_PRE_MOVE_HV_V1")
+    first = _runtime(
+        tmp_path,
+        FakeBroker(),
+        _hv_run(),
+        clock=clock,
+        stage5_by_strategy={
+            SESSION_HARD_HV_METHOD.strategy_version: Stage5Analyzer(first_features)
+        },
+        context_provider=TriggerContextProvider(),
+    )
+    asyncio.run(first.start())
+    clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+    asyncio.run(first.poll_once())
+    asyncio.run(first.stop())
+
+    second_features = FakeFeatureService(calculation_version="STAGE5_PRE_MOVE_HV_V1")
+    broker = FakeBroker()
+    restored = _runtime(
+        tmp_path,
+        broker,
+        _hv_run(),
+        clock=clock,
+        stage5_by_strategy={
+            SESSION_HARD_HV_METHOD.strategy_version: Stage5Analyzer(second_features)
+        },
+        context_provider=TriggerContextProvider(),
+        entry_source=TriggerEntrySource(),
+    )
+    asyncio.run(restored.start())
+    clock.now = datetime(2026, 9, 2, 14, 2, tzinfo=UTC)
+    asyncio.run(restored.poll_once())
+
+    assert first_features.calls == 1
+    assert second_features.calls == 0
+    assert len(broker.submitted) == 1
+    assert broker.submitted[0].strategy_version == SESSION_HARD_HV_METHOD.strategy_version
 
 
 def test_late_start_marks_missed_checkpoint_without_evaluating(tmp_path: Path) -> None:

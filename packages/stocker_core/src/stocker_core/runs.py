@@ -95,6 +95,17 @@ class RunConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_lineage(self) -> "RunConfig":
+        from stocker_core.strategies import SESSION_HARD_HV_METHOD
+
+        if self.environment is Environment.LIVE and (
+            self.strategy
+            in {
+                SESSION_HARD_HV_METHOD.config_name,
+                SESSION_HARD_HV_METHOD.strategy_id,
+            }
+            or self.strategy_version == SESSION_HARD_HV_METHOD.strategy_version
+        ):
+            raise ValueError(f"{SESSION_HARD_HV_METHOD.strategy_version} is PAPER-only")
         lineage = (
             self.market_id,
             self.cap_bucket,
@@ -114,6 +125,8 @@ class RunConfig(BaseModel):
             method = get_strategy(str(self.strategy_id), str(self.strategy_version))
             if self.strategy != method.config_name:
                 raise ValueError("Run strategy name does not match installed strategy lineage")
+            if self.environment.value not in method.environments:
+                raise ValueError(f"{method.strategy_version} is PAPER-only")
         if (
             self.screen is not None
             and self.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1

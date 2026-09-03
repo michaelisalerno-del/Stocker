@@ -230,7 +230,16 @@ class EntryBar:
 class SessionHardStructureDStrategy:
     """Evaluate one concrete strategy without account or broker behavior."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        strategy_id: str = STRATEGY_ID,
+        strategy_version: str = STRATEGY_VERSION,
+    ) -> None:
+        if not strategy_id.strip() or not strategy_version.strip():
+            raise ValueError("strategy identity and version are required")
+        self.strategy_id = strategy_id
+        self.strategy_version = strategy_version
         self._signals: dict[str, StrategySignal] = {}
         self._cohort_watch_ids: set[str] = set()
         self._strategy_candidate_ids: set[str] = set()
@@ -261,7 +270,10 @@ class SessionHardStructureDStrategy:
         if self._signals:
             raise ValueError("strategy signals may only be restored into an empty strategy")
         for signal in signals:
-            if signal.strategy_id != STRATEGY_ID or signal.strategy_version != STRATEGY_VERSION:
+            if (
+                signal.strategy_id != self.strategy_id
+                or signal.strategy_version != self.strategy_version
+            ):
                 raise ValueError("restored signal does not belong to this strategy version")
             self._signals[signal.signal_id] = signal
             if signal.status is SignalStatus.WAITING_FOR_ENTRY:
@@ -301,7 +313,12 @@ class SessionHardStructureDStrategy:
         for row in feature_rows:
             if context.run_id not in row.run_ids:
                 continue
-            signal_id = _signal_id(row, context.run_id)
+            signal_id = _signal_id(
+                row,
+                context.run_id,
+                strategy_id=self.strategy_id,
+                strategy_version=self.strategy_version,
+            )
             existing = self._signals.get(signal_id)
             if existing is not None:
                 signals.append(existing)
@@ -381,8 +398,8 @@ class SessionHardStructureDStrategy:
                 status = SignalStatus.WAITING_FOR_ENTRY
                 reason = "AWAITING_STRUCTURE_D_DOWN_FIRST_TOUCH"
             signal = StrategySignal(
-                strategy_id=STRATEGY_ID,
-                strategy_version=STRATEGY_VERSION,
+                strategy_id=self.strategy_id,
+                strategy_version=self.strategy_version,
                 signal_id=signal_id,
                 run_id=context.run_id,
                 underlying_con_id=row.con_id,
@@ -546,11 +563,17 @@ class SessionHardStructureDStrategy:
         return True
 
 
-def _signal_id(row: Stage5FeatureSnapshot, run_id: str) -> str:
+def _signal_id(
+    row: Stage5FeatureSnapshot,
+    run_id: str,
+    *,
+    strategy_id: str,
+    strategy_version: str,
+) -> str:
     identity = "|".join(
         (
-            STRATEGY_ID,
-            STRATEGY_VERSION,
+            strategy_id,
+            strategy_version,
             run_id,
             str(row.con_id),
             row.session.isoformat(),

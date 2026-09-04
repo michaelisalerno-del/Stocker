@@ -35,6 +35,8 @@ class FakeOrderClient:
         self.position_values = []
         self.execution_values = []
         self.completed_orders = []
+        self.open_order_requests = 0
+        self.completed_order_requests = 0
 
     def get_req_id(self) -> int:
         self.next_order_id += 1
@@ -66,11 +68,19 @@ class FakeOrderClient:
         return SimpleNamespace(contract=contract, order=order)
 
     async def reqAllOpenOrdersAsync(self) -> list[object]:
+        self.open_order_requests += 1
         return self.open_orders
 
     async def reqCompletedOrdersAsync(self, apiOnly: bool) -> list[object]:
         assert apiOnly is False
+        self.completed_order_requests += 1
         return self.completed_orders
+
+    def openTrades(self) -> list[object]:
+        return self.open_orders
+
+    def trades(self) -> list[object]:
+        return [*self.open_orders, *self.completed_orders]
 
     async def reqPositionsAsync(self) -> list[object]:
         return self.position_values
@@ -313,6 +323,27 @@ def test_completed_order_request_timeout_fails_reconciliation_without_hanging() 
 
     with pytest.raises(IbkrError, match="order-status request timed out"):
         asyncio.run(asyncio.wait_for(scenario(), timeout=0.5))
+
+
+def test_order_snapshots_are_requested_once_per_connection_then_read_from_live_cache() -> None:
+    client = FakeOrderClient()
+    connection = IbkrConnection(_config(), client=client, execution_enabled=True)
+
+    async def scenario() -> None:
+        await connection.connect()
+        await connection.read_open_orders()
+        await connection.read_order_statuses()
+        await connection.read_open_orders()
+        await connection.read_order_statuses()
+        connection.disconnect()
+        await connection.connect()
+        await connection.read_open_orders()
+        await connection.read_order_statuses()
+
+    asyncio.run(scenario())
+
+    assert client.open_order_requests == 2
+    assert client.completed_order_requests == 2
 
 
 @pytest.mark.parametrize(

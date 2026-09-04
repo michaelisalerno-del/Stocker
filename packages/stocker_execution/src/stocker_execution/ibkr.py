@@ -145,6 +145,10 @@ class _IbClient(Protocol):
 
     async def reqCompletedOrdersAsync(self, apiOnly: bool) -> list[object]: ...
 
+    def openTrades(self) -> list[object]: ...
+
+    def trades(self) -> list[object]: ...
+
     async def reqPositionsAsync(self) -> list[object]: ...
 
     async def reqExecutionsAsync(self, execFilter: object = None) -> list[object]: ...
@@ -424,6 +428,8 @@ class IbkrConnection:
         self._account_id: str | None = None
         self._execution_enabled = execution_enabled
         self._connection_epoch = 0
+        self._open_orders_loaded = False
+        self._completed_orders_loaded = False
         self._scanner_capabilities: ScannerCapabilities | None = None
         self._qualified_stock_cache: dict[tuple[str, str, str, str], QualifiedInstrument] = {}
         self._option_chain_cache: dict[int, tuple[OptionChainDefinition, ...]] = {}
@@ -681,6 +687,8 @@ class IbkrConnection:
             self._verify_environment(account_id)
             self._account_id = account_id
             self._connection_epoch += 1
+            self._open_orders_loaded = False
+            self._completed_orders_loaded = False
             return BrokerSession(
                 environment=self.config.environment,
                 account_id=account_id,
@@ -703,6 +711,8 @@ class IbkrConnection:
         if self._client.isConnected():
             self._client.disconnect()
         self._account_id = None
+        self._open_orders_loaded = False
+        self._completed_orders_loaded = False
         self._scanner_capabilities = None
         self._qualified_stock_cache.clear()
         self._option_chain_cache.clear()
@@ -862,10 +872,14 @@ class IbkrConnection:
 
         self._require_connected()
         try:
-            trades = await asyncio.wait_for(
-                self._client.reqAllOpenOrdersAsync(),
-                timeout=self.config.request_timeout_seconds,
-            )
+            if not self._open_orders_loaded:
+                trades = await asyncio.wait_for(
+                    self._client.reqAllOpenOrdersAsync(),
+                    timeout=self.config.request_timeout_seconds,
+                )
+                self._open_orders_loaded = True
+            else:
+                trades = self._client.openTrades()
             return tuple(self._normalize_open_order(trade) for trade in trades)
         except TimeoutError as exc:
             raise IbkrError("IBKR open-order request timed out") from exc
@@ -879,20 +893,19 @@ class IbkrConnection:
 
         self._require_connected()
         try:
-            trades = [
-                *(
-                    await asyncio.wait_for(
-                        self._client.reqAllOpenOrdersAsync(),
-                        timeout=self.config.request_timeout_seconds,
-                    )
-                ),
-                *(
-                    await asyncio.wait_for(
-                        self._client.reqCompletedOrdersAsync(apiOnly=False),
-                        timeout=self.config.request_timeout_seconds,
-                    )
-                ),
-            ]
+            if not self._open_orders_loaded:
+                await asyncio.wait_for(
+                    self._client.reqAllOpenOrdersAsync(),
+                    timeout=self.config.request_timeout_seconds,
+                )
+                self._open_orders_loaded = True
+            if not self._completed_orders_loaded:
+                await asyncio.wait_for(
+                    self._client.reqCompletedOrdersAsync(apiOnly=False),
+                    timeout=self.config.request_timeout_seconds,
+                )
+                self._completed_orders_loaded = True
+            trades = self._client.trades()
         except TimeoutError as exc:
             raise IbkrError("IBKR order-status request timed out") from exc
         except Exception as exc:

@@ -80,6 +80,7 @@ from stocker_execution.stage7 import (
     ExecutionEnvironmentUnavailableError,
     ExecutionResultCode,
     ExecutionRouter,
+    ReconciliationResult,
     Stage7ExecutionService,
     Stage7StrategyRuntime,
 )
@@ -881,20 +882,22 @@ class StockerRuntime:
         for environment in connected_environments:
             destination = self._destinations[environment]
             affected = [run for run in configured_runs if run.config.environment is environment]
-            environment_ok = True
-            for instance in affected:
-                execution = self._execution[instance.config.run_id]
-                result = await execution.reconcile()
-                self._store.record_reconciliation(
-                    environment=environment,
-                    account=destination.expected_account,
-                    connection_epoch=destination.broker.connection_epoch,
-                    ok=result.ok,
-                    detail=result.detail,
-                    now=now,
-                )
-                if not result.ok:
-                    environment_ok = False
+            services = tuple(
+                (instance.config.run_id, self._execution[instance.config.run_id])
+                for instance in affected
+            )
+            result = await self._reconcile_execution_services(services)
+            self._store.record_reconciliation(
+                environment=environment,
+                account=destination.expected_account,
+                connection_epoch=destination.broker.connection_epoch,
+                ok=result.ok,
+                detail=result.detail,
+                now=now,
+            )
+            environment_ok = result.ok
+            if not result.ok:
+                for instance in affected:
                     self._set_run(instance.config.run_id, RunRuntimeState.DEGRADED, result.detail)
                     self._store.increment(
                         instance.config.run_id, now.date(), "reconciliation_issues"
@@ -1466,9 +1469,9 @@ class StockerRuntime:
                 )
                 continue
 
-            reconciled = True
-            for run_id, execution in services:
-                result = await execution.refresh_broker_state()
+            reconciled = False
+            try:
+                result = await self._reconcile_execution_services(services)
                 self._store.record_reconciliation(
                     environment=target,
                     account=destination.expected_account,
@@ -1477,20 +1480,37 @@ class StockerRuntime:
                     detail=result.detail,
                     now=now,
                 )
-                if not result.ok:
-                    reconciled = False
-                    self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
+            except Exception as exc:
+                detail = f"broker reconciliation unavailable: {exc}"
+                for run_id, _execution in services:
+                    self._set_run(run_id, RunRuntimeState.DEGRADED, detail)
                     self._store.increment(run_id, now.date(), "reconciliation_issues")
                     self._logger.error(
-                        "reconciliation_required",
+                        "reconciliation_failed",
                         environment=target.value,
                         run_id=run_id,
-                        reason=result.detail,
+                        reason=str(exc),
                     )
-                else:
-                    current_execution = self._execution.get(run_id)
-                    if current_execution is execution:
-                        self._ensure_strategy(self._manager.get_run(run_id).config, execution, now)
+            else:
+                reconciled = result.ok
+                for run_id, execution in services:
+                    if not result.ok:
+                        self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
+                        self._store.increment(run_id, now.date(), "reconciliation_issues")
+                        self._logger.error(
+                            "reconciliation_required",
+                            environment=target.value,
+                            run_id=run_id,
+                            reason=result.detail,
+                        )
+                    else:
+                        current_execution = self._execution.get(run_id)
+                        if current_execution is execution:
+                            self._ensure_strategy(
+                                self._manager.get_run(run_id).config,
+                                execution,
+                                now,
+                            )
             self._environment_reconciled[target] = reconciled
             self._environment_ready[target] = reconciled
             if reconciled:
@@ -2247,6 +2267,29 @@ class StockerRuntime:
         )
         self._logger.error("ibkr_disconnected", environment=environment.value)
 
+    async def _reconcile_execution_services(
+        self,
+        services: Sequence[tuple[str, Stage7ExecutionService]],
+    ) -> ReconciliationResult:
+        """Read one account-wide broker snapshot and share it with sibling runs."""
+
+        if not services:
+            raise ValueError("at least one execution service is required for reconciliation")
+        source = services[0][1]
+        try:
+            result = await source.reconcile()
+            if result.ok:
+                for _run_id, execution in services[1:]:
+                    execution.adopt_reconciliation(source)
+            else:
+                for _run_id, execution in services[1:]:
+                    execution.invalidate_reconciliation()
+            return result
+        except Exception:
+            for _run_id, execution in services:
+                execution.invalidate_reconciliation()
+            raise
+
     async def _refresh_execution_state(self, now: datetime) -> bool:
         """Poll durable broker state without allowing orders during the refresh."""
 
@@ -2258,14 +2301,16 @@ class StockerRuntime:
             if not destination.broker.is_connected:
                 self._note_disconnect(environment, now)
                 continue
-            environment_ok = True
-            for run_id, execution in self._execution_services():
-                if execution.run_environment is not environment:
-                    continue
-                try:
-                    result = await execution.refresh_broker_state()
-                except Exception as exc:
-                    detail = f"broker reconciliation unavailable: {exc}"
+            services = tuple(
+                (run_id, execution)
+                for run_id, execution in self._execution_services()
+                if execution.run_environment is environment
+            )
+            try:
+                result = await self._reconcile_execution_services(services)
+            except Exception as exc:
+                detail = f"broker reconciliation unavailable: {exc}"
+                for run_id, _execution in services:
                     self._set_run(run_id, RunRuntimeState.DEGRADED, detail)
                     self._store.increment(run_id, now.date(), "reconciliation_issues")
                     self._logger.error(
@@ -2274,8 +2319,8 @@ class StockerRuntime:
                         run_id=run_id,
                         reason=str(exc),
                     )
-                    environment_ok = False
-                    continue
+                environment_ok = False
+            else:
                 self._store.record_reconciliation(
                     environment=environment,
                     account=destination.expected_account,
@@ -2284,18 +2329,19 @@ class StockerRuntime:
                     detail=result.detail,
                     now=now,
                 )
-                if not result.ok:
-                    self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
-                    self._store.increment(run_id, now.date(), "reconciliation_issues")
-                    self._logger.error(
-                        "reconciliation_required",
-                        environment=environment.value,
-                        run_id=run_id,
-                        reason=result.detail,
-                    )
-                    environment_ok = False
-                    continue
-                self._ensure_strategy(self._manager.get_run(run_id).config, execution, now)
+                environment_ok = result.ok
+                for run_id, execution in services:
+                    if not result.ok:
+                        self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
+                        self._store.increment(run_id, now.date(), "reconciliation_issues")
+                        self._logger.error(
+                            "reconciliation_required",
+                            environment=environment.value,
+                            run_id=run_id,
+                            reason=result.detail,
+                        )
+                    else:
+                        self._ensure_strategy(self._manager.get_run(run_id).config, execution, now)
             self._environment_reconciled[environment] = environment_ok
             self._environment_ready[environment] = environment_ok
             if environment_ok:

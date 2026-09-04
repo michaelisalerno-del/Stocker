@@ -307,6 +307,26 @@ class Stage7ExecutionService:
             raise ValueError("Stage 7 hot apply accepts risk/enabled changes only")
         self._run = run
 
+    def adopt_reconciliation(self, source: "Stage7ExecutionService") -> None:
+        """Reuse one account-wide reconciliation across runs on the same broker session."""
+
+        if (
+            source._broker is not self._broker
+            or source._expected_account != self._expected_account
+            or source.run_environment is not self.run_environment
+            or source._reconciled_epoch != self._broker.connection_epoch
+            or source._last_account_state is None
+        ):
+            raise ValueError("shared reconciliation source does not match this execution scope")
+        self._last_account_state = source._last_account_state
+        self._reconciled_epoch = source._reconciled_epoch
+
+    def invalidate_reconciliation(self) -> None:
+        """Require a fresh broker snapshot before this run may submit another order."""
+
+        self._last_account_state = None
+        self._reconciled_epoch = None
+
     async def reconcile(self) -> ReconciliationResult:
         """Compare broker orders/positions/fills with local execution state."""
 

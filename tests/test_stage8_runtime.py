@@ -595,9 +595,10 @@ def test_enabled_run_requires_explicit_market_session_before_broker_connect(
 
 
 def test_multiple_runs_coexist_and_disabled_run_never_activates(tmp_path: Path) -> None:
+    broker = FakeBroker()
     runtime = _runtime(
         tmp_path,
-        FakeBroker(),
+        broker,
         _run("first"),
         _run("second"),
         _run("disabled", enabled=False),
@@ -611,6 +612,38 @@ def test_multiple_runs_coexist_and_disabled_run_never_activates(tmp_path: Path) 
         "second": RunRuntimeState.ACTIVE,
         "disabled": RunRuntimeState.DISABLED,
     }
+    assert broker.events.count("account_state") == 1
+    assert broker.events.count("open_orders") == 1
+    assert broker.events.count("statuses") == 1
+    assert broker.events.count("fills") == 1
+    assert broker.events.count("positions") == 1
+
+
+def test_multiple_runs_share_periodic_account_reconciliation(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        clock = MutableClock()
+        broker = FakeBroker()
+        runtime = _runtime(
+            tmp_path,
+            broker,
+            _run("first"),
+            _run("second"),
+            clock=clock,
+        )
+        await runtime.start()
+        broker.events.clear()
+        clock.now += timedelta(seconds=6)
+
+        await runtime.poll_once()
+
+        assert broker.events.count("account_state") == 1
+        assert broker.events.count("open_orders") == 1
+        assert broker.events.count("statuses") == 1
+        assert broker.events.count("fills") == 1
+        assert broker.events.count("positions") == 1
+        assert all(run.state is RunRuntimeState.ACTIVE for run in runtime.status().runs)
+
+    asyncio.run(scenario())
 
 
 def test_hot_enable_prepares_run_without_replaying_missed_checkpoint(tmp_path: Path) -> None:

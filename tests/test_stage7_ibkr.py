@@ -315,6 +315,40 @@ def test_completed_order_request_timeout_fails_reconciliation_without_hanging() 
         asyncio.run(asyncio.wait_for(scenario(), timeout=0.5))
 
 
+@pytest.mark.parametrize(
+    ("connection_method", "client_method", "message"),
+    (
+        ("account_state", "accountSummaryAsync", "account state request timed out"),
+        ("read_open_orders", "reqAllOpenOrdersAsync", "open-order request timed out"),
+        ("read_fills", "reqExecutionsAsync", "execution request timed out"),
+        ("read_positions", "reqPositionsAsync", "position request timed out"),
+    ),
+)
+def test_execution_state_requests_use_the_configured_timeout(
+    connection_method: str,
+    client_method: str,
+    message: str,
+) -> None:
+    client = FakeOrderClient()
+
+    async def hang(*args: object, **kwargs: object) -> list[object]:
+        del args, kwargs
+        await asyncio.Event().wait()
+        return []
+
+    setattr(client, client_method, hang)
+    config = _config().model_copy(update={"request_timeout_seconds": 0.01})
+    connection = IbkrConnection(config, client=client, execution_enabled=True)
+
+    async def scenario() -> object:
+        await connection.connect()
+        method = getattr(connection, connection_method)
+        return await method()
+
+    with pytest.raises(IbkrError, match=message):
+        asyncio.run(asyncio.wait_for(scenario(), timeout=0.5))
+
+
 def test_pending_cancel_remains_active_until_ibkr_confirms_cancellation() -> None:
     client = FakeOrderClient()
     client.open_orders = [

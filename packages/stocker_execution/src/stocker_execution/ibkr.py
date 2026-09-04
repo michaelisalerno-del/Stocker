@@ -752,8 +752,13 @@ class IbkrConnection:
 
         self._require_connected()
         try:
-            values = await self._client.accountSummaryAsync(self.account)
+            values = await asyncio.wait_for(
+                self._client.accountSummaryAsync(self.account),
+                timeout=self.config.request_timeout_seconds,
+            )
             positions = await self.read_positions()
+        except TimeoutError as exc:
+            raise IbkrError("IBKR account state request timed out") from exc
         except Exception as exc:
             if isinstance(exc, IbkrError):
                 raise
@@ -857,8 +862,13 @@ class IbkrConnection:
 
         self._require_connected()
         try:
-            trades = await self._client.reqAllOpenOrdersAsync()
+            trades = await asyncio.wait_for(
+                self._client.reqAllOpenOrdersAsync(),
+                timeout=self.config.request_timeout_seconds,
+            )
             return tuple(self._normalize_open_order(trade) for trade in trades)
+        except TimeoutError as exc:
+            raise IbkrError("IBKR open-order request timed out") from exc
         except Exception as exc:
             if isinstance(exc, IbkrError):
                 raise
@@ -913,7 +923,12 @@ class IbkrConnection:
 
         self._require_connected()
         try:
-            sources = await self._client.reqPositionsAsync()
+            sources = await asyncio.wait_for(
+                self._client.reqPositionsAsync(),
+                timeout=self.config.request_timeout_seconds,
+            )
+        except TimeoutError as exc:
+            raise IbkrError("IBKR position request timed out") from exc
         except Exception as exc:
             raise IbkrError(f"IBKR position request failed: {exc}") from exc
         positions: list[BrokerPosition] = []
@@ -937,7 +952,12 @@ class IbkrConnection:
 
         self._require_connected()
         try:
-            sources = await self._client.reqExecutionsAsync()
+            sources = await asyncio.wait_for(
+                self._client.reqExecutionsAsync(),
+                timeout=self.config.request_timeout_seconds,
+            )
+        except TimeoutError as exc:
+            raise IbkrError("IBKR execution request timed out") from exc
         except Exception as exc:
             raise IbkrError(f"IBKR execution request failed: {exc}") from exc
         fills: list[BrokerFill] = []

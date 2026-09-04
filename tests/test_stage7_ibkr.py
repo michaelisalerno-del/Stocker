@@ -3,6 +3,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from stocker_core.config import IbkrConfig
 from stocker_core.runs import Environment
 from stocker_execution.execution_models import (
@@ -12,7 +14,7 @@ from stocker_execution.execution_models import (
     OrderPlan,
     OrderRole,
 )
-from stocker_execution.ibkr import IbkrConnection, QualifiedInstrument
+from stocker_execution.ibkr import IbkrConnection, IbkrError, QualifiedInstrument
 
 
 class FakeOrderClient:
@@ -292,6 +294,25 @@ def test_broker_rejection_status_is_normalized() -> None:
 
     assert statuses[0].status is OrderLifecycle.REJECTED
     assert statuses[0].reason == "price precaution rejected"
+
+
+def test_completed_order_request_timeout_fails_reconciliation_without_hanging() -> None:
+    class HangingCompletedOrderClient(FakeOrderClient):
+        async def reqCompletedOrdersAsync(self, apiOnly: bool) -> list[object]:
+            assert apiOnly is False
+            await asyncio.Event().wait()
+            return []
+
+    client = HangingCompletedOrderClient()
+    config = _config().model_copy(update={"request_timeout_seconds": 0.01})
+    connection = IbkrConnection(config, client=client, execution_enabled=True)
+
+    async def scenario() -> object:
+        await connection.connect()
+        return await connection.read_order_statuses()
+
+    with pytest.raises(IbkrError, match="order-status request timed out"):
+        asyncio.run(asyncio.wait_for(scenario(), timeout=0.5))
 
 
 def test_pending_cancel_remains_active_until_ibkr_confirms_cancellation() -> None:

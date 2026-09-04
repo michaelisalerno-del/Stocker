@@ -870,9 +870,21 @@ class IbkrConnection:
         self._require_connected()
         try:
             trades = [
-                *(await self._client.reqAllOpenOrdersAsync()),
-                *(await self._client.reqCompletedOrdersAsync(apiOnly=False)),
+                *(
+                    await asyncio.wait_for(
+                        self._client.reqAllOpenOrdersAsync(),
+                        timeout=self.config.request_timeout_seconds,
+                    )
+                ),
+                *(
+                    await asyncio.wait_for(
+                        self._client.reqCompletedOrdersAsync(apiOnly=False),
+                        timeout=self.config.request_timeout_seconds,
+                    )
+                ),
             ]
+        except TimeoutError as exc:
+            raise IbkrError("IBKR order-status request timed out") from exc
         except Exception as exc:
             raise IbkrError(f"IBKR order-status request failed: {exc}") from exc
         by_order: dict[int, BrokerOrderStatus] = {}

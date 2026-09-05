@@ -144,7 +144,9 @@ class FakeBroker:
         self.events.append("positions")
         return self.positions
 
-    async def read_order_statuses(self) -> tuple[BrokerOrderStatus, ...]:
+    async def read_order_statuses(
+        self, *, include_completed: bool = True
+    ) -> tuple[BrokerOrderStatus, ...]:
         self.events.append("statuses")
         return self.statuses
 

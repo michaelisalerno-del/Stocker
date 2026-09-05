@@ -121,7 +121,9 @@ class ExecutionBroker(Protocol):
 
     async def read_positions(self) -> tuple[BrokerPosition, ...]: ...
 
-    async def read_order_statuses(self) -> tuple[BrokerOrderStatus, ...]: ...
+    async def read_order_statuses(
+        self, *, include_completed: bool = True
+    ) -> tuple[BrokerOrderStatus, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,7 +346,16 @@ class Stage7ExecutionService:
 
         try:
             open_orders = await self._broker.read_open_orders()
-            broker_statuses = await self._broker.read_order_statuses()
+            # Completed history is needed to recover unfinished plans across a
+            # connection gap. A flat, settled ledger needs only current broker
+            # evidence; orders placed on a reconciled connection have live callbacks.
+            # Scope this to the whole account, including sibling runs.
+            include_completed = self._reconciled_epoch != self._broker.connection_epoch and bool(
+                self._ledger.active_records(self._run.environment, self._expected_account)
+            )
+            broker_statuses = await self._broker.read_order_statuses(
+                include_completed=include_completed
+            )
             broker_fills = await self._broker.read_fills()
             broker_positions = await self._broker.read_positions()
         except Exception as exc:

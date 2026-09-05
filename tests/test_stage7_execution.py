@@ -94,7 +94,9 @@ class FakeExecutionBroker:
     async def read_positions(self) -> tuple[BrokerPosition, ...]:
         return self._positions
 
-    async def read_order_statuses(self) -> tuple[BrokerOrderStatus, ...]:
+    async def read_order_statuses(
+        self, *, include_completed: bool = True
+    ) -> tuple[BrokerOrderStatus, ...]:
         return self._statuses
 
 

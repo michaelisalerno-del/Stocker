@@ -888,8 +888,10 @@ class IbkrConnection:
                 raise
             raise IbkrError(f"IBKR open-order request failed: {exc}") from exc
 
-    async def read_order_statuses(self) -> tuple[BrokerOrderStatus, ...]:
-        """Read normalized open and completed order states, including rejections."""
+    async def read_order_statuses(
+        self, *, include_completed: bool = True
+    ) -> tuple[BrokerOrderStatus, ...]:
+        """Read live states, optionally loading completed history for restart recovery."""
 
         self._require_connected()
         try:
@@ -899,7 +901,7 @@ class IbkrConnection:
                     timeout=self.config.request_timeout_seconds,
                 )
                 self._open_orders_loaded = True
-            if not self._completed_orders_loaded:
+            if include_completed and not self._completed_orders_loaded:
                 await asyncio.wait_for(
                     self._client.reqCompletedOrdersAsync(apiOnly=False),
                     timeout=self.config.request_timeout_seconds,

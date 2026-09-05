@@ -361,7 +361,11 @@ class RunControlService:
             )
             if existing is None:
                 universes = (*universes, universe)
-            updated = RunsConfig(universes=universes, runs=config.runs)
+            updated = RunsConfig(
+                session_hard_hv_round_trip_cost_bps=config.session_hard_hv_round_trip_cost_bps,
+                universes=universes,
+                runs=config.runs,
+            )
             affected = {
                 run.run_id for run in updated.runs if run.universe == normalized_id and run.enabled
             }
@@ -437,7 +441,11 @@ class RunControlService:
         payload.update(updates)
         updated = RunConfig.model_validate(payload)
         runs = tuple(updated if item.run_id == current.run_id else item for item in config.runs)
-        validated = RunsConfig(universes=config.universes, runs=runs)
+        validated = RunsConfig(
+            session_hard_hv_round_trip_cost_bps=config.session_hard_hv_round_trip_cost_bps,
+            universes=config.universes,
+            runs=runs,
+        )
         if self.runtime is None:
             self._write_runs(validated)
             return ControlResult(

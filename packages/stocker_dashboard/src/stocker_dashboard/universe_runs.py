@@ -179,7 +179,11 @@ class UniverseRunBuilder:
         universes = (
             config.universes if universe in config.universes else (*config.universes, universe)
         )
-        return RunsConfig(universes=universes, runs=(*config.runs, run)), run
+        return RunsConfig(
+            session_hard_hv_round_trip_cost_bps=config.session_hard_hv_round_trip_cost_bps,
+            universes=universes,
+            runs=(*config.runs, run),
+        ), run
 
     def disable(self, config: RunsConfig, run_id: str) -> RunsConfig:
         run = next((item for item in config.runs if item.run_id == run_id), None)
@@ -190,6 +194,7 @@ class UniverseRunBuilder:
     @staticmethod
     def _replace_run(config: RunsConfig, selected: RunConfig) -> RunsConfig:
         return RunsConfig(
+            session_hard_hv_round_trip_cost_bps=config.session_hard_hv_round_trip_cost_bps,
             universes=config.universes,
             runs=tuple(
                 selected if item.run_id == selected.run_id else item for item in config.runs

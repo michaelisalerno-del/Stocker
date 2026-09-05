@@ -636,6 +636,14 @@ class ExecutionLedger:
             ).fetchone()
         return _record_from_row(row) if row is not None else None
 
+    def entry_fill_signal_ids(self) -> tuple[str, ...]:
+        """Read actual entry fills in one query, without scanning skipped opportunities."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT signal_id FROM execution_plans WHERE filled_quantity > 0"
+            ).fetchall()
+        return tuple(str(row["signal_id"]) for row in rows)
+
     def has_signal(self, signal_id: str) -> bool:
         with self._connect() as connection:
             row = connection.execute(

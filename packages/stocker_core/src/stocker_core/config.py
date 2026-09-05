@@ -101,6 +101,9 @@ class IbkrConfig(BaseModel):
 class RunsConfig(BaseModel):
     """Configured universes and the independent runs that reference them."""
 
+    # Frozen Session HARD research round-trip cost; replaceable independently
+    # of the admission rule. No other installed strategy uses this assumption.
+    session_hard_hv_round_trip_cost_bps: float = Field(default=10.0, ge=0.0, allow_inf_nan=False)
     universes: tuple[UniverseDefinition, ...] = Field(min_length=1)
     runs: tuple[RunConfig, ...] = ()
 
@@ -297,6 +300,7 @@ def runs_config_storage_payload(
             item["members"] = []
         persisted_universes.append(item)
     return {
+        "session_hard_hv_round_trip_cost_bps": config.session_hard_hv_round_trip_cost_bps,
         "named_universe_snapshot": named_universe_snapshot,
         "universes": persisted_universes,
         "runs": payload["runs"],

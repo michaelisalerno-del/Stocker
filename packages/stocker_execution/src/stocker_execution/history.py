@@ -112,6 +112,17 @@ class IbkrHistoryCache:
                 """
             )
 
+    def qualified_instrument(self, con_id: int) -> QualifiedInstrument | None:
+        """Recover the IBKR-qualified identity already persisted with cached bars."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT symbol, con_id, exchange, primary_exchange, currency, security_type
+                FROM ibkr_history_bars WHERE con_id = ? AND source = ?
+                ORDER BY fetched_at_utc DESC LIMIT 1""",
+                (con_id, IBKR_HISTORY_SOURCE),
+            ).fetchone()
+        return QualifiedInstrument(**dict(row)) if row is not None else None
+
     def _store_from_ibkr(
         self,
         instrument: QualifiedInstrument,

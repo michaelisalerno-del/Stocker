@@ -275,6 +275,7 @@ class EmptyEntrySource:
         session: date,
         now: datetime,
         signals: object,
+        fetch_missing: bool = True,
     ) -> dict[int, tuple[object, ...]]:
         return {}
 
@@ -328,6 +329,7 @@ class TriggerEntrySource:
         session: date,
         now: datetime,
         signals: object,
+        fetch_missing: bool = True,
     ) -> dict[int, tuple[EntryBar, ...]]:
         t0 = datetime(2026, 9, 2, 14, 0, tzinfo=UTC)
         return {con_id: (EntryBar(t0, 99.5, 99.7, 99.4),) for con_id in instruments}
@@ -342,6 +344,7 @@ class RollingTriggerEntrySource:
         session: date,
         now: datetime,
         signals: object,
+        fetch_missing: bool = True,
     ) -> dict[int, tuple[EntryBar, ...]]:
         timestamp = now.replace(second=0, microsecond=0) - timedelta(minutes=1)
         return {con_id: (EntryBar(timestamp, 99.5, 99.7, 99.4),) for con_id in instruments}

@@ -29,6 +29,7 @@ from stocker_execution.session_hard_structure_d import (
     SessionHardStructureDStrategy,
     SignalStatus,
     StrategySignal,
+    nominal_exit_prices,
 )
 
 
@@ -231,8 +232,7 @@ class Stage7RiskEngine:
         ):
             return _rejected(RiskRejection.INVALID_STOP_DISTANCE)
 
-        stop = entry + order_intent.stop_distance_m * m_price
-        target = entry - order_intent.target_distance_m * m_price
+        stop, target = nominal_exit_prices(order_intent)
         per_share_risk = abs(entry - stop)
         if (
             not isfinite(stop)
@@ -705,7 +705,20 @@ class Stage7StrategyRuntime:
     ) -> tuple[ExecutionAttempt, ...]:
         """Advance Stage 6 first-touch state and execute only its selected outputs."""
 
-        order_intents = self._strategy.observe_entry_bars(bars_by_con_id)
+        return await self.execute_observed(self.observe(bars_by_con_id), instruments)
+
+    def observe(
+        self,
+        bars_by_con_id: Mapping[int, Sequence[EntryBar]],
+    ) -> tuple[StrategySignal, ...]:
+        return self._strategy.observe_entry_bars(bars_by_con_id)
+
+    async def execute_observed(
+        self,
+        order_intents: Sequence[StrategySignal],
+        instruments: Mapping[int, QualifiedInstrument],
+    ) -> tuple[ExecutionAttempt, ...]:
+        """Use the same Stage 7 path after runtime admission has completed."""
         return await self._execution.execute_ready_intents(order_intents, instruments)
 
 

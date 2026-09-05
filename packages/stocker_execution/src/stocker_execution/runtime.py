@@ -6,12 +6,15 @@ import asyncio
 import json
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from contextlib import suppress
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol, cast
 from zoneinfo import ZoneInfo
+
+import structlog
 
 from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
 from stocker_core.logging import configure_logging
@@ -48,6 +51,15 @@ from stocker_execution.ibkr import (
     mask_ibkr_account,
 )
 from stocker_execution.pre_context import PriorSessionContextService, PriorSessionContextStore
+from stocker_execution.session_hard_payoff import (
+    CompletedPayoff,
+    CostAwareAssessment,
+    CostAwareDecision,
+    assess_pooled_payoff,
+    hypothetical_baseline_outcome,
+    is_baseline_payoff_candidate,
+    pooled_opportunity_id,
+)
 from stocker_execution.session_hard_structure_d import (
     SESSION_HARD_CHECKPOINTS,
     CohortOpportunity,
@@ -59,6 +71,7 @@ from stocker_execution.session_hard_structure_d import (
     StrategyContext,
     StrategyOpportunityKey,
     StrategySignal,
+    nominal_exit_prices,
 )
 from stocker_execution.stage5 import (
     STAGE5_HV_CALCULATION_VERSION,
@@ -342,6 +355,7 @@ class EntryBarSource(Protocol):
         session: date,
         now: datetime,
         signals: Sequence[StrategySignal],
+        fetch_missing: bool = True,
     ) -> Mapping[int, Sequence[EntryBar]]: ...
 
 
@@ -435,6 +449,20 @@ class RuntimeStore:
                     session TEXT NOT NULL,
                     pre_move_m REAL NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS runtime_session_hard_payoffs (
+                    signal_id TEXT PRIMARY KEY,
+                    opportunity_id TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    con_id INTEGER NOT NULL,
+                    signal_timestamp TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    assessment TEXT,
+                    completion_timestamp TEXT,
+                    gross_r REAL,
+                    actually_executed INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS runtime_payoff_completion
+                    ON runtime_session_hard_payoffs(completion_timestamp);
                 CREATE TABLE IF NOT EXISTS runtime_signals (
                     signal_id TEXT PRIMARY KEY,
                     run_id TEXT NOT NULL,
@@ -680,6 +708,172 @@ class RuntimeStore:
             ).fetchall()
         return tuple(_signal_from_payload(json.loads(str(row["payload"]))) for row in rows)
 
+    def register_payoff(
+        self,
+        signal: StrategySignal,
+        instrument: QualifiedInstrument,
+        run: RunConfig,
+        cost_bps: float | None,
+    ) -> None:
+        """Record every filled baseline candidate before admission or risk selection."""
+        if not is_baseline_payoff_candidate(signal):
+            raise ValueError("only exact baseline-fillable Session HARD candidates enter the pool")
+        if signal.underlying_con_id != instrument.con_id:
+            raise ValueError("baseline instrument identity mismatch")
+        if signal.signal_timestamp is None:
+            raise ValueError("baseline signal timestamp is required")
+        stop, _target = nominal_exit_prices(signal)
+        payload = {
+            "signal": _signal_payload(signal),
+            "instrument": asdict(instrument),
+            "run": run.model_dump(mode="json"),
+            "baseline_eligible": True,
+            "entry_reference_price": signal.entry_reference,
+            "initial_stop_price": stop,
+            "estimated_round_trip_cost_bps": cost_bps,
+            "admission_decision": "TRADE_BASELINE_PRE_HURDLE" if cost_bps is None else None,
+        }
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT OR IGNORE INTO runtime_session_hard_payoffs
+                (signal_id, opportunity_id, symbol, con_id, signal_timestamp, payload)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    signal.signal_id,
+                    pooled_opportunity_id(signal),
+                    signal.symbol,
+                    signal.underlying_con_id,
+                    _aware(signal.signal_timestamp).isoformat(),
+                    json.dumps(payload, sort_keys=True),
+                ),
+            )
+
+    def backfill_payoffs(self, runs: Sequence[RunConfig], history: IbkrHistoryCache) -> None:
+        """Register saved exact HV entries; reconstruct gross outcomes from IBKR bars only.
+
+        These signals predate admission. Their historical cost/estimate is unknown
+        and remains null, rather than being reconstructed using today's assumption.
+        """
+        for run in runs:
+            for signal in self.load_signals(run.run_id):
+                if not is_baseline_payoff_candidate(signal) or signal.underlying_con_id is None:
+                    continue
+                instrument = history.qualified_instrument(signal.underlying_con_id)
+                if instrument is not None:
+                    self.register_payoff(signal, instrument, run, cost_bps=None)
+
+    def pending_payoffs(
+        self,
+    ) -> tuple[tuple[StrategySignal, QualifiedInstrument, RunConfig], ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT signal_id, payload FROM runtime_session_hard_payoffs
+                WHERE completion_timestamp IS NULL ORDER BY signal_timestamp, signal_id"""
+            ).fetchall()
+        pending = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"])
+                signal = replace(_signal_from_payload(payload["signal"]), baseline_eligible=True)
+                pending.append(
+                    (
+                        signal,
+                        QualifiedInstrument(**payload["instrument"]),
+                        RunConfig.model_validate(payload["run"]),
+                    )
+                )
+            except (ValueError, TypeError, KeyError) as exc:
+                structlog.get_logger(__name__).warning(
+                    "session_hard_shadow_invalid", signal_id=row["signal_id"], reason=str(exc)
+                )
+        return tuple(pending)
+
+    def complete_payoff(self, signal_id: str, outcome: CompletedPayoff) -> None:
+        """Persist immutable gross outcomes; costs and broker P&L never enter the pool."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM runtime_session_hard_payoffs WHERE signal_id = ?", (signal_id,)
+            ).fetchone()
+            if row is None or row["opportunity_id"] != outcome.opportunity_id:
+                raise ValueError("completed payoff has no matching baseline opportunity")
+            # A touch-bar outcome may complete exactly when its entry becomes
+            # actionable, but is still excluded from that admission's history.
+            if outcome.completion_timestamp < datetime.fromisoformat(row["signal_timestamp"]):
+                raise ValueError("baseline outcome completed before its signal")
+            if row["completion_timestamp"] is not None:
+                if (
+                    row["completion_timestamp"] != _aware(outcome.completion_timestamp).isoformat()
+                    or row["gross_r"] != outcome.gross_r
+                ):
+                    raise ValueError("completed baseline outcomes are immutable")
+                return
+            connection.execute(
+                """UPDATE runtime_session_hard_payoffs
+                SET completion_timestamp = ?, gross_r = ?
+                WHERE signal_id = ? AND completion_timestamp IS NULL""",
+                (_aware(outcome.completion_timestamp).isoformat(), outcome.gross_r, signal_id),
+            )
+
+    def assess_payoff(self, signal_id: str) -> CostAwareAssessment:
+        """Atomically freeze the original decision from strictly prior pooled completions."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM runtime_session_hard_payoffs WHERE signal_id = ?", (signal_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError("payoff admission requires a registered baseline opportunity")
+            if row["assessment"] is not None:
+                values = json.loads(row["assessment"])
+                values["decision"] = CostAwareDecision(values["decision"])
+                return CostAwareAssessment(**values)
+            payload = json.loads(row["payload"])
+            prior = connection.execute(
+                """SELECT opportunity_id, completion_timestamp, gross_r
+                FROM runtime_session_hard_payoffs
+                WHERE completion_timestamp < ? ORDER BY completion_timestamp, opportunity_id""",
+                (row["signal_timestamp"],),
+            ).fetchall()
+            assessment = assess_pooled_payoff(
+                opportunity_id=row["opportunity_id"],
+                signal_timestamp=datetime.fromisoformat(row["signal_timestamp"]),
+                entry_reference_price=payload["entry_reference_price"],
+                initial_stop_price=payload["initial_stop_price"],
+                estimated_round_trip_cost_bps=payload["estimated_round_trip_cost_bps"],
+                observations=(
+                    CompletedPayoff(
+                        item["opportunity_id"],
+                        datetime.fromisoformat(item["completion_timestamp"]),
+                        item["gross_r"],
+                    )
+                    for item in prior
+                ),
+            )
+            connection.execute(
+                """UPDATE runtime_session_hard_payoffs SET assessment = ?
+                WHERE signal_id = ?""",
+                (json.dumps(asdict(assessment), sort_keys=True), signal_id),
+            )
+        return assessment
+
+    def payoff_audit(self) -> tuple[dict[str, Any], ...]:
+        """Expose admission, hypothetical completion, and actual fills separately."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM runtime_session_hard_payoffs ORDER BY signal_timestamp, signal_id"
+            ).fetchall()
+        return tuple(dict(row) for row in rows)
+
+    def record_payoff_executions(self, signal_ids: Sequence[str]) -> None:
+        if not signal_ids:
+            return
+        with self._connect() as connection:
+            connection.executemany(
+                """UPDATE runtime_session_hard_payoffs SET actually_executed = 1
+                WHERE signal_id = ? AND actually_executed = 0""",
+                ((signal_id,) for signal_id in signal_ids),
+            )
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
@@ -744,6 +938,8 @@ class StockerRuntime:
         }
         self._context_provider = context_provider
         self._entry_source = entry_source
+        self._payoff_history_task: asyncio.Task[None] | None = None
+        self._payoff_fetch_minute: datetime | None = None
         self._session_resolver = session_resolver or ExchangeSessionResolver()
         self._clock = clock or (lambda: datetime.now(tz=UTC))
         self._logger = logger or configure_logging()
@@ -973,6 +1169,10 @@ class StockerRuntime:
 
         self._stopping = True
         self._state = ApplicationState.STOPPING
+        if self._payoff_history_task is not None:
+            self._payoff_history_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._payoff_history_task
         async with self._cycle_lock:
             for instance in self._manager.list_runs():
                 if self._run_states.get(instance.config.run_id) is not RunRuntimeState.DISABLED:
@@ -2111,6 +2311,9 @@ class StockerRuntime:
             )
 
     async def _observe_entries(self, now: datetime) -> None:
+        # Register all baseline opportunities before resolving outcomes/admissions,
+        # so pool availability cannot depend on the order of runs in this cycle.
+        prepared = []
         for instance in self._manager.list_runs():
             run = instance.config
             if self._run_states.get(run.run_id) not in {
@@ -2134,10 +2337,71 @@ class StockerRuntime:
                     instruments,
                     session=market.session,
                     now=now,
-                    signals=strategy.signals,
+                    signals=tuple(
+                        signal
+                        for signal in strategy.signals
+                        if signal.status is SignalStatus.WAITING_FOR_ENTRY
+                    ),
                 )
-                attempts = await strategy_runtime.observe_and_execute(bars, instruments)
+                intents = strategy_runtime.observe(bars)
+                for signal in intents:
+                    if is_baseline_payoff_candidate(signal):
+                        instrument = (
+                            instruments.get(signal.underlying_con_id)
+                            if signal.underlying_con_id
+                            else None
+                        )
+                        if instrument is not None:
+                            self._store.register_payoff(
+                                signal,
+                                instrument,
+                                run,
+                                self._config.session_hard_hv_round_trip_cost_bps,
+                            )
                 self._store.save_signals(strategy.signals, now)
+                prepared.append((run, market, strategy, strategy_runtime, instruments, intents))
+            except Exception as exc:
+                self._set_run(run.run_id, RunRuntimeState.DEGRADED, str(exc))
+                self._logger.error("run_degraded", run_id=run.run_id, reason=str(exc))
+                continue
+
+        # Shadow tracking also runs for historical/removed universes and disabled
+        # runs, using the original persisted qualified instrument and run identity.
+        await self._advance_pending_payoffs(now, fetch_missing=False)
+        ready_for_execution = []
+        for run, market, strategy, strategy_runtime, instruments, intents in prepared:
+            try:
+                admitted = []
+                for signal in intents:
+                    if is_baseline_payoff_candidate(signal):
+                        if signal.underlying_con_id not in instruments:
+                            continue
+                        assessment = self._store.assess_payoff(signal.signal_id)
+                        strategy.record_admission(signal.signal_id, assessment.decision.value)
+                        self._logger.info(
+                            "session_hard_cost_admission",
+                            symbol=signal.symbol,
+                            signal_id=signal.signal_id,
+                            setup="HIGH_PRE_MOVE_DOWN",
+                            signal_timestamp=str(signal.signal_timestamp),
+                            **asdict(assessment),
+                        )
+                        if not assessment.take_trade:
+                            continue
+                    admitted.append(signal)
+                self._store.save_signals(strategy.signals, now)
+                ready_for_execution.append(
+                    (run, market, strategy, strategy_runtime, instruments, admitted)
+                )
+            except Exception as exc:
+                self._set_run(run.run_id, RunRuntimeState.DEGRADED, str(exc))
+                self._logger.error("run_degraded", run_id=run.run_id, reason=str(exc))
+
+        # Freeze every simultaneous decision before broker awaits can allow a
+        # background history completion to change the pool between runs.
+        for run, market, strategy, strategy_runtime, instruments, admitted in ready_for_execution:
+            try:
+                attempts = await strategy_runtime.execute_observed(admitted, instruments)
             except Exception as exc:
                 self._set_run(run.run_id, RunRuntimeState.DEGRADED, str(exc))
                 self._logger.error("run_degraded", run_id=run.run_id, reason=str(exc))
@@ -2205,6 +2469,69 @@ class StockerRuntime:
                     f"{opportunity.pre_move_m:.17g}|{index}"
                 )
                 self._store.save_cohort(identity, opportunity)
+
+        # Historical downloads never stand between a ready signal and submission.
+        minute = now.replace(second=0, microsecond=0)
+        if (
+            not self._stopping
+            and self._payoff_fetch_minute != minute
+            and (self._payoff_history_task is None or self._payoff_history_task.done())
+        ):
+            self._payoff_fetch_minute = minute
+            self._payoff_history_task = asyncio.create_task(
+                self._advance_pending_payoffs(now, fetch_missing=True)
+            )
+
+    async def _advance_pending_payoffs(
+        self,
+        now: datetime,
+        *,
+        fetch_missing: bool = False,
+    ) -> None:
+        pending_by_run: dict[str, list[tuple[StrategySignal, QualifiedInstrument, RunConfig]]] = {}
+        for item in self._store.pending_payoffs():
+            pending_by_run.setdefault(item[2].run_id, []).append(item)
+        for items in pending_by_run.values():
+            run = items[0][2]
+            instruments = {item[1].con_id: item[1] for item in items}
+            try:
+                bars = await self._entry_source.bars_for(
+                    run,
+                    instruments,
+                    session=items[0][0].session,
+                    now=now,
+                    signals=tuple(item[0] for item in items),
+                    fetch_missing=fetch_missing,
+                )
+            except Exception as exc:
+                self._logger.warning(
+                    "session_hard_shadow_incomplete", run_id=run.run_id, reason=str(exc)
+                )
+                continue
+            for signal, instrument, _run in items:
+                try:
+                    outcome = hypothetical_baseline_outcome(
+                        signal,
+                        bars.get(instrument.con_id, ()),
+                        as_of=now,
+                    )
+                    if outcome is not None:
+                        self._store.complete_payoff(signal.signal_id, outcome)
+                        self._logger.info(
+                            "session_hard_baseline_completed",
+                            signal_id=signal.signal_id,
+                            symbol=signal.symbol,
+                            gross_r=outcome.gross_r,
+                            completion_timestamp=outcome.completion_timestamp.isoformat(),
+                        )
+                except Exception as exc:
+                    self._logger.warning(
+                        "session_hard_shadow_incomplete",
+                        signal_id=signal.signal_id,
+                        symbol=signal.symbol,
+                        reason=str(exc),
+                    )
+        self._store.record_payoff_executions(self._ledger.entry_fill_signal_ids())
 
     def _qualification_for(
         self, run_ids: set[str]
@@ -2664,20 +2991,31 @@ class IbkrSessionDataSource:
         session: date,
         now: datetime,
         signals: Sequence[StrategySignal],
+        fetch_missing: bool = True,
     ) -> Mapping[int, Sequence[EntryBar]]:
         causal_now = _aware(now)
         completed_minute = causal_now.replace(second=0, microsecond=0) - timedelta(minutes=1)
-        required_by_con_id: dict[int, set[datetime]] = {}
+        required_by_con_id: dict[tuple[int, date], set[datetime]] = {}
         for signal in signals:
+            shadow = signal.baseline_eligible and is_baseline_payoff_candidate(signal)
             if (
                 signal.run_id != run.run_id
-                or signal.session != session
                 or signal.underlying_con_id is None
-                or signal.status is not SignalStatus.WAITING_FOR_ENTRY
+                or (
+                    not shadow
+                    and (
+                        signal.session != session
+                        or signal.status is not SignalStatus.WAITING_FOR_ENTRY
+                    )
+                )
             ):
                 continue
-            start = _aware(signal.t0)
-            if causal_now > start + timedelta(minutes=5):
+            start = (
+                _aware(signal.entry_timestamp)
+                if shadow and signal.entry_timestamp
+                else _aware(signal.t0)
+            )
+            if not shadow and causal_now > start + timedelta(minutes=5):
                 self._logger.info(
                     "entry_window_not_replayed",
                     run_id=run.run_id,
@@ -2685,16 +3023,21 @@ class IbkrSessionDataSource:
                     con_id=signal.underlying_con_id,
                 )
                 continue
-            end = min(start + timedelta(minutes=4), completed_minute)
+            horizon_end = (
+                _aware(signal.t0) + timedelta(minutes=14)
+                if shadow
+                else start + timedelta(minutes=4)
+            )
+            end = min(horizon_end, completed_minute)
             if end < start:
                 continue
-            required_by_con_id.setdefault(signal.underlying_con_id, set()).update(
+            required_by_con_id.setdefault((signal.underlying_con_id, signal.session), set()).update(
                 start + timedelta(minutes=index)
                 for index in range(int((end - start).total_seconds() // 60) + 1)
             )
 
         result: dict[int, tuple[EntryBar, ...]] = {}
-        for con_id, required_set in required_by_con_id.items():
+        for (con_id, _session), required_set in required_by_con_id.items():
             instrument = instruments.get(con_id)
             if instrument is None:
                 self._logger.warning(
@@ -2709,14 +3052,17 @@ class IbkrSessionDataSource:
                 snapshot = self._cache.get_required_history(
                     instrument, self._ONE_MINUTE, required, as_of=causal_now
                 )
-                if snapshot.status is not HistoryStatus.READY:
+                if snapshot.status is not HistoryStatus.READY and fetch_missing:
+                    duration_seconds = max(
+                        900, int((required[-1] - required[0]).total_seconds()) + 60
+                    )
                     await self._history.fetch_and_store(
                         instrument,
                         bar_size="1 min",
-                        duration="900 S",
+                        duration=f"{duration_seconds} S",
                         what_to_show="TRADES",
                         regular_trading_hours=True,
-                        end_time=causal_now,
+                        end_time=min(causal_now, required[-1] + timedelta(minutes=1)),
                     )
                     snapshot = self._cache.get_required_history(
                         instrument, self._ONE_MINUTE, required, as_of=causal_now
@@ -2729,14 +3075,18 @@ class IbkrSessionDataSource:
                         symbol=instrument.symbol,
                         reason=snapshot.reason,
                     )
-                result[con_id] = tuple(
-                    EntryBar(
-                        timestamp=_intraday_timestamp(bar.timestamp),
-                        open=bar.open,
-                        high=bar.high,
-                        low=bar.low,
-                    )
-                    for bar in snapshot.bars
+                result[con_id] = (
+                    *result.get(con_id, ()),
+                    *tuple(
+                        EntryBar(
+                            timestamp=_intraday_timestamp(bar.timestamp),
+                            open=bar.open,
+                            high=bar.high,
+                            low=bar.low,
+                            close=bar.close,
+                        )
+                        for bar in snapshot.bars
+                    ),
                 )
             except (IbkrError, ValueError) as exc:
                 self._logger.warning(
@@ -2880,11 +3230,13 @@ def build_runtime(
             activity_snapshots=snapshots,
         )
 
+    runtime_store = RuntimeStore(database_path)
+    runtime_store.backfill_payoffs(runs.runs, history_cache)
     return StockerRuntime(
         config=runs,
         execution_router=execution_router,
         ledger=ExecutionLedger(database_path),
-        store=RuntimeStore(database_path),
+        store=runtime_store,
         qualify=qualify,
         stage5=stage5,
         stage5_by_strategy=stage5_by_strategy,

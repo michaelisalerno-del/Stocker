@@ -263,3 +263,18 @@ def test_activity_profile_and_generated_lineage_fail_closed_when_mislabeled() ->
     payload["candidate_screen_id"] = "MISLABELED"
     with pytest.raises(ValueError, match="matching immutable lineage"):
         RunConfig.model_validate(payload)
+
+
+def test_changing_markets_or_disabling_run_preserves_hv_cost_input():
+    builder = UniverseRunBuilder()
+    config = empty_config().model_copy(update={"session_hard_hv_round_trip_cost_bps": 7.5})
+    updated, run = builder.add(
+        config,
+        market_id=MarketId.UK_LSE,
+        cap_bucket=CapBucket.SMALL,
+        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
+        environment=Environment.PAPER,
+    )
+    assert updated.session_hard_hv_round_trip_cost_bps == 7.5
+    assert builder.disable(updated, run.run_id).session_hard_hv_round_trip_cost_bps == 7.5

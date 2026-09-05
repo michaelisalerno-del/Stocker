@@ -208,6 +208,8 @@ class StrategySignal:
     signal_timestamp: datetime | None = None
     stop_distance_m: float = 0.50
     target_distance_m: float = 1.00
+    baseline_eligible: bool = False
+    admission_decision: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,11 +218,16 @@ class EntryBar:
     open: float
     high: float
     low: float
+    close: float | None = None
 
     def __post_init__(self) -> None:
         if self.timestamp.tzinfo is None or self.timestamp.utcoffset() is None:
             raise ValueError("entry bar timestamp must be timezone-aware")
         values = (self.open, self.high, self.low)
+        if self.close is not None and (
+            not isfinite(self.close) or not self.low <= self.close <= self.high
+        ):
+            raise ValueError("entry bar close must be within its high/low")
         if not all(isfinite(value) and value > 0.0 for value in values):
             raise ValueError("entry bar prices must be finite and positive")
         if self.high < max(self.open, self.low) or self.low > min(self.open, self.high):
@@ -262,6 +269,14 @@ class SessionHardStructureDStrategy:
                 self._signals.values(),
                 key=lambda item: (item.t0, item.symbol, item.signal_id),
             )
+        )
+
+    def record_admission(self, signal_id: str, decision: str) -> None:
+        """Attach admission audit without changing frozen qualification/ranking."""
+        self._signals[signal_id] = replace(
+            self._signals[signal_id],
+            baseline_eligible=True,
+            admission_decision=decision,
         )
 
     def restore_signals(self, signals: Sequence[StrategySignal]) -> None:
@@ -561,6 +576,16 @@ class SessionHardStructureDStrategy:
             if observed_timestamp not in self._observed_entry_bars.get(signal_id, {}):
                 return False
         return True
+
+
+def nominal_exit_prices(signal: StrategySignal) -> tuple[float, float]:
+    """Canonical unrounded geometry shared by risk sizing and baseline accounting."""
+    if signal.entry_reference is None or signal.m_price is None:
+        raise ValueError("entry reference and M are required for nominal geometry")
+    return (
+        signal.entry_reference + signal.stop_distance_m * signal.m_price,
+        signal.entry_reference - signal.target_distance_m * signal.m_price,
+    )
 
 
 def _signal_id(

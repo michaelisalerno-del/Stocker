@@ -498,6 +498,26 @@ def _runtime(
     )
 
 
+def test_entry_observation_precedes_bulk_preparation_and_refreshes_clock(tmp_path, monkeypatch):
+    clock = MutableClock()
+    runtime = _runtime(tmp_path, FakeBroker(), clock=clock)
+    asyncio.run(runtime.start())
+    events = []
+
+    async def observe(now):
+        events.append(("entries", now))
+
+    async def prepare(now):
+        events.append(("prepare", now))
+        clock.now += timedelta(seconds=65)
+
+    monkeypatch.setattr(runtime, "_observe_entries", observe)
+    monkeypatch.setattr(runtime, "_prepare_upcoming_expected_moves", prepare)
+    asyncio.run(runtime.poll_once())
+    assert events[0] == ("entries", NOW)
+    assert events[-1] == ("entries", NOW + timedelta(seconds=65))
+
+
 def test_clean_startup_reconciles_before_reaching_ready(tmp_path: Path) -> None:
     broker = FakeBroker()
     runtime = _runtime(tmp_path, broker)

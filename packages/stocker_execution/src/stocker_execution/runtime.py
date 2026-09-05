@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from collections.abc import Awaitable, Callable, Mapping, Sequence
-from contextlib import suppress
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Protocol, cast
 from zoneinfo import ZoneInfo
 
@@ -1421,7 +1422,21 @@ class StockerRuntime:
         if self._state is not ApplicationState.READY:
             return self.status()
         async with self._cycle_lock:
-            return await self._poll_once()
+            with self._timing("cycle"):
+                return await self._poll_once()
+
+    @contextmanager
+    def _timing(self, operation: str) -> Iterator[None]:
+        started = perf_counter()
+        try:
+            yield
+        finally:
+            elapsed_ms = (perf_counter() - started) * 1000
+            if elapsed_ms >= 1000:
+                self._logger.info(
+                    "runtime_stage_timing", operation=operation,
+                    elapsed_ms=round(elapsed_ms, 1),
+                )
 
     async def _poll_once(self) -> RuntimeStatus:
         """Process one cycle while graceful shutdown is excluded."""
@@ -1438,13 +1453,21 @@ class StockerRuntime:
         if not any(self._environment_ready.values()):
             return self.status()
         sync_due = self._last_sync is None or now - self._last_sync >= self._broker_sync_interval
-        if sync_due and not await self._refresh_execution_state(now):
-            return self.status()
+        if sync_due:
+            with self._timing("broker_reconciliation"):
+                if not await self._refresh_execution_state(now):
+                    return self.status()
 
-        await self._refresh_activity_sessions(now)
-        await self._refresh_scheduled_activity_shortlists(now)
-        await self._prepare_upcoming_expected_moves(now)
+        # Existing waiting entries precede bulk work. Reconciliation stays first.
+        with self._timing("entries_before_preparation"):
+            await self._observe_entries(_aware(self._clock()))
+        with self._timing("session_and_shortlist_refresh"):
+            await self._refresh_activity_sessions(_aware(self._clock()))
+            await self._refresh_scheduled_activity_shortlists(_aware(self._clock()))
+        with self._timing("expected_move_preparation"):
+            await self._prepare_upcoming_expected_moves(_aware(self._clock()))
 
+        now = _aware(self._clock())
         due: dict[tuple[date, datetime, int], list[RunInstance]] = {}
         for instance in self._manager.list_runs():
             run = instance.config
@@ -1486,8 +1509,10 @@ class StockerRuntime:
                     due.setdefault((market.session, t0, checkpoint), []).append(instance)
 
         for (session, t0, checkpoint), instances in sorted(due.items()):
-            await self._evaluate_group(instances, session=session, t0=t0, checkpoint=checkpoint)
-        await self._observe_entries(now)
+            with self._timing("checkpoint_evaluation"):
+                await self._evaluate_group(instances, session=session, t0=t0, checkpoint=checkpoint)
+        with self._timing("entries_after_checkpoints"):
+            await self._observe_entries(_aware(self._clock()))
         return self.status()
 
     async def _prepare_upcoming_expected_moves(self, now: datetime) -> None:
@@ -2319,6 +2344,7 @@ class StockerRuntime:
             instruments = {request.instrument.con_id: request.instrument for request in requests}
             try:
                 strategy = self._strategies[run.run_id]
+                now = _aware(self._clock())
                 expired = strategy.expire_waiting_before(now)
                 if expired:
                     self._store.save_signals(expired, now)

@@ -73,6 +73,8 @@ class ExecutionRecord:
     per_share_initial_risk: float | None
     rejection_reason: str | None
     diagnostic: bool
+    entry_limit_price: float | None = None
+    entry_expires_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +228,8 @@ class ExecutionLedger:
             self._migrate_execution_fill_identity(connection)
             self._ensure_column(connection, "execution_plans", "initial_risk_budget", "REAL")
             self._ensure_column(connection, "execution_plans", "per_share_initial_risk", "REAL")
+            self._ensure_column(connection, "execution_plans", "entry_limit_price", "REAL")
+            self._ensure_column(connection, "execution_plans", "entry_expires_at", "TEXT")
 
     @staticmethod
     def _ensure_column(
@@ -275,8 +279,8 @@ class ExecutionLedger:
                         environment, expected_account, con_id, symbol, side,
                         intended_quantity, entry_reference, stop_price, target_price,
                         status, created_at, initial_risk_budget, per_share_initial_risk,
-                        diagnostic
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        diagnostic, entry_limit_price, entry_expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         plan.order_plan_id,
@@ -298,6 +302,8 @@ class ExecutionLedger:
                         plan.initial_risk_budget,
                         plan.per_share_initial_risk,
                         int(plan.diagnostic),
+                        plan.entry_limit_price,
+                        plan.entry_expires_at.isoformat() if plan.entry_expires_at else None,
                     ),
                 )
             return True
@@ -1127,6 +1133,9 @@ def _record_from_row(row: sqlite3.Row) -> ExecutionRecord:
         realized_pnl=_optional_float(row["realized_pnl"]),
         initial_risk_budget=_optional_float(row["initial_risk_budget"]),
         per_share_initial_risk=_optional_float(row["per_share_initial_risk"]),
+        entry_limit_price=_optional_float(row["entry_limit_price"]),
+        entry_expires_at=(datetime.fromisoformat(row["entry_expires_at"])
+                          if row["entry_expires_at"] else None),
         rejection_reason=(
             str(row["rejection_reason"]) if row["rejection_reason"] is not None else None
         ),

@@ -14,6 +14,7 @@ class OrderAction(StrEnum):
 
 class EntryOrderType(StrEnum):
     MARKET = "MARKET"
+    LIMIT = "LIMIT"
 
 
 class OrderLifecycle(StrEnum):
@@ -62,6 +63,8 @@ class OrderPlan:
     initial_risk_budget: float | None = None
     per_share_initial_risk: float | None = None
     diagnostic: bool = False
+    entry_limit_price: float | None = None
+    entry_expires_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

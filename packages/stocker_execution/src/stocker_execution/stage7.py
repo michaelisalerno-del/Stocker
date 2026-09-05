@@ -1,9 +1,10 @@
 """Stage 7 risk, planning, and environment-scoped execution orchestration."""
 
+import asyncio
 import hashlib
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from enum import StrEnum
 from math import floor, isfinite
@@ -23,7 +24,7 @@ from stocker_execution.execution_models import (
     OrderLifecycle,
     OrderPlan,
 )
-from stocker_execution.ibkr import BrokerSession, QualifiedInstrument
+from stocker_execution.ibkr import BrokerSession, CurrentQuote, QualifiedInstrument
 from stocker_execution.session_hard_structure_d import (
     EntryBar,
     SessionHardStructureDStrategy,
@@ -31,6 +32,11 @@ from stocker_execution.session_hard_structure_d import (
     StrategySignal,
     nominal_exit_prices,
 )
+
+
+MAX_ENTRY_SIGNAL_AGE = timedelta(seconds=60)
+MAX_ENTRY_QUOTE_AGE = timedelta(seconds=5)
+ENTRY_ORDER_LIFETIME = timedelta(seconds=5)
 
 
 class RiskRejection(StrEnum):
@@ -44,6 +50,9 @@ class RiskRejection(StrEnum):
 
 class ExecutionResultCode(StrEnum):
     SUBMITTED = "SUBMITTED"
+    STALE_SIGNAL = "STALE_SIGNAL"
+    ENTRY_QUOTE_UNAVAILABLE = "ENTRY_QUOTE_UNAVAILABLE"
+    ENTRY_PRICE_MOVED = "ENTRY_PRICE_MOVED"
     EXECUTION_ENVIRONMENT_UNAVAILABLE = "EXECUTION_ENVIRONMENT_UNAVAILABLE"
     ACCOUNT_OR_ENVIRONMENT_MISMATCH = "ACCOUNT_OR_ENVIRONMENT_MISMATCH"
     BROKER_DISCONNECTED = "BROKER_DISCONNECTED"
@@ -111,6 +120,8 @@ class ExecutionBroker(Protocol):
     async def account_state(self) -> BrokerAccountState: ...
 
     async def minimum_tick(self, instrument: QualifiedInstrument) -> float: ...
+
+    async def entry_quote(self, instrument: QualifiedInstrument) -> CurrentQuote: ...
 
     async def submit_protected_order(
         self, plan: OrderPlan, instrument: QualifiedInstrument
@@ -534,6 +545,52 @@ class Stage7ExecutionService:
                 str(exc),
                 actual_account=account_state.account,
             )
+        # A historical intrabar touch does not establish a currently executable price.
+        if not _fresh_entry_signal(order_intent, self._clock()):
+            return self._outcome(
+                order_intent.signal_id, ExecutionResultCode.STALE_SIGNAL,
+                "entry signal is missing, future-dated, or more than 60 seconds old",
+                actual_account=account_state.account,
+            )
+        try:
+            quote = await asyncio.wait_for(self._broker.entry_quote(instrument), timeout=4.0)
+        except Exception as exc:
+            return self._outcome(
+                order_intent.signal_id, ExecutionResultCode.ENTRY_QUOTE_UNAVAILABLE,
+                f"fresh live bid/ask unavailable: {exc}", actual_account=account_state.account,
+            )
+        checked_at = self._clock()
+        if not _fresh_entry_signal(order_intent, checked_at):
+            return self._outcome(
+                order_intent.signal_id, ExecutionResultCode.STALE_SIGNAL,
+                "entry signal expired while awaiting a live quote",
+                actual_account=account_state.account,
+            )
+        if not _valid_entry_quote(quote, instrument, checked_at):
+            return self._outcome(
+                order_intent.signal_id, ExecutionResultCode.ENTRY_QUOTE_UNAVAILABLE,
+                "live, correctly identified, uncrossed bid/ask no older than 5 seconds required",
+                actual_account=account_state.account,
+            )
+        limit = _to_tick(plan.entry_reference, minimum_tick, ROUND_CEILING)
+        assert quote.bid is not None and quote.ask is not None
+        if quote.bid < limit or quote.ask >= plan.stop_price:
+            return self._outcome(
+                order_intent.signal_id, ExecutionResultCode.ENTRY_PRICE_MOVED,
+                f"bid={quote.bid:g} ask={quote.ask:g}; required bid>={limit:g} "
+                f"and ask<{plan.stop_price:g}; reference={plan.entry_reference:g}",
+                actual_account=account_state.account,
+            )
+        assert order_intent.signal_timestamp is not None
+        plan = replace(
+            plan, created_at=checked_at, entry_order_type=EntryOrderType.LIMIT,
+            entry_limit_price=limit,
+            entry_expires_at=min(
+                checked_at + ENTRY_ORDER_LIFETIME,
+                order_intent.signal_timestamp + MAX_ENTRY_SIGNAL_AGE,
+                order_intent.t0 + timedelta(minutes=5),
+            ),
+        )
         if not self._ledger.reserve(plan, expected_account=self._expected_account):
             return self._outcome(
                 order_intent.signal_id,
@@ -786,6 +843,32 @@ def _to_tick(value: float, minimum_tick: float, rounding: str) -> float:
     price = Decimal(str(value))
     tick = Decimal(str(minimum_tick))
     return float((price / tick).to_integral_value(rounding=rounding) * tick)
+
+
+def _fresh_entry_signal(signal: StrategySignal, now: datetime) -> bool:
+    timestamp = signal.signal_timestamp
+    return (
+        timestamp is not None
+        and timestamp.tzinfo is not None and timestamp.utcoffset() is not None
+        and now.tzinfo is not None and now.utcoffset() is not None
+        and timedelta(0) <= now - timestamp < MAX_ENTRY_SIGNAL_AGE
+        and signal.t0.tzinfo is not None and signal.t0.utcoffset() is not None
+        and now < signal.t0 + timedelta(minutes=5)
+    )
+
+
+def _valid_entry_quote(quote: CurrentQuote, instrument: QualifiedInstrument, now: datetime) -> bool:
+    timestamp = quote.timestamp
+    return (
+        quote.con_id == instrument.con_id and quote.symbol == instrument.symbol
+        and quote.market_data_type == 1
+        and timestamp is not None and timestamp.tzinfo is not None
+        and timestamp.utcoffset() is not None
+        and timedelta(0) <= now - timestamp <= MAX_ENTRY_QUOTE_AGE
+        and quote.bid is not None and quote.ask is not None
+        and isfinite(quote.bid) and isfinite(quote.ask)
+        and 0 < quote.bid <= quote.ask
+    )
 
 
 def _rejected(reason: RiskRejection) -> Stage7RiskDecision:

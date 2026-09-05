@@ -30,7 +30,7 @@ from stocker_execution.execution_models import (
     OrderLifecycle,
     OrderRole,
 )
-from stocker_execution.ibkr import BrokerSession, QualifiedInstrument
+from stocker_execution.ibkr import BrokerSession, CurrentQuote, QualifiedInstrument
 from stocker_execution.runtime import (
     ApplicationState,
     MarketSession,
@@ -90,6 +90,20 @@ class FakeBroker:
         self.events: list[str] = []
         self.reconciliation_gate: asyncio.Event | None = None
         self.reconciliation_waiting: asyncio.Event | None = None
+        self.quote_clock = lambda: NOW
+        self.quote_bid = 99.5
+
+    async def entry_quote(self, instrument: QualifiedInstrument) -> CurrentQuote:
+        return CurrentQuote(
+            instrument.symbol,
+            instrument.con_id,
+            self.quote_clock(),
+            self.quote_bid,
+            self.quote_bid + 0.01,
+            None,
+            None,
+            1,
+        )
 
     async def connect(self) -> BrokerSession:
         self.events.append("connect")
@@ -451,6 +465,10 @@ def _runtime(
 ) -> StockerRuntime:
     selected_runs = runs or (_run(),)
     features = feature_service or FakeFeatureService()
+    clock = clock or MutableClock()
+    broker.quote_clock = clock
+    if live_broker is not None:
+        live_broker.quote_clock = clock
 
     async def qualify(active_runs: object) -> Stage5QualificationResult:
         instances = tuple(active_runs)
@@ -1150,8 +1168,11 @@ def test_hv_signal_uses_normal_stage7_paper_path_and_duplicate_protection(tmp_pa
     assert plan.environment is Environment.PAPER
 
 
-def test_restart_restores_hv_signal_and_executes_without_recalculating_stage5(
+@pytest.mark.parametrize("restart_second, expected_orders", [(90, 1), (120, 0)])
+def test_restart_restores_hv_signal_and_executes_only_while_fresh(
     tmp_path: Path,
+    restart_second,
+    expected_orders,
 ) -> None:
     clock = MutableClock()
     first_features = FakeFeatureService(calculation_version="STAGE5_PRE_MOVE_HV_V1")
@@ -1184,13 +1205,14 @@ def test_restart_restores_hv_signal_and_executes_without_recalculating_stage5(
         entry_source=TriggerEntrySource(),
     )
     asyncio.run(restored.start())
-    clock.now = datetime(2026, 9, 2, 14, 2, tzinfo=UTC)
+    clock.now = datetime(2026, 9, 2, 14, 0, tzinfo=UTC) + timedelta(seconds=restart_second)
     asyncio.run(restored.poll_once())
 
     assert first_features.calls == 1
     assert second_features.calls == 0
-    assert len(broker.submitted) == 1
-    assert broker.submitted[0].strategy_version == SESSION_HARD_HV_METHOD.strategy_version
+    assert len(broker.submitted) == expected_orders
+    if broker.submitted:
+        assert broker.submitted[0].strategy_version == SESSION_HARD_HV_METHOD.strategy_version
 
 
 def test_late_start_marks_missed_checkpoint_without_evaluating(tmp_path: Path) -> None:
@@ -1574,7 +1596,7 @@ def test_restart_restores_waiting_signal_without_reevaluating_checkpoint(
         entry_source=TriggerEntrySource(),
     )
     asyncio.run(restored.start())
-    clock.now = datetime(2026, 9, 2, 14, 2, tzinfo=UTC)
+    clock.now = datetime(2026, 9, 2, 14, 1, 30, tzinfo=UTC)
     asyncio.run(restored.poll_once())
 
     assert len(second_broker.submitted) == 1

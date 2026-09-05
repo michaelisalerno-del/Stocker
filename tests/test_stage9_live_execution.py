@@ -111,6 +111,9 @@ def _mixed_runtime(
 ) -> StockerRuntime:
     paper_run = _runtime_run("paper-run")
     live_run = _runtime_run("live-run", environment=Environment.LIVE)
+    clock = MutableClock()
+    paper.quote_clock = live.quote_clock = clock
+    paper.quote_bid = live.quote_bid = 100.0
     router = ExecutionRouter(
         (
             ExecutionDestination(Environment.PAPER, "DU123456", paper),
@@ -138,7 +141,7 @@ def _mixed_runtime(
         context_provider=EmptyContextProvider(),
         entry_source=EmptyEntrySource(),
         session_resolver=FixedSessionResolver(),
-        clock=MutableClock(),
+        clock=clock,
     )
 
 
@@ -183,6 +186,7 @@ def test_live_run_reconciles_and_submits_through_the_same_execution_service(tmp_
         expected_account="U123456",
         broker=broker,
         ledger=ExecutionLedger(tmp_path / "ledger.sqlite3"),
+        clock=lambda: datetime(2026, 9, 2, 14, 31, 1, tzinfo=UTC),
     )
 
     assert service.run_environment is Environment.LIVE
@@ -317,6 +321,7 @@ def test_mixed_runtime_dispatches_each_signal_to_its_selected_environment(tmp_pa
     live = EnvironmentBroker(Environment.LIVE, "U123456")
     runtime = _mixed_runtime(tmp_path, paper, live)
     asyncio.run(runtime.start())
+    runtime._clock.now = datetime(2026, 9, 2, 14, 31, 1, tzinfo=UTC)
 
     paper_result = asyncio.run(runtime._execution["paper-run"].execute(_intent(), _instrument()))
     live_intent = replace(_intent(), run_id="live-run", signal_id="live-signal")
@@ -339,12 +344,14 @@ def test_same_instrument_uses_isolated_paper_and_live_account_state(tmp_path) ->
         expected_account="DU123456",
         broker=paper,
         ledger=ledger,
+        clock=lambda: datetime(2026, 9, 2, 14, 31, 1, tzinfo=UTC),
     )
     live_service = Stage7ExecutionService(
         run=_run(Environment.LIVE).model_copy(update={"run_id": "live-run"}),
         expected_account="U123456",
         broker=live,
         ledger=ledger,
+        clock=lambda: datetime(2026, 9, 2, 14, 31, 1, tzinfo=UTC),
     )
     live_intent = replace(_intent(), run_id="live-run", signal_id="live-signal-1")
 
@@ -563,6 +570,7 @@ def test_order_and_position_records_never_reconcile_across_environments(tmp_path
             expected_account=source_account,
             broker=source_broker,
             ledger=ledger,
+            clock=lambda: datetime(2026, 9, 2, 14, 31, 1, tzinfo=UTC),
         )
         assert asyncio.run(source.reconcile()).ok
         submitted = asyncio.run(source.execute(source_intent, _instrument()))

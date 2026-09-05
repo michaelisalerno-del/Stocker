@@ -1,7 +1,8 @@
 """Reproduce an unavailable IBKR completed-order endpoint at the real adapter seam."""
 
 import asyncio
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,14 +13,34 @@ from stocker_execution.execution_ledger import ExecutionLedger
 from stocker_execution.execution_models import BrokerFill, BrokerOrderIds, OrderAction
 from stocker_execution.ibkr import IbkrConnection
 from stocker_execution.stage7 import Stage7ExecutionService
-from test_stage7_execution import _instrument, _intent, _run
+from test_stage7_execution import _instrument, _run
+from test_stage7_execution import _intent as _original_intent
 from test_stage7_ibkr import FakeOrderClient, _config, _plan
+
+
+def _intent():
+    now = datetime.now(tz=UTC)
+    return replace(
+        _original_intent(),
+        t0=now - timedelta(minutes=1),
+        entry_timestamp=now - timedelta(minutes=1),
+        signal_timestamp=now,
+    )
 
 
 class UnavailableHistoryClient(FakeOrderClient):
     def __init__(self, *, account: str = "DU123456") -> None:
         super().__init__(account=account)
         self.live_trades: list[object] = []
+
+    def reqMarketDataType(self, market_data_type):
+        assert market_data_type == 1
+
+    def reqMktData(self, contract, **kwargs):
+        return SimpleNamespace(time=datetime.now(tz=UTC), bid=100.0, ask=100.01, marketDataType=1)
+
+    def cancelMktData(self, contract):
+        pass
 
     async def reqCompletedOrdersAsync(self, apiOnly: bool) -> list[object]:
         self.completed_order_requests += 1
@@ -40,7 +61,7 @@ def service_for(
         expected_account=client.accounts[0],
         broker=connection,
         ledger=ExecutionLedger(path),
-        clock=lambda: datetime(2026, 9, 2, 14, 31, 1, tzinfo=UTC),
+        clock=lambda: datetime.now(tz=UTC),
     )
     return connection, service
 

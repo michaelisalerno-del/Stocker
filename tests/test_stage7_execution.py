@@ -18,7 +18,7 @@ from stocker_execution.execution_models import (
     OrderPlan,
     OrderRole,
 )
-from stocker_execution.ibkr import QualifiedInstrument
+from stocker_execution.ibkr import CurrentQuote, QualifiedInstrument
 from stocker_execution.session_hard_structure_d import (
     EntryBar,
     SessionHardStructureDStrategy,
@@ -78,6 +78,18 @@ class FakeExecutionBroker:
         if self.minimum_tick_error is not None:
             raise self.minimum_tick_error
         return 0.01
+
+    async def entry_quote(self, instrument: QualifiedInstrument) -> CurrentQuote:
+        return CurrentQuote(
+            instrument.symbol,
+            instrument.con_id,
+            datetime(2026, 9, 2, 14, 31, 1, tzinfo=UTC),
+            100.0,
+            100.01,
+            None,
+            None,
+            1,
+        )
 
     async def submit_protected_order(self, plan: object, instrument: object) -> BrokerOrderIds:
         if self.reject:
@@ -241,7 +253,7 @@ def test_new_orders_require_reconciliation_and_reconnect_invalidates_it(tmp_path
     assert broker.submitted == []
 
 
-def test_stage7_does_not_add_an_unowned_expiry_to_stage6_intent(tmp_path: Path) -> None:
+def test_stage7_rejects_an_obsolete_stage6_intent(tmp_path: Path) -> None:
     broker = FakeExecutionBroker()
     service = _service(tmp_path / "ledger.sqlite3", broker)
     assert asyncio.run(service.reconcile()).ok
@@ -250,8 +262,8 @@ def test_stage7_does_not_add_an_unowned_expiry_to_stage6_intent(tmp_path: Path) 
 
     result = asyncio.run(service.execute(stale, _instrument()))
 
-    assert result.code is ExecutionResultCode.SUBMITTED
-    assert len(broker.submitted) == 1
+    assert result.code is ExecutionResultCode.STALE_SIGNAL
+    assert broker.submitted == []
 
 
 def test_account_state_failure_is_candidate_local(tmp_path: Path) -> None:

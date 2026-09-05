@@ -1434,7 +1434,8 @@ class StockerRuntime:
             elapsed_ms = (perf_counter() - started) * 1000
             if elapsed_ms >= 1000:
                 self._logger.info(
-                    "runtime_stage_timing", operation=operation,
+                    "runtime_stage_timing",
+                    operation=operation,
                     elapsed_ms=round(elapsed_ms, 1),
                 )
 

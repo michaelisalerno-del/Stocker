@@ -1134,8 +1134,9 @@ def _record_from_row(row: sqlite3.Row) -> ExecutionRecord:
         initial_risk_budget=_optional_float(row["initial_risk_budget"]),
         per_share_initial_risk=_optional_float(row["per_share_initial_risk"]),
         entry_limit_price=_optional_float(row["entry_limit_price"]),
-        entry_expires_at=(datetime.fromisoformat(row["entry_expires_at"])
-                          if row["entry_expires_at"] else None),
+        entry_expires_at=(
+            datetime.fromisoformat(row["entry_expires_at"]) if row["entry_expires_at"] else None
+        ),
         rejection_reason=(
             str(row["rejection_reason"]) if row["rejection_reason"] is not None else None
         ),

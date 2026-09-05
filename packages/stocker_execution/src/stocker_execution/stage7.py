@@ -33,7 +33,6 @@ from stocker_execution.session_hard_structure_d import (
     nominal_exit_prices,
 )
 
-
 MAX_ENTRY_SIGNAL_AGE = timedelta(seconds=60)
 MAX_ENTRY_QUOTE_AGE = timedelta(seconds=5)
 ENTRY_ORDER_LIFETIME = timedelta(seconds=5)
@@ -548,7 +547,8 @@ class Stage7ExecutionService:
         # A historical intrabar touch does not establish a currently executable price.
         if not _fresh_entry_signal(order_intent, self._clock()):
             return self._outcome(
-                order_intent.signal_id, ExecutionResultCode.STALE_SIGNAL,
+                order_intent.signal_id,
+                ExecutionResultCode.STALE_SIGNAL,
                 "entry signal is missing, future-dated, or more than 60 seconds old",
                 actual_account=account_state.account,
             )
@@ -556,19 +556,46 @@ class Stage7ExecutionService:
             quote = await asyncio.wait_for(self._broker.entry_quote(instrument), timeout=4.0)
         except Exception as exc:
             return self._outcome(
-                order_intent.signal_id, ExecutionResultCode.ENTRY_QUOTE_UNAVAILABLE,
-                f"fresh live bid/ask unavailable: {exc}", actual_account=account_state.account,
+                order_intent.signal_id,
+                ExecutionResultCode.ENTRY_QUOTE_UNAVAILABLE,
+                f"fresh live bid/ask unavailable: {exc}",
+                actual_account=account_state.account,
             )
         checked_at = self._clock()
+        if not self._broker.is_connected:
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.BROKER_DISCONNECTED,
+                actual_account=account_state.account,
+            )
+        if (
+            self._broker.account != self._expected_account
+            or self._broker.environment is not self._run.environment
+        ):
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.ACCOUNT_OR_ENVIRONMENT_MISMATCH,
+                "execution destination changed while awaiting the quote",
+                actual_account=self._broker.account,
+            )
+        if self._reconciled_epoch != self._broker.connection_epoch:
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED,
+                "broker connection changed while awaiting the quote",
+                actual_account=account_state.account,
+            )
         if not _fresh_entry_signal(order_intent, checked_at):
             return self._outcome(
-                order_intent.signal_id, ExecutionResultCode.STALE_SIGNAL,
+                order_intent.signal_id,
+                ExecutionResultCode.STALE_SIGNAL,
                 "entry signal expired while awaiting a live quote",
                 actual_account=account_state.account,
             )
         if not _valid_entry_quote(quote, instrument, checked_at):
             return self._outcome(
-                order_intent.signal_id, ExecutionResultCode.ENTRY_QUOTE_UNAVAILABLE,
+                order_intent.signal_id,
+                ExecutionResultCode.ENTRY_QUOTE_UNAVAILABLE,
                 "live, correctly identified, uncrossed bid/ask no older than 5 seconds required",
                 actual_account=account_state.account,
             )
@@ -576,18 +603,21 @@ class Stage7ExecutionService:
         assert quote.bid is not None and quote.ask is not None
         if quote.bid < limit or quote.ask >= plan.stop_price:
             return self._outcome(
-                order_intent.signal_id, ExecutionResultCode.ENTRY_PRICE_MOVED,
+                order_intent.signal_id,
+                ExecutionResultCode.ENTRY_PRICE_MOVED,
                 f"bid={quote.bid:g} ask={quote.ask:g}; required bid>={limit:g} "
                 f"and ask<{plan.stop_price:g}; reference={plan.entry_reference:g}",
                 actual_account=account_state.account,
             )
         assert order_intent.signal_timestamp is not None
         plan = replace(
-            plan, created_at=checked_at, entry_order_type=EntryOrderType.LIMIT,
+            plan,
+            created_at=checked_at,
+            entry_order_type=EntryOrderType.LIMIT,
             entry_limit_price=limit,
             entry_expires_at=min(
                 checked_at + ENTRY_ORDER_LIFETIME,
-                order_intent.signal_timestamp + MAX_ENTRY_SIGNAL_AGE,
+                _entry_deadline(order_intent),
                 order_intent.t0 + timedelta(minutes=5),
             ),
         )
@@ -849,24 +879,47 @@ def _fresh_entry_signal(signal: StrategySignal, now: datetime) -> bool:
     timestamp = signal.signal_timestamp
     return (
         timestamp is not None
-        and timestamp.tzinfo is not None and timestamp.utcoffset() is not None
-        and now.tzinfo is not None and now.utcoffset() is not None
-        and timedelta(0) <= now - timestamp < MAX_ENTRY_SIGNAL_AGE
-        and signal.t0.tzinfo is not None and signal.t0.utcoffset() is not None
-        and now < signal.t0 + timedelta(minutes=5)
+        and timestamp.tzinfo is not None
+        and timestamp.utcoffset() is not None
+        and now.tzinfo is not None
+        and now.utcoffset() is not None
+        and signal.t0.tzinfo is not None
+        and signal.t0.utcoffset() is not None
+        and (
+            signal.entry_timestamp is None
+            or (
+                signal.entry_timestamp.tzinfo is not None
+                and signal.entry_timestamp.utcoffset() is not None
+            )
+        )
+        and timestamp <= now < _entry_deadline(signal)
     )
+
+
+def _entry_deadline(signal: StrategySignal) -> datetime:
+    assert signal.signal_timestamp is not None
+    # Gap-at-open timestamps name the bar start, but production observes complete
+    # bars. Both gap and intrabar entries get at most one minute after observation.
+    observed_at = signal.signal_timestamp
+    if signal.entry_timestamp is not None:
+        observed_at = max(observed_at, signal.entry_timestamp + timedelta(minutes=1))
+    return min(observed_at + MAX_ENTRY_SIGNAL_AGE, signal.t0 + timedelta(minutes=5))
 
 
 def _valid_entry_quote(quote: CurrentQuote, instrument: QualifiedInstrument, now: datetime) -> bool:
     timestamp = quote.timestamp
     return (
-        quote.con_id == instrument.con_id and quote.symbol == instrument.symbol
+        quote.con_id == instrument.con_id
+        and quote.symbol == instrument.symbol
         and quote.market_data_type == 1
-        and timestamp is not None and timestamp.tzinfo is not None
+        and timestamp is not None
+        and timestamp.tzinfo is not None
         and timestamp.utcoffset() is not None
         and timedelta(0) <= now - timestamp <= MAX_ENTRY_QUOTE_AGE
-        and quote.bid is not None and quote.ask is not None
-        and isfinite(quote.bid) and isfinite(quote.ask)
+        and quote.bid is not None
+        and quote.ask is not None
+        and isfinite(quote.bid)
+        and isfinite(quote.ask)
         and 0 < quote.bid <= quote.ask
     )
 

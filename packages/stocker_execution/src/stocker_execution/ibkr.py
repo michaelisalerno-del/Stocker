@@ -736,25 +736,34 @@ class IbkrConnection:
         if plan.side is not OrderAction.SELL:
             raise IbkrError("Stage 7 supports only the first strategy's SHORT order plans")
 
-        from ib_async import LimitOrder, MarketOrder, StopOrder
+        from ib_async import LimitOrder, MarketOrder, Order, StopOrder
 
         parent_id = int(self._client.client.getReqId())
         target_id = int(self._client.client.getReqId())
         stop_id = int(self._client.client.getReqId())
         common = {"orderRef": plan.order_plan_id, "account": self.account}
+        parent: Order
         if plan.entry_order_type is EntryOrderType.LIMIT:
             limit = plan.entry_limit_price
             expiry = plan.entry_expires_at
             if (
-                limit is None or not isfinite(limit)
+                limit is None
+                or not isfinite(limit)
                 or not plan.target_price < plan.entry_reference <= limit < plan.stop_price
-                or expiry is None or expiry.tzinfo is None or expiry.utcoffset() is None
+                or expiry is None
+                or expiry.tzinfo is None
+                or expiry.utcoffset() is None
                 or expiry <= datetime.now(tz=UTC)
             ):
                 raise IbkrError("invalid or expired protected entry limit")
             parent = LimitOrder(
-                "SELL", plan.quantity, limit, orderId=parent_id, transmit=False,
-                tif="GTD", goodTillDate=expiry.astimezone(UTC).strftime("%Y%m%d-%H:%M:%S"),
+                "SELL",
+                plan.quantity,
+                limit,
+                orderId=parent_id,
+                transmit=False,
+                tif="GTD",
+                goodTillDate=expiry.astimezone(UTC).strftime("%Y%m%d-%H:%M:%S"),
                 **common,
             )
         else:
@@ -1351,7 +1360,9 @@ class IbkrConnection:
             finished_at = perf_counter()
             if finished_at - queued_at >= 1.0:
                 structlog.get_logger(__name__).info(
-                    "ibkr_history_timing", symbol=instrument.symbol, bar_size=bar_size,
+                    "ibkr_history_timing",
+                    symbol=instrument.symbol,
+                    bar_size=bar_size,
                     end_time=str(end_time),
                     queue_ms=round((requested_at - queued_at) * 1000, 1),
                     request_ms=round((finished_at - requested_at) * 1000, 1),
@@ -1390,24 +1401,36 @@ class IbkrConnection:
         try:
             self._client.reqMarketDataType(1)
             key, ticker = self._acquire_market_data_stream(
-                _to_ib_contract(instrument), generic_tick_list="",
-                market_data_type=1, purpose="ENTRY_EXECUTION",
+                _to_ib_contract(instrument),
+                generic_tick_list="",
+                market_data_type=1,
+                purpose="ENTRY_EXECUTION",
             )
             deadline = asyncio.get_running_loop().time() + 3.0
             while True:
                 timestamp = getattr(ticker, "time", None)
-                bid = _available_price(getattr(ticker, "bid", None))
-                ask = _available_price(getattr(ticker, "ask", None))
+                bid = _optional_number(getattr(ticker, "bid", None))
+                ask = _optional_number(getattr(ticker, "ask", None))
                 data_type = _optional_integer(getattr(ticker, "marketDataType", None))
                 if (
-                    data_type == 1 and bid is not None and ask is not None and bid <= ask
-                    and isinstance(timestamp, datetime) and timestamp.tzinfo is not None
+                    data_type == 1
+                    and bid is not None
+                    and ask is not None
+                    and 0 < bid <= ask
+                    and isinstance(timestamp, datetime)
+                    and timestamp.tzinfo is not None
                     and timestamp.utcoffset() is not None
                     and 0 <= (datetime.now(tz=UTC) - timestamp).total_seconds() <= 5
                 ):
                     return CurrentQuote(
-                        instrument.symbol, instrument.con_id, timestamp,
-                        bid, ask, None, None, data_type,
+                        instrument.symbol,
+                        instrument.con_id,
+                        timestamp,
+                        bid,
+                        ask,
+                        None,
+                        None,
+                        data_type,
                     )
                 if asyncio.get_running_loop().time() >= deadline:
                     raise IbkrError("fresh live entry bid/ask unavailable within 3 seconds")

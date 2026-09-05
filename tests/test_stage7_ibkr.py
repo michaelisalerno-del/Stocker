@@ -1,5 +1,6 @@
 import asyncio
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -184,6 +185,84 @@ def test_paper_submission_transmits_one_coherent_market_stop_limit_bracket() -> 
     assert orders[2].auxPrice == 101.0
     assert {order.orderRef for order in orders} == {"plan-1"}
     assert {order.account for order in orders} == {"DU123456"}
+
+
+def test_guarded_entry_uses_gtd_limit_and_keeps_protective_children_gtc():
+    client = FakeOrderClient()
+    connection = IbkrConnection(_config(), client=client, execution_enabled=True)
+    expiry = datetime.now(tz=UTC) + timedelta(seconds=5)
+    plan = replace(
+        _plan(),
+        entry_order_type=EntryOrderType.LIMIT,
+        entry_limit_price=100.0,
+        entry_expires_at=expiry,
+    )
+
+    async def scenario():
+        await connection.connect()
+        await connection.submit_protected_order(plan, _instrument())
+
+    asyncio.run(scenario())
+    parent, target, stop = [order for _, order in client.placed]
+    assert parent.orderType == "LMT" and parent.lmtPrice == 100.0
+    assert parent.tif == "GTD"
+    assert parent.goodTillDate == expiry.strftime("%Y%m%d-%H:%M:%S")
+    assert target.tif == stop.tif == "GTC"
+    assert target.goodTillDate == stop.goodTillDate == ""
+    assert target.parentId == stop.parentId == parent.orderId
+    assert target.lmtPrice == 98 and stop.auxPrice == 101
+    assert [parent.transmit, target.transmit, stop.transmit] == [False, False, True]
+
+
+def test_expired_guarded_entry_is_not_sent_to_ibkr():
+    client = FakeOrderClient()
+    connection = IbkrConnection(_config(), client=client, execution_enabled=True)
+    plan = replace(
+        _plan(),
+        entry_order_type=EntryOrderType.LIMIT,
+        entry_limit_price=100.0,
+        entry_expires_at=datetime.now(tz=UTC),
+    )
+
+    async def scenario():
+        await connection.connect()
+        with pytest.raises(IbkrError, match="expired"):
+            await connection.submit_protected_order(plan, _instrument())
+
+    asyncio.run(scenario())
+    assert client.placed == []
+
+
+@pytest.mark.parametrize("reported_type", [1, 2])
+def test_entry_quote_releases_temporary_stream_on_success_or_cancellation(reported_type):
+    class QuoteClient(FakeOrderClient):
+        def reqMarketDataType(self, data_type):
+            assert data_type == 1
+
+        def reqMktData(self, contract, **kwargs):
+            assert kwargs["snapshot"] is False
+            return SimpleNamespace(
+                time=datetime.now(tz=UTC), bid=100, ask=100.01, marketDataType=reported_type
+            )
+
+        def cancelMktData(self, contract):
+            self.cancelled.append(contract)
+
+    client = QuoteClient()
+    connection = IbkrConnection(_config(), client=client)
+
+    async def scenario():
+        await connection.connect()
+        if reported_type == 1:
+            quote = await connection.entry_quote(_instrument())
+            assert quote.bid == 100 and quote.market_data_type == 1
+        else:
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(connection.entry_quote(_instrument()), timeout=0.01)
+
+    asyncio.run(scenario())
+    assert len(client.cancelled) == 1
+    assert connection.resource_status().active_market_data_lines == 0
 
 
 def test_explicitly_enabled_live_plan_uses_a_writable_live_session() -> None:

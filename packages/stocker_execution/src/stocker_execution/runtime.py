@@ -20,7 +20,7 @@ from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_r
 from stocker_core.logging import configure_logging
 from stocker_core.markets import MARKET_CATALOGUE, ActivityScanner, CapBucket, get_market
 from stocker_core.runs import CandidateScreen, Environment, RunConfig, RunInstance, RunManager
-from stocker_core.strategies import SESSION_HARD_HV_METHOD, SESSION_HARD_METHOD
+from stocker_core.strategies import SESSION_HARD_HV_METHOD
 from stocker_core.universes import UniverseCatalog
 from stocker_data.calendars import get_market_calendar
 from stocker_execution.activity_shortlist import (
@@ -33,7 +33,6 @@ from stocker_execution.execution_ledger import ExecutionLedger
 from stocker_execution.execution_models import BrokerAccountState, BrokerFill, OrderLifecycle
 from stocker_execution.expected_move import (
     IbkrHistoricalVolatilityExpectedMoveService,
-    PriorSessionContextExpectedMoveService,
 )
 from stocker_execution.history import (
     HistorySemantics,
@@ -50,7 +49,6 @@ from stocker_execution.ibkr import (
     QualifiedInstrument,
     mask_ibkr_account,
 )
-from stocker_execution.pre_context import PriorSessionContextService, PriorSessionContextStore
 from stocker_execution.session_hard_payoff import (
     CompletedPayoff,
     CostAwareAssessment,
@@ -884,8 +882,6 @@ class StockerRuntime:
     """One restartable application with per-run execution routing."""
 
     _SUPPORTED_STRATEGIES = {
-        SESSION_HARD_METHOD.config_name,
-        SESSION_HARD_METHOD.strategy_id,
         SESSION_HARD_HV_METHOD.config_name,
         SESSION_HARD_HV_METHOD.strategy_id,
     }
@@ -933,7 +929,7 @@ class StockerRuntime:
         self._store = store
         self._qualify = qualify
         self._stage5_by_strategy = {
-            SESSION_HARD_METHOD.strategy_version: stage5,
+            SESSION_HARD_HV_METHOD.strategy_version: stage5,
             **dict(stage5_by_strategy or {}),
         }
         self._context_provider = context_provider
@@ -2107,14 +2103,8 @@ class StockerRuntime:
         run_id = run.run_id
         if run_id in self._strategies:
             return
-        default_method = (
-            SESSION_HARD_HV_METHOD
-            if run.strategy
-            in {SESSION_HARD_HV_METHOD.config_name, SESSION_HARD_HV_METHOD.strategy_id}
-            else SESSION_HARD_METHOD
-        )
-        strategy_id = str(run.strategy_id or default_method.strategy_id)
-        strategy_version = str(run.strategy_version or default_method.strategy_version)
+        strategy_id = str(run.strategy_id or SESSION_HARD_HV_METHOD.strategy_id)
+        strategy_version = str(run.strategy_version or SESSION_HARD_HV_METHOD.strategy_version)
         strategy = create_strategy(strategy_id, strategy_version)
         restored = self._store.load_signals(run_id)
         strategy.restore_signals(restored)
@@ -3145,18 +3135,7 @@ def build_runtime(
     )
     market_data_broker = connections[data_environment]
     history_cache = IbkrHistoryCache(database_path)
-    prior_context = PriorSessionContextService(
-        market_data_broker,
-        history_cache,
-        PriorSessionContextStore(database_path),
-    )
     data_clock = clock or (lambda: datetime.now(tz=UTC))
-    current_data = Stage5CurrentDataService(
-        market_data_broker,
-        history_cache,
-        PriorSessionContextExpectedMoveService(prior_context),
-        clock=data_clock,
-    )
     hv_current_data = Stage5CurrentDataService(
         market_data_broker,
         history_cache,
@@ -3166,17 +3145,11 @@ def build_runtime(
     )
     snapshot_store = Stage5SnapshotStore(database_path)
     stage5 = Stage5Analyzer(
-        current_data,
+        hv_current_data,
         snapshot_store=snapshot_store,
+        calculation_version=STAGE5_HV_CALCULATION_VERSION,
     )
-    stage5_by_strategy = {
-        SESSION_HARD_METHOD.strategy_version: stage5,
-        SESSION_HARD_HV_METHOD.strategy_version: Stage5Analyzer(
-            hv_current_data,
-            snapshot_store=snapshot_store,
-            calculation_version=STAGE5_HV_CALCULATION_VERSION,
-        ),
-    }
+    stage5_by_strategy = {SESSION_HARD_HV_METHOD.strategy_version: stage5}
     session_data = IbkrSessionDataSource(market_data_broker, history_cache, logger=logger)
     activity_service = ActivityShortlistService(ActivityShortlistStore(database_path))
 

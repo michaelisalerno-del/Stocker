@@ -17,7 +17,6 @@ from stocker_dashboard.performance import PerformancePeriod, RunPerformanceServi
 from stocker_execution.activity_shortlist import ActivityShortlistStore
 from stocker_execution.execution_ledger import ExecutionLedger, ExecutionRecord
 from stocker_execution.execution_models import OrderLifecycle
-from stocker_execution.pre_context import PriorSessionContextStore
 from stocker_execution.runtime import ExecutionEnvironmentStatus, RuntimeStatus, RuntimeStore
 from stocker_execution.session_hard_structure_d import (
     STRATEGY_VERSION,
@@ -38,7 +37,6 @@ class DashboardReadService:
         stage5_store: Stage5SnapshotStore,
         runtime_store: RuntimeStore,
         ledger: ExecutionLedger,
-        pre_context_store: PriorSessionContextStore | None = None,
         activity_store: ActivityShortlistStore | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
@@ -47,7 +45,6 @@ class DashboardReadService:
         self.stage5_store = stage5_store
         self.runtime_store = runtime_store
         self.ledger = ledger
-        self.pre_context_store = pre_context_store
         self.clock = clock or (lambda: datetime.now(tz=UTC))
         self.activity_store = activity_store
         self.performance_service = RunPerformanceService(ledger, clock=self.clock)
@@ -210,7 +207,7 @@ class DashboardReadService:
             "strategy": run.strategy,
             "strategy_id": run.effective_strategy_id,
             "strategy_version": run.strategy_version
-            or (STRATEGY_VERSION if run.strategy == "SESSION_HARD" else None),
+            or (STRATEGY_VERSION if run.strategy == "SESSION_HARD_HV" else None),
             "market_id": run.market_id.value if run.market_id else None,
             "market": market.display_name if market else None,
             "cap_bucket": run.cap_bucket.value if run.cap_bucket else None,
@@ -416,14 +413,6 @@ class DashboardReadService:
             None,
         )
         run = self._run(signal.run_id)
-        context = (
-            self.pre_context_store.get_by_identity(
-                signal.underlying_con_id or 0,
-                session=signal.session,
-            )
-            if self.pre_context_store is not None and signal.strategy_version == STRATEGY_VERSION
-            else None
-        )
         return {
             **self._candidate(snapshot, signal),
             "con_id": signal.underlying_con_id,
@@ -435,9 +424,6 @@ class DashboardReadService:
             "account": self._account(run.environment),
             "t0": signal.t0.isoformat(),
             "p0": signal.p0,
-            "call_model_iv": context.call_model_iv if context else None,
-            "put_model_iv": context.put_model_iv if context else None,
-            "atm_iv": context.atm_iv if context else None,
             "expected_move_source": snapshot.expected_move_source if snapshot else None,
             "expected_move_observation_at": (
                 snapshot.expected_move_observation_at.isoformat()

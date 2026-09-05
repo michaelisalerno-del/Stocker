@@ -15,8 +15,8 @@ from stocker_execution.stage7 import Stage7RiskDecision, Stage7RiskEngine, build
 def _intent(*, m_price: float = 2.0) -> StrategySignal:
     timestamp = datetime(2026, 9, 2, 14, 31, tzinfo=UTC)
     return StrategySignal(
-        strategy_id="SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
-        strategy_version="SESSION_HARD_STRUCTURE_D_V1",
+        strategy_id="TEST_EXECUTION",
+        strategy_version="TEST_EXECUTION_V1",
         signal_id="deterministic-stage6-signal",
         run_id="paper-run",
         underlying_con_id=265598,
@@ -32,7 +32,7 @@ def _intent(*, m_price: float = 2.0) -> StrategySignal:
         session_hard_score=0.9999,
         session_hard_checkpoint=6,
         session_hard_qualified=True,
-        feature_calculation_version="STAGE5_PRE_MOVE_V1",
+        feature_calculation_version="STAGE5_PRE_MOVE_HV_V1",
         side="SHORT",
         direction="DOWN",
         candidate_rank=1,

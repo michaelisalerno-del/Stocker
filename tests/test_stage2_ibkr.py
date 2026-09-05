@@ -783,7 +783,7 @@ def test_ibkr_diagnostic_runs_the_read_only_data_path_and_always_disconnects(
         """
 run_id: stage2_check
 universe: NASDAQ
-strategy: SESSION_HARD
+strategy: SESSION_HARD_HV
 environment: PAPER
 """,
         encoding="utf-8",

@@ -118,14 +118,6 @@ class _IbClient(Protocol):
 
     def reqMarketDataType(self, marketDataType: int) -> object: ...
 
-    async def reqSecDefOptParamsAsync(
-        self,
-        underlyingSymbol: str,
-        futFopExchange: str,
-        underlyingSecType: str,
-        underlyingConId: int,
-    ) -> list[object]: ...
-
     async def reqScannerDataAsync(
         self,
         subscription: object,
@@ -170,15 +162,6 @@ class _QualifiedContract(Protocol):
     tradingClass: str
 
 
-class _SourceOptionChain(Protocol):
-    exchange: str
-    underlyingConId: int
-    tradingClass: str
-    multiplier: str
-    expirations: list[str]
-    strikes: list[float]
-
-
 class _SourceBar(Protocol):
     date: date | datetime
     open: float
@@ -195,21 +178,6 @@ class _SourceTicker(Protocol):
     last: float
     close: float
     marketDataType: int
-
-
-class _SourceOptionComputation(Protocol):
-    impliedVol: float
-    delta: float
-    gamma: float
-
-
-class _SourceOptionTicker(Protocol):
-    bid: float
-    ask: float
-    callOpenInterest: float
-    putOpenInterest: float
-    marketDataType: int
-    modelGreeks: _SourceOptionComputation | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,63 +258,6 @@ class QualifiedInstrument:
     primary_exchange: str | None
     currency: str
     security_type: str
-
-
-@dataclass(frozen=True, slots=True)
-class QualifiedOption:
-    """Stable identity copied from one qualified IBKR option contract."""
-
-    symbol: str
-    con_id: int
-    exchange: str
-    currency: str
-    security_type: str
-    expiry: date
-    strike: float
-    right: str
-    multiplier: str
-    trading_class: str
-
-
-@dataclass(frozen=True, slots=True)
-class OptionContractRequest:
-    """One option identity advertised by an IBKR security-definition chain."""
-
-    symbol: str
-    exchange: str
-    currency: str
-    expiry: date
-    strike: float
-    right: str
-    multiplier: str
-    trading_class: str
-
-
-@dataclass(frozen=True, slots=True)
-class OptionChainDefinition:
-    """Minimal IBKR option security-definition parameters for one chain."""
-
-    exchange: str
-    underlying_con_id: int
-    trading_class: str
-    multiplier: str
-    expirations: tuple[date, ...]
-    strikes: tuple[float, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class OptionMarketSnapshot:
-    """Contract snapshot using only IBKR tick-13 Model Option Computation Greeks."""
-
-    option: QualifiedOption
-    captured_at: datetime
-    bid: float | None
-    ask: float | None
-    open_interest: float | None
-    market_data_type: int | None
-    model_iv: float | None
-    model_delta: float | None
-    model_gamma: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,7 +343,6 @@ class IbkrConnection:
         self._completed_orders_loaded = False
         self._scanner_capabilities: ScannerCapabilities | None = None
         self._qualified_stock_cache: dict[tuple[str, str, str, str], QualifiedInstrument] = {}
-        self._option_chain_cache: dict[int, tuple[OptionChainDefinition, ...]] = {}
         self._active_market_data: dict[
             tuple[int, str, str, str, int], _ActiveMarketDataSubscription
         ] = {}
@@ -715,7 +625,6 @@ class IbkrConnection:
         self._completed_orders_loaded = False
         self._scanner_capabilities = None
         self._qualified_stock_cache.clear()
-        self._option_chain_cache.clear()
         if was_connected:
             self._connection_epoch += 1
 
@@ -1499,83 +1408,6 @@ class IbkrConnection:
             market_data_type=_optional_integer(getattr(ticker, "marketDataType", None)),
         )
 
-    async def option_snapshots(
-        self,
-        options: tuple[QualifiedOption, ...],
-        *,
-        market_data_type: int = 1,
-        purpose: str = "OPTION_PRE_CONTEXT",
-    ) -> tuple[OptionMarketSnapshot, ...]:
-        """Capture tick-13 model computations plus generic-101 open interest."""
-
-        self._require_connected()
-        if not options:
-            raise IbkrError("At least one qualified option is required")
-        if market_data_type not in {1, 2, 3, 4}:
-            raise IbkrError("IBKR market data type must be one of 1, 2, 3, or 4")
-        unique_options = tuple({option.con_id: option for option in options}.values())
-        contracts = tuple(_to_ib_option_contract(option) for option in unique_options)
-        acquired: list[tuple[int, str, str, str, int]] = []
-        tickers: tuple[object, ...] = ()
-        try:
-            self._client.reqMarketDataType(market_data_type)
-            requested: list[object] = []
-            for contract in contracts:
-                key, ticker = self._acquire_market_data_stream(
-                    contract,
-                    generic_tick_list="101",
-                    market_data_type=market_data_type,
-                    purpose=purpose,
-                )
-                acquired.append(key)
-                requested.append(ticker)
-            tickers = tuple(requested)
-            deadline = asyncio.get_running_loop().time() + self.config.request_timeout_seconds
-            while not all(
-                _option_snapshot_complete(
-                    cast(_SourceOptionTicker, ticker),
-                    option,
-                    allow_delayed_model=market_data_type in {3, 4},
-                )
-                for ticker, option in zip(tickers, unique_options, strict=True)
-            ):
-                if asyncio.get_running_loop().time() >= deadline:
-                    break
-                await asyncio.sleep(0.05)
-        except Exception as exc:
-            if isinstance(exc, IbkrError):
-                raise
-            raise IbkrError(f"IBKR option market data request failed: {exc}") from exc
-        finally:
-            for key in reversed(acquired):
-                self._release_market_data_stream(key)
-
-        captured_at = datetime.now(tz=UTC)
-        normalized: list[OptionMarketSnapshot] = []
-        for option, source in zip(unique_options, tickers, strict=True):
-            ticker = cast(_SourceOptionTicker, source)
-            reported_market_data_type = _optional_integer(getattr(ticker, "marketDataType", None))
-            accepted_model_types = {1, 2, 3, 4} if market_data_type in {3, 4} else {1, 2}
-            model = (
-                getattr(ticker, "modelGreeks", None)
-                if reported_market_data_type in accepted_model_types
-                else None
-            )
-            normalized.append(
-                OptionMarketSnapshot(
-                    option=option,
-                    captured_at=captured_at,
-                    bid=_optional_number(getattr(ticker, "bid", None)),
-                    ask=_optional_number(getattr(ticker, "ask", None)),
-                    open_interest=_option_open_interest(ticker, option),
-                    market_data_type=reported_market_data_type,
-                    model_iv=_optional_number(getattr(model, "impliedVol", None)),
-                    model_delta=_optional_number(getattr(model, "delta", None)),
-                    model_gamma=_optional_number(getattr(model, "gamma", None)),
-                )
-            )
-        return tuple(normalized)
-
     async def historical_volatility_snapshot(
         self,
         instrument: QualifiedInstrument,
@@ -1626,109 +1458,6 @@ class IbkrConnection:
             if key is not None:
                 self._release_market_data_stream(key)
 
-    async def option_chains(
-        self, instrument: QualifiedInstrument
-    ) -> tuple[OptionChainDefinition, ...]:
-        """Return normalized IBKR option-chain security definitions."""
-
-        self._require_connected()
-        cached = self._option_chain_cache.get(instrument.con_id)
-        if cached is not None:
-            self._reset_daily_resource_counters()
-            self._deduplicated_requests_today += 1
-            return cached
-        try:
-            sources = await asyncio.wait_for(
-                self._client.reqSecDefOptParamsAsync(
-                    instrument.symbol,
-                    "",
-                    instrument.security_type,
-                    instrument.con_id,
-                ),
-                timeout=self.config.request_timeout_seconds,
-            )
-        except Exception as exc:
-            raise IbkrError(
-                f"IBKR option-chain request failed for {instrument.symbol}: {exc}"
-            ) from exc
-        chains: list[OptionChainDefinition] = []
-        for source in sources:
-            chain = cast(_SourceOptionChain, source)
-            try:
-                expirations = tuple(
-                    sorted({_parse_option_expiry(value) for value in chain.expirations})
-                )
-                strikes = tuple(sorted({float(value) for value in chain.strikes}))
-                underlying_con_id = int(chain.underlyingConId)
-            except (AttributeError, TypeError, ValueError) as exc:
-                raise IbkrError(
-                    f"IBKR returned an invalid option chain for {instrument.symbol}"
-                ) from exc
-            if underlying_con_id != instrument.con_id:
-                continue
-            chains.append(
-                OptionChainDefinition(
-                    exchange=str(chain.exchange),
-                    underlying_con_id=underlying_con_id,
-                    trading_class=str(chain.tradingClass),
-                    multiplier=str(chain.multiplier),
-                    expirations=expirations,
-                    strikes=strikes,
-                )
-            )
-        if not chains:
-            raise IbkrError(f"IBKR returned no option chain for {instrument.symbol}")
-        result = tuple(chains)
-        self._option_chain_cache[instrument.con_id] = result
-        return result
-
-    async def qualify_options(
-        self, requests: tuple[OptionContractRequest, ...]
-    ) -> tuple[QualifiedOption, ...]:
-        """Qualify the exact option candidates supplied by Stage 4."""
-
-        self._require_connected()
-        if not requests:
-            raise IbkrError("At least one option contract request is required")
-        try:
-            contracts = await asyncio.wait_for(
-                self._client.qualifyContractsAsync(
-                    *(_to_ib_option_request(item) for item in requests),
-                    returnAll=False,
-                ),
-                timeout=self.config.request_timeout_seconds,
-            )
-        except Exception as exc:
-            raise IbkrError(f"IBKR option contract qualification failed: {exc}") from exc
-        qualified: list[QualifiedOption] = []
-        for source in contracts:
-            if source is None or isinstance(source, list):
-                continue
-            contract = cast(_QualifiedContract, source)
-            try:
-                expiry = _parse_option_expiry(contract.lastTradeDateOrContractMonth[:8])
-                con_id = int(contract.conId)
-                strike = float(contract.strike)
-            except (AttributeError, TypeError, ValueError) as exc:
-                raise IbkrError("IBKR returned an invalid qualified option contract") from exc
-            if contract.secType != "OPT" or con_id <= 0:
-                raise IbkrError("IBKR returned an invalid qualified option contract")
-            qualified.append(
-                QualifiedOption(
-                    symbol=contract.symbol,
-                    con_id=con_id,
-                    exchange=contract.exchange,
-                    currency=contract.currency,
-                    security_type=contract.secType,
-                    expiry=expiry,
-                    strike=strike,
-                    right=contract.right,
-                    multiplier=contract.multiplier,
-                    trading_class=contract.tradingClass,
-                )
-            )
-        return tuple(qualified)
-
     def _select_account(self, accounts: list[str]) -> str:
         expected = self.config.expected_account
         if expected is not None:
@@ -1771,38 +1500,6 @@ def _to_ib_contract(instrument: QualifiedInstrument) -> object:
     )
 
 
-def _to_ib_option_contract(option: QualifiedOption) -> object:
-    from ib_async import Contract
-
-    return Contract(
-        conId=option.con_id,
-        symbol=option.symbol,
-        secType=option.security_type,
-        exchange=option.exchange,
-        currency=option.currency,
-        lastTradeDateOrContractMonth=option.expiry.strftime("%Y%m%d"),
-        strike=option.strike,
-        right=option.right,
-        multiplier=option.multiplier,
-        tradingClass=option.trading_class,
-    )
-
-
-def _to_ib_option_request(request: OptionContractRequest) -> object:
-    from ib_async import Option
-
-    return Option(
-        request.symbol,
-        request.expiry.strftime("%Y%m%d"),
-        request.strike,
-        request.right,
-        request.exchange,
-        request.multiplier,
-        request.currency,
-        tradingClass=request.trading_class,
-    )
-
-
 def _normalize_historical_bar(source: _SourceBar, *, index: int) -> HistoricalBar:
     try:
         timestamp = source.date
@@ -1840,35 +1537,6 @@ def _optional_number(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if isfinite(number) else None
-
-
-def _option_open_interest(ticker: _SourceOptionTicker, option: QualifiedOption) -> float | None:
-    right_specific = (
-        getattr(ticker, "callOpenInterest", None)
-        if option.right.upper() in {"C", "CALL"}
-        else getattr(ticker, "putOpenInterest", None)
-    )
-    return _optional_number(right_specific)
-
-
-def _option_snapshot_complete(
-    ticker: _SourceOptionTicker,
-    option: QualifiedOption,
-    *,
-    allow_delayed_model: bool,
-) -> bool:
-    market_data_type = _optional_integer(getattr(ticker, "marketDataType", None))
-    accepted_model_types = {1, 2, 3, 4} if allow_delayed_model else {1, 2}
-    model = (
-        getattr(ticker, "modelGreeks", None) if market_data_type in accepted_model_types else None
-    )
-    values = [
-        _optional_number(getattr(ticker, "bid", None)),
-        _optional_number(getattr(ticker, "ask", None)),
-        _option_open_interest(ticker, option),
-    ]
-    values.append(_optional_number(getattr(model, "impliedVol", None)))
-    return all(value is not None for value in values)
 
 
 def _optional_integer(value: object) -> int | None:
@@ -1926,7 +1594,3 @@ def _order_lifecycle(status: str) -> OrderLifecycle:
     if normalized == "INACTIVE":
         return OrderLifecycle.REJECTED
     raise IbkrError(f"IBKR returned unsupported order status: {status}")
-
-
-def _parse_option_expiry(value: str) -> date:
-    return datetime.strptime(str(value), "%Y%m%d").date()

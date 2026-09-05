@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from execution_test_support import execution_method  # noqa: F401
 from stocker_core.config import IbkrConfig, RunsConfig
 from stocker_core.markets import CapBucket, MarketId, MarketUniverseSpec
 from stocker_core.runs import (
@@ -57,6 +58,9 @@ from stocker_execution.stage7 import ExecutionDestination, ExecutionRouter
 
 NOW = datetime(2026, 9, 2, 13, 55, tzinfo=UTC)
 SESSION = date(2026, 9, 2)
+
+
+pytestmark = pytest.mark.usefixtures("execution_method")
 
 
 class FakeBroker:
@@ -170,7 +174,7 @@ class FakeFeatureService:
         self,
         *,
         session_offset: int = 0,
-        calculation_version: str = "STAGE5_PRE_MOVE_V1",
+        calculation_version: str = "STAGE5_PRE_MOVE_HV_V1",
     ) -> None:
         self.calls = 0
         self.prepared: list[tuple[date, datetime, tuple[int, ...]]] = []
@@ -399,7 +403,7 @@ def _run(
         run_id=run_id,
         enabled=enabled,
         universe="NASDAQ",
-        strategy="SESSION_HARD",
+        strategy="TEST_EXECUTION",
         environment=environment,
         risk=RunRiskConfig(risk_per_trade=0.001, max_concurrent_positions=5),
         session=RunWindow(
@@ -530,11 +534,12 @@ def test_activity_qualification_rotates_once_on_each_new_market_session(
                     version="ACTIVITY_SHORTLIST_V1",
                     scheduled_active_minutes=15,
                 ),
+                "strategy": "SESSION_HARD_HV",
                 "market_id": MarketId.US_NASDAQ,
                 "cap_bucket": CapBucket.MID,
                 "cap_bucket_version": "CAP_BUCKETS_V1",
-                "strategy_id": "SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
-                "strategy_version": "SESSION_HARD_STRUCTURE_D_V1",
+                "strategy_id": "SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
+                "strategy_version": "SESSION_HARD_HV_V1",
                 "candidate_screen_id": "ACTIVITY_SHORTLIST_V1",
                 "candidate_screen_version": "ACTIVITY_SHORTLIST_V1",
             }
@@ -586,7 +591,7 @@ def test_enabled_run_requires_explicit_market_session_before_broker_connect(
     run = RunConfig(
         run_id="missing-session",
         universe="NASDAQ",
-        strategy="SESSION_HARD",
+        strategy="TEST_EXECUTION",
         environment=Environment.PAPER,
         risk=RunRiskConfig(risk_per_trade=0.001, max_concurrent_positions=5),
     )
@@ -1072,36 +1077,6 @@ def test_checkpoint_is_evaluated_once_and_overlapping_runs_share_feature_work(
 
     assert features.calls == 1
     assert runtime.status().counters.checkpoints_processed == 2
-
-
-def test_simultaneous_iv_and_hv_runs_use_isolated_stage5_lineage(tmp_path: Path) -> None:
-    clock = MutableClock()
-    iv_features = FakeFeatureService(calculation_version="STAGE5_PRE_MOVE_V1")
-    hv_features = FakeFeatureService(calculation_version="STAGE5_PRE_MOVE_HV_V1")
-    hv_run = _hv_run()
-    runtime = _runtime(
-        tmp_path,
-        FakeBroker(),
-        _run("iv-run"),
-        hv_run,
-        clock=clock,
-        feature_service=iv_features,
-        stage5_by_strategy={SESSION_HARD_HV_METHOD.strategy_version: Stage5Analyzer(hv_features)},
-        context_provider=TriggerContextProvider(),
-    )
-    asyncio.run(runtime.start())
-    clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
-
-    asyncio.run(runtime.poll_once())
-
-    assert iv_features.calls == 1
-    assert hv_features.calls == 1
-    iv_signal = runtime.store.load_signals("iv-run")[0]
-    hv_signal = runtime.store.load_signals("hv-run")[0]
-    assert iv_signal.feature_calculation_version == "STAGE5_PRE_MOVE_V1"
-    assert hv_signal.feature_calculation_version == "STAGE5_PRE_MOVE_HV_V1"
-    assert hv_signal.strategy_id == SESSION_HARD_HV_METHOD.strategy_id
-    assert hv_signal.strategy_version == SESSION_HARD_HV_METHOD.strategy_version
 
 
 def test_hv_expected_move_is_prepared_before_the_checkpoint(tmp_path: Path) -> None:

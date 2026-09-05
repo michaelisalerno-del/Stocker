@@ -1,7 +1,6 @@
 """Command-line interface for Stocker."""
 
 import asyncio
-from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -160,88 +159,6 @@ def ibkr_check(
         raise typer.Exit(code=1) from exc
 
 
-@app.command("ibkr-data-diagnostic")
-def ibkr_data_diagnostic(
-    run_config: Annotated[
-        Path, typer.Option("--run-config", help="Run config selecting PAPER or LIVE.")
-    ] = DEFAULT_RUN_CONFIG,
-    ibkr_config: Annotated[
-        Path, typer.Option("--ibkr-config", help="Explicit PAPER and LIVE IBKR settings.")
-    ] = DEFAULT_IBKR_CONFIG,
-    runs_config: Annotated[
-        Path, typer.Option("--runs-config", help="Universe definitions to report.")
-    ] = DEFAULT_RUNS_CONFIG,
-    symbol: Annotated[str, typer.Option("--symbol")] = "AAPL",
-    exchange: Annotated[str, typer.Option("--exchange")] = "SMART",
-    primary_exchange: Annotated[str | None, typer.Option("--primary-exchange")] = "NASDAQ",
-    currency: Annotated[str, typer.Option("--currency")] = "USD",
-) -> None:
-    """Check required IBKR data and entitlements on one symbol without trading."""
-
-    from stocker_execution.ibkr import IbkrConnection
-    from stocker_execution.ibkr_data_diagnostic import (
-        IbkrDataStatus,
-        diagnose_ibkr_data,
-    )
-
-    try:
-        run = load_run_config(run_config)
-        broker_config = load_ibkr_config(ibkr_config, run.environment)
-        loaded_runs = load_runs_config(runs_config)
-        catalog = UniverseCatalog(loaded_runs.universes)
-    except (OSError, ValueError) as exc:
-        raise typer.BadParameter(f"Invalid IBKR data diagnostic configuration: {exc}") from exc
-
-    try:
-        report = asyncio.run(
-            diagnose_ibkr_data(
-                IbkrConnection(broker_config),
-                symbol=symbol,
-                exchange=exchange,
-                primary_exchange=primary_exchange,
-                currency=currency,
-            )
-        )
-    except (OSError, ValueError) as exc:
-        console.print(f"IBKR data diagnostic failed: {exc}")
-        raise typer.Exit(code=1) from exc
-
-    console.print("Stocker IBKR data diagnostic")
-    console.print(f"Configured environment: {run.environment.value}")
-    console.print(f"Account: {report.masked_account or 'unavailable'}")
-    for check in report.checks:
-        console.print(f"{check.capability.value}: {check.status.value}")
-        console.print(f"  {check.detail}")
-        check_location = "/".join(item for item in (check.symbol, check.exchange) if item)
-        if check_location:
-            console.print(f"  instrument: {check_location}")
-        for error in check.errors:
-            location = "/".join(
-                item for item in (error.symbol, error.exchange, str(error.con_id or "")) if item
-            )
-            console.print(
-                f"  IBKR error {error.code}: {error.message}{f' [{location}]' if location else ''}"
-            )
-        if check.status in {IbkrDataStatus.NOT_ENTITLED, IbkrDataStatus.DELAYED_ONLY}:
-            console.print(f"  delayed available: {'yes' if check.delayed_available else 'no'}")
-            if check.apparent_entitlement:
-                console.print(f"  smallest apparent entitlement: {check.apparent_entitlement}")
-            if check.required_for:
-                console.print(f"  Stocker requires this for: {check.required_for}")
-
-    console.print("Universes")
-    by_id = {universe.universe_id: universe for universe in catalog.list_universes()}
-    for universe_id in ("US_ALL", "NASDAQ", "NYSE", "CUSTOM"):
-        universe = by_id.get(universe_id)
-        if universe is None:
-            console.print(f"Universe {universe_id}: NOT_CONFIGURED")
-        else:
-            console.print(f"Universe {universe_id}: READY members={len(universe.members)}")
-    console.print("No order was transmitted by this diagnostic.")
-    if any(check.status != IbkrDataStatus.AVAILABLE for check in report.checks):
-        raise typer.Exit(code=1)
-
-
 @app.command("ibkr-resources")
 def ibkr_resources(
     runs_config: Annotated[
@@ -371,7 +288,6 @@ def ibkr_resources(
             f"Diagnostic connection active streaming lines: {status.active_market_data_lines}"
         )
         console.print(f"  underlying: {status.active_underlying_lines}")
-        console.print(f"  options: {status.active_option_lines}")
         console.print(
             f"Diagnostic connection active scanner subscriptions: {status.active_scanners}"
         )
@@ -403,15 +319,6 @@ def ibkr_resources(
             )
         else:
             console.print("Estimated duplicate savings: unavailable")
-        temporary = sum(item.purpose == "OPTION_PRE_CONTEXT" for item in status.subscriptions)
-        console.print(f"Temporary Stage 4 subscriptions: {temporary}")
-        now = datetime.now(tz=UTC)
-        possible_leaks = sum(
-            item.purpose == "OPTION_PRE_CONTEXT"
-            and (now - item.created_at).total_seconds() > broker_config.request_timeout_seconds
-            for item in status.subscriptions
-        )
-        console.print(f"Possible subscription leaks: {possible_leaks}")
         console.print(f"Last resource/pacing error: {status.last_resource_error or 'none'}")
         realistic = next(
             item
@@ -429,225 +336,6 @@ def ibkr_resources(
         console.print("No order was transmitted by this diagnostic.")
     finally:
         connection.disconnect()
-
-
-@app.command("pre-context-check")
-def pre_context_check(
-    target_session: Annotated[
-        str, typer.Option("--session", help="Required target session, YYYY-MM-DD")
-    ],
-    run_config: Annotated[
-        Path, typer.Option("--run-config", help="Stage 1 PAPER run configuration.")
-    ] = DEFAULT_RUN_CONFIG,
-    ibkr_config: Annotated[
-        Path, typer.Option("--ibkr-config", help="Explicit IBKR settings.")
-    ] = DEFAULT_IBKR_CONFIG,
-    symbol: Annotated[str, typer.Option("--symbol")] = "AAPL",
-    exchange: Annotated[str, typer.Option("--exchange")] = "SMART",
-    primary_exchange: Annotated[str | None, typer.Option("--primary-exchange")] = "NASDAQ",
-    currency: Annotated[str, typer.Option("--currency")] = "USD",
-    cache_path: Annotated[Path, typer.Option("--cache")] = Path(".stocker/ibkr-stage4.sqlite3"),
-) -> None:
-    """Capture and then reuse one Stage 4 PAPER prior-session volatility context."""
-
-    from stocker_core.runs import Environment
-    from stocker_execution.history import IbkrHistoryCache
-    from stocker_execution.ibkr import IbkrConnection, IbkrError
-    from stocker_execution.pre_context import (
-        ContextStatus,
-        PriorSessionContextService,
-        PriorSessionContextStore,
-    )
-
-    try:
-        run = load_run_config(run_config)
-        if run.environment is not Environment.PAPER:
-            raise ValueError("Stage 4 diagnostic requires a PAPER run configuration")
-        broker_config = load_ibkr_config(ibkr_config, run.environment)
-        selected_session = date.fromisoformat(target_session)
-    except (OSError, ValueError) as exc:
-        raise typer.BadParameter(f"Invalid Stage 4 configuration: {exc}") from exc
-
-    async def diagnose() -> None:
-        connection = IbkrConnection(broker_config)
-        try:
-            await connection.connect()
-            instrument = await connection.resolve_stock(
-                symbol,
-                exchange=exchange,
-                primary_exchange=primary_exchange,
-                currency=currency,
-            )
-            service = PriorSessionContextService(
-                connection,
-                IbkrHistoryCache(cache_path),
-                PriorSessionContextStore(cache_path),
-            )
-            first = await service.get_or_create(instrument, session=selected_session)
-            if first.status is not ContextStatus.READY or first.context is None:
-                raise IbkrError(first.reason)
-            second = await service.get_or_create(instrument, session=selected_session)
-            context = first.context
-            console.print(f"{context.symbol} conId={context.underlying_con_id}")
-            console.print(f"session: {context.target_session}")
-            console.print(f"call conId: {context.call_con_id}")
-            console.print(f"put conId: {context.put_con_id}")
-            console.print(f"expiry: {context.expiry} strike: {context.strike}")
-            console.print(f"call model IV: {context.call_model_iv}")
-            console.print(f"put model IV: {context.put_model_iv}")
-            console.print(f"ATM IV: {context.atm_iv}")
-            console.print(f"expected abs return 15m: {context.expected_absolute_return_15m}")
-            console.print(f"source: {context.iv_source}")
-            console.print(f"cache/context reused: {'yes' if second.reused else 'no'}")
-        finally:
-            connection.disconnect()
-
-    try:
-        asyncio.run(diagnose())
-    except IbkrError as exc:
-        console.print(f"Stage 4 diagnostic failed: {exc}")
-        raise typer.Exit(code=1) from exc
-
-
-@app.command("stage5-diagnostic")
-def stage5_diagnostic(
-    target_session: Annotated[str, typer.Option("--session", help="Target session, YYYY-MM-DD.")],
-    t0: Annotated[str, typer.Option("--t0", help="Signal timestamp with UTC offset.")],
-    run_config: Annotated[
-        Path, typer.Option("--run-config", help="Stage 1 PAPER run configuration.")
-    ] = DEFAULT_RUN_CONFIG,
-    ibkr_config: Annotated[
-        Path, typer.Option("--ibkr-config", help="Explicit IBKR settings.")
-    ] = DEFAULT_IBKR_CONFIG,
-    symbols: Annotated[
-        list[str] | None,
-        typer.Option("--symbol", help="Small custom universe; repeat as needed."),
-    ] = None,
-    exchange: Annotated[str, typer.Option("--exchange")] = "SMART",
-    primary_exchange: Annotated[str | None, typer.Option("--primary-exchange")] = None,
-    currency: Annotated[str, typer.Option("--currency")] = "USD",
-    cache_path: Annotated[Path, typer.Option("--cache")] = Path(".stocker/ibkr-stage5.sqlite3"),
-) -> None:
-    """Run the non-trading Stage 5 diagnostic for a small PAPER universe."""
-
-    from rich.table import Table
-
-    from stocker_core.runs import Environment
-    from stocker_execution.expected_move import PriorSessionContextExpectedMoveService
-    from stocker_execution.history import IbkrHistoryCache
-    from stocker_execution.ibkr import IbkrConnection, IbkrError
-    from stocker_execution.pre_context import (
-        PriorSessionContextService,
-        PriorSessionContextStore,
-    )
-    from stocker_execution.stage5 import (
-        Stage5Analyzer,
-        Stage5CurrentDataService,
-        Stage5FeatureSnapshot,
-        Stage5Membership,
-        Stage5QualifiedRequest,
-        Stage5SnapshotStore,
-    )
-
-    try:
-        run = load_run_config(run_config)
-        if run.environment is not Environment.PAPER:
-            raise ValueError("Stage 5 diagnostic requires a PAPER run configuration")
-        broker_config = load_ibkr_config(ibkr_config, run.environment)
-        selected_session = date.fromisoformat(target_session)
-        signal_timestamp = datetime.fromisoformat(t0)
-        if signal_timestamp.tzinfo is None or signal_timestamp.utcoffset() is None:
-            raise ValueError("--t0 must include a UTC offset")
-        selected_symbols = tuple(dict.fromkeys(symbol.strip().upper() for symbol in symbols or ()))
-        if not selected_symbols or any(not symbol for symbol in selected_symbols):
-            raise ValueError("at least one non-empty --symbol is required")
-    except (OSError, ValueError) as exc:
-        raise typer.BadParameter(f"Invalid Stage 5 configuration: {exc}") from exc
-
-    async def diagnose() -> tuple[tuple[Stage5FeatureSnapshot, ...], tuple[tuple[str, str], ...]]:
-        connection = IbkrConnection(broker_config)
-        try:
-            await connection.connect()
-            history_cache = IbkrHistoryCache(cache_path)
-            context_service = PriorSessionContextService(
-                connection,
-                history_cache,
-                PriorSessionContextStore(cache_path),
-            )
-            current_service = Stage5CurrentDataService(
-                connection,
-                history_cache,
-                PriorSessionContextExpectedMoveService(context_service),
-            )
-            requests: list[Stage5QualifiedRequest] = []
-            failures: list[tuple[str, str]] = []
-            for symbol in selected_symbols:
-                try:
-                    instrument = await connection.resolve_stock(
-                        symbol,
-                        exchange=exchange,
-                        primary_exchange=primary_exchange,
-                        currency=currency,
-                    )
-                except IbkrError as exc:
-                    failures.append((symbol, str(exc)))
-                    continue
-                requests.append(
-                    Stage5QualifiedRequest(
-                        instrument,
-                        (Stage5Membership("STAGE5_DIAGNOSTIC", "CUSTOM_DIAGNOSTIC"),),
-                    )
-                )
-            rows = await Stage5Analyzer(
-                current_service,
-                snapshot_store=Stage5SnapshotStore(cache_path),
-            ).analyze(requests, session=selected_session, t0=signal_timestamp)
-            return rows, tuple(failures)
-        finally:
-            connection.disconnect()
-
-    try:
-        rows, failures = asyncio.run(diagnose())
-    except IbkrError as exc:
-        console.print(f"Stage 5 diagnostic failed: {exc}")
-        raise typer.Exit(code=1) from exc
-
-    table = Table(title="Stocker Stage 5 — generic feature diagnostic")
-    headings = (
-        "symbol",
-        "conId",
-        "status",
-        "reason",
-        "T0",
-        "P0",
-        "expected_abs_15m",
-        "M_price",
-        "raw_PRE",
-        "PRE_MOVE_M",
-    )
-    for heading in headings:
-        table.add_column(heading)
-    for symbol, reason in failures:
-        table.add_row(symbol, "-", "INELIGIBLE", reason, *("-" for _ in range(6)))
-    for row in rows:
-        values = (
-            row.symbol,
-            str(row.con_id),
-            row.status.value,
-            row.exclusion_reason or "-",
-            row.t0.isoformat(),
-            _display_optional(row.p0),
-            _display_optional(row.expected_absolute_return_15m),
-            _display_optional(row.m_price),
-            _display_optional(row.raw_pre_move_price),
-            _display_optional(row.pre_move_m),
-        )
-        table.add_row(*values)
-    console.print(table)
-
-
-def _display_optional(value: object | None) -> str:
-    return "-" if value is None else str(value)
 
 
 @data_app.command("validate")

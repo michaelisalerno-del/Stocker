@@ -7,7 +7,6 @@ from stocker_core.markets import CapBucket, MarketId
 from stocker_core.runs import CandidateScreen, Environment, RunConfig, RunScreenConfig
 from stocker_core.strategies import (
     SESSION_HARD_HV_METHOD,
-    SESSION_HARD_METHOD,
     installed_strategies,
 )
 from stocker_core.universes import UniverseDefinition
@@ -54,19 +53,13 @@ def test_builder_options_are_backend_owned_and_include_installed_method() -> Non
     assert {item["cap_bucket"] for item in options["capitalisation"]} == set(CapBucket)
     assert options["strategies"] == [
         {
-            "strategy_id": SESSION_HARD_METHOD.strategy_id,
-            "strategy_version": SESSION_HARD_METHOD.strategy_version,
-            "label": "Session HARD",
-            "environments": ["PAPER", "LIVE"],
-        },
-        {
             "strategy_id": SESSION_HARD_HV_METHOD.strategy_id,
             "strategy_version": SESSION_HARD_HV_METHOD.strategy_version,
             "label": "Session HARD · HV",
             "environments": ["PAPER"],
         },
     ]
-    assert installed_strategies() == (SESSION_HARD_METHOD, SESSION_HARD_HV_METHOD)
+    assert installed_strategies() == (SESSION_HARD_HV_METHOD,)
 
 
 def test_any_installed_method_can_be_created_as_paper_on_any_supported_market() -> None:
@@ -75,18 +68,18 @@ def test_any_installed_method_can_be_created_as_paper_on_any_supported_market() 
         empty_config(),
         market_id=MarketId.SOUTH_KOREA_KRX,
         cap_bucket=CapBucket.MID,
-        strategy_id=SESSION_HARD_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_METHOD.strategy_version,
+        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
         environment=Environment.PAPER,
     )
 
-    assert run.display_name == "KRX · HARD · MID"
+    assert run.display_name == "KRX · HARD-HV · MID"
     assert run.environment is Environment.PAPER
     assert run.market_id == MarketId.SOUTH_KOREA_KRX
     assert run.cap_bucket == CapBucket.MID
     assert run.cap_bucket_version == "CAP_BUCKETS_V1"
-    assert run.strategy_id == SESSION_HARD_METHOD.strategy_id
-    assert run.strategy_version == SESSION_HARD_METHOD.strategy_version
+    assert run.strategy_id == SESSION_HARD_HV_METHOD.strategy_id
+    assert run.strategy_version == SESSION_HARD_HV_METHOD.strategy_version
     assert run.candidate_screen_id == "ACTIVITY_SHORTLIST_V1"
     assert run.candidate_screen_version == "ACTIVITY_SHORTLIST_V1"
     assert run.screen is not None
@@ -151,48 +144,14 @@ def test_session_hard_hv_rejects_live_explicitly_even_with_matching_paper() -> N
         RunConfig.model_validate(live_payload)
 
 
-def test_live_requires_exact_paper_counterpart_and_does_not_modify_it() -> None:
-    builder = UniverseRunBuilder()
-    with pytest.raises(ValueError, match="matching PAPER run"):
-        builder.add(
-            empty_config(),
-            market_id=MarketId.US_NASDAQ,
-            cap_bucket=CapBucket.MID,
-            strategy_id=SESSION_HARD_METHOD.strategy_id,
-            strategy_version=SESSION_HARD_METHOD.strategy_version,
-            environment=Environment.LIVE,
-        )
-
-    paper_config, paper = builder.add(
-        empty_config(),
-        market_id=MarketId.US_NASDAQ,
-        cap_bucket=CapBucket.MID,
-        strategy_id=SESSION_HARD_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_METHOD.strategy_version,
-        environment=Environment.PAPER,
-    )
-    live_config, live = builder.add(
-        paper_config,
-        market_id=MarketId.US_NASDAQ,
-        cap_bucket=CapBucket.MID,
-        strategy_id=SESSION_HARD_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_METHOD.strategy_version,
-        environment=Environment.LIVE,
-    )
-
-    assert live.run_id != paper.run_id
-    assert next(item for item in live_config.runs if item.run_id == paper.run_id) == paper
-    assert live.environment is Environment.LIVE
-
-
 def test_disable_and_readd_reuses_exact_lineage() -> None:
     builder = UniverseRunBuilder()
     config, created = builder.add(
         empty_config(),
         market_id=MarketId.UK_LSE,
         cap_bucket=CapBucket.LARGE,
-        strategy_id=SESSION_HARD_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_METHOD.strategy_version,
+        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
         environment=Environment.PAPER,
     )
     disabled = builder.disable(config, created.run_id)
@@ -203,8 +162,8 @@ def test_disable_and_readd_reuses_exact_lineage() -> None:
         disabled,
         market_id=MarketId.UK_LSE,
         cap_bucket=CapBucket.LARGE,
-        strategy_id=SESSION_HARD_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_METHOD.strategy_version,
+        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
         environment=Environment.PAPER,
     )
     assert same.run_id == created.run_id
@@ -235,8 +194,8 @@ def test_exchange_specific_us_run_requires_authoritative_membership() -> None:
             config,
             market_id=MarketId.US_NYSE,
             cap_bucket=CapBucket.MID,
-            strategy_id=SESSION_HARD_METHOD.strategy_id,
-            strategy_version=SESSION_HARD_METHOD.strategy_version,
+            strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+            strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
             environment=Environment.PAPER,
         )
 
@@ -254,8 +213,8 @@ def test_activity_profile_and_generated_lineage_fail_closed_when_mislabeled() ->
         empty_config(),
         market_id=MarketId.US_NASDAQ,
         cap_bucket=CapBucket.MID,
-        strategy_id=SESSION_HARD_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_METHOD.strategy_version,
+        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
         environment=Environment.PAPER,
     )
     del config

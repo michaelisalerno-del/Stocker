@@ -1,9 +1,7 @@
 # Session HARD · HV pooled payoff admission
 
 This updates SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D / SESSION_HARD_HV_V1
-in place. No new strategy or broker execution path is installed. Original
-SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D is unchanged.
-
+in place. No new strategy or broker execution path is installed.
 ## Authorized final rule
 
 The user's later instructions supersede the original warmup and strategy scope:
@@ -85,23 +83,3 @@ Initialization reuses already-persisted exact HV signals and IBKR cache identiti
 Historical cost/admission estimates for pre-hurdle trades remain null and are labelled
 TRADE_BASELINE_PRE_HURDLE. Their gross outcomes can be reconstructed through the same
 cached-bar calculation. No research CSV is imported into production.
-
-## Regression evidence
-
-The test-only fixture is an extract of the 296-opportunity original IV-M research ledger.
-Source SHA256: ca274ae2e153e5998483b91f87f950efd942ad41b09c97a051eb8a5a80a3fd00.
-It verifies admission arithmetic; it is not an HV performance validation or a production seed.
-
-With the originally requested abstaining warmup, ready decisions reproduce 224 passes,
-baseline mean net R 0.2352, retained mean 0.3911, mean per opportunity 0.2959,
-and total approximately 87.60R.
-
-The later authorized baseline-trading warmup admits the 21 warmup opportunities too:
-245 total, sum net R 91.2620223161, mean per taken 0.3724980503,
-mean per original opportunity 0.3083176430. No runtime compatibility option was added
-to force the old trade count.
-
-Focused tests cover warmup continuation, pass/fail/zero, unseen stocks, pooled independence,
-stop-cost sensitivity, strict completion boundaries, overlapping/future/current outcomes,
-rejected-opportunity learning, replay gaps/ambiguity/timeouts, restart, cross-run deduplication,
-HV isolation, missing-history nonblocking behavior and cached historical initialization.

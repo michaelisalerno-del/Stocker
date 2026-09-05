@@ -132,21 +132,6 @@ uv run stocker runs-status \
 
 This command does not connect to IBKR, fetch data, schedule work, evaluate a strategy, or trade.
 
-For a one-symbol read-only entitlement check covering Stocker-required stock history, option-chain
-metadata, option bid/ask/open interest, and tick-13 model IV:
-
-```bash
-uv run stocker ibkr-data-diagnostic \
-  --run-config configs/run.example.yaml \
-  --ibkr-config configs/ibkr.local.yaml \
-  --runs-config configs/runs.example.yaml \
-  --symbol AAPL \
-  --primary-exchange NASDAQ
-```
-
-The command masks account identity, reports exact IBKR error codes and delayed availability, and
-never submits an order.
-
 ## Intentionally Not Implemented Yet
 
 - No broker order submission or cancellation through the Stage 2 IBKR adapter.

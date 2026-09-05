@@ -17,7 +17,7 @@ runs:
   - run_id: ftse_morning
     enabled: true
     universe: FTSE_TEST
-    strategy: SESSION_HARD
+    strategy: SESSION_HARD_HV
     environment: PAPER
     risk:
       risk_per_trade: 0.001
@@ -31,8 +31,8 @@ runs:
   - run_id: nasdaq_main
     enabled: false
     universe: NASDAQ
-    strategy: SESSION_HARD
-    environment: LIVE
+    strategy: SESSION_HARD_HV
+    environment: PAPER
     screen:
       method: HOT_BY_VOLUME
       max_results: 50
@@ -54,17 +54,17 @@ runs:
   - run_id: nyse_experiment
     enabled: false
     universe: NYSE
-    strategy: SESSION_HARD
+    strategy: SESSION_HARD_HV
     environment: PAPER
 
   - run_id: us_all_experiment
     enabled: false
     universe: US_ALL
-    strategy: SESSION_HARD
+    strategy: SESSION_HARD_HV
     environment: PAPER
 
   - run_id: custom_experiment
     enabled: false
     universe: CUSTOM
-    strategy: SESSION_HARD
+    strategy: SESSION_HARD_HV
     environment: PAPER

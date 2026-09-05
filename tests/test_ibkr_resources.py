@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,7 +23,6 @@ from stocker_execution.ibkr import (
     IbkrConnection,
     IbkrError,
     QualifiedInstrument,
-    QualifiedOption,
 )
 from stocker_execution.ibkr_resources import simulate_capacity
 
@@ -92,7 +90,9 @@ class StreamClient(ConfigClient):
             raise RuntimeError("market data request failed")
         self.requested.append(con_id)
         self.generic_tick_lists.append(genericTickList)
-        return self.tickers.setdefault(con_id, incomplete_ticker())
+        return self.tickers.setdefault(
+            con_id, SimpleNamespace(histVolatility=float("nan"), marketDataType=1)
+        )
 
     def cancelMktData(self, contract: object) -> bool:
         self.cancelled.append(int(contract.conId))  # type: ignore[attr-defined]
@@ -214,51 +214,6 @@ class WatchlistScannerClient(ConcurrencyClient):
         ]
 
 
-class CacheClient(StreamClient):
-    def __init__(self) -> None:
-        super().__init__()
-        self.qualification_requests = 0
-        self.option_chain_requests = 0
-
-    async def connectAsync(self, *args: object, **kwargs: object) -> None:
-        del args, kwargs
-        self.connected = True
-
-    def managedAccounts(self) -> list[str]:
-        return ["DU123456"]
-
-    async def qualifyContractsAsync(
-        self, *contracts: object, returnAll: bool = False
-    ) -> list[object]:
-        del returnAll
-        self.qualification_requests += 1
-        contract = contracts[0]
-        contract.conId = 265598  # type: ignore[attr-defined]
-        contract.exchange = "SMART"  # type: ignore[attr-defined]
-        contract.primaryExchange = "NASDAQ"  # type: ignore[attr-defined]
-        contract.currency = "USD"  # type: ignore[attr-defined]
-        contract.secType = "STK"  # type: ignore[attr-defined]
-        return [contract]
-
-    async def reqSecDefOptParamsAsync(
-        self,
-        underlyingSymbol: str,
-        futFopExchange: str,
-        underlyingSecType: str,
-        underlyingConId: int,
-    ) -> list[object]:
-        del underlyingSymbol, futFopExchange, underlyingSecType
-        self.option_chain_requests += 1
-        return [
-            SimpleNamespace(
-                exchange="SMART",
-                underlyingConId=underlyingConId,
-                tradingClass="AAPL",
-                multiplier="100",
-                expirations=["20260918"],
-                strikes=[100.0, 105.0],
-            )
-        ]
 
 
 def config(*, market_data_line_budget: int = 100) -> IbkrConfig:
@@ -343,41 +298,6 @@ def test_resource_errors_are_sanitized_counted_and_do_not_disconnect() -> None:
     assert connection.is_connected is False
 
 
-def option(con_id: int, *, right: str = "C") -> QualifiedOption:
-    return QualifiedOption(
-        symbol="AMD",
-        con_id=con_id,
-        exchange="SMART",
-        currency="USD",
-        security_type="OPT",
-        expiry=date(2026, 9, 18),
-        strike=100.0,
-        right=right,
-        multiplier="100",
-        trading_class="AMD",
-    )
-
-
-def incomplete_ticker() -> SimpleNamespace:
-    return SimpleNamespace(
-        bid=float("nan"),
-        ask=float("nan"),
-        callOpenInterest=float("nan"),
-        putOpenInterest=float("nan"),
-        marketDataType=1,
-        modelGreeks=None,
-        histVolatility=float("nan"),
-    )
-
-
-def complete(ticker: SimpleNamespace, *, right: str = "C") -> None:
-    ticker.bid = 1.0
-    ticker.ask = 1.2
-    ticker.callOpenInterest = 100.0 if right == "C" else float("nan")
-    ticker.putOpenInterest = 100.0 if right == "P" else float("nan")
-    ticker.modelGreeks = SimpleNamespace(impliedVol=0.25, delta=0.5, gamma=0.02)
-
-
 def connected_stream_boundary(
     client: StreamClient, *, budget: int = 100, timeout: float = 0.2
 ) -> IbkrConnection:
@@ -395,28 +315,6 @@ def connected_stream_boundary(
     )
     connection._account_id = "DU123456"
     return connection
-
-
-def test_active_stream_registry_increments_and_final_release_cancels() -> None:
-    async def scenario() -> tuple[object, object]:
-        client = StreamClient()
-        connection = connected_stream_boundary(client)
-        task = asyncio.create_task(connection.option_snapshots((option(101),)))
-        await asyncio.sleep(0)
-        active = connection.resource_status()
-        complete(client.tickers[101])
-        await task
-        return active, connection.resource_status()
-
-    active, released = asyncio.run(scenario())
-
-    assert active.active_market_data_lines == 1  # type: ignore[attr-defined]
-    assert active.active_option_lines == 1  # type: ignore[attr-defined]
-    assert active.active_underlying_lines == 0  # type: ignore[attr-defined]
-    assert active.subscriptions[0].con_id == 101  # type: ignore[attr-defined]
-    assert active.subscriptions[0].purpose == "OPTION_PRE_CONTEXT"  # type: ignore[attr-defined]
-    assert active.subscriptions[0].consumer_count == 1  # type: ignore[attr-defined]
-    assert released.active_market_data_lines == 0  # type: ignore[attr-defined]
 
 
 def test_historical_volatility_uses_only_temporary_generic_tick_104(
@@ -493,66 +391,6 @@ def test_fifty_member_activity_watchlist_opens_no_streaming_quote() -> None:
     assert watchlist_size == 50
     assert client.requested == []
     assert status.active_market_data_lines == 0  # type: ignore[attr-defined]
-
-
-def test_identical_physical_stream_is_shared_until_final_consumer_releases() -> None:
-    async def scenario() -> tuple[StreamClient, object]:
-        client = StreamClient()
-        connection = connected_stream_boundary(client)
-        first = asyncio.create_task(connection.option_snapshots((option(101),)))
-        await asyncio.sleep(0)
-        second = asyncio.create_task(connection.option_snapshots((option(101),)))
-        await asyncio.sleep(0)
-        shared = connection.resource_status()
-        complete(client.tickers[101])
-        await asyncio.gather(first, second)
-        return client, shared
-
-    client, shared = asyncio.run(scenario())
-
-    assert client.requested == [101]
-    assert client.cancelled == [101]
-    assert shared.active_market_data_lines == 1  # type: ignore[attr-defined]
-    assert shared.subscriptions[0].consumer_count == 2  # type: ignore[attr-defined]
-    assert shared.deduplicated_requests_today == 1  # type: ignore[attr-defined]
-
-
-def test_budget_exhaustion_rejects_noncritical_option_stream_without_disturbing_first() -> None:
-    async def scenario() -> tuple[StreamClient, object]:
-        client = StreamClient()
-        connection = connected_stream_boundary(client, budget=1)
-        first = asyncio.create_task(connection.option_snapshots((option(101),)))
-        await asyncio.sleep(0)
-        with pytest.raises(IbkrError, match="IBKR_MARKET_DATA_CAPACITY_UNAVAILABLE"):
-            await connection.option_snapshots((option(202, right="P"),))
-        rejected = connection.resource_status()
-        complete(client.tickers[101])
-        await first
-        return client, rejected
-
-    client, rejected = asyncio.run(scenario())
-
-    assert client.requested == [101]
-    assert rejected.active_market_data_lines == 1  # type: ignore[attr-defined]
-    assert rejected.capacity_rejects_today == 1  # type: ignore[attr-defined]
-    assert rejected.last_resource_error == "IBKR_MARKET_DATA_CAPACITY_UNAVAILABLE"  # type: ignore[attr-defined]
-
-
-def test_timeout_and_exception_release_only_streams_that_were_opened() -> None:
-    timeout_client = StreamClient()
-    timeout_connection = connected_stream_boundary(timeout_client, timeout=0.01)
-    asyncio.run(timeout_connection.option_snapshots((option(101),)))
-    assert timeout_connection.resource_status().active_market_data_lines == 0  # type: ignore[attr-defined]
-    assert timeout_client.cancelled == [101]
-
-    failing_client = StreamClient()
-    failing_client.raise_for.add(202)
-    failing_connection = connected_stream_boundary(failing_client)
-    with pytest.raises(IbkrError, match="market data request failed"):
-        asyncio.run(failing_connection.option_snapshots((option(101), option(202, right="P"))))
-    assert failing_connection.resource_status().active_market_data_lines == 0  # type: ignore[attr-defined]
-    assert failing_client.requested == [101]
-    assert failing_client.cancelled == [101]
 
 
 def stock(con_id: int) -> QualifiedInstrument:
@@ -659,62 +497,13 @@ def test_daily_resource_counters_roll_over() -> None:
     assert connection._market_data_requests_today == 0
 
 
-def test_contract_qualification_and_option_definitions_reuse_session_cache() -> None:
-    async def scenario() -> tuple[CacheClient, object]:
-        client = CacheClient()
-        connection = connected_stream_boundary(client)
-        first = await connection.resolve_stock("aapl", exchange="smart", currency="usd")
-        second = await connection.resolve_stock("AAPL", exchange="SMART", currency="USD")
-        first_chain = await connection.option_chains(first)
-        second_chain = await connection.option_chains(second)
-        assert first == second
-        assert first_chain is second_chain
-        return client, connection.resource_status()
-
-    client, status = asyncio.run(scenario())
-
-    assert client.qualification_requests == 1
-    assert client.option_chain_requests == 1
-    assert status.deduplicated_requests_today == 2  # type: ignore[attr-defined]
-
-
-def test_disconnect_discards_twenty_stale_streams_and_reconnect_does_not_double() -> None:
-    async def scenario() -> tuple[CacheClient, object, object, list[int]]:
-        client = CacheClient()
-        connection = connected_stream_boundary(client, timeout=5.0)
-        capture = asyncio.create_task(
-            connection.option_snapshots(tuple(option(index) for index in range(1, 21)))
-        )
-        await wait_until(
-            lambda: connection.resource_status().active_market_data_lines,  # type: ignore[attr-defined]
-            20,
-        )
-        before = connection.resource_status()
-        connection.disconnect()
-        after_disconnect = connection.resource_status()
-        assert after_disconnect.active_market_data_lines == 0  # type: ignore[attr-defined]
-        await connection.connect()
-        after_reconnect = connection.resource_status()
-        capture.cancel()
-        with suppress(asyncio.CancelledError):
-            await capture
-        return client, before, after_reconnect, client.cancelled
-
-    client, before, after, cancelled = asyncio.run(scenario())
-
-    assert before.active_market_data_lines == 20  # type: ignore[attr-defined]
-    assert after.active_market_data_lines == 0  # type: ignore[attr-defined]
-    assert client.requested == list(range(1, 21))
-    assert cancelled == list(range(1, 21))
-
-
 def test_realistic_capacity_simulation_shares_physical_work_and_stays_below_budget() -> None:
     scenarios = {item.name: item for item in simulate_capacity(market_data_line_budget=100)}
 
     assert scenarios["A"].configured_runs == 1
     assert scenarios["A"].unique_stocks == 50
     assert scenarios["A"].scanner_requests == 3
-    assert scenarios["A"].peak_market_data_lines == 2
+    assert scenarios["A"].peak_market_data_lines == 1
     assert scenarios["B"].configured_runs == 3
     assert scenarios["B"].unique_stocks == 50
     assert scenarios["B"].duplicate_stock_requests_avoided == 100
@@ -723,7 +512,7 @@ def test_realistic_capacity_simulation_shares_physical_work_and_stays_below_budg
     assert scenarios["C"].unique_stocks == 200
     assert scenarios["C"].scanner_requests == 12
     assert scenarios["C"].peak_scanner_concurrency == 1
-    assert scenarios["C"].historical_requests == 6_200
+    assert scenarios["C"].historical_requests == 6_000
     assert scenarios["D"].subscriptions_before_disconnect == 20
     assert scenarios["D"].subscriptions_after_disconnect == 0
     assert scenarios["D"].subscriptions_after_reconnect == 0
@@ -731,18 +520,17 @@ def test_realistic_capacity_simulation_shares_physical_work_and_stays_below_budg
     assert realistic.configured_runs == 4
     assert realistic.unique_stocks == 100
     assert realistic.contract_qualifications == 100
-    assert realistic.stage4_contexts == 100
-    assert realistic.historical_requests == 3_100
-    assert realistic.peak_underlying_lines == 0
-    assert realistic.peak_option_lines == 2
-    assert realistic.peak_market_data_lines == 2
+    assert realistic.hv_snapshots == 1500
+    assert realistic.historical_requests == 3_000
+    assert realistic.peak_underlying_lines == 1
+    assert realistic.peak_market_data_lines == 1
     assert realistic.within_budget is True
 
     exhausted = {item.name: item for item in simulate_capacity(market_data_line_budget=1)}["A"]
-    assert exhausted.within_budget is False
+    assert exhausted.within_budget is True
     assert exhausted.unique_stocks == 50
-    assert exhausted.stage4_contexts == 0
-    assert exhausted.historical_requests == 50
+    assert exhausted.hv_snapshots == 750
+    assert exhausted.historical_requests == 1500
     assert exhausted.execution_safety_checks == 50
 
 
@@ -760,11 +548,11 @@ universes:
 runs:
   - run_id: first
     universe: CUSTOM
-    strategy: SESSION_HARD
+    strategy: SESSION_HARD_HV
     environment: PAPER
   - run_id: second
     universe: CUSTOM
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: LIVE
 """,
         encoding="utf-8",
@@ -819,9 +607,9 @@ universes:
 runs:
   - run_id: activity
     universe: NASDAQ_MID
-    strategy: SESSION_HARD
-    strategy_id: SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D
-    strategy_version: SESSION_HARD_STRUCTURE_D_V1
+    strategy: SESSION_HARD_HV
+    strategy_id: SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D
+    strategy_version: SESSION_HARD_HV_V1
     market_id: US_NASDAQ
     cap_bucket: MID
     cap_bucket_version: CAP_BUCKETS_V1

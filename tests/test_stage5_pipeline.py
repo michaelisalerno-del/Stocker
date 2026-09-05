@@ -198,7 +198,7 @@ def test_snapshot_store_preserves_ready_feature_across_transient_rerun(
         aligned_pre_open=99.0,
         raw_pre_move_price=1.0,
         pre_move_m=1.0,
-        calculation_version="STAGE5_PRE_MOVE_V1",
+        calculation_version="STAGE5_PRE_MOVE_HV_V1",
     )
     store.save(ready)
     store.save(
@@ -215,14 +215,18 @@ def test_snapshot_store_preserves_ready_feature_across_transient_rerun(
     assert store.get("US_ALL", T0, 123) == ready
 
 
-def test_snapshot_store_keeps_iv_and_hv_rows_separate_with_hv_audit_lineage(
+def test_snapshot_store_keeps_calculation_versions_separate_with_hv_audit_lineage(
     tmp_path: Path,
 ) -> None:
     store = Stage5SnapshotStore(tmp_path / "stage5.sqlite3")
-    iv = replace(ready_feature(qualified("HOOD", 123)), calculation_version="STAGE5_PRE_MOVE_V1")
-    iv_snapshot = Stage5FeatureSnapshot(run_ids=("IV_RUN",), universe_id="US_ALL", **asdict(iv))
+    other = replace(
+        ready_feature(qualified("HOOD", 123)), calculation_version="TEST_OTHER_FEATURE_VERSION"
+    )
+    other_snapshot = Stage5FeatureSnapshot(
+        run_ids=("OTHER_RUN",), universe_id="US_ALL", **asdict(other)
+    )
     hv_snapshot = replace(
-        iv_snapshot,
+        other_snapshot,
         run_ids=("HV_RUN",),
         expected_absolute_return_15m=0.00333310044188278,
         m_price=0.333310044188278,
@@ -236,10 +240,13 @@ def test_snapshot_store_keeps_iv_and_hv_rows_separate_with_hv_audit_lineage(
         market_regular_minutes=390,
     )
 
-    store.save(iv_snapshot)
+    store.save(other_snapshot)
     store.save(hv_snapshot)
 
-    assert store.get("US_ALL", T0, 123, calculation_version="STAGE5_PRE_MOVE_V1") == iv_snapshot
+    assert (
+        store.get("US_ALL", T0, 123, calculation_version="TEST_OTHER_FEATURE_VERSION")
+        == other_snapshot
+    )
     assert store.get("US_ALL", T0, 123, calculation_version="STAGE5_PRE_MOVE_HV_V1") == hv_snapshot
 
 

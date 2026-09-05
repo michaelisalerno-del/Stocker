@@ -100,47 +100,6 @@ def test_empty_history_has_no_fabricated_estimate():
     assert result.estimated_net_r is None
 
 
-def test_frozen_296_opportunity_ledger():
-    import csv
-    from pathlib import Path
-
-    ledger = Path(__file__).parent / "fixtures/session_hard_pooled_payoff.csv"
-    with ledger.open() as handle:
-        rows = list(csv.DictReader(handle))
-    observations = [
-        CompletedPayoff(
-            row["row_id"],
-            datetime.fromisoformat(row["available_at"]),
-            float(row["gross_R"]),
-        )
-        for row in rows
-    ]
-    taken = []
-    for row in rows:
-        assessment = assess_pooled_payoff(
-            opportunity_id=row["row_id"],
-            signal_timestamp=datetime.fromisoformat(row["signal_timestamp"]),
-            entry_reference_price=float(row["entry_price"]),
-            initial_stop_price=float(row["entry_price"]) + 0.5 * float(row["M_price"]),
-            estimated_round_trip_cost_bps=10.0,
-            observations=observations,
-        )
-        # The frozen research abstained during warmup. The user's revised
-        # production rule trades baseline during warmup; ready decisions match.
-        frozen_take = assessment.completed_observation_count >= 20 and assessment.take_trade
-        assert frozen_take == (row["POOLED_PAYOFF_HURDLE"] == "True")
-        if frozen_take:
-            taken.append(float(row["net_R"]))
-    assert len(rows) == 296
-    assert len(taken) == 224
-    assert sum(float(row["net_R"]) for row in rows) / len(rows) == pytest.approx(
-        0.2352, abs=0.00005
-    )
-    assert sum(taken) / len(taken) == pytest.approx(0.3911, abs=0.00005)
-    assert sum(taken) / len(rows) == pytest.approx(0.2959, abs=0.00005)
-    assert sum(taken) == pytest.approx(87.60, abs=0.005)
-
-
 def baseline_signal(*, t0=NOW, con_id=999, symbol="XYZ", run_id="RUN_A"):
     from dataclasses import replace
 
@@ -308,16 +267,15 @@ def test_timeout_is_original_t0_plus_15_and_missing_close_never_fabricates():
     assert hypothetical_baseline_outcome(signal, bars, as_of=NOW + timedelta(minutes=15)) is None
 
 
-def test_original_session_hard_cannot_seed_hv_pool(tmp_path):
+def test_other_strategy_cannot_seed_hv_pool(tmp_path):
     from dataclasses import replace
 
-    from stocker_core.strategies import SESSION_HARD_METHOD
     from stocker_execution.runtime import RuntimeStore
 
     signal = replace(
         baseline_signal(),
-        strategy_id=SESSION_HARD_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_METHOD.strategy_version,
+        strategy_id="OTHER_STRATEGY",
+        strategy_version="OTHER_VERSION",
     )
     with pytest.raises(ValueError, match="only exact"):
         register(RuntimeStore(tmp_path / "runtime.sqlite3"), signal)
@@ -554,6 +512,7 @@ def test_old_shadow_download_never_blocks_normal_paper_submission(tmp_path):
         FakeBroker,
         MutableClock,
         TriggerContextProvider,
+        _hv_run,
         _runtime,
     )
 
@@ -587,6 +546,7 @@ def test_old_shadow_download_never_blocks_normal_paper_submission(tmp_path):
         runtime = _runtime(
             tmp_path,
             broker,
+            _hv_run(),
             clock=clock,
             context_provider=TriggerContextProvider(),
             entry_source=Bars(),

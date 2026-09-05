@@ -8,7 +8,6 @@ import pytest
 
 from stocker_core.strategies import (
     SESSION_HARD_HV_METHOD,
-    SESSION_HARD_METHOD,
     StrategyDefinition,
 )
 from stocker_execution.session_hard_structure_d import (
@@ -179,7 +178,7 @@ def test_exact_pre_move_threshold_is_not_qualified() -> None:
     assert snapshot.pre_move_m == 0.475764059845861
 
 
-@pytest.mark.parametrize("method", (SESSION_HARD_METHOD, SESSION_HARD_HV_METHOD))
+@pytest.mark.parametrize("method", (SESSION_HARD_HV_METHOD,))
 def test_installed_session_hard_variants_share_frozen_mechanics_and_keep_identity(
     method: StrategyDefinition,
 ) -> None:
@@ -201,7 +200,7 @@ def test_installed_session_hard_variants_share_frozen_mechanics_and_keep_identit
     assert restored.signals == (signal,)
 
 
-@pytest.mark.parametrize("method", (SESSION_HARD_METHOD, SESSION_HARD_HV_METHOD))
+@pytest.mark.parametrize("method", (SESSION_HARD_HV_METHOD,))
 def test_known_mid_band_is_vetoed_from_strategy_entry(method: StrategyDefinition) -> None:
     start = date(2025, 1, 1)
     history = tuple(
@@ -229,7 +228,7 @@ def test_known_mid_band_is_vetoed_from_strategy_entry(method: StrategyDefinition
     assert signal.reason == "COHORT_MID_VETO"
 
 
-@pytest.mark.parametrize("method", (SESSION_HARD_METHOD, SESSION_HARD_HV_METHOD))
+@pytest.mark.parametrize("method", (SESSION_HARD_HV_METHOD,))
 def test_frozen_glw_down_first_touch_emits_short_intention_at_level(
     method: StrategyDefinition,
 ) -> None:
@@ -280,7 +279,7 @@ def test_frozen_glw_down_first_touch_emits_short_intention_at_level(
     assert triggered.target_distance_m == 1.00
 
 
-@pytest.mark.parametrize("method", (SESSION_HARD_METHOD, SESSION_HARD_HV_METHOD))
+@pytest.mark.parametrize("method", (SESSION_HARD_HV_METHOD,))
 def test_simultaneous_candidates_rank_by_session_hard_score_and_cap_at_five(
     method: StrategyDefinition,
 ) -> None:

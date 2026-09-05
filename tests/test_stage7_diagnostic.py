@@ -35,7 +35,7 @@ def test_diagnostic_rejects_live_run_before_connecting(tmp_path: Path) -> None:
         """
 run_id: live-run
 universe: NASDAQ
-strategy: SESSION_HARD
+strategy: TEST_EXECUTION
 environment: LIVE
 """,
         encoding="utf-8",
@@ -75,7 +75,7 @@ def test_diagnostic_requires_an_explicit_expected_paper_account(tmp_path: Path) 
         """
 run_id: paper-run
 universe: NASDAQ
-strategy: SESSION_HARD
+strategy: TEST_EXECUTION
 environment: PAPER
 """,
         encoding="utf-8",

@@ -30,7 +30,7 @@ from stocker_execution.history import (
 )
 from stocker_execution.ibkr import HistoricalBar, IbkrConnection, IbkrError, QualifiedInstrument
 
-STAGE5_CALCULATION_VERSION = "STAGE5_PRE_MOVE_V1"
+STAGE5_CALCULATION_VERSION = "STAGE5_PRE_MOVE_HV_V1"
 STAGE5_HV_CALCULATION_VERSION = "STAGE5_PRE_MOVE_HV_V1"
 STAGE5_FIVE_MINUTE_HISTORY = HistorySemantics("5 mins", "TRADES", True)
 STAGE5_ONE_MINUTE_HISTORY = HistorySemantics("1 min", "TRADES", True)

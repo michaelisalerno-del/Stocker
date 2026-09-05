@@ -24,7 +24,7 @@ IBKR Historical Data
         ↓
 Local IBKR History Cache
         ↓
-Prior-Session IV Context / Expected-Move Fraction
+Stock HV Snapshot / Expected-Move Fraction
         ↓
 Current-Session M / PRE_MOVE / Generic Feature Snapshot
         ↓
@@ -99,90 +99,15 @@ Reads name their exact required timezone-aware timestamps and an `as_of` cutoff.
 or cached rows that fail the shared historical-bar validation produce `NOT_READY` with the exact
 gaps; bars are never interpolated, substituted, or silently dropped from the requirement.
 
-#### Canonical PRE contract status
-
-The detailed recovery evidence, backward lineage, confirmed `PRE_MOVE_M` behavior, reference rows,
-and exact unblock requirements are recorded once in
-[`PRE_LINEAGE_RECOVERY.md`](PRE_LINEAGE_RECOVERY.md).
-The follow-up row audit and corrected causal ownership are recorded in
-[`M_PRE_MOVE_AUDIT.md`](M_PRE_MOVE_AUDIT.md).
-
-The accepted research lineage is:
-
-- research worktree `2026-09-01-session-hard-structure-d-price-volume/`
-  `rvol_efficiency_context_v0/contract.json` and `run_experiment.py` (research runner SHA-256
-  `3e0c2884ff3f0277265b86d4feca447954e75a349d3d81388390007e50c47f25`), which define
-  `PRE_MOVE_M` as the split-aligned absolute open-price change from exactly `T0-3 minutes` to
-  `T0`, divided by upstream canonical `M`;
-- Stocker research worktree `2026-08-15-you-are-working-in-my-existing/`, file
-  `research/directional-readiness/20260830-session-hard-broad-universe-expansion-v0/`
-  `run_broad_experiment.py`, which produces that upstream `M_price` from prior-session ATM option
-  IV (`P0 * atm_iv * sqrt(15 / (252 * 390)) * sqrt(2 / pi)`), rather than from a frozen
-  stock-bar-only history calculation.
-
-The follow-up audit confirms that the research normalisation is row-specific and correct:
-
-```text
-expected_absolute_return_15m = ATM_IV * sqrt(15 / (252 * 390)) * sqrt(2 / pi)
-M_price = current-session P0 at T0 * expected_absolute_return_15m
-PRE_MOVE_M = abs(P0 - raw_open[T0-3m] * (P0 / raw_open[T0])) / M_price
-```
-
-The unchanged strict threshold `PRE_MOVE_M > 0.475764059845861` is downstream of this
-normalisation and is never `M`.
-
-Stage 4 is implemented in `stocker_execution.pre_context` as `PRE_CONTEXT_V1`. Its pure selector
-preserves the frozen 7--45 calendar-DTE, 75%--125% strike bounds, nearest common-strike expiry,
-`abs(log(strike / previous_close))`, descending minimum open interest, combined relative spread,
-IV-gap, strike, and contract-ID ordering. It validates the selected pair without trying a fallback:
-model IV `[0.005, 5]`, nonnegative bid, ask at least bid, positive midpoint, open interest at least
-10 per leg, relative spread at most 1, and the recovered optional delta/gamma checks.
-
-The PAPER/LIVE IV source is frozen by user decision as the contract-specific IBKR Model Option
-Computation `impliedVol` delivered by `tickOptionComputation` tick type 13 (the `ib_async`
-`ticker.modelGreeks.impliedVol` field). Call and put model IV are averaged. Tick types 10, 11, and
-12 are not fallbacks; generic tick 106 `OPTION_IMPLIED_VOLATILITY` is excluded. Generic tick 101 is
-requested only for per-leg open interest. The adapter explicitly requests live market data type 1
-and accepts only returned type 1 or frozen type 2, whose model computation uses tick 13; delayed
-types 3/4 (model tick 83) are rejected. A missing model computation makes the result
-`PRE_CONTEXT_NOT_READY`.
-
-The research specified five-minute regular-session traded-price context functionally. The explicit
-**IBKR implementation mapping** is `5 mins`, `TRADES`, and `useRTH=True`, ending at the previous
-XNYS session close. A completely absent session uses `duration=1 D`; partial gaps request only
-contiguous missing five-minute ranges. The existing exchange calendar supplies normal and half-day
-bounds; every scheduled five-minute bar is required and the final bar close is the selection
-reference. No missing bar is filled. Acquisition qualifies every bounded strike for each expiry in
-order until the first expiry with an actual common call/put strike, then snapshots only the
-primary-distance strike set required for the remaining frozen tie-breakers. The canonical option
-observation is always 16:00 America/New_York on the previous session date, including XNYS
-half-days. An uncached request must start during that timestamp's one-minute resolution and stores
-both the 16:00 observation point and actual receipt time. This is necessary because IBKR does not
-provide this contract-specific model IV as a historical option-bar series.
-
-One SQLite table persists the context by `underlying conId + target session + PRE_CONTEXT_V1` with
-underlying/call/put `conId`, selected expiry/strike, both model IVs, ATM IV, expected-return fraction,
-source, market-data types, and timestamps. The first valid context stored for that key is immutable;
-the key has no universe, run, strategy, or PAPER/LIVE dimension. The
-user-accepted EODHD/IBKR parity conclusion comes from prior empirical testing; its old numerical
-artefact is unavailable and is not a blocker. Runtime inputs remain IBKR-only.
-
 ### IBKR boundary
 
 `stocker_execution.ibkr.IbkrConnection` is the Stage 2 broker boundary for connection/session
-identity, stock and option qualification, option definitions/model snapshots, historical bars,
+identity, stock qualification, historical-volatility snapshots, historical bars,
 current stock snapshots, and Stage 7 protected execution. Each instance owns its own client state,
 so PAPER and LIVE use distinct Gateway sessions without a global singleton. The adapter is
 read-only unless execution is explicitly enabled by runtime composition, and a writable session
 still accepts only plans matching its configured environment and expected account. It exposes
 small Stocker models; strategies and calculations do not import IBKR objects.
-
-`stocker ibkr-data-diagnostic` uses that same boundary on one caller-selected stock. It captures
-sanitized IBKR error codes per request, probes live stock data before a distinct delayed-data check,
-and separately reports qualification, historical bars, option-chain metadata, option bid/ask/open
-interest, and contract-specific tick-13 model IV. The diagnostic is read-only, masks account
-identity, does not persist PRE context, and does not transmit orders. Normal PRE acquisition still
-requires live/frozen market-data types 1/2; delayed types 3/4 remain invalid.
 
 PAPER and LIVE host, port, client ID, and environment are separate explicit configuration blocks.
 The Stage 1 run environment selects one block. Connection verification uses the managed account ID,
@@ -191,21 +116,11 @@ multi-account session must configure `expected_account` so Stocker does not sele
 
 ### M and PRE calculator boundary
 
-Stage 5 consumes a small expected-move result rather than a particular volatility producer. Two
-explicit producers are installed; there is no provider-discovery or plugin framework:
-
-- **Session HARD** (`SESSION_HARD_STRUCTURE_D_V1`) keeps the existing Stage 4 prior-session
-  canonical ATM option-pair model-IV context unchanged.
-- **Session HARD · HV** (`SESSION_HARD_HV_V1`) requests the stock's IBKR 30-day Historical
-  Volatility with temporary generic tick `104`. It does not request an option chain, tick `106`, or
-  a multi-session realized-volatility backfill. The bounded market-data line is cancelled after a
-  valid value is captured or the request fails.
-
-The Stage 4 pure calculator receives two normalized model IV values and exposes no IBKR objects.
-`PriorSessionContextService` remains the existing option-context implementation; a thin adapter
-exposes its result through the expected-move seam. The tick-104 boundary explicitly labels IBKR's
-value as decimal; percent normalization is performed only for an explicitly percent-tagged value,
-never inferred from magnitude. The HV producer then calculates:
+Stage 5 consumes an expected-move result from the installed **Session HARD · HV**
+(`SESSION_HARD_HV_V1`) method. The producer requests stock 30-day historical volatility
+through IBKR generic tick 104. Each temporary market-data line is cancelled after capture
+or failure. Values are explicitly decimal; percent normalization is used only when labelled.
+The pure HV producer calculates:
 
 ```text
 SIGMA_15 = HV * sqrt(15 / (252 * MarketDefinition.active_regular_minutes))
@@ -216,7 +131,7 @@ M_price = P0 * EXPECTED_ABSOLUTE_RETURN_15M
 The market catalogue supplies active regular minutes, including split sessions and excluded lunch
 breaks; no universal 390-minute assumption is used. A time-of-day adjustment is intentionally not
 part of V1. Missing, invalid, unavailable, or unverifiable-current HV is `HV_NOT_READY` for that
-symbol with no IV, realized-M, ATR, cached-stale, or vendor fallback.
+symbol without a substitute or stale input.
 
 The scheduler prepares HV during the five minutes before each Session HARD checkpoint. A received
 tick is accepted only when its timestamp is at or before that checkpoint, at or after the request,
@@ -224,7 +139,7 @@ and no more than five minutes old. The observation is kept only under that exact
 session, and checkpoint key; if no qualifying pre-T0 observation exists, Stage 5 rejects the symbol
 instead of issuing a late request.
 
-The pure arithmetic and selector run without a Gateway. Stage 4 does not define or calculate
+The pure arithmetic runs without a Gateway. The history cache does not define or calculate
 `P0`, `T0`, `M_price`, or `PRE_MOVE_M`; those current-session measurements are Stage 5 concerns.
 The `0.475764059845861` threshold, cohort bands, qualification, and ranking are strategy concerns
 owned by Stage 6.
@@ -259,7 +174,7 @@ qualification. The accepted broad-universe runner used a pre-frozen 511-security
 completeness; the older `$5`, first-six-bar dollar-volume, and 100-session rules belonged to an
 unseen-cohort builder and were not the frozen broad-universe Stage 5 contract. Stage 5 deduplicates
 overlapping qualified members by `conId` within the same M source and requests expected-move data
-only for survivors. IV and HV calculations retain separate run memberships and calculation versions
+only for survivors. HV calculations retain their run memberships and calculation version
 (`STAGE5_PRE_MOVE_V1` and `STAGE5_PRE_MOVE_HV_V1`). A failed symbol is logged, recorded, and does
 not stop the batch.
 
@@ -302,9 +217,8 @@ A strategy evaluates prepared candidates and market state. It does not download 
 universes, communicate with IBKR, or submit orders. Implement the first strategy concretely; let a
 second real strategy reveal the generalisation actually needed.
 
-Stage 6 implements shared mechanics for the installed
-`SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D` and
-`SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D` identities in the single
+Stage 6 implements the installed
+`SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D` strategy in the single
 `stocker_execution.session_hard_structure_d` implementation. It consumes immutable Stage 5 snapshots plus causal
 Session HARD score inputs. It neither mutates nor recalculates Stage 5 `P0`, `M_price`, or
 `PRE_MOVE_M`. The frozen flow is:
@@ -476,7 +390,7 @@ entry reference, M price, risk fraction, an expected PAPER account, and
 
 Stage 8 is the orchestration layer over the existing public boundaries; it adds no second source of
 trading decisions. `StockerRuntime` composes `RunManager`/`UniverseCatalog`, Stage 2 qualification,
-`PriorSessionContextService`, `Stage5Analyzer`, the concrete Session HARD strategy,
+`IbkrHistoricalVolatilityExpectedMoveService`, `Stage5Analyzer`, the concrete Session HARD strategy,
 `Stage7ExecutionService`, and `ExecutionLedger`. `build_runtime` is the mixed-environment production
 composition entry point and `runtime.start()` is the single lifecycle entry point.
 
@@ -515,7 +429,7 @@ configured exchange-local session open. Stage 5 work is shared for overlapping r
 session/T0 and retains the exact `conId + session + T0` identity. A checkpoint is atomically reserved
 and durably completed once. A process that starts after T0, misses the five-minute processing
 window, or restarts after an interrupted checkpoint records the opportunity as skipped; it does not
-manufacture a historical live signal. Stage 4 continues to receive the exact target session, so its
+manufacture a historical live signal. The data layer receives the exact target session, so its
 previous-session context cache cannot drift across trade sessions.
 
 Stage 6 signal state is durably upserted as it is produced and after entry observation. On restart,
@@ -535,7 +449,7 @@ Stage 7 diagnostic remains the only explicit manual diagnostic order path.
 
 ### Controlled LIVE execution
 
-Stage 9 changes only the execution destination. Universe selection, Stage 4 context, Stage 5
+Stage 9 changes only the execution destination. Universe selection, HV inputs, Stage 5
 features, Stage 6 strategy/`OrderIntent`, Stage 7 risk arithmetic, `OrderPlan` geometry, and Stage 8
 orchestration are shared. Account equity/buying power, positions, orders, fills, broker IDs, ledger
 records, idempotency, reconciliation, connection epochs, and readiness remain scoped by explicit
@@ -637,8 +551,7 @@ Run lineage includes market, cap contract/version, strategy/version, candidate s
 PAPER or LIVE. An exact disabled lineage is re-enabled; a changed semantic identity creates a new
 run. LIVE creation requires an existing exact PAPER counterpart and is always a deliberate action.
 `SESSION_HARD_HV_V1` is PAPER-only: the run model and Universes builder reject LIVE explicitly,
-and the dashboard advertises only PAPER availability for that strategy. Existing Session HARD
-retains both PAPER and LIVE availability.
+and the dashboard advertises only PAPER availability.
 
 `ACTIVITY_SHORTLIST_V1` is captured 15 active trading minutes after regular-session open. It
 discovers and caches IBKR scanner parameters, uses the supported subset of `TOP_TRADE_RATE`,
@@ -650,11 +563,8 @@ immutably and may be shared by PAPER/LIVE or multiple methods. Reconnect loads i
 with no snapshot records `SCREEN_MISSED` and does not create a substitute population.
 
 Exchange calendars generate valid active five-minute slots. Breaks do not count toward Session
-HARD checkpoints, while the existing US `6, 8, ..., 34` timestamps are unchanged. US Stage 4
-continues byte-for-byte with `PRE_CONTEXT_V1` and `252 * 390`. Non-US PAPER context uses
-`PRE_CONTEXT_MARKET_CLOCK_V1`, the exact previous local session and close, and
-`252 * active_regular_session_minutes`; breaks are excluded and no substitute volatility source
-is allowed.
+HARD checkpoints, while the existing US `6, 8, ..., 34` timestamps are unchanged.
+HV scales by each market's active regular-session minutes.
 
 Per-run performance is derived from execution-ledger fills rather than current position state.
 Closed fills and recorded commissions provide realised P&L; historical R uses the risk captured on

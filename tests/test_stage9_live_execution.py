@@ -3,6 +3,9 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
+from execution_test_support import execution_method  # noqa: F401
 from stocker_core.runs import Environment
 from stocker_execution.execution_ledger import ExecutionLedger
 from stocker_execution.execution_models import (
@@ -59,6 +62,8 @@ from test_stage8_runtime import (
 from test_stage8_runtime import (
     _run as _runtime_run,
 )
+
+pytestmark = pytest.mark.usefixtures("execution_method")
 
 
 class EnvironmentBroker(FakeBroker):
@@ -708,7 +713,7 @@ universes:
 runs:
   - run_id: live-run
     universe: NASDAQ
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: LIVE
     risk: {risk_per_trade: 0.001}
     session:
@@ -757,7 +762,7 @@ runs:
   - run_id: deployment-paper
     enabled: false
     universe: CUSTOM_DEPLOYMENT
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: PAPER
     risk: {risk_per_trade: 0.001, max_concurrent_positions: 1}
     session:

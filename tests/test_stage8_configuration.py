@@ -22,7 +22,7 @@ runs:
   - run_id: paper-run
     enabled: true
     universe: NASDAQ
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: PAPER
     risk: {risk_per_trade: 0.001, max_concurrent_positions: 5}
     session:
@@ -53,7 +53,7 @@ def test_run_enabled_defaults_true_and_environment_remains_per_run() -> None:
     run = RunConfig(
         run_id="future-live",
         universe="NASDAQ",
-        strategy="SESSION_HARD",
+        strategy="TEST_EXECUTION",
         environment=Environment.LIVE,
     )
 

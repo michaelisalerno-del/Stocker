@@ -170,7 +170,7 @@ def test_exchange_session_resolver_uses_run_timezone_and_closed_day() -> None:
     run = RunConfig(
         run_id="london",
         universe="FTSE",
-        strategy="SESSION_HARD",
+        strategy="SESSION_HARD_HV",
         environment=Environment.PAPER,
         session=RunWindow(
             start=time(8),
@@ -195,7 +195,7 @@ def test_exchange_session_resolver_rejects_missing_session_instead_of_assuming_u
     run = RunConfig(
         run_id="missing-session",
         universe="FTSE",
-        strategy="SESSION_HARD",
+        strategy="SESSION_HARD_HV",
         environment=Environment.PAPER,
     )
 

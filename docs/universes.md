@@ -38,7 +38,7 @@ universes:
 runs:
   - run_id: nasdaq_paper
     universe: NASDAQ
-    strategy: SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D
+    strategy: SESSION_HARD_HV
     environment: PAPER
     screen:
       method: HOT_BY_VOLUME

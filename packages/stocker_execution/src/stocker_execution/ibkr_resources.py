@@ -16,11 +16,10 @@ class CapacitySimulation:
     unique_stocks: int
     scanner_requests: int
     contract_qualifications: int
-    stage4_contexts: int
+    hv_snapshots: int
     historical_requests: int
     peak_scanner_concurrency: int
     peak_underlying_lines: int
-    peak_option_lines: int
     peak_market_data_lines: int
     duplicate_stock_requests_avoided: int
     market_data_line_budget: int
@@ -39,13 +38,12 @@ class _FakeResourceBroker:
         self.budget = budget
         self.screens: set[tuple[str, str]] = set()
         self.qualified: set[int] = set()
-        self.contexts: set[int] = set()
+        self.contexts: set[tuple[int, int]] = set()
         self.history: set[tuple[object, ...]] = set()
         self.active_lines: set[tuple[int, str]] = set()
         self.scanner_requests = 0
         self.active_scanners = 0
         self.peak_scanners = 0
-        self.peak_option_lines = 0
         self.peak_total_lines = 0
         self.capacity_rejects = 0
         self.execution_safety_checks = 0
@@ -62,22 +60,20 @@ class _FakeResourceBroker:
 
     def prepare_stock(self, con_id: int) -> None:
         self.qualified.add(con_id)
-        if con_id not in self.contexts:
-            self.request_history((con_id, "PRE", "5 mins"))
-            try:
-                self.acquire_line((con_id, "CALL"))
-                self.acquire_line((con_id, "PUT"))
-            except RuntimeError:
-                self.execution_safety_checks += 1
-                return
-            finally:
-                self.release_line((con_id, "PUT"))
-                self.release_line((con_id, "CALL"))
-            self.contexts.add(con_id)
-        self.execution_safety_checks += 1
         for checkpoint in range(len(SESSION_HARD_CHECKPOINTS)):
+            identity = (con_id, checkpoint)
+            if identity not in self.contexts:
+                try:
+                    self.acquire_line((con_id, "HV"))
+                    self.contexts.add(identity)
+                except RuntimeError:
+                    self.execution_safety_checks += 1
+                    return
+                finally:
+                    self.release_line((con_id, "HV"))
             self.request_history((con_id, checkpoint, "5 mins"))
             self.request_history((con_id, checkpoint, "1 min"))
+        self.execution_safety_checks += 1
 
     def request_history(self, key: tuple[object, ...]) -> None:
         self.history.add(key)
@@ -89,8 +85,6 @@ class _FakeResourceBroker:
             self.capacity_rejects += 1
             raise RuntimeError("IBKR_MARKET_DATA_CAPACITY_UNAVAILABLE")
         self.active_lines.add(key)
-        option_lines = sum(kind in {"CALL", "PUT"} for _con_id, kind in self.active_lines)
-        self.peak_option_lines = max(self.peak_option_lines, option_lines)
         self.peak_total_lines = max(self.peak_total_lines, len(self.active_lines))
 
     def release_line(self, key: tuple[int, str]) -> None:
@@ -147,11 +141,10 @@ def _exercise_workload(
         unique_stocks=len(broker.qualified),
         scanner_requests=broker.scanner_requests,
         contract_qualifications=len(broker.qualified),
-        stage4_contexts=len(broker.contexts),
+        hv_snapshots=len(broker.contexts),
         historical_requests=len(broker.history),
         peak_scanner_concurrency=broker.peak_scanners,
-        peak_underlying_lines=0,
-        peak_option_lines=broker.peak_option_lines,
+        peak_underlying_lines=broker.peak_total_lines,
         peak_market_data_lines=broker.peak_total_lines,
         duplicate_stock_requests_avoided=configured_memberships - len(broker.qualified),
         market_data_line_budget=market_data_line_budget,
@@ -165,7 +158,7 @@ def _exercise_reconnect(market_data_line_budget: int) -> CapacitySimulation:
     broker = _FakeResourceBroker(market_data_line_budget)
     for con_id in range(20):
         try:
-            broker.acquire_line((con_id, "CALL"))
+            broker.acquire_line((con_id, "HV"))
         except RuntimeError:
             break
     before = len(broker.active_lines)
@@ -178,11 +171,10 @@ def _exercise_reconnect(market_data_line_budget: int) -> CapacitySimulation:
         unique_stocks=20,
         scanner_requests=0,
         contract_qualifications=0,
-        stage4_contexts=0,
+        hv_snapshots=0,
         historical_requests=0,
         peak_scanner_concurrency=0,
-        peak_underlying_lines=0,
-        peak_option_lines=broker.peak_option_lines,
+        peak_underlying_lines=broker.peak_total_lines,
         peak_market_data_lines=broker.peak_total_lines,
         duplicate_stock_requests_avoided=0,
         market_data_line_budget=market_data_line_budget,

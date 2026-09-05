@@ -22,7 +22,7 @@ algorithmic execution authority; use a PAPER-only configuration for this diagnos
    read-only metadata shows USD, XNYS, America/New_York, regular session 09:30–16:00, Activity
    Shortlist V1, a 15-active-minute screen time, and a watch limit of 50.
 3. Choose **Add to PAPER**. Confirm the run appears only under PAPER as
-   `NASDAQ · HARD · MID`, with distinct market/cap/strategy/screen lineage. The LIVE action is
+   `NASDAQ · HARD-HV · MID`, with distinct market/cap/strategy/screen lineage. The LIVE action is
    permitted only because the exact PAPER counterpart now exists; do not use it in this diagnostic.
 4. At 09:45 America/New_York, inspect the persisted screen endpoint and Run Detail. Confirm the
    snapshot reports the actual supported subset of `TOP_TRADE_RATE`, `TOP_VOLUME_RATE`, and

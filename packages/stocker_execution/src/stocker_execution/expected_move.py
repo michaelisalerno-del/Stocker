@@ -11,7 +11,6 @@ from typing import Literal, Protocol
 
 from stocker_core.markets import MarketDefinition
 from stocker_execution.ibkr import IbkrConnection, IbkrError, QualifiedInstrument
-from stocker_execution.pre_context import ContextStatus, PriorSessionContextResult
 
 HV_EXPECTED_MOVE_CALCULATION_VERSION = "EXPECTED_MOVE_HV_V1"
 IBKR_HISTORICAL_VOLATILITY_SOURCE = "IBKR_HISTORICAL_VOLATILITY_TICK_104"
@@ -42,7 +41,7 @@ class ExpectedMoveResult:
 
 
 class ExpectedMoveService(Protocol):
-    """The small Stage 5 boundary shared by the two concrete M producers."""
+    """The small Stage 5 boundary for the HV M producer."""
 
     async def get_expected_move(
         self,
@@ -61,12 +60,6 @@ class ExpectedMoveService(Protocol):
         session: date,
         t0: datetime,
     ) -> None: ...
-
-
-class _PriorSessionContextService(Protocol):
-    async def get_or_create(
-        self, instrument: QualifiedInstrument, *, session: date
-    ) -> PriorSessionContextResult: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,52 +111,6 @@ def calculate_hv_expected_move(
         sigma_15=sigma_15,
         expected_absolute_return_15m=expected,
     )
-
-
-class PriorSessionContextExpectedMoveService:
-    """Adapt the unchanged canonical ATM-option-IV context to the M seam."""
-
-    def __init__(self, context_service: _PriorSessionContextService) -> None:
-        self._context_service = context_service
-
-    async def prepare_expected_move(
-        self,
-        instrument: QualifiedInstrument,
-        *,
-        market: MarketDefinition,
-        session: date,
-        t0: datetime,
-    ) -> None:
-        del instrument, market, session, t0
-
-    async def get_expected_move(
-        self,
-        instrument: QualifiedInstrument,
-        *,
-        market: MarketDefinition,
-        session: date,
-        t0: datetime,
-    ) -> ExpectedMoveResult:
-        del market, t0
-        result = await self._context_service.get_or_create(instrument, session=session)
-        if result.status is not ContextStatus.READY or result.context is None:
-            return ExpectedMoveResult(
-                status=ExpectedMoveStatus.NOT_READY,
-                expected_absolute_return_15m=None,
-                source="IBKR_PRIOR_SESSION_ATM_OPTION_IV",
-                observation_timestamp=None,
-                calculation_version="",
-                reason=result.reason,
-            )
-        context = result.context
-        return ExpectedMoveResult(
-            status=ExpectedMoveStatus.READY,
-            expected_absolute_return_15m=context.expected_absolute_return_15m,
-            source=context.iv_source,
-            observation_timestamp=context.captured_at,
-            calculation_version=context.calculation_version,
-            reason=result.reason,
-        )
 
 
 class IbkrHistoricalVolatilityExpectedMoveService:

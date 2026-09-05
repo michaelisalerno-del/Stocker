@@ -1,4 +1,4 @@
 run_id: nasdaq_session_hard_paper
 universe: NASDAQ
-strategy: SESSION_HARD
+strategy: SESSION_HARD_HV
 environment: PAPER

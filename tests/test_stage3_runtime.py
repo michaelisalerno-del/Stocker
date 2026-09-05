@@ -84,7 +84,7 @@ universes:
 runs:
   - run_id: nasdaq_main
     universe: NASDAQ_TEST
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: PAPER
   - run_id: custom_experiment
     universe: CUSTOM_RESEARCH
@@ -138,19 +138,19 @@ universes:
 runs:
   - run_id: nasdaq
     universe: NASDAQ
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: PAPER
   - run_id: nyse
     universe: NYSE
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: PAPER
   - run_id: all
     universe: US_ALL
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: PAPER
   - run_id: custom
     universe: CUSTOM
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: PAPER
 """,
         encoding="utf-8",
@@ -231,7 +231,7 @@ universes:
 runs:
   - run_id: unknown_universe_run
     universe: MISSING
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: PAPER
 """,
         encoding="utf-8",
@@ -255,7 +255,7 @@ universes:
 runs:
   - run_id: duplicate
     universe: NASDAQ_TEST
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: PAPER
   - run_id: duplicate
     universe: NASDAQ_TEST
@@ -286,13 +286,13 @@ def test_starting_two_runs_with_different_universes_keeps_both_active() -> None:
             RunConfig(
                 run_id="nasdaq_main",
                 universe="NASDAQ_TEST",
-                strategy="SESSION_HARD",
+                strategy="TEST_EXECUTION",
                 environment=Environment.PAPER,
             ),
             RunConfig(
                 run_id="ftse_morning",
                 universe="FTSE_TEST",
-                strategy="SESSION_HARD",
+                strategy="TEST_EXECUTION",
                 environment=Environment.PAPER,
             ),
         ),
@@ -317,7 +317,7 @@ def test_active_paper_and_live_runs_can_share_one_universe_and_remain_independen
             RunConfig(
                 run_id="nasdaq_live",
                 universe="NASDAQ_TEST",
-                strategy="SESSION_HARD",
+                strategy="TEST_EXECUTION",
                 environment=Environment.LIVE,
             ),
             RunConfig(
@@ -379,7 +379,7 @@ def test_run_can_carry_an_optional_session_window_without_scheduling_it() -> Non
     run = RunConfig(
         run_id="ftse_morning",
         universe="FTSE_TEST",
-        strategy="SESSION_HARD",
+        strategy="TEST_EXECUTION",
         environment=Environment.PAPER,
         session=RunWindow(
             start=time(8, 0),
@@ -402,7 +402,7 @@ def test_run_manager_rejects_duplicate_ids_when_constructed_directly() -> None:
     duplicate = RunConfig(
         run_id="duplicate",
         universe="NASDAQ_TEST",
-        strategy="SESSION_HARD",
+        strategy="TEST_EXECUTION",
         environment=Environment.PAPER,
     )
 
@@ -431,11 +431,11 @@ universes:
 runs:
   - run_id: nasdaq_main
     universe: NASDAQ_TEST
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: PAPER
   - run_id: ftse_morning
     universe: FTSE_TEST
-    strategy: SESSION_HARD
+    strategy: TEST_EXECUTION
     environment: PAPER
 """,
         encoding="utf-8",

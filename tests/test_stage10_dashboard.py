@@ -11,10 +11,14 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
+from execution_test_support import (
+    TEST_METHOD,
+    execution_method,  # noqa: F401
+)
 from stocker_core.cli import stage10_run
 from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig, RunWindow
-from stocker_core.strategies import SESSION_HARD_HV_METHOD, SESSION_HARD_METHOD
+from stocker_core.strategies import SESSION_HARD_HV_METHOD
 from stocker_core.universes import InstrumentReference, UniverseDefinition
 from stocker_dashboard.app import create_dashboard_app
 from stocker_dashboard.controls import LiveConfirmation, RunControlService
@@ -56,6 +60,9 @@ from stocker_execution.stage5 import (
 NOW = datetime(2026, 9, 2, 14, 41, tzinfo=UTC)
 
 
+pytestmark = pytest.mark.usefixtures("execution_method")
+
+
 def _config() -> RunsConfig:
     universe = UniverseDefinition(
         universe_id="NASDAQ",
@@ -81,7 +88,7 @@ def _config() -> RunsConfig:
             RunConfig(
                 run_id="US-SH-LIVE",
                 universe="NASDAQ",
-                strategy="SESSION_HARD",
+                strategy="TEST_EXECUTION",
                 environment=Environment.LIVE,
                 risk=RunRiskConfig(risk_per_trade=0.001, max_concurrent_positions=5),
                 session=session,
@@ -90,7 +97,7 @@ def _config() -> RunsConfig:
                 run_id="US-SH-PAPER",
                 enabled=False,
                 universe="NASDAQ",
-                strategy="SESSION_HARD",
+                strategy="TEST_EXECUTION",
                 environment=Environment.PAPER,
                 risk=RunRiskConfig(risk_per_trade=0.002, max_concurrent_positions=3),
                 session=session,
@@ -128,7 +135,7 @@ def _runtime_status() -> RuntimeStatus:
             RunStatus(
                 "US-SH-LIVE",
                 "NASDAQ",
-                "SESSION_HARD",
+                "TEST_EXECUTION",
                 Environment.LIVE,
                 RunRuntimeState.ACTIVE,
                 "",
@@ -141,7 +148,7 @@ def _runtime_status() -> RuntimeStatus:
             RunStatus(
                 "US-SH-PAPER",
                 "NASDAQ",
-                "SESSION_HARD",
+                "TEST_EXECUTION",
                 Environment.PAPER,
                 RunRuntimeState.DISABLED,
                 "disabled by configuration",
@@ -260,8 +267,8 @@ def _seed_authoritative_state(tmp_path: Path) -> DashboardReadService:
     )
     runtime_store = RuntimeStore(database)
     signal = StrategySignal(
-        strategy_id="SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
-        strategy_version="SESSION_HARD_STRUCTURE_D_V1",
+        strategy_id="TEST_EXECUTION",
+        strategy_version="TEST_EXECUTION_V1",
         signal_id="signal-live-nvda",
         run_id="US-SH-LIVE",
         underlying_con_id=101,
@@ -433,7 +440,7 @@ def test_run_detail_uses_persisted_funnel_counts_and_config(tmp_path: Path) -> N
 
     assert detail["account"] == "U123456"
     assert detail["risk_per_trade"] == 0.001
-    assert detail["strategy_version"] == "SESSION_HARD_STRUCTURE_D_V1"
+    assert detail["strategy_version"] is None
     assert detail["funnel"] == [
         {"stage": "Market / cap eligible", "count": 2},
         {"stage": "Activity scan union", "count": 0},
@@ -558,7 +565,7 @@ def test_trade_filters_and_summary_cover_the_complete_filtered_ledger(tmp_path: 
         start=NOW,
         end=NOW + timedelta(minutes=2),
         run_id="US-SH-LIVE",
-        strategy="SESSION_HARD",
+        strategy="TEST_EXECUTION",
         universe="NASDAQ",
         symbol="nvda",
         limit=1,
@@ -654,8 +661,8 @@ IBM,NYSE
         controls.add_universe_run(
             market_id="US_NASDAQ",
             cap_bucket="MID",
-            strategy_id=SESSION_HARD_METHOD.strategy_id,
-            strategy_version=SESSION_HARD_METHOD.strategy_version,
+            strategy_id=TEST_METHOD.strategy_id,
+            strategy_version=TEST_METHOD.strategy_version,
             environment=Environment.PAPER,
             risk_per_trade=0.001,
             max_concurrent_positions=1,
@@ -695,7 +702,7 @@ def test_run_controls_validate_through_backend_and_require_live_confirmation(
             risk_per_trade=0.003,
             max_concurrent_positions=4,
             universe="NASDAQ",
-            strategy="SESSION_HARD",
+            strategy="TEST_EXECUTION",
         )
     )
 
@@ -712,7 +719,7 @@ def test_run_controls_validate_through_backend_and_require_live_confirmation(
     loaded = load_runs_config(runs_path)
     assert changed.run is not None
     assert changed.run.environment is Environment.LIVE
-    assert changed.run.strategy == "SESSION_HARD"
+    assert changed.run.strategy == "TEST_EXECUTION"
     assert loaded.runs[1].risk == RunRiskConfig(risk_per_trade=0.003, max_concurrent_positions=4)
 
 
@@ -772,7 +779,7 @@ def test_invalid_live_account_and_invalid_config_are_rejected(tmp_path: Path) ->
                 risk_per_trade=-1,
                 max_concurrent_positions=4,
                 universe="NASDAQ",
-                strategy="SESSION_HARD",
+                strategy="TEST_EXECUTION",
             )
         )
 
@@ -906,7 +913,7 @@ def test_custom_universe_edit_normalizes_persists_and_refreshes_affected_run(
             risk_per_trade=0.002,
             max_concurrent_positions=3,
             universe="CUSTOM_OPS",
-            strategy="SESSION_HARD",
+            strategy="TEST_EXECUTION",
         )
     )
     asyncio.run(controls.enable_run("US-SH-PAPER"))
@@ -1139,8 +1146,8 @@ def test_universe_builder_http_flow_keeps_paper_and_live_separate(
     body = {
         "market_id": "UK_LSE",
         "cap_bucket": "LARGE",
-        "strategy_id": "SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
-        "strategy_version": "SESSION_HARD_STRUCTURE_D_V1",
+        "strategy_id": "TEST_EXECUTION",
+        "strategy_version": "TEST_EXECUTION_V1",
         "risk_per_trade": 0.001,
         "max_concurrent_positions": 2,
     }
@@ -1163,8 +1170,8 @@ def test_universe_builder_http_flow_keeps_paper_and_live_separate(
     paper_run = next(item for item in rows["PAPER"] if item["market_id"] == "UK_LSE")
     live_run = next(item for item in rows["LIVE"] if item["market_id"] == "UK_LSE")
     assert paper_run["run_id"] != live_run["run_id"]
-    assert paper_run["display_name"] == "LSE · HARD · LARGE"
-    assert live_run["display_name"] == "LSE · HARD · LARGE"
+    assert paper_run["display_name"] == "LSE · TEST · LARGE"
+    assert live_run["display_name"] == "LSE · TEST · LARGE"
 
     disabled = client.post(f"/api/universe-runs/{paper_run['run_id']}/disable")
     assert disabled.status_code == 200

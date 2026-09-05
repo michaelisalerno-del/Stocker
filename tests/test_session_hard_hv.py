@@ -274,3 +274,21 @@ def test_nearby_checkpoint_preparation_does_not_discard_an_unconsumed_snapshot()
 
     assert result.status is ExpectedMoveStatus.READY
     assert result.observation_timestamp == T0 - timedelta(minutes=4)
+
+
+def test_only_hv_is_installed_and_default_strategy_is_hv() -> None:
+    from stocker_core.strategies import SESSION_HARD_HV_METHOD, installed_strategies
+    from stocker_execution.session_hard_structure_d import SessionHardStructureDStrategy
+    from stocker_execution.strategy_factory import create_strategy
+
+    assert installed_strategies() == (SESSION_HARD_HV_METHOD,)
+    strategy = SessionHardStructureDStrategy()
+    assert strategy.strategy_id == SESSION_HARD_HV_METHOD.strategy_id
+    assert strategy.strategy_version == SESSION_HARD_HV_METHOD.strategy_version
+    with pytest.raises(ValueError, match="Unsupported runtime strategy"):
+        create_strategy(
+            "SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D", "SESSION_HARD_STRUCTURE_D_V1"
+        )
+    assert not hasattr(IbkrConnection, "option_chains")
+    assert not hasattr(IbkrConnection, "option_snapshots")
+    assert not hasattr(IbkrConnection, "qualify_options")

@@ -75,17 +75,17 @@ class ContextService:
             return ExpectedMoveResult(
                 status=ExpectedMoveStatus.NOT_READY,
                 expected_absolute_return_15m=None,
-                source="IBKR_MODEL_OPTION_COMPUTATION_TICK_13",
+                source="IBKR_HISTORICAL_VOLATILITY_TICK_104",
                 observation_timestamp=None,
-                calculation_version="PRE_CONTEXT_V1",
+                calculation_version="EXPECTED_MOVE_HV_V1",
                 reason="PRE_CONTEXT_NOT_READY: missing frozen context",
             )
         return ExpectedMoveResult(
             status=ExpectedMoveStatus.READY,
             expected_absolute_return_15m=0.01,
-            source="IBKR_MODEL_OPTION_COMPUTATION_TICK_13",
+            source="IBKR_HISTORICAL_VOLATILITY_TICK_104",
             observation_timestamp=T0 - timedelta(days=1),
-            calculation_version="PRE_CONTEXT_V1",
+            calculation_version="EXPECTED_MOVE_HV_V1",
             reason="cache hit",
         )
 

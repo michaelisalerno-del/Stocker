@@ -13,15 +13,6 @@ class StrategyDefinition:
     environments: tuple[str, ...]
 
 
-SESSION_HARD_METHOD = StrategyDefinition(
-    strategy_id="SESSION_HARD_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
-    strategy_version="SESSION_HARD_STRUCTURE_D_V1",
-    config_name="SESSION_HARD",
-    label="Session HARD",
-    display_token="HARD",
-    environments=("PAPER", "LIVE"),
-)
-
 SESSION_HARD_HV_METHOD = StrategyDefinition(
     strategy_id="SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
     strategy_version="SESSION_HARD_HV_V1",
@@ -31,7 +22,7 @@ SESSION_HARD_HV_METHOD = StrategyDefinition(
     environments=("PAPER",),
 )
 
-_INSTALLED = (SESSION_HARD_METHOD, SESSION_HARD_HV_METHOD)
+_INSTALLED = (SESSION_HARD_HV_METHOD,)
 
 
 def installed_strategies() -> tuple[StrategyDefinition, ...]:

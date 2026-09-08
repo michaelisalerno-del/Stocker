@@ -216,6 +216,12 @@ async function runDetail(runId) {
   const run = await api(`/api/runs/${encodeURIComponent(runId)}`);
   const selectedPeriod = new URLSearchParams(location.search).get("period") || "TODAY";
   const performance = await api(`/api/runs/${encodeURIComponent(runId)}/performance?period=${encodeURIComponent(selectedPeriod)}`);
+  const evaluationStatus = run.evaluation_status === "NO_MORE_CHECKPOINTS_TODAY"
+    ? "No further method checkpoints today. History downloads may continue for future sessions."
+    : (run.next_checkpoint ? `Next method checkpoint: ${new Date(run.next_checkpoint).toLocaleString()}` : "Waiting for the method checkpoint schedule.");
+  const downloads = run.downloads
+    ? `${number(run.downloads.requests)} history requests today · ${number(run.downloads.pending)} requests queued or in progress. Shared across runs; resets on restart. This is not a stock-completion count.`
+    : "History download activity is unavailable.";
   const details = ["market", "environment", "account", "currency", "market_state", "session", "screen_state", "watchlist_size", "last_checkpoint", "next_checkpoint", "risk_per_trade", "max_concurrent_positions"];
   const grid = details.map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${key === "environment" ? environment(run[key]) : esc(run[key])}</strong></div>`).join("");
   const funnel = run.funnel.map((step, index) => `${index ? '<div class="funnel-arrow"></div>' : ""}<div class="funnel-step"><span>${esc(step.stage)}</span><strong>${number(step.count)}</strong></div>`).join("");
@@ -225,8 +231,8 @@ async function runDetail(runId) {
   const periods = [["TODAY", "Today"], ["5_SESSIONS", "5 Sessions"], ["20_SESSIONS", "20 Sessions"], ["ALL", "All"]].map(([value, label]) => `<button class="${value === selectedPeriod ? "active" : "secondary"}" data-performance-period="${value}">${label}</button>`).join("");
   main.innerHTML = `${head(run.display_name, `${run.market || run.universe} / ${run.environment}`)}
     <section class="section"><div class="control-rail"><button ${run.historical_only ? "disabled" : ""} data-control="${run.enabled ? "disable" : "enable"}">${run.enabled ? "Disable run" : "Enable run"}</button><button class="secondary" data-control="edit">Edit risk & capacity</button></div><p class="notice">Market, method specification, universe snapshot and environment belong to the saved run. Create another run to change them. Disabling stops future entries and never flattens exposure.</p>${lastOutcome ? `<p class="notice" role="status"><b>${esc(lastOutcome.apply_mode)}</b> · ${esc(lastOutcome.detail)}</p>` : ""}</section>
-    <section class="section"><div class="section-head"><h2>Run configuration</h2></div><div class="detail-grid">${grid}</div><details><summary>Method specification and run provenance</summary><pre>${esc(JSON.stringify({ method: run.strategy_id, version: run.strategy_version, spec_hash: run.method_spec_hash, specification: run.method_spec, provenance: run.provenance }, null, 2))}</pre></details></section>
-    <section class="section"><div class="section-head"><h2>Pipeline funnel</h2><span class="muted">Persisted counters only</span></div><div class="funnel">${funnel}</div></section>
+    <section class="section"><div class="section-head"><h2>Run configuration</h2></div><div class="detail-grid">${grid}</div><details><summary>Method specification</summary><pre>${esc(JSON.stringify({ method: run.strategy_id, version: run.strategy_version, spec_hash: run.method_spec_hash, specification: run.method_spec }, null, 2))}</pre><a href="/api/runs/${encodeURIComponent(runId)}/provenance" download="run-provenance.json">Download full run audit record</a></details></section>
+    <section class="section"><div class="section-head"><h2>Preparation and evaluation</h2></div><p class="notice">${esc(evaluationStatus)}</p><p role="status">${esc(downloads)}</p><p class="muted">${run.last_checkpoint ? `Results below are from ${esc(new Date(run.last_checkpoint).toLocaleString())}.` : "No checkpoint results yet."} These totals update after an evaluation, not after each download.</p><div class="funnel">${funnel}</div><p><a href="/candidates?run=${encodeURIComponent(runId)}&status=READY">Browse data-ready stocks</a> · <a href="/candidates?run=${encodeURIComponent(runId)}&status=WAITING_FOR_ENTRY">View armed candidates</a></p></section>
     <section class="section"><div class="section-head"><h2>Performance</h2><div class="tabs">${periods}</div></div><div class="metric-strip performance-strip">${metrics}</div>${table(historyColumns, performance.history)}</section>`;
   main.querySelectorAll("[data-control]").forEach((button) => button.addEventListener("click", () => runControl(run, button.dataset.control)));
   main.querySelectorAll("[data-performance-period]").forEach((button) => button.addEventListener("click", () => { location.href = `/runs?run=${encodeURIComponent(runId)}&period=${button.dataset.performancePeriod}`; }));
@@ -295,7 +301,7 @@ async function candidatesPage() {
     { key: "reason", label: "Reason" },
   ];
   const options = runs.map((run) => `<option ${run.run_id === selected ? "selected" : ""}>${esc(run.run_id)}</option>`).join("");
-  const statuses = ["", "PRE_CONTEXT_NOT_READY", "PRE_MOVE_NOT_READY", "INELIGIBLE", "WAITING_FOR_ENTRY", "ENTRY_TRIGGERED", "NOT_QUALIFIED", "EXPIRED"];
+  const statuses = ["", "READY", "PRE_CONTEXT_NOT_READY", "PRE_MOVE_NOT_READY", "INELIGIBLE", "WAITING_FOR_ENTRY", "ENTRY_TRIGGERED", "NOT_QUALIFIED", "EXPIRED"];
   const statusOptions = statuses.map((value) => `<option value="${esc(value)}" ${value === status ? "selected" : ""}>${esc(value || "ALL")}</option>`).join("");
   const pageStart = data.total ? offset + 1 : 0;
   const pageEnd = Math.min(offset + data.items.length, data.total);

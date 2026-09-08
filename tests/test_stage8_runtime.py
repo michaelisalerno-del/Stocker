@@ -667,6 +667,37 @@ def test_wrong_account_prevents_readiness(tmp_path: Path) -> None:
     assert "ACCOUNT" in runtime.status().runs[0].reason.upper()
 
 
+@pytest.mark.parametrize("hour", [12, 19])
+def test_session_history_resumes_without_opening_entry_streams(tmp_path, hour):
+    async def scenario():
+        clock = MutableClock()
+        clock.now = datetime(2026, 9, 2, hour, 0, tzinfo=UTC)
+        for _restart in range(2):
+            features = FakeFeatureService()
+            broker = FakeBroker()
+            streams = []
+            class Source(EmptyEntrySource):
+                def prepare_trades(self, instrument, captured=streams):
+                    captured.append(instrument)
+            runtime = _runtime(tmp_path, broker, _hv_run(), clock=clock, feature_service=features,
+                               entry_source=Source())
+            runtime._default_method_services = replace(
+                runtime._default_method_services, prepare_history_on_ready=True
+            )
+            await runtime.start()
+            await runtime.poll_once()
+            await asyncio.sleep(0)
+            assert len(features.prepared) == 1
+            await runtime.poll_once()
+            await asyncio.sleep(0)
+            assert len(features.prepared) == 1
+            assert features.calls == 0  # No out-of-window qualification or entry.
+            assert streams == []
+            assert broker.submitted == []
+            await runtime.stop()
+    asyncio.run(scenario())
+
+
 def test_idle_entry_poll_does_not_rewrite_unchanged_candidates(tmp_path, monkeypatch):
     async def scenario():
         clock = MutableClock()
@@ -677,6 +708,16 @@ def test_idle_entry_poll_does_not_rewrite_unchanged_candidates(tmp_path, monkeyp
         await runtime.poll_once()
         saved = runtime.store.load_signals("hv-run")
         assert saved
+        comparisons = []
+        signal_type = type(saved[0])
+        original_eq = signal_type.__eq__
+
+        def count_same_comparison(left, right):
+            if left is right:
+                comparisons.append(left.signal_id)
+            return original_eq(left, right)
+
+        monkeypatch.setattr(signal_type, "__eq__", count_same_comparison)
         rewritten = []
         save = runtime.store.save_signals
 
@@ -687,8 +728,13 @@ def test_idle_entry_poll_does_not_rewrite_unchanged_candidates(tmp_path, monkeyp
         monkeypatch.setattr(runtime.store, "save_signals", record)
         await runtime.poll_once()
         assert rewritten == []
+        assert comparisons == []
         assert runtime.store.load_signals("hv-run") == saved
         assert broker.submitted == []
+        clock.now = datetime(2026, 9, 2, 19, 0, tzinfo=UTC)
+        run_status = runtime.status().runs[0]
+        assert run_status.next_checkpoint is None
+        assert run_status.last_scheduled_checkpoint == datetime(2026, 9, 2, 16, 20, tzinfo=UTC)
         await runtime.stop()
 
     asyncio.run(scenario())

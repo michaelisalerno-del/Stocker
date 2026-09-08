@@ -106,6 +106,13 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
     def run_detail(run_id: str) -> dict[str, Any]:
         return reads.run_detail(run_id)
 
+    @app.get("/api/runs/{run_id}/provenance")
+    def run_provenance(run_id: str) -> JSONResponse:
+        return JSONResponse(
+            reads.runtime_store.method_run(run_id),
+            headers={"Content-Disposition": 'attachment; filename="run-provenance.json"'},
+        )
+
     @app.get("/api/runs/{run_id}/performance")
     def run_performance(
         run_id: str,

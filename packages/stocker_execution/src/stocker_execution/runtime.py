@@ -174,6 +174,8 @@ class RunStatus:
     instruments_ready: int
     signals_today: int
     open_positions: int
+    next_checkpoint: datetime | None = None
+    last_scheduled_checkpoint: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -493,6 +495,8 @@ class RuntimeStore:
                     payload TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE INDEX IF NOT EXISTS runtime_signals_checkpoint
+                    ON runtime_signals(run_id, session, json_extract(payload, '$.t0'));
                 """
             )
 
@@ -825,18 +829,58 @@ class RuntimeStore:
                 rows,
             )
 
-    def load_signals(self, run_id: str) -> tuple[StrategySignal, ...]:
+    def load_signals(
+        self, run_id: str, *, session: date | None = None, t0: datetime | None = None,
+        signal_ids: Sequence[str] | None = None,
+        con_ids: Sequence[int] | None = None, status: SignalStatus | None = None,
+    ) -> tuple[StrategySignal, ...]:
         """Load signals for one run; callers apply the live session/window rules."""
 
+        conditions = ["run_id = ?"]
+        params: list[Any] = [run_id]
+        if session is not None:
+            conditions.append("session = ?")
+            params.append(session.isoformat())
+        if t0 is not None:
+            conditions.append("json_extract(payload, '$.t0') = ?")
+            params.append(_aware(t0).isoformat())
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status.value)
+        if con_ids is not None:
+            if not con_ids:
+                return ()
+            conditions.append("json_extract(payload, '$.underlying_con_id') IN ("
+                              + ",".join("?" for _ in con_ids) + ")")
+            params.extend(con_ids)
+        if signal_ids is not None:
+            if not signal_ids:
+                return ()
+            conditions.append("signal_id IN (" + ",".join("?" for _ in signal_ids) + ")")
+            params.extend(signal_ids)
         with self._connect() as connection:
             rows = connection.execute(
-                """
-                SELECT payload FROM runtime_signals
-                WHERE run_id = ? ORDER BY session, signal_id
-                """,
-                (run_id,),
+                "SELECT payload FROM runtime_signals WHERE " + " AND ".join(conditions)
+                + " ORDER BY session, signal_id",
+                params,
             ).fetchall()
         return tuple(_signal_from_payload(json.loads(str(row["payload"]))) for row in rows)
+
+    def signal_counts(self, run_id: str, session: date, t0: datetime | None) -> dict[str, int]:
+        """Read checkpoint totals without materializing candidate objects or old sessions."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT count(*) AS screened,
+                    coalesce(sum(status != 'NOT_QUALIFIED'), 0) AS qualified,
+                    coalesce(sum(json_extract(payload, '$.q1_eligible') = 0
+                        OR json_extract(payload, '$.reason') = 'COHORT_MID_VETO'), 0) AS vetoed,
+                    coalesce(sum(status = 'WAITING_FOR_ENTRY'), 0) AS armed,
+                    coalesce(sum(status = 'ENTRY_TRIGGERED'), 0) AS triggered
+                FROM runtime_signals WHERE run_id = ? AND session = ?
+                    AND json_extract(payload, '$.t0') = ?""",
+                (run_id, session.isoformat(), _aware(t0).isoformat() if t0 else None),
+            ).fetchone()
+        return {key: int(value) for key, value in dict(row).items()}
 
     def register_payoff(
         self,
@@ -1094,6 +1138,7 @@ class StockerRuntime:
         self._strategies: dict[str, SessionHardMethod] = {}
         self._qualification = Stage5QualificationResult((), ())
         self._expected_move_prepared: set[tuple[str, date, datetime, tuple[int, ...]]] = set()
+        self._session_history_prepared: dict[str, tuple[date, tuple[int, ...]]] = {}
         self._expected_move_tasks: dict[
             tuple[str, date, tuple[int, ...]], tuple[asyncio.Task[None], frozenset[str]]
         ] = {}
@@ -1116,6 +1161,7 @@ class StockerRuntime:
         self._run_ready_at.clear()
         self._qualification = Stage5QualificationResult((), ())
         self._expected_move_prepared.clear()
+        self._session_history_prepared.clear()
         self._expected_move_tasks.clear()
         for environment in self._environment_ready:
             self._environment_ready[environment] = False
@@ -1697,6 +1743,10 @@ class StockerRuntime:
 
     async def _prepare_upcoming_expected_moves(self, now: datetime) -> None:
         enabled = {i.config.run_id for i in self._manager.list_runs() if i.config.enabled}
+        self._session_history_prepared = {
+            run_id: key for run_id, key in self._session_history_prepared.items()
+            if run_id in enabled
+        }
         for pending_key, (task, owners) in tuple(self._expected_move_tasks.items()):
             if task.done():
                 if not task.cancelled() and (error := task.exception()) is not None:
@@ -1726,7 +1776,18 @@ class StockerRuntime:
             market = self._sessions.get(run_id) or self._resolve_market(instance, now)
             if market is None:
                 continue
-            for _checkpoint, t0 in self._services_for(instance.config).checkpoints(market):
+            services = self._services_for(instance.config)
+            schedule = services.checkpoints(market)
+            if services.prepare_history_on_ready and schedule:
+                requests, _ = self._qualification_for({run_id})
+                history_key = market.session, tuple(sorted(r.instrument.con_id for r in requests))
+                if self._session_history_prepared.get(run_id) != history_key:
+                    self._session_history_prepared[run_id] = history_key
+                    self._start_expected_move_preparation(
+                        strategy.strategy_version, market.session, schedule[0][1],
+                        requests, {run_id},
+                    )
+            for _checkpoint, t0 in schedule:
                 if not now < t0 <= now + timedelta(minutes=lead):
                     continue
                 if self._store.checkpoint_state(run_id, market.session, t0) is not None:
@@ -1736,7 +1797,6 @@ class StockerRuntime:
                 )
 
         for (version, session, t0), run_ids in sorted(upcoming.items()):
-            stage5 = self._stage5_by_strategy[version]
             source = self._services_for(self._manager.get_run(sorted(run_ids)[0]).config).entries
             requests, _ineligible = self._qualification_for(run_ids)
             con_ids = tuple(sorted(request.instrument.con_id for request in requests))
@@ -1754,19 +1814,25 @@ class StockerRuntime:
                             symbol=request.instrument.symbol,
                             reason=str(exc),
                         )
-            # Downloads must not hold the scheduler/control lock across the whole universe.
-            # An in-flight session preparation is shared by subsequent checkpoints.
-            task_key = version, session, con_ids
-            if task_key not in self._expected_move_tasks:
-                self._expected_move_tasks[task_key] = (
-                    asyncio.create_task(
-                        stage5.prepare_expected_moves(requests, session=session, t0=t0)
-                    ),
-                    frozenset(run_ids),
-                )
-            else:
-                task, owners = self._expected_move_tasks[task_key]
-                self._expected_move_tasks[task_key] = (task, owners | frozenset(run_ids))
+            self._start_expected_move_preparation(version, session, t0, requests, run_ids)
+
+    def _start_expected_move_preparation(
+        self, version: str, session: date, t0: datetime,
+        requests: Sequence[Stage5QualifiedRequest], run_ids: set[str],
+    ) -> None:
+        # Share bounded background history work; this never opens live trade streams.
+        task_key = version, session, tuple(sorted(r.instrument.con_id for r in requests))
+        if task_key not in self._expected_move_tasks:
+            self._expected_move_tasks[task_key] = (
+                asyncio.create_task(
+                    self._stage5_by_strategy[version].prepare_expected_moves(
+                        requests, session=session, t0=t0
+                    )
+                ), frozenset(run_ids),
+            )
+        else:
+            task, owners = self._expected_move_tasks[task_key]
+            self._expected_move_tasks[task_key] = (task, owners | frozenset(run_ids))
 
     async def _refresh_scheduled_activity_shortlists(self, now: datetime) -> None:
         """Qualify fixed-time activity screens once they become causally due."""
@@ -2256,6 +2322,7 @@ class StockerRuntime:
                     for request in self._qualification.requests
                 )
             )
+            schedule = self._services_for(run).checkpoints(market) if market else ()
             run_statuses.append(
                 RunStatus(
                     run_id=run.run_id,
@@ -2275,6 +2342,8 @@ class StockerRuntime:
                             limit=500,
                         )[0]
                     ),
+                    next_checkpoint=next((t0 for _, t0 in schedule if t0 > now), None),
+                    last_scheduled_checkpoint=schedule[-1][1] if schedule else None,
                 )
             )
         execution_statuses = []
@@ -2559,22 +2628,30 @@ class StockerRuntime:
                 expired = strategy.expire_waiting_before(now)
                 if expired:
                     self._store.save_signals(expired, now)
-                before_observation = {s.signal_id: s for s in strategy.signals}
+                observed_signals = strategy.signals
                 waiting = tuple(
                     signal
-                    for signal in strategy.signals
+                    for signal in observed_signals
                     if signal.status is SignalStatus.WAITING_FOR_ENTRY
                 )
                 if waiting:
+                    before_observation = {s.signal_id: s for s in observed_signals}
                     source = self._services_for(run).entries
                     events = await source.trades_for(instruments, waiting)
                     for con_id, reason in source.trade_errors.items():
                         strategy.expire_unobservable(con_id, reason)
                     strategy.observe_trades(events)
+                    observed_signals = strategy.signals
+                    self._store.save_signals(
+                        tuple(s for s in observed_signals
+                              if s is not before_observation.get(s.signal_id)
+                              and s != before_observation.get(s.signal_id)),
+                        now,
+                    )
                 attempted = self._ledger.attempted_signal_ids(run.run_id)
                 intents = tuple(
                     s
-                    for s in strategy.signals
+                    for s in observed_signals
                     if s.status is SignalStatus.ENTRY_TRIGGERED
                     and s.selected
                     and s.signal_id not in attempted
@@ -2593,13 +2670,6 @@ class StockerRuntime:
                                 run,
                                 self._config.session_hard_hv_round_trip_cost_bps,
                             )
-                self._store.save_signals(
-                    tuple(
-                        s for s in strategy.signals
-                        if s != before_observation.get(s.signal_id)
-                    ),
-                    now,
-                )
                 prepared.append((run, market, strategy, strategy_runtime, instruments, intents))
             except Exception as exc:
                 self._set_run(run.run_id, RunRuntimeState.DEGRADED, str(exc))
@@ -2634,8 +2704,13 @@ class StockerRuntime:
         ready_for_execution = []
         for run, market, strategy, strategy_runtime, instruments, intents in prepared:
             try:
+                admitted: list[StrategySignal] = []
+                if not intents:
+                    ready_for_execution.append(
+                        (run, market, strategy, strategy_runtime, instruments, admitted)
+                    )
+                    continue
                 before_admission = {s.signal_id: s for s in strategy.signals}
-                admitted = []
                 for signal in intents:
                     if is_baseline_payoff_candidate(signal):
                         if signal.underlying_con_id not in instruments:
@@ -2656,7 +2731,8 @@ class StockerRuntime:
                 self._store.save_signals(
                     tuple(
                         s for s in strategy.signals
-                        if s != before_admission.get(s.signal_id)
+                        if s is not before_admission.get(s.signal_id)
+                        and s != before_admission.get(s.signal_id)
                     ),
                     now,
                 )

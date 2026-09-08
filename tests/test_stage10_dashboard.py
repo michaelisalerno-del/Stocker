@@ -433,6 +433,20 @@ def test_system_resource_view_is_read_only_and_labels_stocker_budget(tmp_path: P
     assert first["market_data_line_budget"] == 80
     assert first["ibkr_account_line_limit"] is None
     assert first["active_market_data_lines"] == 0
+    latest = replace(
+        status(), ibkr_resources=replace(
+            connection.resource_status(), historical_requests_today=123, pending_historical_work=4
+        )
+    )
+    service.runtime_status = lambda: replace(
+        latest, runs=tuple(replace(run, next_checkpoint=None,
+                                  last_scheduled_checkpoint=NOW - timedelta(minutes=10))
+                           for run in latest.runs)
+    )
+    detail = service.run_detail("US-SH-LIVE")
+    assert detail["evaluation_status"] == "NO_MORE_CHECKPOINTS_TODAY"
+    assert detail["downloads"] == {"scope": "ALL_RUNS", "requests": 123, "pending": 4}
+    assert detail["last_checkpoint"] is not None
 
 
 def test_run_detail_uses_persisted_funnel_counts_and_config(tmp_path: Path) -> None:
@@ -453,6 +467,24 @@ def test_run_detail_uses_persisted_funnel_counts_and_config(tmp_path: Path) -> N
         {"stage": "Orders", "count": 1},
         {"stage": "Positions", "count": 1},
     ]
+
+
+def test_run_summary_does_not_load_full_candidate_or_universe_history(tmp_path, monkeypatch):
+    reads = _seed_authoritative_state(tmp_path)
+    load = reads.runtime_store.load_signals
+
+    def bounded_load(run_id, **filters):
+        assert filters.get("signal_ids") is not None
+        return load(run_id, **filters)
+
+    def full_provenance(*args):
+        raise AssertionError("full audit records belong to the on-demand endpoint")
+
+    monkeypatch.setattr(reads.runtime_store, "load_signals", bounded_load)
+    monkeypatch.setattr(reads.runtime_store, "method_run", full_provenance)
+    detail = reads.run_detail("US-SH-LIVE")
+    assert "provenance" not in detail
+    assert detail["funnel"][1]["count"] == 1
 
 
 def test_candidates_expose_stage5_and_stage6_values_without_recalculation(tmp_path: Path) -> None:
@@ -1099,6 +1131,9 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
 
     assert client.get("/api/overview").json()["system"] == "READY"
     assert client.get("/api/orders/plan-live-nvda").json()["signal_id"] == "signal-live-nvda"
+    audit = client.get("/api/runs/US-SH-LIVE/provenance")
+    assert audit.status_code == 200
+    assert audit.headers["content-disposition"] == 'attachment; filename="run-provenance.json"'
     assert client.get("/api/positions/LIVE/U123456/101").json()["order_plan_id"] == "plan-live-nvda"
     for route in (
         "/",
@@ -1117,7 +1152,7 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
         assert "PAPER" in response.text
         assert "LIVE" in response.text
     index = client.get("/").text
-    assert 'src="/static/dashboard.js?v=20260908-run-start-progress"' in index
+    assert 'src="/static/dashboard.js?v=20260908-run-summary"' in index
     for label in (
         "Overview",
         "Runs",

@@ -184,15 +184,16 @@ class DashboardReadService:
                 status=Stage5Status.READY,
                 limit=1,
             )
-        signals = tuple(
-            item
-            for item in self.runtime_store.load_signals(run_id)
-            if item.session == selected_session and item.t0 == latest_checkpoint
-        )
+        counts = self.runtime_store.signal_counts(run_id, selected_session, latest_checkpoint)
+        all_plans = self.ledger.list_records(run_id=run_id, limit=500)[0]
+        signals = self.runtime_store.load_signals(
+            run_id, session=selected_session, t0=latest_checkpoint,
+            signal_ids=tuple(item.signal_id for item in all_plans),
+        ) if latest_checkpoint is not None else ()
         signal_ids = {item.signal_id for item in signals}
         plans = tuple(
             item
-            for item in self.ledger.list_records(run_id=run_id, limit=500)[0]
+            for item in all_plans
             if item.signal_id in signal_ids
         )
         positions = self.positions()
@@ -210,7 +211,6 @@ class DashboardReadService:
             "archived": run.archived,
             "method_spec": run.method_spec,
             "method_spec_hash": run.method_spec_hash,
-            "provenance": self.runtime_store.method_run(run_id),
             "display_name": run.display_name or run.run_id,
             "universe": run.universe,
             "strategy": run.strategy,
@@ -231,7 +231,20 @@ class DashboardReadService:
             "risk_per_trade": run.risk.risk_per_trade if run.risk else None,
             "max_concurrent_positions": run.risk.max_concurrent_positions if run.risk else None,
             "last_checkpoint": latest_checkpoint.isoformat() if latest_checkpoint else None,
-            "next_checkpoint": None,
+            "next_checkpoint": (
+                runtime.next_checkpoint.isoformat() if runtime and runtime.next_checkpoint else None
+            ),
+            "evaluation_status": (
+                "NO_MORE_CHECKPOINTS_TODAY"
+                if runtime and runtime.last_scheduled_checkpoint
+                and self.clock() >= runtime.last_scheduled_checkpoint
+                and runtime.next_checkpoint is None else "AWAITING_CHECKPOINT"
+            ),
+            "downloads": (
+                {"scope": "ALL_RUNS", "requests": status.ibkr_resources.historical_requests_today,
+                 "pending": status.ibkr_resources.pending_historical_work}
+                if status.ibkr_resources is not None else None
+            ),
             "market_state": runtime.market.value if runtime and runtime.market else None,
             "session": selected_session.isoformat(),
             "screen_state": screen.status.value if screen else None,
@@ -250,25 +263,22 @@ class DashboardReadService:
                     "stage": "Required data ready",
                     "count": ready_count,
                 },
-                {"stage": "Screened", "count": min(len(signals), latest_total)},
+                {"stage": "Screened", "count": min(counts["screened"], latest_total)},
                 {
                     "stage": "Qualified",
-                    "count": sum(item.status is not SignalStatus.NOT_QUALIFIED for item in signals),
+                    "count": counts["qualified"],
                 },
                 {
                     "stage": "Vetoed",
-                    "count": sum(
-                        item.q1_eligible is False or item.reason == "COHORT_MID_VETO"
-                        for item in signals
-                    ),
+                    "count": counts["vetoed"],
                 },
                 {
                     "stage": "Armed",
-                    "count": sum(item.status is SignalStatus.WAITING_FOR_ENTRY for item in signals),
+                    "count": counts["armed"],
                 },
                 {
                     "stage": "Entry triggered",
-                    "count": sum(item.status is SignalStatus.ENTRY_TRIGGERED for item in signals),
+                    "count": counts["triggered"],
                 },
                 {"stage": "Orders", "count": len(plans)},
                 {
@@ -359,7 +369,10 @@ class DashboardReadService:
             matching_signals = sorted(
                 (
                     item
-                    for item in self.runtime_store.load_signals(selected_run)
+                    for item in self.runtime_store.load_signals(
+                        selected_run, session=selected_session, t0=selected_checkpoint,
+                        status=signal_status,
+                    )
                     if item.session == selected_session
                     and item.t0 == selected_checkpoint
                     and item.status is signal_status
@@ -400,7 +413,10 @@ class DashboardReadService:
         )
         signals = {
             (item.underlying_con_id, item.session, item.t0): item
-            for item in self.runtime_store.load_signals(selected_run)
+            for item in self.runtime_store.load_signals(
+                selected_run, session=selected_session, t0=selected_checkpoint,
+                con_ids=tuple(row.con_id for row in rows if row.con_id is not None),
+            )
         }
         items = [
             self._candidate(row, signals.get((row.con_id, row.session, row.t0))) for row in rows

@@ -97,6 +97,26 @@ all-listings run exposed thousands of individual synchronous commits blocking HT
 Entry observation and admission persist only changed immutable signals; unchanged rejections
 remain in the ledger without being serialized and rewritten four times per scheduler cycle.
 Expiry changes are still persisted immediately, before market-data awaits.
+Idle observation now reuses one signal snapshot and skips comparison/admission work when no
+candidate is waiting or triggered; identity checks precede field equality for immutable signals.
+Run summaries aggregate checkpoint counts in SQL and load only signals associated with displayed
+orders. An additive index on run/session/JSON T0 supports these reads without altering records.
+Candidate pages fetch only the selected session/checkpoint/status or displayed stock page.
+Full saved universes and configuration history are downloaded on demand through
+`/api/runs/{run_id}/provenance`; ordinary refreshes never fetch or render them. Runtime-provided
+method checkpoint times distinguish the latest evaluation from "no further checkpoints today".
+The run view separately shows shared broker history request and pending-work counters; these
+are not completed-stock counts and reset on application restart (also at the UTC day boundary).
+Session HARD's data composition sets `prepare_history_on_ready`: its session-wide prior-close
+history is prepared once after qualification, including before open or after the final checkpoint.
+Restart reuses cached IBKR bars and resumes missing history. This uses the same bounded shared
+job as checkpoint prefetch; it does not subscribe to live trades or evaluate entries outside the
+existing method windows. Other methods must explicitly opt into session-wide preparation.
+Validation for these follow-up changes: 860 pytest tests passed, including filtered summary reads,
+unchanged-signal comparison avoidance and pre-open/after-checkpoint restart preparation. Both
+`tests/dashboard_run_summary.cjs` and `tests/dashboard_run_start.cjs` passed with all HTTP mocked;
+the summary check covers refresh without loading the full universe and explicit audit retrieval.
+Changed-file Ruff and execution/dashboard mypy passed. No broker orders were used in testing.
 The combined responsiveness fixes were deployed as `85983be23ee5a8f748aaec14e0ce976e4d221a34`.
 `rtk .venv/bin/pytest -q -o addopts=` passed 857 tests (five existing warnings); changed-file Ruff
 and execution-package mypy passed. Production verification preserved all three saved runs, frozen

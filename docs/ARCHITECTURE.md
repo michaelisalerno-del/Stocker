@@ -241,6 +241,49 @@ and unknown historical method prices remain unknown. No model, Q1 cutoff, capaci
 account protection was changed. Focused tests use in-memory broker clients and temporary SQLite
 files; they verify the emitted timed-close contract without placing venue orders.
 
+### Exit audit verification and deployment (140e50b)
+
+Before the audit, the current method already selected the first causal break, froze threshold-based
+brackets independently of fills, and submitted the original T0+15 timed close. The mismatches were:
+no-print expiry strictly after T0+5 → expiry at T0+5; TIMEOUT/closed-order callbacks treated as
+unexpected → resolved through persisted broker identities; absent timeout identity tolerated during
+recovery → explicit reconciliation failure; ignored late commissions and blank trade R/exit reason
+→ idempotent commission enrichment and actual execution reporting. Existing broker tick rounding,
+Q1 admission, account capacity, permissions, exposure and connectivity controls were retained.
+
+Changed implementation files, relative to their package's `src` directory:
+
+| File / function | Purpose |
+|---|---|
+| `stocker_execution/session_hard_method.py::expire_waiting_before` | Exact half-open window expiry without a new print. |
+| `stocker_execution/execution_models.py::OrderPlan` | Preserve exact method prices alongside broker prices. |
+| `stocker_execution/stage7.py::build_order_plan`, `reconcile` | Carry method prices; detect missing deadline identity on recovery. |
+| `stocker_execution/execution_ledger.py::ExecutionRecord`, `record_fill`, `_refresh_aggregate`, `record_for_order` | Additive persistence, reference/fill/R diagnostics, exit reasons, late commissions and all-leg lookup. |
+| `stocker_execution/runtime.py::record_fill` | Recognize deadline and settled-order callbacks without duplicate fill counts. |
+| `stocker_execution/ibkr.py::read_fills` | Distinguish a missing commission report from a reported zero commission. |
+| `stocker_dashboard/read_service.py::_order`, `_trade`, `_position_row` | Expose method provenance and execution diagnostics; populate trade R/exit reason. |
+| `stocker_dashboard/static/dashboard.js::executionDetails` | Expandable method/fill diagnostics in order and position details. |
+| `tests/test_session_hard_exit_contract.py` | 24 geometry, fill independence, deadline, causality, migration, recovery and reporting cases. |
+| `tests/test_stage7_ibkr.py`, `tests/test_stage8_runtime.py` | Commission-report availability and deadline/late-commission callback regressions. |
+| `docs/ARCHITECTURE.md` | Verified contract, recovery behavior and this audit record. |
+
+Validation: `rtk .venv/bin/pytest -q` passed 852 tests with five existing warnings. The subsequently
+added missing-deadline recovery case passed in the final 24-case focused suite. On the staged Linux
+release, `pytest -o addopts= -q tests/test_session_hard_exit_contract.py tests/test_method_package.py
+tests/test_stage7_ibkr.py tests/test_stage8_runtime.py` passed 118 tests. Ruff passed for changed
+Python files; mypy passed all 42 core/execution/dashboard source files. JavaScript syntax and a
+mocked-browser check of the expandable diagnostics passed. All order tests terminated at fakes.
+
+Release `140e50b551033feae9d8dc29e2310ef0419c2d96` reached READY at 13:28 UTC on 2026-09-08,
+before the US open, with 6,570 qualified US instruments. Deployment verified the saved US/LSE/ASX
+runs and configuration unchanged, all frozen artifact bytes unchanged, the additive migration,
+one existing execution plan, 28 fills and one historical trade retained, and no open orders or
+positions. Backup: `/var/lib/stocker/backups/exit-contract-140e50b` on the server.
+No broker orders were placed by implementation/testing. LIVE remains disabled for this method.
+Venue execution of the timed order was not tested with a real order; only its emitted broker
+contract and fake-broker lifecycle were verified. The existing LSE/ASX runs had missed their
+local capture windows and remain unvalidated cross-market PAPER tests, as described above.
+
 Migration is additive: new method tables and nullable execution provenance/deadline/timeout
 columns; old rows and research artifacts are retained. Old signals deserialize with absent new
 fields. Legacy configuration enums and old calculation/payoff/scanner sources remain solely to

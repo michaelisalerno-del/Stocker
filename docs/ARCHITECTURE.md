@@ -91,6 +91,12 @@ Session HARD uses 21 consecutive prior exchange-session final RTH one-minute clo
 20 log returns, sample standard deviation (`ddof=1`), annualized by `sqrt(252)`.
 Generic tick 104 is retained for historical diagnostics but cannot replace this frozen input.
 
+Checkpoint feature snapshots are committed in one SQLite transaction through a worker thread,
+retaining the existing protection against replacing READY results with transient failures. The
+all-listings run exposed thousands of individual synchronous commits blocking HTTP requests.
+The dashboard's current Stock eligibility count is the number of saved checkpoint feature rows,
+not scan progress; Required data ready distinguishes rows with complete method inputs.
+
 Prior-close preparation shares the exact exchange-calendar timestamps across stocks for each
 calendar/session. Stage 5 uses a bounded set of workers at the existing IBKR historical-request
 concurrency, yielding between instruments even on cache hits. The runtime tracks these downloads

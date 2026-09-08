@@ -217,9 +217,9 @@ class Stage5CurrentDataService:
                     return_exceptions=True,
                 )
 
-        await asyncio.gather(*(
-            prepare_next() for _ in range(min(len(requests), HISTORICAL_REQUEST_CONCURRENCY))
-        ))
+        await asyncio.gather(
+            *(prepare_next() for _ in range(min(len(requests), HISTORICAL_REQUEST_CONCURRENCY)))
+        )
 
     async def _prepare_expected_move(
         self,
@@ -415,11 +415,18 @@ class Stage5SnapshotStore:
     def save(self, snapshot: Stage5FeatureSnapshot) -> None:
         """Persist one qualified row; a transient rerun cannot replace a READY row."""
 
-        if snapshot.con_id is None:
+        self.save_many((snapshot,))
+
+    def save_many(self, snapshots: Sequence[Stage5FeatureSnapshot]) -> None:
+        """Commit a checkpoint together, retaining the existing READY-row protection."""
+
+        if not snapshots:
+            return
+        if any(snapshot.con_id is None for snapshot in snapshots):
             raise ValueError("cannot persist an unqualified Stage 5 row without conId")
 
         with self._connect() as connection:
-            connection.execute(
+            connection.executemany(
                 """
                 INSERT INTO stage5_feature_snapshots (
                     universe_id, run_ids_json, con_id, symbol, session, t0_utc,
@@ -455,38 +462,41 @@ class Stage5SnapshotStore:
                   AND excluded.status = ?
                 """,
                 (
-                    snapshot.universe_id,
-                    json.dumps(snapshot.run_ids, separators=(",", ":")),
-                    snapshot.con_id,
-                    snapshot.symbol,
-                    snapshot.session.isoformat(),
-                    _aware_utc(snapshot.t0).isoformat(timespec="microseconds"),
-                    snapshot.status.value,
-                    snapshot.exclusion_reason,
-                    snapshot.p0,
-                    snapshot.expected_absolute_return_15m,
-                    snapshot.m_price,
-                    snapshot.raw_open_t0_minus_3m,
-                    snapshot.raw_open_t0,
-                    snapshot.alignment_factor,
-                    snapshot.aligned_pre_open,
-                    snapshot.raw_pre_move_price,
-                    snapshot.pre_move_m,
-                    snapshot.calculation_version,
-                    snapshot.expected_move_source,
                     (
-                        _aware_utc(snapshot.expected_move_observation_at).isoformat(
-                            timespec="microseconds"
-                        )
-                        if snapshot.expected_move_observation_at is not None
-                        else None
-                    ),
-                    snapshot.expected_move_calculation_version,
-                    snapshot.raw_historical_volatility,
-                    snapshot.historical_volatility,
-                    snapshot.market_regular_minutes,
-                    Stage5Status.READY.value,
-                    Stage5Status.READY.value,
+                        snapshot.universe_id,
+                        json.dumps(snapshot.run_ids, separators=(",", ":")),
+                        snapshot.con_id,
+                        snapshot.symbol,
+                        snapshot.session.isoformat(),
+                        _aware_utc(snapshot.t0).isoformat(timespec="microseconds"),
+                        snapshot.status.value,
+                        snapshot.exclusion_reason,
+                        snapshot.p0,
+                        snapshot.expected_absolute_return_15m,
+                        snapshot.m_price,
+                        snapshot.raw_open_t0_minus_3m,
+                        snapshot.raw_open_t0,
+                        snapshot.alignment_factor,
+                        snapshot.aligned_pre_open,
+                        snapshot.raw_pre_move_price,
+                        snapshot.pre_move_m,
+                        snapshot.calculation_version,
+                        snapshot.expected_move_source,
+                        (
+                            _aware_utc(snapshot.expected_move_observation_at).isoformat(
+                                timespec="microseconds"
+                            )
+                            if snapshot.expected_move_observation_at is not None
+                            else None
+                        ),
+                        snapshot.expected_move_calculation_version,
+                        snapshot.raw_historical_volatility,
+                        snapshot.historical_volatility,
+                        snapshot.market_regular_minutes,
+                        Stage5Status.READY.value,
+                        Stage5Status.READY.value,
+                    )
+                    for snapshot in snapshots
                 ),
             )
 
@@ -905,8 +915,8 @@ class Stage5Analyzer:
                     run_ids=tuple(sorted(set(by_universe[universe_id]))),
                 )
                 rows.append(snapshot)
-                if self._snapshot_store is not None:
-                    self._snapshot_store.save(snapshot)
+        if self._snapshot_store is not None:
+            await asyncio.to_thread(self._snapshot_store.save_many, rows)
         rows.extend(
             _ineligible_snapshots(
                 ineligible,

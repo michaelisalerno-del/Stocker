@@ -6,6 +6,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from stocker_core.runs import (
     CandidateScreen,
     Environment,
@@ -144,6 +146,31 @@ def test_one_invalid_instrument_does_not_kill_the_rest_of_the_batch() -> None:
         Stage5Status.READY,
         Stage5Status.PRE_MOVE_NOT_READY,
     ]
+
+
+def test_checkpoint_snapshots_commit_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = Stage5SnapshotStore(tmp_path / "checkpoint.sqlite3")
+    connect = store._connect
+    statements: list[str] = []
+
+    def traced_connect():
+        connection = connect()
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(store, "_connect", traced_connect)
+    analyzer = Stage5Analyzer(FeatureService(), snapshot_store=store)
+    requests = tuple(
+        Stage5QualifiedRequest(qualified(f"STOCK{i}", i), (Stage5Membership("RUN", "US_ALL"),))
+        for i in range(1, 65)
+    )
+    rows = asyncio.run(analyzer.analyze(requests, session=T0.date(), t0=T0))
+
+    assert statements.count("COMMIT") == 1
+    assert len(rows) == 64
+    assert all(store.get("US_ALL", T0, row.con_id) == row for row in rows)
 
 
 def test_hv_analyzer_preserves_lineage_when_feature_service_raises() -> None:

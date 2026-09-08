@@ -179,7 +179,7 @@ def test_exact_pre_move_threshold_is_not_qualified() -> None:
 
 
 @pytest.mark.parametrize("method", (SESSION_HARD_HV_METHOD,))
-def test_installed_session_hard_variants_share_frozen_mechanics_and_keep_identity(
+def test_current_method_reuses_frozen_qualification_and_keeps_current_identity(
     method: StrategyDefinition,
 ) -> None:
     snapshot = ready_snapshot(pre_move_m=0.475764059845861)
@@ -244,7 +244,7 @@ def test_frozen_glw_down_first_touch_emits_short_intention_at_level(
         CohortOpportunity("RUN_A", date(2025, 1, 1) + timedelta(days=index % 20), 0.6)
         for index in range(30)
     )
-    strategy = create_strategy(method.strategy_id, method.strategy_version)
+    strategy = SessionHardStructureDStrategy()
     waiting = strategy.evaluate(
         (snapshot,),
         strategy_context(
@@ -283,7 +283,7 @@ def test_frozen_glw_down_first_touch_emits_short_intention_at_level(
 def test_simultaneous_candidates_rank_by_session_hard_score_and_cap_at_five(
     method: StrategyDefinition,
 ) -> None:
-    strategy = create_strategy(method.strategy_id, method.strategy_version)
+    strategy = SessionHardStructureDStrategy()
     snapshots = tuple(
         replace(
             ready_snapshot(pre_move_m=0.8 + index / 100, con_id=300 + index),

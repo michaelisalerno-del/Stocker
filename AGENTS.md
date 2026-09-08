@@ -38,11 +38,16 @@ in the runtime trading hot path.
 ## Architecture rules
 
 - One repository and one application/codebase with clear modules.
-- Multiple independent runs may execute concurrently. A run combines universe, strategy,
-  environment, and its session/schedule/configuration.
+- Multiple independent runs may execute concurrently. The user selects Market -> Method -> Run.
+  A run saves its method version/specification, method-produced universe, environment and state.
 - PAPER and LIVE execution are explicitly separated.
 - The future dashboard is not part of the trading engine; dashboard failure must not affect trading.
-- Strategies do not resolve universes, download history, communicate with IBKR, or submit orders.
+- A Method owns how it finds, qualifies, vetoes, enters, manages and exits trades.
+  Method packages supply universe/search and data services plus pure decision logic.
+  Pure calculations receive data; shared IBKR execution submits method-produced intentions.
+- Account exposure, permissions, reconciliation and emergency controls remain shared.
+- Add a method through the catalogue and explicit composition seam described in docs/ARCHITECTURE.md;
+  do not scatter method-name conditionals across UI and runtime.
 - PRE calculations receive bars as input and do not communicate with IBKR.
 - Production and paper PRE history originates exclusively from IBKR. A local cache may store only
   IBKR-originated history and is not an alternative source.

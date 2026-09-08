@@ -13,8 +13,9 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from math import fsum, isfinite
 
-from stocker_core.strategies import SESSION_HARD_HV_METHOD
 from stocker_execution.session_hard_structure_d import (
+    STRATEGY_ID,
+    STRATEGY_VERSION,
     EntryBar,
     SignalStatus,
     StrategySignal,
@@ -120,8 +121,8 @@ SHADOW_HORIZON_MINUTES = 15
 
 def is_baseline_payoff_candidate(signal: StrategySignal) -> bool:
     return (
-        signal.strategy_id == SESSION_HARD_HV_METHOD.strategy_id
-        and signal.strategy_version == SESSION_HARD_HV_METHOD.strategy_version
+        signal.strategy_id == STRATEGY_ID
+        and signal.strategy_version == STRATEGY_VERSION
         and signal.status is SignalStatus.ENTRY_TRIGGERED
         and signal.selected
         and signal.direction == "DOWN"

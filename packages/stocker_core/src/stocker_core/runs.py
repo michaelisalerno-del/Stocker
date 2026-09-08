@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import time
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -88,6 +89,9 @@ class RunConfig(BaseModel):
     candidate_screen_id: Identifier | None = None
     candidate_screen_version: Identifier | None = None
     display_name: Identifier | None = None
+    method_spec: dict[str, Any] | None = None
+    method_spec_hash: str | None = None
+    universe_snapshot: UniverseDefinition | None = None
     environment: Environment
     risk: RunRiskConfig | None = None
     session: RunWindow | None = None
@@ -122,11 +126,21 @@ class RunConfig(BaseModel):
 
             if self.cap_bucket_version != CAP_BUCKETS_V1.version:
                 raise ValueError("Generated market runs require CAP_BUCKETS_V1")
-            method = get_strategy(str(self.strategy_id), str(self.strategy_version))
-            if self.strategy != method.config_name:
-                raise ValueError("Run strategy name does not match installed strategy lineage")
-            if self.environment.value not in method.environments:
-                raise ValueError(f"{method.strategy_version} is PAPER-only")
+            if self.method_spec is not None:
+                method = get_strategy(str(self.strategy_id), str(self.strategy_version))
+                from stocker_core.methods import content_hash
+
+                expected = method.specification(self.market_id)
+                if self.method_spec != expected or self.method_spec_hash != content_hash(expected):
+                    raise ValueError("Run method specification does not match frozen package")
+                if self.strategy != method.config_name:
+                    raise ValueError("Run method identity mismatch")
+                if self.cap_bucket is not CapBucket.ALL or self.screen is not None:
+                    raise ValueError(
+                        "Universe/search belongs to the method; cap/screen override rejected"
+                    )
+                if self.environment.value not in method.environments:
+                    raise ValueError(f"{method.label} is PAPER-only")
         if (
             self.screen is not None
             and self.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
@@ -186,7 +200,7 @@ class RunManager:
                 raise ValueError(f"Duplicate run_id: {config.run_id}")
             self._runs[config.run_id] = RunInstance(
                 config=config,
-                universe=universes.get_universe(config.universe),
+                universe=config.universe_snapshot or universes.get_universe(config.universe),
             )
 
     def start_run(self, run_id: str) -> RunInstance:

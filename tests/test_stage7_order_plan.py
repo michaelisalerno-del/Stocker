@@ -143,7 +143,7 @@ def test_inverted_protection_cannot_produce_an_executable_plan() -> None:
         target_price=101.0,
     )
 
-    with pytest.raises(ValueError, match="SHORT protection"):
+    with pytest.raises(ValueError, match="wrong side of entry"):
         build_order_plan(
             order_intent=intent,
             risk_decision=invalid,

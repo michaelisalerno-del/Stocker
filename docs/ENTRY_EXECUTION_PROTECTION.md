@@ -4,7 +4,12 @@ The HRB paper trade on 4 September 2026 used an intrabar short trigger near
 $49.95 but filled near $49.66, while its stop and target remained $50.10/$49.65.
 Historical qualification alone must not authorize execution at an obsolete price.
 
-The existing Stage 7 path now applies these checks after strategy/payoff admission:
+The historical HRB reproduction below retains completed-bar timing for provenance.
+Current Session HARD uses actual-event timestamps, with a 60-second signal age limit and no
+completed-minute extension. LONG protection mirrors SHORT; the method supplies stop/target and
+a T0+15 broker timeout. The current package does not apply the legacy pooled payoff hurdle.
+
+The shared Stage 7 checks include:
 
 - The signal must be time-aware, not future-dated, within the original five-minute
   entry window, and less than 60 seconds beyond its completed entry bar. Gap-at-open

@@ -10,7 +10,7 @@ Production runtime configuration supports:
 - `US_ALL`: all eligible issues in the cached Nasdaq Trader Nasdaq-listed and other-listed files;
 - `NASDAQ`: Nasdaq-listed eligible issues;
 - `NYSE`: issues whose primary listing code is NYSE;
-- `CUSTOM`: inline `InstrumentReference` members in the runs YAML.
+- `CUSTOM`: inline research/testing members; not the live method builder's universe.
 
 The committed `universes/us-listed.csv` snapshot is sourced from the official Nasdaq Trader Symbol
 Directory. It records source URLs, retrieval time, both source-file creation times, and supported
@@ -26,28 +26,19 @@ units, stale symbols, ambiguous symbols, and other non-stock issues therefore fa
 are reported for that symbol, and do not stop the batch. Loading the snapshot itself makes no IBKR,
 historical-bar, option, PRE, or order request.
 
-Reference it from a multi-run config with:
+The method owns universe construction. The dashboard selects authoritative membership for the
+market and embeds it with the new run; refreshing listings does not mutate existing runs.
+The minimal configuration has no active runs until a method run is created:
 
 ```yaml
 named_universe_snapshot: ../universes/us-listed.csv
-universes:
-  - universe_id: CUSTOM
-    name: My list
-    members:
-      - {symbol: AAPL, exchange: SMART, primary_exchange: NASDAQ, currency: USD}
-runs:
-  - run_id: nasdaq_paper
-    universe: NASDAQ
-    strategy: SESSION_HARD_HV
-    environment: PAPER
-    screen:
-      method: HOT_BY_VOLUME
-      max_results: 50
+universes: []
+runs: []
 ```
 
-`HOT_BY_VOLUME` is an optional finite IBKR runtime shortlist, capped at 50 scanner rows. Stocker
-intersects it with NASDAQ membership before Stage 2 qualification; it does not change or replace
-the broker-independent NASDAQ universe snapshot.
+Legacy HOT_BY_VOLUME and Activity Shortlist sources remain for historical/research compatibility.
+They cannot be selected as current Session HARD filters. Cap remains metadata/research input,
+not a global live strategy control. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 The older research universe data manager below remains separate. Its current provider is EODHD,
 and its history is not a production or PAPER PRE input.

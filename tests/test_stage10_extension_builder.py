@@ -1,239 +1,101 @@
-from __future__ import annotations
+"""Current method construction; historical cap metadata is tested separately."""
 
 import pytest
 
 from stocker_core.config import RunsConfig
 from stocker_core.markets import CapBucket, MarketId
-from stocker_core.runs import CandidateScreen, Environment, RunConfig, RunScreenConfig
-from stocker_core.strategies import (
-    SESSION_HARD_HV_METHOD,
-    installed_strategies,
-)
+from stocker_core.methods import SESSION_HARD, validate_run_method
+from stocker_core.runs import Environment, RunConfig
 from stocker_core.universes import UniverseDefinition
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 
 
-def empty_config() -> RunsConfig:
+def empty_config():
     return RunsConfig(
-        universes=(
+        universes=tuple(
             UniverseDefinition(
-                universe_id="CUSTOM_KEEP",
-                name="Backend custom universe",
-                members=(
-                    {
-                        "symbol": "AAPL",
-                        "exchange": "SMART",
-                        "primary_exchange": "NASDAQ",
-                        "currency": "USD",
-                    },
-                ),
-            ),
-            UniverseDefinition(
-                universe_id="NASDAQ",
-                name="NASDAQ listing membership",
-                members=(
-                    {
-                        "symbol": "AAPL",
-                        "exchange": "SMART",
-                        "primary_exchange": "NASDAQ",
-                        "currency": "USD",
-                    },
-                ),
-            ),
-        ),
-        runs=(),
-    )
-
-
-def test_builder_options_are_backend_owned_and_include_installed_method() -> None:
-    builder = UniverseRunBuilder()
-    options = builder.options()
-
-    assert {item["market_id"] for item in options["markets"]} == set(MarketId)
-    assert {item["cap_bucket"] for item in options["capitalisation"]} == set(CapBucket)
-    assert options["strategies"] == [
-        {
-            "strategy_id": SESSION_HARD_HV_METHOD.strategy_id,
-            "strategy_version": SESSION_HARD_HV_METHOD.strategy_version,
-            "label": "Session HARD · HV",
-            "environments": ["PAPER"],
-        },
-    ]
-    assert installed_strategies() == (SESSION_HARD_HV_METHOD,)
-
-
-def test_any_installed_method_can_be_created_as_paper_on_any_supported_market() -> None:
-    builder = UniverseRunBuilder()
-    config, run = builder.add(
-        empty_config(),
-        market_id=MarketId.SOUTH_KOREA_KRX,
-        cap_bucket=CapBucket.MID,
-        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
-        environment=Environment.PAPER,
-    )
-
-    assert run.display_name == "KRX · HARD-HV · MID"
-    assert run.environment is Environment.PAPER
-    assert run.market_id == MarketId.SOUTH_KOREA_KRX
-    assert run.cap_bucket == CapBucket.MID
-    assert run.cap_bucket_version == "CAP_BUCKETS_V1"
-    assert run.strategy_id == SESSION_HARD_HV_METHOD.strategy_id
-    assert run.strategy_version == SESSION_HARD_HV_METHOD.strategy_version
-    assert run.candidate_screen_id == "ACTIVITY_SHORTLIST_V1"
-    assert run.candidate_screen_version == "ACTIVITY_SHORTLIST_V1"
-    assert run.screen is not None
-    assert run.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
-    universe = next(item for item in config.universes if item.universe_id == run.universe)
-    assert universe.market_spec is not None
-    assert universe.market_spec.market_id is MarketId.SOUTH_KOREA_KRX
-    assert universe.market_spec.cap_bucket is CapBucket.MID
-
-
-@pytest.mark.parametrize(
-    ("market_id", "cap_bucket"),
-    (
-        (MarketId.UK_LSE, CapBucket.SMALL),
-        (MarketId.AUSTRALIA_ASX, CapBucket.MID),
-        (MarketId.US_ALL, CapBucket.SMALL),
-    ),
-)
-def test_session_hard_hv_is_a_paper_strategy_for_every_supported_market(
-    market_id: MarketId, cap_bucket: CapBucket
-) -> None:
-    _config, run = UniverseRunBuilder().add(
-        empty_config(),
-        market_id=market_id,
-        cap_bucket=cap_bucket,
-        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
-        environment=Environment.PAPER,
-    )
-
-    assert run.strategy == "SESSION_HARD_HV"
-    assert run.strategy_id == "SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D"
-    assert run.strategy_version == "SESSION_HARD_HV_V1"
-    assert "hard-hv" in run.run_id
-    assert run.environment is Environment.PAPER
-
-
-def test_session_hard_hv_rejects_live_explicitly_even_with_matching_paper() -> None:
-    builder = UniverseRunBuilder()
-    paper_config, _paper = builder.add(
-        empty_config(),
-        market_id=MarketId.UK_LSE,
-        cap_bucket=CapBucket.SMALL,
-        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
-        environment=Environment.PAPER,
-    )
-
-    with pytest.raises(ValueError, match="SESSION_HARD_HV_V1 is PAPER-only"):
-        builder.add(
-            paper_config,
-            market_id=MarketId.UK_LSE,
-            cap_bucket=CapBucket.SMALL,
-            strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
-            strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
-            environment=Environment.LIVE,
+                universe_id=identity,
+                name=identity,
+                members=({"symbol": symbol, "exchange": "SMART", "currency": "USD"},),
+            )
+            for identity, symbol in (("US_ALL", "AAPL"), ("NASDAQ", "AAPL"), ("NYSE", "IBM"))
         )
-
-    live_payload = paper_config.runs[0].model_dump(mode="python")
-    live_payload["environment"] = Environment.LIVE
-    with pytest.raises(ValueError, match="SESSION_HARD_HV_V1 is PAPER-only"):
-        RunConfig.model_validate(live_payload)
-
-
-def test_disable_and_readd_reuses_exact_lineage() -> None:
-    builder = UniverseRunBuilder()
-    config, created = builder.add(
-        empty_config(),
-        market_id=MarketId.UK_LSE,
-        cap_bucket=CapBucket.LARGE,
-        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
-        environment=Environment.PAPER,
     )
-    disabled = builder.disable(config, created.run_id)
-    assert len(disabled.runs) == 1
-    assert disabled.runs[0].enabled is False
 
-    reenabled, same = builder.add(
-        disabled,
-        market_id=MarketId.UK_LSE,
-        cap_bucket=CapBucket.LARGE,
-        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
-        environment=Environment.PAPER,
+
+def add(config=None, market=MarketId.US_NASDAQ, environment=Environment.PAPER):
+    return UniverseRunBuilder().add(
+        config or empty_config(),
+        market_id=market,
+        strategy_id=SESSION_HARD.method_id,
+        strategy_version=SESSION_HARD.version,
+        environment=environment,
     )
-    assert same.run_id == created.run_id
-    assert same.enabled is True
-    assert len(reenabled.runs) == 1
 
 
-def test_exchange_specific_us_run_requires_authoritative_membership() -> None:
-    builder = UniverseRunBuilder()
+def test_builder_options_expose_only_current_supported_markets_and_method():
+    options = UniverseRunBuilder().options()
+    assert {r["market_id"] for r in options["markets"]} == set(SESSION_HARD.supported_markets)
+    assert "capitalisation" not in options
+    assert [r["label"] for r in options["strategies"]] == ["Session HARD"]
+
+
+@pytest.mark.parametrize("market", SESSION_HARD.supported_markets)
+def test_method_owns_listing_universe_and_no_cap_filter(market):
+    _, run = add(market=market)
+    validate_run_method(run)
+    assert run.market_id == market
+    assert run.cap_bucket is CapBucket.ALL
+    assert run.screen is None
+    assert run.universe_snapshot.members
+    assert run.method_spec["universe_search"]["cap_constraint"] is None
+    assert run.candidate_screen_id == "METHOD_REQUIRED_DATA"
+
+
+def test_unvalidated_market_and_live_are_not_selectable():
+    with pytest.raises(ValueError, match="not supported"):
+        add(market=MarketId.UK_LSE)
+    with pytest.raises(ValueError, match="PAPER-only"):
+        add(environment=Environment.LIVE)
+
+
+def test_disable_readd_retains_saved_run_identity_and_snapshot():
+    config, run = add()
+    disabled = UniverseRunBuilder().disable(config, run.run_id)
+    config, resumed = add(disabled)
+    assert resumed.run_id == run.run_id and resumed.enabled
+    assert len(config.runs) == 1
+    assert resumed.universe_snapshot == run.universe_snapshot
+
+
+def test_explicit_custom_basket_cannot_replace_authoritative_market_listing():
     config = RunsConfig(
         universes=(
             UniverseDefinition(
                 universe_id="CUSTOM",
-                name="Custom",
-                members=(
-                    {
-                        "symbol": "VOD",
-                        "exchange": "SMART",
-                        "primary_exchange": "LSE",
-                        "currency": "GBP",
-                    },
-                ),
+                name="Research input",
+                members=({"symbol": "AAPL", "exchange": "SMART", "currency": "USD"},),
             ),
         )
     )
-    with pytest.raises(ValueError, match="authoritative listing membership"):
-        builder.add(
-            config,
-            market_id=MarketId.US_NYSE,
-            cap_bucket=CapBucket.MID,
-            strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
-            strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
-            environment=Environment.PAPER,
-        )
+    with pytest.raises(ValueError, match="authoritative listing"):
+        add(config)
 
 
-def test_activity_profile_and_generated_lineage_fail_closed_when_mislabeled() -> None:
-    with pytest.raises(ValueError, match="max_results 50"):
-        RunScreenConfig(
-            method=CandidateScreen.ACTIVITY_SHORTLIST_V1,
-            max_results=49,
-            version="ACTIVITY_SHORTLIST_V1",
-            scheduled_active_minutes=15,
-        )
-
-    config, created = UniverseRunBuilder().add(
-        empty_config(),
-        market_id=MarketId.US_NASDAQ,
-        cap_bucket=CapBucket.MID,
-        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
-        environment=Environment.PAPER,
-    )
-    del config
-    payload = created.model_dump(mode="python")
-    payload["candidate_screen_id"] = "MISLABELED"
-    with pytest.raises(ValueError, match="matching immutable lineage"):
+def test_cap_override_and_altered_spec_are_rejected():
+    _, run = add()
+    payload = run.model_dump(mode="python")
+    payload["cap_bucket"] = CapBucket.MID
+    with pytest.raises(ValueError, match="cap/screen override"):
+        RunConfig.model_validate(payload)
+    payload = run.model_dump(mode="python")
+    payload["method_spec"]["exits"]["stop_M"] = 99
+    with pytest.raises(ValueError, match="frozen package"):
         RunConfig.model_validate(payload)
 
 
-def test_changing_markets_or_disabling_run_preserves_hv_cost_input():
-    builder = UniverseRunBuilder()
+def test_legacy_economic_setting_is_retained_but_cannot_override_current_method():
     config = empty_config().model_copy(update={"session_hard_hv_round_trip_cost_bps": 7.5})
-    updated, run = builder.add(
-        config,
-        market_id=MarketId.UK_LSE,
-        cap_bucket=CapBucket.SMALL,
-        strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
-        environment=Environment.PAPER,
-    )
+    updated, run = add(config)
     assert updated.session_hard_hv_round_trip_cost_bps == 7.5
-    assert builder.disable(updated, run.run_id).session_hard_hv_round_trip_cost_bps == 7.5
+    assert run.method_spec["economics"]["round_trip_research_cost_bps"] == 10

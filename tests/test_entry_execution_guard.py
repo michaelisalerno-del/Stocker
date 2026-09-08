@@ -35,7 +35,7 @@ def hrb_intent():
         symbol="HRB",
         underlying_con_id=8130,
         strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
-        strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
+        strategy_version="SESSION_HARD_HV_V1",
         session=SIGNAL_TIME.date(),
         t0=SIGNAL_TIME - timedelta(minutes=1),
         status=SignalStatus.WAITING_FOR_ENTRY,

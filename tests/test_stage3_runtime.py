@@ -410,7 +410,9 @@ def test_run_manager_rejects_duplicate_ids_when_constructed_directly() -> None:
         RunManager(UniverseCatalog((nasdaq,)), (duplicate, duplicate))
 
 
-def test_status_can_activate_multiple_runs_without_loading_ibkr(tmp_path: Path) -> None:
+def test_status_can_activate_multiple_runs_without_loading_ibkr(
+    tmp_path: Path, monkeypatch
+) -> None:
     config_path = tmp_path / "runs.yaml"
     config_path.write_text(
         """
@@ -441,7 +443,7 @@ runs:
         encoding="utf-8",
     )
     for module_name in [name for name in sys.modules if name.startswith("stocker_execution")]:
-        sys.modules.pop(module_name)
+        monkeypatch.delitem(sys.modules, module_name)
 
     result = CliRunner().invoke(
         app,

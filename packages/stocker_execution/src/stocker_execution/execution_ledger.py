@@ -75,6 +75,10 @@ class ExecutionRecord:
     diagnostic: bool
     entry_limit_price: float | None = None
     entry_expires_at: datetime | None = None
+    timeout_order_id: int | None = None
+    deadline: datetime | None = None
+    market_id: str | None = None
+    method_spec_hash: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +234,9 @@ class ExecutionLedger:
             self._ensure_column(connection, "execution_plans", "per_share_initial_risk", "REAL")
             self._ensure_column(connection, "execution_plans", "entry_limit_price", "REAL")
             self._ensure_column(connection, "execution_plans", "entry_expires_at", "TEXT")
+            for column in ("deadline", "market_id", "method_spec_hash"):
+                self._ensure_column(connection, "execution_plans", column, "TEXT")
+            self._ensure_column(connection, "execution_plans", "timeout_order_id", "INTEGER")
 
     @staticmethod
     def _ensure_column(
@@ -279,8 +286,11 @@ class ExecutionLedger:
                         environment, expected_account, con_id, symbol, side,
                         intended_quantity, entry_reference, stop_price, target_price,
                         status, created_at, initial_risk_budget, per_share_initial_risk,
-                        diagnostic, entry_limit_price, entry_expires_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        diagnostic, entry_limit_price, entry_expires_at, deadline,
+                        market_id, method_spec_hash
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
                     """,
                     (
                         plan.order_plan_id,
@@ -304,6 +314,9 @@ class ExecutionLedger:
                         int(plan.diagnostic),
                         plan.entry_limit_price,
                         plan.entry_expires_at.isoformat() if plan.entry_expires_at else None,
+                        plan.deadline.isoformat() if plan.deadline else None,
+                        plan.market_id,
+                        plan.method_spec_hash,
                     ),
                 )
             return True
@@ -335,7 +348,7 @@ class ExecutionLedger:
                 """
                 UPDATE execution_plans
                 SET actual_account = ?, parent_order_id = ?, stop_order_id = ?,
-                    target_order_id = ?, status = ?, submitted_at = ?
+                    target_order_id = ?, timeout_order_id = ?, status = ?, submitted_at = ?
                 WHERE order_plan_id = ?
                 """,
                 (
@@ -343,6 +356,7 @@ class ExecutionLedger:
                     order_ids.parent,
                     order_ids.stop,
                     order_ids.target,
+                    order_ids.timeout,
                     OrderLifecycle.SUBMITTED.value,
                     submitted_at,
                     order_plan_id,
@@ -352,7 +366,10 @@ class ExecutionLedger:
                 (OrderRole.ENTRY, order_ids.parent),
                 (OrderRole.STOP, order_ids.stop),
                 (OrderRole.TARGET, order_ids.target),
+                (OrderRole.TIMEOUT, order_ids.timeout),
             ):
+                if order_id is None:
+                    continue
                 connection.execute(
                     """
                     INSERT INTO execution_broker_orders (
@@ -441,6 +458,7 @@ class ExecutionLedger:
                 OrderRole.ENTRY: "parent_order_id",
                 OrderRole.STOP: "stop_order_id",
                 OrderRole.TARGET: "target_order_id",
+                OrderRole.TIMEOUT: "timeout_order_id",
             }[order.role]
             try:
                 connection.execute(
@@ -650,7 +668,18 @@ class ExecutionLedger:
             ).fetchall()
         return tuple(str(row["signal_id"]) for row in rows)
 
+    def attempted_signal_ids(self, run_id: str) -> frozenset[str]:
+        """A persisted outcome or reserved plan is not a fresh admission opportunity."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT signal_id FROM execution_attempts WHERE run_id = ? "
+                "UNION SELECT signal_id FROM execution_plans WHERE run_id = ?",
+                (run_id, run_id),
+            ).fetchall()
+        return frozenset(str(row["signal_id"]) for row in rows)
+
     def has_signal(self, signal_id: str) -> bool:
+        """Whether this signal already reserved a plan."""
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT 1 FROM execution_plans WHERE signal_id = ?", (signal_id,)
@@ -984,22 +1013,23 @@ class ExecutionLedger:
             rows = connection.execute(
                 """
                 SELECT con_id, symbol,
-                       SUM(filled_quantity - closed_quantity) AS open_quantity,
+                       SUM((CASE side WHEN 'BUY' THEN 1 ELSE -1 END)
+                           * (filled_quantity - closed_quantity)) AS open_quantity,
                        SUM(filled_quantity * average_fill_price) AS entry_value,
                        SUM(filled_quantity) AS entry_quantity
                 FROM execution_plans
-                WHERE environment = ? AND actual_account = ? AND side = ?
+                WHERE environment = ? AND actual_account = ?
                 GROUP BY con_id, symbol
                 HAVING ABS(open_quantity) > 0.000000001
                 """,
-                (environment.value, account, OrderAction.SELL.value),
+                (environment.value, account),
             ).fetchall()
         return tuple(
             BrokerPosition(
                 account=account,
                 con_id=int(row["con_id"]),
                 symbol=str(row["symbol"]),
-                quantity=-float(row["open_quantity"]),
+                quantity=float(row["open_quantity"]),
                 average_price=float(row["entry_value"]) / float(row["entry_quantity"]),
             )
             for row in rows
@@ -1053,7 +1083,8 @@ class ExecutionLedger:
         realized_pnl = None
         if closed and entry_average is not None and exit_average is not None:
             closed_quantity = min(entry_quantity, exit_quantity)
-            gross = (entry_average - exit_average) * closed_quantity
+            direction = 1 if plan["side"] == OrderAction.BUY.value else -1
+            gross = direction * (exit_average - entry_average) * closed_quantity
             commissions = sum(float(row["commission"] or 0.0) for row in fills)
             realized_pnl = gross - commissions
         connection.execute(
@@ -1123,6 +1154,10 @@ def _record_from_row(row: sqlite3.Row) -> ExecutionRecord:
         parent_order_id=_optional_int(row["parent_order_id"]),
         stop_order_id=_optional_int(row["stop_order_id"]),
         target_order_id=_optional_int(row["target_order_id"]),
+        timeout_order_id=_optional_int(row["timeout_order_id"]),
+        deadline=_optional_datetime(row["deadline"]),
+        market_id=row["market_id"],
+        method_spec_hash=row["method_spec_hash"],
         filled_quantity=float(row["filled_quantity"]),
         average_fill_price=_optional_float(row["average_fill_price"]),
         closed_quantity=float(row["closed_quantity"]),

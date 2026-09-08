@@ -19,37 +19,27 @@ import structlog
 
 from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
 from stocker_core.logging import configure_logging
-from stocker_core.markets import MARKET_CATALOGUE, ActivityScanner, CapBucket, get_market
+from stocker_core.markets import MARKET_CATALOGUE, ActivityScanner, MarketId, get_market
+from stocker_core.methods import content_hash, installed_methods, validate_run_method
 from stocker_core.runs import CandidateScreen, Environment, RunConfig, RunInstance, RunManager
 from stocker_core.strategies import SESSION_HARD_HV_METHOD
 from stocker_core.universes import UniverseCatalog
 from stocker_data.calendars import get_market_calendar
-from stocker_execution.activity_shortlist import (
-    ActivityShortlistService,
-    ActivityShortlistSnapshot,
-    ActivityShortlistStatus,
-    ActivityShortlistStore,
-)
 from stocker_execution.execution_ledger import ExecutionLedger
 from stocker_execution.execution_models import BrokerAccountState, BrokerFill, OrderLifecycle
-from stocker_execution.expected_move import (
-    IbkrHistoricalVolatilityExpectedMoveService,
-)
 from stocker_execution.history import (
-    HistorySemantics,
-    HistoryStatus,
     IbkrHistoryCache,
-    IbkrHistoryService,
 )
 from stocker_execution.ibkr import (
     BrokerSession,
     CurrentQuote,
     IbkrConnection,
-    IbkrError,
     IbkrResourceStatus,
     QualifiedInstrument,
     mask_ibkr_account,
 )
+from stocker_execution.session_hard_data import IbkrSessionDataSource as IbkrSessionDataSource
+from stocker_execution.session_hard_method import SessionHardMethod, TradeEvent
 from stocker_execution.session_hard_payoff import (
     CompletedPayoff,
     CostAwareAssessment,
@@ -64,18 +54,13 @@ from stocker_execution.session_hard_structure_d import (
     CohortOpportunity,
     EntryBar,
     PreMoveBand,
-    SessionHardAssessment,
-    SessionHardStructureDStrategy,
     SignalStatus,
     StrategyContext,
-    StrategyOpportunityKey,
     StrategySignal,
     nominal_exit_prices,
 )
 from stocker_execution.stage5 import (
-    STAGE5_HV_CALCULATION_VERSION,
     Stage5Analyzer,
-    Stage5CurrentDataService,
     Stage5FeatureSnapshot,
     Stage5IneligibleInstrument,
     Stage5Membership,
@@ -83,7 +68,6 @@ from stocker_execution.stage5 import (
     Stage5QualifiedRequest,
     Stage5SnapshotStore,
     Stage5Status,
-    calculate_session_hard_inputs,
     qualify_active_runs,
 )
 from stocker_execution.stage7 import (
@@ -96,7 +80,11 @@ from stocker_execution.stage7 import (
     Stage7ExecutionService,
     Stage7StrategyRuntime,
 )
-from stocker_execution.strategy_factory import create_strategy
+from stocker_execution.strategy_factory import (
+    MethodServices,
+    create_method_services,
+    create_strategy,
+)
 
 
 class ApplicationState(StrEnum):
@@ -143,18 +131,20 @@ class MarketSession:
     closes_at: datetime | None
     active_bar_starts: tuple[datetime, ...] = ()
 
-    def checkpoint_times(self) -> tuple[tuple[int, datetime], ...]:
+    def checkpoint_times(
+        self, checkpoints: Sequence[int] = SESSION_HARD_CHECKPOINTS
+    ) -> tuple[tuple[int, datetime], ...]:
         if self.opens_at is None or self.closes_at is None:
             return ()
         if self.active_bar_starts:
             return tuple(
                 (checkpoint, self.active_bar_starts[checkpoint])
-                for checkpoint in SESSION_HARD_CHECKPOINTS
+                for checkpoint in checkpoints
                 if checkpoint < len(self.active_bar_starts)
             )
         return tuple(
             (checkpoint, self.opens_at + timedelta(minutes=checkpoint * 5))
-            for checkpoint in SESSION_HARD_CHECKPOINTS
+            for checkpoint in checkpoints
             if self.opens_at + timedelta(minutes=checkpoint * 5) < self.closes_at
         )
 
@@ -346,6 +336,22 @@ class StrategyContextProvider(Protocol):
 
 
 class EntryBarSource(Protocol):
+    trade_errors: dict[int, str]
+
+    def prepare_trades(self, instrument: QualifiedInstrument) -> None: ...
+
+    def release_trades(self, con_id: int) -> None: ...
+
+    def release_unused_trades(self, retained: set[int]) -> None: ...
+
+    async def trades_for(
+        self, instruments: Mapping[int, QualifiedInstrument], signals: Sequence[StrategySignal]
+    ) -> Mapping[int, Sequence[TradeEvent]]: ...
+
+    async def cohort_bars(
+        self, instrument: QualifiedInstrument, signal: StrategySignal, now: datetime
+    ) -> Sequence[EntryBar]: ...
+
     async def bars_for(
         self,
         run: RunConfig,
@@ -416,6 +422,24 @@ class RuntimeStore:
         with self._connect() as connection:
             connection.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS method_runs (
+                    run_id TEXT PRIMARY KEY,
+                    configuration TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    reason TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS method_cohort_labels (
+                    signal_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS method_run_configurations (
+                    run_id TEXT NOT NULL,
+                    saved_at TEXT NOT NULL,
+                    configuration TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS runtime_checkpoints (
                     run_id TEXT NOT NULL,
                     session TEXT NOT NULL,
@@ -471,6 +495,114 @@ class RuntimeStore:
                     updated_at TEXT NOT NULL
                 );
                 """
+            )
+
+    def save_method_run(self, run: RunConfig, now: datetime) -> None:
+        payload = run.model_dump_json()
+        with self._connect() as connection:
+            existing = connection.execute(
+                "SELECT configuration FROM method_runs WHERE run_id = ?", (run.run_id,)
+            ).fetchone()
+            if existing is not None:
+                saved = json.loads(existing[0])
+                if saved.get("method_spec_hash") != run.method_spec_hash:
+                    raise ValueError("Existing run belongs to a different method specification")
+            if existing is None or json.loads(existing[0]) != json.loads(payload):
+                connection.execute(
+                    "INSERT INTO method_run_configurations VALUES (?, ?, ?)",
+                    (run.run_id, now.isoformat(), payload),
+                )
+            connection.execute(
+                "INSERT OR IGNORE INTO method_runs VALUES (?, ?, ?, ?, ?, ?)",
+                (run.run_id, payload, now.isoformat(), now.isoformat(), "CONFIGURED", ""),
+            )
+            connection.execute(
+                "UPDATE method_runs SET configuration = ? WHERE run_id = ?",
+                (payload, run.run_id),
+            )
+
+    def save_cohort_labels(self, signals: Sequence[StrategySignal]) -> None:
+        with self._connect() as connection:
+            connection.executemany(
+                "INSERT OR REPLACE INTO method_cohort_labels VALUES (?, ?, ?)",
+                [(s.signal_id, s.run_id, json.dumps(_signal_payload(s))) for s in signals],
+            )
+
+    def load_cohort_labels(self, run_id: str) -> tuple[StrategySignal, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM method_cohort_labels WHERE run_id = ?", (run_id,)
+            ).fetchall()
+        return tuple(_signal_from_payload(json.loads(row[0])) for row in rows)
+
+    def method_run(self, run_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM method_runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["configuration"] = json.loads(result["configuration"])
+        config = result["configuration"]
+        result.update(
+            market=config["market_id"],
+            method_id=config["strategy_id"],
+            method_version=config["strategy_version"],
+            method_spec_hash=config["method_spec_hash"],
+            universe_snapshot_sha256=content_hash(config["universe_snapshot"]),
+            data_source="IBKR",
+            broker_mode=config["environment"],
+        )
+        signals = self.load_signals(run_id)
+        result["candidate_count"] = len(signals)
+        result["screened"] = len(signals)
+        result["universe_count"] = len((config.get("universe_snapshot") or {}).get("members", []))
+        result["qualified"] = sum(s.session_hard_qualified for s in signals)
+        result["vetoed"] = sum(
+            s.q1_eligible is False or s.reason == "COHORT_MID_VETO" for s in signals
+        )
+        result["armed"] = sum(s.status is SignalStatus.WAITING_FOR_ENTRY for s in signals)
+        result["triggered"] = sum(s.status is SignalStatus.ENTRY_TRIGGERED for s in signals)
+        result["sessions"] = sorted({s.session.isoformat() for s in signals})
+        result["errors"] = [s.reason for s in signals if "UNAVAILABLE" in s.reason]
+        with self._connect() as connection:
+            result["configuration_history"] = [
+                {"saved_at": r[0], "configuration": json.loads(r[1])}
+                for r in connection.execute(
+                    "SELECT saved_at, configuration FROM method_run_configurations "
+                    "WHERE run_id = ? ORDER BY saved_at",
+                    (run_id,),
+                )
+            ]
+            result["errors"].extend(
+                r[0]
+                for r in connection.execute(
+                    "SELECT detail FROM runtime_checkpoints WHERE run_id = ? AND state = 'FAILED'",
+                    (run_id,),
+                )
+            )
+            has_ledger = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = 'execution_plans'"
+            ).fetchone()
+            positions = (
+                connection.execute(
+                    "SELECT order_plan_id, filled_quantity, closed_quantity, status "
+                    "FROM execution_plans WHERE run_id = ?",
+                    (run_id,),
+                ).fetchall()
+                if has_ledger
+                else []
+            )
+        result["active_positions"] = [r[0] for r in positions if r[1] > r[2]]
+        result["completed_positions"] = [r[0] for r in positions if r[3] == "CLOSED"]
+        return result
+
+    def set_method_run_state(self, run_id: str, state: str, reason: str, now: datetime) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE method_runs SET updated_at = ?, status = ?, reason = ? WHERE run_id = ?",
+                (now.isoformat(), state, reason, run_id),
             )
 
     def recover_interrupted(self, now: datetime) -> int:
@@ -882,11 +1014,6 @@ class RuntimeStore:
 class StockerRuntime:
     """One restartable application with per-run execution routing."""
 
-    _SUPPORTED_STRATEGIES = {
-        SESSION_HARD_HV_METHOD.config_name,
-        SESSION_HARD_HV_METHOD.strategy_id,
-    }
-
     def __init__(
         self,
         *,
@@ -896,6 +1023,7 @@ class StockerRuntime:
         qualify: Qualifier,
         stage5: Stage5Analyzer,
         stage5_by_strategy: Mapping[str, Stage5Analyzer] | None = None,
+        method_services: Mapping[str, MethodServices] | None = None,
         context_provider: StrategyContextProvider,
         entry_source: EntryBarSource,
         execution_router: ExecutionRouter | None = None,
@@ -935,6 +1063,10 @@ class StockerRuntime:
         }
         self._context_provider = context_provider
         self._entry_source = entry_source
+        self._method_services = dict(method_services or {})
+        self._default_method_services = MethodServices(
+            stage5, context_provider, entry_source, lambda market: market.checkpoint_times()
+        )
         self._payoff_history_task: asyncio.Task[None] | None = None
         self._payoff_fetch_minute: datetime | None = None
         self._session_resolver = session_resolver or ExchangeSessionResolver()
@@ -960,7 +1092,7 @@ class StockerRuntime:
         self._environment_reconciled: dict[Environment, bool] = {
             environment: False for environment in self._destinations
         }
-        self._strategies: dict[str, SessionHardStructureDStrategy] = {}
+        self._strategies: dict[str, SessionHardMethod] = {}
         self._qualification = Stage5QualificationResult((), ())
         self._expected_move_prepared: set[tuple[str, date, datetime, tuple[int, ...]]] = set()
         self._run_ready_at: dict[str, datetime] = {}
@@ -990,10 +1122,18 @@ class StockerRuntime:
         configured_runs: list[RunInstance] = []
         for instance in self._manager.list_runs():
             run = instance.config
+            method_error = ""
+            if run.enabled:
+                try:
+                    validate_run_method(run)
+                except (ValueError, OSError) as exc:
+                    method_error = str(exc)
+            if run.method_spec is not None:
+                self._store.save_method_run(run, now)
             if not run.enabled:
                 self._set_run(run.run_id, RunRuntimeState.DISABLED, "disabled by configuration")
-            elif run.strategy not in self._SUPPORTED_STRATEGIES:
-                self._set_run(run.run_id, RunRuntimeState.DEGRADED, "unsupported strategy")
+            elif method_error:
+                self._set_run(run.run_id, RunRuntimeState.DEGRADED, method_error)
             elif run.session is None:
                 self._set_run(
                     run.run_id, RunRuntimeState.DEGRADED, "explicit market session required"
@@ -1200,6 +1340,9 @@ class StockerRuntime:
 
         if not changed_run_ids:
             return self.status()
+        for run in config.runs:
+            if run.run_id in changed_run_ids and run.enabled:
+                validate_run_method(run)
         current_by_id = {item.run_id: item for item in self._config.runs}
         updated_by_id = {item.run_id: item for item in config.runs}
         current_universes = {item.universe_id: item for item in self._config.universes}
@@ -1239,6 +1382,8 @@ class StockerRuntime:
             for run_id in (item.run_id for item in config.runs if item.run_id in changed_run_ids):
                 current = current_by_id.get(run_id)
                 updated = updated_by_id[run_id]
+                if updated.method_spec is not None:
+                    self._store.save_method_run(updated, now)
                 if not updated.enabled:
                     self._set_run(run_id, RunRuntimeState.DISABLED, "disabled by configuration")
                     self._replace_qualification_for({run_id}, Stage5QualificationResult((), ()))
@@ -1490,7 +1635,7 @@ class StockerRuntime:
                 ),
                 "",
             )
-            for checkpoint, t0 in market.checkpoint_times():
+            for checkpoint, t0 in self._services_for(run).checkpoints(market):
                 if t0 > now:
                     continue
                 if self._store.checkpoint_state(run.run_id, market.session, t0) is not None:
@@ -1516,11 +1661,16 @@ class StockerRuntime:
             await self._observe_entries(_aware(self._clock()))
         return self.status()
 
+    def _services_for(self, run: RunConfig) -> MethodServices:
+        if not self._method_services:
+            return self._default_method_services
+        return self._method_services[str(run.strategy_version)]
+
     async def _prepare_upcoming_expected_moves(self, now: datetime) -> None:
         self._expected_move_prepared = {
             key for key in self._expected_move_prepared if key[2] >= now
         }
-        upcoming: dict[tuple[date, datetime], set[str]] = {}
+        upcoming: dict[tuple[str, date, datetime], set[str]] = {}
         for instance in self._manager.list_runs():
             run_id = instance.config.run_id
             if self._run_states.get(run_id) not in {
@@ -1529,31 +1679,44 @@ class StockerRuntime:
             }:
                 continue
             strategy = self._strategies.get(run_id)
-            if (
-                strategy is None
-                or strategy.strategy_version != SESSION_HARD_HV_METHOD.strategy_version
-            ):
+            if strategy is None:
                 continue
+            lead = (
+                (instance.config.method_spec or {})
+                .get("data_requirements", {})
+                .get("prefetch_lead_minutes", 0)
+            )
             market = self._sessions.get(run_id) or self._resolve_market(instance, now)
             if market is None:
                 continue
-            for _checkpoint, t0 in market.checkpoint_times():
-                if not now < t0 <= now + HV_EXPECTED_MOVE_PREFETCH_LEAD:
+            for _checkpoint, t0 in self._services_for(instance.config).checkpoints(market):
+                if not now < t0 <= now + timedelta(minutes=lead):
                     continue
                 if self._store.checkpoint_state(run_id, market.session, t0) is not None:
                     continue
-                upcoming.setdefault((market.session, t0), set()).add(run_id)
+                upcoming.setdefault((strategy.strategy_version, market.session, t0), set()).add(
+                    run_id
+                )
 
-        stage5 = self._stage5_by_strategy.get(SESSION_HARD_HV_METHOD.strategy_version)
-        if stage5 is None:
-            return
-        for (session, t0), run_ids in sorted(upcoming.items()):
+        for (version, session, t0), run_ids in sorted(upcoming.items()):
+            stage5 = self._stage5_by_strategy[version]
+            source = self._services_for(self._manager.get_run(sorted(run_ids)[0]).config).entries
             requests, _ineligible = self._qualification_for(run_ids)
             con_ids = tuple(sorted(request.instrument.con_id for request in requests))
-            key = (SESSION_HARD_HV_METHOD.strategy_version, session, t0, con_ids)
+            key = (version, session, t0, con_ids)
             if key in self._expected_move_prepared:
                 continue
             self._expected_move_prepared.add(key)
+            if hasattr(source, "prepare_trades"):
+                for request in requests:
+                    try:
+                        source.prepare_trades(request.instrument)
+                    except Exception as exc:
+                        self._logger.warning(
+                            "trade_stream_unavailable",
+                            symbol=request.instrument.symbol,
+                            reason=str(exc),
+                        )
             await stage5.prepare_expected_moves(requests, session=session, t0=t0)
 
     async def _refresh_scheduled_activity_shortlists(self, now: datetime) -> None:
@@ -2116,6 +2279,7 @@ class StockerRuntime:
         return None
 
     def _set_run(self, run_id: str, state: RunRuntimeState, reason: str) -> None:
+        self._store.set_method_run_state(run_id, state.value, reason, _aware(self._clock()))
         self._run_states[run_id] = state
         self._run_reasons[run_id] = reason
 
@@ -2131,7 +2295,10 @@ class StockerRuntime:
             return
         strategy_id = str(run.strategy_id or SESSION_HARD_HV_METHOD.strategy_id)
         strategy_version = str(run.strategy_version or SESSION_HARD_HV_METHOD.strategy_version)
-        strategy = create_strategy(strategy_id, strategy_version)
+        strategy = create_strategy(
+            strategy_id, strategy_version, run.market_id or MarketId.US_ALL, clock=self._clock
+        )
+        strategy.restore_runtime_state(self._store, run_id)
         restored = self._store.load_signals(run_id)
         strategy.restore_signals(restored)
         expired = strategy.expire_waiting_before(now)
@@ -2167,7 +2334,7 @@ class StockerRuntime:
             market = self._sessions.get(run_id)
             if market is None:
                 continue
-            for checkpoint, t0 in market.checkpoint_times():
+            for checkpoint, t0 in self._services_for(instance.config).checkpoints(market):
                 if t0 < ready_at:
                     self._store.mark_missed(run_id, market.session, t0, checkpoint, ready_at)
 
@@ -2270,7 +2437,7 @@ class StockerRuntime:
                 instruments = {
                     request.instrument.con_id: request.instrument for request in requests
                 }
-                context = await self._context_provider.context_for(
+                context = await self._services_for(run).context.context_for(
                     run,
                     valid_rows,
                     checkpoint,
@@ -2298,6 +2465,7 @@ class StockerRuntime:
                         reason=str(exc),
                     )
             self._store.save_signals(evaluated, now)
+            strategy.save_runtime_state(self._store)
             waiting = sum(signal.status is SignalStatus.WAITING_FOR_ENTRY for signal in evaluated)
             self._store.increment(run.run_id, session, "signals", waiting)
             ready_count = sum(row.status is Stage5Status.READY for row in valid_rows)
@@ -2349,18 +2517,25 @@ class StockerRuntime:
                 expired = strategy.expire_waiting_before(now)
                 if expired:
                     self._store.save_signals(expired, now)
-                bars = await self._entry_source.bars_for(
-                    run,
-                    instruments,
-                    session=market.session,
-                    now=now,
-                    signals=tuple(
-                        signal
-                        for signal in strategy.signals
-                        if signal.status is SignalStatus.WAITING_FOR_ENTRY
-                    ),
+                waiting = tuple(
+                    signal
+                    for signal in strategy.signals
+                    if signal.status is SignalStatus.WAITING_FOR_ENTRY
                 )
-                intents = strategy_runtime.observe(bars)
+                if waiting:
+                    source = self._services_for(run).entries
+                    events = await source.trades_for(instruments, waiting)
+                    for con_id, reason in source.trade_errors.items():
+                        strategy.expire_unobservable(con_id, reason)
+                    strategy.observe_trades(events)
+                attempted = self._ledger.attempted_signal_ids(run.run_id)
+                intents = tuple(
+                    s
+                    for s in strategy.signals
+                    if s.status is SignalStatus.ENTRY_TRIGGERED
+                    and s.selected
+                    and s.signal_id not in attempted
+                )
                 for signal in intents:
                     if is_baseline_payoff_candidate(signal):
                         instrument = (
@@ -2385,6 +2560,28 @@ class StockerRuntime:
         # Shadow tracking also runs for historical/removed universes and disabled
         # runs, using the original persisted qualified instrument and run identity.
         await self._advance_pending_payoffs(now, fetch_missing=False)
+        # All runs have consumed this cycle's events. Keep streams only for waiting
+        # candidates or checkpoints whose qualification has not yet completed.
+        retained_by_source: dict[int, tuple[EntryBarSource, set[int]]] = {}
+        for run, market, strategy, _runtime, instruments, _intents in prepared:
+            source = self._services_for(run).entries
+            retained = retained_by_source.setdefault(id(source), (source, set()))[1]
+            retained.update(
+                s.underlying_con_id
+                for s in strategy.signals
+                if s.status is SignalStatus.WAITING_FOR_ENTRY and s.underlying_con_id is not None
+            )
+            data = (run.method_spec or {}).get("data_requirements", {})
+            entry = (run.method_spec or {}).get("entry", {})
+            for _, t0 in self._services_for(run).checkpoints(market):
+                if now < t0 <= now + timedelta(minutes=data.get("prefetch_lead_minutes", 0)) or (
+                    t0 <= now < t0 + timedelta(minutes=entry.get("window_minutes", 0))
+                    and self._store.checkpoint_state(run.run_id, market.session, t0)
+                    in {None, CheckpointState.PROCESSING}
+                ):
+                    retained.update(instruments)
+        for source, retained in retained_by_source.values():
+            source.release_unused_trades(retained)
         ready_for_execution = []
         for run, market, strategy, strategy_runtime, instruments, intents in prepared:
             try:
@@ -2416,7 +2613,7 @@ class StockerRuntime:
 
         # Freeze every simultaneous decision before broker awaits can allow a
         # background history completion to change the pool between runs.
-        for run, market, strategy, strategy_runtime, instruments, admitted in ready_for_execution:
+        for run, market, _strategy, strategy_runtime, instruments, admitted in ready_for_execution:
             try:
                 attempts = await strategy_runtime.execute_observed(admitted, instruments)
             except Exception as exc:
@@ -2480,13 +2677,6 @@ class StockerRuntime:
                         result=attempt.code.value,
                         reason=attempt.detail,
                     )
-            for index, opportunity in enumerate(strategy.cohort_opportunities):
-                identity = (
-                    f"{opportunity.run_id}|{opportunity.session.isoformat()}|"
-                    f"{opportunity.pre_move_m:.17g}|{index}"
-                )
-                self._store.save_cohort(identity, opportunity)
-
         # Historical downloads never stand between a ready signal and submission.
         minute = now.replace(second=0, microsecond=0)
         if (
@@ -2495,9 +2685,15 @@ class StockerRuntime:
             and (self._payoff_history_task is None or self._payoff_history_task.done())
         ):
             self._payoff_fetch_minute = minute
-            self._payoff_history_task = asyncio.create_task(
-                self._advance_pending_payoffs(now, fetch_missing=True)
-            )
+            self._payoff_history_task = asyncio.create_task(self._advance_background_history(now))
+
+    async def _advance_background_history(self, now: datetime) -> None:
+        for run_id, method in self._strategies.items():
+            requests, _ = self._qualification_for({run_id})
+            instruments = {r.instrument.con_id: r.instrument for r in requests}
+            source = self._services_for(self._manager.get_run(run_id).config).entries
+            await method.advance_runtime_state(source, instruments, self._store, now, self._logger)
+        await self._advance_pending_payoffs(now, fetch_missing=True)
 
     async def _advance_pending_payoffs(
         self,
@@ -2849,7 +3045,7 @@ def _signal_payload(signal: StrategySignal) -> dict[str, object]:
     payload["t0"] = _aware(signal.t0).isoformat()
     payload["status"] = signal.status.value
     payload["band"] = signal.band.value if signal.band is not None else None
-    for name in ("entry_timestamp", "signal_timestamp"):
+    for name in ("entry_timestamp", "signal_timestamp", "armed_at", "deadline"):
         value = getattr(signal, name)
         payload[name] = _aware(value).isoformat() if value is not None else None
     return payload
@@ -2861,7 +3057,7 @@ def _signal_from_payload(payload: Mapping[str, object]) -> StrategySignal:
     values["t0"] = datetime.fromisoformat(str(values["t0"]))
     values["status"] = SignalStatus(str(values["status"]))
     values["band"] = PreMoveBand(str(values["band"])) if values.get("band") else None
-    for name in ("entry_timestamp", "signal_timestamp"):
+    for name in ("entry_timestamp", "signal_timestamp", "armed_at", "deadline"):
         if values.get(name) is not None:
             values[name] = datetime.fromisoformat(str(values[name]))
     return StrategySignal(**values)  # type: ignore[arg-type]
@@ -2896,225 +3092,6 @@ def _intraday_timestamp(value: date | datetime) -> datetime:
     if not isinstance(value, datetime):
         raise ValueError("runtime entry bars require intraday timestamps")
     return _aware(value)
-
-
-class IbkrSessionDataSource:
-    """Supply Stage 6 causal score inputs and entry bars from the shared IBKR cache."""
-
-    _FIVE_MINUTES = HistorySemantics("5 mins", "TRADES", True)
-    _ONE_MINUTE = HistorySemantics("1 min", "TRADES", True)
-
-    def __init__(
-        self,
-        ibkr: IbkrConnection,
-        history_cache: IbkrHistoryCache,
-        *,
-        logger: Any | None = None,
-    ) -> None:
-        self._cache = history_cache
-        self._history = IbkrHistoryService(ibkr, history_cache)
-        self._logger = logger or configure_logging()
-
-    async def context_for(
-        self,
-        run: RunConfig,
-        rows: Sequence[Stage5FeatureSnapshot],
-        checkpoint: int,
-        instruments: Mapping[int, QualifiedInstrument],
-        cohort_history: Sequence[CohortOpportunity],
-    ) -> StrategyContext:
-        assessments: dict[StrategyOpportunityKey, SessionHardAssessment] = {}
-        for row in rows:
-            if row.status is not Stage5Status.READY or row.con_id is None:
-                continue
-            instrument = instruments.get(row.con_id)
-            if instrument is None:
-                self._logger.warning(
-                    "session_hard_input_unavailable",
-                    run_id=run.run_id,
-                    con_id=row.con_id,
-                    symbol=row.symbol,
-                    reason="qualified instrument identity missing",
-                )
-                continue
-            t0 = _aware(row.t0)
-            market_session = ExchangeSessionResolver().resolve(run, t0)
-            required = market_session.active_bar_starts[:checkpoint]
-            if len(required) != checkpoint:
-                self._logger.warning(
-                    "session_hard_input_unavailable",
-                    run_id=run.run_id,
-                    con_id=row.con_id,
-                    symbol=row.symbol,
-                    reason="active trading-bar prefix unavailable",
-                )
-                continue
-            session_open = required[0]
-            try:
-                snapshot = self._cache.get_required_history(
-                    instrument, self._FIVE_MINUTES, required, as_of=t0
-                )
-                if snapshot.status is not HistoryStatus.READY:
-                    await self._history.fetch_and_store(
-                        instrument,
-                        bar_size="5 mins",
-                        duration=f"{checkpoint * 5 * 60 + 300} S",
-                        what_to_show="TRADES",
-                        regular_trading_hours=True,
-                        end_time=t0,
-                    )
-                    snapshot = self._cache.get_required_history(
-                        instrument, self._FIVE_MINUTES, required, as_of=t0
-                    )
-                if snapshot.status is not HistoryStatus.READY:
-                    self._logger.debug(
-                        "session_hard_input_unavailable",
-                        run_id=run.run_id,
-                        con_id=instrument.con_id,
-                        symbol=instrument.symbol,
-                        reason=snapshot.reason,
-                    )
-                    continue
-                features = calculate_session_hard_inputs(
-                    snapshot.bars,
-                    checkpoint=checkpoint,
-                    session_open=session_open,
-                    bar_starts=required,
-                )
-                key = StrategyOpportunityKey(instrument.con_id, row.session, t0)
-                assessments[key] = SessionHardAssessment.from_features(
-                    checkpoint=checkpoint, features=features
-                )
-            except (IbkrError, ValueError) as exc:
-                self._logger.warning(
-                    "session_hard_input_failed",
-                    run_id=run.run_id,
-                    con_id=instrument.con_id,
-                    symbol=instrument.symbol,
-                    reason=str(exc),
-                )
-                continue
-        return StrategyContext(
-            run_id=run.run_id,
-            session_hard=assessments,
-            cohort_history=tuple(cohort_history),
-        )
-
-    async def bars_for(
-        self,
-        run: RunConfig,
-        instruments: Mapping[int, QualifiedInstrument],
-        *,
-        session: date,
-        now: datetime,
-        signals: Sequence[StrategySignal],
-        fetch_missing: bool = True,
-    ) -> Mapping[int, Sequence[EntryBar]]:
-        causal_now = _aware(now)
-        completed_minute = causal_now.replace(second=0, microsecond=0) - timedelta(minutes=1)
-        required_by_con_id: dict[tuple[int, date], set[datetime]] = {}
-        for signal in signals:
-            shadow = signal.baseline_eligible and is_baseline_payoff_candidate(signal)
-            if (
-                signal.run_id != run.run_id
-                or signal.underlying_con_id is None
-                or (
-                    not shadow
-                    and (
-                        signal.session != session
-                        or signal.status is not SignalStatus.WAITING_FOR_ENTRY
-                    )
-                )
-            ):
-                continue
-            start = (
-                _aware(signal.entry_timestamp)
-                if shadow and signal.entry_timestamp
-                else _aware(signal.t0)
-            )
-            if not shadow and causal_now > start + timedelta(minutes=5):
-                self._logger.info(
-                    "entry_window_not_replayed",
-                    run_id=run.run_id,
-                    signal_id=signal.signal_id,
-                    con_id=signal.underlying_con_id,
-                )
-                continue
-            horizon_end = (
-                _aware(signal.t0) + timedelta(minutes=14)
-                if shadow
-                else start + timedelta(minutes=4)
-            )
-            end = min(horizon_end, completed_minute)
-            if end < start:
-                continue
-            required_by_con_id.setdefault((signal.underlying_con_id, signal.session), set()).update(
-                start + timedelta(minutes=index)
-                for index in range(int((end - start).total_seconds() // 60) + 1)
-            )
-
-        result: dict[int, tuple[EntryBar, ...]] = {}
-        for (con_id, _session), required_set in required_by_con_id.items():
-            instrument = instruments.get(con_id)
-            if instrument is None:
-                self._logger.warning(
-                    "entry_data_unavailable",
-                    run_id=run.run_id,
-                    con_id=con_id,
-                    reason="qualified instrument identity missing",
-                )
-                continue
-            required = tuple(sorted(required_set))
-            try:
-                snapshot = self._cache.get_required_history(
-                    instrument, self._ONE_MINUTE, required, as_of=causal_now
-                )
-                if snapshot.status is not HistoryStatus.READY and fetch_missing:
-                    duration_seconds = max(
-                        900, int((required[-1] - required[0]).total_seconds()) + 60
-                    )
-                    await self._history.fetch_and_store(
-                        instrument,
-                        bar_size="1 min",
-                        duration=f"{duration_seconds} S",
-                        what_to_show="TRADES",
-                        regular_trading_hours=True,
-                        end_time=min(causal_now, required[-1] + timedelta(minutes=1)),
-                    )
-                    snapshot = self._cache.get_required_history(
-                        instrument, self._ONE_MINUTE, required, as_of=causal_now
-                    )
-                if snapshot.status is not HistoryStatus.READY:
-                    self._logger.debug(
-                        "entry_data_incomplete",
-                        run_id=run.run_id,
-                        con_id=instrument.con_id,
-                        symbol=instrument.symbol,
-                        reason=snapshot.reason,
-                    )
-                result[con_id] = (
-                    *result.get(con_id, ()),
-                    *tuple(
-                        EntryBar(
-                            timestamp=_intraday_timestamp(bar.timestamp),
-                            open=bar.open,
-                            high=bar.high,
-                            low=bar.low,
-                            close=bar.close,
-                        )
-                        for bar in snapshot.bars
-                    ),
-                )
-            except (IbkrError, ValueError) as exc:
-                self._logger.warning(
-                    "entry_data_failed",
-                    run_id=run.run_id,
-                    con_id=instrument.con_id,
-                    symbol=instrument.symbol,
-                    reason=str(exc),
-                )
-                continue
-        return result
 
 
 def build_runtime(
@@ -3163,72 +3140,23 @@ def build_runtime(
     market_data_broker = connections[data_environment]
     history_cache = IbkrHistoryCache(database_path)
     data_clock = clock or (lambda: datetime.now(tz=UTC))
-    hv_current_data = Stage5CurrentDataService(
-        market_data_broker,
-        history_cache,
-        IbkrHistoricalVolatilityExpectedMoveService(market_data_broker, clock=data_clock),
-        calculation_version=STAGE5_HV_CALCULATION_VERSION,
-        clock=data_clock,
-    )
     snapshot_store = Stage5SnapshotStore(database_path)
-    stage5 = Stage5Analyzer(
-        hv_current_data,
-        snapshot_store=snapshot_store,
-        calculation_version=STAGE5_HV_CALCULATION_VERSION,
-    )
-    stage5_by_strategy = {SESSION_HARD_HV_METHOD.strategy_version: stage5}
-    session_data = IbkrSessionDataSource(market_data_broker, history_cache, logger=logger)
-    activity_service = ActivityShortlistService(ActivityShortlistStore(database_path))
+    services = {
+        method.version: create_method_services(
+            method.method_id,
+            method.version,
+            market_data_broker,
+            history_cache,
+            snapshot_store,
+            data_clock,
+            logger,
+        )
+        for method in installed_methods()
+    }
+    default = next(iter(services.values()))
 
     async def qualify(runs_to_prepare: Sequence[RunInstance]) -> Stage5QualificationResult:
-        snapshots: dict[str, ActivityShortlistSnapshot] = {}
-        now = _aware(data_clock())
-        resolver = ExchangeSessionResolver()
-        for instance in runs_to_prepare:
-            config = instance.config
-            if (
-                config.screen is None
-                or config.screen.method.value != "ACTIVITY_SHORTLIST_V1"
-                or config.market_id is None
-                or config.cap_bucket is None
-            ):
-                continue
-            market = resolver.resolve(config, now)
-            definition = get_market(config.market_id)
-            if len(market.active_bar_starts) <= 3:
-                snapshots[config.run_id] = ActivityShortlistSnapshot(
-                    market_id=config.market_id.value,
-                    cap_bucket=config.cap_bucket,
-                    cap_bucket_version=config.cap_bucket_version or "CAP_BUCKETS_V1",
-                    session=market.session,
-                    screen_timestamp=now,
-                    profile_id=config.candidate_screen_id or "ACTIVITY_SHORTLIST_V1",
-                    profile_version=(config.candidate_screen_version or "ACTIVITY_SHORTLIST_V1"),
-                    status=ActivityShortlistStatus.SCANNER_NOT_AVAILABLE,
-                    components=(),
-                    candidates=(),
-                    reason="SCANNER_NOT_AVAILABLE",
-                )
-                continue
-            allowed_symbols = (
-                frozenset(item.symbol for item in instance.universe.members)
-                if instance.universe.members
-                else None
-            )
-            snapshots[config.run_id] = await activity_service.get_or_create(
-                market_data_broker,
-                market=definition,
-                cap_bucket=CapBucket(config.cap_bucket),
-                session=market.session,
-                screen_at=market.active_bar_starts[3],
-                now=now,
-                allowed_symbols=allowed_symbols,
-            )
-        return await qualify_active_runs(
-            market_data_broker,
-            runs_to_prepare,
-            activity_snapshots=snapshots,
-        )
+        return await qualify_active_runs(market_data_broker, runs_to_prepare)
 
     runtime_store = RuntimeStore(database_path)
     runtime_store.backfill_payoffs(runs.runs, history_cache)
@@ -3238,10 +3166,11 @@ def build_runtime(
         ledger=ExecutionLedger(database_path),
         store=runtime_store,
         qualify=qualify,
-        stage5=stage5,
-        stage5_by_strategy=stage5_by_strategy,
-        context_provider=session_data,
-        entry_source=session_data,
+        stage5=default.features,
+        stage5_by_strategy={version: service.features for version, service in services.items()},
+        method_services=services,
+        context_provider=default.context,
+        entry_source=default.entries,
         clock=data_clock,
         logger=logger,
     )

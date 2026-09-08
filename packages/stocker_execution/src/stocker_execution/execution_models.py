@@ -32,6 +32,7 @@ class OrderRole(StrEnum):
     ENTRY = "ENTRY"
     STOP = "STOP"
     TARGET = "TARGET"
+    TIMEOUT = "TIMEOUT"
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +40,7 @@ class BrokerOrderIds:
     parent: int
     stop: int
     target: int
+    timeout: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +67,9 @@ class OrderPlan:
     diagnostic: bool = False
     entry_limit_price: float | None = None
     entry_expires_at: datetime | None = None
+    deadline: datetime | None = None
+    market_id: str | None = None
+    method_spec_hash: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

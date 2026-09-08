@@ -1,5 +1,7 @@
 """Minimal IBKR connection, market-data, and explicit execution boundary."""
 
+from __future__ import annotations
+
 import asyncio
 import re
 import xml.etree.ElementTree as ElementTree
@@ -11,7 +13,10 @@ from decimal import Decimal
 from itertools import pairwise
 from math import isfinite
 from time import perf_counter
-from typing import Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+
+if TYPE_CHECKING:
+    from stocker_execution.session_hard_method import TradeEvent
 
 import structlog
 
@@ -119,6 +124,12 @@ class _IbClient(Protocol):
     ) -> object: ...
 
     def cancelMktData(self, contract: object) -> bool: ...
+
+    def reqTickByTickData(
+        self, contract: object, tickType: str, numberOfTicks: int, ignoreSize: bool
+    ) -> Any: ...
+
+    def cancelTickByTickData(self, contract: object, tickType: str) -> None: ...
 
     def reqMarketDataType(self, marketDataType: int) -> object: ...
 
@@ -393,8 +404,12 @@ class IbkrConnection:
             ib_async_requests_interval=(
                 float(requests_interval) if isinstance(requests_interval, (int, float)) else None
             ),
-            active_market_data_lines=len(subscriptions),
-            active_underlying_lines=sum(item.security_type != "OPT" for item in subscriptions),
+            active_market_data_lines=len(subscriptions)
+            + len(getattr(self, "_causal_trade_streams", {})),
+            active_underlying_lines=(
+                sum(item.security_type != "OPT" for item in subscriptions)
+                + len(getattr(self, "_causal_trade_streams", {}))
+            ),
             active_option_lines=sum(item.security_type == "OPT" for item in subscriptions),
             subscriptions=subscriptions,
             market_data_requests_today=self._market_data_requests_today,
@@ -513,7 +528,10 @@ class IbkrConnection:
             existing.consumer_count += 1
             self._deduplicated_requests_today += 1
             return key, existing.ticker
-        if len(self._active_market_data) >= self.config.market_data_line_budget:
+        if (
+            len(self._active_market_data) + len(getattr(self, "_causal_trade_streams", {}))
+            >= self.config.market_data_line_budget
+        ):
             self._capacity_rejects_today += 1
             self._last_resource_error = "IBKR_MARKET_DATA_CAPACITY_UNAVAILABLE"
             raise IbkrError("IBKR_MARKET_DATA_CAPACITY_UNAVAILABLE")
@@ -621,6 +639,7 @@ class IbkrConnection:
         """Disconnect this instance and clear its confirmed account state."""
 
         was_connected = self._client.isConnected() or self._account_id is not None
+        self.release_trade_events()
         self._cancel_all_market_data_streams()
         if self._client.isConnected():
             self._client.disconnect()
@@ -733,15 +752,16 @@ class IbkrConnection:
             or instrument.con_id != plan.con_id
         ):
             raise IbkrError("ACCOUNT_OR_ENVIRONMENT_MISMATCH")
-        if plan.side is not OrderAction.SELL:
-            raise IbkrError("Stage 7 supports only the first strategy's SHORT order plans")
 
-        from ib_async import LimitOrder, MarketOrder, Order, StopOrder
+        from ib_async import LimitOrder, MarketOrder, Order, StopOrder, TimeCondition
 
         parent_id = int(self._client.client.getReqId())
         target_id = int(self._client.client.getReqId())
         stop_id = int(self._client.client.getReqId())
         common = {"orderRef": plan.order_plan_id, "account": self.account}
+        long = plan.side is OrderAction.BUY
+        entry_action = "BUY" if long else "SELL"
+        exit_action = "SELL" if long else "BUY"
         parent: Order
         if plan.entry_order_type is EntryOrderType.LIMIT:
             limit = plan.entry_limit_price
@@ -749,7 +769,11 @@ class IbkrConnection:
             if (
                 limit is None
                 or not isfinite(limit)
-                or not plan.target_price < plan.entry_reference <= limit < plan.stop_price
+                or not (
+                    plan.stop_price < limit <= plan.entry_reference < plan.target_price
+                    if long
+                    else plan.target_price < plan.entry_reference <= limit < plan.stop_price
+                )
                 or expiry is None
                 or expiry.tzinfo is None
                 or expiry.utcoffset() is None
@@ -757,7 +781,7 @@ class IbkrConnection:
             ):
                 raise IbkrError("invalid or expired protected entry limit")
             parent = LimitOrder(
-                "SELL",
+                entry_action,
                 plan.quantity,
                 limit,
                 orderId=parent_id,
@@ -768,10 +792,10 @@ class IbkrConnection:
             )
         else:
             parent = MarketOrder(
-                "SELL", plan.quantity, orderId=parent_id, transmit=False, tif="DAY", **common
+                entry_action, plan.quantity, orderId=parent_id, transmit=False, tif="DAY", **common
             )
         target = LimitOrder(
-            "BUY",
+            exit_action,
             plan.quantity,
             plan.target_price,
             orderId=target_id,
@@ -781,7 +805,7 @@ class IbkrConnection:
             **common,
         )
         stop = StopOrder(
-            "BUY",
+            exit_action,
             plan.quantity,
             plan.stop_price,
             orderId=stop_id,
@@ -790,10 +814,36 @@ class IbkrConnection:
             tif="GTC",
             **common,
         )
+        timeout_id = None
+        bracket = [parent, target, stop]
+        if plan.deadline is not None:
+            if plan.deadline.tzinfo is None or plan.deadline <= datetime.now(UTC):
+                raise IbkrError("Method deadline must be in the future")
+            timeout_id = int(self._client.client.getReqId())
+            stop.transmit = False
+            timeout = MarketOrder(
+                exit_action,
+                plan.quantity,
+                orderId=timeout_id,
+                parentId=parent_id,
+                transmit=True,
+                tif="DAY",
+                conditions=[
+                    TimeCondition(
+                        isMore=True,
+                        time=plan.deadline.astimezone(UTC).strftime("%Y%m%d %H:%M:%S UTC"),
+                    )
+                ],
+                **common,
+            )
+            for child in (target, stop, timeout):
+                child.ocaGroup = plan.order_plan_id + "-exits"
+                child.ocaType = 2
+            bracket.append(timeout)
         contract = _to_ib_contract(instrument)
         placed: list[object] = []
         try:
-            for bracket_order in (parent, target, stop):
+            for bracket_order in bracket:
                 self._client.placeOrder(contract, bracket_order)
                 placed.append(bracket_order)
         except Exception as exc:
@@ -803,7 +853,7 @@ class IbkrConnection:
             raise IbkrError(
                 f"IBKR protected {self.environment.value} order submission failed: {exc}"
             ) from exc
-        return BrokerOrderIds(parent=parent_id, stop=stop_id, target=target_id)
+        return BrokerOrderIds(parent=parent_id, stop=stop_id, target=target_id, timeout=timeout_id)
 
     async def read_open_orders(self) -> tuple[BrokerOpenOrder, ...]:
         """Read and normalize all open orders visible to this IBKR session."""
@@ -963,6 +1013,8 @@ class IbkrConnection:
         order_type = str(order.orderType).upper()
         if int(order.parentId) == 0:
             role = OrderRole.ENTRY
+        elif order_type == "MKT" and getattr(order, "conditions", None):
+            role = OrderRole.TIMEOUT
         elif order_type in {"STP", "STP LMT"}:
             role = OrderRole.STOP
         else:
@@ -1438,6 +1490,81 @@ class IbkrConnection:
         finally:
             if key is not None:
                 self._release_market_data_stream(key)
+
+    def prepare_trade_events(self, instrument: QualifiedInstrument) -> None:
+        """Subscribe to actual Last prints before a method's T0; no historical replay."""
+        self._require_connected()
+        from stocker_execution.session_hard_method import TradeEvent
+
+        if not hasattr(self, "_causal_trade_streams"):
+            self._causal_trade_streams: dict[int, tuple[Any, ...]] = {}
+        key = instrument.con_id
+        existing = self._causal_trade_streams.get(key)
+        if existing is not None and existing[0] == self.connection_epoch:
+            return
+        if (
+            len(self._active_market_data) + len(self._causal_trade_streams)
+            >= self.config.market_data_line_budget
+        ):
+            self._capacity_rejects_today += 1
+            raise IbkrError("IBKR_MARKET_DATA_CAPACITY_UNAVAILABLE")
+        contract = _to_ib_contract(instrument)
+        ticker = self._client.reqTickByTickData(contract, "Last", 0, False)
+        events: list[TradeEvent] = []
+
+        def receive(updated: Any) -> None:
+            for tick in updated.tickByTicks:
+                events.append(TradeEvent(tick.time, tick.price, len(events) + 1))
+
+        ticker.updateEvent += receive
+        self._causal_trade_streams[key] = (
+            self.connection_epoch,
+            datetime.now(UTC),
+            events,
+            contract,
+            ticker,
+            receive,
+        )
+
+    def trade_events(
+        self, instrument: QualifiedInstrument, *, t0: datetime
+    ) -> tuple[TradeEvent, ...]:
+        """Return the received ordered prefix only if subscription preceded T0."""
+        self._require_connected()
+        stream = getattr(self, "_causal_trade_streams", {}).get(instrument.con_id)
+        if stream is None or stream[0] != self.connection_epoch or stream[1] > t0:
+            raise IbkrError("CAUSAL_TRADES_PREFIX_UNAVAILABLE: stream must precede T0")
+        return tuple(event for event in stream[2] if event.timestamp >= t0)
+
+    def release_trade_events(self, con_id: int | None = None) -> None:
+        streams = getattr(self, "_causal_trade_streams", {})
+        for key, stream in tuple(streams.items()):
+            if con_id is not None and key != con_id:
+                continue
+            stream[4].updateEvent -= stream[5]
+            self._client.cancelTickByTickData(stream[3], "Last")
+            del streams[key]
+
+    async def shortable_quantity(self, instrument: QualifiedInstrument) -> float:
+        """Read IBKR's available shares to short (generic tick 236)."""
+        self._require_connected()
+        key, ticker = self._acquire_market_data_stream(
+            _to_ib_contract(instrument),
+            generic_tick_list="236",
+            market_data_type=1,
+            purpose="method shortability",
+        )
+        try:
+            deadline = asyncio.get_running_loop().time() + self.config.request_timeout_seconds
+            while True:
+                value = getattr(ticker, "shortableShares", None)
+                if value is not None and isfinite(float(value)) and float(value) >= 0:
+                    return float(value)
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise IbkrError("IBKR shortable share quantity unavailable")
+                await asyncio.sleep(0.05)
+        finally:
+            self._release_market_data_stream(key)
 
     async def current_quote(
         self, instrument: QualifiedInstrument, *, market_data_type: int = 1

@@ -12,7 +12,6 @@ import yaml
 from fastapi.testclient import TestClient
 
 from execution_test_support import (
-    TEST_METHOD,
     execution_method,  # noqa: F401
 )
 from stocker_core.cli import stage10_run
@@ -442,14 +441,13 @@ def test_run_detail_uses_persisted_funnel_counts_and_config(tmp_path: Path) -> N
     assert detail["risk_per_trade"] == 0.001
     assert detail["strategy_version"] is None
     assert detail["funnel"] == [
-        {"stage": "Market / cap eligible", "count": 2},
-        {"stage": "Activity scan union", "count": 0},
-        {"stage": "Shortlist selected", "count": 0},
-        {"stage": "Stage 2 qualified", "count": 1},
-        {"stage": "Stage 4 / Stage 5 PRE ready", "count": 1},
-        {"stage": "Strategy evaluated", "count": 1},
-        {"stage": "Strategy qualified", "count": 1},
-        {"stage": "Rank selected", "count": 1},
+        {"stage": "Universe eligibility", "count": 2},
+        {"stage": "Stock eligibility", "count": 1},
+        {"stage": "Required data ready", "count": 1},
+        {"stage": "Screened", "count": 1},
+        {"stage": "Qualified", "count": 1},
+        {"stage": "Vetoed", "count": 0},
+        {"stage": "Armed", "count": 0},
         {"stage": "Entry triggered", "count": 1},
         {"stage": "Orders", "count": 1},
         {"stage": "Positions", "count": 1},
@@ -660,9 +658,8 @@ IBM,NYSE
     asyncio.run(
         controls.add_universe_run(
             market_id="US_NASDAQ",
-            cap_bucket="MID",
-            strategy_id=TEST_METHOD.strategy_id,
-            strategy_version=TEST_METHOD.strategy_version,
+            strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+            strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
             environment=Environment.PAPER,
             risk_per_trade=0.001,
             max_concurrent_positions=1,
@@ -671,14 +668,12 @@ IBM,NYSE
 
     persisted = yaml.safe_load(runs_path.read_text(encoding="utf-8"))
     assert persisted["named_universe_snapshot"] == snapshot_path.name
-    assert [item["universe_id"] for item in persisted["universes"]] == [
-        "US_NASDAQ_MID_CAP_BUCKETS_V1"
-    ]
+    assert [item["universe_id"] for item in persisted["universes"]] == ["US_NASDAQ_METHOD_LISTINGS"]
     assert persisted["universes"][0]["members"] == []
     reloaded = load_runs_config(runs_path)
     nasdaq = next(item for item in reloaded.universes if item.universe_id == "NASDAQ")
     derived = next(
-        item for item in reloaded.universes if item.universe_id == "US_NASDAQ_MID_CAP_BUCKETS_V1"
+        item for item in reloaded.universes if item.universe_id == "US_NASDAQ_METHOD_LISTINGS"
     )
     assert derived.members == nasdaq.members
 
@@ -731,7 +726,6 @@ def test_run_controls_update_session_hard_hv_risk_without_changing_lineage(
     created = asyncio.run(
         controls.add_universe_run(
             market_id="US_NASDAQ",
-            cap_bucket="MID",
             strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
             strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
             environment=Environment.PAPER,
@@ -1086,11 +1080,11 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
         assert "PAPER" in response.text
         assert "LIVE" in response.text
     index = client.get("/").text
-    assert 'src="/static/dashboard.js?v=20260902-resilient-refresh"' in index
+    assert 'src="/static/dashboard.js?v=20260908-method-runs"' in index
     for label in (
         "Overview",
         "Runs",
-        "Universes",
+        "Start run",
         "Candidates",
         "Orders",
         "Positions",
@@ -1137,52 +1131,37 @@ def test_background_refresh_preserves_last_good_page_on_fetch_failure(
     assert "clearRefreshWarning();" in script
 
 
-def test_universe_builder_http_flow_keeps_paper_and_live_separate(
-    tmp_path: Path,
-) -> None:
+def test_universe_builder_http_flow_rejects_legacy_values_and_live(tmp_path):
     service = _seed_authoritative_state(tmp_path)
     runs_path, broker_path = _write_control_files(tmp_path)
     client = TestClient(create_dashboard_app(service, RunControlService(runs_path, broker_path)))
     body = {
-        "market_id": "UK_LSE",
-        "cap_bucket": "LARGE",
-        "strategy_id": "TEST_EXECUTION",
-        "strategy_version": "TEST_EXECUTION_V1",
+        "market_id": "US_NASDAQ",
+        "strategy_id": SESSION_HARD_HV_METHOD.strategy_id,
+        "strategy_version": SESSION_HARD_HV_METHOD.strategy_version,
         "risk_per_trade": 0.001,
         "max_concurrent_positions": 2,
     }
-
-    before_paper = client.post(
-        "/api/universe-runs/live",
-        json={**body, "confirmed": True, "target_account": "U123456"},
+    assert (
+        client.post("/api/universe-runs/paper", json={**body, "cap_bucket": "MID"}).status_code
+        == 422
     )
-    assert before_paper.status_code == 400
-    assert "matching PAPER" in before_paper.json()["detail"]
-
+    assert (
+        client.post(
+            "/api/universe-runs/paper", json={**body, "strategy_version": "SESSION_HARD_HV_V1"}
+        ).status_code
+        == 400
+    )
     paper = client.post("/api/universe-runs/paper", json=body)
     assert paper.status_code == 200
     live = client.post(
-        "/api/universe-runs/live",
-        json={**body, "confirmed": True, "target_account": "U123456"},
+        "/api/universe-runs/live", json={**body, "confirmed": True, "target_account": "U123456"}
     )
-    assert live.status_code == 200
-    rows = client.get("/api/universe-runs").json()
-    paper_run = next(item for item in rows["PAPER"] if item["market_id"] == "UK_LSE")
-    live_run = next(item for item in rows["LIVE"] if item["market_id"] == "UK_LSE")
-    assert paper_run["run_id"] != live_run["run_id"]
-    assert paper_run["display_name"] == "LSE · TEST · LARGE"
-    assert live_run["display_name"] == "LSE · TEST · LARGE"
-
-    disabled = client.post(f"/api/universe-runs/{paper_run['run_id']}/disable")
-    assert disabled.status_code == 200
-    assert (
-        next(
-            item
-            for item in client.get("/api/universe-runs").json()["PAPER"]
-            if item["run_id"] == paper_run["run_id"]
-        )["enabled"]
-        is False
-    )
+    assert live.status_code == 400
+    rows = client.get("/api/universe-runs").json()["PAPER"]
+    run = next(row for row in rows if row["market_id"] == "US_NASDAQ")
+    assert run["display_name"] == "NASDAQ · Session HARD"
+    assert client.post(f"/api/universe-runs/{run['run_id']}/disable").status_code == 200
 
 
 def test_universe_builder_default_risk_is_valid_for_html_number_input(

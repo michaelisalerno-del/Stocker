@@ -9,10 +9,10 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from stocker_core.config import IbkrConfig, load_runs_config
-from stocker_core.markets import CapBucket, MarketId
+from stocker_core.markets import MarketId
 from stocker_core.runs import Environment
 from stocker_dashboard.controls import ControlResult, LiveConfirmation, RunControlService
 from stocker_dashboard.performance import PerformancePeriod
@@ -55,8 +55,8 @@ class CustomUniverseBody(BaseModel):
 
 
 class UniverseRunBody(ConfirmationBody):
+    model_config = ConfigDict(extra="forbid")
     market_id: MarketId
-    cap_bucket: CapBucket
     strategy_id: str
     strategy_version: str
     risk_per_trade: float
@@ -111,7 +111,6 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             return changed(
                 await controls.add_universe_run(
                     market_id=body.market_id,
-                    cap_bucket=body.cap_bucket,
                     strategy_id=body.strategy_id,
                     strategy_version=body.strategy_version,
                     environment=environment,

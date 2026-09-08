@@ -39,8 +39,8 @@ expected/actual account identity in SQLite.
 
 ## Sessions
 
-No trading should occur outside allowed sessions. Future session checks should use
-exchange calendars, instrument-specific trading hours, and broker availability.
+No trading occurs outside allowed sessions. The scheduler uses exchange calendars,
+method-owned checkpoints, run session windows and broker availability.
 
 ## Broker Boundaries
 

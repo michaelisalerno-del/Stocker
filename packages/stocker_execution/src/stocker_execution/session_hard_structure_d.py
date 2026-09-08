@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from math import exp, isfinite
@@ -170,6 +170,10 @@ class StrategyContext:
     run_id: str
     session_hard: Mapping[StrategyOpportunityKey, SessionHardAssessment]
     cohort_history: tuple[CohortOpportunity, ...] = ()
+    whipsaw_features: Mapping[StrategyOpportunityKey, Mapping[str, float]] = field(
+        default_factory=dict
+    )
+    available_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not self.run_id.strip():
@@ -210,6 +214,18 @@ class StrategySignal:
     target_distance_m: float = 1.00
     baseline_eligible: bool = False
     admission_decision: str | None = None
+    market_id: str | None = None
+    method_spec_hash: str | None = None
+    artifact_hashes: Mapping[str, str] = field(default_factory=dict)
+    whipsaw_risk_score: float | None = None
+    q1_eligible: bool | None = None
+    up_trigger: float | None = None
+    down_trigger: float | None = None
+    armed_at: datetime | None = None
+    deadline: datetime | None = None
+    last_event_sequence: int | None = None
+    stop_price: float | None = None
+    target_price: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -580,11 +596,14 @@ class SessionHardStructureDStrategy:
 
 def nominal_exit_prices(signal: StrategySignal) -> tuple[float, float]:
     """Canonical unrounded geometry shared by risk sizing and baseline accounting."""
+    if signal.stop_price is not None and signal.target_price is not None:
+        return signal.stop_price, signal.target_price
     if signal.entry_reference is None or signal.m_price is None:
         raise ValueError("entry reference and M are required for nominal geometry")
+    direction = 1 if signal.side == "LONG" else -1
     return (
-        signal.entry_reference + signal.stop_distance_m * signal.m_price,
-        signal.entry_reference - signal.target_distance_m * signal.m_price,
+        signal.entry_reference - direction * signal.stop_distance_m * signal.m_price,
+        signal.entry_reference + direction * signal.target_distance_m * signal.m_price,
     )
 
 

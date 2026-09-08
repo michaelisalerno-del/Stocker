@@ -19,7 +19,8 @@ from stocker_core.config import (
     load_runs_config,
     runs_config_storage_payload,
 )
-from stocker_core.markets import CapBucket, MarketId
+from stocker_core.markets import MarketId
+from stocker_core.methods import validate_run_method
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig
 from stocker_core.strategies import installed_strategies
 from stocker_core.universes import InstrumentReference, UniverseDefinition
@@ -114,7 +115,6 @@ class RunControlService:
         self,
         *,
         market_id: MarketId,
-        cap_bucket: CapBucket,
         strategy_id: str,
         strategy_version: str,
         environment: Environment,
@@ -122,7 +122,7 @@ class RunControlService:
         max_concurrent_positions: int | None,
         confirmation: LiveConfirmation | None = None,
     ) -> ControlResult:
-        """Create or re-enable one exact market/cap/method/environment lineage."""
+        """Create or re-enable one exact market/method/environment lineage."""
 
         if risk_per_trade <= 0 or risk_per_trade > 1:
             raise ValueError("risk_per_trade must be greater than zero and no more than one")
@@ -137,7 +137,6 @@ class RunControlService:
             updated, run = self._builder.add(
                 current,
                 market_id=market_id,
-                cap_bucket=cap_bucket,
                 strategy_id=strategy_id,
                 strategy_version=strategy_version,
                 environment=environment,
@@ -194,6 +193,7 @@ class RunControlService:
     ) -> ControlResult:
         async with self._lock:
             config, current = self._config_and_run(run_id)
+            validate_run_method(current)
             if current.environment is Environment.LIVE:
                 self._confirm_live(current, confirmation)
             return await self._replace_run(
@@ -231,8 +231,7 @@ class RunControlService:
                 universe != current.universe or strategy != current.strategy
             ):
                 raise ValueError(
-                    "market, capitalisation, method, and screen identity must be changed "
-                    "by creating a separate run"
+                    "market and method identity must be changed by creating a separate run"
                 )
             risk = RunRiskConfig(
                 risk_per_trade=risk_per_trade,

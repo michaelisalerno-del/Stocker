@@ -1,5 +1,9 @@
 # Session HARD · HV pooled payoff admission
 
+Historical specification only: this applies to SESSION_HARD_HV_V1, which cannot start new runs.
+The current Session HARD causal Q1 package does not use this pooled hurdle. See
+[ARCHITECTURE.md](ARCHITECTURE.md). Source and saved records remain for provenance.
+
 This updates SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D / SESSION_HARD_HV_V1
 in place. No new strategy or broker execution path is installed.
 ## Authorized final rule

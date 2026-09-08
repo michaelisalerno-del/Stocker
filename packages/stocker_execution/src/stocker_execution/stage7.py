@@ -122,6 +122,8 @@ class ExecutionBroker(Protocol):
 
     async def entry_quote(self, instrument: QualifiedInstrument) -> CurrentQuote: ...
 
+    async def shortable_quantity(self, instrument: QualifiedInstrument) -> float: ...
+
     async def submit_protected_order(
         self, plan: OrderPlan, instrument: QualifiedInstrument
     ) -> BrokerOrderIds: ...
@@ -225,20 +227,28 @@ class Stage7RiskEngine:
 
         entry = order_intent.entry_reference
         m_price = order_intent.m_price
+        explicit_exits = (
+            order_intent.stop_price is not None and order_intent.target_price is not None
+        )
         if (
             order_intent.status is not SignalStatus.ENTRY_TRIGGERED
             or not order_intent.selected
-            or order_intent.side != "SHORT"
+            or order_intent.side not in {"SHORT", "LONG"}
             or entry is None
             or not isfinite(entry)
             or entry <= 0.0
-            or m_price is None
-            or not isfinite(m_price)
-            or m_price <= 0.0
-            or not isfinite(order_intent.stop_distance_m)
-            or order_intent.stop_distance_m <= 0.0
-            or not isfinite(order_intent.target_distance_m)
-            or order_intent.target_distance_m <= 0.0
+            or (
+                not explicit_exits
+                and (
+                    m_price is None
+                    or not isfinite(m_price)
+                    or m_price <= 0.0
+                    or not isfinite(order_intent.stop_distance_m)
+                    or order_intent.stop_distance_m <= 0.0
+                    or not isfinite(order_intent.target_distance_m)
+                    or order_intent.target_distance_m <= 0.0
+                )
+            )
         ):
             return _rejected(RiskRejection.INVALID_STOP_DISTANCE)
 
@@ -247,9 +257,9 @@ class Stage7RiskEngine:
         if (
             not isfinite(stop)
             or not isfinite(target)
-            or stop <= entry
+            or (stop <= entry if order_intent.side == "SHORT" else stop >= entry)
             or target <= 0.0
-            or target >= entry
+            or (target >= entry if order_intent.side == "SHORT" else target <= entry)
             or per_share_risk <= 0.0
         ):
             return _rejected(RiskRejection.INVALID_STOP_DISTANCE)
@@ -430,16 +440,17 @@ class Stage7ExecutionService:
                     record.parent_order_id,
                     record.stop_order_id,
                     record.target_order_id,
+                    record.timeout_order_id,
                 )
                 if value is not None
             }
             local_quantity = local_by_con_id.get(record.con_id, 0.0)
             if not ids:
                 problems.append(f"local plan {record.order_plan_id} has no broker identity")
-            elif local_quantity != 0.0 and not {
-                record.stop_order_id,
-                record.target_order_id,
-            }.issubset(open_ids):
+            elif local_quantity != 0.0 and not (
+                {record.stop_order_id, record.target_order_id}
+                | ({record.timeout_order_id} if record.timeout_order_id is not None else set())
+            ).issubset(open_ids):
                 problems.append(
                     f"position {record.con_id} missing protective stop/target "
                     f"for {record.order_plan_id}"
@@ -512,6 +523,18 @@ class Stage7ExecutionService:
             account_state=account_state,
             risk_config=self._run.risk,
         )
+        if self._run.method_spec_hash is not None and (
+            order_intent.method_spec_hash != self._run.method_spec_hash
+            or order_intent.strategy_id != self._run.strategy_id
+            or order_intent.strategy_version != self._run.strategy_version
+            or order_intent.market_id != self._run.market_id
+        ):
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.ORDER_PLAN_UNAVAILABLE,
+                "Signal provenance does not match the run's frozen method",
+                actual_account=account_state.account,
+            )
         if not risk.approved:
             return self._outcome(
                 order_intent.signal_id,
@@ -544,6 +567,22 @@ class Stage7ExecutionService:
                 str(exc),
                 actual_account=account_state.account,
             )
+        if (
+            order_intent.side == "SHORT"
+            and self._run.method_spec is not None
+            and self._run.method_spec["execution"].get("shortability") == "Required for SHORT"
+        ):
+            try:
+                available = await self._broker.shortable_quantity(instrument)
+                if not isfinite(available) or available < plan.quantity:
+                    raise ValueError("available borrow is below the intended quantity")
+            except Exception as exc:
+                return self._outcome(
+                    order_intent.signal_id,
+                    ExecutionResultCode.BROKER_REJECTED,
+                    f"METHOD_SHORTABILITY_UNAVAILABLE: {exc}",
+                    actual_account=account_state.account,
+                )
         # A historical intrabar touch does not establish a currently executable price.
         if not _fresh_entry_signal(order_intent, self._clock()):
             return self._outcome(
@@ -599,14 +638,19 @@ class Stage7ExecutionService:
                 "live, correctly identified, uncrossed bid/ask no older than 5 seconds required",
                 actual_account=account_state.account,
             )
-        limit = _to_tick(plan.entry_reference, minimum_tick, ROUND_CEILING)
+        long = order_intent.side == "LONG"
+        limit = _to_tick(plan.entry_reference, minimum_tick, ROUND_FLOOR if long else ROUND_CEILING)
         assert quote.bid is not None and quote.ask is not None
-        if quote.bid < limit or quote.ask >= plan.stop_price:
+        if (
+            (quote.ask > limit or quote.bid <= plan.stop_price)
+            if long
+            else (quote.bid < limit or quote.ask >= plan.stop_price)
+        ):
             return self._outcome(
                 order_intent.signal_id,
                 ExecutionResultCode.ENTRY_PRICE_MOVED,
-                f"bid={quote.bid:g} ask={quote.ask:g}; required bid>={limit:g} "
-                f"and ask<{plan.stop_price:g}; reference={plan.entry_reference:g}",
+                f"{order_intent.side}: bid={quote.bid:g} ask={quote.ask:g}; "
+                f"limit={limit:g} stop={plan.stop_price:g}; entry is no longer executable",
                 actual_account=account_state.account,
             )
         assert order_intent.signal_timestamp is not None
@@ -822,7 +866,7 @@ def build_order_plan(
     created_at: datetime,
     diagnostic: bool = False,
 ) -> OrderPlan:
-    """Map one approved first-strategy intent into a protected SHORT plan."""
+    """Map one approved method intent into its protected LONG or SHORT plan."""
 
     if not isfinite(minimum_tick) or minimum_tick <= 0.0:
         raise ValueError("instrument minimum tick must be finite and positive")
@@ -830,15 +874,23 @@ def build_order_plan(
         raise ValueError("order plan creation timestamp must be timezone-aware")
     if not risk_decision.approved or risk_decision.quantity <= 0:
         raise ValueError("order plan requires an approved positive risk decision")
-    if order_intent.side != "SHORT" or risk_decision.stop_price <= risk_decision.entry_price:
-        raise ValueError("SHORT protection requires a stop above entry")
-    if risk_decision.target_price <= 0.0 or risk_decision.target_price >= risk_decision.entry_price:
-        raise ValueError("SHORT protection requires a positive target below entry")
-
-    stop = _to_tick(risk_decision.stop_price, minimum_tick, ROUND_FLOOR)
-    target = _to_tick(risk_decision.target_price, minimum_tick, ROUND_CEILING)
-    if stop <= risk_decision.entry_price or target >= risk_decision.entry_price:
-        raise ValueError("SHORT protection became inverted at the instrument minimum tick")
+    long = order_intent.side == "LONG"
+    direction = 1 if long else -1
+    if (risk_decision.entry_price - risk_decision.stop_price) * direction <= 0:
+        raise ValueError("Protective stop is on the wrong side of entry")
+    if (
+        risk_decision.target_price <= 0
+        or (risk_decision.target_price - risk_decision.entry_price) * direction <= 0
+    ):
+        raise ValueError("Protective target is on the wrong side of entry")
+    stop = _to_tick(risk_decision.stop_price, minimum_tick, ROUND_CEILING if long else ROUND_FLOOR)
+    target = _to_tick(
+        risk_decision.target_price, minimum_tick, ROUND_FLOOR if long else ROUND_CEILING
+    )
+    if (risk_decision.entry_price - stop) * direction <= 0 or (
+        target - risk_decision.entry_price
+    ) * direction <= 0:
+        raise ValueError("Protection became inverted at the instrument minimum tick")
     identity = "|".join(
         (
             "STAGE7_ORDER_PLAN_V1",
@@ -855,7 +907,7 @@ def build_order_plan(
         strategy_version=order_intent.strategy_version,
         con_id=int(order_intent.underlying_con_id or 0),
         symbol=order_intent.symbol,
-        side=OrderAction.SELL,
+        side=OrderAction.BUY if long else OrderAction.SELL,
         quantity=risk_decision.quantity,
         entry_order_type=EntryOrderType.MARKET,
         entry_reference=risk_decision.entry_price,
@@ -866,6 +918,9 @@ def build_order_plan(
         initial_risk_budget=risk_decision.risk_budget,
         per_share_initial_risk=risk_decision.per_share_risk,
         diagnostic=diagnostic,
+        deadline=order_intent.deadline,
+        market_id=order_intent.market_id,
+        method_spec_hash=order_intent.method_spec_hash,
     )
 
 
@@ -901,7 +956,7 @@ def _entry_deadline(signal: StrategySignal) -> datetime:
     # Gap-at-open timestamps name the bar start, but production observes complete
     # bars. Both gap and intrabar entries get at most one minute after observation.
     observed_at = signal.signal_timestamp
-    if signal.entry_timestamp is not None:
+    if signal.method_spec_hash is None and signal.entry_timestamp is not None:
         observed_at = max(observed_at, signal.entry_timestamp + timedelta(minutes=1))
     return min(observed_at + MAX_ENTRY_SIGNAL_AGE, signal.t0 + timedelta(minutes=5))
 

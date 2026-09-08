@@ -30,7 +30,7 @@ environment: PAPER
     )
 
 
-def test_start_reports_run_without_loading_execution(tmp_path: Path) -> None:
+def test_start_reports_run_without_loading_execution(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "run.yaml"
     config_path.write_text(
         """
@@ -43,7 +43,7 @@ environment: PAPER
     )
     execution_modules = [name for name in sys.modules if name.startswith("stocker_execution")]
     for name in execution_modules:
-        sys.modules.pop(name)
+        monkeypatch.delitem(sys.modules, name)
 
     result = CliRunner().invoke(app, ["start", "--config", str(config_path)])
 

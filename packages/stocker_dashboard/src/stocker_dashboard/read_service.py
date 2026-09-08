@@ -134,6 +134,7 @@ class DashboardReadService:
                     "strategy": run.strategy,
                     "strategy_id": run.effective_strategy_id,
                     "strategy_version": run.strategy_version,
+                    "historical_only": run.method_spec is None,
                     "market_id": run.market_id.value if run.market_id else None,
                     "cap_bucket": run.cap_bucket.value if run.cap_bucket else None,
                     "environment": run.environment.value,
@@ -202,6 +203,10 @@ class DashboardReadService:
         today = self.performance_service.performance(run, PerformancePeriod.TODAY)
         return {
             "run_id": run.run_id,
+            "historical_only": run.method_spec is None,
+            "method_spec": run.method_spec,
+            "method_spec_hash": run.method_spec_hash,
+            "provenance": self.runtime_store.method_run(run_id),
             "display_name": run.display_name or run.run_id,
             "universe": run.universe,
             "strategy": run.strategy,
@@ -233,28 +238,30 @@ class DashboardReadService:
             "unrealised_status": today["unrealised_status"],
             "funnel": [
                 {
-                    "stage": "Market / cap eligible",
-                    "count": len(self._universe(run.universe).members),
+                    "stage": "Universe eligibility",
+                    "count": len((run.universe_snapshot or self._universe(run.universe)).members),
                 },
+                {"stage": "Stock eligibility", "count": latest_total},
                 {
-                    "stage": "Activity scan union",
-                    "count": len(screen.candidates) if screen else 0,
-                },
-                {
-                    "stage": "Shortlist selected",
-                    "count": sum(item.selected for item in screen.candidates) if screen else 0,
-                },
-                {"stage": "Stage 2 qualified", "count": latest_total},
-                {
-                    "stage": "Stage 4 / Stage 5 PRE ready",
+                    "stage": "Required data ready",
                     "count": ready_count,
                 },
-                {"stage": "Strategy evaluated", "count": min(len(signals), latest_total)},
+                {"stage": "Screened", "count": min(len(signals), latest_total)},
                 {
-                    "stage": "Strategy qualified",
+                    "stage": "Qualified",
                     "count": sum(item.status is not SignalStatus.NOT_QUALIFIED for item in signals),
                 },
-                {"stage": "Rank selected", "count": sum(item.selected for item in signals)},
+                {
+                    "stage": "Vetoed",
+                    "count": sum(
+                        item.q1_eligible is False or item.reason == "COHORT_MID_VETO"
+                        for item in signals
+                    ),
+                },
+                {
+                    "stage": "Armed",
+                    "count": sum(item.status is SignalStatus.WAITING_FOR_ENTRY for item in signals),
+                },
                 {
                     "stage": "Entry triggered",
                     "count": sum(item.status is SignalStatus.ENTRY_TRIGGERED for item in signals),
@@ -765,7 +772,10 @@ class DashboardReadService:
                     "version": item.strategy_version,
                     "environments": list(item.environments),
                     "editable_parameters": [],
-                    "description": f"Frozen {item.label} / Structure D strategy definition",
+                    "description": (
+                        f"Frozen {item.label} method package; "
+                        "see run provenance for its specification"
+                    ),
                 }
                 for item in installed_strategies()
             ],
@@ -785,7 +795,18 @@ class DashboardReadService:
                 "band": signal.band.value if signal.band else None,
                 "session_hard": signal.session_hard_qualified,
                 "session_hard_score": signal.session_hard_score,
-                "structure": "D" if signal.direction else None,
+                "structure": signal.reason,
+                "reason": signal.reason,
+                "side": signal.side,
+                "stop": signal.stop_price,
+                "target": signal.target_price,
+                "whipsaw_risk_score": signal.whipsaw_risk_score,
+                "q1_eligible": signal.q1_eligible,
+                "up_trigger": signal.up_trigger,
+                "down_trigger": signal.down_trigger,
+                "armed_at": signal.armed_at.isoformat() if signal.armed_at else None,
+                "deadline": signal.deadline.isoformat() if signal.deadline else None,
+                "method_spec_hash": signal.method_spec_hash,
                 "direction": signal.direction,
                 "entry": signal.entry_level,
                 "status": signal.status.value,

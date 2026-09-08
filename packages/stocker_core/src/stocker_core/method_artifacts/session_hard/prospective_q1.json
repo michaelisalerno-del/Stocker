@@ -1,0 +1,32 @@
+{
+  "admission_rule": "whipsaw_risk_score <= q1_risk_cutoff",
+  "assessment_used_to_choose_cutoff": false,
+  "equality_policy": "ADMIT",
+  "fit_population": {
+    "count": 931,
+    "first_session": "2025-05-19",
+    "last_session": "2025-06-30",
+    "selection": "Original saved MODEL_T0_predictions.csv split == FIT"
+  },
+  "frozen_at": "2026-09-08T10:20:12.315213+00:00",
+  "model_refit": false,
+  "model_sha256": "68c0f5ebf4a23744a171e32a32a8b336e8d832013692913ca034f744a88e8bc2",
+  "order_placement": "disabled",
+  "preprocessing_parameters_sha256": "396e6a3134b101b50b3abfc6855cb414dbcf60721729ee748d2dc17484a31b94",
+  "protected_data_accessed": false,
+  "q1_risk_cutoff": 0.22995371253992852,
+  "q1_risk_cutoff_float64_hex": "0x1.d6f1f8d79f4a2p-3",
+  "quantile": {
+    "dtype": "float64",
+    "function": "numpy.quantile",
+    "library": "numpy",
+    "method": "linear",
+    "q": 0.2,
+    "version": "2.4.6"
+  },
+  "research_spec_sha256": "fe9e198cc8c31b67bf7ac7da1a12c0264e8512d3741c49609369f156ba9d56f5",
+  "score_distribution_sha256": "38aef28373eab9560316a6178814c7879f887a6d6681e528f71d2eed9bda9e91",
+  "signal_id_tie_break": "Historical assessment equal-count reproduction only",
+  "source_predictions_sha256": "a09bdf76247ac64ef2297c46f580449abc20e4a1f4796fd4209bae4901801966",
+  "spec_id": "SESSION_HARD_MODEL_T0_FIT_Q1_V1"
+}

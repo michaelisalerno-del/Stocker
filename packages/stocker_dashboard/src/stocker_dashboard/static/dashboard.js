@@ -120,17 +120,16 @@ async function universesPage() {
     api("/api/universe-runs"),
   ]);
   const marketOptions = options.markets.map((item) => `<option value="${esc(item.market_id)}">${esc(item.label)}</option>`).join("");
-  const capOptions = options.capitalisation.map((item) => `<option value="${esc(item.cap_bucket)}" ${item.cap_bucket === "MID" ? "selected" : ""}>${esc(item.label)}</option>`).join("");
   const strategyOptions = options.strategies.map((item) => `<option value="${esc(item.strategy_id)}" data-version="${esc(item.strategy_version)}" data-environments="${esc(item.environments.join(","))}">${esc(item.label)}</option>`).join("");
   const runCard = (row) => `<article class="run-card ${row.enabled ? "" : "disabled"}">
     <div class="run-card-title"><div><span class="eyebrow">${esc(row.market_id || row.universe)} · ${esc(row.currency || "NATIVE")}</span><h3>${esc(row.display_name)}</h3></div>${badge(row.enabled ? row.status : "DISABLED", row.enabled ? row.status : "warn")}</div>
     <div class="run-stats"><div><span>Watch</span><strong>${number(row.candidate_count)}</strong></div><div><span>Signals today</span><strong>${number(row.signals_today)}</strong></div><div><span>Positions</span><strong>${number(row.open_positions)}</strong></div><div><span>Today realised</span><strong>${money(row.today_realised_pnl, row.currency)}</strong></div><div><span>Unrealised</span><strong>${row.unrealised_status === "AVAILABLE" ? money(row.unrealised_pnl, row.currency) : esc(row.unrealised_status)}</strong></div><div><span>20-session R</span><strong>${row.total_r == null ? "—" : `${number(row.total_r)}R`}</strong></div></div>
-    <div class="control-rail"><button class="secondary" data-action="run:${esc(row.run_id)}">Open run</button><button data-universe-control="${row.enabled ? "disable" : "enable"}" data-run-id="${esc(row.run_id)}" data-environment="${esc(row.environment)}">${row.enabled ? `Remove from ${esc(row.environment)}` : `Re-enable ${esc(row.environment)}`}</button></div>
+    <div class="control-rail"><button class="secondary" data-action="run:${esc(row.run_id)}">Open run</button>${row.historical_only ? '<span class="muted">Historical only</span>' : `<button data-universe-control="${row.enabled ? "disable" : "enable"}" data-run-id="${esc(row.run_id)}" data-environment="${esc(row.environment)}">${row.enabled ? `Remove from ${esc(row.environment)}` : `Re-enable ${esc(row.environment)}`}</button>`}</div>
   </article>`;
   const cards = (rows) => rows.length ? `<div class="run-card-grid">${rows.map(runCard).join("")}</div>` : '<div class="empty">No runs in this environment.</div>';
-  main.innerHTML = `${head("Universes", "Build and compare market, capitalisation, and trading-method combinations without mixing PAPER and LIVE lineage.")}
+  main.innerHTML = `${head("Market → Method → Run", "Choose a market and method, then start a run. The method owns stock search, qualification, vetoes, entry and exits.")}
     ${lastOutcome ? `<p class="notice" role="status"><b>${esc(lastOutcome.apply_mode)}</b> · ${esc(lastOutcome.detail)}</p>` : ""}
-    <section class="builder-panel"><div class="builder-stripe"><span>CREATE / SELECT</span><strong>MARKET RUN</strong></div><form id="universe-builder"><div class="builder-grid"><label>Market<select name="market_id">${marketOptions}</select></label><label>Capitalisation<select name="cap_bucket">${capOptions}</select></label><label>Trading method<select name="strategy_id">${strategyOptions}</select></label><label>Risk per trade<input name="risk_per_trade" type="number" min="0.000001" max="1" step="any" value="0.001" required></label><label>Maximum positions<input name="max_concurrent_positions" type="number" min="1" step="1" value="1"></label></div><div class="builder-context"><div><span>Candidate selection</span><strong>${esc(options.candidate_screen.label)}</strong></div><div><span>Screen schedule</span><strong>${number(options.candidate_screen.screen_active_minutes_after_open)} active minutes after open</strong></div><div><span>Market session</span><strong id="builder-session">—</strong></div><div><span>Scanner readiness</span><strong id="builder-readiness">—</strong></div></div><div class="builder-actions"><button type="submit" data-add-environment="PAPER">Add to PAPER</button><button type="button" class="danger" data-add-environment="LIVE">Add to LIVE</button><span id="live-prerequisite" class="muted">Matching PAPER run required.</span></div></form></section>
+    <section class="builder-panel"><div class="builder-stripe"><span>CREATE / SELECT</span><strong>MARKET RUN</strong></div><form id="universe-builder"><div class="builder-grid"><label>Market<select name="market_id">${marketOptions}</select></label><label>Method<select name="strategy_id">${strategyOptions}</select></label></div><details><summary>Account risk and capacity</summary><div class="builder-grid"><label>Risk per trade<input name="risk_per_trade" type="number" min="0.000001" max="1" step="any" value="0.001" required></label><label>Maximum positions<input name="max_concurrent_positions" type="number" min="1" step="1" value="1"></label></div></details><div class="builder-context"><div><span>Candidate selection</span><strong>${esc(options.candidate_screen.label)}</strong></div><div><span>Suitability</span><strong>Required data; no validated cap filter</strong></div><div><span>Market session</span><strong id="builder-session">—</strong></div><div><span>Search policy</span><strong id="builder-readiness">—</strong></div></div><div class="builder-actions"><button type="submit" data-add-environment="PAPER">Start PAPER run</button><button type="button" class="danger" data-add-environment="LIVE">Add to LIVE</button><span id="live-prerequisite" class="muted">Matching PAPER run required.</span></div></form></section>
     <section class="environment-section paper-zone"><div class="section-head"><h2>PAPER RUNS</h2>${environment("PAPER")}</div>${cards(grouped.PAPER)}</section>
     <section class="environment-section live-zone"><div class="section-head"><h2>LIVE RUNS</h2>${environment("LIVE")}</div>${cards(grouped.LIVE)}</section>`;
 
@@ -139,7 +138,7 @@ async function universesPage() {
   const strategySelect = form.elements.strategy_id;
   const selectedStrategy = () => strategySelect.selectedOptions[0];
   const selectedDefinition = () => options.markets.find((item) => item.market_id === marketSelect.value);
-  const matchingPaper = () => grouped.PAPER.some((item) => item.market_id === marketSelect.value && item.cap_bucket === form.elements.cap_bucket.value && item.strategy_id === strategySelect.value);
+  const matchingPaper = () => grouped.PAPER.some((item) => item.market_id === marketSelect.value && item.strategy_id === strategySelect.value);
   const refreshBuilderContext = () => {
     const market = selectedDefinition();
     document.querySelector("#builder-session").textContent = market ? `${market.session} ${market.timezone}` : "—";
@@ -147,7 +146,7 @@ async function universesPage() {
     const liveButton = form.querySelector('[data-add-environment="LIVE"]');
     const supportsLive = selectedStrategy().dataset.environments.split(",").includes("LIVE");
     liveButton.disabled = !supportsLive || !matchingPaper();
-    document.querySelector("#live-prerequisite").textContent = !supportsLive ? `${selectedStrategy().dataset.version} is PAPER-only.` : (matchingPaper() ? "PAPER prerequisite satisfied." : "Matching PAPER run required.");
+    document.querySelector("#live-prerequisite").textContent = !supportsLive ? `${selectedStrategy().textContent} is PAPER-only.` : (matchingPaper() ? "PAPER prerequisite satisfied." : "Matching PAPER run required.");
   };
   refreshBuilderContext();
   form.addEventListener("change", refreshBuilderContext);
@@ -155,7 +154,6 @@ async function universesPage() {
     const selectedStrategyOption = selectedStrategy();
     const body = {
       market_id: marketSelect.value,
-      cap_bucket: form.elements.cap_bucket.value,
       strategy_id: strategySelect.value,
       strategy_version: selectedStrategyOption.dataset.version,
       risk_per_trade: Number(form.elements.risk_per_trade.value),
@@ -165,7 +163,7 @@ async function universesPage() {
       const settings = await api("/api/settings");
       const broker = settings.broker_configuration.find((item) => item.environment === "LIVE");
       if (!broker?.expected_account) throw new Error("LIVE expected account is not configured");
-      if (!window.confirm(`Create a separate LIVE run for ${selectedDefinition().label} / ${form.elements.cap_bucket.value} / ${selectedStrategyOption.textContent} on ${broker.expected_account}?`)) return;
+      if (!window.confirm(`Create a separate LIVE run for ${selectedDefinition().label} / ${selectedStrategyOption.textContent} on ${broker.expected_account}?`)) return;
       body.confirmed = true;
       body.target_account = broker.expected_account;
     }
@@ -188,7 +186,7 @@ async function runDetail(runId) {
   const run = await api(`/api/runs/${encodeURIComponent(runId)}`);
   const selectedPeriod = new URLSearchParams(location.search).get("period") || "TODAY";
   const performance = await api(`/api/runs/${encodeURIComponent(runId)}/performance?period=${encodeURIComponent(selectedPeriod)}`);
-  const details = ["market", "market_id", "cap_bucket", "cap_bucket_version", "strategy_id", "strategy_version", "candidate_screen_id", "candidate_screen_version", "environment", "account", "currency", "market_state", "session", "screen_state", "screen_timestamp", "watchlist_size", "last_checkpoint", "next_checkpoint", "risk_per_trade", "max_concurrent_positions"];
+  const details = ["market", "environment", "account", "currency", "market_state", "session", "screen_state", "watchlist_size", "last_checkpoint", "next_checkpoint", "risk_per_trade", "max_concurrent_positions"];
   const grid = details.map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${key === "environment" ? environment(run[key]) : esc(run[key])}</strong></div>`).join("");
   const funnel = run.funnel.map((step, index) => `${index ? '<div class="funnel-arrow"></div>' : ""}<div class="funnel-step"><span>${esc(step.stage)}</span><strong>${number(step.count)}</strong></div>`).join("");
   const metricValues = [["Closed trades", performance.closed_trades], ["Wins", performance.wins], ["Losses", performance.losses], ["Win %", performance.win_percent], ["Realised P/L", money(performance.realised_pnl, performance.currency)], ["Unrealised P/L", performance.unrealised_status === "AVAILABLE" ? money(performance.unrealised_pnl, performance.currency) : performance.unrealised_status], ["Total R", performance.total_r == null ? "—" : `${number(performance.total_r)}R`], ["Mean R", performance.mean_r == null ? "—" : `${number(performance.mean_r)}R`], ["Max drawdown", money(performance.max_realised_drawdown, performance.currency)]];
@@ -196,8 +194,8 @@ async function runDetail(runId) {
   const historyColumns = [{ key: "date", label: "Date" }, { key: "trades", label: "Trades", numeric: true }, { label: "P/L", numeric: true, render: (row) => money(row.pnl, performance.currency) }, { label: "R", numeric: true, render: (row) => row.r == null ? "—" : `${number(row.r)}R` }];
   const periods = [["TODAY", "Today"], ["5_SESSIONS", "5 Sessions"], ["20_SESSIONS", "20 Sessions"], ["ALL", "All"]].map(([value, label]) => `<button class="${value === selectedPeriod ? "active" : "secondary"}" data-performance-period="${value}">${label}</button>`).join("");
   main.innerHTML = `${head(run.display_name, `${run.market || run.universe} / ${run.environment}`)}
-    <section class="section"><div class="control-rail"><button data-control="${run.enabled ? "disable" : "enable"}">${run.enabled ? "Disable run" : "Enable run"}</button><button class="secondary" data-control="edit">Edit risk & capacity</button></div><p class="notice">Market, capitalisation, method, screen, and environment define immutable performance lineage. Create another combination from Universes. Disabling stops future entries and never flattens exposure.</p>${lastOutcome ? `<p class="notice" role="status"><b>${esc(lastOutcome.apply_mode)}</b> · ${esc(lastOutcome.detail)}</p>` : ""}</section>
-    <section class="section"><div class="section-head"><h2>Run configuration</h2></div><div class="detail-grid">${grid}</div></section>
+    <section class="section"><div class="control-rail"><button ${run.historical_only ? "disabled" : ""} data-control="${run.enabled ? "disable" : "enable"}">${run.enabled ? "Disable run" : "Enable run"}</button><button class="secondary" data-control="edit">Edit risk & capacity</button></div><p class="notice">Market, method specification, universe snapshot and environment belong to the saved run. Create another run to change them. Disabling stops future entries and never flattens exposure.</p>${lastOutcome ? `<p class="notice" role="status"><b>${esc(lastOutcome.apply_mode)}</b> · ${esc(lastOutcome.detail)}</p>` : ""}</section>
+    <section class="section"><div class="section-head"><h2>Run configuration</h2></div><div class="detail-grid">${grid}</div><details><summary>Method specification and run provenance</summary><pre>${esc(JSON.stringify({ method: run.strategy_id, version: run.strategy_version, spec_hash: run.method_spec_hash, specification: run.method_spec, provenance: run.provenance }, null, 2))}</pre></details></section>
     <section class="section"><div class="section-head"><h2>Pipeline funnel</h2><span class="muted">Persisted counters only</span></div><div class="funnel">${funnel}</div></section>
     <section class="section"><div class="section-head"><h2>Performance</h2><div class="tabs">${periods}</div></div><div class="metric-strip performance-strip">${metrics}</div>${table(historyColumns, performance.history)}</section>`;
   main.querySelectorAll("[data-control]").forEach((button) => button.addEventListener("click", () => runControl(run, button.dataset.control)));
@@ -256,10 +254,15 @@ async function candidatesPage() {
   if (status) query.set("status", status);
   const data = selected ? await api(`/api/candidates?${query}`) : { items: [], total: 0, limit: 100, offset: 0 };
   const columns = [
-    { key: "rank", label: "Rank", numeric: true }, { key: "symbol", label: "Symbol" }, { label: "PRE_MOVE_M", numeric: true, render: (row) => number(row.pre_move_m) },
-    { label: "Percentile", numeric: true, render: (row) => number(row.cohort_percentile) }, { key: "band", label: "Band" },
-    { label: "HARD", render: (row) => row.session_hard == null ? "—" : (row.session_hard ? "✓" : "—") }, { key: "structure", label: "Structure" },
-    { key: "direction", label: "Direction" }, { label: "Entry", numeric: true, render: (row) => number(row.entry) }, { label: "Status", render: (row) => badge(row.status) },
+    { key: "symbol", label: "Symbol" },
+    { label: "Method score", numeric: true, render: (row) => number(row.session_hard_score) },
+    { label: "PRE_MOVE", numeric: true, render: (row) => number(row.pre_move_m) },
+    { label: "Whipsaw risk", numeric: true, render: (row) => number(row.whipsaw_risk_score) },
+    { label: "Q1", render: (row) => row.q1_eligible == null ? "—" : (row.q1_eligible ? "Admitted" : "Vetoed") },
+    { key: "side", label: "Direction" },
+    { label: "Entry", numeric: true, render: (row) => number(row.entry) },
+    { label: "Status", render: (row) => badge(row.status) },
+    { key: "reason", label: "Reason" },
   ];
   const options = runs.map((run) => `<option ${run.run_id === selected ? "selected" : ""}>${esc(run.run_id)}</option>`).join("");
   const statuses = ["", "PRE_CONTEXT_NOT_READY", "PRE_MOVE_NOT_READY", "INELIGIBLE", "WAITING_FOR_ENTRY", "ENTRY_TRIGGERED", "NOT_QUALIFIED", "EXPIRED"];
@@ -267,7 +270,7 @@ async function candidatesPage() {
   const pageStart = data.total ? offset + 1 : 0;
   const pageEnd = Math.min(offset + data.items.length, data.total);
   const pager = `<div class="toolbar"><button id="candidate-prev" class="secondary" ${offset === 0 ? "disabled" : ""}>Previous</button><span>${pageStart}–${pageEnd} of ${data.total}</span><button id="candidate-next" class="secondary" ${offset + data.items.length >= data.total ? "disabled" : ""}>Next</button></div>`;
-  main.innerHTML = `${head("Candidates", "Authoritative Stage 5 feature and Stage 6 strategy evaluation snapshots.")}<div class="toolbar"><label>Run<select id="candidate-run">${options}</select></label><label>Session<input id="candidate-session" type="date" value="${esc(session)}"></label><label>Checkpoint<input id="candidate-checkpoint" type="datetime-local" value="${esc(checkpoint)}"></label><label>Status<select id="candidate-status">${statusOptions}</select></label></div><section>${table(columns, data.items, (row) => row.signal_id ? `candidate:${row.signal_id}` : "")}</section>${pager}`;
+  main.innerHTML = `${head("Candidates", "Method qualification, Q1 admission and causal entry state. Open a candidate for detailed provenance.")}<div class="toolbar"><label>Run<select id="candidate-run">${options}</select></label><label>Session<input id="candidate-session" type="date" value="${esc(session)}"></label><label>Checkpoint<input id="candidate-checkpoint" type="datetime-local" value="${esc(checkpoint)}"></label><label>Status<select id="candidate-status">${statusOptions}</select></label></div><section>${table(columns, data.items, (row) => row.signal_id ? `candidate:${row.signal_id}` : "")}</section>${pager}`;
   const updateCandidateFilters = () => {
     const next = new URLSearchParams();
     next.set("run", document.querySelector("#candidate-run").value);
@@ -286,7 +289,7 @@ async function candidatesPage() {
 }
 async function candidateDetail(signalId) {
   const item = await api(`/api/candidates/${encodeURIComponent(signalId)}`);
-  const fields = ["symbol", "con_id", "run_id", "universe", "strategy", "strategy_version", "environment", "account", "t0", "p0", "expected_move_source", "expected_move_observation_at", "expected_move_calculation_version", "raw_historical_volatility", "historical_volatility", "market_regular_minutes", "expected_absolute_return_15m", "m_price", "raw_pre_move", "pre_move_m", "cohort_percentile", "band", "session_hard_score", "structure", "direction", "rank", "entry", "entry_reference", "status", "signal_id", "order_plan_id"];
+  const fields = ["symbol", "con_id", "run_id", "universe", "strategy", "strategy_version", "environment", "account", "t0", "p0", "expected_move_source", "expected_move_observation_at", "expected_move_calculation_version", "raw_historical_volatility", "historical_volatility", "market_regular_minutes", "expected_absolute_return_15m", "m_price", "raw_pre_move", "pre_move_m", "cohort_percentile", "band", "session_hard_score", "reason", "side", "direction", "rank", "entry", "entry_reference", "stop", "target", "whipsaw_risk_score", "q1_eligible", "up_trigger", "down_trigger", "armed_at", "deadline", "method_spec_hash", "status", "signal_id", "order_plan_id"];
   main.innerHTML = `${head(item.symbol, "Candidate calculation lineage copied from authoritative Stage 5/6 outputs.")}<section class="section"><div class="detail-grid">${fields.map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${key === "environment" ? environment(item[key]) : esc(item[key])}</strong></div>`).join("")}</div></section>`;
 }
 
@@ -397,7 +400,7 @@ async function settingsPage() {
     return `<form class="config-form" data-broker-form="${esc(item.environment)}"><div class="section-head"><h3>IBKR ${esc(item.environment)}</h3>${environment(item.environment)}</div><div class="detail-grid"><label class="detail-cell"><span>Host</span><input name="host" required value="${esc(item.host)}"></label><label class="detail-cell"><span>Port</span><input name="port" type="number" min="1" max="65535" required value="${esc(item.port)}"></label><label class="detail-cell"><span>Client ID</span><input name="client_id" type="number" min="1" required value="${esc(item.client_id)}"></label><label class="detail-cell"><span>Expected account</span><input name="expected_account" required value="${esc(item.expected_account || "")}"></label><label class="detail-cell"><span>Connect timeout (seconds)</span><input name="connect_timeout_seconds" type="number" min="0.1" step="0.1" required value="${esc(item.connect_timeout_seconds)}"></label><label class="detail-cell"><span>Request timeout (seconds)</span><input name="request_timeout_seconds" type="number" min="0.1" step="0.1" required value="${esc(item.request_timeout_seconds)}"></label><label class="detail-cell"><span>Stocker market-data budget</span><input name="market_data_line_budget" type="number" min="1" step="1" required value="${esc(item.market_data_line_budget)}"><small>Self-imposed per connection; not the broker-authoritative account allowance</small></label><div class="detail-cell"><span>Runtime</span><strong>${runtime.connected ? "CONNECTED" : "DISCONNECTED"} · ${runtime.account ? esc(runtime.account) : "—"}</strong></div></div><div class="control-rail"><button type="submit">Save and reconnect ${esc(item.environment)}</button></div></form>`;
   }).join("");
   const strategyColumns = [{ key: "strategy", label: "Strategy" }, { key: "identity", label: "Identity" }, { key: "version", label: "Version" }, { key: "description", label: "Definition" }];
-  main.innerHTML = `${head("Settings", "Broker and application controls. Market-run construction now belongs to Universes; strategy identity remains read-only.")}${lastOutcome ? `<p class="notice" role="status"><b>${esc(lastOutcome.apply_mode)}</b> · ${esc(lastOutcome.detail)}</p>` : ""}<section class="section"><div class="section-head"><h2>Broker</h2><span class="muted">Reconnect and reconcile only the edited environment</span></div>${broker}</section><section class="section"><div class="section-head"><h2>Application / runtime</h2></div><p class="notice">Run identity, market selection, and capitalisation are managed from Universes. Existing CUSTOM universe support remains available through backend configuration and CLI workflows.</p></section><section class="section"><div class="section-head"><h2>Strategies</h2><span class="muted">Installed method identity is read-only</span></div>${table(strategyColumns, data.strategies)}</section>`;
+  main.innerHTML = `${head("Settings", "Broker and application controls. Market-run construction now belongs to Universes; strategy identity remains read-only.")}${lastOutcome ? `<p class="notice" role="status"><b>${esc(lastOutcome.apply_mode)}</b> · ${esc(lastOutcome.detail)}</p>` : ""}<section class="section"><div class="section-head"><h2>Broker</h2><span class="muted">Reconnect and reconcile only the edited environment</span></div>${broker}</section><section class="section"><div class="section-head"><h2>Application / runtime</h2></div><p class="notice">Use Start run to select the market and method. Existing CUSTOM universe support remains available through backend configuration and CLI workflows.</p></section><section class="section"><div class="section-head"><h2>Methods</h2><span class="muted">Installed method identity is read-only</span></div>${table(strategyColumns, data.strategies)}</section>`;
   main.querySelectorAll("[data-broker-form]").forEach((form) => form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const body = Object.fromEntries(new FormData(form));

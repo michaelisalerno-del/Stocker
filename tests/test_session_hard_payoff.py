@@ -2,11 +2,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from execution_test_support import execution_method  # noqa: F401
 from stocker_execution.session_hard_payoff import (
     CompletedPayoff,
     CostAwareDecision,
     assess_pooled_payoff,
 )
+
+pytestmark = pytest.mark.usefixtures("execution_method")
 
 NOW = datetime(2025, 2, 20, 15, tzinfo=UTC)
 
@@ -103,9 +106,7 @@ def test_empty_history_has_no_fabricated_estimate():
 def baseline_signal(*, t0=NOW, con_id=999, symbol="XYZ", run_id="RUN_A"):
     from dataclasses import replace
 
-    from stocker_core.strategies import SESSION_HARD_HV_METHOD
-    from stocker_execution.session_hard_structure_d import EntryBar
-    from stocker_execution.strategy_factory import create_strategy
+    from stocker_execution.session_hard_structure_d import EntryBar, SessionHardStructureDStrategy
     from test_stage6_session_hard_strategy import ready_snapshot, strategy_context
 
     row = replace(
@@ -116,10 +117,7 @@ def baseline_signal(*, t0=NOW, con_id=999, symbol="XYZ", run_id="RUN_A"):
         session=t0.date(),
         calculation_version="STAGE5_PRE_MOVE_HV_V1",
     )
-    strategy = create_strategy(
-        SESSION_HARD_HV_METHOD.strategy_id,
-        SESSION_HARD_HV_METHOD.strategy_version,
-    )
+    strategy = SessionHardStructureDStrategy()
     strategy.evaluate((row,), strategy_context((row,), {con_id: 1.0}, run_id=run_id))
     return strategy.observe_entry_bars({con_id: (EntryBar(t0, 100, 100, 99.7, 99.75),)})[0]
 
@@ -305,77 +303,37 @@ def test_multiple_runs_do_not_duplicate_pooled_observation(tmp_path):
     assert store.assess_payoff(later.signal_id).completed_observation_count == 1
 
 
-@pytest.mark.parametrize("future_low", [97.0, 99.7])
-def test_runtime_abstains_without_orders_and_keeps_shadow_after_restart(tmp_path, future_low):
+def test_current_method_does_not_apply_legacy_pooled_hurdle(tmp_path):
     import asyncio
 
-    from stocker_core.strategies import SESSION_HARD_HV_METHOD
     from stocker_execution.runtime import RuntimeStore
-    from stocker_execution.session_hard_structure_d import EntryBar
-    from stocker_execution.stage5 import Stage5Analyzer
     from test_stage8_runtime import (
-        CapturingLogger,
         FakeBroker,
-        FakeFeatureService,
         MutableClock,
         TriggerContextProvider,
+        TriggerEntrySource,
         _hv_run,
         _runtime,
     )
 
     t0 = datetime(2026, 9, 2, 14, tzinfo=UTC)
-    seed_pool(RuntimeStore(tmp_path / "runtime.sqlite3"), gross_r=-0.5, before=t0)
-
-    class Bars:
-        async def bars_for(self, run, instruments, *, session, now, signals, fetch_missing=True):
-            return {
-                con_id: (
-                    EntryBar(t0, 99.5, 99.7, 99.4, 99.6),
-                    EntryBar(t0 + timedelta(minutes=1), 99.7, 99.8, future_low, 99.7),
-                )
-                for con_id in instruments
-            }
-
-    broker = FakeBroker()
-    clock = MutableClock()
-    logger = CapturingLogger()
-    run = _hv_run()
-    features = FakeFeatureService(calculation_version="STAGE5_PRE_MOVE_HV_V1")
+    store = RuntimeStore(tmp_path / "runtime.sqlite3")
+    seed_pool(store, count=20, gross_r=-100, before=t0)
+    broker, clock = FakeBroker(), MutableClock()
     runtime = _runtime(
         tmp_path,
         broker,
-        run,
+        _hv_run(),
         clock=clock,
-        logger=logger,
-        stage5_by_strategy={SESSION_HARD_HV_METHOD.strategy_version: Stage5Analyzer(features)},
         context_provider=TriggerContextProvider(),
-        entry_source=Bars(),
+        entry_source=TriggerEntrySource(),
     )
     asyncio.run(runtime.start())
     clock.now = t0 + timedelta(minutes=1)
     asyncio.run(runtime.poll_once())
-    assert not broker.submitted
-    store = RuntimeStore(tmp_path / "runtime.sqlite3")
-    row = next(row for row in store.payoff_audit() if row["symbol"] == "AAPL")
-    decision = store.assess_payoff(row["signal_id"])
-    assert decision.decision is CostAwareDecision.FAIL
-    assert row["completion_timestamp"] is None  # future bar supplied by fake cannot leak
-    assert any(event == "session_hard_cost_admission" for event, _ in logger.events)
-    asyncio.run(runtime.stop())
-
-    # A changed/removed current universe cannot make a persisted shadow disappear.
-    restarted = _runtime(tmp_path, FakeBroker(), clock=clock, entry_source=Bars())
-    clock.now = t0 + timedelta(minutes=2)
-    asyncio.run(restarted._advance_pending_payoffs(clock.now))
-    reloaded = RuntimeStore(tmp_path / "runtime.sqlite3")
-    assert reloaded.assess_payoff(row["signal_id"]) == decision
-    completed = next(
-        item["completion_timestamp"]
-        for item in reloaded.payoff_audit()
-        if item["signal_id"] == row["signal_id"]
-    )
-    assert bool(completed) == (future_low == 97.0)
-    assert not broker.submitted
+    assert len(broker.submitted) == 1
+    assert len(store.payoff_audit()) == 20
+    assert not any(r["signal_id"] == broker.submitted[0].signal_id for r in store.payoff_audit())
 
 
 @pytest.mark.parametrize("n", [0, 1, 19])
@@ -425,11 +383,7 @@ def test_runtime_with_no_history_still_submits_normal_hv_paper_order(tmp_path):
     plan = broker.submitted[0]
     assert plan.strategy_id == SESSION_HARD_HV_METHOD.strategy_id
     store = RuntimeStore(tmp_path / "runtime.sqlite3")
-    assert store.assess_payoff(plan.signal_id).decision is CostAwareDecision.WARMUP
-    # Submission is not an actual fill and not a completed observation.
-    row = store.payoff_audit()[0]
-    assert row["actually_executed"] == 0
-    assert row["completion_timestamp"] is None
+    assert store.payoff_audit() == ()
 
 
 def test_ibkr_shadow_cache_and_pre_hurdle_backfill_use_saved_identity(tmp_path):
@@ -664,8 +618,5 @@ def test_all_simultaneous_admissions_freeze_before_first_broker_await(tmp_path):
     clock.now = t0 + timedelta(minutes=1)
     asyncio.run(runtime.poll_once())
     current = [row for row in store.payoff_audit() if row["symbol"] == "AAPL"]
-    assert len(current) == 2
-    assessments = [store.assess_payoff(row["signal_id"]) for row in current]
-    assert {item.completed_observation_count for item in assessments} == {19}
-    assert all(item.take_trade for item in assessments)
+    assert current == []  # Current method never joins the historical payoff pool.
     assert len(broker.submitted) == 2

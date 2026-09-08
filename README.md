@@ -2,10 +2,13 @@
 
 ![CI](https://github.com/michaelisalerno-del/Stocker/actions/workflows/ci.yml/badge.svg)
 
-Stocker is a from-scratch trading research and execution foundation. The first goal is
-not to find an edge or place trades. The goal is to make bad ideas cheap to disprove on
-a Mac, while keeping any future server execution small, boring, and protected by hard
-risk boundaries.
+Stocker is a modular trading research and execution application. The operational workflow is
+**Market → Method → Run**. A Method owns how it finds, qualifies, vetoes, enters, manages and exits
+trades. The sole installed method is **Session HARD**, with a frozen prospective FIT-derived
+MODEL_T0 cutoff and causal first-break entries. It remains PAPER-only.
+
+See [the architecture guide](docs/ARCHITECTURE.md) for package boundaries, the Q1 reconciliation,
+provenance and historical compatibility.
 
 ## Repo Split
 
@@ -111,36 +114,24 @@ handles authentication; Stocker does not store or automate broker login credenti
 exposes multiple accounts, copy the example to the ignored `configs/ibkr.local.yaml` and set
 `expected_account` there so Stocker can select the intended account explicitly.
 
-## Stage 3 Universes And Runs
+## Markets and runs
 
-`configs/runs.example.yaml` resolves `NASDAQ`, `NYSE`, and `US_ALL` from the timestamped
-`universes/us-listed.csv` Nasdaq Trader snapshot and defines inline `CUSTOM` members plus
-independent PAPER/LIVE runs. Refresh membership explicitly with:
+The dashboard offers US All, NASDAQ and NYSE, then Session HARD and Start PAPER run.
+The method builds its universe from authoritative listing membership and saves it with the run.
+There is no global cap-size selector. Suitability beyond eligibility and required data remains
+research-only. Account risk and capacity are separate settings.
+
+`configs/runs.example.yaml` loads the existing listing snapshot with no enabled runs.
+Refresh the snapshot explicitly before creating a new run:
 
 ```bash
 uv run stocker universe refresh-us-listings --output universes/us-listed.csv
+uv run stocker runs-status --config configs/runs.example.yaml
 ```
 
-Inspect the configured state, or mark several runs active for this in-memory diagnostic, with:
-
-```bash
-uv run stocker runs-status \
-  --config configs/runs.example.yaml \
-  --start ftse_morning \
-  --start nasdaq_main
-```
-
-This command does not connect to IBKR, fetch data, schedule work, evaluate a strategy, or trade.
-
-## Intentionally Not Implemented Yet
-
-- No broker order submission or cancellation through the Stage 2 IBKR adapter.
-- No PAPER or LIVE trading logic.
-- No API keys or secrets.
-- No vendor credentials in the repo.
-- No strategy optimization.
-- No Docker, systemd, or deployment automation.
-- No event-driven accounting engine beyond an explicit placeholder.
+Historical methods, manual research universes and research templates remain readable; they cannot
+be selected for new execution runs. PAPER/LIVE account infrastructure remains separate, and the
+current method is not enabled for LIVE. Tests use fake broker clients and place no real orders.
 
 ## Data Pipeline
 
@@ -308,12 +299,3 @@ uv run stocker stage10-dashboard \
 
 Open `http://127.0.0.1:8000`. This command reads persisted runtime state and edits validated backend
 run configuration. It does not connect IBKR, start the trading runtime, or transmit an order.
-
-## Next Development Stages
-
-1. Add stock-suitability scoring across qualified universes.
-2. Expand event-driven accounting for candidates that survive the harness.
-3. Add paper trading with stale-data checks and broker-state reconciliation.
-4. Add tiny live tests only after paper results and operational safety are proven.
-5. Add production monitoring, deployment, and operational runbooks only after the
-   execution boundary is proven in paper mode.

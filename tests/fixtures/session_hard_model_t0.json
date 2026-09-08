@@ -1,0 +1,52 @@
+[
+  {
+    "signal_id": "f88adbff1d6862a8c591e814d5cabb3b",
+    "probability": 0.0006938986629226625,
+    "features": {
+      "score": 1.0,
+      "PRE_MOVE_M": 1.8018717029762075,
+      "cohort_percentile": null,
+      "M_over_P0_bps": 11.055347998527274,
+      "hv": 0.13267344553568153,
+      "typical_vwap_distance": -9.783044514825034,
+      "return_3m": -0.3984063745010591,
+      "session_open_distance": -0.3984063745010591,
+      "completed_5m_body": -0.255000000000005,
+      "recent_vs_earlier_range_ratio": 1.5995222929936272,
+      "current_bar_range_vs_prior_6": 1.8450229709035002,
+      "current_volume_vs_session_mean": 15.713127974691425,
+      "current_volume_vs_prior6_mean": 88.38553202627325,
+      "last3_vs_first3_volume": 17.15688172563445,
+      "range_effort": 6.8326063869971385,
+      "travel_effort": 5.440549059502052,
+      "absolute_efficiency": 0.0007214842188324252,
+      "close_retention": 0.0004291845493552146,
+      "directional_persistence": 0.2916666666666667
+    }
+  },
+  {
+    "signal_id": "3b05a60ee8cf2d539eeb9c741201a0f8",
+    "probability": 0.9017473996042065,
+    "features": {
+      "score": 0.9999999999885816,
+      "PRE_MOVE_M": 17.146911112560534,
+      "cohort_percentile": 100.0,
+      "M_over_P0_bps": 55.64055228241128,
+      "hv": 0.6677332802005979,
+      "typical_vwap_distance": -946.9474146935852,
+      "return_3m": -889.3662728249208,
+      "session_open_distance": -1353.7206931702362,
+      "completed_5m_body": -0.7061538461538466,
+      "recent_vs_earlier_range_ratio": 1.5979705807114688,
+      "current_bar_range_vs_prior_6": 1.833220534744264,
+      "current_volume_vs_session_mean": 1.2594350482684078,
+      "current_volume_vs_prior6_mean": 1.3283596587030964,
+      "last3_vs_first3_volume": 0.8284459151692777,
+      "range_effort": 8.417922315520567,
+      "travel_effort": 7.793367583397848,
+      "absolute_efficiency": 0.5675678450741594,
+      "close_retention": 0.3074074074074074,
+      "directional_persistence": 0.6666666666666666
+    }
+  }
+]

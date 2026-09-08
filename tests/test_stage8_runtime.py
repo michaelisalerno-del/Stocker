@@ -8,6 +8,7 @@ import pytest
 from execution_test_support import execution_method  # noqa: F401
 from stocker_core.config import IbkrConfig, RunsConfig
 from stocker_core.markets import CapBucket, MarketId, MarketUniverseSpec
+from stocker_core.methods import content_hash
 from stocker_core.runs import (
     CandidateScreen,
     Environment,
@@ -91,7 +92,7 @@ class FakeBroker:
         self.reconciliation_gate: asyncio.Event | None = None
         self.reconciliation_waiting: asyncio.Event | None = None
         self.quote_clock = lambda: NOW
-        self.quote_bid = 99.5
+        self.quote_bid = 99.6
 
     async def entry_quote(self, instrument: QualifiedInstrument) -> CurrentQuote:
         return CurrentQuote(
@@ -139,12 +140,15 @@ class FakeBroker:
     async def minimum_tick(self, instrument: QualifiedInstrument) -> float:
         return 0.01
 
+    async def shortable_quantity(self, instrument: QualifiedInstrument) -> float:
+        return 1000000
+
     async def submit_protected_order(
         self, plan: object, instrument: QualifiedInstrument
     ) -> BrokerOrderIds:
         self.events.append("submit")
         self.submitted.append(plan)
-        return BrokerOrderIds(101, 102, 103)
+        return BrokerOrderIds(101, 102, 103, 104 if getattr(plan, "deadline", None) else None)
 
     async def read_open_orders(self) -> tuple[BrokerOpenOrder, ...]:
         self.events.append("open_orders")
@@ -313,12 +317,21 @@ class TriggerContextProvider:
         if run.run_id == self.failing_run:
             raise RuntimeError("score inputs unavailable")
         snapshots = tuple(rows)
+        from test_method_package import examples
+
+        example = examples()[0]["features"]
+        values = {k: v if v is not None else float("nan") for k, v in example.items()}
         return StrategyContext(
             run_id=run.run_id,
             session_hard={
                 StrategyOpportunityKey(row.con_id, row.session, row.t0): SessionHardAssessment(
                     SESSION_HARD_THRESHOLD, checkpoint
                 )
+                for row in snapshots
+                if row.con_id is not None
+            },
+            whipsaw_features={
+                StrategyOpportunityKey(row.con_id, row.session, row.t0): values
                 for row in snapshots
                 if row.con_id is not None
             },
@@ -430,21 +443,27 @@ def _run(
 
 
 def _hv_run(run_id: str = "hv-run") -> RunConfig:
+    spec = SESSION_HARD_HV_METHOD.specification(MarketId.US_NASDAQ)
     return _run(run_id).model_copy(
         update={
             "strategy": SESSION_HARD_HV_METHOD.config_name,
             "strategy_id": SESSION_HARD_HV_METHOD.strategy_id,
             "strategy_version": SESSION_HARD_HV_METHOD.strategy_version,
             "market_id": MarketId.US_NASDAQ,
-            "cap_bucket": CapBucket.MID,
+            "cap_bucket": CapBucket.ALL,
             "cap_bucket_version": "CAP_BUCKETS_V1",
-            "candidate_screen_id": "ACTIVITY_SHORTLIST_V1",
-            "candidate_screen_version": "ACTIVITY_SHORTLIST_V1",
-            "screen": RunScreenConfig(
-                method=CandidateScreen.ACTIVITY_SHORTLIST_V1,
-                max_results=50,
-                version="ACTIVITY_SHORTLIST_V1",
-                scheduled_active_minutes=15,
+            "candidate_screen_id": "METHOD_REQUIRED_DATA",
+            "candidate_screen_version": SESSION_HARD_HV_METHOD.strategy_version,
+            "screen": None,
+            "method_spec": spec,
+            "method_spec_hash": content_hash(spec),
+            "universe_snapshot": UniverseDefinition(
+                universe_id="NASDAQ",
+                name="NASDAQ",
+                market_spec=MarketUniverseSpec(
+                    market_id=MarketId.US_NASDAQ, cap_bucket=CapBucket.ALL
+                ),
+                members=(InstrumentReference(symbol="AAPL", exchange="SMART", currency="USD"),),
             ),
         }
     )
@@ -591,12 +610,13 @@ def test_activity_qualification_rotates_once_on_each_new_market_session(
         )
         runtime._session_resolver = RotatingSessionResolver()
         await runtime.start()
-        assert calls == [("paper-run",)]
+        assert calls == []
+        assert runtime.status().runs[0].state is RunRuntimeState.DEGRADED
 
         clock.now = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
         await runtime.poll_once()
         await runtime.poll_once()
-        assert calls == [("paper-run",), ("paper-run",)]
+        assert calls == []
 
     asyncio.run(scenario())
 

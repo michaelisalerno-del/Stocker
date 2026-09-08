@@ -2559,6 +2559,7 @@ class StockerRuntime:
                 expired = strategy.expire_waiting_before(now)
                 if expired:
                     self._store.save_signals(expired, now)
+                before_observation = {s.signal_id: s for s in strategy.signals}
                 waiting = tuple(
                     signal
                     for signal in strategy.signals
@@ -2592,7 +2593,13 @@ class StockerRuntime:
                                 run,
                                 self._config.session_hard_hv_round_trip_cost_bps,
                             )
-                self._store.save_signals(strategy.signals, now)
+                self._store.save_signals(
+                    tuple(
+                        s for s in strategy.signals
+                        if s != before_observation.get(s.signal_id)
+                    ),
+                    now,
+                )
                 prepared.append((run, market, strategy, strategy_runtime, instruments, intents))
             except Exception as exc:
                 self._set_run(run.run_id, RunRuntimeState.DEGRADED, str(exc))
@@ -2627,6 +2634,7 @@ class StockerRuntime:
         ready_for_execution = []
         for run, market, strategy, strategy_runtime, instruments, intents in prepared:
             try:
+                before_admission = {s.signal_id: s for s in strategy.signals}
                 admitted = []
                 for signal in intents:
                     if is_baseline_payoff_candidate(signal):
@@ -2645,7 +2653,13 @@ class StockerRuntime:
                         if not assessment.take_trade:
                             continue
                     admitted.append(signal)
-                self._store.save_signals(strategy.signals, now)
+                self._store.save_signals(
+                    tuple(
+                        s for s in strategy.signals
+                        if s != before_admission.get(s.signal_id)
+                    ),
+                    now,
+                )
                 ready_for_execution.append(
                     (run, market, strategy, strategy_runtime, instruments, admitted)
                 )

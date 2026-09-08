@@ -667,6 +667,33 @@ def test_wrong_account_prevents_readiness(tmp_path: Path) -> None:
     assert "ACCOUNT" in runtime.status().runs[0].reason.upper()
 
 
+def test_idle_entry_poll_does_not_rewrite_unchanged_candidates(tmp_path, monkeypatch):
+    async def scenario():
+        clock = MutableClock()
+        broker = FakeBroker()
+        runtime = _runtime(tmp_path, broker, _hv_run(), clock=clock)
+        await runtime.start()
+        clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+        await runtime.poll_once()
+        saved = runtime.store.load_signals("hv-run")
+        assert saved
+        rewritten = []
+        save = runtime.store.save_signals
+
+        def record(signals, now):
+            rewritten.extend(signals)
+            save(signals, now)
+
+        monkeypatch.setattr(runtime.store, "save_signals", record)
+        await runtime.poll_once()
+        assert rewritten == []
+        assert runtime.store.load_signals("hv-run") == saved
+        assert broker.submitted == []
+        await runtime.stop()
+
+    asyncio.run(scenario())
+
+
 def test_broker_unavailable_leaves_execution_safely_unavailable(tmp_path: Path) -> None:
     broker = FakeBroker(connect_error=RuntimeError("gateway unavailable"))
     runtime = _runtime(tmp_path, broker)

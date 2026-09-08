@@ -94,6 +94,9 @@ Generic tick 104 is retained for historical diagnostics but cannot replace this 
 Checkpoint feature snapshots are committed in one SQLite transaction through a worker thread,
 retaining the existing protection against replacing READY results with transient failures. The
 all-listings run exposed thousands of individual synchronous commits blocking HTTP requests.
+Entry observation and admission persist only changed immutable signals; unchanged rejections
+remain in the ledger without being serialized and rewritten four times per scheduler cycle.
+Expiry changes are still persisted immediately, before market-data awaits.
 The dashboard's current Stock eligibility count is the number of saved checkpoint feature rows,
 not scan progress; Required data ready distinguishes rows with complete method inputs.
 

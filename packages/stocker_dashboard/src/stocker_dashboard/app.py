@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
@@ -13,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 
 from stocker_core.config import IbkrConfig, load_runs_config
 from stocker_core.markets import MarketId
+from stocker_core.methods import get_method
 from stocker_core.runs import Environment
 from stocker_dashboard.controls import ControlResult, LiveConfirmation, RunControlService
 from stocker_dashboard.performance import PerformancePeriod
@@ -66,7 +71,19 @@ class UniverseRunBody(ConfirmationBody):
 def create_dashboard_app(reads: DashboardReadService, controls: RunControlService) -> FastAPI:
     """Create an isolated HTTP consumer over injected read/control boundaries."""
 
-    app = FastAPI(title="Stocker Operational Dashboard", docs_url="/api/docs")
+    start_task: asyncio.Task[None] | None = None
+    start_status: dict[str, Any] = {"status": "IDLE"}
+    start_request: tuple[Environment, UniverseRunBody] | None = None
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        yield
+        if start_task is not None and not start_task.done():
+            start_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await start_task
+
+    app = FastAPI(title="Stocker Operational Dashboard", docs_url="/api/docs", lifespan=lifespan)
     static = Path(__file__).with_name("static")
     app.mount("/static", StaticFiles(directory=static), name="static")
 
@@ -122,12 +139,67 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/universe-runs/start-status")
+    async def run_start_status() -> dict[str, Any]:
+        return dict(start_status)
+
+    async def begin_start(body: UniverseRunBody, environment: Environment) -> JSONResponse:
+        nonlocal start_task, start_status, start_request
+        # Reject stale method/environment values before acknowledging an operation.
+        try:
+            method = get_method(body.strategy_id, body.strategy_version)
+            method.specification(body.market_id)
+            if environment.value not in method.environments:
+                raise ValueError(f"{method.label} is PAPER-only")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if start_task is not None and not start_task.done():
+            if start_request != (environment, body):
+                raise HTTPException(
+                    status_code=409, detail="A run is already starting; wait for its result"
+                )
+            return JSONResponse(status_code=202, content=start_status)
+        start_request = (environment, body)
+        start_status = {
+            "operation_id": uuid4().hex,
+            "status": "STARTING",
+            "market": body.market_id.value,
+            "environment": environment.value,
+            "detail": "Connecting and qualifying stocks; this can take several minutes.",
+        }
+
+        async def finish_start() -> None:
+            try:
+                result = await add_universe_run(body, environment)
+                start_status.update(
+                    status="COMPLETED" if result["persisted"] else "FAILED",
+                    detail=result["detail"],
+                    result=result,
+                )
+            except asyncio.CancelledError:
+                start_status.update(
+                    status="FAILED", detail="Run start interrupted by server shutdown"
+                )
+                raise
+            except Exception as exc:
+                start_status.update(
+                    status="FAILED",
+                    detail=str(exc.detail if isinstance(exc, HTTPException) else exc),
+                )
+
+        start_task = asyncio.create_task(finish_start(), name="dashboard-run-start")
+        return JSONResponse(status_code=202, content=start_status)
+
     @app.post("/api/universe-runs/paper")
-    async def add_paper_run(body: UniverseRunBody) -> dict[str, object]:
+    async def add_paper_run(body: UniverseRunBody, background: bool = False) -> Any:
+        if background:
+            return await begin_start(body, Environment.PAPER)
         return await add_universe_run(body, Environment.PAPER)
 
     @app.post("/api/universe-runs/live")
-    async def add_live_run(body: UniverseRunBody) -> dict[str, object]:
+    async def add_live_run(body: UniverseRunBody, background: bool = False) -> Any:
+        if background:
+            return await begin_start(body, Environment.LIVE)
         return await add_universe_run(body, Environment.LIVE)
 
     @app.post("/api/universe-runs/{run_id}/disable")

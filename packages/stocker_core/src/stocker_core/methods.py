@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from stocker_core.markets import CapBucket, MarketId, MarketUniverseSpec, get_market
+from stocker_core.markets import (
+    MARKET_CATALOGUE,
+    CapBucket,
+    MarketId,
+    MarketUniverseSpec,
+    get_market,
+)
 from stocker_core.universes import UniverseDefinition
 
 ARTIFACTS = Path(__file__).parent / "method_artifacts" / "session_hard"
@@ -42,6 +48,12 @@ def session_hard_universe(
     listings: Sequence[UniverseDefinition], selected: MarketId
 ) -> UniverseDefinition:
     market = get_market(selected)
+    if market.listing_membership is None:
+        return UniverseDefinition(
+            universe_id=f"{selected.value}_METHOD_ACTIVITY",
+            name=market.display_name,
+            market_spec=MarketUniverseSpec(market_id=selected, cap_bucket=CapBucket.ALL),
+        )
     listing = next((u for u in listings if u.universe_id == market.listing_membership), None)
     if listing is None or not listing.members:
         raise ValueError(f"{market.display_name} requires authoritative listing membership")
@@ -85,7 +97,7 @@ class MethodDefinition:
 
 def session_hard_specification(selected: MarketId) -> dict[str, Any]:
     q1 = verified_q1_spec()
-    return {
+    spec: dict[str, Any] = {
         "method_id": SESSION_HARD.method_id,
         "method_version": SESSION_HARD.version,
         "market": selected.value,
@@ -143,6 +155,19 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
             "prospective_q1": PROSPECTIVE_SPEC_SHA256,
         },
     }
+    if get_market(selected).listing_membership is None:
+        # Preserve the existing discovery profile for cross-market PAPER testing.
+        # It is not a validated suitability rule or evidence of model transfer.
+        spec["universe_search"].update(
+            {
+                "builder": "IBKR_ACTIVITY_SHORTLIST_V1",
+                "activity_profile": "ACTIVITY_SHORTLIST_V1",
+                "capture_active_minutes": 15,
+                "validation": "UNVALIDATED_CROSS_MARKET_PAPER_TEST",
+                "coverage": "Existing bounded IBKR activity shortlist; not all market listings",
+            }
+        )
+    return spec
 
 
 SESSION_HARD = MethodDefinition(
@@ -150,7 +175,10 @@ SESSION_HARD = MethodDefinition(
     version="SESSION_HARD_CAUSAL_Q1_FIT_V1",
     config_name="SESSION_HARD",
     label="Session HARD",
-    supported_markets=(MarketId.US_ALL, MarketId.US_NASDAQ, MarketId.US_NYSE),
+    supported_markets=(
+        MarketId.US_ALL,
+        *(m.market_id for m in MARKET_CATALOGUE if m.market_id is not MarketId.US_ALL),
+    ),
     environments=("PAPER",),
     specification_builder=session_hard_specification,
     universe_builder=session_hard_universe,

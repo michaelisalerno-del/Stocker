@@ -700,10 +700,7 @@ async def qualify_active_runs(
         if run.state is not RunState.ACTIVE:
             continue
         membership = Stage5Membership(run.config.run_id, run.universe.universe_id)
-        if (
-            run.config.screen is not None
-            and run.config.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
-        ):
+        if run.config.uses_activity_shortlist:
             snapshot = activity_snapshots.get(run.config.run_id)
             if snapshot is None or snapshot.status is not ActivityShortlistStatus.READY:
                 reason = (

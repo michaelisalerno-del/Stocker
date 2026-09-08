@@ -16,7 +16,7 @@ from stocker_core.config import (
     load_runs_config,
     load_server_config,
 )
-from stocker_core.runs import CandidateScreen, Environment, RunManager
+from stocker_core.runs import Environment, RunManager
 from stocker_core.universes import UniverseCatalog
 
 console = Console()
@@ -221,10 +221,7 @@ def ibkr_resources(
             universe = by_universe[run.universe]
             members = universe.members
             identities: set[tuple[object, ...]]
-            if (
-                run.screen is not None
-                and run.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
-            ):
+            if run.uses_activity_shortlist:
                 if run.market_id is None or run.cap_bucket is None:
                     all_watchlists_available = False
                     watchlists.append(f"{run.run_id}: unavailable (missing market lineage)")
@@ -234,8 +231,8 @@ def ibkr_resources(
                     market_id=run.market_id.value,
                     cap_bucket=run.cap_bucket,
                     cap_bucket_version=run.cap_bucket_version or "CAP_BUCKETS_V1",
-                    profile_id=run.candidate_screen_id or "ACTIVITY_SHORTLIST_V1",
-                    profile_version=run.candidate_screen_version or "ACTIVITY_SHORTLIST_V1",
+                    profile_id="ACTIVITY_SHORTLIST_V1",
+                    profile_version="ACTIVITY_SHORTLIST_V1",
                 )
                 if stored is None:
                     all_watchlists_available = False

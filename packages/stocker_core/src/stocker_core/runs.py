@@ -93,6 +93,16 @@ class RunConfig(BaseModel):
     method_spec: dict[str, Any] | None = None
     method_spec_hash: str | None = None
     universe_snapshot: UniverseDefinition | None = None
+
+    @property
+    def uses_activity_shortlist(self) -> bool:
+        """A method-owned discovery profile, or a historical explicit screen."""
+        return (self.method_spec or {}).get("universe_search", {}).get(
+            "activity_profile"
+        ) == ACTIVITY_SHORTLIST_V1_ID or (
+            self.screen is not None and self.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
+        )
+
     environment: Environment
     risk: RunRiskConfig | None = None
     session: RunWindow | None = None

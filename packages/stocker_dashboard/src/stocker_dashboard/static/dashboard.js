@@ -4,6 +4,7 @@ const main = document.querySelector("#main");
 const fmt = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
 let timer;
 let lastOutcome = null;
+let runStartStatus = { status: "IDLE" };
 let pageHasRendered = false;
 const INTERACTIVE_ROUTES = new Set(["universes", "candidates", "trades", "settings"]);
 
@@ -115,19 +116,23 @@ async function runsPage() {
 }
 
 async function universesPage() {
-  const [options, grouped] = await Promise.all([
+  const [options, grouped, starting] = await Promise.all([
     api("/api/universe-builder/options"),
     api("/api/universe-runs"),
+    api("/api/universe-runs/start-status"),
   ]);
-  const marketOptions = options.markets.map((item) => `<option value="${esc(item.market_id)}">${esc(item.label)}</option>`).join("");
+  runStartStatus = starting;
+  const marketOptions = options.markets.map((item) => `<option value="${esc(item.market_id)}" ${item.market_id === starting.market ? "selected" : ""}>${esc(item.label)}${item.experimental ? " · PAPER test" : ""}</option>`).join("");
   const strategyOptions = options.strategies.map((item) => `<option value="${esc(item.strategy_id)}" data-version="${esc(item.strategy_version)}" data-environments="${esc(item.environments.join(","))}">${esc(item.label)}</option>`).join("");
   const runCard = (row) => `<article class="run-card ${row.enabled ? "" : "disabled"}">
     <div class="run-card-title"><div><span class="eyebrow">${esc(row.market_id || row.universe)} · ${esc(row.currency || "NATIVE")}</span><h3>${esc(row.display_name)}</h3></div>${badge(row.enabled ? row.status : "DISABLED", row.enabled ? row.status : "warn")}</div>
+    ${row.search_status ? `<p class="muted">Search: ${esc(row.search_status)}</p>` : ""}${row.reason ? `<p class="notice">${esc(row.reason)}</p>` : ""}
     <div class="run-stats"><div><span>Watch</span><strong>${number(row.candidate_count)}</strong></div><div><span>Signals today</span><strong>${number(row.signals_today)}</strong></div><div><span>Positions</span><strong>${number(row.open_positions)}</strong></div><div><span>Today realised</span><strong>${money(row.today_realised_pnl, row.currency)}</strong></div><div><span>Unrealised</span><strong>${row.unrealised_status === "AVAILABLE" ? money(row.unrealised_pnl, row.currency) : esc(row.unrealised_status)}</strong></div><div><span>20-session R</span><strong>${row.total_r == null ? "—" : `${number(row.total_r)}R`}</strong></div></div>
     <div class="control-rail"><button class="secondary" data-action="run:${esc(row.run_id)}">Open run</button>${row.historical_only ? '<span class="muted">Historical only</span>' : `<button data-universe-control="${row.enabled ? "disable" : "enable"}" data-run-id="${esc(row.run_id)}" data-environment="${esc(row.environment)}">${row.enabled ? `Remove from ${esc(row.environment)}` : `Re-enable ${esc(row.environment)}`}</button>`}</div>
   </article>`;
   const cards = (rows) => rows.length ? `<div class="run-card-grid">${rows.map(runCard).join("")}</div>` : '<div class="empty">No runs in this environment.</div>';
   main.innerHTML = `${head("Market → Method → Run", "Choose a market and method, then start a run. The method owns stock search, qualification, vetoes, entry and exits.")}
+    <p id="run-start-status" class="notice" role="status" aria-live="polite" hidden></p>
     ${lastOutcome ? `<p class="notice" role="status"><b>${esc(lastOutcome.apply_mode)}</b> · ${esc(lastOutcome.detail)}</p>` : ""}
     <section class="builder-panel"><div class="builder-stripe"><span>CREATE / SELECT</span><strong>MARKET RUN</strong></div><form id="universe-builder"><div class="builder-grid"><label>Market<select name="market_id">${marketOptions}</select></label><label>Method<select name="strategy_id">${strategyOptions}</select></label></div><details><summary>Account risk and capacity</summary><div class="builder-grid"><label>Risk per trade<input name="risk_per_trade" type="number" min="0.000001" max="1" step="any" value="0.001" required></label><label>Maximum positions<input name="max_concurrent_positions" type="number" min="1" step="1" value="1"></label></div></details><div class="builder-context"><div><span>Candidate selection</span><strong>${esc(options.candidate_screen.label)}</strong></div><div><span>Suitability</span><strong>Required data; no validated cap filter</strong></div><div><span>Market session</span><strong id="builder-session">—</strong></div><div><span>Search policy</span><strong id="builder-readiness">—</strong></div></div><div class="builder-actions"><button type="submit" data-add-environment="PAPER">Start PAPER run</button><button type="button" class="danger" data-add-environment="LIVE">Add to LIVE</button><span id="live-prerequisite" class="muted">Matching PAPER run required.</span></div></form></section>
     <section class="environment-section paper-zone"><div class="section-head"><h2>PAPER RUNS</h2>${environment("PAPER")}</div>${cards(grouped.PAPER)}</section>
@@ -142,15 +147,17 @@ async function universesPage() {
   const refreshBuilderContext = () => {
     const market = selectedDefinition();
     document.querySelector("#builder-session").textContent = market ? `${market.session} ${market.timezone}` : "—";
-    document.querySelector("#builder-readiness").textContent = market?.scanner_readiness || "—";
+    document.querySelector("#builder-readiness").textContent = market ? `${market.search_policy} · ${market.validation}` : "—";
     const liveButton = form.querySelector('[data-add-environment="LIVE"]');
     const supportsLive = selectedStrategy().dataset.environments.split(",").includes("LIVE");
-    liveButton.disabled = !supportsLive || !matchingPaper();
+    liveButton.disabled = runStartStatus.status === "STARTING" || !supportsLive || !matchingPaper();
     document.querySelector("#live-prerequisite").textContent = !supportsLive ? `${selectedStrategy().textContent} is PAPER-only.` : (matchingPaper() ? "PAPER prerequisite satisfied." : "Matching PAPER run required.");
   };
   refreshBuilderContext();
+  showRunStartStatus();
   form.addEventListener("change", refreshBuilderContext);
   const submitRun = async (target) => {
+    if (runStartStatus.status === "STARTING") return;
     const selectedStrategyOption = selectedStrategy();
     const body = {
       market_id: marketSelect.value,
@@ -167,8 +174,16 @@ async function universesPage() {
       body.confirmed = true;
       body.target_account = broker.expected_account;
     }
-    lastOutcome = await api(`/api/universe-runs/${target.toLowerCase()}`, { method: "POST", body: JSON.stringify(body) });
-    await render();
+    runStartStatus = { status: "STARTING", detail: "Sending start request…" };
+    showRunStartStatus();
+    try {
+      runStartStatus = await api(`/api/universe-runs/${target.toLowerCase()}?background=true`, { method: "POST", body: JSON.stringify(body) });
+      showRunStartStatus();
+    } catch (error) {
+      runStartStatus = { status: "FAILED", detail: error.message };
+      showRunStartStatus();
+      refreshBuilderContext();
+    }
   };
   form.addEventListener("submit", async (event) => { event.preventDefault(); try { await submitRun("PAPER"); } catch (error) { alert(error.message); } });
   form.querySelector('[data-add-environment="LIVE"]').addEventListener("click", async () => { try { await submitRun("LIVE"); } catch (error) { alert(error.message); } });
@@ -180,6 +195,21 @@ async function universesPage() {
       await render();
     } catch (error) { if (error.message !== "cancelled") alert(error.message); }
   }));
+}
+
+function showRunStartStatus() {
+  const notice = document.querySelector("#run-start-status");
+  if (!notice) return;
+  const starting = runStartStatus.status === "STARTING";
+  notice.hidden = runStartStatus.status === "IDLE";
+  notice.textContent = `${runStartStatus.status}: ${runStartStatus.detail || ""}`;
+  notice.classList.toggle("error", runStartStatus.status === "FAILED");
+  const form = document.querySelector("#universe-builder");
+  form.setAttribute("aria-busy", String(starting));
+  form.querySelectorAll('input, select, [data-add-environment="PAPER"]').forEach((control) => { control.disabled = starting; });
+  const paper = form.querySelector('[data-add-environment="PAPER"]');
+  paper.textContent = starting ? "Starting…" : "Start PAPER run";
+  if (starting) form.querySelector('[data-add-environment="LIVE"]').disabled = true;
 }
 
 async function runDetail(runId) {
@@ -440,6 +470,15 @@ async function refreshCurrentPage() {
   if (INTERACTIVE_ROUTES.has(route())) {
     try {
       await refreshHeader();
+      if (route() === "universes") {
+        const wasStarting = runStartStatus.status === "STARTING";
+        runStartStatus = await api("/api/universe-runs/start-status");
+        if (wasStarting && runStartStatus.status !== "STARTING") {
+          await render();
+          return;
+        }
+        showRunStartStatus();
+      }
       clearRefreshWarning();
     } catch (_) { showRefreshWarning(); }
     scheduleRefresh();

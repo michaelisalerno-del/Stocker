@@ -153,6 +153,7 @@ class DashboardReadService:
                     "signals_today": runtime.signals_today if runtime else 0,
                     "open_positions": runtime.open_positions if runtime else 0,
                     "reason": runtime.reason if runtime else "",
+                    "search_status": screen.status.value if screen else None,
                     "currency": today["currency"] or self._run_currency(run),
                     "today_realised_pnl": today["realised_pnl"],
                     "unrealised_pnl": today["unrealised_pnl"],

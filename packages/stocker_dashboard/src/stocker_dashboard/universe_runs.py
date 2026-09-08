@@ -27,7 +27,17 @@ class UniverseRunBuilder:
                         for s in get_market(m).regular_sessions
                     ),
                     "scanner_readiness": "METHOD_OWNED_LISTINGS",
-                    "experimental": False,
+                    "experimental": get_market(m).listing_membership is None,
+                    "search_policy": (
+                        "Market listings · no cap filter"
+                        if get_market(m).listing_membership
+                        else "Existing IBKR activity shortlist · no cap filter"
+                    ),
+                    "validation": (
+                        "US development candidate"
+                        if get_market(m).listing_membership
+                        else "Unvalidated cross-market PAPER test"
+                    ),
                 }
                 for m in markets
             ],

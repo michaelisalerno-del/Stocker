@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from stocker_core.markets import MarketId
 from stocker_core.methods import SESSION_HARD, get_method
+from stocker_core.runs import RunInstance
 from stocker_execution.session_hard_method import SessionHardMethod
 
 if TYPE_CHECKING:
     from stocker_execution.history import IbkrHistoryCache
     from stocker_execution.ibkr import IbkrConnection
     from stocker_execution.runtime import EntryBarSource, MarketSession, StrategyContextProvider
-    from stocker_execution.stage5 import Stage5Analyzer, Stage5SnapshotStore
+    from stocker_execution.stage5 import (
+        Stage5Analyzer,
+        Stage5QualificationResult,
+        Stage5SnapshotStore,
+    )
 
 
 @dataclass(frozen=True)
@@ -24,6 +29,7 @@ class MethodServices:
     context: StrategyContextProvider
     entries: EntryBarSource
     checkpoints: Callable[[MarketSession], tuple[tuple[int, datetime], ...]]
+    qualify: Callable[[Sequence[RunInstance]], Awaitable[Stage5QualificationResult]] | None = None
 
 
 def session_hard_services(
@@ -37,6 +43,7 @@ def session_hard_services(
         IbkrSessionDataSource,
         PriorSessionExpectedMoveService,
     )
+    from stocker_execution.session_hard_universe import SessionHardUniverseSearch
     from stocker_execution.stage5 import (
         STAGE5_HV_CALCULATION_VERSION,
         Stage5Analyzer,
@@ -62,6 +69,7 @@ def session_hard_services(
         source,
         source,
         lambda market: market.checkpoint_times(checkpoints),
+        SessionHardUniverseSearch(broker, store.path, clock).qualify,
     )
 
 

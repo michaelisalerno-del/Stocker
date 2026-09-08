@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+import httpx
 import pytest
 import yaml
 from fastapi.testclient import TestClient
@@ -1116,7 +1117,7 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
         assert "PAPER" in response.text
         assert "LIVE" in response.text
     index = client.get("/").text
-    assert 'src="/static/dashboard.js?v=20260908-method-runs"' in index
+    assert 'src="/static/dashboard.js?v=20260908-run-start-progress"' in index
     for label in (
         "Overview",
         "Runs",
@@ -1198,6 +1199,55 @@ def test_universe_builder_http_flow_rejects_legacy_values_and_live(tmp_path):
     run = next(row for row in rows if row["market_id"] == "US_NASDAQ")
     assert run["display_name"] == "NASDAQ · Session HARD"
     assert client.post(f"/api/universe-runs/{run['run_id']}/disable").status_code == 200
+
+
+def test_start_acknowledges_before_slow_qualification_and_survives_page_reload(tmp_path):
+    async def scenario():
+        gate = asyncio.Event()
+
+        class SlowRuntime(RecordingRuntime):
+            async def apply_runs_config(self, config, *, changed_run_ids):
+                await gate.wait()
+                return await super().apply_runs_config(config, changed_run_ids=changed_run_ids)
+
+        reads = _seed_authoritative_state(tmp_path)
+        runs_path, broker_path = _write_control_files(tmp_path)
+        runtime = SlowRuntime()
+        app = create_dashboard_app(
+            reads, RunControlService(runs_path, broker_path, runtime=runtime)
+        )
+        body = {
+            "market_id": "US_NASDAQ",
+            "strategy_id": SESSION_HARD_HV_METHOD.strategy_id,
+            "strategy_version": SESSION_HARD_HV_METHOD.strategy_version,
+            "risk_per_trade": 0.001,
+        }
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="http://test"
+        ) as client:
+            response = await asyncio.wait_for(
+                client.post("/api/universe-runs/paper?background=true", json=body), 1
+            )
+            assert response.status_code == 202
+            assert response.json()["status"] == "STARTING"
+            duplicate = await client.post("/api/universe-runs/paper?background=true", json=body)
+            assert duplicate.json()["operation_id"] == response.json()["operation_id"]
+            assert (await client.get("/api/universe-runs/start-status")).json()[
+                "status"
+            ] == "STARTING"
+            gate.set()
+            for _ in range(100):
+                await asyncio.sleep(0.01)
+                status = (await client.get("/api/universe-runs/start-status")).json()
+                if status["status"] != "STARTING":
+                    break
+            assert status["status"] == "COMPLETED"
+            assert status["result"]["persisted"]
+            assert len(runtime.run_updates) == 1
+            rows = (await client.get("/api/universe-runs")).json()["PAPER"]
+            assert any(r["market_id"] == "US_NASDAQ" for r in rows)
+
+    asyncio.run(scenario())
 
 
 def test_universe_builder_default_risk_is_valid_for_html_number_input(

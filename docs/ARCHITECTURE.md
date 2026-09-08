@@ -5,11 +5,12 @@
 A Method owns how it finds, qualifies, vetoes, enters, manages and exits trades.
 The user selects the market and method; the method determines what stocks are appropriate.
 
-The current catalogue exposes one method, **Session HARD**, for US All, NASDAQ and NYSE.
+The current catalogue exposes one method, **Session HARD**, across Stocker's market catalogue.
 Its stable internal identity is `SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D`;
 its current version is `SESSION_HARD_CAUSAL_Q1_FIT_V1`. The old name remains an internal
 identity for history continuity, not a second selectable strategy. The method remains PAPER-only.
-Other exchange calendars remain available as infrastructure; this change does not validate LSE.
+Non-US markets are labelled **unvalidated cross-market PAPER tests**. Operational calendar/scanner
+support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on those markets.
 
 ```text
 Market → Method → saved Run
@@ -38,7 +39,7 @@ midcap, volatility or liquidity finding has become an admission filter.
   sessions, runtime state and artifact provenance. Its canonical JSON SHA-256 is saved per run.
 - `stocker_execution.strategy_factory` is the explicit composition seam. It associates the
   method identity/version with its decision engine and `MethodServices`: feature producer,
-  context producer, event source and checkpoint schedule.
+  context producer, event source, checkpoint schedule and universe qualification function.
 - The engine evaluates candidates, observes entry events, restores/saves its additional state
   and advances background state. Session HARD reuses frozen qualification calculations from
   `session_hard_structure_d.py`; that historical class is not an installed engine.
@@ -56,12 +57,29 @@ There is no plugin loader, factory hierarchy or dependency-injection container.
 
 ### Universe, data and suitability
 
-The universe builder resolves the selected market's authoritative NASDAQ/NYSE/US_ALL listing
+For US markets the universe builder resolves authoritative NASDAQ/NYSE/US_ALL listing
 membership. The existing Nasdaq Trader snapshot records source URLs, retrieval/file times and
 non-ETF/non-test issues. IBKR qualification proves tradable STK identity and reports failures
 per symbol. A run embeds the actual membership snapshot, so refreshing the catalogue does not
 silently change that run. Refresh membership explicitly with
 `stocker universe refresh-us-listings` before creating a new run.
+
+For other markets, `session_hard_universe.py` reuses the existing Activity Shortlist V1 profile
+as an explicitly unvalidated PAPER test input: the existing scanner components, deterministic
+ranking, 50-stock limit, 15 active-minute capture and one-minute capture window. No cap restriction
+is applied. This bounded activity population is not a complete exchange listing or a validated
+Session HARD suitability filter. The existing per-market/session snapshot preserves the discovery
+population across reloads; a missed capture stays `SCREEN_MISSED` until the next session.
+The frozen qualification, MODEL_T0 preprocessing/score, inclusive FIT cutoff and entry/exit geometry
+are identical across markets. No model or trading thresholds are re-fit for transfer.
+
+The dashboard starts runs with `POST /api/universe-runs/paper?background=true`, receiving `202`
+while broker connection and qualification continue. `/api/universe-runs/start-status` exposes
+starting/completed/failed status across page reloads. The start button disables immediately,
+duplicate submissions reuse the pending operation and failures remain visible. The runtime saves
+the run configuration after application; an unfinished start interrupted by a server restart must
+be submitted again. Existing synchronous API callers remain supported.
+The first new run reconciles the account and updates shared readiness before it can trade.
 
 An explicit/manual basket remains a research or test input, not the live builder's dependency.
 There is no newly validated stock-suitability rule beyond universe eligibility and required data.

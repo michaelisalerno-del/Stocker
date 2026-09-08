@@ -21,7 +21,7 @@ from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_r
 from stocker_core.logging import configure_logging
 from stocker_core.markets import MARKET_CATALOGUE, ActivityScanner, MarketId, get_market
 from stocker_core.methods import content_hash, installed_methods, validate_run_method
-from stocker_core.runs import CandidateScreen, Environment, RunConfig, RunInstance, RunManager
+from stocker_core.runs import Environment, RunConfig, RunInstance, RunManager
 from stocker_core.strategies import SESSION_HARD_HV_METHOD
 from stocker_core.universes import UniverseCatalog
 from stocker_data.calendars import get_market_calendar
@@ -68,7 +68,6 @@ from stocker_execution.stage5 import (
     Stage5QualifiedRequest,
     Stage5SnapshotStore,
     Stage5Status,
-    qualify_active_runs,
 )
 from stocker_execution.stage7 import (
     ExecutionBroker,
@@ -1430,7 +1429,28 @@ class StockerRuntime:
                     self._legacy_execution.pop((run_id, updated.environment), None)
                     self._legacy_execution[(run_id, current.environment)] = self._execution[run_id]
                 self._execution[run_id] = execution
-                result = await execution.reconcile()
+                result = await self._reconcile_execution_services(
+                    tuple(
+                        (identity, service)
+                        for identity, service in self._execution_services()
+                        if service.run_environment is updated.environment
+                    )
+                )
+                self._environment_reconciled[updated.environment] = result.ok
+                self._environment_ready[updated.environment] = result.ok
+                self._state = (
+                    ApplicationState.READY
+                    if any(self._environment_ready.values())
+                    else ApplicationState.DEGRADED
+                )
+                self._store.record_reconciliation(
+                    environment=updated.environment,
+                    account=destination.expected_account,
+                    connection_epoch=destination.broker.connection_epoch,
+                    ok=result.ok,
+                    detail=result.detail,
+                    now=_aware(self._clock()),
+                )
                 if not result.ok:
                     self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
                     continue
@@ -1755,8 +1775,7 @@ class StockerRuntime:
             run = instance.config
             if (
                 not run.enabled
-                or run.screen is None
-                or run.screen.method is not CandidateScreen.ACTIVITY_SHORTLIST_V1
+                or not run.uses_activity_shortlist
                 or self._run_states.get(run.run_id)
                 not in {RunRuntimeState.READY, RunRuntimeState.ACTIVE}
             ):
@@ -1777,11 +1796,9 @@ class StockerRuntime:
 
     def _remember_activity_qualification_sessions(self, instances: Sequence[RunInstance]) -> None:
         for instance in instances:
-            screen = instance.config.screen
             market = self._sessions.get(instance.config.run_id)
             if (
-                screen is not None
-                and screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
+                instance.config.uses_activity_shortlist
                 and market is not None
                 and market.active_bar_starts
             ):
@@ -3156,7 +3173,14 @@ def build_runtime(
     default = next(iter(services.values()))
 
     async def qualify(runs_to_prepare: Sequence[RunInstance]) -> Stage5QualificationResult:
-        return await qualify_active_runs(market_data_broker, runs_to_prepare)
+        results = []
+        for version, service in services.items():
+            selected = tuple(r for r in runs_to_prepare if r.config.strategy_version == version)
+            if not selected:
+                continue
+            assert service.qualify is not None
+            results.append(await service.qualify(selected))
+        return _merge_qualification_results(*results)
 
     runtime_store = RuntimeStore(database_path)
     runtime_store.backfill_payoffs(runs.runs, history_cache)

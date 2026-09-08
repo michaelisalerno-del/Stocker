@@ -3,7 +3,7 @@
 import pytest
 
 from stocker_core.config import RunsConfig
-from stocker_core.markets import CapBucket, MarketId
+from stocker_core.markets import CapBucket, MarketId, get_market
 from stocker_core.methods import SESSION_HARD, validate_run_method
 from stocker_core.runs import Environment, RunConfig
 from stocker_core.universes import UniverseDefinition
@@ -47,14 +47,20 @@ def test_method_owns_listing_universe_and_no_cap_filter(market):
     assert run.market_id == market
     assert run.cap_bucket is CapBucket.ALL
     assert run.screen is None
-    assert run.universe_snapshot.members
+    assert bool(run.universe_snapshot.members) == bool(get_market(market).listing_membership)
+    assert run.uses_activity_shortlist == (get_market(market).listing_membership is None)
     assert run.method_spec["universe_search"]["cap_constraint"] is None
     assert run.candidate_screen_id == "METHOD_REQUIRED_DATA"
 
 
-def test_unvalidated_market_and_live_are_not_selectable():
-    with pytest.raises(ValueError, match="not supported"):
-        add(market=MarketId.UK_LSE)
+def test_other_markets_restore_paper_testing_without_claiming_validation():
+    _, run = add(market=MarketId.UK_LSE)
+    assert run.method_spec["universe_search"]["validation"] == "UNVALIDATED_CROSS_MARKET_PAPER_TEST"
+    assert run.uses_activity_shortlist and run.screen is None
+    assert run.session.calendar == "XLON"
+    us = add(market=MarketId.US_ALL)[1]
+    for component in ("qualification", "vetoes", "direction", "entry", "exits", "artifact_hashes"):
+        assert run.method_spec[component] == us.method_spec[component]
     with pytest.raises(ValueError, match="PAPER-only"):
         add(environment=Environment.LIVE)
 

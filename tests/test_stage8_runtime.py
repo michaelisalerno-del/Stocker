@@ -1422,6 +1422,33 @@ def test_broker_config_change_reconnects_and_reconciles_affected_environment(
     asyncio.run(scenario())
 
 
+def test_first_run_after_empty_start_marks_account_reconciled(tmp_path):
+    async def scenario():
+        broker = FakeBroker()
+        disabled = _run().model_copy(update={"enabled": False})
+        runtime = _runtime(tmp_path, broker, disabled)
+        await runtime.start()
+        await runtime.replace_broker_config(
+            IbkrConfig(
+                environment=Environment.PAPER,
+                expected_account="DU123456",
+                host="127.0.0.1",
+                port=4002,
+                client_id=21,
+            )
+        )
+        enabled = disabled.model_copy(update={"enabled": True})
+        status = await runtime.apply_runs_config(
+            _runs(enabled), changed_run_ids=frozenset({enabled.run_id})
+        )
+        assert status.application is ApplicationState.READY
+        assert status.execution_environments[0].reconciled
+        assert status.execution_environments[0].ready
+        assert broker.submitted == []
+
+    asyncio.run(scenario())
+
+
 def test_broker_config_changes_restart_only_the_selected_environment(tmp_path: Path) -> None:
     async def scenario() -> None:
         paper = FakeBroker()

@@ -36,8 +36,12 @@ universes: []
 runs: []
 ```
 
-Legacy HOT_BY_VOLUME and Activity Shortlist sources remain for historical/research compatibility.
-They cannot be selected as current Session HARD filters. Cap remains metadata/research input,
+The other existing market choices are available for unvalidated cross-market PAPER testing.
+Session HARD owns their existing Activity Shortlist V1 discovery profile, with no cap restriction.
+It captures at 15 active minutes after the local open; a missed capture is reported explicitly
+and the next session is scheduled. It is a bounded test population, not a validated suitability
+rule or a complete listing universe. Old saved universes and archived run history remain readable.
+Legacy screens cannot be selected as independent current Session HARD filters. Cap remains metadata/research input,
 not a global live strategy control. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 The older research universe data manager below remains separate. Its current provider is EODHD,

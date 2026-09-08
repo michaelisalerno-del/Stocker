@@ -117,6 +117,14 @@ unchanged-signal comparison avoidance and pre-open/after-checkpoint restart prep
 `tests/dashboard_run_summary.cjs` and `tests/dashboard_run_start.cjs` passed with all HTTP mocked;
 the summary check covers refresh without loading the full universe and explicit audit retrieval.
 Changed-file Ruff and execution/dashboard mypy passed. No broker orders were used in testing.
+Deployed as `128847db548d109370881b6f41bc4d0d65de7976`. On the existing server data, the run
+summary returned HTTP 200 in 0.248 seconds with a 3,986-byte response while history preparation
+was active; before deployment it timed out at 12 seconds with no bytes. A subsequent overview
+probe took 2.452 seconds, so this does not claim every request has the summary's latency.
+Verification preserved 48,670 signal rows, all three enabled run configurations, frozen artifacts,
+the existing execution plan and 28 fills. The additive checkpoint index was present. History
+resumed after the final entry checkpoint (four requests in progress, zero live subscriptions),
+with no open orders or positions. Backup: `/var/lib/stocker/backups/run-summary-128847d`.
 The combined responsiveness fixes were deployed as `85983be23ee5a8f748aaec14e0ce976e4d221a34`.
 `rtk .venv/bin/pytest -q -o addopts=` passed 857 tests (five existing warnings); changed-file Ruff
 and execution-package mypy passed. Production verification preserved all three saved runs, frozen

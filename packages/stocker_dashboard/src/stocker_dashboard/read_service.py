@@ -95,6 +95,8 @@ class DashboardReadService:
         }
         result = []
         for run in self.config.runs:
+            if run.archived:
+                continue
             runtime = runtime_by_id.get(run.run_id)
             market_definition = get_market(run.market_id) if run.market_id is not None else None
             selected_session = (
@@ -203,7 +205,8 @@ class DashboardReadService:
         today = self.performance_service.performance(run, PerformancePeriod.TODAY)
         return {
             "run_id": run.run_id,
-            "historical_only": run.method_spec is None,
+            "historical_only": run.archived or run.method_spec is None,
+            "archived": run.archived,
             "method_spec": run.method_spec,
             "method_spec_hash": run.method_spec_hash,
             "provenance": self.runtime_store.method_run(run_id),
@@ -764,7 +767,9 @@ class DashboardReadService:
                 }
                 for item in self.config.universes
             ],
-            "runs": [item.model_dump(mode="json") for item in self.config.runs],
+            "runs": [
+                item.model_dump(mode="json") for item in self.config.runs if not item.archived
+            ],
             "strategies": [
                 {
                     "strategy": item.config_name,

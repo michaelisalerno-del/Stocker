@@ -79,6 +79,7 @@ class RunConfig(BaseModel):
 
     run_id: Identifier
     enabled: bool = True
+    archived: bool = False
     universe: Identifier
     strategy: Identifier
     strategy_id: Identifier | None = None
@@ -101,6 +102,8 @@ class RunConfig(BaseModel):
     def validate_lineage(self) -> "RunConfig":
         from stocker_core.strategies import SESSION_HARD_HV_METHOD
 
+        if self.archived and self.enabled:
+            raise ValueError("Archived runs cannot be enabled")
         if self.environment is Environment.LIVE and (
             self.strategy
             in {

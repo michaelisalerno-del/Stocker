@@ -520,6 +520,42 @@ def test_orders_positions_and_trades_preserve_account_environment(tmp_path: Path
     assert trades["summary"]["trades"] == 0
 
 
+def test_archived_runs_leave_operational_lists_but_keep_history(tmp_path: Path) -> None:
+    service = _seed_authoritative_state(tmp_path)
+    service.ledger.record_fill(
+        BrokerFill(
+            execution_id="archive-target",
+            order_id=102,
+            account="U123456",
+            environment=Environment.LIVE,
+            con_id=101,
+            symbol="NVDA",
+            side=OrderAction.BUY,
+            quantity=12,
+            price=177.80,
+            executed_at=NOW,
+        )
+    )
+    service.config = service.config.model_copy(
+        update={
+            "runs": tuple(
+                run.model_copy(update={"enabled": False, "archived": True})
+                for run in service.config.runs
+            )
+        }
+    )
+    assert service.runs() == []
+    assert service.universe_runs() == {"PAPER": [], "LIVE": []}
+    trades = service.trades(environment=None, start=None, end=None)
+    assert trades["total"] == 1
+    assert trades["items"][0]["run_id"] == "US-SH-LIVE"
+    assert service.order_detail("plan-live-nvda")["run_id"] == "US-SH-LIVE"
+    payload = service.config.runs[0].model_dump()
+    payload["enabled"] = True
+    with pytest.raises(ValueError, match="Archived runs cannot be enabled"):
+        RunConfig.model_validate(payload)
+
+
 def test_unknown_broker_position_remains_visible_without_invented_lineage(tmp_path: Path) -> None:
     service = _seed_authoritative_state(tmp_path)
     service.ledger.replace_broker_snapshot(

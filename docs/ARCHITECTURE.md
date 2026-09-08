@@ -181,6 +181,10 @@ fields. Legacy configuration enums and old calculation/payoff/scanner sources re
 read history and reproduce research. Old methods cannot start through runtime, API or controls.
 There is no destructive reset or conversion of old decisions into the new method.
 
+Retired runs can be marked `archived: true` with `enabled: false`. They disappear from operational
+run lists while remaining available to historical trades, orders and candidate details. Archived
+runs cannot be enabled; archiving never deletes ledger rows or changes broker orders.
+
 The FastAPI/vanilla-JS dashboard is a consumer/controller of these boundaries. Market, Method
 and Start PAPER run are primary. Account risk/capacity and detailed method provenance are
 expandable. Standalone dashboard mode edits saved configuration but does not connect or trade.

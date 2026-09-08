@@ -1094,6 +1094,9 @@ class StockerRuntime:
         self._strategies: dict[str, SessionHardMethod] = {}
         self._qualification = Stage5QualificationResult((), ())
         self._expected_move_prepared: set[tuple[str, date, datetime, tuple[int, ...]]] = set()
+        self._expected_move_tasks: dict[
+            tuple[str, date, tuple[int, ...]], tuple[asyncio.Task[None], frozenset[str]]
+        ] = {}
         self._run_ready_at: dict[str, datetime] = {}
         self._last_sync: datetime | None = None
         self._stopping = False
@@ -1113,6 +1116,7 @@ class StockerRuntime:
         self._run_ready_at.clear()
         self._qualification = Stage5QualificationResult((), ())
         self._expected_move_prepared.clear()
+        self._expected_move_tasks.clear()
         for environment in self._environment_ready:
             self._environment_ready[environment] = False
             self._environment_reconciled[environment] = False
@@ -1305,6 +1309,11 @@ class StockerRuntime:
 
         self._stopping = True
         self._state = ApplicationState.STOPPING
+        preparation = [task for task, _owners in self._expected_move_tasks.values()]
+        for task in preparation:
+            task.cancel()
+        await asyncio.gather(*preparation, return_exceptions=True)
+        self._expected_move_tasks.clear()
         if self._payoff_history_task is not None:
             self._payoff_history_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -1687,6 +1696,14 @@ class StockerRuntime:
         return self._method_services[str(run.strategy_version)]
 
     async def _prepare_upcoming_expected_moves(self, now: datetime) -> None:
+        enabled = {i.config.run_id for i in self._manager.list_runs() if i.config.enabled}
+        for pending_key, (task, owners) in tuple(self._expected_move_tasks.items()):
+            if task.done():
+                if not task.cancelled() and (error := task.exception()) is not None:
+                    self._logger.warning("expected_move_preparation_failed", reason=str(error))
+                del self._expected_move_tasks[pending_key]
+            elif not owners.intersection(enabled):
+                task.cancel()
         self._expected_move_prepared = {
             key for key in self._expected_move_prepared if key[2] >= now
         }
@@ -1737,7 +1754,19 @@ class StockerRuntime:
                             symbol=request.instrument.symbol,
                             reason=str(exc),
                         )
-            await stage5.prepare_expected_moves(requests, session=session, t0=t0)
+            # Downloads must not hold the scheduler/control lock across the whole universe.
+            # An in-flight session preparation is shared by subsequent checkpoints.
+            task_key = version, session, con_ids
+            if task_key not in self._expected_move_tasks:
+                self._expected_move_tasks[task_key] = (
+                    asyncio.create_task(
+                        stage5.prepare_expected_moves(requests, session=session, t0=t0)
+                    ),
+                    frozenset(run_ids),
+                )
+            else:
+                task, owners = self._expected_move_tasks[task_key]
+                self._expected_move_tasks[task_key] = (task, owners | frozenset(run_ids))
 
     async def _refresh_scheduled_activity_shortlists(self, now: datetime) -> None:
         """Qualify fixed-time activity screens once they become causally due."""

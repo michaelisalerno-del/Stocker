@@ -578,6 +578,41 @@ def test_clean_startup_reconciles_before_reaching_ready(tmp_path: Path) -> None:
     assert disconnected.buying_power is None
 
 
+def test_slow_preparation_does_not_hold_run_controls_or_shutdown(tmp_path):
+    async def scenario():
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        class SlowHistory(FakeFeatureService):
+            async def prepare_expected_moves(self, requests, *, session, t0):
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+
+        run = _hv_run()
+        runtime = _runtime(
+            tmp_path, FakeBroker(), run,
+            clock=MutableClock(datetime(2026, 9, 2, 13, 56, tzinfo=UTC)),
+            stage5_by_strategy={
+                SESSION_HARD_HV_METHOD.strategy_version: Stage5Analyzer(SlowHistory())
+            },
+        )
+        await runtime.start()
+        await asyncio.wait_for(runtime.poll_once(), timeout=0.5)
+        await asyncio.wait_for(started.wait(), timeout=0.5)
+        disabled = run.model_copy(update={"enabled": False})
+        await asyncio.wait_for(
+            runtime.apply_runs_config(_runs(disabled), frozenset({run.run_id})), timeout=0.5
+        )
+        await asyncio.wait_for(runtime.stop(), timeout=0.5)
+        assert cancelled.is_set()
+        assert runtime.status().application is ApplicationState.STOPPED
+
+    asyncio.run(scenario())
+
+
 def test_activity_qualification_rotates_once_on_each_new_market_session(
     tmp_path: Path,
 ) -> None:

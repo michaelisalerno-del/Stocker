@@ -55,6 +55,7 @@ class PriorSessionExpectedMoveService:
         self.cache = cache
         self.history = IbkrHistoryService(broker, cache)
         self.prepared: dict[tuple[int, date], ExpectedMoveResult] = {}
+        self._prior_closes: dict[tuple[str, date], tuple[datetime, ...]] = {}
 
     async def prepare_expected_move(
         self,
@@ -67,13 +68,16 @@ class PriorSessionExpectedMoveService:
         key = instrument.con_id, session
         if key in self.prepared:
             return
-        calendar = get_market_calendar(market.calendar)
-        schedule = calendar.schedule(
-            start_date=session - timedelta(days=90), end_date=session - timedelta(days=1)
-        ).tail(21)
-        required = tuple(
-            (v - pd.Timedelta(minutes=1)).to_pydatetime() for v in schedule.market_close
-        )
+        calendar_key = market.calendar, session
+        if calendar_key not in self._prior_closes:
+            calendar = get_market_calendar(market.calendar)
+            schedule = calendar.schedule(
+                start_date=session - timedelta(days=90), end_date=session - timedelta(days=1)
+            ).tail(21)
+            self._prior_closes[calendar_key] = tuple(
+                (v - pd.Timedelta(minutes=1)).to_pydatetime() for v in schedule.market_close
+            )
+        required = self._prior_closes[calendar_key]
         try:
             if len(required) != 21:
                 raise ValueError("21 prior exchange sessions are required")

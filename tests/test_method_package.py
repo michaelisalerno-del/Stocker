@@ -436,7 +436,7 @@ def test_failed_shortability_is_a_single_persisted_admission(tmp_path):
     assert runtime._ledger.attempted_signal_ids("hv-run")
 
 
-def test_prior20_hv_uses_exact_prior_session_closes(tmp_path):
+def test_prior20_hv_uses_exact_prior_session_closes(tmp_path, monkeypatch):
     import asyncio
     import math
     from datetime import UTC, date, datetime
@@ -457,6 +457,13 @@ def test_prior20_hv_uses_exact_prior_session_closes(tmp_path):
         v.to_pydatetime(): 100 * math.exp(0.01 if index % 2 else 0)
         for index, v in enumerate(schedule.market_close)
     }
+    calendar_calls = []
+
+    def calendar_for(name):
+        calendar_calls.append(name)
+        return get_market_calendar(name)
+
+    monkeypatch.setattr("stocker_execution.session_hard_data.get_market_calendar", calendar_for)
 
     class History(IbkrConnection):
         def __init__(self):
@@ -483,6 +490,10 @@ def test_prior20_hv_uses_exact_prior_session_closes(tmp_path):
     assert result.historical_volatility == pytest.approx(0.01 * math.sqrt(20 / 19) * math.sqrt(252))
     assert broker.requested == list(closes)
     assert all(t.date() < session for t in broker.requested)
+    second = replace(instrument, con_id=2, symbol="SECOND")
+    asyncio.run(service.prepare_expected_move(second, **args))
+    assert asyncio.run(service.get_expected_move(second, **args)) == result
+    assert calendar_calls == ["XNYS"]
 
 
 def test_direction_inputs_and_aggregation_exclude_trigger_minute():

@@ -28,7 +28,13 @@ from stocker_execution.history import (
     IbkrHistoryCache,
     IbkrHistoryService,
 )
-from stocker_execution.ibkr import HistoricalBar, IbkrConnection, IbkrError, QualifiedInstrument
+from stocker_execution.ibkr import (
+    HISTORICAL_REQUEST_CONCURRENCY,
+    HistoricalBar,
+    IbkrConnection,
+    IbkrError,
+    QualifiedInstrument,
+)
 
 STAGE5_CALCULATION_VERSION = "STAGE5_PRE_MOVE_HV_V1"
 STAGE5_HV_CALCULATION_VERSION = "STAGE5_PRE_MOVE_HV_V1"
@@ -201,10 +207,19 @@ class Stage5CurrentDataService:
     ) -> None:
         """Capture source-specific observations before the causal T0 cutoff."""
 
-        await asyncio.gather(
-            *(self._prepare_expected_move(request, session=session, t0=t0) for request in requests),
-            return_exceptions=True,
-        )
+        pending = iter(requests)
+
+        async def prepare_next() -> None:
+            for request in pending:
+                # Isolate each symbol, and yield even when its history is already cached.
+                await asyncio.gather(
+                    self._prepare_expected_move(request, session=session, t0=t0),
+                    return_exceptions=True,
+                )
+
+        await asyncio.gather(*(
+            prepare_next() for _ in range(min(len(requests), HISTORICAL_REQUEST_CONCURRENCY))
+        ))
 
     async def _prepare_expected_move(
         self,

@@ -91,6 +91,16 @@ Session HARD uses 21 consecutive prior exchange-session final RTH one-minute clo
 20 log returns, sample standard deviation (`ddof=1`), annualized by `sqrt(252)`.
 Generic tick 104 is retained for historical diagnostics but cannot replace this frozen input.
 
+Prior-close preparation shares the exact exchange-calendar timestamps across stocks for each
+calendar/session. Stage 5 uses a bounded set of workers at the existing IBKR historical-request
+concurrency, yielding between instruments even on cache hits. The runtime tracks these downloads
+as background preparation, outside its scheduler/control lock, shares in-flight session work
+between checkpoints, and cancels it on shutdown or when no owning run remains enabled. Missing
+history still reports NOT_READY; no universe filter, data substitution or trading threshold is
+introduced. This fixes the observed all-universe calendar rebuild that starved HTTP requests,
+and prevents a long history download from holding run controls. Regression tests cover calendar
+reuse with unchanged HV, request-loop fairness, and controls/shutdown during stalled history.
+
 The existing expected-move arithmetic uses market active regular minutes:
 `M = P0 × HV × sqrt(15 / (252 × regular_minutes)) × 0.67448975`.
 T0 qualification aggregates the exact completed one-minute prefix into five-minute bars.

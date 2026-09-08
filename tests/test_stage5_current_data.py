@@ -206,6 +206,39 @@ def test_expected_move_preparation_isolates_one_unmappable_instrument(tmp_path: 
     assert expected_move.con_ids == [123]
 
 
+def test_cached_universe_preparation_leaves_turns_for_dashboard_requests(tmp_path):
+    from dataclasses import replace
+
+    expected_move = CapturingExpectedMovePreparation()
+    service = Stage5CurrentDataService(
+        HistoryBoundary(), IbkrHistoryCache(tmp_path / "history.sqlite3"), expected_move
+    )
+    requests = tuple(
+        Stage5QualifiedRequest(
+            replace(instrument(), con_id=con_id), (Stage5Membership("HV_RUN", "US_ALL"),)
+        )
+        for con_id in range(1, 65)
+    )
+    observed = []
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        finished = False
+
+        def dashboard_turn():
+            if not finished:
+                observed.append(len(expected_move.con_ids))
+                loop.call_soon(dashboard_turn)
+
+        loop.call_soon(dashboard_turn)
+        await service.prepare_expected_moves(requests, session=T0.date(), t0=T0)
+        finished = True
+
+    asyncio.run(scenario())
+    assert sorted(expected_move.con_ids) == list(range(1, 65))
+    assert any(0 < count < 64 for count in observed), observed
+
+
 def test_hv_stage5_reuses_pre_move_arithmetic_with_distinct_lineage(tmp_path: Path) -> None:
     result = asyncio.run(
         Stage5CurrentDataService(

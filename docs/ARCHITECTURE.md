@@ -97,6 +97,16 @@ all-listings run exposed thousands of individual synchronous commits blocking HT
 Entry observation and admission persist only changed immutable signals; unchanged rejections
 remain in the ledger without being serialized and rewritten four times per scheduler cycle.
 Expiry changes are still persisted immediately, before market-data awaits.
+The combined responsiveness fixes were deployed as `85983be23ee5a8f748aaec14e0ce976e4d221a34`.
+`rtk .venv/bin/pytest -q -o addopts=` passed 857 tests (five existing warnings); changed-file Ruff
+and execution-package mypy passed. Production verification preserved all three saved runs, frozen
+artifact bytes and historical ledger rows, with no open orders/positions or test orders. While
+history preparation was active, overview requests returned HTTP 200 in 0.141–0.148 seconds and
+the root page in 1.782 seconds, replacing the reproduced five-/ten-second zero-byte timeouts.
+This does not solve full-universe data capacity: 6,570 broker-qualified stocks require up to
+137,970 individual prior-close requests before cache hits, and the configured 100-line budget
+rejected 6,470 simultaneous stream requests. These are operational constraints, not new method
+suitability filters; neither the universe nor broker budget was changed by this fix.
 The dashboard's current Stock eligibility count is the number of saved checkpoint feature rows,
 not scan progress; Required data ready distinguishes rows with complete method inputs.
 

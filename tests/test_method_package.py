@@ -54,7 +54,12 @@ def test_frozen_model_reproduces_saved_fit_predictions():
     model = FrozenWhipsawModel()
     for row in examples():
         values = {k: v if v is not None else float("nan") for k, v in row["features"].items()}
-        assert model.score(values) == row["probability"]
+        score = model.score(values)
+        # The frozen pipeline can differ by floating-point rounding across CPU/BLAS builds.
+        # This tolerance is test-only; prospective admission still uses the exact <= cutoff.
+        assert score == pytest.approx(row["probability"], rel=1e-14, abs=0)
+        assert model.score(values) == score
+        assert model.admits(score) == model.admits(row["probability"])
 
 
 def test_fit_cutoff_quantile_and_inclusive_equality():

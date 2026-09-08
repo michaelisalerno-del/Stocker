@@ -2162,15 +2162,7 @@ class StockerRuntime:
     def record_fill(self, fill: BrokerFill) -> bool:
         """Persist one broker fill idempotently and expose its run-level operational count."""
 
-        matching = None
-        for record in self._ledger.active_records(fill.environment, fill.account):
-            if fill.order_id in {
-                record.parent_order_id,
-                record.stop_order_id,
-                record.target_order_id,
-            }:
-                matching = record
-                break
+        matching = self._ledger.record_for_order(fill.environment, fill.account, fill.order_id)
         if matching is None:
             for run_id, execution in self._execution.items():
                 if execution.run_environment is not fill.environment:
@@ -2191,7 +2183,11 @@ class StockerRuntime:
             )
             return False
         matching_execution = self._execution.get(matching.run_id)
-        if matching_execution is None or not matching_execution.record_fill(fill):
+        accepted = (
+            matching_execution.record_fill(fill) if matching_execution is not None
+            else self._ledger.record_fill(fill)
+        )
+        if not accepted:
             return False
         market = self._sessions.get(matching.run_id)
         session = market.session if market is not None else _aware(fill.executed_at).date()

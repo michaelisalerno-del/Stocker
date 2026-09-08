@@ -120,8 +120,17 @@ Qualification and Q1 must already be available. If the first break preceded armi
 expires. A missing event prefix after disconnect/restart cannot be reconstructed from OHLC.
 Later opposite movement never changes an established side or retrospectively cancels an entry.
 
-The entry window remains five minutes. Entry references the frozen threshold.
-Stop distance is 0.50M, target distance is 1.00M, and the deadline remains original T0+15.
+The entry window is `[T0, T0+5 minutes)`, including when no new print arrives.
+An untriggered candidate expires as `ENTRY_WINDOW_EXPIRED` at the boundary.
+Entry references the frozen threshold, independently of the actual broker fill:
+
+| Direction | Trigger / entry reference | Method stop | Method target |
+|---|---|---|---|
+| LONG | P0 + 0.20M | reference − 0.50M | reference + 1.00M |
+| SHORT | P0 − 0.20M | reference + 0.50M | reference − 1.00M |
+
+Nominal 1R is 0.50M and the deadline is always original T0+15. A first break at
+T0+3 leaves twelve minutes until that deadline, not fifteen.
 The package emits explicit prices/deadline; account settings cannot replace those exits.
 The old TOP5 filter and pooled historical payoff hurdle are historical-only.
 
@@ -173,6 +182,29 @@ A broker time-conditioned market child implements the deadline; stop, target and
 OCA reduction for remaining quantity. Stopping a run stops future entries and does not flatten
 exposure or remove protective orders.
 
+The existing close path is installed with the bracket: the parent-linked TIMEOUT market order
+has an IBKR `TimeCondition(isMore=True)` at the original deadline. It shares OCA type 2 with
+the GTC stop/target, reducing/cancelling remaining siblings as exits fill. It does not depend on
+the application's poll loop or a timer restarted at entry. Its fill records `METHOD_DEADLINE`;
+stop and target fills record `STOP` and `TARGET`. There is no second runtime flatten mechanism.
+Broker acceptance/fills remain authoritative; reconciliation reports missing protection explicitly.
+
+Stage 7 already rounds broker prices to the instrument tick grid (LONG stop up / target down;
+SHORT stop down / target up). This execution rule is unchanged. Exact `method_stop_price` and
+`method_target_price` are now stored alongside these submitted `stop_price` and `target_price`
+values. Neither pair is recentered after a fill. For P0=100, M=1, LONG reference=100.20,
+a fill at 100.23 leaves method stop=99.70 and target=101.20.
+
+The ledger retains `entry_reference` separately from `average_fill_price` (exposed as
+`actual_fill_price`), exit fills and commissions. Diagnostics derive signed entry slippage,
+fill-relative stop distance and reward remaining from those persisted prices. Method-reference R
+is the directional exit-price move from the frozen reference divided by nominal risk; execution R
+is actual realised P/L divided by filled quantity times the same nominal risk. Neither uses a
+fill-redefined 1R. The research 10bps assumption never changes broker prices or actual execution P/L.
+Late commission reports enrich an existing execution without adding quantity or another fill count;
+`commissions_complete` distinguishes final reports from P/L that includes only costs received so far.
+Order/position details expose these diagnostics; trade rows expose execution R and exit reason.
+
 TRADES subscriptions start before T0 and share the existing market-data budget. Unavailable
 capacity is observable per-symbol failure; the method does not invent a different stock filter.
 Consumed/expired streams are released, including before quote/borrow admission where possible.
@@ -192,6 +224,22 @@ absolute exits, deadline and run/method/artifact provenance. Checkpoints are res
 Reload restores candidate and cohort state; it never replays a missed live first break.
 The execution ledger reserves a unique signal before transmission, stores fills once and
 reconciles broker-authoritative orders/positions on every connection epoch.
+
+ARMED recovery restores P0/M, both triggers, arming time, event cursor and window. A missing
+TRADES prefix expires explicitly rather than inferring which threshold broke during downtime.
+A saved first break retains its side, time, threshold reference, absolute geometry and deadline;
+later opposite prints cannot modify it. Pending/open execution recovers persisted broker leg IDs,
+including TIMEOUT, actual fills and the original deadline. Reservation prevents resubmission;
+reconciliation ingests a deadline exit that occurred while disconnected without extending the clock.
+
+The September 2026 exit audit found existing causal first-break and fill-independent geometry
+correct. It corrected no-print expiry at exactly T0+5, recognition of TIMEOUT/closed-order callbacks,
+missing timeout identity during recovery, and missing exit/commission/R diagnostics.
+The execution diagnostics migration adds nullable
+method-price, exit-reason and commission fields plus a completeness flag; existing rows are kept,
+and unknown historical method prices remain unknown. No model, Q1 cutoff, capacity rule or shared
+account protection was changed. Focused tests use in-memory broker clients and temporary SQLite
+files; they verify the emitted timed-close contract without placing venue orders.
 
 Migration is additive: new method tables and nullable execution provenance/deadline/timeout
 columns; old rows and research artifacts are retained. Old signals deserialize with absent new

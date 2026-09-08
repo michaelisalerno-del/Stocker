@@ -574,6 +574,9 @@ class DashboardReadService:
             "current_price": None,
             "stop": record.stop_price if record else None,
             "target": record.target_price if record else None,
+            "execution": record.execution_metrics() if record else None,
+            "method_spec_hash": record.method_spec_hash if record else None,
+            "market_id": record.market_id if record else None,
             "unrealised_pnl": None,
             "attribution_status": attribution_status,
             "opened_at": record.opened_at.isoformat() if record and record.opened_at else None,
@@ -850,13 +853,19 @@ class DashboardReadService:
             "symbol": record.symbol,
             "side": record.side.value,
             "quantity": record.intended_quantity,
-            "order_type": "MARKET + PROTECTION",
+            "order_type": (
+                "LIMIT + PROTECTION" if record.entry_limit_price is not None
+                else "MARKET + PROTECTION"
+            ),
             "entry": record.entry_reference,
             "stop": record.stop_price,
             "target": record.target_price,
             "status": record.status.value,
             "filled": record.filled_quantity,
             "average_fill": record.average_fill_price,
+            "execution": record.execution_metrics(),
+            "method_spec_hash": record.method_spec_hash,
+            "market_id": record.market_id,
             "rejection_reason": record.rejection_reason,
             "orders": [
                 {
@@ -886,8 +895,13 @@ class DashboardReadService:
             "quantity": record.closed_quantity,
             "pnl": record.realized_pnl,
             "currency": currency,
-            "r": None,
-            "exit_reason": None,
+            "r": record.execution_metrics()["realized_execution_r"],
+            "exit_reason": record.exit_reason,
+            "execution": record.execution_metrics(),
+            "signal_id": record.signal_id,
+            "order_plan_id": record.order_plan_id,
+            "method_spec_hash": record.method_spec_hash,
+            "market_id": record.market_id,
         }
 
     def _run(self, run_id: str) -> RunConfig:

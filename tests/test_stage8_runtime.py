@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
@@ -1706,6 +1707,32 @@ def _open_order(plan: object, order_id: int, role: OrderRole) -> BrokerOpenOrder
         role,
         OrderLifecycle.SUBMITTED,
     )
+
+
+def test_deadline_fill_and_closed_trade_commission_are_known_runtime_events(tmp_path):
+    runtime, broker, _clock, plan = _submitted_runtime(tmp_path)
+    ledger = ExecutionLedger(tmp_path / "execution.sqlite3")
+    assert ledger.recover_open_order(_open_order(plan, 104, OrderRole.TIMEOUT))
+    entry = _fill(
+        plan, execution_id="entry", order_id=101, side=OrderAction.SELL,
+        quantity=plan.quantity, price=plan.entry_reference,
+    )
+    close = _fill(
+        plan, execution_id="deadline", order_id=104, side=OrderAction.BUY,
+        quantity=plan.quantity, price=plan.entry_reference,
+    )
+    assert runtime.record_fill(entry)
+    assert runtime.record_fill(close)
+    assert runtime.status().application is ApplicationState.READY
+    assert runtime.status().counters.fills == 2
+    assert not runtime.record_fill(replace(close, commission=1.25))
+    assert runtime.status().application is ApplicationState.READY
+    assert runtime.status().counters.fills == 2
+    record = ledger.get(plan.order_plan_id)
+    assert record.status is OrderLifecycle.CLOSED
+    assert record.exit_reason == "METHOD_DEADLINE"
+    assert record.realized_pnl == -1.25
+    assert len(broker.submitted) == 1
 
 
 def _fill(

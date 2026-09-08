@@ -70,6 +70,8 @@ class OrderPlan:
     deadline: datetime | None = None
     market_id: str | None = None
     method_spec_hash: str | None = None
+    method_stop_price: float | None = None
+    method_target_price: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

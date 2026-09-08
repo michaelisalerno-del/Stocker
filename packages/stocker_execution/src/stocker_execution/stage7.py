@@ -447,6 +447,8 @@ class Stage7ExecutionService:
             local_quantity = local_by_con_id.get(record.con_id, 0.0)
             if not ids:
                 problems.append(f"local plan {record.order_plan_id} has no broker identity")
+            elif record.deadline is not None and record.timeout_order_id is None:
+                problems.append(f"missing method deadline order for {record.order_plan_id}")
             elif local_quantity != 0.0 and not (
                 {record.stop_order_id, record.target_order_id}
                 | ({record.timeout_order_id} if record.timeout_order_id is not None else set())
@@ -921,6 +923,8 @@ def build_order_plan(
         deadline=order_intent.deadline,
         market_id=order_intent.market_id,
         method_spec_hash=order_intent.method_spec_hash,
+        method_stop_price=risk_decision.stop_price,
+        method_target_price=risk_decision.target_price,
     )
 
 

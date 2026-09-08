@@ -339,6 +339,13 @@ async function orderDetail(orderPlanId) {
   const fields = ["order_plan_id", "signal_id", "run_id", "strategy", "strategy_version", "environment", "account", "con_id", "symbol", "side", "quantity", "order_type", "entry", "stop", "target", "status", "filled", "average_fill", "time", "rejection_reason"];
   const legs = item.orders.map((leg) => `<div class="order-leg"><b>${esc(leg.role)}</b>${badge(leg.status)}<span>IBKR #${esc(leg.ibkr_order_id)}</span></div>`).join("");
   main.innerHTML = `${head(item.symbol, "Broker order state and protected-order lineage.")}<section class="section"><div class="detail-grid">${fields.map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${key === "environment" ? environment(item[key]) : esc(item[key])}</strong></div>`).join("")}</div></section><section class="section"><div class="section-head"><h2>IBKR order legs</h2></div>${legs}</section>`;
+  main.insertAdjacentHTML("beforeend", executionDetails(item));
+}
+function executionDetails(item) {
+  if (!item.execution) return "";
+  const values = {market: item.market_id, method_spec_hash: item.method_spec_hash, ...item.execution};
+  const cells = Object.entries(values).map(([key, value]) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${esc(value)}</strong></div>`).join("");
+  return `<details class="section"><summary>Method and fill diagnostics</summary><p>Nominal R is fixed at T0. Method prices are separate from broker tick-rounded protection. P/L includes commissions reported so far.</p><div class="detail-grid">${cells}</div></details>`;
 }
 async function positionsPage() {
   const params = new URLSearchParams(location.search);
@@ -358,6 +365,7 @@ async function positionDetail(environmentName, account, conId) {
   const fields = ["symbol", "con_id", "run_id", "strategy", "strategy_version", "signal_id", "order_plan_id", "environment", "account", "side", "quantity", "average_entry", "current_price", "stop", "target", "unrealised_pnl", "opened_at", "observed_at", "source"];
   const legs = item.orders.map((leg) => `<div class="order-leg"><b>${esc(leg.role)}</b>${badge(leg.status)}<span>IBKR #${esc(leg.ibkr_order_id)}</span></div>`).join("") || '<div class="empty">No Stocker order lineage for this broker position.</div>';
   main.innerHTML = `${head(`${item.symbol} — ${item.environment}`, "Broker-authoritative position with Stocker lineage when known.")}<section class="section"><div class="detail-grid">${fields.map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${key === "environment" ? environment(item[key]) : esc(item[key])}</strong></div>`).join("")}</div></section><section class="section"><div class="section-head"><h2>Protection</h2></div>${legs}</section>`;
+  main.insertAdjacentHTML("beforeend", executionDetails(item));
 }
 async function tradesPage() {
   const params = new URLSearchParams(location.search);

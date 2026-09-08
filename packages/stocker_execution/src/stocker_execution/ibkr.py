@@ -975,7 +975,11 @@ class IbkrConnection:
             side_text = str(execution.side).upper()
             side = OrderAction.SELL if side_text in {"SLD", "SELL"} else OrderAction.BUY
             report = getattr(source, "commissionReport", None)
-            commission = _optional_number(getattr(report, "commission", None))
+            # ib_async creates a zero-valued placeholder before the actual report arrives.
+            commission = (
+                _optional_number(getattr(report, "commission", None))
+                if getattr(report, "execId", "") == str(execution.execId) else None
+            )
             fills.append(
                 BrokerFill(
                     execution_id=str(execution.execId),

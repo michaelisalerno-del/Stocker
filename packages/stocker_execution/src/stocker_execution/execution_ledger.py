@@ -79,6 +79,61 @@ class ExecutionRecord:
     deadline: datetime | None = None
     market_id: str | None = None
     method_spec_hash: str | None = None
+    method_stop_price: float | None = None
+    method_target_price: float | None = None
+    exit_reason: str | None = None
+    commission_total: float | None = None
+    commissions_complete: bool = False
+
+    @property
+    def fill_relative_risk(self) -> float | None:
+        if self.average_fill_price is None or self.method_stop_price is None:
+            return None
+        direction = 1 if self.side is OrderAction.BUY else -1
+        return direction * (self.average_fill_price - self.method_stop_price)
+
+    @property
+    def fill_relative_reward(self) -> float | None:
+        if self.average_fill_price is None or self.method_target_price is None:
+            return None
+        direction = 1 if self.side is OrderAction.BUY else -1
+        return direction * (self.method_target_price - self.average_fill_price)
+
+    def execution_metrics(self) -> dict[str, float | str | bool | None]:
+        """Report from persisted prices; fills never redefine the nominal risk unit."""
+        direction = 1 if self.side is OrderAction.BUY else -1
+        risk = self.per_share_initial_risk
+        if risk is not None and risk <= 0:
+            risk = None
+        slippage = (
+            direction * (self.average_fill_price - self.entry_reference)
+            if self.average_fill_price is not None else None
+        )
+        return {
+            "entry_reference": self.entry_reference,
+            "actual_fill_price": self.average_fill_price,
+            "actual_exit_price": self.average_exit_price,
+            "method_stop_price": self.method_stop_price,
+            "method_target_price": self.method_target_price,
+            "method_deadline": self.deadline.isoformat() if self.deadline else None,
+            "nominal_r": risk,
+            "fill_relative_risk": self.fill_relative_risk,
+            "fill_relative_reward": self.fill_relative_reward,
+            "entry_slippage_bps": slippage / self.entry_reference * 10000
+            if slippage is not None and self.entry_reference > 0 else None,
+            "entry_slippage_r": slippage / risk
+            if slippage is not None and risk is not None else None,
+            "method_reference_r": (
+                direction * (self.average_exit_price - self.entry_reference) / risk
+                if self.average_exit_price is not None and risk is not None else None
+            ),
+            "realized_execution_r": self.realized_pnl / (self.filled_quantity * risk)
+            if self.realized_pnl is not None and self.filled_quantity > 0
+            and risk is not None else None,
+            "exit_reason": self.exit_reason,
+            "commission_total": self.commission_total,
+            "commissions_complete": self.commissions_complete,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +292,12 @@ class ExecutionLedger:
             for column in ("deadline", "market_id", "method_spec_hash"):
                 self._ensure_column(connection, "execution_plans", column, "TEXT")
             self._ensure_column(connection, "execution_plans", "timeout_order_id", "INTEGER")
+            for column in ("method_stop_price", "method_target_price", "commission_total"):
+                self._ensure_column(connection, "execution_plans", column, "REAL")
+            self._ensure_column(connection, "execution_plans", "exit_reason", "TEXT")
+            self._ensure_column(
+                connection, "execution_plans", "commissions_complete", "INTEGER NOT NULL DEFAULT 0"
+            )
 
     @staticmethod
     def _ensure_column(
@@ -287,9 +348,9 @@ class ExecutionLedger:
                         intended_quantity, entry_reference, stop_price, target_price,
                         status, created_at, initial_risk_budget, per_share_initial_risk,
                         diagnostic, entry_limit_price, entry_expires_at, deadline,
-                        market_id, method_spec_hash
+                        market_id, method_spec_hash, method_stop_price, method_target_price
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -317,6 +378,8 @@ class ExecutionLedger:
                         plan.deadline.isoformat() if plan.deadline else None,
                         plan.market_id,
                         plan.method_spec_hash,
+                        plan.method_stop_price,
+                        plan.method_target_price,
                     ),
                 )
             return True
@@ -568,7 +631,7 @@ class ExecutionLedger:
         return OrderRole(str(row["role"])) if row is not None else None
 
     def record_fill(self, fill: BrokerFill) -> bool:
-        """Record one execution once and derive its trade/position aggregate."""
+        """Record once, allowing later commission reports to enrich that execution."""
 
         if fill.quantity <= 0.0 or fill.price <= 0.0:
             return False
@@ -608,6 +671,18 @@ class ExecutionLedger:
                 ),
             )
             if cursor.rowcount == 0:
+                if fill.commission is not None:
+                    enriched = connection.execute(
+                        """
+                        UPDATE execution_fills SET commission = ?
+                        WHERE environment = ? AND account = ? AND execution_id = ?
+                          AND order_plan_id = ? AND commission IS NOT ?
+                        """,
+                        (fill.commission, fill.environment.value, fill.account,
+                         fill.execution_id, plan_id, fill.commission),
+                    )
+                    if enriched.rowcount:
+                        self._refresh_aggregate(connection, plan_id)
                 return False
             self._refresh_aggregate(connection, plan_id)
         return True
@@ -1046,6 +1121,21 @@ class ExecutionLedger:
             ).fetchall()
         return frozenset(int(row["order_id"]) for row in rows)
 
+    def record_for_order(
+        self, environment: Environment, account: str, order_id: int
+    ) -> ExecutionRecord | None:
+        """Resolve any persisted leg, including deadline exits and closed trades."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT p.* FROM execution_plans p JOIN execution_broker_orders o
+                ON p.order_plan_id = o.order_plan_id
+                WHERE o.environment = ? AND o.account = ? AND o.order_id = ?
+                """,
+                (environment.value, account, order_id),
+            ).fetchone()
+        return _record_from_row(row) if row is not None else None
+
     def _refresh_aggregate(self, connection: sqlite3.Connection, plan_id: str) -> None:
         fills = connection.execute(
             """
@@ -1081,18 +1171,29 @@ class ExecutionLedger:
         else:
             status = OrderLifecycle.SUBMITTED
         realized_pnl = None
+        reported_commissions = [
+            float(row["commission"]) for row in fills if row["commission"] is not None
+        ]
+        commission_total = sum(reported_commissions) if reported_commissions else None
+        commissions_complete = bool(fills) and len(reported_commissions) == len(fills)
+        exit_reason = None
+        if closed:
+            exit_reason = (
+                "METHOD_DEADLINE" if exits[-1]["role"] == OrderRole.TIMEOUT.value
+                else str(exits[-1]["role"])
+            )
         if closed and entry_average is not None and exit_average is not None:
             closed_quantity = min(entry_quantity, exit_quantity)
             direction = 1 if plan["side"] == OrderAction.BUY.value else -1
             gross = direction * (exit_average - entry_average) * closed_quantity
-            commissions = sum(float(row["commission"] or 0.0) for row in fills)
-            realized_pnl = gross - commissions
+            realized_pnl = gross - (commission_total or 0.0)
         connection.execute(
             """
             UPDATE execution_plans
             SET status = ?, filled_quantity = ?, average_fill_price = ?,
                 closed_quantity = ?, average_exit_price = ?, opened_at = ?,
-                closed_at = ?, realized_pnl = ?
+                closed_at = ?, realized_pnl = ?, exit_reason = ?, commission_total = ?,
+                commissions_complete = ?
             WHERE order_plan_id = ?
             """,
             (
@@ -1104,6 +1205,9 @@ class ExecutionLedger:
                 opened_at,
                 closed_at,
                 realized_pnl,
+                exit_reason,
+                commission_total,
+                int(commissions_complete),
                 plan_id,
             ),
         )
@@ -1158,6 +1262,11 @@ def _record_from_row(row: sqlite3.Row) -> ExecutionRecord:
         deadline=_optional_datetime(row["deadline"]),
         market_id=row["market_id"],
         method_spec_hash=row["method_spec_hash"],
+        method_stop_price=_optional_float(row["method_stop_price"]),
+        method_target_price=_optional_float(row["method_target_price"]),
+        exit_reason=row["exit_reason"],
+        commission_total=_optional_float(row["commission_total"]),
+        commissions_complete=bool(row["commissions_complete"]),
         filled_quantity=float(row["filled_quantity"]),
         average_fill_price=_optional_float(row["average_fill_price"]),
         closed_quantity=float(row["closed_quantity"]),

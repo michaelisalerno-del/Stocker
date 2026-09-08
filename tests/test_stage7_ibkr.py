@@ -330,7 +330,7 @@ def test_open_orders_positions_and_fills_are_normalized_without_callback_leakage
                 price=100.25,
                 time=datetime(2026, 9, 2, 14, 32, tzinfo=UTC),
             ),
-            commissionReport=SimpleNamespace(commission=0.25),
+            commissionReport=SimpleNamespace(execId="exec-1", commission=0.25),
         )
     ]
     connection = IbkrConnection(_config(), client=client, execution_enabled=True)
@@ -354,6 +354,10 @@ def test_open_orders_positions_and_fills_are_normalized_without_callback_leakage
     assert fills[0].side is OrderAction.SELL
     assert fills[0].quantity == 4.0
     assert fills[0].commission == 0.25
+    client.execution_values[0].commissionReport = SimpleNamespace(execId="", commission=0.0)
+    assert asyncio.run(connection.read_fills())[0].commission is None
+    client.execution_values[0].commissionReport = SimpleNamespace(execId="exec-1", commission=0.0)
+    assert asyncio.run(connection.read_fills())[0].commission == 0.0
 
 
 def test_broker_rejection_status_is_normalized() -> None:

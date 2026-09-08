@@ -146,6 +146,25 @@ class SessionHardMethod(SessionHardStructureDStrategy):
                     signal, status=SignalStatus.EXPIRED, reason=reason
                 )
 
+    def expire_waiting_before(self, now: datetime) -> tuple[StrategySignal, ...]:
+        """The half-open entry window also expires when no new print arrives."""
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("strategy expiry time must be timezone-aware")
+        expired = []
+        for signal_id, signal in tuple(self._signals.items()):
+            if (
+                signal.status is SignalStatus.WAITING_FOR_ENTRY
+                and now >= signal.t0 + timedelta(minutes=5)
+            ):
+                updated = replace(
+                    signal, status=SignalStatus.EXPIRED, reason="ENTRY_WINDOW_EXPIRED"
+                )
+                self._signals[signal_id] = updated
+                self._cohort_watch_ids.discard(signal_id)
+                self._strategy_candidate_ids.discard(signal_id)
+                expired.append(updated)
+        return tuple(expired)
+
     def evaluate(
         self, feature_rows: Sequence[Stage5FeatureSnapshot], context: StrategyContext
     ) -> tuple[StrategySignal, ...]:

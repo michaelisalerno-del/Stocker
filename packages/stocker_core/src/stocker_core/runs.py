@@ -11,6 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from stocker_core.markets import CAP_BUCKETS_V1, CapBucket, MarketId
 from stocker_core.universes import Identifier, UniverseCatalog, UniverseDefinition
 
+ACTIVITY_CAPACITY_V2_VERSION = "ACTIVITY_CAPACITY_V2_ENTITLED"
+
+
+def activity_snapshot_version(profile_id: str) -> str:
+    return ACTIVITY_CAPACITY_V2_VERSION if profile_id == "ACTIVITY_CAPACITY_V2" else profile_id
+
 
 class Environment(StrEnum):
     PAPER = "PAPER"
@@ -101,6 +107,10 @@ class RunConfig(BaseModel):
             .get("universe_search", {})
             .get("activity_profile", ACTIVITY_SHORTLIST_V1_ID)
         )
+
+    @property
+    def activity_profile_version(self) -> str:
+        return activity_snapshot_version(self.activity_profile_id)
 
     @property
     def uses_activity_shortlist(self) -> bool:

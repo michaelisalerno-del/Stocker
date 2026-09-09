@@ -79,6 +79,11 @@ timestamp. The immutable market/session/profile snapshot stores selected and exc
 scanner ranks and failures. Reloads reuse it; no retrospective checkpoint or missing trade prefix
 is replayed. Historical `ACTIVITY_SHORTLIST_V1` retains its 50-stock, one-minute capture semantics.
 The dashboard exposes the current profile's timestamp, watchlist and selection audit.
+Snapshot revision `ACTIVITY_CAPACITY_V2_ENTITLED` rejects IBKR warning 492 (imprecise scanner
+results without the required market-data permissions), scoped to the matching request ID.
+Earlier snapshots remain stored under their original revision and cannot seed this corrected
+path. A market with fewer than two entitled scanner components reports `DATA_NOT_ENTITLED`;
+it never falls back to unfiltered listings or imprecise scanner ranks.
 `scripts/migrate_activity_filter.py` writes a separate configuration with V1 runs archived and V2
 PAPER replacements retaining risk settings and enabled state; historical specs and database rows
 are preserved. Archived specifications retain their hash check and cannot be started.

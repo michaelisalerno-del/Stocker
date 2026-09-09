@@ -475,10 +475,12 @@ class ActivityShortlistService:
         *,
         profile_id: str = ACTIVITY_SHORTLIST_ID,
         watch_limit: int = ACTIVITY_SHORTLIST_WATCH_LIMIT,
+        profile_version: str | None = None,
         allow_late_capture: bool = False,
     ) -> None:
         self.store = store
         self.profile_id = profile_id
+        self.profile_version = profile_version or profile_id
         self.watch_limit = watch_limit
         self.allow_late_capture = allow_late_capture
 
@@ -498,7 +500,7 @@ class ActivityShortlistService:
             cap_bucket,
             session,
             profile_id=self.profile_id,
-            profile_version=self.profile_id,
+            profile_version=self.profile_version,
         )
         if existing is not None:
             return existing
@@ -633,7 +635,7 @@ class ActivityShortlistService:
             session=session,
             screen_timestamp=screen_at.astimezone(UTC),
             profile_id=self.profile_id,
-            profile_version=self.profile_id,
+            profile_version=self.profile_version,
             status=ActivityShortlistStatus.READY,
             components=used_components,
             candidates=rank_activity_candidates(rows, watch_limit=self.watch_limit),
@@ -658,7 +660,7 @@ class ActivityShortlistService:
             session,
             screen_at.astimezone(UTC),
             self.profile_id,
-            self.profile_id,
+            self.profile_version,
             status,
             components,
             (),

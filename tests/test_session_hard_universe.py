@@ -7,7 +7,7 @@ import pytest
 
 from stocker_core.markets import ActivityScanner, CapBucket, MarketId, get_market
 from stocker_core.methods import SESSION_HARD
-from stocker_core.runs import Environment, RunInstance, RunState
+from stocker_core.runs import ACTIVITY_CAPACITY_V2_VERSION, Environment, RunInstance, RunState
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 from stocker_execution.activity_shortlist import ScannerCandidate, ScannerCapabilities
 from stocker_execution.ibkr import IbkrConnection, QualifiedInstrument
@@ -105,7 +105,7 @@ def test_method_uses_existing_local_session_scan_and_reloads_snapshot(tmp_path, 
             CapBucket.ALL,
             now[0].astimezone(ZoneInfo(market.timezone)).date(),
             profile_id="ACTIVITY_CAPACITY_V2",
-            profile_version="ACTIVITY_CAPACITY_V2",
+            profile_version=ACTIVITY_CAPACITY_V2_VERSION,
         )
         assert snapshot.screen_timestamp == now[0]
         assert len(snapshot.candidates) == 12
@@ -184,6 +184,49 @@ def test_dashboard_reads_current_profile_not_legacy_shortlist(tmp_path):
     assert detail["watchlist_size"] == 5
     assert detail["activity_screen"]["profile_id"] == "ACTIVITY_CAPACITY_V2"
     assert len(detail["activity_screen"]["candidates"]) == 12
+
+
+def test_pre_entitlement_snapshot_is_preserved_but_not_reused(tmp_path):
+    from stocker_execution.activity_shortlist import (
+        ActivityShortlistService,
+        ActivityShortlistStore,
+    )
+    from test_stage10_extension_builder import add
+
+    config, run = add(market=MarketId.UK_LSE)
+    now = datetime(2026, 9, 8, 8, tzinfo=UTC)
+    broker = MarketBroker(get_market(MarketId.UK_LSE))
+    path = tmp_path / "activity.sqlite"
+    store = ActivityShortlistStore(path)
+    legacy = ActivityShortlistService(
+        store, profile_id="ACTIVITY_CAPACITY_V2", allow_late_capture=True
+    )
+    original = asyncio.run(
+        legacy.get_or_create(
+            broker,
+            market=broker.market,
+            cap_bucket=CapBucket.ALL,
+            session=now.date(),
+            screen_at=now,
+            now=now,
+        )
+    )
+    assert sum(c.selected for c in original.candidates) == 12
+    current = SessionHardUniverseSearch(broker, path, lambda: now)
+    result = asyncio.run(
+        current.qualify((RunInstance(run, config.universes[-1], RunState.ACTIVE),))
+    )
+    assert len(result.requests) == 5 and len(broker.scans) == 6
+    assert (
+        store.get(
+            run.market_id.value,
+            CapBucket.ALL,
+            now.date(),
+            profile_id="ACTIVITY_CAPACITY_V2",
+            profile_version="ACTIVITY_CAPACITY_V2",
+        )
+        == original
+    )
 
 
 @pytest.mark.parametrize("market_id", [MarketId.HONG_KONG_HKEX, MarketId.JAPAN_TSE])

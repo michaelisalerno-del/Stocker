@@ -501,7 +501,7 @@ class IbkrConnection:
                 "too many scanner",
             )
         )
-        entitlement = code == 354 or any(
+        entitlement = code in {354, 492} or any(
             phrase in normalized
             for phrase in ("not subscribed", "market data permission", "not entitled")
         )
@@ -1165,19 +1165,27 @@ class IbkrConnection:
                 cancel = getattr(self._client, "cancelScannerSubscription", None)
                 wrapper = getattr(self._client, "wrapper", None)
                 if callable(request) and callable(cancel) and wrapper is not None:
-                    data_list = request(subscription, [], filter_options or [])
-                    future = wrapper.startReq(data_list.reqId, container=data_list)
-                    try:
-                        result = await asyncio.wait_for(
-                            future,
-                            timeout=self.config.request_timeout_seconds,
-                        )
-                        return list(result)
-                    finally:
-                        cancel(data_list)
-                        end_request = getattr(wrapper, "_endReq", None)
-                        if callable(end_request):
-                            end_request(data_list.reqId)
+                    with self.capture_api_errors() as errors:
+                        data_list = request(subscription, [], filter_options or [])
+                        future = wrapper.startReq(data_list.reqId, container=data_list)
+                        try:
+                            result = await asyncio.wait_for(
+                                future,
+                                timeout=self.config.request_timeout_seconds,
+                            )
+                            if any(
+                                e.request_id == data_list.reqId and e.code == 492 for e in errors
+                            ):
+                                raise IbkrError(
+                                    "DATA_NOT_ENTITLED: market data permission required "
+                                    "for precise scanner results (IBKR 492)"
+                                )
+                            return list(result)
+                        finally:
+                            cancel(data_list)
+                            end_request = getattr(wrapper, "_endReq", None)
+                            if callable(end_request):
+                                end_request(data_list.reqId)
                 if filter_options is None:
                     result = await asyncio.wait_for(
                         self._client.reqScannerDataAsync(subscription),

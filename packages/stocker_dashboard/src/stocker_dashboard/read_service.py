@@ -142,7 +142,7 @@ class DashboardReadService:
                         run.cap_bucket,
                         selected_session,
                         profile_id=run.activity_profile_id,
-                        profile_version=run.activity_profile_id,
+                        profile_version=run.activity_profile_version,
                     )
                     if self.activity_store is not None
                     and market_definition is not None
@@ -231,7 +231,7 @@ class DashboardReadService:
         if self.activity_store is not None and market is not None and run.cap_bucket is not None:
             screen = self.activity_store.get(
                 market.market_id.value, run.cap_bucket, selected_session,
-                profile_id=run.activity_profile_id, profile_version=run.activity_profile_id,
+                profile_id=run.activity_profile_id, profile_version=run.activity_profile_version,
             )
         today = self.performance_service.performance(run, PerformancePeriod.TODAY)
         return {
@@ -352,10 +352,11 @@ class DashboardReadService:
         if self.activity_store is None:
             raise ValueError("activity shortlist store is unavailable")
         from stocker_core.markets import CapBucket
+        from stocker_core.runs import activity_snapshot_version
 
         snapshot = self.activity_store.get(
             market_id, CapBucket(cap_bucket), session,
-            profile_id=profile_id, profile_version=profile_id,
+            profile_id=profile_id, profile_version=activity_snapshot_version(profile_id),
         )
         if snapshot is None:
             raise ValueError("unknown activity shortlist snapshot")

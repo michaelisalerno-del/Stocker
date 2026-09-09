@@ -214,8 +214,6 @@ class WatchlistScannerClient(ConcurrencyClient):
         ]
 
 
-
-
 def config(*, market_data_line_budget: int = 100) -> IbkrConfig:
     return IbkrConfig(
         environment=Environment.PAPER,
@@ -490,11 +488,36 @@ def test_daily_resource_counters_roll_over() -> None:
     connection = IbkrConnection(config(), client=client)  # type: ignore[arg-type]
     client.errorEvent.emit(7, 100, "pacing violation", None)
     assert connection.resource_status().pacing_violations_today == 1
-
     connection._reset_daily_resource_counters(connection._resource_counter_date + timedelta(days=1))
-
     assert connection._pacing_violations_today == 0
     assert connection._market_data_requests_today == 0
+
+
+@pytest.mark.parametrize("request_id", [71, 999])
+def test_scanner_permission_warning_rejects_only_its_own_imprecise_results(request_id):
+    async def scenario():
+        client = LowLevelScannerClient()
+        client.errorEvent = CallbackEvent()
+        connection = connected_stream_boundary(client)
+        task = asyncio.create_task(connection.hot_us_stocks_by_volume())
+        await wait_until(lambda: len(client.wrapper.futures), 1)
+        client.errorEvent.emit(
+            request_id,
+            492,
+            "You must subscribe for additional permissions to obtain precise results",
+            None,
+        )
+        client.wrapper.futures[0].set_result([])
+        if request_id == 71:
+            with pytest.raises(IbkrError, match="market data permission"):
+                await task
+        else:
+            assert await task == ()
+        assert client.cancelled_scanners == [71]
+        assert connection.resource_status().active_scanners == 0
+        assert len(client.errorEvent.handlers) == 1
+
+    asyncio.run(scenario())
 
 
 def test_realistic_capacity_simulation_shares_physical_work_and_stays_below_budget() -> None:
@@ -708,9 +731,12 @@ def test_resource_diagnostic_reads_actual_frozen_activity_members_read_only(
 def test_tick_capacity_error_is_reported_and_rejected_prefix_is_unusable():
     client = ErrorClient()
     broker = IbkrConnection(config(), client=client)
-    client.errorEvent.emit(32510, 10190,
+    client.errorEvent.emit(
+        32510,
+        10190,
         "Max number of tick-by-tick requests has been reached.",
-        SimpleNamespace(conId=6588, symbol="DTF", exchange="SMART"))
+        SimpleNamespace(conId=6588, symbol="DTF", exchange="SMART"),
+    )
     status = broker.resource_status()
     assert status.capacity_rejects_today == 1
     assert "10190" in status.last_resource_error
@@ -722,13 +748,16 @@ def test_tick_streams_have_separate_capacity_and_broker_rejection_invalidates_pr
             super().__init__()
             self.errorEvent = CallbackEvent()
             self.streams = {}
+
         def reqTickByTickData(self, contract, tick_type, number, ignore_size):
             self.requested.append(contract.conId)
             stream = SimpleNamespace(updateEvent=CallbackEvent(), tickByTicks=[])
             self.streams[contract.conId] = stream
             return stream
+
         def cancelTickByTickData(self, contract, tick_type):
             self.cancelled.append(contract.conId)
+
     client = Client()
     broker = connected_stream_boundary(client, budget=100)
     for con_id in range(1, 6):
@@ -736,9 +765,9 @@ def test_tick_streams_have_separate_capacity_and_broker_rejection_invalidates_pr
     with pytest.raises(IbkrError, match="TICK_BY_TICK_CAPACITY"):
         broker.prepare_trade_events(stock(6))
     assert client.requested == [1, 2, 3, 4, 5]
-    client.errorEvent.emit(1, 10190,
-        "Max number of tick-by-tick requests has been reached.",
-        SimpleNamespace(conId=1))
+    client.errorEvent.emit(
+        1, 10190, "Max number of tick-by-tick requests has been reached.", SimpleNamespace(conId=1)
+    )
     with pytest.raises(IbkrError, match="PREFIX_UNAVAILABLE"):
         broker.trade_events(stock(1), t0=datetime.now(UTC))
     assert 1 in client.cancelled

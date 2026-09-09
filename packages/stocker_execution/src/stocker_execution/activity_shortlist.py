@@ -45,6 +45,7 @@ class ScannerCandidate:
     exchange: str
     primary_exchange: str | None
     currency: str
+    warning: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -576,6 +577,7 @@ class ActivityShortlistService:
                 )
             )
         rows: dict[ActivityScanner, tuple[ScannerCandidate, ...]] = {}
+        warnings: list[str] = []
         entitlement_failure = False
         cap_filter_failure = False
         for component in components:
@@ -605,6 +607,7 @@ class ActivityShortlistService:
                 if status is ActivityShortlistStatus.DATA_NOT_ENTITLED:
                     entitlement_failure = True
                 continue
+            warnings.extend(f"{component.value}: {row.warning}" for row in scanned if row.warning)
             if allowed_symbols is not None:
                 scanned = tuple(item for item in scanned if item.symbol in allowed_symbols)
             rows[component] = scanned
@@ -639,6 +642,7 @@ class ActivityShortlistService:
             status=ActivityShortlistStatus.READY,
             components=used_components,
             candidates=rank_activity_candidates(rows, watch_limit=self.watch_limit),
+            reason="; ".join(dict.fromkeys(warnings)),
         )
         return self.store.save_once(snapshot)
 

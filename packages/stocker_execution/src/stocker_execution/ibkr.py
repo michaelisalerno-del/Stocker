@@ -48,6 +48,12 @@ HISTORICAL_REQUEST_CONCURRENCY = 4
 
 
 @dataclass(frozen=True, slots=True)
+class _ScannerResult:
+    rows: tuple[object, ...]
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class IbkrApiError:
     """One sanitized TWS/Gateway API error observed during a data request."""
 
@@ -501,11 +507,13 @@ class IbkrConnection:
                 "too many scanner",
             )
         )
-        entitlement = code in {354, 492} or any(
-            phrase in normalized
-            for phrase in ("not subscribed", "market data permission", "not entitled")
+        entitlement = code != 492 and (
+            code == 354 or any(
+                phrase in normalized
+                for phrase in ("not subscribed", "market data permission", "not entitled")
+            )
         )
-        if not (pacing or capacity or entitlement):
+        if not (pacing or capacity or entitlement or code == 492):
             return
         self._reset_daily_resource_counters()
         if pacing:
@@ -1132,7 +1140,7 @@ class IbkrConnection:
             scanCode="HOT_BY_VOLUME",
         )
         try:
-            rows = await self._bounded_scanner_data(subscription)
+            rows = (await self._bounded_scanner_data(subscription)).rows
         except Exception as exc:
             raise IbkrError(
                 f"IBKR HOT_BY_VOLUME scanner request failed: {sanitize_ibkr_message(exc)}"
@@ -1153,7 +1161,7 @@ class IbkrConnection:
         self,
         subscription: object,
         filter_options: list[object] | None = None,
-    ) -> list[object]:
+    ) -> _ScannerResult:
         """Collect one scan and guarantee broker-side cancellation on every exit."""
 
         self._reset_daily_resource_counters()
@@ -1173,14 +1181,11 @@ class IbkrConnection:
                                 future,
                                 timeout=self.config.request_timeout_seconds,
                             )
-                            if any(
-                                e.request_id == data_list.reqId and e.code == 492 for e in errors
-                            ):
-                                raise IbkrError(
-                                    "DATA_NOT_ENTITLED: market data permission required "
-                                    "for precise scanner results (IBKR 492)"
-                                )
-                            return list(result)
+                            warnings = tuple(
+                                f"IBKR scanner precision warning (492): {e.message}"
+                                for e in errors if e.request_id == data_list.reqId and e.code == 492
+                            )
+                            return _ScannerResult(tuple(result), warnings)
                         finally:
                             cancel(data_list)
                             end_request = getattr(wrapper, "_endReq", None)
@@ -1196,7 +1201,7 @@ class IbkrConnection:
                         self._client.reqScannerDataAsync(subscription, [], filter_options),
                         timeout=self.config.request_timeout_seconds,
                     )
-                return list(result)
+                return _ScannerResult(tuple(result))
             finally:
                 self._active_scanners -= 1
 
@@ -1355,7 +1360,8 @@ class IbkrConnection:
             else:
                 subscription.marketCapBelow = cap.scanner_maximum_millions
         try:
-            rows = await self._bounded_scanner_data(subscription, filter_options)
+            scan = await self._bounded_scanner_data(subscription, filter_options)
+            rows = scan.rows
         except Exception as exc:
             raise IbkrError(
                 f"IBKR {component.value} scanner request failed: {sanitize_ibkr_message(exc)}"
@@ -1383,6 +1389,7 @@ class IbkrConnection:
                         else None
                     ),
                     currency=str(contract.currency or market.currency).upper(),
+                    warning="; ".join(scan.warnings),
                 )
             )
         return tuple(results[:max_results])

@@ -494,7 +494,7 @@ def test_daily_resource_counters_roll_over() -> None:
 
 
 @pytest.mark.parametrize("request_id", [71, 999])
-def test_scanner_permission_warning_rejects_only_its_own_imprecise_results(request_id):
+def test_scanner_precision_warning_does_not_block_returned_stock_discovery(request_id):
     async def scenario():
         client = LowLevelScannerClient()
         client.errorEvent = CallbackEvent()
@@ -507,12 +507,11 @@ def test_scanner_permission_warning_rejects_only_its_own_imprecise_results(reque
             "You must subscribe for additional permissions to obtain precise results",
             None,
         )
-        client.wrapper.futures[0].set_result([])
-        if request_id == 71:
-            with pytest.raises(IbkrError, match="market data permission"):
-                await task
-        else:
-            assert await task == ()
+        contract = SimpleNamespace(symbol="TEST", secType="STK")
+        client.wrapper.futures[0].set_result(
+            [SimpleNamespace(rank=0, contractDetails=SimpleNamespace(contract=contract))]
+        )
+        assert await task == ("TEST",)
         assert client.cancelled_scanners == [71]
         assert connection.resource_status().active_scanners == 0
         assert len(client.errorEvent.handlers) == 1

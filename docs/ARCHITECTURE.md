@@ -269,6 +269,39 @@ Broker disconnect protection and exact account verification remain shared bounda
 
 ## Runs, persistence and recovery
 
+### Data capacity and incremental checkpoint processing
+
+IBKR tick-by-tick streams use a separate local budget of 5% of Stocker's quote-line
+budget (minimum one); this is not a measurement of available account-wide entitlement.
+See [IBKR's tick-by-tick limit](https://www.interactivebrokers.com/docs/tws-api/doc/market-data-live/tick-by-tick-data/request-tick-by-tick-data).
+Error 10190 is recorded as a capacity failure and invalidates the rejected stream's
+causal prefix. A failed stream cannot be interpreted as a valid but quiet market.
+Capacity failures remain visible in the overview, including how many stocks lacked
+a feed at the latest preparation checkpoint. No stock-suitability filter, model,
+entry threshold, account budget or execution geometry is changed.
+
+Session HARD opts into incremental checkpoints at its existing composition seam.
+Four-stock batches fetch inputs and build context outside the scheduler lock, then
+check current run ownership/readiness and the original T0+5 deadline before recording
+decisions under that lock. Results are published as batches finish; reconciliation,
+entry observation and run controls continue during pending downloads. Disabling all
+owners cancels shared work; shutdown cancels all checkpoint work. A timeout retains
+completed results, marks the checkpoint incomplete and never evaluates late inputs.
+One completed-checkpoint counter is recorded for the entire job, not for every batch.
+Historical data remains IBKR-only with unchanged exact timestamps and calculations.
+
+The dashboard reports evaluated/total stock progress, unfinished preparation and
+capacity failures. Stock eligibility means broker-qualified identities, independently
+of saved checkpoint rows. An operational ATTENTION label does not change engine or
+broker execution state. Thousands of simultaneous tick feeds remain beyond a
+100-line configuration: these fixes expose that constraint rather than silently
+redefining the method's universe or promising complete market coverage.
+
+Validation: 866 Python tests passed, including failed-subscription invalidation,
+incremental progress during stalled history, responsive disable/shutdown, exact
+deadline cancellation, and once-only checkpoint completion. Execution/dashboard mypy
+and changed-file Ruff checks passed. All order assertions used fake brokers.
+
 A saved run contains run_id, market, method identity/version/spec/hash, method-generated search
 configuration and universe snapshot, environment, account risk configuration and session window.
 SQLite `method_runs` records start/update times, status and stop reason; configuration revisions

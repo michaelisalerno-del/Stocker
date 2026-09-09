@@ -667,6 +667,72 @@ def test_wrong_account_prevents_readiness(tmp_path: Path) -> None:
     assert "ACCOUNT" in runtime.status().runs[0].reason.upper()
 
 
+@pytest.mark.parametrize("finish", ["disable", "deadline", "complete"])
+def test_incremental_checkpoint_publishes_results_and_controls_survive_slow_history(
+    tmp_path, finish,
+):
+    async def scenario():
+        clock = MutableClock()
+        stalled = asyncio.Event()
+        cancelled = asyncio.Event()
+        release = asyncio.Event()
+
+        class SlowTail(FakeFeatureService):
+            async def get_feature(self, instrument, *, session, t0):
+                if instrument.con_id == 1004:
+                    stalled.set()
+                    try:
+                        await release.wait()
+                    finally:
+                        cancelled.set()
+                return await super().get_feature(instrument, session=session, t0=t0)
+
+        run = _hv_run()
+        broker = FakeBroker()
+        runtime = _runtime(tmp_path, broker, run, clock=clock, feature_service=SlowTail())
+        runtime._default_method_services = replace(
+            runtime._default_method_services, incremental_checkpoints=True
+        )
+        await runtime.start()
+        original = runtime._qualification.requests[0]
+        runtime._qualification = Stage5QualificationResult(tuple(
+            replace(original, instrument=replace(original.instrument, con_id=1000+i))
+            for i in range(5)
+        ), ())
+        clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+        await asyncio.wait_for(runtime.poll_once(), timeout=0.5)
+        await asyncio.wait_for(stalled.wait(), timeout=2)
+        assert len(runtime.store.load_signals(run.run_id)) == 4
+        assert runtime.status().runs[0].evaluation_completed == 4
+        await asyncio.wait_for(runtime.poll_once(), timeout=0.5)
+        if finish == "disable":
+            disabled = run.model_copy(update={"enabled": False})
+            await asyncio.wait_for(
+                runtime.apply_runs_config(_runs(disabled), frozenset({run.run_id})), timeout=0.5
+            )
+            await asyncio.wait_for(cancelled.wait(), timeout=0.5)
+        elif finish == "deadline":
+            clock.now = datetime(2026, 9, 2, 14, 5, tzinfo=UTC)
+            await asyncio.wait_for(runtime.poll_once(), timeout=0.5)
+            await asyncio.wait_for(cancelled.wait(), timeout=0.5)
+        else:
+            release.set()
+        await asyncio.wait_for(
+            asyncio.gather(*runtime._checkpoint_tasks.values()), timeout=1
+        )
+        progress = runtime.status().runs[0]
+        assert progress.evaluation_state == ("COMPLETED" if finish == "complete" else "INCOMPLETE")
+        assert progress.evaluation_completed == (5 if finish == "complete" else 4)
+        assert runtime.store.counters(run.run_id, clock.now.date()).checkpoints_processed == (
+            1 if finish == "complete" else 0
+        )
+        await asyncio.wait_for(runtime.stop(), timeout=0.5)
+        assert cancelled.is_set()
+        assert broker.submitted == []
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("hour", [12, 19])
 def test_session_history_resumes_without_opening_entry_streams(tmp_path, hour):
     async def scenario():

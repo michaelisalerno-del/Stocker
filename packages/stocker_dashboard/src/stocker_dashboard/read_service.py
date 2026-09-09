@@ -68,9 +68,30 @@ class DashboardReadService:
             for run in status.runs
             if run.state.value == "DEGRADED" and run.reason
         )
+        resources = status.ibkr_resources
+        if resources is not None and resources.last_resource_error:
+            attention.append({"scope": "IBKR data", "message": resources.last_resource_error})
+        for run in status.runs:
+            if run.state.value not in {"ACTIVE", "READY"}:
+                continue
+            if run.trade_stream_unavailable:
+                attention.append({"scope": run.run_id, "message": (
+                    f"{run.trade_stream_unavailable} stocks could not obtain a required trade feed "
+                    "at the latest preparation checkpoint; entry coverage is incomplete."
+                )})
+            if run.evaluation_state in {"EVALUATING", "INCOMPLETE"}:
+                attention.append({"scope": run.run_id, "message": (
+                    f"Checkpoint {run.evaluation_state.lower()}: "
+                    f"{run.evaluation_completed}/{run.evaluation_total} stocks evaluated."
+                )})
+            elif run.preparing_history:
+                attention.append(
+                    {"scope": run.run_id, "message": "Preparing required IBKR history."}
+                )
         return {
             "as_of": self.clock().isoformat(),
-            "system": status.application.value,
+            "system": "ATTENTION" if attention and status.application.value == "READY"
+            else status.application.value,
             "environments": environments,
             "active_runs": sum(run.state.value == "ACTIVE" for run in status.runs),
             "open_positions": len(positions),
@@ -128,6 +149,9 @@ class DashboardReadService:
                 )
             today = self.performance_service.performance(run, PerformancePeriod.TODAY)
             recent = self.performance_service.performance(run, PerformancePeriod.SESSIONS_20)
+            checkpoint = (
+                runtime.evaluation_checkpoint or runtime.next_checkpoint if runtime else None
+            )
             result.append(
                 {
                     "run_id": run.run_id,
@@ -144,11 +168,13 @@ class DashboardReadService:
                     "enabled": run.enabled,
                     "status": runtime.state.value if runtime else "CONFIGURED",
                     "market": runtime.market.value if runtime and runtime.market else None,
-                    "current_or_next_checkpoint": None,
+                    "current_or_next_checkpoint": (
+                        checkpoint.isoformat() if checkpoint else None
+                    ),
                     "candidate_count": (
                         sum(item.selected for item in screen.candidates)
                         if screen is not None
-                        else count
+                        else runtime.instruments_ready if runtime else count
                     ),
                     "signals_today": runtime.signals_today if runtime else 0,
                     "open_positions": runtime.open_positions if runtime else 0,
@@ -235,11 +261,21 @@ class DashboardReadService:
                 runtime.next_checkpoint.isoformat() if runtime and runtime.next_checkpoint else None
             ),
             "evaluation_status": (
-                "NO_MORE_CHECKPOINTS_TODAY"
+                runtime.evaluation_state
+                if runtime and runtime.evaluation_state in {"EVALUATING", "INCOMPLETE"}
+                else "NO_MORE_CHECKPOINTS_TODAY"
                 if runtime and runtime.last_scheduled_checkpoint
                 and self.clock() >= runtime.last_scheduled_checkpoint
                 and runtime.next_checkpoint is None else "AWAITING_CHECKPOINT"
             ),
+            "evaluation_progress": {
+                "completed": runtime.evaluation_completed if runtime else 0,
+                "total": runtime.evaluation_total if runtime else 0,
+                "checkpoint": runtime.evaluation_checkpoint.isoformat()
+                if runtime and runtime.evaluation_checkpoint else None,
+                "preparing_history": runtime.preparing_history if runtime else False,
+                "trade_stream_unavailable": runtime.trade_stream_unavailable if runtime else 0,
+            },
             "downloads": (
                 {"scope": "ALL_RUNS", "requests": status.ibkr_resources.historical_requests_today,
                  "pending": status.ibkr_resources.pending_historical_work}
@@ -258,7 +294,8 @@ class DashboardReadService:
                     "stage": "Universe eligibility",
                     "count": len((run.universe_snapshot or self._universe(run.universe)).members),
                 },
-                {"stage": "Stock eligibility", "count": latest_total},
+                {"stage": "Stock eligibility", "count": runtime.instruments_ready
+                 if runtime else latest_total},
                 {
                     "stage": "Required data ready",
                     "count": ready_count,

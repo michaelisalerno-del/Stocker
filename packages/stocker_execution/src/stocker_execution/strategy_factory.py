@@ -31,6 +31,7 @@ class MethodServices:
     checkpoints: Callable[[MarketSession], tuple[tuple[int, datetime], ...]]
     qualify: Callable[[Sequence[RunInstance]], Awaitable[Stage5QualificationResult]] | None = None
     prepare_history_on_ready: bool = False
+    incremental_checkpoints: bool = False
 
 
 def session_hard_services(
@@ -72,6 +73,7 @@ def session_hard_services(
         lambda market: market.checkpoint_times(checkpoints),
         SessionHardUniverseSearch(broker, store.path, clock).qualify,
         prepare_history_on_ready=True,
+        incremental_checkpoints=True,
     )
 
 

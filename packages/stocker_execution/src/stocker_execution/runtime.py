@@ -176,6 +176,12 @@ class RunStatus:
     open_positions: int
     next_checkpoint: datetime | None = None
     last_scheduled_checkpoint: datetime | None = None
+    evaluation_checkpoint: datetime | None = None
+    evaluation_completed: int = 0
+    evaluation_total: int = 0
+    evaluation_state: str = "IDLE"
+    preparing_history: bool = False
+    trade_stream_unavailable: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -1139,6 +1145,10 @@ class StockerRuntime:
         self._qualification = Stage5QualificationResult((), ())
         self._expected_move_prepared: set[tuple[str, date, datetime, tuple[int, ...]]] = set()
         self._session_history_prepared: dict[str, tuple[date, tuple[int, ...]]] = {}
+        self._checkpoint_tasks: dict[tuple[str, date, datetime], asyncio.Task[None]] = {}
+        self._checkpoint_task_owners: dict[tuple[str, date, datetime], frozenset[str]] = {}
+        self._checkpoint_progress: dict[str, dict[str, Any]] = {}
+        self._trade_stream_failures: dict[str, int] = {}
         self._expected_move_tasks: dict[
             tuple[str, date, tuple[int, ...]], tuple[asyncio.Task[None], frozenset[str]]
         ] = {}
@@ -1355,6 +1365,12 @@ class StockerRuntime:
 
         self._stopping = True
         self._state = ApplicationState.STOPPING
+        checkpoints = list(self._checkpoint_tasks.values())
+        for task in checkpoints:
+            task.cancel()
+        await asyncio.gather(*checkpoints, return_exceptions=True)
+        self._checkpoint_tasks.clear()
+        self._checkpoint_task_owners.clear()
         preparation = [task for task, _owners in self._expected_move_tasks.values()]
         for task in preparation:
             task.cancel()
@@ -1416,6 +1432,10 @@ class StockerRuntime:
         async with self._cycle_lock:
             now = _aware(self._clock())
             previous_states = dict(self._run_states)
+            for key, task in self._checkpoint_tasks.items():
+                if not any(updated_by_id[owner].enabled
+                           for owner in self._checkpoint_task_owners[key]):
+                    task.cancel()
             prepared_runs: list[RunInstance] = []
             previous_environments: dict[str, Environment] = {}
             self._config = config
@@ -1688,6 +1708,14 @@ class StockerRuntime:
         with self._timing("expected_move_preparation"):
             await self._prepare_upcoming_expected_moves(_aware(self._clock()))
 
+        for key, task in tuple(self._checkpoint_tasks.items()):
+            if task.done():
+                if not task.cancelled() and (error := task.exception()) is not None:
+                    self._logger.error("checkpoint_task_failed", reason=str(error))
+                del self._checkpoint_tasks[key]
+                self._checkpoint_task_owners.pop(key, None)
+            elif _aware(self._clock()) >= key[2] + timedelta(minutes=5):
+                task.cancel()
         now = _aware(self._clock())
         due: dict[tuple[date, datetime, int], list[RunInstance]] = {}
         for instance in self._manager.list_runs():
@@ -1804,16 +1832,23 @@ class StockerRuntime:
             if key in self._expected_move_prepared:
                 continue
             self._expected_move_prepared.add(key)
+            failures = 0
             if hasattr(source, "prepare_trades"):
                 for request in requests:
                     try:
                         source.prepare_trades(request.instrument)
                     except Exception as exc:
-                        self._logger.warning(
+                        failures += 1
+                        self._logger.debug(
                             "trade_stream_unavailable",
                             symbol=request.instrument.symbol,
                             reason=str(exc),
                         )
+            for run_id in run_ids:
+                self._trade_stream_failures[run_id] = failures
+            if failures:
+                self._logger.warning("checkpoint_stream_capacity", unavailable=failures,
+                                     requested=len(requests), t0=t0.isoformat())
             self._start_expected_move_preparation(version, session, t0, requests, run_ids)
 
     def _start_expected_move_preparation(
@@ -2323,6 +2358,9 @@ class StockerRuntime:
                 )
             )
             schedule = self._services_for(run).checkpoints(market) if market else ()
+            progress = self._checkpoint_progress.get(run.run_id, {})
+            if progress and market and progress["t0"].date() != market.session:
+                progress = {}
             run_statuses.append(
                 RunStatus(
                     run_id=run.run_id,
@@ -2344,6 +2382,15 @@ class StockerRuntime:
                     ),
                     next_checkpoint=next((t0 for _, t0 in schedule if t0 > now), None),
                     last_scheduled_checkpoint=schedule[-1][1] if schedule else None,
+                    evaluation_checkpoint=progress.get("t0"),
+                    evaluation_completed=progress.get("completed", 0),
+                    evaluation_total=progress.get("total", 0),
+                    evaluation_state=progress.get("state", "IDLE"),
+                    preparing_history=any(
+                        run.run_id in owners and not task.done()
+                        for task, owners in self._expected_move_tasks.values()
+                    ),
+                    trade_stream_unavailable=self._trade_stream_failures.get(run.run_id, 0),
                 )
             )
         execution_statuses = []
@@ -2484,6 +2531,16 @@ class StockerRuntime:
                         now,
                     )
                 continue
+            if self._services_for(grouped[version][0].config).incremental_checkpoints:
+                key = version, session, t0
+                self._checkpoint_task_owners[key] = frozenset(
+                    instance.config.run_id for instance in grouped[version]
+                )
+                self._checkpoint_tasks[key] = asyncio.create_task(
+                    self._evaluate_incrementally(grouped[version], stage5=stage5,
+                                                 session=session, t0=t0, checkpoint=checkpoint)
+                )
+                continue
             await self._evaluate_strategy_group(
                 grouped[version],
                 stage5=stage5,
@@ -2492,118 +2549,170 @@ class StockerRuntime:
                 checkpoint=checkpoint,
             )
 
+    async def _evaluate_incrementally(
+        self, instances: Sequence[RunInstance], *, stage5: Stage5Analyzer,
+        session: date, t0: datetime, checkpoint: int,
+    ) -> None:
+        """Publish bounded batches without holding the scheduler during broker I/O."""
+        run_ids = {item.config.run_id for item in instances}
+        requests, ineligible = self._qualification_for(run_ids)
+        for instance in instances:
+            run_id = instance.config.run_id
+            self._checkpoint_progress[run_id] = {
+                "t0": t0, "completed": 0, "total": sum(
+                    any(m.run_id == run_id for m in request.memberships) for request in requests
+                ), "state": "EVALUATING",
+            }
+        outcome = CheckpointState.COMPLETED
+        reason = ""
+        try:
+            # The method's existing half-open entry window also bounds data work.
+            remaining = (t0 + timedelta(minutes=5) - _aware(self._clock())).total_seconds()
+            async with asyncio.timeout(max(0, remaining)):
+                for offset in range(0, max(1, len(requests)), 4):
+                    active = tuple(i for i in instances if self._checkpoint_owner_active(i))
+                    if not active:
+                        raise asyncio.CancelledError
+                    if _aware(self._clock()) >= t0 + timedelta(minutes=5):
+                        raise TimeoutError
+                    await self._evaluate_strategy_group(
+                        active, stage5=stage5, session=session, t0=t0, checkpoint=checkpoint,
+                        batch=requests[offset:offset + 4],
+                        batch_ineligible=ineligible if offset == 0 else (),
+                        background=True,
+                    )
+                    await asyncio.sleep(0)
+        except (TimeoutError, asyncio.CancelledError):
+            outcome = CheckpointState.FAILED
+            reason = "ENTRY_WINDOW_ELAPSED_OR_RUN_STOPPED: unfinished inputs were not evaluated"
+        except Exception as exc:
+            outcome = CheckpointState.FAILED
+            reason = str(exc)
+        finally:
+            for instance in instances:
+                run_id = instance.config.run_id
+                progress = self._checkpoint_progress[run_id]
+                progress["state"] = (
+                    "COMPLETED" if outcome is CheckpointState.COMPLETED else "INCOMPLETE"
+                )
+                self._store.mark_checkpoint(
+                    run_id, session, t0, outcome, reason, _aware(self._clock())
+                )
+                if outcome is CheckpointState.COMPLETED:
+                    self._store.increment(run_id, session, "checkpoints_processed")
+                self._logger.info("checkpoint_finished", run_id=run_id, t0=t0.isoformat(),
+                                  completed=progress["completed"], total=progress["total"],
+                                  state=progress["state"], reason=reason)
+
+    def _checkpoint_owner_active(self, instance: RunInstance) -> bool:
+        run = instance.config
+        current = self._manager.get_run(run.run_id).config
+        return (
+            not self._stopping and current.enabled and current == run
+            and self._environment_ready.get(run.environment, False)
+            and self._run_states.get(run.run_id) in {RunRuntimeState.READY, RunRuntimeState.ACTIVE}
+        )
+
     async def _evaluate_strategy_group(
-        self,
-        instances: Sequence[RunInstance],
-        *,
-        stage5: Stage5Analyzer,
-        session: date,
-        t0: datetime,
-        checkpoint: int,
+        self, instances: Sequence[RunInstance], *, stage5: Stage5Analyzer,
+        session: date, t0: datetime, checkpoint: int,
+        batch: Sequence[Stage5QualifiedRequest] | None = None,
+        batch_ineligible: Sequence[Stage5IneligibleInstrument] = (),
+        background: bool = False,
     ) -> None:
         now = _aware(self._clock())
         run_ids = {instance.config.run_id for instance in instances}
         requests, ineligible = self._qualification_for(run_ids)
+        if batch is not None:
+            requests, ineligible = tuple(batch), tuple(batch_ineligible)
         try:
-            rows = await stage5.analyze(
-                requests,
-                ineligible=ineligible,
-                session=session,
-                t0=t0,
-            )
+            rows = await stage5.analyze(requests, ineligible=ineligible, session=session, t0=t0)
         except Exception as exc:
+            if background:
+                raise
             for instance in instances:
                 self._fail_checkpoint(instance, session, t0, str(exc), now)
             return
-
         for instance in instances:
             run = instance.config
-            run_rows = tuple(row for row in rows if run.run_id in row.run_ids)
-            valid_rows = tuple(
-                row
-                for row in run_rows
-                if row.session == session and row.t0 == t0 and row.t0.tzinfo is not None
-            )
-            if len(valid_rows) != len(run_rows):
+            valid_rows = tuple(row for row in rows if run.run_id in row.run_ids)
+            if any(row.session != session or row.t0 != t0 or row.t0.tzinfo is None
+                   for row in valid_rows):
+                if background:
+                    raise ValueError("STALE_OR_SESSION_MISMATCHED_INPUT")
                 self._fail_checkpoint(
-                    instance,
-                    session,
-                    t0,
-                    "STALE_OR_SESSION_MISMATCHED_INPUT",
-                    now,
+                    instance, session, t0, "STALE_OR_SESSION_MISMATCHED_INPUT", now
                 )
                 continue
-            for row in valid_rows:
-                if row.status is Stage5Status.READY:
-                    continue
-                self._logger.warning(
-                    "stage5_candidate_rejected",
-                    run_id=run.run_id,
-                    con_id=row.con_id,
-                    symbol=row.symbol,
-                    status=row.status.value,
-                    reason=row.exclusion_reason,
-                )
             try:
-                instruments = {
-                    request.instrument.con_id: request.instrument for request in requests
-                }
                 context = await self._services_for(run).context.context_for(
-                    run,
-                    valid_rows,
-                    checkpoint,
-                    instruments,
+                    run, valid_rows, checkpoint,
+                    {request.instrument.con_id: request.instrument for request in requests},
                     self._store.cohort_history(run.run_id),
                 )
                 if context.run_id != run.run_id:
                     raise ValueError("strategy context run identity mismatch")
-                strategy = self._strategies[run.run_id]
             except Exception as exc:
+                if background:
+                    raise
                 self._fail_checkpoint(instance, session, t0, str(exc), now)
                 continue
-            evaluated: list[StrategySignal] = []
-            candidate_errors = 0
-            for row in valid_rows:
-                try:
-                    evaluated.extend(strategy.evaluate((row,), context))
-                except Exception as exc:
-                    candidate_errors += 1
-                    self._logger.error(
-                        "strategy_candidate_failed",
-                        run_id=run.run_id,
-                        con_id=row.con_id,
-                        symbol=row.symbol,
-                        reason=str(exc),
+            if background:
+                async with self._cycle_lock:
+                    if not self._checkpoint_owner_active(instance):
+                        continue
+                    if _aware(self._clock()) >= t0 + timedelta(minutes=5):
+                        raise TimeoutError
+                    self._record_checkpoint_rows(run, valid_rows, context, session, t0, checkpoint,
+                                                 finalize=False)
+                    self._checkpoint_progress[run.run_id]["completed"] += sum(
+                        row.con_id is not None for row in valid_rows
                     )
-            self._store.save_signals(evaluated, now)
-            strategy.save_runtime_state(self._store)
-            waiting = sum(signal.status is SignalStatus.WAITING_FOR_ENTRY for signal in evaluated)
-            self._store.increment(run.run_id, session, "signals", waiting)
-            ready_count = sum(row.status is Stage5Status.READY for row in valid_rows)
-            context_not_ready = sum(
-                row.status is Stage5Status.PRE_CONTEXT_NOT_READY for row in valid_rows
-            )
+            else:
+                self._record_checkpoint_rows(run, valid_rows, context, session, t0, checkpoint)
+
+    def _record_checkpoint_rows(
+        self, run: RunConfig, valid_rows: Sequence[Stage5FeatureSnapshot],
+        context: StrategyContext, session: date, t0: datetime, checkpoint: int,
+        *, finalize: bool = True,
+    ) -> None:
+        now = _aware(self._clock())
+        strategy = self._strategies[run.run_id]
+        evaluated: list[StrategySignal] = []
+        candidate_errors = 0
+        for row in valid_rows:
+            try:
+                evaluated.extend(strategy.evaluate((row,), context))
+            except Exception as exc:
+                candidate_errors += 1
+                self._logger.error(
+                    "strategy_candidate_failed",
+                    run_id=run.run_id,
+                    con_id=row.con_id,
+                    symbol=row.symbol,
+                    reason=str(exc),
+                )
+        self._store.save_signals(evaluated, now)
+        strategy.save_runtime_state(self._store)
+        waiting = sum(signal.status is SignalStatus.WAITING_FOR_ENTRY for signal in evaluated)
+        self._store.increment(run.run_id, session, "signals", waiting)
+        ready_count = sum(row.status is Stage5Status.READY for row in valid_rows)
+        self._store.increment(run.run_id, session, "instruments_ready", ready_count)
+        context_not_ready = sum(
+            row.status is Stage5Status.PRE_CONTEXT_NOT_READY for row in valid_rows
+        )
+        if finalize:
             self._store.increment(run.run_id, session, "checkpoints_processed")
-            self._store.increment(run.run_id, session, "instruments_ready", ready_count)
             self._store.mark_checkpoint(
-                run.run_id,
-                session,
-                t0,
-                CheckpointState.COMPLETED,
-                f"Stage 5 ready={ready_count}; candidate_errors={candidate_errors}",
-                now,
+                run.run_id, session, t0, CheckpointState.COMPLETED,
+                f"Stage 5 ready={ready_count}; candidate_errors={candidate_errors}", now,
             )
-            self._logger.info(
-                "checkpoint_processed",
-                run_id=run.run_id,
-                session=session.isoformat(),
-                t0=t0.isoformat(),
-                checkpoint=checkpoint,
-                instruments_ready=ready_count,
-                pre_context_not_ready=context_not_ready,
-                strategy_signals=waiting,
-                candidate_errors=candidate_errors,
-            )
+        self._logger.info(
+            "checkpoint_batch_processed", run_id=run.run_id, t0=t0.isoformat(),
+            checkpoint=checkpoint, instruments_ready=ready_count,
+            pre_context_not_ready=context_not_ready, strategy_signals=waiting,
+            candidate_errors=candidate_errors,
+        )
 
     async def _observe_entries(self, now: datetime) -> None:
         # Register all baseline opportunities before resolving outcomes/admissions,

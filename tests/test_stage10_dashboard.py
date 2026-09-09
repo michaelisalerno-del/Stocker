@@ -165,6 +165,29 @@ def _runtime_status() -> RuntimeStatus:
     )
 
 
+def test_overview_surfaces_tick_capacity_and_incomplete_checkpoint(tmp_path):
+    from test_ibkr_resources import ConfigClient, config
+
+    service = _seed_authoritative_state(tmp_path)
+    resource = IbkrConnection(config(), client=ConfigClient()).resource_status()
+    status = _runtime_status()
+    service.runtime_status = lambda: replace(
+        status,
+        ibkr_resources=replace(resource, capacity_rejects_today=12,
+                               last_resource_error="10190: tick-by-tick limit reached"),
+        runs=(replace(status.runs[0], evaluation_state="INCOMPLETE",
+                      evaluation_completed=4, evaluation_total=100,
+                      trade_stream_unavailable=95), *status.runs[1:]),
+    )
+    overview = service.overview()
+    assert overview["system"] == "ATTENTION"
+    assert any("10190" in item["message"] for item in overview["attention"])
+    assert any("4/100" in item["message"] for item in overview["attention"])
+    run = service.run_detail("US-SH-LIVE")
+    assert run["evaluation_status"] == "INCOMPLETE"
+    assert run["evaluation_progress"]["completed"] == 4
+
+
 class RecordingRuntime:
     def __init__(self) -> None:
         self.run_updates: list[tuple[RunsConfig, set[str]]] = []
@@ -457,7 +480,7 @@ def test_run_detail_uses_persisted_funnel_counts_and_config(tmp_path: Path) -> N
     assert detail["strategy_version"] is None
     assert detail["funnel"] == [
         {"stage": "Universe eligibility", "count": 2},
-        {"stage": "Stock eligibility", "count": 1},
+        {"stage": "Stock eligibility", "count": 2},
         {"stage": "Required data ready", "count": 1},
         {"stage": "Screened", "count": 1},
         {"stage": "Qualified", "count": 1},
@@ -484,7 +507,7 @@ def test_run_summary_does_not_load_full_candidate_or_universe_history(tmp_path, 
     monkeypatch.setattr(reads.runtime_store, "method_run", full_provenance)
     detail = reads.run_detail("US-SH-LIVE")
     assert "provenance" not in detail
-    assert detail["funnel"][1]["count"] == 1
+    assert detail["funnel"][1]["count"] == 2
 
 
 def test_candidates_expose_stage5_and_stage6_values_without_recalculation(tmp_path: Path) -> None:
@@ -1152,7 +1175,7 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
         assert "PAPER" in response.text
         assert "LIVE" in response.text
     index = client.get("/").text
-    assert 'src="/static/dashboard.js?v=20260908-run-summary"' in index
+    assert 'src="/static/dashboard.js?v=20260909-data-readiness"' in index
     for label in (
         "Overview",
         "Runs",

@@ -216,12 +216,18 @@ async function runDetail(runId) {
   const run = await api(`/api/runs/${encodeURIComponent(runId)}`);
   const selectedPeriod = new URLSearchParams(location.search).get("period") || "TODAY";
   const performance = await api(`/api/runs/${encodeURIComponent(runId)}/performance?period=${encodeURIComponent(selectedPeriod)}`);
-  const evaluationStatus = run.evaluation_status === "NO_MORE_CHECKPOINTS_TODAY"
+  const progress = run.evaluation_progress;
+  const evaluationStatus = run.evaluation_status === "EVALUATING"
+    ? `Evaluating checkpoint: ${number(progress.completed)} of ${number(progress.total)} stocks processed.`
+    : run.evaluation_status === "INCOMPLETE"
+    ? `Checkpoint incomplete: ${number(progress.completed)} of ${number(progress.total)} stocks processed before the entry window closed or the run stopped.`
+    : run.evaluation_status === "NO_MORE_CHECKPOINTS_TODAY"
     ? "No further method checkpoints today. History downloads may continue for future sessions."
     : (run.next_checkpoint ? `Next method checkpoint: ${new Date(run.next_checkpoint).toLocaleString()}` : "Waiting for the method checkpoint schedule.");
   const downloads = run.downloads
     ? `${number(run.downloads.requests)} history requests today · ${number(run.downloads.pending)} requests queued or in progress. Shared across runs; resets on restart. This is not a stock-completion count.`
     : "History download activity is unavailable.";
+  const preparation = progress ? `${progress.preparing_history ? "Preparing required IBKR history. " : ""}${progress.trade_stream_unavailable ? `${number(progress.trade_stream_unavailable)} stocks lacked a required trade feed at the latest preparation checkpoint. Entry coverage is incomplete.` : ""}` : "";
   const details = ["market", "environment", "account", "currency", "market_state", "session", "screen_state", "watchlist_size", "last_checkpoint", "next_checkpoint", "risk_per_trade", "max_concurrent_positions"];
   const grid = details.map((key) => `<div class="detail-cell"><span>${esc(key.replaceAll("_", " "))}</span><strong>${key === "environment" ? environment(run[key]) : esc(run[key])}</strong></div>`).join("");
   const funnel = run.funnel.map((step, index) => `${index ? '<div class="funnel-arrow"></div>' : ""}<div class="funnel-step"><span>${esc(step.stage)}</span><strong>${number(step.count)}</strong></div>`).join("");
@@ -232,7 +238,7 @@ async function runDetail(runId) {
   main.innerHTML = `${head(run.display_name, `${run.market || run.universe} / ${run.environment}`)}
     <section class="section"><div class="control-rail"><button ${run.historical_only ? "disabled" : ""} data-control="${run.enabled ? "disable" : "enable"}">${run.enabled ? "Disable run" : "Enable run"}</button><button class="secondary" data-control="edit">Edit risk & capacity</button></div><p class="notice">Market, method specification, universe snapshot and environment belong to the saved run. Create another run to change them. Disabling stops future entries and never flattens exposure.</p>${lastOutcome ? `<p class="notice" role="status"><b>${esc(lastOutcome.apply_mode)}</b> · ${esc(lastOutcome.detail)}</p>` : ""}</section>
     <section class="section"><div class="section-head"><h2>Run configuration</h2></div><div class="detail-grid">${grid}</div><details><summary>Method specification</summary><pre>${esc(JSON.stringify({ method: run.strategy_id, version: run.strategy_version, spec_hash: run.method_spec_hash, specification: run.method_spec }, null, 2))}</pre><a href="/api/runs/${encodeURIComponent(runId)}/provenance" download="run-provenance.json">Download full run audit record</a></details></section>
-    <section class="section"><div class="section-head"><h2>Preparation and evaluation</h2></div><p class="notice">${esc(evaluationStatus)}</p><p role="status">${esc(downloads)}</p><p class="muted">${run.last_checkpoint ? `Results below are from ${esc(new Date(run.last_checkpoint).toLocaleString())}.` : "No checkpoint results yet."} These totals update after an evaluation, not after each download.</p><div class="funnel">${funnel}</div><p><a href="/candidates?run=${encodeURIComponent(runId)}&status=READY">Browse data-ready stocks</a> · <a href="/candidates?run=${encodeURIComponent(runId)}&status=WAITING_FOR_ENTRY">View armed candidates</a></p></section>
+    <section class="section"><div class="section-head"><h2>Preparation and evaluation</h2></div><p class="notice">${esc(evaluationStatus)}</p><p role="status">${esc(preparation)}</p><p role="status">${esc(downloads)}</p><p class="muted">${run.last_checkpoint ? `Results below are from ${esc(new Date(run.last_checkpoint).toLocaleString())}.` : "No checkpoint results yet."} Eligibility counts broker-qualified stocks; evaluation totals update as batches finish.</p><div class="funnel">${funnel}</div><p><a href="/candidates?run=${encodeURIComponent(runId)}&status=READY">Browse data-ready stocks</a> · <a href="/candidates?run=${encodeURIComponent(runId)}&status=WAITING_FOR_ENTRY">View armed candidates</a></p></section>
     <section class="section"><div class="section-head"><h2>Performance</h2><div class="tabs">${periods}</div></div><div class="metric-strip performance-strip">${metrics}</div>${table(historyColumns, performance.history)}</section>`;
   main.querySelectorAll("[data-control]").forEach((button) => button.addEventListener("click", () => runControl(run, button.dataset.control)));
   main.querySelectorAll("[data-performance-period]").forEach((button) => button.addEventListener("click", () => { location.href = `/runs?run=${encodeURIComponent(runId)}&period=${button.dataset.performancePeriod}`; }));

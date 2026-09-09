@@ -703,3 +703,43 @@ def test_resource_diagnostic_reads_actual_frozen_activity_members_read_only(
     assert watchlist is not None
     assert watchlist.status is ActivityShortlistStatus.READY
     assert tuple(item.con_id for item in watchlist.candidates) == (265598,)
+
+
+def test_tick_capacity_error_is_reported_and_rejected_prefix_is_unusable():
+    client = ErrorClient()
+    broker = IbkrConnection(config(), client=client)
+    client.errorEvent.emit(32510, 10190,
+        "Max number of tick-by-tick requests has been reached.",
+        SimpleNamespace(conId=6588, symbol="DTF", exchange="SMART"))
+    status = broker.resource_status()
+    assert status.capacity_rejects_today == 1
+    assert "10190" in status.last_resource_error
+
+
+def test_tick_streams_have_separate_capacity_and_broker_rejection_invalidates_prefix():
+    class Client(StreamClient):
+        def __init__(self):
+            super().__init__()
+            self.errorEvent = CallbackEvent()
+            self.streams = {}
+        def reqTickByTickData(self, contract, tick_type, number, ignore_size):
+            self.requested.append(contract.conId)
+            stream = SimpleNamespace(updateEvent=CallbackEvent(), tickByTicks=[])
+            self.streams[contract.conId] = stream
+            return stream
+        def cancelTickByTickData(self, contract, tick_type):
+            self.cancelled.append(contract.conId)
+    client = Client()
+    broker = connected_stream_boundary(client, budget=100)
+    for con_id in range(1, 6):
+        broker.prepare_trade_events(stock(con_id))
+    with pytest.raises(IbkrError, match="TICK_BY_TICK_CAPACITY"):
+        broker.prepare_trade_events(stock(6))
+    assert client.requested == [1, 2, 3, 4, 5]
+    client.errorEvent.emit(1, 10190,
+        "Max number of tick-by-tick requests has been reached.",
+        SimpleNamespace(conId=1))
+    with pytest.raises(IbkrError, match="PREFIX_UNAVAILABLE"):
+        broker.trade_events(stock(1), t0=datetime.now(UTC))
+    assert 1 in client.cancelled
+    assert broker.resource_status().active_tick_by_tick_lines == 4

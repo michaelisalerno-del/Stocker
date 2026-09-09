@@ -12,6 +12,7 @@ const path = require("node:path");
     page.on("pageerror", error => errors.push(error.message));
     let requests = 123;
     let auditDownloads = 0;
+    let evaluation = "NO_MORE_CHECKPOINTS_TODAY";
     const staticPath = path.join(__dirname, "../packages/stocker_dashboard/src/stocker_dashboard/static");
     await page.context().route("http://stocker.test/**", async route => {
       const url = new URL(route.request().url());
@@ -20,7 +21,8 @@ const path = require("node:path");
       if (url.pathname === "/api/overview") return json({ environments: {}, system: "READY", active_runs: 1, open_positions: 0, as_of: "2026-09-08T19:00:00Z" });
       if (url.pathname === "/api/runs/test") return json({
         run_id: "test", display_name: "US · Session HARD", environment: "PAPER", enabled: true,
-        evaluation_status: "NO_MORE_CHECKPOINTS_TODAY", last_checkpoint: "2026-09-08T16:00:00Z",
+        evaluation_status: evaluation, last_checkpoint: "2026-09-08T16:00:00Z",
+        evaluation_progress: { completed: 40, total: 6570, preparing_history: true, trade_stream_unavailable: 6565 },
         downloads: { scope: "ALL_RUNS", requests, pending: 4 },
         method_spec: { entry: { trigger_M: 0.2 } },
         funnel: [{ stage: "Stock eligibility", count: 6570 }, { stage: "Required data ready", count: 153 }],
@@ -37,6 +39,13 @@ const path = require("node:path");
     await page.getByText("No further method checkpoints today.", { exact: false }).waitFor();
     assert.match(await page.locator("main").innerText(), /123 history requests/);
     assert.equal(auditDownloads, 0);
+    evaluation = "EVALUATING";
+    await page.evaluate(() => refreshCurrentPage());
+    assert.match(await page.locator("main").innerText(), /40 of 6,570 stocks processed/);
+    assert.match(await page.locator("main").innerText(), /6,565 stocks lacked a required trade feed/);
+    evaluation = "INCOMPLETE";
+    await page.evaluate(() => refreshCurrentPage());
+    assert.match(await page.locator("main").innerText(), /Checkpoint incomplete/);
     assert.equal(await page.locator("main").getByRole("row").count(), 0);
     assert(await page.getByRole("link", { name: "Browse data-ready stocks" }).getAttribute("href").then(href => href.includes("status=READY")));
     requests = 127;

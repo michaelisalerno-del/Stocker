@@ -248,6 +248,8 @@ class IbkrResourceStatus:
     last_resource_error: str | None
     market_data_budget_label: str = "Stocker API line budget"
     ibkr_account_line_limit: int | None = None
+    tick_by_tick_line_budget: int = 5
+    active_tick_by_tick_lines: int = 0
 
 
 @dataclass(slots=True)
@@ -429,6 +431,8 @@ class IbkrConnection:
             ),
             pacing_violations_today=self._pacing_violations_today,
             last_resource_error=self._last_resource_error,
+            tick_by_tick_line_budget=max(1, self.config.market_data_line_budget // 20),
+            active_tick_by_tick_lines=len(getattr(self, "_causal_trade_streams", {})),
         )
 
     def _configure_ib_async_throttle(self) -> int | None:
@@ -488,7 +492,7 @@ class IbkrConnection:
             or "pacing violation" in normalized
             or (code in {162, 420} and "pacing" in normalized)
         )
-        capacity = code == 101 or any(
+        capacity = code in {101, 10190} or any(
             phrase in normalized
             for phrase in (
                 "market data lines",
@@ -509,6 +513,12 @@ class IbkrConnection:
         if capacity:
             self._capacity_rejects_today += 1
         self._last_resource_error = f"{int(code)}: {sanitize_ibkr_message(message)}"
+        # A rejected subscription has no complete causal prefix. Remove it even if
+        # reqTickByTickData returned a ticker before the asynchronous error arrived.
+        con_id = getattr(_contract, "conId", None)
+        if con_id is not None and (code == 10190 or entitlement):
+            with suppress(Exception):
+                self.release_trade_events(int(con_id))
 
     def _acquire_market_data_stream(
         self,
@@ -1506,11 +1516,19 @@ class IbkrConnection:
         existing = self._causal_trade_streams.get(key)
         if existing is not None and existing[0] == self.connection_epoch:
             return
+        self._reset_daily_resource_counters()
+        # IBKR allocates tick-by-tick lines separately: 5% of market data lines.
+        # This is a local budget, not a claim about account-wide free capacity.
+        if len(self._causal_trade_streams) >= max(1, self.config.market_data_line_budget // 20):
+            self._capacity_rejects_today += 1
+            self._last_resource_error = "IBKR_TICK_BY_TICK_CAPACITY_UNAVAILABLE"
+            raise IbkrError(self._last_resource_error)
         if (
             len(self._active_market_data) + len(self._causal_trade_streams)
             >= self.config.market_data_line_budget
         ):
             self._capacity_rejects_today += 1
+            self._last_resource_error = "IBKR_MARKET_DATA_CAPACITY_UNAVAILABLE"
             raise IbkrError("IBKR_MARKET_DATA_CAPACITY_UNAVAILABLE")
         contract = _to_ib_contract(instrument)
         ticker = self._client.reqTickByTickData(contract, "Last", 0, False)
@@ -1546,8 +1564,8 @@ class IbkrConnection:
             if con_id is not None and key != con_id:
                 continue
             stream[4].updateEvent -= stream[5]
-            self._client.cancelTickByTickData(stream[3], "Last")
             del streams[key]
+            self._client.cancelTickByTickData(stream[3], "Last")
 
     async def shortable_quantity(self, instrument: QualifiedInstrument) -> float:
         """Read IBKR's available shares to short (generic tick 236)."""

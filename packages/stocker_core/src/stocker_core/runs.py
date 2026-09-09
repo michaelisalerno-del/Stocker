@@ -95,11 +95,20 @@ class RunConfig(BaseModel):
     universe_snapshot: UniverseDefinition | None = None
 
     @property
+    def activity_profile_id(self) -> str:
+        return str(
+            (self.method_spec or {})
+            .get("universe_search", {})
+            .get("activity_profile", ACTIVITY_SHORTLIST_V1_ID)
+        )
+
+    @property
     def uses_activity_shortlist(self) -> bool:
         """A method-owned discovery profile, or a historical explicit screen."""
-        return (self.method_spec or {}).get("universe_search", {}).get(
-            "activity_profile"
-        ) == ACTIVITY_SHORTLIST_V1_ID or (
+        return (
+            (self.method_spec or {}).get("universe_search", {}).get("activity_profile")
+            in {ACTIVITY_SHORTLIST_V1_ID, "ACTIVITY_CAPACITY_V2"}
+        ) or (
             self.screen is not None and self.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
         )
 
@@ -139,7 +148,12 @@ class RunConfig(BaseModel):
 
             if self.cap_bucket_version != CAP_BUCKETS_V1.version:
                 raise ValueError("Generated market runs require CAP_BUCKETS_V1")
-            if self.method_spec is not None:
+            if self.method_spec is not None and self.archived:
+                from stocker_core.methods import content_hash
+
+                if self.method_spec_hash != content_hash(self.method_spec):
+                    raise ValueError("Archived method specification hash mismatch")
+            if self.method_spec is not None and not self.archived:
                 method = get_strategy(str(self.strategy_id), str(self.strategy_version))
                 from stocker_core.methods import content_hash
 

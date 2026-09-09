@@ -7,7 +7,7 @@ The user selects the market and method; the method determines what stocks are ap
 
 The current catalogue exposes one method, **Session HARD**, across Stocker's market catalogue.
 Its stable internal identity is `SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D`;
-its current version is `SESSION_HARD_CAUSAL_Q1_FIT_V1`. The old name remains an internal
+its current version is `SESSION_HARD_CAUSAL_Q1_ACTIVITY_V2`. The old name remains an internal
 identity for history continuity, not a second selectable strategy. The method remains PAPER-only.
 Non-US markets are labelled **unvalidated cross-market PAPER tests**. Operational calendar/scanner
 support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on those markets.
@@ -15,7 +15,7 @@ support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on
 ```text
 Market → Method → saved Run
                     ↓
- method-owned listing universe / required-data screening
+ method-owned activity shortlist → capacity limit → required-data screening
                     ↓
  suitability diagnostics → T0 qualification → MODEL_T0 Q1 veto
                     ↓
@@ -64,12 +64,30 @@ per symbol. A run embeds the actual membership snapshot, so refreshing the catal
 silently change that run. Refresh membership explicitly with
 `stocker universe refresh-us-listings` before creating a new run.
 
-For other markets, `session_hard_universe.py` reuses the existing Activity Shortlist V1 profile
-as an explicitly unvalidated PAPER test input: the existing scanner components, deterministic
-ranking, 50-stock limit, 15 active-minute capture and one-minute capture window. No cap restriction
-is applied. This bounded activity population is not a complete exchange listing or a validated
-Session HARD suitability filter. The existing per-market/session snapshot preserves the discovery
-population across reloads; a missed capture stays `SCREEN_MISSED` until the next session.
+Every supported market uses `ACTIVITY_CAPACITY_V2` before contract qualification or history work.
+It reuses V1's three IBKR activity components and deterministic ranking: scanner hit count,
+equal-weight rank sum, best rank, symbol and conId. At least two components must succeed.
+US scanner results are intersected with the saved authoritative listing membership before ranking.
+Only `min(50, max(1, configured_market_data_lines // 20))` stocks per market proceed to expensive
+work (five with the current 100-line setting). Shared broker tick limits still apply when markets
+overlap; unavailable complete tick prefixes prevent entry and appear in readiness reporting.
+No market-cap restriction is applied. This changes the method's population and is explicitly
+an unvalidated PAPER activity filter, not evidence of profitability or cross-market model transfer.
+
+Capture occurs on the first available attempt at/after 15 active minutes, with the actual capture
+timestamp. The immutable market/session/profile snapshot stores selected and excluded candidates,
+scanner ranks and failures. Reloads reuse it; no retrospective checkpoint or missing trade prefix
+is replayed. Historical `ACTIVITY_SHORTLIST_V1` retains its 50-stock, one-minute capture semantics.
+The dashboard exposes the current profile's timestamp, watchlist and selection audit.
+`scripts/migrate_activity_filter.py` writes a separate configuration with V1 runs archived and V2
+PAPER replacements retaining risk settings and enabled state; historical specs and database rows
+are preserved. Archived specifications retain their hash check and cannot be started.
+
+Session prefixes expand actual exchange five-minute slots into one-minute requirements, excluding
+scheduled lunch breaks. Historical request durations include elapsed break time. Frozen directional
+calculations use the verified active-minute prefix; absent required bars still reject the candidate.
+At the exact lunch reopening checkpoint, missing wall-clock T0-3 minute inputs remain unavailable
+and are never interpolated.
 The frozen qualification, MODEL_T0 preprocessing/score, inclusive FIT cutoff and entry/exit geometry
 are identical across markets. No model or trading thresholds are re-fit for transfer.
 

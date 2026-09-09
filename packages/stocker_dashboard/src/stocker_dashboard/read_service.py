@@ -141,6 +141,8 @@ class DashboardReadService:
                         market_definition.market_id.value,
                         run.cap_bucket,
                         selected_session,
+                        profile_id=run.activity_profile_id,
+                        profile_version=run.activity_profile_id,
                     )
                     if self.activity_store is not None
                     and market_definition is not None
@@ -228,7 +230,8 @@ class DashboardReadService:
         screen = None
         if self.activity_store is not None and market is not None and run.cap_bucket is not None:
             screen = self.activity_store.get(
-                market.market_id.value, run.cap_bucket, selected_session
+                market.market_id.value, run.cap_bucket, selected_session,
+                profile_id=run.activity_profile_id, profile_version=run.activity_profile_id,
             )
         today = self.performance_service.performance(run, PerformancePeriod.TODAY)
         return {
@@ -285,6 +288,10 @@ class DashboardReadService:
             "session": selected_session.isoformat(),
             "screen_state": screen.status.value if screen else None,
             "screen_timestamp": screen.screen_timestamp.isoformat() if screen else None,
+            "activity_screen": self.screen(
+                market.market_id.value, run.cap_bucket.value, selected_session,
+                profile_id=run.activity_profile_id,
+            ) if screen is not None and market is not None and run.cap_bucket is not None else None,
             "watchlist_size": sum(item.selected for item in screen.candidates) if screen else 0,
             "today_realised_pnl": today["realised_pnl"],
             "current_unrealised_pnl": today["unrealised_pnl"],
@@ -338,12 +345,18 @@ class DashboardReadService:
             for environment in Environment
         }
 
-    def screen(self, market_id: str, cap_bucket: str, session: date) -> dict[str, Any]:
+    def screen(
+        self, market_id: str, cap_bucket: str, session: date,
+        *, profile_id: str = "ACTIVITY_SHORTLIST_V1",
+    ) -> dict[str, Any]:
         if self.activity_store is None:
             raise ValueError("activity shortlist store is unavailable")
         from stocker_core.markets import CapBucket
 
-        snapshot = self.activity_store.get(market_id, CapBucket(cap_bucket), session)
+        snapshot = self.activity_store.get(
+            market_id, CapBucket(cap_bucket), session,
+            profile_id=profile_id, profile_version=profile_id,
+        )
         if snapshot is None:
             raise ValueError("unknown activity shortlist snapshot")
         return {

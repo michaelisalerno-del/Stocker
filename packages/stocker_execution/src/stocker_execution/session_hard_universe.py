@@ -1,4 +1,4 @@
-"""Session HARD discovery: listings, or the existing cross-market PAPER shortlist."""
+"""Bound contract/history work using the same audited activity filter in every market."""
 
 from collections.abc import Callable, Sequence
 from datetime import datetime
@@ -20,7 +20,12 @@ class SessionHardUniverseSearch:
     def __init__(self, broker: IbkrConnection, database: Path, clock: Callable[[], datetime]):
         self.broker = broker
         self.clock = clock
-        self.activity = ActivityShortlistService(ActivityShortlistStore(database))
+        self.activity = ActivityShortlistService(
+            ActivityShortlistStore(database),
+            profile_id="ACTIVITY_CAPACITY_V2",
+            watch_limit=min(50, max(1, broker.config.market_data_line_budget // 20)),
+            allow_late_capture=True,
+        )
 
     async def qualify(self, runs: Sequence[RunInstance]) -> Stage5QualificationResult:
         from stocker_execution.runtime import ExchangeSessionResolver
@@ -41,8 +46,8 @@ class SessionHardUniverseSearch:
                     cap_bucket_version="CAP_BUCKETS_V1",
                     session=market.session,
                     screen_timestamp=now,
-                    profile_id="ACTIVITY_SHORTLIST_V1",
-                    profile_version="ACTIVITY_SHORTLIST_V1",
+                    profile_id=self.activity.profile_id,
+                    profile_version=self.activity.profile_id,
                     status=ActivityShortlistStatus.SCANNER_NOT_AVAILABLE,
                     components=(),
                     candidates=(),
@@ -56,5 +61,10 @@ class SessionHardUniverseSearch:
                 session=market.session,
                 screen_at=market.active_bar_starts[3],
                 now=now,
+                allowed_symbols=(
+                    frozenset(member.symbol for member in instance.universe.members)
+                    if definition.listing_membership is not None
+                    else None
+                ),
             )
         return await qualify_active_runs(self.broker, runs, activity_snapshots=snapshots)

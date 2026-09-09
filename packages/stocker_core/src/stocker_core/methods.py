@@ -102,7 +102,16 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
         "method_version": SESSION_HARD.version,
         "market": selected.value,
         "universe_search": {
-            "builder": "AUTHORITATIVE_MARKET_LISTINGS",
+            "builder": "IBKR_ACTIVITY_CAPACITY_V2",
+            "activity_profile": "ACTIVITY_CAPACITY_V2",
+            "capture_active_minutes": 15,
+            "capture_policy": (
+                "First available capture at/after minute 15; actual timestamp; no replay"
+            ),
+            "watch_limit": "min(50, max(1, configured_market_data_lines // 20)) per market",
+            "ranking": "Scanner hit count, equal-weight rank sum, best rank, symbol, conId",
+            "coverage": "Bounded IBKR activity shortlist; US authoritative membership enforced",
+            "validation": "UNVALIDATED_ACTIVITY_FILTER_PAPER_TEST",
             "market": selected.value,
             "cap_constraint": None,
             "manual_universe": "research/testing input only",
@@ -132,7 +141,10 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
             "comparison": "<=",
             "q1_spec_sha256": PROSPECTIVE_SPEC_SHA256,
         },
-        "ranking_capacity": "No TOP5 strategy filter; shared account capacity applies",
+        "ranking_capacity": (
+            "Activity watchlist fits per-market tick budget; "
+            "shared account/feed capacity still applies"
+        ),
         "direction": "First UP break LONG; first DOWN break SHORT; no reversal",
         "entry": {"trigger_M": 0.20, "window_minutes": 5, "reference": "Exact threshold"},
         "exits": {"stop_M": 0.50, "target_M": 1.00, "deadline_minutes_from_t0": 15},
@@ -156,15 +168,10 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
         },
     }
     if get_market(selected).listing_membership is None:
-        # Preserve the existing discovery profile for cross-market PAPER testing.
-        # It is not a validated suitability rule or evidence of model transfer.
+        # Sharing a discovery profile is not evidence of model transfer.
         spec["universe_search"].update(
             {
-                "builder": "IBKR_ACTIVITY_SHORTLIST_V1",
-                "activity_profile": "ACTIVITY_SHORTLIST_V1",
-                "capture_active_minutes": 15,
                 "validation": "UNVALIDATED_CROSS_MARKET_PAPER_TEST",
-                "coverage": "Existing bounded IBKR activity shortlist; not all market listings",
             }
         )
     return spec
@@ -172,7 +179,7 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
 
 SESSION_HARD = MethodDefinition(
     method_id="SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
-    version="SESSION_HARD_CAUSAL_Q1_FIT_V1",
+    version="SESSION_HARD_CAUSAL_Q1_ACTIVITY_V2",
     config_name="SESSION_HARD",
     label="Session HARD",
     supported_markets=(

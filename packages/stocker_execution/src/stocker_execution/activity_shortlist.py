@@ -469,8 +469,18 @@ class ActivityShortlistStore:
 
 
 class ActivityShortlistService:
-    def __init__(self, store: ActivityShortlistStore) -> None:
+    def __init__(
+        self,
+        store: ActivityShortlistStore,
+        *,
+        profile_id: str = ACTIVITY_SHORTLIST_ID,
+        watch_limit: int = ACTIVITY_SHORTLIST_WATCH_LIMIT,
+        allow_late_capture: bool = False,
+    ) -> None:
         self.store = store
+        self.profile_id = profile_id
+        self.watch_limit = watch_limit
+        self.allow_late_capture = allow_late_capture
 
     async def get_or_create(
         self,
@@ -483,14 +493,22 @@ class ActivityShortlistService:
         now: datetime,
         allowed_symbols: frozenset[str] | None = None,
     ) -> ActivityShortlistSnapshot:
-        existing = self.store.get(market.market_id.value, cap_bucket, session)
+        existing = self.store.get(
+            market.market_id.value,
+            cap_bucket,
+            session,
+            profile_id=self.profile_id,
+            profile_version=self.profile_id,
+        )
         if existing is not None:
             return existing
         if now < screen_at:
             return self._status(
                 market, cap_bucket, session, screen_at, ActivityShortlistStatus.SCHEDULED
             )
-        if now >= screen_at + ACTIVITY_SHORTLIST_CAPTURE_WINDOW:
+        if self.allow_late_capture:
+            screen_at = now
+        if not self.allow_late_capture and now >= screen_at + ACTIVITY_SHORTLIST_CAPTURE_WINDOW:
             return self.store.save_once(
                 self._status(
                     market,
@@ -614,16 +632,16 @@ class ActivityShortlistService:
             cap_bucket_version="CAP_BUCKETS_V1",
             session=session,
             screen_timestamp=screen_at.astimezone(UTC),
-            profile_id=ACTIVITY_SHORTLIST_ID,
-            profile_version=ACTIVITY_SHORTLIST_VERSION,
+            profile_id=self.profile_id,
+            profile_version=self.profile_id,
             status=ActivityShortlistStatus.READY,
             components=used_components,
-            candidates=rank_activity_candidates(rows),
+            candidates=rank_activity_candidates(rows, watch_limit=self.watch_limit),
         )
         return self.store.save_once(snapshot)
 
-    @staticmethod
     def _status(
+        self,
         market: MarketDefinition,
         cap_bucket: CapBucket,
         session: date,
@@ -639,8 +657,8 @@ class ActivityShortlistService:
             "CAP_BUCKETS_V1",
             session,
             screen_at.astimezone(UTC),
-            ACTIVITY_SHORTLIST_ID,
-            ACTIVITY_SHORTLIST_VERSION,
+            self.profile_id,
+            self.profile_id,
             status,
             components,
             (),
@@ -649,12 +667,8 @@ class ActivityShortlistService:
 
 
 def _supports_cap_bucket(filters: frozenset[str], bucket: CapBucket) -> bool:
-    above = bool(
-        {"marketCapAbove", "usdMarketCapAbove", "marketCapAbove1e6"} & filters
-    )
-    below = bool(
-        {"marketCapBelow", "usdMarketCapBelow", "marketCapBelow1e6"} & filters
-    )
+    above = bool({"marketCapAbove", "usdMarketCapAbove", "marketCapAbove1e6"} & filters)
+    below = bool({"marketCapBelow", "usdMarketCapBelow", "marketCapBelow1e6"} & filters)
     if bucket is CapBucket.MEGA:
         return above
     return above and below

@@ -1175,7 +1175,7 @@ def test_http_routes_and_all_navigation_pages_render(tmp_path: Path) -> None:
         assert "PAPER" in response.text
         assert "LIVE" in response.text
     index = client.get("/").text
-    assert 'src="/static/dashboard.js?v=20260909-data-readiness"' in index
+    assert 'src="/static/dashboard.js?v=20260909-activity-filter"' in index
     for label in (
         "Overview",
         "Runs",

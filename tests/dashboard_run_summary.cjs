@@ -13,6 +13,7 @@ const path = require("node:path");
     let requests = 123;
     let auditDownloads = 0;
     let evaluation = "NO_MORE_CHECKPOINTS_TODAY";
+    let activity = null;
     const staticPath = path.join(__dirname, "../packages/stocker_dashboard/src/stocker_dashboard/static");
     await page.context().route("http://stocker.test/**", async route => {
       const url = new URL(route.request().url());
@@ -25,6 +26,7 @@ const path = require("node:path");
         evaluation_progress: { completed: 40, total: 6570, preparing_history: true, trade_stream_unavailable: 6565 },
         downloads: { scope: "ALL_RUNS", requests, pending: 4 },
         method_spec: { entry: { trigger_M: 0.2 } },
+        activity_screen: activity,
         funnel: [{ stage: "Stock eligibility", count: 6570 }, { stage: "Required data ready", count: 153 }],
       });
       if (url.pathname === "/api/runs/test/performance") return json({ history: [], currency: "USD", closed_trades: 0 });
@@ -62,6 +64,15 @@ const path = require("node:path");
     });
     assert.equal(audit.historical, "FULL_UNIVERSE_DATA");
     assert.equal(auditDownloads, 1);
+    activity = { reason: "", candidates: [
+      { symbol: "AAPL", currency: "USD", scan_hit_count: 3, aggregate_screen_score: 2.9, best_component_rank: 1, selected: true },
+      { symbol: "MSFT", currency: "USD", scan_hit_count: 2, aggregate_screen_score: 1.8, best_component_rank: 3, selected: false },
+    ] };
+    await page.evaluate(() => refreshCurrentPage());
+    assert.match(await page.locator("main").innerText(), /2 activity candidates · 1 selected/);
+    await page.getByText("Inspect stock selection", { exact: true }).click();
+    assert.match(await page.locator("main").innerText(), /AAPL/);
+    assert.match(await page.locator("main").innerText(), /Outside capacity limit/);
     assert(!await page.locator("main").innerText().then(text => text.includes("FULL_UNIVERSE_DATA")));
     assert.deepEqual(errors, []);
     console.log("PASS: compact summary, live download refresh, checkpoint status, on-demand audit, GET-only");

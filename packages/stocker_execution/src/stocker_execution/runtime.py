@@ -1875,7 +1875,7 @@ class StockerRuntime:
         pending_run_ids = {
             membership.run_id
             for item in self._qualification.ineligible
-            if item.symbol == "ACTIVITY_SHORTLIST_V1"
+            if item.symbol in {"ACTIVITY_SHORTLIST_V1", "ACTIVITY_CAPACITY_V2"}
             and item.reason in {"SCHEDULED", "ACTIVITY_SHORTLIST_NOT_READY"}
             for membership in item.memberships
         }

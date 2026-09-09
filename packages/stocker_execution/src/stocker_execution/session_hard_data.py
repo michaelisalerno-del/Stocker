@@ -170,7 +170,11 @@ def completed_five_minute_bars(bars: Sequence[HistoricalBar]) -> tuple[Historica
 
 
 def directional_inputs(
-    bars: Sequence[HistoricalBar], t0: datetime, checkpoint: int
+    bars: Sequence[HistoricalBar],
+    t0: datetime,
+    checkpoint: int,
+    *,
+    active_minutes: Sequence[datetime] | None = None,
 ) -> dict[str, float]:
     """The four frozen T0 predictors, cut at T0-1m; no trigger-minute OHLC.
 
@@ -190,10 +194,20 @@ def directional_inputs(
             for b in bars
         ]
     ).set_index("timestamp")
-    expected = pd.date_range(
-        t0 - timedelta(minutes=checkpoint * 5), t0 - timedelta(minutes=1), freq="1min"
+    expected = (
+        pd.DatetimeIndex(list(active_minutes))
+        if active_minutes is not None
+        else pd.date_range(
+            t0 - timedelta(minutes=checkpoint * 5), t0 - timedelta(minutes=1), freq="1min"
+        )
     )
-    if not prefix.index.equals(expected):
+    if (
+        len(expected) != checkpoint * 5
+        or not expected.is_unique
+        or not expected.is_monotonic_increasing
+        or expected[-1] >= t0
+        or not prefix.index.equals(expected)
+    ):
         raise ValueError("Missing exact causal qualification prefix")
     typical = (prefix.high + prefix.low + prefix.close) / 3
     vwap = (typical * prefix.volume).cumsum() / prefix.volume.cumsum().replace(0, np.nan)
@@ -271,7 +285,7 @@ class IbkrSessionDataSource:
             try:
                 semantics = self._ONE_MINUTE if run.method_spec else self._FIVE_MINUTES
                 history_required = (
-                    tuple(session_open + timedelta(minutes=i) for i in range(checkpoint * 5))
+                    tuple(start + timedelta(minutes=i) for start in required for i in range(5))
                     if run.method_spec
                     else required
                 )
@@ -282,7 +296,7 @@ class IbkrSessionDataSource:
                     await self._history.fetch_and_store(
                         instrument,
                         bar_size=semantics.bar_size,
-                        duration=f"{checkpoint * 5 * 60 + 300} S",
+                        duration=f"{int((t0 - session_open).total_seconds()) + 300} S",
                         what_to_show="TRADES",
                         regular_trading_hours=True,
                         end_time=t0,
@@ -312,9 +326,7 @@ class IbkrSessionDataSource:
                 if run.method_spec is not None:
                     if row.expected_move_source != SOURCE:
                         raise ValueError("Frozen MODEL_T0 requires prior20 HV, not tick104")
-                    one_required = tuple(
-                        session_open + timedelta(minutes=i) for i in range(checkpoint * 5)
-                    )
+                    one_required = history_required
                     one = self._cache.get_required_history(
                         instrument, self._ONE_MINUTE, one_required, as_of=t0
                     )
@@ -322,7 +334,7 @@ class IbkrSessionDataSource:
                         await self._history.fetch_and_store(
                             instrument,
                             bar_size="1 min",
-                            duration=f"{checkpoint * 300} S",
+                            duration=f"{int((t0 - session_open).total_seconds())} S",
                             what_to_show="TRADES",
                             regular_trading_hours=True,
                             end_time=t0,
@@ -341,7 +353,7 @@ class IbkrSessionDataSource:
                     assert row.pre_move_m is not None and row.historical_volatility is not None
                     inputs = {
                         **features,
-                        **directional_inputs(one.bars, t0, checkpoint),
+                        **directional_inputs(one.bars, t0, checkpoint, active_minutes=one_required),
                         "score": assessments[key].score,
                         "PRE_MOVE_M": row.pre_move_m,
                         "cohort_percentile": float("nan"),

@@ -26,13 +26,9 @@ class UniverseRunBuilder:
                         f"{s.opens_at:%H:%M}–{s.closes_at:%H:%M}"
                         for s in get_market(m).regular_sessions
                     ),
-                    "scanner_readiness": "METHOD_OWNED_LISTINGS",
+                    "scanner_readiness": "METHOD_OWNED_ACTIVITY_FILTER",
                     "experimental": get_market(m).listing_membership is None,
-                    "search_policy": (
-                        "Market listings · no cap filter"
-                        if get_market(m).listing_membership
-                        else "Existing IBKR activity shortlist · no cap filter"
-                    ),
+                    "search_policy": "IBKR activity shortlist · sized to tick-feed capacity",
                     "validation": (
                         "US development candidate"
                         if get_market(m).listing_membership
@@ -52,8 +48,8 @@ class UniverseRunBuilder:
                 for method in installed_methods()
             ],
             "candidate_screen": {
-                "label": "Method-owned universe and required-data checks",
-                "screen_active_minutes_after_open": 0,
+                "label": "Activity ranking, capacity limit, then required-data checks",
+                "screen_active_minutes_after_open": 15,
             },
         }
 

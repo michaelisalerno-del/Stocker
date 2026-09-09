@@ -735,7 +735,7 @@ async def qualify_active_runs(
                 )
                 ineligible.append(
                     Stage5IneligibleInstrument(
-                        "ACTIVITY_SHORTLIST_V1",
+                        run.config.activity_profile_id,
                         (membership,),
                         reason,
                     )

@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 from stocker_core.config import RunsConfig
+from stocker_core.markets import get_market
 from stocker_core.methods import SESSION_HARD
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 
@@ -39,6 +40,21 @@ def migrate(payload: dict[str, Any]) -> tuple[RunsConfig, dict[str, str]]:
         if previous.run_id not in enabled:
             continue
         assert previous.market_id is not None
+        original_universes = config.universes
+        listing_id = get_market(previous.market_id).listing_membership
+        if listing_id is not None:
+            snapshot = previous.universe_snapshot
+            if snapshot is None or not snapshot.members:
+                raise ValueError("Migration requires the previous run's saved listing membership")
+            # Reuse the exact saved population, even if the catalogue was removed or refreshed.
+            config = config.model_copy(
+                update={
+                    "universes": (
+                        *(u for u in config.universes if u.universe_id != listing_id),
+                        snapshot.model_copy(update={"universe_id": listing_id}),
+                    )
+                }
+            )
         config, current = UniverseRunBuilder().add(
             config,
             market_id=previous.market_id,
@@ -47,6 +63,15 @@ def migrate(payload: dict[str, Any]) -> tuple[RunsConfig, dict[str, str]]:
             environment=previous.environment,
             risk=previous.risk,
         )
+        if listing_id is not None:
+            config = config.model_copy(
+                update={
+                    "universes": (
+                        *(u for u in config.universes if u.universe_id != listing_id),
+                        *(u for u in original_universes if u.universe_id == listing_id),
+                    )
+                }
+            )
         if not enabled[previous.run_id]:
             config = UniverseRunBuilder().disable(config, current.run_id)
         mapping[previous.run_id] = current.run_id

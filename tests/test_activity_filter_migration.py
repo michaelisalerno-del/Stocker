@@ -17,9 +17,12 @@ def migration():
 
 
 @pytest.mark.parametrize("enabled", [True, False])
-def test_upgrade_preserves_history_risk_environment_and_enabled_state(enabled):
+@pytest.mark.parametrize("catalogue_present", [True, False])
+def test_upgrade_preserves_history_risk_environment_and_enabled_state(enabled, catalogue_present):
     config, _run = add()
     payload = config.model_dump(mode="json")
+    if not catalogue_present:
+        payload["universes"] = [u for u in payload["universes"] if "METHOD" in u["universe_id"]]
     old = payload["runs"][0]
     old.update(
         run_id="previous-run",
@@ -37,6 +40,10 @@ def test_upgrade_preserves_history_risk_environment_and_enabled_state(enabled):
     assert previous.method_spec_hash == old["method_spec_hash"]
     assert current.risk == previous.risk
     assert current.environment == previous.environment
+    assert current.universe_snapshot == previous.universe_snapshot
+    assert {u.universe_id for u in upgraded.universes} == {
+        u["universe_id"] for u in payload["universes"]
+    }
     assert current.enabled == enabled
     assert mapping == {previous.run_id: current.run_id}
     validate_run_method(current)

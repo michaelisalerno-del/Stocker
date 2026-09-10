@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import re
 import xml.etree.ElementTree as ElementTree
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -374,6 +375,13 @@ class IbkrConnection:
         self._open_orders_loaded = False
         self._completed_orders_loaded = False
         self._scanner_capabilities: ScannerCapabilities | None = None
+        self._scanner_capabilities_lock = asyncio.Lock()
+        self._scanner_timings: dict[int, dict[str, Any]] = {}
+        self._scanner_timing_installed = False
+        self.audit_history_lock = asyncio.Lock()
+        self._history_request_context: ContextVar[list[int] | None] = ContextVar(
+            "ibkr_history_request", default=None)
+        self._history_capture_installed = False
         self._qualified_stock_cache: dict[tuple[str, str, str, str], QualifiedInstrument] = {}
         self._scanner_stock_type_cache: dict[int, str] = {}
         self._discovery_contract_cache: dict[int, tuple[QualifiedInstrument, str]] = {}
@@ -1179,11 +1187,14 @@ class IbkrConnection:
         self,
         subscription: object,
         filter_options: list[object] | None = None,
+        *, audit: dict[str, Any] | None = None,
     ) -> _ScannerResult:
         """Collect one scan and guarantee broker-side cancellation on every exit."""
 
         self._reset_daily_resource_counters()
         async with self._scanner_semaphore:
+            if audit is not None:
+                audit["request_start"] = datetime.now(UTC).isoformat()
             self._active_scanners += 1
             self._scanner_requests_today += 1
             try:
@@ -1192,7 +1203,11 @@ class IbkrConnection:
                 wrapper = getattr(self._client, "wrapper", None)
                 if callable(request) and callable(cancel) and wrapper is not None:
                     with self.capture_api_errors() as errors:
+                        self._install_scanner_timing(wrapper)
                         data_list = request(subscription, [], filter_options or [])
+                        if audit is not None:
+                            self._scanner_timings[data_list.reqId] = audit
+                            audit["request_id"] = data_list.reqId
                         future = wrapper.startReq(data_list.reqId, container=data_list)
                         try:
                             result = await asyncio.wait_for(
@@ -1220,9 +1235,14 @@ class IbkrConnection:
                                 f"IBKR scanner precision warning (492): {e.message}"
                                 for e in errors if e.request_id == data_list.reqId and e.code == 492
                             )
+                            if audit is not None:
+                                audit.update(row_count=len(result), warnings=list(warnings))
                             return _ScannerResult(tuple(result), warnings)
                         finally:
                             cancel(data_list)
+                            if audit is not None:
+                                audit["cancelled_at"] = datetime.now(UTC).isoformat()
+                                self._scanner_timings.pop(data_list.reqId, None)
                             end_request = getattr(wrapper, "_endReq", None)
                             if callable(end_request):
                                 end_request(data_list.reqId)
@@ -1236,11 +1256,36 @@ class IbkrConnection:
                         self._client.reqScannerDataAsync(subscription, [], filter_options),
                         timeout=self.config.request_timeout_seconds,
                     )
+                if audit is not None:
+                    audit.update(row_count=len(result), completed_at=datetime.now(UTC).isoformat(),
+                                 timing_note="High-level client; callback times unavailable")
                 return _ScannerResult(tuple(result))
             finally:
                 self._active_scanners -= 1
 
+    def _install_scanner_timing(self, wrapper: Any) -> None:
+        """Observe existing wrapper callbacks without changing scanner delivery."""
+        if self._scanner_timing_installed:
+            return
+        for name, field in (("scannerData", "first_response"),
+                            ("scannerDataEnd", "scanner_data_end")):
+            original = getattr(wrapper, name, None)
+            if not callable(original):
+                continue
+            def observed(*args: Any, _original: Any = original,
+                         _field: str = field) -> Any:
+                audit = self._scanner_timings.get(int(args[0]))
+                if audit is not None:
+                    audit.setdefault(_field, datetime.now(UTC).isoformat())
+                return _original(*args)
+            setattr(wrapper, name, observed)
+        self._scanner_timing_installed = True
+
     async def scanner_capabilities(self) -> ScannerCapabilities:
+        async with self._scanner_capabilities_lock:
+            return await self._load_scanner_capabilities()
+
+    async def _load_scanner_capabilities(self) -> ScannerCapabilities:
         """Discover and cache the connected broker's finite scanner vocabulary."""
 
         self._require_connected()
@@ -1310,7 +1355,20 @@ class IbkrConnection:
                     location_instruments.setdefault(direct_location, set()).update(
                         local_instruments
                     )
+        descriptions: dict[str, str] = {}
+        for element in root.iter():
+            children = {child.tag.rsplit("}", 1)[-1]: (child.text or "").strip()
+                        for child in element}
+            if children.get("scanCode"):
+                descriptions[children["scanCode"]] = " ".join(
+                    children.get(key, "") for key in ("displayName", "name", "scanName")
+                ).strip()
+        version_reader = getattr(getattr(self._client, "client", None), "serverVersion", None)
         discovered = ScannerCapabilities(
+            retrieved_at=datetime.now(UTC).isoformat(),
+            server_version=str(version_reader()) if callable(version_reader) else None,
+            raw_xml=payload,
+            scan_descriptions=descriptions,
             locations=frozenset(values["locations"]),
             scan_codes=frozenset(values["scan_codes"]),
             filters=frozenset(values["filters"]),
@@ -1402,6 +1460,52 @@ class IbkrConnection:
             currency, 1 / mid if inverse else mid, instrument.con_id, pair,
             quote.bid, quote.ask, quote.timestamp.isoformat(),
         )
+
+    async def acquisition_scan(
+        self, request: Any, audit: dict[str, Any]
+    ) -> tuple[DiscoveryRow, ...]:
+        """Raw acquisition only: no price, volume or stock-suitability threshold."""
+        from ib_async import ScannerSubscription, TagValue
+
+        from stocker_execution.discovery import DiscoveryRow
+
+        self._require_connected()
+        caps = await self.scanner_capabilities()
+        if (request.unsupported_reason or request.location not in caps.locations
+                or request.scan_code not in caps.scan_codes_for(request.location)
+                or not caps.supports_instrument(request.location, request.instrument)
+                or any(key not in caps.filters_for(request.location)
+                       for key, _ in request.filters)):
+            raise IbkrError(request.unsupported_reason or "SCANNER_COMPONENT_UNSUPPORTED")
+        subscription = ScannerSubscription(numberOfRows=request.rows, instrument=request.instrument,
+                                           locationCode=request.location,
+                                           scanCode=request.scan_code)
+        filters: list[object] = []
+        for key, value in request.filters:
+            if key in {"marketCapAbove", "marketCapBelow"}:
+                setattr(subscription, key, float(value))
+            else:
+                filters.append(TagValue(key, value))
+        started = perf_counter()
+        try:
+            scan = await self._bounded_scanner_data(subscription, filters, audit=audit)
+            return tuple(DiscoveryRow(
+                int(getattr(raw.contractDetails.contract, "conId", 0) or 0),
+                str(getattr(raw.contractDetails.contract, "symbol", "")).upper(),
+                str(getattr(raw.contractDetails.contract, "exchange", "") or "SMART"),
+                getattr(raw.contractDetails.contract, "primaryExchange", None) or None,
+                str(getattr(raw.contractDetails.contract, "currency", "")).upper(),
+                str(getattr(raw.contractDetails.contract, "secType", "")).upper(),
+                int(getattr(raw, "rank", -1)),
+                {"stock_type": str(getattr(raw.contractDetails, "stockType", "")),
+                 "warning": "; ".join(scan.warnings)},
+            ) for raw in cast(Sequence[Any], scan.rows))
+        except BaseException as exc:
+            audit["error"] = sanitize_ibkr_message(exc) or type(exc).__name__
+            raise
+        finally:
+            audit["latency_ms"] = (perf_counter() - started) * 1000
+            audit["completed_at"] = datetime.now(UTC).isoformat()
 
     async def discovery_scan(self, request: DiscoveryScan) -> tuple[DiscoveryRow, ...]:
         """Raw scanner boundary: preserve every observation, including invalid identities."""
@@ -1617,6 +1721,43 @@ class IbkrConnection:
             )
         return tuple(results[:max_results])
 
+    async def _historical_response(self, contract: object, **kwargs: Any) -> list[object]:
+        """Use the existing client request; retain its ID for errors and cancellation."""
+        wrapper = getattr(self._client, "wrapper", None)
+        start = getattr(wrapper, "startReq", None)
+        if wrapper is not None and callable(start) and not self._history_capture_installed:
+            def capture(key: Any, *args: Any, **options: Any) -> Any:
+                ids = self._history_request_context.get()
+                if ids is not None and isinstance(key, int):
+                    ids.append(key)
+                return start(key, *args, **options)
+            wrapper.startReq = capture
+            self._history_capture_installed = True
+        ids: list[int] = []
+        token = self._history_request_context.set(ids)
+        completed = False
+        try:
+            with self.capture_api_errors() as errors:
+                # The outer timeout propagates failure instead of ib_async's empty-list timeout.
+                async with asyncio.timeout(self.config.request_timeout_seconds):
+                    result = await self._client.reqHistoricalDataAsync(
+                        contract, **kwargs, timeout=0)
+                completed = True
+                failures = [e for e in errors if e.request_id in ids
+                            and not ("no data" in e.message.lower() and e.code in {162, 165})]
+                if failures:
+                    raise IbkrError("; ".join(f"{e.code}: {e.message}" for e in failures))
+                return result
+        finally:
+            self._history_request_context.reset(token)
+            cancel = getattr(getattr(self._client, "client", None), "cancelHistoricalData", None)
+            end = getattr(wrapper, "_endReq", None)
+            for request_id in ids:
+                if not completed and callable(cancel):
+                    cancel(request_id)
+                if callable(end):
+                    end(request_id)
+
     async def historical_bars(
         self,
         instrument: QualifiedInstrument,
@@ -1644,7 +1785,7 @@ class IbkrConnection:
             async with self._historical_semaphore:
                 requested_at = perf_counter()
                 self._historical_requests_today += 1
-                source_bars = await self._client.reqHistoricalDataAsync(
+                source_bars = await self._historical_response(
                     _to_ib_contract(instrument),
                     endDateTime=end_time or "",
                     durationStr=duration.strip(),
@@ -1653,7 +1794,6 @@ class IbkrConnection:
                     useRTH=regular_trading_hours,
                     formatDate=2,
                     keepUpToDate=False,
-                    timeout=self.config.request_timeout_seconds,
                 )
         except Exception as exc:
             raise IbkrError(

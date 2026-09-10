@@ -1740,6 +1740,29 @@ class StockerRuntime:
                 update = await lifecycle(instance, market, _aware(self._clock()))
                 if update is not None:
                     self._replace_qualification_for({instance.config.run_id}, update)
+        # Audit jobs get no slots while any enabled market or trading preparation is active.
+        background_owners = [(owner, self._services_for(owner.config).background_work)
+                             for owner in self._manager.list_runs()
+                             if self._services_for(owner.config).background_work is not None]
+        if background_owners:
+            background_allowed = not self._expected_move_tasks and not self._checkpoint_tasks
+            for owner in self._manager.list_runs():
+                if not owner.config.enabled:
+                    continue
+                audit_session = self._resolve_market(owner, now)
+                broker = self._destinations[owner.config.environment].broker
+                configuration = getattr(broker, "config", None)
+                guard = timedelta(seconds=getattr(configuration, "request_timeout_seconds", 60))
+                if (audit_session and audit_session.opens_at and audit_session.closes_at
+                        and audit_session.opens_at - guard <= now < audit_session.closes_at):
+                    background_allowed = False
+            for owner, background in background_owners:
+                assert background is not None
+                try:
+                    await background(owner, background_allowed and owner.config.enabled)
+                except Exception as exc:
+                    self._logger.warning("method_background_failed",
+                                         run_id=owner.config.run_id, reason=str(exc))
         with self._timing("session_and_shortlist_refresh"):
             await self._refresh_activity_sessions(_aware(self._clock()))
             await self._refresh_scheduled_activity_shortlists(_aware(self._clock()))

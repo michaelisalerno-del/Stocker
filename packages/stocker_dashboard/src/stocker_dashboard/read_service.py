@@ -14,6 +14,7 @@ from stocker_core.runs import Environment, RunConfig
 from stocker_core.strategies import installed_strategies
 from stocker_core.universes import UniverseDefinition
 from stocker_dashboard.performance import PerformancePeriod, RunPerformanceService
+from stocker_execution.acquisition_store import AcquisitionStore
 from stocker_execution.activity_shortlist import ActivityShortlistStore
 from stocker_execution.candidate_pipeline import CandidateStore
 from stocker_execution.discovery import DiscoveryStore, discovery_summary
@@ -51,6 +52,7 @@ class DashboardReadService:
         self.activity_store = activity_store
         self.discovery_store = DiscoveryStore(stage5_store.path, initialize=False)
         self.candidate_store = CandidateStore(stage5_store.path, initialize=False)
+        self.acquisition_store = AcquisitionStore(stage5_store.path, initialize=False)
         self.performance_service = RunPerformanceService(ledger, clock=self.clock)
 
     def overview(self) -> dict[str, Any]:
@@ -179,6 +181,8 @@ class DashboardReadService:
                     "market": runtime.market.value if runtime and runtime.market else None,
                     "current_or_next_checkpoint": (checkpoint.isoformat() if checkpoint else None),
                     "candidate_selection": selection,
+                    "acquisition": self.acquisition_store.summary(run.run_id, selected_session)
+                    if run.method_spec and "universe_acquisition" in run.method_spec else None,
                     "candidate_count": (
                         selection["watchlist_size"]
                         if selection
@@ -230,6 +234,20 @@ class DashboardReadService:
             "source": run.universe_source.value if run.universe_source else None,
             "last_successful_discovery": successes[0]["completed_at"] if successes else None,
         }
+
+    def acquisition_details(self, run_id: str, session: date, kind: str,
+                            limit: int, offset: int) -> dict[str, Any]:
+        summary = self.acquisition_store.summary(run_id, session)
+        allowed = {"hits", "components", "pool", "broad", "requests", "oracle",
+                   "targets", "misses", "contributions"}
+        if kind not in allowed:
+            raise ValueError("Unknown acquisition detail kind")
+        return {"summary": summary,
+                "rows": self.acquisition_store.details(run_id, session, kind, limit, offset)
+                        if summary else [],
+                "recall_history": self.acquisition_store.recall_history(run_id) if summary else {},
+                "benchmark": self.acquisition_store.benchmark(run_id, session) if summary else {},
+                "limit": limit, "offset": offset}
 
     def candidate_selection_details(
         self, run_id: str, session: date, limit: int, offset: int
@@ -379,6 +397,8 @@ class DashboardReadService:
             "market_state": runtime.market.value if runtime and runtime.market else None,
             "session": selected_session.isoformat(),
             "candidate_selection": selection,
+                    "acquisition": self.acquisition_store.summary(run.run_id, selected_session)
+                    if run.method_spec and "universe_acquisition" in run.method_spec else None,
             "discovery": discovery,
             "universe_source": (
                 run.universe_source.value if run.universe_source else "LEGACY_ACTIVITY"

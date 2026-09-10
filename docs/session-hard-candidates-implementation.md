@@ -1,5 +1,7 @@
 # Session HARD candidate pipeline implementation
 
+Historical V8 implementation report. Current acquisition is described in [candidate-discovery.md](candidate-discovery.md).
+
 Implemented locally on branch `implement/session-hard-candidates-20260910`, based on
 `88fcaf2670e934687fbc96da1cc23e0c558da2fc`. No deployment, migration of active files, run
 activation, broker connection, or order submission was performed.

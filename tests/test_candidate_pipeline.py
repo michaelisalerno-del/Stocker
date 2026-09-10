@@ -217,7 +217,8 @@ def test_new_spec_changes_only_candidate_and_operational_fields():
     assert RunsConfig.model_validate(config.model_dump(mode="json")).runs[0] == instance.config
 
 
-def test_real_runtime_gates_history_and_builds_state_only_from_rv30(tmp_path):
+@pytest.mark.parametrize("scanner_acquired", [False, True])
+def test_real_runtime_gates_history_and_builds_state_only_from_rv30(tmp_path, scanner_acquired):
     from stocker_execution.strategy_factory import MethodServices
     from test_stage8_runtime import (
         FakeBroker,
@@ -239,6 +240,16 @@ def test_real_runtime_gates_history_and_builds_state_only_from_rv30(tmp_path):
         )
         instance = replace(instance, config=run, universe=run.universe_snapshot)
         provider, source = Provider(), Source()
+        if scanner_acquired:
+            from stocker_execution.acquisition_store import AcquisitionStore
+            from stocker_execution.scanner_acquisition import ScannerAcquisition
+            from test_scanner_acquisition import WideBroker
+
+            async def wait(due):
+                clock.now = due
+            provider = ScannerAcquisition(
+                WideBroker(MarketId.US_NASDAQ), AcquisitionStore(tmp_path / "acquisition.sqlite"),
+                lambda: clock.now, wait)
         pipeline = CandidatePipeline(
             CandidateStore(tmp_path / "candidates.sqlite"), provider, source, lambda: clock.now
         )
@@ -298,6 +309,8 @@ def test_real_runtime_gates_history_and_builds_state_only_from_rv30(tmp_path):
             r.instrument.con_id for r in pipeline.result(instance, session.session).requests
         }
         assert len(selected) == 30
+        if scanner_acquired:
+            assert {i for i, m in source.calls if m == 5} == set(range(1, 351))
         await asyncio.gather(*(task for task, _ in runtime._expected_move_tasks.values()))
         assert all(set(row[2]) == selected for row in features.prepared)
         clock.now = session.opens_at + timedelta(minutes=25)

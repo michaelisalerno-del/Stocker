@@ -8,7 +8,12 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
 from stocker_core.markets import MarketId
-from stocker_core.methods import LEGACY_SESSION_HARD, SESSION_HARD, get_method
+from stocker_core.methods import (
+    LEGACY_SESSION_HARD,
+    SESSION_HARD,
+    SESSION_HARD_CANDIDATES_V8,
+    get_method,
+)
 from stocker_core.runs import RunInstance
 from stocker_execution.session_hard_method import SessionHardMethod
 
@@ -41,6 +46,7 @@ class MethodServices:
     universe_ready: Callable[[str, date], bool] | None = None
     universe_status: Callable[[str, date], dict[str, Any] | None] | None = None
     stop_universe: Callable[[], Awaitable[None]] | None = None
+    background_work: Callable[[RunInstance, bool], Awaitable[None]] | None = None
 
 
 def legacy_session_hard_services(
@@ -119,9 +125,30 @@ def session_hard_services(
     )
 
 
+def acquired_session_hard_services(
+    broker: IbkrConnection, cache: IbkrHistoryCache, store: Stage5SnapshotStore,
+    clock: Callable[[], datetime], logger: Any,
+) -> MethodServices:
+    from dataclasses import replace
+
+    from stocker_execution.acquired_candidates import AcquiredCandidates
+    from stocker_execution.candidate_pipeline import CandidateStore
+
+    services = legacy_session_hard_services(broker, cache, store, clock, logger)
+    candidates = AcquiredCandidates(broker, cache, CandidateStore(store.path), clock)
+    return replace(services, qualify=candidates.qualify, universe_lifecycle=candidates.advance,
+                   universe_ready=candidates.ready, universe_status=candidates.summary,
+                   stop_universe=candidates.stop, background_work=candidates.background)
+
+
 # Add a method's engine and data composition here; UI never branches on its name.
 _PACKAGES = {
-    (SESSION_HARD.method_id, SESSION_HARD.version): (SessionHardMethod, session_hard_services),
+    (SESSION_HARD.method_id, SESSION_HARD.version): (
+        SessionHardMethod, acquired_session_hard_services,
+    ),
+    (SESSION_HARD_CANDIDATES_V8.method_id, SESSION_HARD_CANDIDATES_V8.version): (
+        SessionHardMethod, session_hard_services,
+    ),
     (LEGACY_SESSION_HARD.method_id, LEGACY_SESSION_HARD.version): (
         SessionHardMethod,
         legacy_session_hard_services,

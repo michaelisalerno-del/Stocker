@@ -7,7 +7,7 @@ The user selects the market and method; the method determines what stocks are ap
 
 The current catalogue exposes one method, **Session HARD**, across Stocker's market catalogue.
 Its stable internal identity is `SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D`;
-its current version is `SESSION_HARD_CAUSAL_Q1_CANDIDATES_V8`. The old name remains an internal
+its current version is `SESSION_HARD_CAUSAL_Q1_ACQUISITION_V9`. The old name remains an internal
 identity for history continuity, not a second selectable strategy. The method remains PAPER-only.
 Non-US markets are labelled **unvalidated cross-market PAPER tests**. Operational calendar/scanner
 support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on those markets.
@@ -60,7 +60,7 @@ There is no plugin loader, factory hierarchy or dependency-injection container.
 ### Universe, data and suitability
 
 New runs follow [candidate-discovery.md](candidate-discovery.md): acquisition of a saved broad
-eligible market population, then the frozen Range5 HIGH250 -> RV10 HIGH50 -> RV15 HIGH30 recipe.
+eligible market membership, a prospective scanner-assisted acquisition union, then frozen Range5 HIGH250 -> RV10 HIGH50 -> RV15 HIGH30 recipe.
 US uses authoritative named listing snapshots. Other markets need an explicitly configured
 broad market universe; unavailable sources/data degrade explicitly. No activity TOP50 or cap
 scanner watch limit precedes Range250. Cross-market transfer remains unvalidated and PAPER-only.
@@ -73,9 +73,21 @@ No expensive prior-close/HV/PRE work runs across the broad opening population. S
 historical cache remains intact. Only final TOP30 enters the existing run-scoped strategy state.
 
 V7's five-cap-scan discovery and older activity profiles are legacy behavior retained for saved
-runs and historical audits. V7 remains runnable with its original spec/hash; only V8 is selectable
+runs and historical audits. V7 and V8 remain runnable with their original specs/hashes; only V9 is selectable
 for new runs. Migration creates disabled PAPER replacements in a separate configuration and
-preserves all history. No scanner-recall solution, capacity increase or LIVE activation is included.
+preserves all history. Scanner recall is measured by a delayed audit-only full-market oracle; it is not yet validated.
+No capacity increase or LIVE activation is included.
+
+V9 supplies ScannerAcquisition through the existing UniverseProvider and an idle background
+audit through MethodServices. Scanner ranks only identify contracts for data acquisition.
+The declared experimental matrix uses cached actual Gateway capabilities, floorless/uncapped
+and canonical cap coverage, append-only conId sweeps and bounded cancellation. It does not
+replace the frozen candidate mathematics or admit scanner rank into any strategy score.
+The after-close oracle reconstructs full saved membership using the same candidate functions,
+with separate audit-only tables and prospective recall/contribution diagnostics. It pauses for
+enabled market windows and foreground history work. Normal dashboard/API reads aggregate
+counts and project compact oracle metrics in SQL. See candidate-discovery.md for experiment
+identity, evidence boundaries, deadline behavior and the opt-in read-only PAPER benchmark.
 
 Session prefixes expand actual exchange five-minute slots into one-minute requirements, excluding
 scheduled lunch breaks. Historical request durations include elapsed break time. Frozen directional
@@ -390,7 +402,7 @@ Migration is additive: new method tables and nullable execution provenance/deadl
 columns; old rows and research artifacts are retained. Old signals deserialize with absent new
 fields. Legacy configuration enums and old calculation/payoff/scanner sources remain solely to
 read history and reproduce research. Saved V7 runs remain runnable with their original specifications;
-new run creation selects V8. Earlier archived method versions remain read-only.
+new run creation selects V9. Earlier archived method versions remain read-only.
 There is no destructive reset or conversion of old decisions into the new method.
 
 Retired runs can be marked `archived: true` with `enabled: false`. They disappear from operational

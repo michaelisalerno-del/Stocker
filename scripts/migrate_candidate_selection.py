@@ -1,4 +1,4 @@
-"""Create disabled Range/RV PAPER replacements in a separate configuration file.
+"""Create disabled current acquisition / Range/RV PAPER replacements in a separate file.
 
 No database changes, broker calls, activation, deployment or history reinterpretation.
 """

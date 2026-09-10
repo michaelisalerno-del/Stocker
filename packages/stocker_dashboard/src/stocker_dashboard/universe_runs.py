@@ -106,6 +106,8 @@ class UniverseRunBuilder:
             method_spec_hash=digest,
             universe_snapshot=universe,
             universe_source=(
+                UniverseSource.SCANNER_ASSISTED_UNIVERSE_ACQUISITION
+                if "universe_acquisition" in spec else
                 UniverseSource.DYNAMIC_IBKR
                 if method.discovery_profile(market.market_id) is not None else
                 UniverseSource.AUTHORITATIVE_LISTINGS if market.listing_membership else

@@ -95,6 +95,11 @@ class ScannerCapabilities:
     location_filters: Mapping[str, frozenset[str]] | None = None
     location_instruments: Mapping[str, frozenset[str]] | None = None
 
+    retrieved_at: str | None = None
+    server_version: str | None = None
+    raw_xml: str | None = None
+    scan_descriptions: Mapping[str, str] | None = None
+
     def scan_codes_for(self, location: str) -> frozenset[str]:
         if self.location_scan_codes and location in self.location_scan_codes:
             return self.location_scan_codes[location]

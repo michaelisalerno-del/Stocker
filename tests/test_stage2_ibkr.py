@@ -498,7 +498,7 @@ def test_historical_ibkr_bars_are_converted_without_fabrication() -> None:
         "useRTH": True,
         "formatDate": 2,
         "keepUpToDate": False,
-        "timeout": 60.0,
+        "timeout": 0,  # Stocker enforces the configured timeout around the request.
     }
 
 

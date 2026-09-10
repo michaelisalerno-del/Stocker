@@ -7,8 +7,9 @@ import json
 import sqlite3
 from collections.abc import Callable, Sequence
 from dataclasses import asdict
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, Protocol
 
 from stocker_core.candidate_selection import (
@@ -22,7 +23,12 @@ from stocker_core.candidate_selection import (
 from stocker_core.markets import get_market
 from stocker_core.runs import RunInstance
 from stocker_execution.discovery import DiscoveryRow
-from stocker_execution.history import IbkrHistoryCache, IbkrHistoryService
+from stocker_execution.history import (
+    HistorySemantics,
+    HistoryStatus,
+    IbkrHistoryCache,
+    IbkrHistoryService,
+)
 from stocker_execution.ibkr import (
     HISTORICAL_REQUEST_CONCURRENCY,
     HistoricalBar,
@@ -156,17 +162,41 @@ class OpeningBarSource:
 
     def __init__(self, broker: IbkrConnection, cache: IbkrHistoryCache):
         self.history = IbkrHistoryService(broker, cache)
+        self.cache = cache
         self._bars: dict[tuple[int, datetime, tuple[datetime, ...]], tuple[HistoricalBar, ...]] = {}
         self._locks: dict[tuple[int, datetime, tuple[datetime, ...]], asyncio.Lock] = {}
 
     async def prefix(
-        self, identity: CandidateIdentity, expected: tuple[datetime, ...], due: datetime
+        self, identity: CandidateIdentity, expected: tuple[datetime, ...], due: datetime,
+        *, diagnostic: dict[str, Any] | None = None, use_cache: bool = False,
     ) -> tuple[HistoricalBar, ...]:
+        observed = diagnostic if diagnostic is not None else {}
+        observed.update(started_at=datetime.now(UTC).isoformat(), broker_request=0, cache_hit=0)
+        started = perf_counter()
+        try:
+            return await self._prefix(identity, expected, due, observed, use_cache)
+        finally:
+            observed.update(completed_at=datetime.now(UTC).isoformat(),
+                            latency_ms=(perf_counter()-started)*1000)
+
+    async def _prefix(self, identity: CandidateIdentity, expected: tuple[datetime, ...],
+                      due: datetime, observed: dict[str, Any], use_cache: bool
+                      ) -> tuple[HistoricalBar, ...]:
         self.prune(due.date() - timedelta(days=1))
         key = identity.con_id, due, expected
         async with self._locks.setdefault(key, asyncio.Lock()):
+            if key in self._bars:
+                observed["cache_hit"] = 1
+            elif use_cache:
+                snapshot = await asyncio.to_thread(
+                    self.cache.get_required_history, instrument(identity),
+                    HistorySemantics("1 min", "TRADES", True), expected, as_of=due)
+                if snapshot.status is HistoryStatus.READY:
+                    self._bars[key] = snapshot.bars
+                    observed["cache_hit"] = 1
             if key not in self._bars:
                 try:
+                    observed["broker_request"] = 1
                     rows = await self.history.fetch_and_store(
                         instrument(identity),
                         bar_size="1 min",

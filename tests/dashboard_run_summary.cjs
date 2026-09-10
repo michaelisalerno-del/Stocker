@@ -16,6 +16,7 @@ const path = require("node:path");
     let activity = null;
     let discovery = null;
     let selection = null;
+    let acquisition = null;
     const staticPath = path.join(__dirname, "../packages/stocker_dashboard/src/stocker_dashboard/static");
     await page.context().route("http://stocker.test/**", async route => {
       const url = new URL(route.request().url());
@@ -31,6 +32,7 @@ const path = require("node:path");
         activity_screen: activity,
         discovery,
         candidate_selection: selection,
+        acquisition, session: "2026-09-08",
         funnel: [{ stage: "Stock eligibility", count: 6570 }, { stage: "Required data ready", count: 153 }],
       });
       if (url.pathname === "/api/runs/test/performance") return json({ history: [], currency: "USD", closed_trades: 0 });
@@ -112,6 +114,17 @@ const path = require("node:path");
     assert.match(await page.locator("main").innerText(), /UNVALIDATED_CROSS_MARKET_PAPER_TRANSFER/);
     assert.match(await page.locator("main").innerText(), /BROAD_OPENING_DATA_CAPACITY_UNRESOLVED/);
     assert.equal(auditDownloads, 1);
+    acquisition = {
+      state: "SCANNER_ACQUISITION_READY", upstream_evidence: "PROSPECTIVE_IBKR_TEST",
+      broad_membership: 6570, raw_hits: 1240, acquisition_count: 486,
+      range5_prefixes_ready: 472, oracle_state: "COMPLETE", oracle_completed: 6570,
+      oracle_metrics: { recipes: { ACTIVE: { RANGE250: {recall: .988}, RV50: {recall: 1}, RV30: {recall: 1} } } },
+    };
+    await page.evaluate(() => refreshCurrentPage());
+    assert.match(await page.locator("main").innerText(), /Scanner-assisted acquisition/i);
+    assert.match(await page.locator("main").innerText(), /PROSPECTIVE_IBKR_TEST/);
+    assert.match(await page.locator("main").innerText(), /RANGE250 recall: 98.8%/);
+    assert.equal(await page.locator("main").getByRole("row").count(), 0);
     assert.deepEqual(errors, []);
     console.log("PASS: compact summary, live download refresh, checkpoint status, on-demand audit, GET-only");
   } finally { await browser.close(); }

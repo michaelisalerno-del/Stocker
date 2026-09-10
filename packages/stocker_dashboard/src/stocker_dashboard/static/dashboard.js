@@ -229,12 +229,26 @@ async function runDetail(runId) {
     : "History download activity is unavailable.";
   const preparation = progress ? `${progress.preparing_history ? "Preparing required IBKR history. " : ""}${progress.trade_stream_unavailable ? `${number(progress.trade_stream_unavailable)} stocks lacked a required trade feed at the latest preparation checkpoint. Entry coverage is incomplete.` : ""}` : "";
   const details = ["market", "universe_source", "environment", "account", "currency", "market_state", "session", "screen_state", "screen_timestamp", "watchlist_size", "last_checkpoint", "next_checkpoint", "risk_per_trade", "max_concurrent_positions"];
+  const acquisition = run.acquisition;
+  const acquisitionPanel = acquisition ? `<section class="section"><h2>Scanner-assisted acquisition</h2>
+    <p role="status">${esc(acquisition.state)} · ${esc(acquisition.reason || "")}</p>
+    <p class="muted">Upstream acquisition: ${esc(acquisition.upstream_evidence)}.
+    Scanner rank requests data; it does not rank trading candidates.</p>
+    <div class="metric-strip">
+    ${[["Broad eligible", acquisition.broad_membership], ["Scanner raw hits", acquisition.raw_hits],
+      ["Scanner unique acquisition", acquisition.acquisition_count], ["5m prefixes ready", acquisition.range5_prefixes_ready]]
+      .map(([label, value]) => `<div><span>${label}</span><strong>${number(value)}</strong></div>`).join("")}</div>
+    <p>Oracle audit: ${esc(acquisition.oracle_state)} · ${number(acquisition.oracle_completed)} / ${number(acquisition.broad_membership)} complete · AUDIT_ONLY</p>
+    <p>${Object.entries(acquisition.oracle_metrics?.recipes?.ACTIVE || {}).map(([stage, metric]) =>
+      `${esc(stage)} recall: ${metric.recall == null ? "pending" : (metric.recall * 100).toFixed(1) + "%"}`).join(" · ") || "Range250 / RV50 / RV30 recall: pending"}</p>
+    <a href="/api/runs/${encodeURIComponent(runId)}/acquisition?session=${encodeURIComponent(run.session)}" target="_blank" rel="noopener">Inspect paginated acquisition and oracle diagnostics</a>
+    </section>` : "";
   const selection = run.candidate_selection;
   const selectionPanel = selection ? `<section class="section"><div class="section-head"><h2>Candidate selection</h2></div>
     <p role="status">${esc(selection.state)} · ${esc(selection.reason || "")}</p>
     <p>Range5 HIGH250 → RV10 HIGH50 → RV15 HIGH30</p>
     <p class="muted">${esc(selection.recipe.cross_market_evidence)} · ${esc(selection.recipe.evidence_status)}</p>
-    <div class="metric-strip"><div><span>Broad eligible</span><strong>${number(selection.broad_eligible)}</strong></div>
+    <div class="metric-strip"><div><span>${acquisition ? "Acquisition input" : "Broad eligible"}</span><strong>${number(selection.broad_eligible)}</strong></div>
     ${(selection.stages || []).map(stage => `<div><span>${stage.minutes}m ${esc(stage.stage_id)}</span><strong>${stage.selected == null ? "Pending" : number(stage.selected)}</strong></div>`).join("")}
     <div><span>HARD qualified</span><strong>${number(selection.session_hard_qualified || 0)}</strong></div></div>
     <p class="muted">Source: ${esc(selection.source)} · ${number(selection.source_population_count)} saved references. Broad opening-data capacity requires Gateway verification.</p>
@@ -265,7 +279,7 @@ async function runDetail(runId) {
     <section class="section"><div class="control-rail"><button ${run.historical_only ? "disabled" : ""} data-control="${run.enabled ? "disable" : "enable"}">${run.enabled ? "Disable run" : "Enable run"}</button><button class="secondary" data-control="edit">Edit risk & capacity</button></div><p class="notice">Market, method specification, universe snapshot and environment belong to the saved run. Create another run to change them. Disabling stops future entries and never flattens exposure.</p>${lastOutcome ? `<p class="notice" role="status"><b>${esc(lastOutcome.apply_mode)}</b> · ${esc(lastOutcome.detail)}</p>` : ""}</section>
     <section class="section"><div class="section-head"><h2>Run configuration</h2></div><div class="detail-grid">${grid}</div><details><summary>Method specification</summary><pre>${esc(JSON.stringify({ method: run.strategy_id, version: run.strategy_version, spec_hash: run.method_spec_hash, specification: run.method_spec }, null, 2))}</pre><a href="/api/runs/${encodeURIComponent(runId)}/provenance" download="run-provenance.json">Download full run audit record</a></details></section>
     <section class="section"><div class="section-head"><h2>Preparation and evaluation</h2></div><p class="notice">${esc(evaluationStatus)}</p><p role="status">${esc(preparation)}</p><p role="status">${esc(downloads)}</p><p class="muted">${run.last_checkpoint ? `Results below are from ${esc(new Date(run.last_checkpoint).toLocaleString())}.` : "No checkpoint results yet."} Eligibility counts broker-qualified stocks; evaluation totals update as batches finish.</p><div class="funnel">${funnel}</div><p><a href="/candidates?run=${encodeURIComponent(runId)}&status=READY">Browse data-ready stocks</a> · <a href="/candidates?run=${encodeURIComponent(runId)}&status=WAITING_FOR_ENTRY">View armed candidates</a></p></section>
-    ${selectionPanel}${discoveryPanel}${activityPanel}<section class="section"><div class="section-head"><h2>Performance</h2><div class="tabs">${periods}</div></div><div class="metric-strip performance-strip">${metrics}</div>${table(historyColumns, performance.history)}</section>`;
+    ${acquisitionPanel}${selectionPanel}${discoveryPanel}${activityPanel}<section class="section"><div class="section-head"><h2>Performance</h2><div class="tabs">${periods}</div></div><div class="metric-strip performance-strip">${metrics}</div>${table(historyColumns, performance.history)}</section>`;
   main.querySelectorAll("[data-control]").forEach((button) => button.addEventListener("click", () => runControl(run, button.dataset.control)));
   main.querySelectorAll("[data-performance-period]").forEach((button) => button.addEventListener("click", () => { location.href = `/runs?run=${encodeURIComponent(runId)}&period=${button.dataset.performancePeriod}`; }));
 }

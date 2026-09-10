@@ -257,7 +257,7 @@ def candidate_universe(
     )
 
 
-def session_hard_specification(selected: MarketId) -> dict[str, Any]:
+def session_hard_candidate_specification(selected: MarketId) -> dict[str, Any]:
     # Trading specification is inherited byte-for-byte in value; only acquisition,
     # candidate reduction and operational version/capacity lineage change.
     spec = legacy_session_hard_specification(selected)
@@ -285,7 +285,7 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
             else "UNVALIDATED_CROSS_MARKET_PAPER_TRANSFER"
         ),
     )
-    spec["method_version"] = SESSION_HARD.version
+    spec["method_version"] = SESSION_HARD_CANDIDATES_V8.version
     spec["candidate_selection"] = recipe
     spec["universe_search"] = {
         "builder": "BROAD_ELIGIBLE_MARKET_UNIVERSE",
@@ -304,18 +304,37 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
     return spec
 
 
-SESSION_HARD = replace(
+SESSION_HARD_CANDIDATES_V8 = replace(
     LEGACY_SESSION_HARD,
     version="SESSION_HARD_CAUSAL_Q1_CANDIDATES_V8",
-    specification_builder=session_hard_specification,
+    specification_builder=session_hard_candidate_specification,
     universe_builder=candidate_universe,
     discovery_profiles=(),
 )
 
 
+def session_hard_specification(selected: MarketId) -> dict[str, Any]:
+    from stocker_core.acquisition import ACQUISITION_EXPERIMENT_V1
+
+    spec = session_hard_candidate_specification(selected)
+    spec["method_version"] = SESSION_HARD.version
+    spec["universe_acquisition"] = ACQUISITION_EXPERIMENT_V1.model_dump(mode="json")
+    spec["universe_search"] = dict(spec["universe_search"],
+        acquisition="SCANNER_ASSISTED_UNIVERSE_ACQUISITION",
+        acquisition_evidence="UNVALIDATED_UPSTREAM_ACQUISITION")
+    return spec
+
+
+SESSION_HARD = replace(
+    SESSION_HARD_CANDIDATES_V8,
+    version="SESSION_HARD_CAUSAL_Q1_ACQUISITION_V9",
+    specification_builder=session_hard_specification,
+)
+
+
 def runnable_methods() -> tuple[MethodDefinition, ...]:
-    """Existing V7 runs keep their operational behavior; only V8 is selectable."""
-    return (SESSION_HARD, LEGACY_SESSION_HARD)
+    """Existing V7/V8 runs retain their specifications; only V9 is selectable."""
+    return (SESSION_HARD, SESSION_HARD_CANDIDATES_V8, LEGACY_SESSION_HARD)
 
 
 def installed_methods() -> tuple[MethodDefinition, ...]:

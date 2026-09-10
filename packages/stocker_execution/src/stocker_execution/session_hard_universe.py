@@ -4,9 +4,9 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 
-from stocker_core.markets import CapBucket, get_market
+from stocker_core.markets import LIQUIDITY_ACTIVITY_COMPONENTS, CapBucket, get_market
 from stocker_core.methods import SESSION_HARD_SCREEN_LIMIT
-from stocker_core.runs import ACTIVITY_CAPACITY_V2_VERSION, RunInstance
+from stocker_core.runs import ACTIVITY_LIQUIDITY_V1_ID, RunInstance
 from stocker_execution.activity_shortlist import (
     ActivityShortlistService,
     ActivityShortlistSnapshot,
@@ -23,10 +23,12 @@ class SessionHardUniverseSearch:
         self.clock = clock
         self.activity = ActivityShortlistService(
             ActivityShortlistStore(database),
-            profile_id="ACTIVITY_CAPACITY_V2",
-            profile_version=ACTIVITY_CAPACITY_V2_VERSION,
+            profile_id=ACTIVITY_LIQUIDITY_V1_ID,
+            profile_version=ACTIVITY_LIQUIDITY_V1_ID,
             watch_limit=SESSION_HARD_SCREEN_LIMIT,
             allow_late_capture=True,
+            components=LIQUIDITY_ACTIVITY_COMPONENTS,
+            stock_type_filter="CORP",
         )
 
     async def qualify(self, runs: Sequence[RunInstance]) -> Stage5QualificationResult:

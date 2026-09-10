@@ -7,7 +7,7 @@ The user selects the market and method; the method determines what stocks are ap
 
 The current catalogue exposes one method, **Session HARD**, across Stocker's market catalogue.
 Its stable internal identity is `SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D`;
-its current version is `SESSION_HARD_CAUSAL_Q1_ACTIVITY_V3`. The old name remains an internal
+its current version is `SESSION_HARD_CAUSAL_Q1_ACTIVITY_V4`. The old name remains an internal
 identity for history continuity, not a second selectable strategy. The method remains PAPER-only.
 Non-US markets are labelled **unvalidated cross-market PAPER tests**. Operational calendar/scanner
 support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on those markets.
@@ -64,9 +64,14 @@ per symbol. A run embeds the actual membership snapshot, so refreshing the catal
 silently change that run. Refresh membership explicitly with
 `stocker universe refresh-us-listings` before creating a new run.
 
-Every supported market uses `ACTIVITY_CAPACITY_V2` before contract qualification or history work.
-It reuses V1's three IBKR activity components and deterministic ranking: scanner hit count,
-equal-weight rank sum, best rank, symbol and conId. At least two components must succeed.
+Every supported market uses `ACTIVITY_LIQUIDITY_V1` before contract qualification or history work.
+Its three IBKR components are TOP_TRADE_RATE, MOST_ACTIVE_AVG_USD and HOT_BY_VOLUME:
+current trade activity, normal dollar turnover and unusual daily volume. Each request applies
+the native `stockTypeFilter=CORP` before IBKR's 50-row limit. Known contradictory fund
+classifications in returned details are excluded defensively; absent classification relies on
+the server's native filter. No invented price or volume threshold is applied.
+Ranking remains scanner hit count, equal-weight rank sum, best rank, symbol and conId.
+At least two components must succeed, and a missing component is named in the audit.
 US scanner results are intersected with the saved authoritative listing membership before ranking.
 Up to 50 stocks per market proceed to contract/history evaluation, independently of the live-feed
 budget. Three component scans return at most 150 merged contracts before this final cap.
@@ -82,8 +87,10 @@ timestamp. The immutable market/session/profile snapshot stores selected and exc
 scanner ranks and failures. Reloads reuse it; no retrospective checkpoint or missing trade prefix
 is replayed. Historical `ACTIVITY_SHORTLIST_V1` retains its 50-stock, one-minute capture semantics.
 The dashboard exposes the current profile's timestamp, watchlist and selection audit.
-Snapshot revision `ACTIVITY_CAPACITY_V3_SCREEN50` separates screening capacity from trade feeds.
-The prior five-stock `ACTIVITY_CAPACITY_V2_WARNINGS` snapshots remain immutable and cannot seed it.
+The new profile cannot reuse prior `ACTIVITY_CAPACITY_V3_SCREEN50` or five-stock
+`ACTIVITY_CAPACITY_V2_WARNINGS` snapshots. Both remain immutable. A nullable
+`most_active_avg_usd_rank` column preserves liquidity ranks without relabelling old volume ranks.
+Legacy V1 retains its original three components.
 It retains IBKR's returned discovery results
 when warning 492 reports limited scanner precision. The warning is scoped to its request and
 persisted in the selection audit. Scanner discovery is separate from the actual historical and
@@ -91,7 +98,15 @@ streaming data checks required for entry ([IBKR scanner documentation](https://i
 The earlier `ENTITLED` revision incorrectly turned that warning into a market-wide block;
 its snapshots remain stored but cannot seed the corrected path. Actual failed requests still
 fail screening when fewer than two components succeed. No missing prices or trade events are
-estimated or substituted, and no full-listing fallback is used.
+estimated or substituted, and no full-listing fallback is used. Request-scoped scanner errors,
+including an unsupported location returned alongside an empty result, fail the component;
+normal cancellation acknowledgements do not. Code 492 remains a precision warning.
+
+A read-only gateway check on 2026-09-10 returned 50 corporation-filtered liquidity results for
+the US, Canada, UK, Germany, France, Netherlands, Switzerland, Australia, Hong Kong, Japan and
+South Korea. The configured South Africa location was rejected by IBKR. Most overseas results
+carried precision warning 492. These checks establish API behavior, not profitability, full
+market coverage, or entitlement to the historical and live data needed for entry.
 `scripts/migrate_activity_filter.py` writes a separate configuration with V2 runs archived and V3
 PAPER replacements retaining risk settings and enabled state; historical specs and database rows
 are preserved. Archived specifications retain their hash check and cannot be started.

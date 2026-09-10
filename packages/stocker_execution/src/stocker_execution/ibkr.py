@@ -1181,6 +1181,19 @@ class IbkrConnection:
                                 future,
                                 timeout=self.config.request_timeout_seconds,
                             )
+                            failures = [
+                                error for error in errors
+                                if error.request_id == data_list.reqId
+                                and error.code != 492
+                                and not (
+                                    error.code == 162
+                                    and "scanner subscription cancelled" in error.message.lower()
+                                )
+                            ]
+                            if failures:
+                                raise IbkrError("; ".join(
+                                    f"{error.code}: {error.message}" for error in failures
+                                ))
                             warnings = tuple(
                                 f"IBKR scanner precision warning (492): {e.message}"
                                 for e in errors if e.request_id == data_list.reqId and e.code == 492
@@ -1300,6 +1313,7 @@ class IbkrConnection:
         cap_bucket: CapBucket,
         component: ActivityScanner,
         max_results: int = 50,
+        stock_type_filter: str = "",
     ) -> tuple[ScannerCandidate, ...]:
         """Run one bounded market/cap-restricted Activity Shortlist component."""
 
@@ -1334,6 +1348,7 @@ class IbkrConnection:
             instrument=market.scanner_instrument,
             locationCode=market.scanner_location,
             scanCode=component.value,
+            stockTypeFilter=stock_type_filter,
         )
         filter_options: list[object] = []
         filters = capabilities.filters_for(market.scanner_location)
@@ -1370,6 +1385,11 @@ class IbkrConnection:
         seen: set[tuple[str, int | None]] = set()
         for raw in sorted(rows, key=lambda item: int(cast(Any, item).rank)):
             contract = cast(Any, raw).contractDetails.contract
+            stock_type = str(getattr(cast(Any, raw).contractDetails, "stockType", "")).upper()
+            if stock_type_filter == "CORP" and stock_type in {
+                "ETF", "ETN", "CEF", "ETMF", "EFN",
+            }:
+                continue
             symbol = str(contract.symbol).strip().upper()
             con_id = int(contract.conId) if int(getattr(contract, "conId", 0)) > 0 else None
             identity = (symbol, con_id)

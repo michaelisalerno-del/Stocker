@@ -12,6 +12,7 @@ from stocker_execution.activity_shortlist import (
     ActivityShortlistStore,
     ScannerCapabilities,
 )
+from stocker_execution.ibkr import IbkrError
 from test_ibkr_resources import (
     CallbackEvent,
     LowLevelScannerClient,
@@ -90,5 +91,32 @@ def test_uk_discovery_retains_stock_results_and_audits_only_its_warnings(
         )
         assert client.cancelled_scanners == [71, 71, 71]
         assert len(client.errorEvent.handlers) == 1
+
+    asyncio.run(scenario())
+
+
+def test_unsupported_location_error_is_not_a_successful_empty_scan():
+    async def scenario():
+        client = LowLevelScannerClient()
+        client.errorEvent = CallbackEvent()
+        broker = connected_stream_boundary(client)
+        market = get_market(MarketId.SOUTH_AFRICA_JSE)
+        broker._scanner_capabilities = ScannerCapabilities(
+            frozenset({market.scanner_location}),
+            frozenset({"MOST_ACTIVE_AVG_USD"}),
+            frozenset(),
+        )
+        task = asyncio.create_task(broker.activity_scan(
+            market=market, cap_bucket=CapBucket.ALL,
+            component=ActivityScanner.MOST_ACTIVE_AVG_USD, stock_type_filter="CORP",
+        ))
+        await wait_until(lambda: len(client.wrapper.futures), 1)
+        client.errorEvent.emit(
+            71, 162, "Market Scanner is not configured for one of the chosen locations.", None,
+        )
+        client.wrapper.futures[0].set_result([])
+        with pytest.raises(IbkrError, match="not configured"):
+            await task
+        assert client.cancelled_scanners == [71]
 
     asyncio.run(scenario())

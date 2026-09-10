@@ -12,6 +12,7 @@ from stocker_core.markets import CAP_BUCKETS_V1, CapBucket, MarketId
 from stocker_core.universes import Identifier, UniverseCatalog, UniverseDefinition
 
 ACTIVITY_CAPACITY_V2_VERSION = "ACTIVITY_CAPACITY_V3_SCREEN50"
+ACTIVITY_LIQUIDITY_V1_ID = "ACTIVITY_LIQUIDITY_V1"
 
 
 def activity_snapshot_version(profile_id: str) -> str:
@@ -117,7 +118,7 @@ class RunConfig(BaseModel):
         """A method-owned discovery profile, or a historical explicit screen."""
         return (
             (self.method_spec or {}).get("universe_search", {}).get("activity_profile")
-            in {ACTIVITY_SHORTLIST_V1_ID, "ACTIVITY_CAPACITY_V2"}
+            in {ACTIVITY_SHORTLIST_V1_ID, "ACTIVITY_CAPACITY_V2", ACTIVITY_LIQUIDITY_V1_ID}
         ) or (
             self.screen is not None and self.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
         )

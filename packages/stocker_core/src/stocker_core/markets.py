@@ -39,6 +39,19 @@ class ActivityScanner(StrEnum):
     TOP_TRADE_RATE = "TOP_TRADE_RATE"
     TOP_VOLUME_RATE = "TOP_VOLUME_RATE"
     HOT_BY_VOLUME = "HOT_BY_VOLUME"
+    MOST_ACTIVE_AVG_USD = "MOST_ACTIVE_AVG_USD"
+
+
+LEGACY_ACTIVITY_COMPONENTS = (
+    ActivityScanner.TOP_TRADE_RATE,
+    ActivityScanner.TOP_VOLUME_RATE,
+    ActivityScanner.HOT_BY_VOLUME,
+)
+LIQUIDITY_ACTIVITY_COMPONENTS = (
+    ActivityScanner.TOP_TRADE_RATE,
+    ActivityScanner.MOST_ACTIVE_AVG_USD,
+    ActivityScanner.HOT_BY_VOLUME,
+)
 
 
 class MarketAvailability(StrEnum):

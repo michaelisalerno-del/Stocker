@@ -19,7 +19,12 @@ import structlog
 
 from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
 from stocker_core.logging import configure_logging
-from stocker_core.markets import MARKET_CATALOGUE, ActivityScanner, MarketId, get_market
+from stocker_core.markets import (
+    LIQUIDITY_ACTIVITY_COMPONENTS,
+    MARKET_CATALOGUE,
+    MarketId,
+    get_market,
+)
 from stocker_core.methods import content_hash, installed_methods, validate_run_method
 from stocker_core.runs import Environment, RunConfig, RunInstance, RunManager
 from stocker_core.strategies import SESSION_HARD_HV_METHOD
@@ -1875,7 +1880,9 @@ class StockerRuntime:
         pending_run_ids = {
             membership.run_id
             for item in self._qualification.ineligible
-            if item.symbol in {"ACTIVITY_SHORTLIST_V1", "ACTIVITY_CAPACITY_V2"}
+            if item.symbol in {
+                "ACTIVITY_SHORTLIST_V1", "ACTIVITY_CAPACITY_V2", "ACTIVITY_LIQUIDITY_V1"
+            }
             and item.reason in {"SCHEDULED", "ACTIVITY_SHORTLIST_NOT_READY"}
             for membership in item.memberships
         }
@@ -2201,7 +2208,10 @@ class StockerRuntime:
         failed_markets = {
             run_markets[membership.run_id]
             for failure in self._qualification.ineligible
-            if failure.symbol not in {"HOT_BY_VOLUME", "ACTIVITY_SHORTLIST_V1"}
+            if failure.symbol not in {
+                "HOT_BY_VOLUME", "ACTIVITY_SHORTLIST_V1", "ACTIVITY_CAPACITY_V2",
+                "ACTIVITY_LIQUIDITY_V1",
+            }
             for membership in failure.memberships
             if membership.run_id in run_markets
         }
@@ -2215,7 +2225,7 @@ class StockerRuntime:
                     market.scanner_location, market.scanner_instrument
                 )
                 and len(
-                    {component.value for component in ActivityScanner}
+                    {component.value for component in LIQUIDITY_ACTIVITY_COMPONENTS}
                     & set(capabilities.scan_codes_for(market.scanner_location))
                 )
                 >= 2

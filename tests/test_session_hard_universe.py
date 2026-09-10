@@ -7,7 +7,7 @@ import pytest
 
 from stocker_core.markets import ActivityScanner, CapBucket, MarketId, get_market
 from stocker_core.methods import SESSION_HARD
-from stocker_core.runs import ACTIVITY_CAPACITY_V2_VERSION, Environment, RunInstance, RunState
+from stocker_core.runs import ACTIVITY_LIQUIDITY_V1_ID, Environment, RunInstance, RunState
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 from stocker_execution.activity_shortlist import ScannerCandidate, ScannerCapabilities
 from stocker_execution.ibkr import IbkrConnection, QualifiedInstrument
@@ -20,6 +20,7 @@ class MarketBroker(IbkrConnection):
         self.market = market
         self.config = SimpleNamespace(environment=Environment.PAPER, market_data_line_budget=100)
         self.scans = []
+        self.stock_filters = []
         self.resolved = []
 
     async def scanner_capabilities(self):
@@ -29,8 +30,11 @@ class MarketBroker(IbkrConnection):
             frozenset(),
         )
 
-    async def activity_scan(self, *, market, cap_bucket, component, max_results):
+    async def activity_scan(
+        self, *, market, cap_bucket, component, max_results, stock_type_filter=""
+    ):
         self.scans.append((market.market_id, cap_bucket, component, max_results))
+        self.stock_filters.append(stock_type_filter)
         return tuple(
             ScannerCandidate(component, i + 1, f"TEST{i}", 123 + i, "SMART", None, market.currency)
             for i in range(50)
@@ -99,17 +103,23 @@ def test_method_uses_existing_local_session_scan_and_reloads_snapshot(tmp_path, 
         )
         assert set(broker.resolved) == {f"TEST{i}" for i in range(50)}
         assert len(broker.scans) == 3
+        assert {component.value for _, _, component, _ in broker.scans} == {
+            "TOP_TRADE_RATE", "MOST_ACTIVE_AVG_USD", "HOT_BY_VOLUME",
+        }
+        assert broker.stock_filters == ["CORP"] * 3
         assert all(cap is CapBucket.ALL and limit == 50 for _, cap, _, limit in broker.scans)
         snapshot = search.activity.store.get(
             market_id.value,
             CapBucket.ALL,
             now[0].astimezone(ZoneInfo(market.timezone)).date(),
-            profile_id="ACTIVITY_CAPACITY_V2",
-            profile_version=ACTIVITY_CAPACITY_V2_VERSION,
+            profile_id=ACTIVITY_LIQUIDITY_V1_ID,
+            profile_version=ACTIVITY_LIQUIDITY_V1_ID,
         )
         assert snapshot.screen_timestamp == now[0]
         assert len(snapshot.candidates) == 50
         assert sum(c.selected for c in snapshot.candidates) == 50
+        assert snapshot.candidates[0].most_active_avg_usd_rank == 1
+        assert snapshot.candidates[0].top_volume_rate_rank is None
         now[0] += timedelta(minutes=5)
         replay = SessionHardUniverseSearch(broker, database, lambda: now[0])
         assert await replay.qualify((instance,)) == result
@@ -141,7 +151,9 @@ def test_150_scanner_hits_are_bounded_to_50_before_contract_work(tmp_path):
     from test_stage10_extension_builder import add
 
     class DisjointScans(MarketBroker):
-        async def activity_scan(self, *, market, cap_bucket, component, max_results):
+        async def activity_scan(
+            self, *, market, cap_bucket, component, max_results, stock_type_filter=""
+        ):
             offset = list(ActivityScanner).index(component) * 50
             return tuple(
                 ScannerCandidate(
@@ -163,7 +175,7 @@ def test_150_scanner_hits_are_bounded_to_50_before_contract_work(tmp_path):
     )
     snapshot = search.activity.store.get(
         run.market_id.value, CapBucket.ALL, now.date(),
-        profile_id="ACTIVITY_CAPACITY_V2", profile_version=ACTIVITY_CAPACITY_V2_VERSION,
+        profile_id=ACTIVITY_LIQUIDITY_V1_ID, profile_version=ACTIVITY_LIQUIDITY_V1_ID,
     )
     assert len(snapshot.candidates) == 150
     selected = {c.symbol for c in snapshot.candidates if c.selected}
@@ -217,8 +229,9 @@ def test_dashboard_reads_current_profile_not_legacy_shortlist(tmp_path):
     assert reads.runs()[0]["candidate_count"] == 50
     detail = reads.run_detail(run.run_id)
     assert detail["watchlist_size"] == 50
-    assert detail["activity_screen"]["profile_id"] == "ACTIVITY_CAPACITY_V2"
+    assert detail["activity_screen"]["profile_id"] == ACTIVITY_LIQUIDITY_V1_ID
     assert len(detail["activity_screen"]["candidates"]) == 50
+    assert detail["activity_screen"]["candidates"][0]["most_active_avg_usd_rank"] == 1
 
 
 def test_five_stock_snapshot_is_preserved_but_not_reused(tmp_path):

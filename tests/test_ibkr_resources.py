@@ -10,7 +10,13 @@ from typer.testing import CliRunner
 
 from stocker_core.cli import app
 from stocker_core.config import IbkrConfig
-from stocker_core.markets import ActivityScanner, CapBucket, MarketId, get_market
+from stocker_core.markets import (
+    LEGACY_ACTIVITY_COMPONENTS,
+    ActivityScanner,
+    CapBucket,
+    MarketId,
+    get_market,
+)
 from stocker_core.runs import Environment
 from stocker_execution.activity_shortlist import (
     ActivityCandidate,
@@ -379,7 +385,7 @@ def test_fifty_member_activity_watchlist_opens_no_streaming_quote() -> None:
                 component=component,
                 max_results=50,
             )
-            for component in ActivityScanner
+            for component in LEGACY_ACTIVITY_COMPONENTS
         }
         watchlist = rank_activity_candidates(rows)
         return client, len(watchlist), connection.resource_status()

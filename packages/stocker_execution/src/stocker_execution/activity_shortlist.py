@@ -11,7 +11,12 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
-from stocker_core.markets import ActivityScanner, CapBucket, MarketDefinition
+from stocker_core.markets import (
+    LEGACY_ACTIVITY_COMPONENTS,
+    ActivityScanner,
+    CapBucket,
+    MarketDefinition,
+)
 from stocker_core.runs import (
     ACTIVITY_SHORTLIST_V1_ID,
     ACTIVITY_SHORTLIST_V1_VERSION,
@@ -63,6 +68,7 @@ class ActivityCandidate:
     aggregate_screen_score: float
     final_shortlist_rank: int | None
     selected: bool
+    most_active_avg_usd_rank: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +121,7 @@ class ActivityScannerBoundary(Protocol):
         cap_bucket: CapBucket,
         component: ActivityScanner,
         max_results: int = 50,
+        stock_type_filter: str = "",
     ) -> tuple[ScannerCandidate, ...]: ...
 
 
@@ -186,6 +193,7 @@ def rank_activity_candidates(
                 aggregate_screen_score=sum((51 - rank) / 50 for rank in rank_by_component.values()),
                 final_shortlist_rank=index if selected else None,
                 selected=selected,
+                most_active_avg_usd_rank=rank_by_component.get(ActivityScanner.MOST_ACTIVE_AVG_USD),
             )
         )
     return tuple(results)
@@ -243,6 +251,16 @@ class ActivityShortlistStore:
                 );
                 """
             )
+
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(activity_shortlist_candidates)")
+            }
+            if "most_active_avg_usd_rank" not in columns:
+                connection.execute(
+                    "ALTER TABLE activity_shortlist_candidates "
+                    "ADD COLUMN most_active_avg_usd_rank INTEGER"
+                )
 
     def get(
         self,
@@ -391,8 +409,14 @@ class ActivityShortlistStore:
                 for item in snapshot.candidates:
                     connection.execute(
                         """
-                    INSERT OR IGNORE INTO activity_shortlist_candidates VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    INSERT OR IGNORE INTO activity_shortlist_candidates (
+                        market_id, cap_bucket, cap_bucket_version, session, profile_id,
+                        profile_version, symbol, con_id, exchange, primary_exchange, currency,
+                        top_trade_rate_rank, top_volume_rate_rank, hot_by_volume_rank,
+                        scan_hit_count, best_component_rank, aggregate_screen_score,
+                        final_shortlist_rank, selected, most_active_avg_usd_rank
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                         (
@@ -415,6 +439,7 @@ class ActivityShortlistStore:
                             item.aggregate_screen_score,
                             item.final_shortlist_rank,
                             int(item.selected),
+                            item.most_active_avg_usd_rank,
                         ),
                     )
         return (
@@ -457,6 +482,12 @@ class ActivityShortlistStore:
                 else None
             ),
             selected=bool(row["selected"]),
+            most_active_avg_usd_rank=(
+                int(row["most_active_avg_usd_rank"])
+                if "most_active_avg_usd_rank" in row.keys()  # noqa: SIM118 (sqlite3.Row keys)
+                and row["most_active_avg_usd_rank"] is not None
+                else None
+            ),
         )
 
     def _connect(self, *, read_only: bool = False) -> sqlite3.Connection:
@@ -478,12 +509,16 @@ class ActivityShortlistService:
         watch_limit: int = ACTIVITY_SHORTLIST_WATCH_LIMIT,
         profile_version: str | None = None,
         allow_late_capture: bool = False,
+        components: tuple[ActivityScanner, ...] = LEGACY_ACTIVITY_COMPONENTS,
+        stock_type_filter: str = "",
     ) -> None:
         self.store = store
         self.profile_id = profile_id
         self.profile_version = profile_version or profile_id
         self.watch_limit = watch_limit
         self.allow_late_capture = allow_late_capture
+        self.components = components
+        self.stock_type_filter = stock_type_filter
 
     async def get_or_create(
         self,
@@ -561,7 +596,7 @@ class ActivityShortlistService:
             )
         components = tuple(
             item
-            for item in ActivityScanner
+            for item in self.components
             if item.value in capabilities.scan_codes_for(market.scanner_location)
         )
         if len(components) < 2:
@@ -582,11 +617,15 @@ class ActivityShortlistService:
         cap_filter_failure = False
         for component in components:
             try:
+                stock_options = (
+                    {"stock_type_filter": self.stock_type_filter} if self.stock_type_filter else {}
+                )
                 scanned = await broker.activity_scan(
                     market=market,
                     cap_bucket=cap_bucket,
                     component=component,
                     max_results=ACTIVITY_SHORTLIST_COMPONENT_LIMIT,
+                    **stock_options,
                 )
             except Exception as exc:
                 text = str(exc).lower()
@@ -606,6 +645,7 @@ class ActivityShortlistService:
                     status = ActivityShortlistStatus.DATA_NOT_ENTITLED
                 if status is ActivityShortlistStatus.DATA_NOT_ENTITLED:
                     entitlement_failure = True
+                warnings.append(f"{component.value}: {status.value}")
                 continue
             warnings.extend(f"{component.value}: {row.warning}" for row in scanned if row.warning)
             if allowed_symbols is not None:

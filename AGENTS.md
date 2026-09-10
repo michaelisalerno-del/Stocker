@@ -46,6 +46,8 @@ in the runtime trading hot path.
   Method packages supply universe/search and data services plus pure decision logic.
   Dynamic discovery is method-owned (see docs/candidate-discovery.md): reuse CAP_BUCKETS_V1,
   persist raw observations and rejection stages, and pass qualified conIds into Stage 5.
+  All market selections use method-owned profiles. Native cap filters use listing currency:
+  translate canonical USD boundaries with an audited IBKR FX quote, never relabel local caps.
   Discovery/watch ordering must never become a Session HARD trade score. Do not tune
   discovery criteria from historical winners/losers or change the frozen method to fit a pool.
   Pure calculations receive data; shared IBKR execution submits method-produced intentions.

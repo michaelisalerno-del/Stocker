@@ -215,6 +215,7 @@ class RunConfig(BaseModel):
                         for field in (
                             "profile_id", "version", "cap_bands", "scanner",
                             "stock_type_filter", "allowed_stock_types",
+                            "price_currency", "scanner_location",
                         )
                     ):
                         raise ValueError("Discovery policy must belong to the selected method")

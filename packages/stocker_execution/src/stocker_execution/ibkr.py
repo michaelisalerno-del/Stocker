@@ -16,7 +16,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 if TYPE_CHECKING:
-    from stocker_execution.discovery import DiscoveryRow, DiscoveryScan
+    from stocker_execution.discovery import DiscoveryFx, DiscoveryRow, DiscoveryScan
     from stocker_execution.session_hard_method import TradeEvent
 
 import structlog
@@ -369,6 +369,7 @@ class IbkrConnection:
         self._qualified_stock_cache: dict[tuple[str, str, str, str], QualifiedInstrument] = {}
         self._scanner_stock_type_cache: dict[int, str] = {}
         self._discovery_contract_cache: dict[int, tuple[QualifiedInstrument, str]] = {}
+        self._discovery_fx_contracts: dict[str, QualifiedInstrument] = {}
         self._scanner_contract_semaphore = asyncio.Semaphore(4)
         self._active_market_data: dict[
             tuple[int, str, str, str, int], _ActiveMarketDataSubscription
@@ -672,6 +673,7 @@ class IbkrConnection:
         self._qualified_stock_cache.clear()
         self._scanner_stock_type_cache.clear()
         self._discovery_contract_cache.clear()
+        self._discovery_fx_contracts.clear()
         if was_connected:
             self._connection_epoch += 1
 
@@ -1195,6 +1197,10 @@ class IbkrConnection:
                                     error.code == 162
                                     and "scanner subscription cancelled" in error.message.lower()
                                 )
+                                and not (
+                                    error.code == 165 and not result
+                                    and error.message.lower().endswith("no items retrieved")
+                                )
                             ]
                             if failures:
                                 raise IbkrError("; ".join(
@@ -1341,6 +1347,52 @@ class IbkrConnection:
         self._scanner_stock_type_cache[con_id] = stock_type
         return stock_type
 
+    async def discovery_fx(self, currency: str) -> DiscoveryFx:
+        """One audited FX snapshot per discovery, on the existing broker connection."""
+        from ib_async import Forex
+
+        from stocker_execution.discovery import DiscoveryFx
+
+        self._require_connected()
+        # IBKR's conventional IDEALPRO pair orientation; no synthetic FX or fixed rates.
+        inverse = currency in {"EUR", "GBP", "AUD"}
+        pair = currency + "USD" if inverse else "USD" + currency
+        async with self._scanner_contract_semaphore:
+            instrument = self._discovery_fx_contracts.get(pair)
+            if instrument is None:
+                details = await asyncio.wait_for(
+                    self._client.reqContractDetailsAsync(Forex(pair)),
+                    timeout=self.config.request_timeout_seconds,
+                )
+                if len(details) != 1:
+                    raise IbkrError(
+                        f"MARKET_DATA_UNAVAILABLE: IBKR scanner FX pair {pair} unavailable"
+                    )
+                contract = cast(Any, details[0]).contract
+                if (
+                    contract.conId <= 0 or contract.secType != "CASH"
+                    or contract.symbol != pair[:3] or contract.currency != pair[3:]
+                ):
+                    raise IbkrError(f"INVALID_CONTRACT: IBKR scanner FX pair {pair}")
+                instrument = QualifiedInstrument(
+                    contract.symbol, contract.conId, contract.exchange or "IDEALPRO",
+                    None, contract.currency, "CASH",
+                )
+                self._discovery_fx_contracts[pair] = instrument
+        quote = await self.current_quote(instrument)
+        if (
+            quote.bid is None or quote.ask is None or quote.ask < quote.bid
+            or quote.timestamp is None or quote.timestamp.tzinfo is None
+            or not 0 <= (datetime.now(UTC) - quote.timestamp).total_seconds() <= 120
+            or quote.market_data_type != 1
+        ):
+            raise IbkrError(f"MARKET_DATA_UNAVAILABLE: current two-sided FX quote for {pair}")
+        mid = (quote.bid + quote.ask) / 2
+        return DiscoveryFx(
+            currency, 1 / mid if inverse else mid, instrument.con_id, pair,
+            quote.bid, quote.ask, quote.timestamp.isoformat(),
+        )
+
     async def discovery_scan(self, request: DiscoveryScan) -> tuple[DiscoveryRow, ...]:
         """Raw scanner boundary: preserve every observation, including invalid identities."""
         from ib_async import ScannerSubscription, TagValue
@@ -1352,16 +1404,20 @@ class IbkrConnection:
             numberOfRows=request.rows, instrument=request.instrument,
             locationCode=request.location, scanCode=request.scanner,
             stockTypeFilter=request.stock_type,
-            abovePrice=request.minimum_price, aboveVolume=request.minimum_volume,
+            aboveVolume=request.minimum_volume,
         )
-        # Native TWS fields are explicitly millions, unlike vendor-specific USD aliases.
+        filters: list[object] = [TagValue("avgVolumeAbove", str(request.minimum_average_volume))]
+        if request.price_currency == "USD":
+            filters.append(TagValue("usdPriceAbove", str(request.minimum_price)))
+        else:
+            subscription.abovePrice = request.minimum_price
+        # Native caps are millions of listing currency. Discovery translates CAP_BUCKETS_V1
+        # USD boundaries with an audited IBKR FX quote before reaching this adapter.
         if request.minimum_cap_millions is not None:
             subscription.marketCapAbove = request.minimum_cap_millions
         if request.maximum_cap_millions is not None:
             subscription.marketCapBelow = request.maximum_cap_millions
-        scan = await self._bounded_scanner_data(subscription, [
-            TagValue("avgVolumeAbove", str(request.minimum_average_volume)),
-        ])
+        scan = await self._bounded_scanner_data(subscription, filters)
         rows: list[DiscoveryRow] = []
         for raw in scan.rows:
             detail = getattr(raw, "contractDetails", None)

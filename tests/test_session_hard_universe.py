@@ -7,11 +7,13 @@ import pytest
 
 from stocker_core.markets import ActivityScanner, CapBucket, MarketId, get_market
 from stocker_core.methods import SESSION_HARD
-from stocker_core.runs import ACTIVITY_LIQUIDITY_V2_ID, Environment, RunInstance, RunState
+from stocker_core.runs import Environment, RunInstance, RunState
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 from stocker_execution.activity_shortlist import ScannerCandidate, ScannerCapabilities
+from stocker_execution.discovery import DiscoveryFx, DiscoveryRow, DiscoveryStore
 from stocker_execution.ibkr import IbkrConnection, QualifiedInstrument
 from stocker_execution.session_hard_universe import SessionHardUniverseSearch
+from test_candidate_discovery import FILTERS
 from test_stage10_extension_builder import empty_config
 
 
@@ -25,9 +27,9 @@ class MarketBroker(IbkrConnection):
 
     async def scanner_capabilities(self):
         return ScannerCapabilities(
-            frozenset({self.market.scanner_location}),
+            frozenset({SESSION_HARD.discovery_profile(self.market.market_id).scanner_location}),
             frozenset(s.value for s in ActivityScanner),
-            frozenset(),
+            FILTERS,
         )
 
     async def activity_scan(
@@ -40,6 +42,23 @@ class MarketBroker(IbkrConnection):
             for i in range(50)
         )
 
+    async def discovery_fx(self, currency):
+        return DiscoveryFx(currency, 2, 900, "USD" + currency, 1.9, 2.1,
+                           datetime.now(UTC).isoformat())
+
+    async def discovery_scan(self, request):
+        self.scans.append(request)
+        return tuple(
+            DiscoveryRow(123 + i, f"TEST{i}", "SMART", None, self.market.currency, "STK", i, {})
+            for i in range(50)
+        )
+
+    async def qualify_discovery_candidate(self, row):
+        self.resolved.append(row.symbol)
+        return QualifiedInstrument(
+            row.symbol, row.con_id, row.exchange, row.primary_exchange, row.currency, "STK",
+        ), "COMMON"
+
     async def resolve_stock(self, symbol, *, exchange, currency, primary_exchange=None):
         self.resolved.append(symbol)
         return QualifiedInstrument(
@@ -50,7 +69,7 @@ class MarketBroker(IbkrConnection):
         raise AssertionError("Universe testing must never submit orders")
 
 
-@pytest.mark.parametrize("market_id", [m for m in MarketId if m is not MarketId.US_ALL])
+@pytest.mark.parametrize("market_id", list(MarketId))
 def test_method_uses_existing_local_session_scan_and_reloads_snapshot(tmp_path, market_id):
     async def scenario():
         from stocker_core.universes import InstrumentReference
@@ -102,35 +121,27 @@ def test_method_uses_existing_local_session_scan_and_reloads_snapshot(tmp_path, 
             len(result.requests) == 50 and result.requests[0].instrument.currency == market.currency
         )
         assert set(broker.resolved) == {f"TEST{i}" for i in range(50)}
-        assert len(broker.scans) == 3
-        assert {component.value for _, _, component, _ in broker.scans} == {
-            "TOP_TRADE_RATE", "MOST_ACTIVE_AVG_USD", "HOT_BY_VOLUME",
-        }
-        assert broker.stock_filters == ["CORP"] * 3
-        assert all(cap is CapBucket.ALL and limit == 50 for _, cap, _, limit in broker.scans)
-        snapshot = search.activity.store.get(
-            market_id.value,
-            CapBucket.ALL,
-            now[0].astimezone(ZoneInfo(market.timezone)).date(),
-            profile_id=ACTIVITY_LIQUIDITY_V2_ID,
-            profile_version=ACTIVITY_LIQUIDITY_V2_ID,
-        )
-        assert snapshot.screen_timestamp == now[0]
-        assert len(snapshot.candidates) == 50
-        assert sum(c.selected for c in snapshot.candidates) == 50
-        assert snapshot.candidates[0].most_active_avg_usd_rank == 1
-        assert snapshot.candidates[0].top_volume_rate_rank is None
+        assert len(broker.scans) == 5
+        assert all(r.scanner == "TOP_TRADE_RATE" and r.rows == 50 for r in broker.scans)
+        assert {r.cap_band for r in broker.scans} == set(run.discovery_profile.cap_bands)
+        factor = 1 if market.currency == "USD" else 2
+        assert broker.scans[0].minimum_cap_millions == 50 * factor
+        audit = search.discovery.store.history(run.run_id)[0]
+        assert audit["captured_at"] == now[0].isoformat()
+        assert len(audit["observations"]) == 250
+        assert len(audit["candidates"]) == 50
+        assert all(len(c["observation_indices"]) == 5 for c in audit["candidates"])
         now[0] += timedelta(minutes=5)
         replay = SessionHardUniverseSearch(broker, database, lambda: now[0])
         assert await replay.qualify((instance,)) == result
-        assert len(broker.scans) == 3
+        assert len(broker.scans) == 5
         now[0] = opening + timedelta(days=1)
         assert (await replay.qualify((instance,))).ineligible[0].reason == "SCHEDULED"
 
     asyncio.run(scenario())
 
 
-def test_us_listing_membership_is_applied_before_ranking_and_qualification(tmp_path):
+def test_seeded_membership_does_not_limit_exchange_discovery(tmp_path):
     from stocker_core.universes import InstrumentReference
     from test_stage10_extension_builder import add
 
@@ -143,24 +154,22 @@ def test_us_listing_membership_is_applied_before_ranking_and_qualification(tmp_p
         broker, tmp_path / "screen.sqlite", lambda: datetime(2026, 9, 8, 14, tzinfo=UTC)
     )
     result = asyncio.run(search.qualify((RunInstance(run, universe, RunState.ACTIVE),)))
-    assert [r.instrument.symbol for r in result.requests] == ["TEST8"]
-    assert broker.resolved == ["TEST8"]
+    assert len(result.requests) == 50
+    assert all(r.location == "STK.NASDAQ" for r in broker.scans)
 
 
-def test_150_scanner_hits_are_bounded_to_50_before_history_work(tmp_path):
+def test_250_scanner_hits_are_bounded_to_150_before_history_work(tmp_path):
     from test_stage10_extension_builder import add
 
     class DisjointScans(MarketBroker):
-        async def activity_scan(
-            self, *, market, cap_bucket, component, max_results, stock_type_filter=""
-        ):
-            offset = list(ActivityScanner).index(component) * 50
+        async def discovery_scan(self, request):
+            offset = list(SESSION_HARD.discovery_profile(self.market.market_id).cap_bands).index(
+                request.cap_band
+            ) * 50
             return tuple(
-                ScannerCandidate(
-                    component, i + 1, f"TEST{offset + i}", 123 + offset + i,
-                    "SMART", None, market.currency,
-                )
-                for i in range(max_results)
+                DiscoveryRow(123 + offset + i, f"TEST{offset + i}", "SMART", None,
+                             self.market.currency, "STK", i, {})
+                for i in range(request.rows)
             )
 
         def prepare_trade_events(self, instrument):
@@ -173,15 +182,10 @@ def test_150_scanner_hits_are_bounded_to_50_before_history_work(tmp_path):
     result = asyncio.run(
         search.qualify((RunInstance(run, config.universes[-1], RunState.ACTIVE),))
     )
-    snapshot = search.activity.store.get(
-        run.market_id.value, CapBucket.ALL, now.date(),
-        profile_id=ACTIVITY_LIQUIDITY_V2_ID, profile_version=ACTIVITY_LIQUIDITY_V2_ID,
-    )
-    assert len(snapshot.candidates) == 150
-    selected = {c.symbol for c in snapshot.candidates if c.selected}
-    assert len(selected) == len(result.requests) == len(broker.resolved) == 50
-    assert set(broker.resolved) == selected
-    assert run.method_spec["universe_search"]["watch_limit"] == 50
+    audit = search.discovery.store.history(run.run_id)[0]
+    assert len(audit["observations"]) == len(broker.resolved) == 250
+    assert len(result.requests) == sum(c["in_watch_pool"] for c in audit["candidates"]) == 150
+    assert sum(c["rejection_reason"] == "RESOURCE_LIMIT" for c in audit["candidates"]) == 100
 
 
 def test_screen_size_is_independent_of_feed_budget_and_scanner_failures_stay_isolated(tmp_path):
@@ -201,18 +205,17 @@ def test_screen_size_is_independent_of_feed_budget_and_scanner_failures_stay_iso
     assert len(result.requests) == 50 and len(broker.resolved) == 50
 
     class Unentitled(MarketBroker):
-        async def activity_scan(self, **kwargs):
+        async def discovery_scan(self, request):
             raise IbkrError("Market data permission unavailable")
 
     denied = Unentitled(broker.market)
     search = SessionHardUniverseSearch(denied, tmp_path / "denied.sqlite", now)
     result = asyncio.run(search.qualify((instance,)))
     assert not result.requests and not denied.resolved
-    assert result.ineligible[0].reason == "DATA_NOT_ENTITLED"
+    assert result.ineligible[0].reason.startswith("FAILED: SCANNER_FAILED")
 
 
 def test_dashboard_reads_current_profile_not_legacy_shortlist(tmp_path):
-    from stocker_execution.activity_shortlist import ActivityShortlistStore
     from test_stage10_dashboard import _seed_authoritative_state
     from test_stage10_extension_builder import add
 
@@ -225,13 +228,13 @@ def test_dashboard_reads_current_profile_not_legacy_shortlist(tmp_path):
         MarketBroker(get_market(MarketId.UK_LSE)), tmp_path / "activity.sqlite", lambda: now
     )
     asyncio.run(search.qualify((RunInstance(run, config.universes[-1], RunState.ACTIVE),)))
-    reads.activity_store = ActivityShortlistStore(tmp_path / "activity.sqlite")
+    reads.discovery_store = DiscoveryStore(tmp_path / "activity.sqlite")
     assert reads.runs()[0]["candidate_count"] == 50
     detail = reads.run_detail(run.run_id)
     assert detail["watchlist_size"] == 50
-    assert detail["activity_screen"]["profile_id"] == ACTIVITY_LIQUIDITY_V2_ID
-    assert len(detail["activity_screen"]["candidates"]) == 50
-    assert detail["activity_screen"]["candidates"][0]["most_active_avg_usd_rank"] == 1
+    assert detail["discovery"]["raw_candidates"] == 250
+    assert detail["discovery"]["unique_candidates"] == 50
+    assert not detail["activity_screen"]
 
 
 def test_five_stock_snapshot_is_preserved_but_not_reused(tmp_path):
@@ -266,7 +269,7 @@ def test_five_stock_snapshot_is_preserved_but_not_reused(tmp_path):
     result = asyncio.run(
         current.qualify((RunInstance(run, config.universes[-1], RunState.ACTIVE),))
     )
-    assert len(result.requests) == 50 and len(broker.scans) == 6
+    assert len(result.requests) == 50 and len(broker.scans) == 8
     assert (
         store.get(
             run.market_id.value,

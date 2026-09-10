@@ -236,7 +236,9 @@ async function runDetail(runId) {
   const discoveryPanel = discovery ? '<section class="section"><div class="section-head"><h2>Dynamic universe: IBKR</h2></div><p role="status">' +
     esc(discovery.status) + ' · Raw: ' + number(discovery.raw_candidates) + ' · Unique: ' + number(discovery.unique_candidates) +
     ' · Watch pool: ' + number(discovery.watch_pool_size) + ' · Session HARD qualified: ' + number(discovery.session_hard_qualified || 0) +
-    '</p><p>' + esc(discovery.reason) + '</p><p class="muted">Last successful discovery: ' + esc(discovery.last_successful_discovery || 'None') +
+    '</p><p>' + esc(discovery.reason) + '</p>' +
+    (discovery.warnings || []).map(warning => '<p class="muted">' + esc(warning) + '</p>').join('') +
+    '<p class="muted">Last successful discovery: ' + esc(discovery.last_successful_discovery || 'None') +
     '. Watch-pool limits manage preparation resources. Scanner rank is separate from Session HARD trade ranking. Existing trade-feed limits still apply.</p>' +
     '<details><summary>Discovery diagnostics</summary><pre>' + esc(JSON.stringify(discovery, null, 2)) +
     '</pre><a href="/api/runs/' + encodeURIComponent(runId) + '/discovery" target="_blank" rel="noopener">Inspect discovery runs, filters and candidate provenance</a></details>' +

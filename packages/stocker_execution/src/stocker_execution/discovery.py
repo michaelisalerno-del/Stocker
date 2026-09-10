@@ -9,6 +9,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
+from math import isfinite
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
@@ -34,6 +35,21 @@ class DiscoveryScan:
     minimum_price: float
     minimum_volume: int
     minimum_average_volume: int
+    price_currency: str = "LOCAL"
+    cap_currency: str = "USD"
+
+
+@dataclass(frozen=True)
+class DiscoveryFx:
+    """Observed local currency per USD, used only to translate scanner cap boundaries."""
+
+    currency: str
+    local_per_usd: float
+    con_id: int
+    symbol: str
+    bid: float
+    ask: float
+    observed_at: str
 
 
 @dataclass(frozen=True)
@@ -52,6 +68,7 @@ class DiscoveryRow:
 
 class DiscoveryBroker(Protocol):
     async def scanner_capabilities(self) -> ScannerCapabilities: ...
+    async def discovery_fx(self, currency: str) -> DiscoveryFx: ...
     async def discovery_scan(self, request: DiscoveryScan) -> tuple[DiscoveryRow, ...]: ...
     async def qualify_discovery_candidate(
         self, row: DiscoveryRow
@@ -59,11 +76,15 @@ class DiscoveryBroker(Protocol):
 
 
 def scanner_requests(
-    profile: DiscoveryProfile, market: MarketDefinition, capabilities: ScannerCapabilities
+    profile: DiscoveryProfile, market: MarketDefinition, capabilities: ScannerCapabilities,
+    *, local_per_usd: float | None = None,
 ) -> tuple[DiscoveryScan, ...]:
     """Validate the entire profile before issuing any scan; never substitute scan codes."""
-    location = market.scanner_location
-    required = {"priceAbove", "volumeAbove", "avgVolumeAbove"}
+    if local_per_usd is not None and (not isfinite(local_per_usd) or local_per_usd <= 0):
+        raise ValueError("MARKET_DATA_UNAVAILABLE: invalid scanner FX conversion")
+    location = profile.scanner_location or market.scanner_location
+    price_filter = "usdPriceAbove" if profile.price_currency == "USD" else "priceAbove"
+    required = {price_filter, "volumeAbove", "avgVolumeAbove"}
     available = capabilities.filters_for(location)
     missing = sorted(required - available)
     for names in (
@@ -82,6 +103,10 @@ def scanner_requests(
             f"SCANNER_NOT_SUPPORTED: {market.scanner_instrument}/{location}/"
             f"{profile.scanner.value}; missing filters: {', '.join(missing) or 'none'}"
         )
+    def local_millions(usd: int | None) -> float | None:
+        rate = local_per_usd if local_per_usd is not None else 1
+        return usd * rate / 1_000_000 if usd is not None else None
+
     return tuple(
         DiscoveryScan(
             band,
@@ -90,11 +115,13 @@ def scanner_requests(
             profile.scanner.value,
             profile.results_per_band,
             profile.stock_type_filter,
-            CAP_BUCKETS_V1.definition(band).scanner_minimum_millions,
-            CAP_BUCKETS_V1.definition(band).scanner_maximum_millions,
+            local_millions(CAP_BUCKETS_V1.definition(band).minimum_usd),
+            local_millions(CAP_BUCKETS_V1.definition(band).maximum_usd_exclusive),
             profile.minimum_price,
             profile.minimum_volume,
             profile.minimum_average_volume,
+            profile.price_currency,
+            market.currency if local_per_usd is not None else "USD",
         )
         for band in profile.cap_bands
     )
@@ -215,6 +242,10 @@ def discovery_summary(document: dict[str, Any]) -> dict[str, Any]:
         "duplicate_observations": sum(
             r.get("rejection_reason") == "DUPLICATE_CONID" for r in observations
         ),
+        "warnings": sorted({
+            r["metadata"]["warning"] for r in observations if r["metadata"].get("warning")
+        }),
+        "fx_conversion": document.get("fx_conversion"),
         "watch_pool_size": (
             sum(c["in_watch_pool"] for c in candidates) if document["status"] == "READY" else 0
         ),
@@ -317,6 +348,18 @@ class CandidateDiscovery:
                 return await self.broker.discovery_scan(request)
 
         try:
+            if market.currency != "USD":
+                fx = await self.broker.discovery_fx(market.currency)
+                if fx.currency != market.currency:
+                    raise ValueError("MARKET_DATA_UNAVAILABLE: scanner FX currency mismatch")
+                document["fx_conversion"] = asdict(fx)
+                requests = scanner_requests(
+                    profile, market, await self.broker.scanner_capabilities(),
+                    local_per_usd=fx.local_per_usd,
+                )
+                for segment, request in zip(document["segments"], requests, strict=True):
+                    segment["request"] = asdict(request)
+                self.store.save(document)
             results = await asyncio.gather(*(scan(r) for r in requests), return_exceptions=True)
             received_at = self.clock() if self.clock else datetime.now(now.tzinfo)
             document["captured_at"] = received_at.isoformat()

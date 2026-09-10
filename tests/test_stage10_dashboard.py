@@ -760,14 +760,16 @@ IBM,NYSE
 
     persisted = yaml.safe_load(runs_path.read_text(encoding="utf-8"))
     assert persisted["named_universe_snapshot"] == snapshot_path.name
-    assert [item["universe_id"] for item in persisted["universes"]] == ["US_NASDAQ_METHOD_LISTINGS"]
+    assert [item["universe_id"] for item in persisted["universes"]] == ["US_NASDAQ_METHOD_ACTIVITY"]
     assert persisted["universes"][0]["members"] == []
     reloaded = load_runs_config(runs_path)
     nasdaq = next(item for item in reloaded.universes if item.universe_id == "NASDAQ")
     derived = next(
-        item for item in reloaded.universes if item.universe_id == "US_NASDAQ_METHOD_LISTINGS"
+        item for item in reloaded.universes if item.universe_id == "US_NASDAQ_METHOD_ACTIVITY"
     )
-    assert derived.members == nasdaq.members
+    assert nasdaq.members  # The fixed catalogue remains available for explicit fixed sources.
+    assert not derived.members
+    assert reloaded.runs[0].uses_dynamic_discovery
 
 
 def test_run_controls_validate_through_backend_and_require_live_confirmation(

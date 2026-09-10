@@ -3,7 +3,7 @@
 import pytest
 
 from stocker_core.config import RunsConfig
-from stocker_core.markets import CapBucket, MarketId, get_market
+from stocker_core.markets import CapBucket, MarketId
 from stocker_core.methods import SESSION_HARD, validate_run_method
 from stocker_core.runs import Environment, RunConfig
 from stocker_core.universes import UniverseDefinition
@@ -47,9 +47,8 @@ def test_method_owns_listing_universe_and_no_cap_filter(market):
     assert run.market_id == market
     assert run.cap_bucket is CapBucket.ALL
     assert run.screen is None
-    assert bool(run.universe_snapshot.members) == (
-        bool(get_market(market).listing_membership) and market is not MarketId.US_ALL
-    )
+    assert not run.universe_snapshot.members
+    assert run.uses_dynamic_discovery
     assert run.uses_activity_shortlist
     assert run.method_spec["universe_search"]["cap_constraint"] is None
     assert run.candidate_screen_id == "METHOD_REQUIRED_DATA"
@@ -76,7 +75,7 @@ def test_disable_readd_retains_saved_run_identity_and_snapshot():
     assert resumed.universe_snapshot == run.universe_snapshot
 
 
-def test_explicit_custom_basket_cannot_replace_authoritative_market_listing():
+def test_custom_basket_does_not_limit_dynamic_market_discovery():
     config = RunsConfig(
         universes=(
             UniverseDefinition(
@@ -86,8 +85,9 @@ def test_explicit_custom_basket_cannot_replace_authoritative_market_listing():
             ),
         )
     )
-    with pytest.raises(ValueError, match="authoritative listing"):
-        add(config)
+    _, run = add(config)
+    assert run.uses_dynamic_discovery
+    assert not run.universe_snapshot.members
 
 
 def test_cap_override_and_altered_spec_are_rejected():

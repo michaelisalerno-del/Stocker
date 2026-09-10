@@ -1,6 +1,7 @@
 """Method-owned discovery configuration; resource selection is not trade ranking."""
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -29,6 +30,8 @@ class DiscoveryProfile(BaseModel):
     monitoring_limit: int = Field(default=150, ge=1, le=1000)
     scan_concurrency: int = Field(default=2, ge=1, le=5)
     minimum_price: float = Field(default=1, gt=0, allow_inf_nan=False)
+    price_currency: Literal["LOCAL", "USD"] = "LOCAL"
+    scanner_location: str | None = None
     minimum_volume: int = Field(default=1000, ge=1)
     minimum_average_volume: int = Field(default=100000, ge=1)
 
@@ -48,8 +51,10 @@ class DiscoveryProfile(BaseModel):
 # This profile belongs to Session HARD, not to every method in the catalogue.
 # CAP_BUCKETS_V1 in markets.py is the sole authority for numerical boundaries.
 SESSION_HARD_DISCOVERY = DiscoveryProfile(
-    profile_id="SESSION_HARD_DISCOVERY_V1",
-    version="1",
+    profile_id="SESSION_HARD_DISCOVERY_V2",
+    version="2",
     cap_bands=(CapBucket.MICRO, CapBucket.SMALL, CapBucket.MID, CapBucket.LARGE, CapBucket.MEGA),
     scanner=ActivityScanner.TOP_TRADE_RATE,
+    price_currency="USD",
+    scanner_location="STK.US.MAJOR",
 )

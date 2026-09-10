@@ -6,18 +6,21 @@ from datetime import UTC, datetime
 
 import pytest
 
-from stocker_core.config import load_ibkr_config
+from stocker_core.config import RunsConfig, load_ibkr_config
+from stocker_core.markets import MARKET_CATALOGUE
+from stocker_core.methods import SESSION_HARD
 from stocker_core.runs import Environment
+from stocker_dashboard.universe_runs import UniverseRunBuilder
 from stocker_execution.discovery import CandidateDiscovery, DiscoveryStore, watch_identities
 from stocker_execution.ibkr import IbkrConnection
-from test_candidate_discovery import MARKET, make_run
 
 
 @pytest.mark.skipif(
     not os.environ.get("STOCKER_DISCOVERY_IBKR_CONFIG"),
     reason="Set STOCKER_DISCOVERY_IBKR_CONFIG to an explicit PAPER Gateway config",
 )
-def test_gateway_discovery(tmp_path):
+@pytest.mark.parametrize("market", MARKET_CATALOGUE, ids=lambda m: m.market_id.value)
+def test_gateway_discovery(tmp_path, market):
     async def scenario():
         broker = IbkrConnection(
             load_ibkr_config(
@@ -28,10 +31,21 @@ def test_gateway_discovery(tmp_path):
         await broker.connect()
         try:
             now = datetime.now(UTC)
+            _, run = UniverseRunBuilder().add(
+                RunsConfig(), market_id=market.market_id,
+                strategy_id=SESSION_HARD.method_id, strategy_version=SESSION_HARD.version,
+                environment=Environment.PAPER,
+            )
             result = await CandidateDiscovery(
                 broker,
                 DiscoveryStore(tmp_path / "gateway-discovery.sqlite"),
-            ).discover(make_run()[1], MARKET, now.date(), now, now)
+            ).discover(run, market, now.date(), now, now)
+            capabilities = await broker.scanner_capabilities()
+            if run.discovery_profile.scanner_location not in capabilities.locations:
+                assert result["status"] == "FAILED"
+                assert result["reason"].startswith("SCANNER_NOT_SUPPORTED")
+                assert not result["observations"] and not watch_identities(result)
+                return
             assert result["status"] in {"READY", "EMPTY"}, result["reason"]
             assert len(result["segments"]) == 5
             assert all(segment["status"] == "COMPLETE" for segment in result["segments"])

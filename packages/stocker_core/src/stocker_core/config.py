@@ -219,6 +219,18 @@ def load_runs_config(path: str | Path) -> RunsConfig:
     runs = raw.get("runs", [])
     if not isinstance(inline, list) or not isinstance(runs, list):
         return RunsConfig.model_validate(raw)
+    dynamic_universes = {
+        str(item.get("universe", ""))
+        for item in runs
+        if isinstance(item, dict) and (
+            item.get("universe_source") == "DYNAMIC_IBKR"
+            or (
+                item.get("universe_source") is None
+                and (item.get("method_spec") or {}).get("universe_search", {}).get("builder")
+                == "DYNAMIC_IBKR"
+            )
+        )
+    }
     inline_ids = {str(item.get("universe_id", "")) for item in inline if isinstance(item, dict)}
     referenced = tuple(
         dict.fromkeys(
@@ -245,7 +257,10 @@ def load_runs_config(path: str | Path) -> RunsConfig:
         snapshot = load_us_universe_snapshot(snapshot_path)
         hydrated_inline: list[object] = []
         for item in inline:
-            if not isinstance(item, dict) or item.get("members"):
+            if (
+                not isinstance(item, dict) or item.get("members")
+                or item.get("universe_id") in dynamic_universes
+            ):
                 hydrated_inline.append(item)
                 continue
             market_spec = item.get("market_spec")

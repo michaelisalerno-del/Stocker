@@ -80,9 +80,11 @@ const path = require("node:path");
       status: "READY", reason: "", raw_candidates: 214, unique_candidates: 187,
       watch_pool_size: 150, session_hard_qualified: 4,
       last_successful_discovery: "2026-09-08T13:46:00Z",
+      warnings: ["IBKR scanner precision warning (492): LSE permissions"],
     };
     await page.evaluate(() => refreshCurrentPage());
     assert.match(await page.locator("main").innerText(), /Dynamic universe: IBKR/i);
+    assert.match(await page.locator("main").innerText(), /precision warning \(492\): LSE permissions/);
     assert.match(await page.locator("main").innerText(), /Raw: 214 · Unique: 187 · Watch pool: 150 · Session HARD qualified: 4/);
     assert.equal(await page.getByRole("button", { name: "Rebuild on next enable" }).isDisabled(), true);
     await page.getByText("Discovery diagnostics", { exact: true }).click();

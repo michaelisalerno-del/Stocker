@@ -26,10 +26,10 @@ units, stale symbols, ambiguous symbols, and other non-stock issues therefore fa
 are reported for that symbol, and do not stop the batch. Loading the snapshot itself makes no IBKR,
 historical-bar, option, PRE, or order request.
 
-The method owns universe construction. US / All + Session HARD defaults to
+The method owns universe construction. Every market + Session HARD defaults to
 `DYNAMIC_IBKR`: independent cap scans with no saved-listing intersection. See
 [candidate-discovery.md](candidate-discovery.md) for configuration, lifecycle and audit storage.
-NASDAQ/NYSE selections retain their saved authoritative membership. Explicit `FIXED` and
+NASDAQ/NYSE/TSX use exchange-specific scanner locations. Explicit `FIXED` and
 `RESEARCH` sources retain deterministic members and converge on the same Stage 5 interface.
 Refreshing listings does not mutate existing fixed runs.
 The minimal configuration has no active runs until a method run is created:
@@ -41,10 +41,11 @@ runs: []
 ```
 
 The other existing market choices are available for unvalidated cross-market PAPER testing.
-Session HARD owns their existing Activity Shortlist V1 discovery profile, with no cap restriction.
-It captures at 15 active minutes after the local open; a missed capture is reported explicitly
-and the next session is scheduled. It is a bounded test population, not a validated suitability
-rule or a complete listing universe. Old saved universes and archived run history remain readable.
+Session HARD owns their dynamic discovery profiles, with five canonical USD cap bands and
+audited IBKR FX conversion to native scanner units. Capture occurs at/after 15 active minutes
+after the local open; daily lifecycle and explicit rebuild are shared across markets.
+The pool is a resource limit, not a validated suitability rule or complete market enumeration.
+Unsupported scanner locations fail visibly. Old saved universes and archived runs remain readable.
 Legacy screens cannot be selected as independent current Session HARD filters. Cap remains metadata/research input,
 not a global live strategy control. See [ARCHITECTURE.md](ARCHITECTURE.md).
 

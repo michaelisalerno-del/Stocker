@@ -50,19 +50,9 @@ def session_hard_universe(
     listings: Sequence[UniverseDefinition], selected: MarketId
 ) -> UniverseDefinition:
     market = get_market(selected)
-    if selected is MarketId.US_ALL or market.listing_membership is None:
-        return UniverseDefinition(
-            universe_id=f"{selected.value}_METHOD_ACTIVITY",
-            name=market.display_name,
-            market_spec=MarketUniverseSpec(market_id=selected, cap_bucket=CapBucket.ALL),
-        )
-    listing = next((u for u in listings if u.universe_id == market.listing_membership), None)
-    if listing is None or not listing.members:
-        raise ValueError(f"{market.display_name} requires authoritative listing membership")
     return UniverseDefinition(
-        universe_id=f"{selected.value}_METHOD_LISTINGS",
+        universe_id=f"{selected.value}_METHOD_ACTIVITY",
         name=market.display_name,
-        members=listing.members,
         market_spec=MarketUniverseSpec(market_id=selected, cap_bucket=CapBucket.ALL),
     )
 
@@ -180,11 +170,12 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
             "prospective_q1": PROSPECTIVE_SPEC_SHA256,
         },
     }
-    if selected is MarketId.US_ALL:
+    profile = SESSION_HARD.discovery_profile(selected)
+    if profile is not None:
         spec["universe_search"] = {
             "builder": "DYNAMIC_IBKR",
-            "activity_profile": SESSION_HARD_DISCOVERY.profile_id,
-            "discovery_profile": SESSION_HARD_DISCOVERY.model_dump(mode="json"),
+            "activity_profile": profile.profile_id,
+            "discovery_profile": profile.model_dump(mode="json"),
             "capture_active_minutes": 15,
             "capture_policy": "Once per run/session; explicit rebuild while disabled",
             "capacity_scope": "Resource watch pool; independent of trade ranking/feed limits",
@@ -208,7 +199,7 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
 
 SESSION_HARD = MethodDefinition(
     method_id="SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
-    version="SESSION_HARD_CAUSAL_Q1_DISCOVERY_V6",
+    version="SESSION_HARD_CAUSAL_Q1_DISCOVERY_V7",
     config_name="SESSION_HARD",
     label="Session HARD",
     supported_markets=(
@@ -218,7 +209,20 @@ SESSION_HARD = MethodDefinition(
     environments=("PAPER",),
     specification_builder=session_hard_specification,
     universe_builder=session_hard_universe,
-    discovery_profiles=((MarketId.US_ALL, SESSION_HARD_DISCOVERY),),
+    discovery_profiles=tuple(
+        (
+            market.market_id,
+            SESSION_HARD_DISCOVERY.model_copy(update={
+                # Advertised Gateway locations; scope NASDAQ/NYSE/TSX before row limits.
+                "scanner_location": {
+                    MarketId.US_NASDAQ: "STK.NASDAQ",
+                    MarketId.US_NYSE: "STK.NYSE",
+                    MarketId.CANADA_TSX: "STK.NA.TSE",
+                }.get(market.market_id, market.scanner_location),
+            }),
+        )
+        for market in MARKET_CATALOGUE
+    ),
 )
 
 

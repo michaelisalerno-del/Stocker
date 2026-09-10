@@ -36,6 +36,7 @@ FILTERS = frozenset(
         "marketCapAbove1e6",
         "marketCapBelow1e6",
         "priceAbove",
+        "usdPriceAbove",
         "volumeAbove",
         "avgVolumeAbove",
     }
@@ -556,9 +557,11 @@ def test_broker_adapter_preserves_raw_rows_uses_native_cap_units_and_caches_coni
         subscription, filters = client.requests[0]
         assert subscription.marketCapAbove == 50
         assert subscription.marketCapBelow == 300
-        assert subscription.abovePrice == 1
+        assert subscription.abovePrice > 1e100  # Local-price filter remains unset.
         assert subscription.aboveVolume == 1000
-        assert [(f.tag, f.value) for f in filters] == [("avgVolumeAbove", "100000")]
+        assert [(f.tag, f.value) for f in filters] == [
+            ("avgVolumeAbove", "100000"), ("usdPriceAbove", "1"),
+        ]
         assert await connection.qualify_discovery_candidate(rows[0]) == (
             await connection.qualify_discovery_candidate(rows[1])
         )

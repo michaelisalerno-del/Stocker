@@ -7,7 +7,7 @@ The user selects the market and method; the method determines what stocks are ap
 
 The current catalogue exposes one method, **Session HARD**, across Stocker's market catalogue.
 Its stable internal identity is `SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D`;
-its current version is `SESSION_HARD_CAUSAL_Q1_DISCOVERY_V6`. The old name remains an internal
+its current version is `SESSION_HARD_CAUSAL_Q1_DISCOVERY_V7`. The old name remains an internal
 identity for history continuity, not a second selectable strategy. The method remains PAPER-only.
 Non-US markets are labelled **unvalidated cross-market PAPER tests**. Operational calendar/scanner
 support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on those markets.
@@ -57,11 +57,14 @@ There is no plugin loader, factory hierarchy or dependency-injection container.
 
 ### Universe, data and suitability
 
-For **US / All + Session HARD**, discovery now follows [candidate-discovery.md](candidate-discovery.md):
+For **every market + Session HARD**, discovery now follows [candidate-discovery.md](candidate-discovery.md):
 five independent canonical cap-band scans, an audited conId watch pool, then the existing
 Stage 5 identity/history boundary. This path does not load or intersect saved listing membership.
 The method owns its profile; neither scanner ranks nor discovery limits alter trading rules.
-The following legacy description still applies to the other market selections.
+Non-USD cap boundaries use an audited IBKR FX snapshot; price minima use USD scanner prices.
+All markets use the same normalized Stage 5 boundary. Unsupported Gateway locations fail
+explicitly; Johannesburg is currently unadvertised. The following describes historical
+activity profiles only; new runs do not use these legacy discovery policies.
 
 For US NASDAQ/NYSE selections the universe builder resolves authoritative listing
 membership. The existing Nasdaq Trader snapshot records source URLs, retrieval/file times and

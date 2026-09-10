@@ -20,6 +20,7 @@ from stocker_core.universes import UniverseDefinition
 
 ARTIFACTS = Path(__file__).parent / "method_artifacts" / "session_hard"
 PROSPECTIVE_SPEC_SHA256 = "de2c4b3b90e9ecfff44cc7da971b2d9700eb277ece423bab6a4ed8e1fb3b6965"
+SESSION_HARD_SCREEN_LIMIT = 50
 
 
 def content_hash(value: object) -> str:
@@ -108,7 +109,8 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
             "capture_policy": (
                 "First available capture at/after minute 15; actual timestamp; no replay"
             ),
-            "watch_limit": "min(50, max(1, configured_market_data_lines // 20)) per market",
+            "watch_limit": SESSION_HARD_SCREEN_LIMIT,
+            "capacity_scope": "Per-market screening pool, independent of live trade-feed capacity",
             "ranking": "Scanner hit count, equal-weight rank sum, best rank, symbol, conId",
             "coverage": "Bounded IBKR activity shortlist; US authoritative membership enforced",
             "validation": "UNVALIDATED_ACTIVITY_FILTER_PAPER_TEST",
@@ -142,8 +144,8 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
             "q1_spec_sha256": PROSPECTIVE_SPEC_SHA256,
         },
         "ranking_capacity": (
-            "Activity watchlist fits per-market tick budget; "
-            "shared account/feed capacity still applies"
+            "50 stocks screened per market; independent shared account/feed capacity applies; "
+            "missing causal trade streams prevent entry and remain visible"
         ),
         "direction": "First UP break LONG; first DOWN break SHORT; no reversal",
         "entry": {"trigger_M": 0.20, "window_minutes": 5, "reference": "Exact threshold"},
@@ -179,7 +181,7 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
 
 SESSION_HARD = MethodDefinition(
     method_id="SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
-    version="SESSION_HARD_CAUSAL_Q1_ACTIVITY_V2",
+    version="SESSION_HARD_CAUSAL_Q1_ACTIVITY_V3",
     config_name="SESSION_HARD",
     label="Session HARD",
     supported_markets=(

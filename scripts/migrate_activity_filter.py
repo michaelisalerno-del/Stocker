@@ -1,4 +1,4 @@
-"""Create V2 PAPER runs while retaining immutable V1 runs as archived history.
+"""Create current activity-filter PAPER runs and archive the previous version.
 
 Writes a separate config file; activation and database backup remain deployment steps.
 """
@@ -18,7 +18,7 @@ from stocker_core.markets import get_market
 from stocker_core.methods import SESSION_HARD
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 
-PREVIOUS_VERSION = "SESSION_HARD_CAUSAL_Q1_FIT_V1"
+PREVIOUS_VERSION = "SESSION_HARD_CAUSAL_Q1_ACTIVITY_V2"
 
 
 def migrate(payload: dict[str, Any]) -> tuple[RunsConfig, dict[str, str]]:

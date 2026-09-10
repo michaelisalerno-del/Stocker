@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from stocker_core.markets import CAP_BUCKETS_V1, CapBucket, MarketId
 from stocker_core.universes import Identifier, UniverseCatalog, UniverseDefinition
 
-ACTIVITY_CAPACITY_V2_VERSION = "ACTIVITY_CAPACITY_V2_WARNINGS"
+ACTIVITY_CAPACITY_V2_VERSION = "ACTIVITY_CAPACITY_V3_SCREEN50"
 
 
 def activity_snapshot_version(profile_id: str) -> str:

@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from stocker_core.markets import CapBucket, get_market
+from stocker_core.methods import SESSION_HARD_SCREEN_LIMIT
 from stocker_core.runs import ACTIVITY_CAPACITY_V2_VERSION, RunInstance
 from stocker_execution.activity_shortlist import (
     ActivityShortlistService,
@@ -24,7 +25,7 @@ class SessionHardUniverseSearch:
             ActivityShortlistStore(database),
             profile_id="ACTIVITY_CAPACITY_V2",
             profile_version=ACTIVITY_CAPACITY_V2_VERSION,
-            watch_limit=min(50, max(1, broker.config.market_data_line_budget // 20)),
+            watch_limit=SESSION_HARD_SCREEN_LIMIT,
             allow_late_capture=True,
         )
 

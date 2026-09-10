@@ -7,7 +7,7 @@ The user selects the market and method; the method determines what stocks are ap
 
 The current catalogue exposes one method, **Session HARD**, across Stocker's market catalogue.
 Its stable internal identity is `SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D`;
-its current version is `SESSION_HARD_CAUSAL_Q1_ACTIVITY_V2`. The old name remains an internal
+its current version is `SESSION_HARD_CAUSAL_Q1_ACTIVITY_V3`. The old name remains an internal
 identity for history continuity, not a second selectable strategy. The method remains PAPER-only.
 Non-US markets are labelled **unvalidated cross-market PAPER tests**. Operational calendar/scanner
 support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on those markets.
@@ -68,9 +68,12 @@ Every supported market uses `ACTIVITY_CAPACITY_V2` before contract qualification
 It reuses V1's three IBKR activity components and deterministic ranking: scanner hit count,
 equal-weight rank sum, best rank, symbol and conId. At least two components must succeed.
 US scanner results are intersected with the saved authoritative listing membership before ranking.
-Only `min(50, max(1, configured_market_data_lines // 20))` stocks per market proceed to expensive
-work (five with the current 100-line setting). Shared broker tick limits still apply when markets
-overlap; unavailable complete tick prefixes prevent entry and appear in readiness reporting.
+Up to 50 stocks per market proceed to contract/history evaluation, independently of the live-feed
+budget. Three component scans return at most 150 merged contracts before this final cap.
+The 50-stock screening pool is an operational bound, not a validated optimal size.
+Shared broker tick limits still apply: the current 100-line budget allows five tick-by-tick feeds,
+including when markets overlap. Screening 50 does not promise 50 live entry streams.
+Unavailable complete tick prefixes prevent entry and appear in readiness reporting.
 No market-cap restriction is applied. This changes the method's population and is explicitly
 an unvalidated PAPER activity filter, not evidence of profitability or cross-market model transfer.
 
@@ -79,7 +82,9 @@ timestamp. The immutable market/session/profile snapshot stores selected and exc
 scanner ranks and failures. Reloads reuse it; no retrospective checkpoint or missing trade prefix
 is replayed. Historical `ACTIVITY_SHORTLIST_V1` retains its 50-stock, one-minute capture semantics.
 The dashboard exposes the current profile's timestamp, watchlist and selection audit.
-Snapshot revision `ACTIVITY_CAPACITY_V2_WARNINGS` retains IBKR's returned discovery results
+Snapshot revision `ACTIVITY_CAPACITY_V3_SCREEN50` separates screening capacity from trade feeds.
+The prior five-stock `ACTIVITY_CAPACITY_V2_WARNINGS` snapshots remain immutable and cannot seed it.
+It retains IBKR's returned discovery results
 when warning 492 reports limited scanner precision. The warning is scoped to its request and
 persisted in the selection audit. Scanner discovery is separate from the actual historical and
 streaming data checks required for entry ([IBKR scanner documentation](https://interactivebrokers.github.io/tws-api/market_scanners.html)).
@@ -87,7 +92,7 @@ The earlier `ENTITLED` revision incorrectly turned that warning into a market-wi
 its snapshots remain stored but cannot seed the corrected path. Actual failed requests still
 fail screening when fewer than two components succeed. No missing prices or trade events are
 estimated or substituted, and no full-listing fallback is used.
-`scripts/migrate_activity_filter.py` writes a separate configuration with V1 runs archived and V2
+`scripts/migrate_activity_filter.py` writes a separate configuration with V2 runs archived and V3
 PAPER replacements retaining risk settings and enabled state; historical specs and database rows
 are preserved. Archived specifications retain their hash check and cannot be started.
 

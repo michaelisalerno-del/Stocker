@@ -33,7 +33,7 @@ class MarketBroker(IbkrConnection):
         self.scans.append((market.market_id, cap_bucket, component, max_results))
         return tuple(
             ScannerCandidate(component, i + 1, f"TEST{i}", 123 + i, "SMART", None, market.currency)
-            for i in range(12)
+            for i in range(50)
         )
 
     async def resolve_stock(self, symbol, *, exchange, currency, primary_exchange=None):
@@ -61,7 +61,7 @@ def test_method_uses_existing_local_session_scan_and_reloads_snapshot(tmp_path, 
                                 InstrumentReference(
                                     symbol=f"TEST{i}", exchange="SMART", currency="USD"
                                 )
-                                for i in range(12)
+                                for i in range(50)
                             )
                         }
                     )
@@ -95,9 +95,9 @@ def test_method_uses_existing_local_session_scan_and_reloads_snapshot(tmp_path, 
         now[0] = opening + timedelta(minutes=17)
         result = await search.qualify((instance,))
         assert (
-            len(result.requests) == 5 and result.requests[0].instrument.currency == market.currency
+            len(result.requests) == 50 and result.requests[0].instrument.currency == market.currency
         )
-        assert broker.resolved == [f"TEST{i}" for i in range(5)]
+        assert set(broker.resolved) == {f"TEST{i}" for i in range(50)}
         assert len(broker.scans) == 3
         assert all(cap is CapBucket.ALL and limit == 50 for _, cap, _, limit in broker.scans)
         snapshot = search.activity.store.get(
@@ -108,8 +108,8 @@ def test_method_uses_existing_local_session_scan_and_reloads_snapshot(tmp_path, 
             profile_version=ACTIVITY_CAPACITY_V2_VERSION,
         )
         assert snapshot.screen_timestamp == now[0]
-        assert len(snapshot.candidates) == 12
-        assert sum(c.selected for c in snapshot.candidates) == 5
+        assert len(snapshot.candidates) == 50
+        assert sum(c.selected for c in snapshot.candidates) == 50
         now[0] += timedelta(minutes=5)
         replay = SessionHardUniverseSearch(broker, database, lambda: now[0])
         assert await replay.qualify((instance,)) == result
@@ -137,7 +137,42 @@ def test_us_listing_membership_is_applied_before_ranking_and_qualification(tmp_p
     assert broker.resolved == ["TEST8"]
 
 
-def test_smaller_broker_budget_and_scanner_failure_do_not_fall_back_to_listings(tmp_path):
+def test_150_scanner_hits_are_bounded_to_50_before_contract_work(tmp_path):
+    from test_stage10_extension_builder import add
+
+    class DisjointScans(MarketBroker):
+        async def activity_scan(self, *, market, cap_bucket, component, max_results):
+            offset = list(ActivityScanner).index(component) * 50
+            return tuple(
+                ScannerCandidate(
+                    component, i + 1, f"TEST{offset + i}", 123 + offset + i,
+                    "SMART", None, market.currency,
+                )
+                for i in range(max_results)
+            )
+
+        def prepare_trade_events(self, instrument):
+            raise AssertionError("Screening must not allocate live trade streams")
+
+    config, run = add(market=MarketId.UK_LSE)
+    broker = DisjointScans(get_market(MarketId.UK_LSE))
+    now = datetime(2026, 9, 8, 8, tzinfo=UTC)
+    search = SessionHardUniverseSearch(broker, tmp_path / "screen.sqlite", lambda: now)
+    result = asyncio.run(
+        search.qualify((RunInstance(run, config.universes[-1], RunState.ACTIVE),))
+    )
+    snapshot = search.activity.store.get(
+        run.market_id.value, CapBucket.ALL, now.date(),
+        profile_id="ACTIVITY_CAPACITY_V2", profile_version=ACTIVITY_CAPACITY_V2_VERSION,
+    )
+    assert len(snapshot.candidates) == 150
+    selected = {c.symbol for c in snapshot.candidates if c.selected}
+    assert len(selected) == len(result.requests) == len(broker.resolved) == 50
+    assert set(broker.resolved) == selected
+    assert run.method_spec["universe_search"]["watch_limit"] == 50
+
+
+def test_screen_size_is_independent_of_feed_budget_and_scanner_failures_stay_isolated(tmp_path):
     from stocker_execution.ibkr import IbkrError
     from test_stage10_extension_builder import add
 
@@ -151,7 +186,7 @@ def test_smaller_broker_budget_and_scanner_failure_do_not_fall_back_to_listings(
 
     search = SessionHardUniverseSearch(broker, tmp_path / "small.sqlite", now)
     result = asyncio.run(search.qualify((instance,)))
-    assert len(result.requests) == 2 and len(broker.resolved) == 2
+    assert len(result.requests) == 50 and len(broker.resolved) == 50
 
     class Unentitled(MarketBroker):
         async def activity_scan(self, **kwargs):
@@ -179,14 +214,14 @@ def test_dashboard_reads_current_profile_not_legacy_shortlist(tmp_path):
     )
     asyncio.run(search.qualify((RunInstance(run, config.universes[-1], RunState.ACTIVE),)))
     reads.activity_store = ActivityShortlistStore(tmp_path / "activity.sqlite")
-    assert reads.runs()[0]["candidate_count"] == 5
+    assert reads.runs()[0]["candidate_count"] == 50
     detail = reads.run_detail(run.run_id)
-    assert detail["watchlist_size"] == 5
+    assert detail["watchlist_size"] == 50
     assert detail["activity_screen"]["profile_id"] == "ACTIVITY_CAPACITY_V2"
-    assert len(detail["activity_screen"]["candidates"]) == 12
+    assert len(detail["activity_screen"]["candidates"]) == 50
 
 
-def test_pre_entitlement_snapshot_is_preserved_but_not_reused(tmp_path):
+def test_five_stock_snapshot_is_preserved_but_not_reused(tmp_path):
     from stocker_execution.activity_shortlist import (
         ActivityShortlistService,
         ActivityShortlistStore,
@@ -199,7 +234,9 @@ def test_pre_entitlement_snapshot_is_preserved_but_not_reused(tmp_path):
     path = tmp_path / "activity.sqlite"
     store = ActivityShortlistStore(path)
     legacy = ActivityShortlistService(
-        store, profile_id="ACTIVITY_CAPACITY_V2", allow_late_capture=True
+        store, profile_id="ACTIVITY_CAPACITY_V2",
+        profile_version="ACTIVITY_CAPACITY_V2_WARNINGS",
+        watch_limit=5, allow_late_capture=True
     )
     original = asyncio.run(
         legacy.get_or_create(
@@ -211,19 +248,19 @@ def test_pre_entitlement_snapshot_is_preserved_but_not_reused(tmp_path):
             now=now,
         )
     )
-    assert sum(c.selected for c in original.candidates) == 12
+    assert sum(c.selected for c in original.candidates) == 5
     current = SessionHardUniverseSearch(broker, path, lambda: now)
     result = asyncio.run(
         current.qualify((RunInstance(run, config.universes[-1], RunState.ACTIVE),))
     )
-    assert len(result.requests) == 5 and len(broker.scans) == 6
+    assert len(result.requests) == 50 and len(broker.scans) == 6
     assert (
         store.get(
             run.market_id.value,
             CapBucket.ALL,
             now.date(),
             profile_id="ACTIVITY_CAPACITY_V2",
-            profile_version="ACTIVITY_CAPACITY_V2",
+            profile_version="ACTIVITY_CAPACITY_V2_WARNINGS",
         )
         == original
     )

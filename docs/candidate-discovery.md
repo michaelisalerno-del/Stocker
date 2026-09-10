@@ -170,17 +170,22 @@ preparation, signals and cohort labels. Existing Q1, entry, risk and PAPER/LIVE 
 `SESSION_HARD_IBKR_ACQUISITION_EXPERIMENT_V1` is an experiment, not a validated scanner
 filter. It declares three sweeps at OPEN+60/+180/+240 active seconds, two concurrent scanner
 requests per sweep, and up to 50 rows per component. The broker's shared ten-scanner ceiling
-and message throttle still apply. No acquisition-pool cap is enabled; there is no expected
-measured union size yet. A 35-component matrix would make 105 requests over three sweeps,
+and message throttle still apply. No acquisition-pool cap is enabled; there is no measured eligible opening
+union size yet. After-hours raw scanner-contract counts do not establish that population. A 35-component matrix would make 105 requests over three sweeps,
 with at most 5,250 raw observations before duplicates, eligibility and actual Gateway limits.
 
 The matrix requests TOP_TRADE_RATE, TOP_VOLUME_RATE and HOT_BY_VOLUME only when advertised.
-Opening percentage gain/loss families resolve an unambiguous exact advertised code from
-Gateway code/description text. These family identifiers are not invented IBKR scan codes.
+Opening percentage gain/loss families map to `TOP_OPEN_PERC_GAIN` and `TOP_OPEN_PERC_LOSE`,
+the exact since-open codes observed on Gateway API version 178. Each code must be advertised
+for the selected location before a request is allowed. `HIGH_OPEN_GAP`/`LOW_OPEN_GAP` and
+other overnight gap scans are not substitutes. No fuzzy description matching is used. The
+semantic family identifiers are not sent as IBKR scan codes.
 Capabilities include raw XML, retrieval time, available server version, locations, instruments,
 codes and filter fields, cached per connection and persisted by content hash. Unsupported or
-ambiguous components are individually failed; no scan is substituted. Actual connected
-capabilities have not been measured by this implementation task.
+unavailable components are individually failed; no scan is substituted. The read-only
+[Gateway access check](scanner-access-check-20260910.md) observed 355 requests across the
+supported profiles, but no opening-bar throughput or oracle recall. The resolver correction
+is documented in [the follow-up report](scanner-acquisition-followup.md).
 
 Each family has UNCAPPED, BELOW_MICRO (<$50m), MICRO, SMALL, MID, LARGE and MEGA requests,
 using existing canonical cap definitions. UNCAPPED has no cap floor or ceiling and retains

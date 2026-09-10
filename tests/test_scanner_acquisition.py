@@ -6,6 +6,7 @@ import asyncio
 import json
 from dataclasses import asdict, replace
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -27,13 +28,13 @@ from stocker_execution.ibkr import HistoricalBar, QualifiedInstrument
 from stocker_execution.scanner_acquisition import ScannerAcquisition, acquisition_scans
 from test_candidate_pipeline import Source, drain, setup_run
 
-# These are deliberately fictional advertised codes, not asserted Gateway capabilities.
+# Codes advertised by Gateway 178; individual test brokers remain entirely fake.
 CODES = {
     "TOP_TRADE_RATE",
     "TOP_VOLUME_RATE",
     "HOT_BY_VOLUME",
-    "FIXTURE_OPEN_PERC_GAIN",
-    "FIXTURE_OPEN_PERC_LOSS",
+    "TOP_OPEN_PERC_GAIN",
+    "TOP_OPEN_PERC_LOSE",
 }
 
 
@@ -105,6 +106,41 @@ class WideBroker(Broker):
             DiscoveryRow(i, f"S{i}", "SMART", None, "USD", "STK", rank, {})
             for rank, i in enumerate(range(index * 50 + 1, index * 50 + 51))
         )
+
+
+@pytest.mark.parametrize("market_id", [MarketId.US_ALL, MarketId.UK_LSE, MarketId.AUSTRALIA_ASX])
+def test_observed_gateway_since_open_codes_exclude_overnight_gaps(market_id):
+    fixture = json.loads((Path(__file__).parent / "fixtures/scanner_acquisition/"
+                          "gateway_178_opening_codes.json").read_text())
+    caps = ScannerCapabilities(
+        locations=frozenset(fixture["locations"]),
+        scan_codes=frozenset(fixture["scan_codes"]),
+        filters=frozenset(fixture["filters"]),
+        scan_descriptions=fixture["scan_descriptions"],
+    )
+    plans = acquisition_scans(ACQUISITION_EXPERIMENT_V1, get_market(market_id), caps, 1.0)
+    assert len(plans) == 35 and all(not p.unsupported_reason for p in plans)
+    assert {p.scan_code for p in plans if p.family == "OPENING_PERCENT_GAIN"} == {
+        "TOP_OPEN_PERC_GAIN"
+    }
+    assert {p.scan_code for p in plans if p.family == "OPENING_PERCENT_LOSS"} == {
+        "TOP_OPEN_PERC_LOSE"
+    }
+    assert not {"HIGH_OPEN_GAP", "LOW_OPEN_GAP"} & {p.scan_code for p in plans}
+    missing = replace(caps, scan_codes=caps.scan_codes - {"TOP_OPEN_PERC_GAIN"})
+    failed = acquisition_scans(ACQUISITION_EXPERIMENT_V1, get_market(market_id), missing, 1.0)
+    assert all(p.unsupported_reason and not p.scan_code for p in failed
+               if p.family == "OPENING_PERCENT_GAIN")
+    assert all(not p.unsupported_reason for p in failed
+               if p.family != "OPENING_PERCENT_GAIN")
+    scoped = replace(caps, location_scan_codes={
+        get_market(market_id).scanner_location: caps.scan_codes - {"TOP_OPEN_PERC_LOSE"}
+    })
+    restricted = acquisition_scans(
+        ACQUISITION_EXPERIMENT_V1, get_market(market_id), scoped, 1.0
+    )
+    assert all(p.unsupported_reason and not p.scan_code for p in restricted
+               if p.family == "OPENING_PERCENT_LOSS")
 
 
 def test_capabilities_define_exact_components_and_floorless_coverage():

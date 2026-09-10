@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from datetime import datetime, timedelta
@@ -29,23 +28,13 @@ def acquisition_scans(
     filters = capabilities.filters_for(market.scanner_location)
     requests = []
     for family in recipe.families:
-        code = family if family in available else ""
-        if family in {"OPENING_PERCENT_GAIN", "OPENING_PERCENT_LOSS"}:
-            direction = (
-                r"GAIN|GAINER|RISE|UP" if family.endswith("GAIN") else r"LOSS|LOSER|LOSE|FALL|DOWN"
-            )
-            matches = []
-            for advertised in sorted(available):
-                label = (
-                    advertised + " " + (capabilities.scan_descriptions or {}).get(advertised, "")
-                )
-                if (
-                    re.search(r"OPEN", label, re.I)
-                    and re.search(r"PERC|%", label, re.I)
-                    and re.search(direction, label, re.I)
-                ):
-                    matches.append(advertised)
-            code = matches[0] if len(matches) == 1 else ""
+        # Exact since-open codes observed in Gateway 178. Validate against this
+        # connection/location before requesting; overnight OPEN_GAP is not equivalent.
+        requested_code = {
+            "OPENING_PERCENT_GAIN": "TOP_OPEN_PERC_GAIN",
+            "OPENING_PERCENT_LOSS": "TOP_OPEN_PERC_LOSE",
+        }.get(family, family)
+        code = requested_code if requested_code in available else ""
         for cap in recipe.cap_slices:
             reason = ""
             configured_filters = []

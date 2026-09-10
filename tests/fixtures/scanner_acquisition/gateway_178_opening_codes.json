@@ -1,0 +1,32 @@
+{
+  "source": "Projection of the read-only PAPER Gateway reqScannerParameters response, 2026-09-10",
+  "capabilities_digest": "3d01200a211c5595491992d7007281b44f58ef460c9b937db4cf956e6e553054",
+  "server_version": "178",
+  "scan_codes": [
+    "TOP_TRADE_RATE",
+    "TOP_VOLUME_RATE",
+    "HOT_BY_VOLUME",
+    "TOP_OPEN_PERC_GAIN",
+    "TOP_OPEN_PERC_LOSE",
+    "HIGH_OPEN_GAP",
+    "LOW_OPEN_GAP"
+  ],
+  "scan_descriptions": {
+    "TOP_TRADE_RATE": "Same Cap in Industry",
+    "TOP_VOLUME_RATE": "Top Volume Rate",
+    "HOT_BY_VOLUME": "Hot Contracts by Volume",
+    "TOP_OPEN_PERC_GAIN": "Top % Gainers Since Open",
+    "TOP_OPEN_PERC_LOSE": "Top % Losers Since Open",
+    "HIGH_OPEN_GAP": "Top Close-to-Open % Gainers",
+    "LOW_OPEN_GAP": "Top Close-to-Open % Losers"
+  },
+  "locations": [
+    "STK.US.MAJOR",
+    "STK.EU.LSE",
+    "STK.HK.ASX"
+  ],
+  "filters": [
+    "marketCapAbove1e6",
+    "marketCapBelow1e6"
+  ]
+}

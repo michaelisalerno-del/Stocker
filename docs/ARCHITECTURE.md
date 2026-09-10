@@ -15,7 +15,9 @@ support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on
 ```text
 Market → Method → saved Run
                     ↓
- broad eligible universe → Range5 HIGH250 → RV10 HIGH50 → RV15 HIGH30
+ broad eligible universe → prospective scanner acquisition union
+                    ↓
+ Range5 HIGH250 → RV10 HIGH50 → RV15 HIGH30
                     ↓
  method-required IBKR history/PRE preparation → required-data screening
                     ↓
@@ -83,6 +85,10 @@ audit through MethodServices. Scanner ranks only identify contracts for data acq
 The declared experimental matrix uses cached actual Gateway capabilities, floorless/uncapped
 and canonical cap coverage, append-only conId sweeps and bounded cancellation. It does not
 replace the frozen candidate mathematics or admit scanner rank into any strategy score.
+Opening acquisition families use the capability-validated exact `TOP_OPEN_PERC_GAIN` and
+`TOP_OPEN_PERC_LOSE` codes, not overnight gap scans or fuzzy description matches. The real
+Gateway access check found scanner precision warnings outside the US; opening-history
+throughput and recall remain prospective measurements. See scanner-acquisition-followup.md.
 The after-close oracle reconstructs full saved membership using the same candidate functions,
 with separate audit-only tables and prospective recall/contribution diagnostics. It pauses for
 enabled market windows and foreground history work. Normal dashboard/API reads aggregate

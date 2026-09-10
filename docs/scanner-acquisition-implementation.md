@@ -1,5 +1,8 @@
 # Scanner-assisted acquisition implementation report
 
+Historical initial implementation report. For the subsequently observed Gateway matrix,
+resolver correction and current verification, see [the follow-up report](scanner-acquisition-followup.md).
+
 Implemented locally against completed V8 baseline `9181eff`. Current selectable version:
 `SESSION_HARD_CAUSAL_Q1_ACQUISITION_V9`. Experimental acquisition recipe:
 `SESSION_HARD_IBKR_ACQUISITION_EXPERIMENT_V1`. Stable Session HARD identity and frozen

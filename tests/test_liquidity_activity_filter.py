@@ -15,6 +15,19 @@ def test_broker_filters_corporations_before_the_fifty_row_scanner_limit(market_i
     market = get_market(market_id)
 
     class LiquidityClient(ScannerClient):
+        def __init__(self):
+            super().__init__()
+            self.classification_requests = []
+
+        async def reqContractDetailsAsync(self, contract):
+            from types import SimpleNamespace
+            self.classification_requests.append(contract.conId)
+            if contract.conId == 100:
+                raise TimeoutError("Classification unavailable")
+            return [SimpleNamespace(
+                contract=contract, stockType="ETC" if contract.conId == 99 else "COMMON",
+            )]
+
         async def reqScannerParametersAsync(self):
             return (
                 "<ScanParameterResponse>"
@@ -25,18 +38,22 @@ def test_broker_filters_corporations_before_the_fifty_row_scanner_limit(market_i
 
         async def reqScannerDataAsync(self, *args):
             rows = await super().reqScannerDataAsync(*args)
-            # Defensively exclude a contradictory fund classification even when the
-            # server was asked for corporations. Real scan rows often omit this field.
+            # Observed UK bug: CORP returns ETCs, and scanner rows omit stockType.
             from copy import deepcopy
             fund = deepcopy(rows[0])
-            fund.contractDetails.stockType = "ETF"
+            fund.contractDetails.stockType = ""
             fund.contractDetails.contract.symbol = "FUND"
             fund.contractDetails.contract.conId = 99
             fund.rank = 1
-            return [*rows, fund]
+            unknown = deepcopy(fund)
+            unknown.contractDetails.contract.symbol = "UNKNOWN"
+            unknown.contractDetails.contract.conId = 100
+            unknown.rank = 2
+            return [*rows, fund, unknown]
 
     client = LiquidityClient()
-    rows = asyncio.run(connection(client).activity_scan(
+    broker = connection(client)
+    rows = asyncio.run(broker.activity_scan(
         market=market, cap_bucket=CapBucket.ALL,
         component=ActivityScanner.MOST_ACTIVE_AVG_USD, max_results=50,
         stock_type_filter="CORP",
@@ -48,6 +65,15 @@ def test_broker_filters_corporations_before_the_fifty_row_scanner_limit(market_i
     assert subscription.instrument == market.scanner_instrument
     assert subscription.numberOfRows == 50
     assert [r.symbol for r in rows] == ["MSFT"]
+    assert "ETC" in rows[0].warning
+    assert "UNKNOWN" in rows[0].warning
+    asyncio.run(broker.activity_scan(
+        market=market, cap_bucket=CapBucket.ALL,
+        component=ActivityScanner.MOST_ACTIVE_AVG_USD, max_results=50,
+        stock_type_filter="CORP",
+    ))
+    assert client.classification_requests.count(272093) == 1
+    assert client.classification_requests.count(99) == 1
 
 
 def test_old_snapshot_remains_readable_before_and_after_schema_upgrade(tmp_path):

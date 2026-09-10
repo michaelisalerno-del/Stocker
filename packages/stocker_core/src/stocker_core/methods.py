@@ -103,10 +103,11 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
         "method_version": SESSION_HARD.version,
         "market": selected.value,
         "universe_search": {
-            "builder": "IBKR_ACTIVITY_LIQUIDITY_V1",
-            "activity_profile": "ACTIVITY_LIQUIDITY_V1",
+            "builder": "IBKR_ACTIVITY_LIQUIDITY_V2",
+            "activity_profile": "ACTIVITY_LIQUIDITY_V2",
             "components": ["TOP_TRADE_RATE", "MOST_ACTIVE_AVG_USD", "HOT_BY_VOLUME"],
             "stock_type_filter": "CORP",
+            "verified_stock_types": ["COMMON", "CORP", "ADR", "REIT"],
             "capture_active_minutes": 15,
             "capture_policy": (
                 "First available capture at/after minute 15; actual timestamp; no replay"
@@ -186,7 +187,7 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
 
 SESSION_HARD = MethodDefinition(
     method_id="SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
-    version="SESSION_HARD_CAUSAL_Q1_ACTIVITY_V4",
+    version="SESSION_HARD_CAUSAL_Q1_ACTIVITY_V5",
     config_name="SESSION_HARD",
     label="Session HARD",
     supported_markets=(

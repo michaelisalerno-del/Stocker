@@ -7,7 +7,7 @@ The user selects the market and method; the method determines what stocks are ap
 
 The current catalogue exposes one method, **Session HARD**, across Stocker's market catalogue.
 Its stable internal identity is `SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D`;
-its current version is `SESSION_HARD_CAUSAL_Q1_ACTIVITY_V4`. The old name remains an internal
+its current version is `SESSION_HARD_CAUSAL_Q1_ACTIVITY_V5`. The old name remains an internal
 identity for history continuity, not a second selectable strategy. The method remains PAPER-only.
 Non-US markets are labelled **unvalidated cross-market PAPER tests**. Operational calendar/scanner
 support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on those markets.
@@ -64,12 +64,16 @@ per symbol. A run embeds the actual membership snapshot, so refreshing the catal
 silently change that run. Refresh membership explicitly with
 `stocker universe refresh-us-listings` before creating a new run.
 
-Every supported market uses `ACTIVITY_LIQUIDITY_V1` before contract qualification or history work.
+Every supported market uses `ACTIVITY_LIQUIDITY_V2` before price-history evaluation.
 Its three IBKR components are TOP_TRADE_RATE, MOST_ACTIVE_AVG_USD and HOT_BY_VOLUME:
 current trade activity, normal dollar turnover and unusual daily volume. Each request applies
-the native `stockTypeFilter=CORP` before IBKR's 50-row limit. Known contradictory fund
-classifications in returned details are excluded defensively; absent classification relies on
-the server's native filter. No invented price or volume threshold is applied.
+the native `stockTypeFilter=CORP` before IBKR's 50-row limit. Because that filter admits ETCs,
+missing stock classifications are retrieved through IBKR contract details before ranking the
+final 50. Only COMMON, CORP, ADR and REIT classifications qualify. Unknown/failed classifications
+are excluded per symbol and recorded alongside known non-equity exclusions in the scan audit.
+Contract-detail requests are bounded to four concurrent requests and successful classifications
+are cached per connection. Metadata work covers at most 150 scan hits; history work covers only
+the final 50. No invented price or volume threshold is applied.
 Ranking remains scanner hit count, equal-weight rank sum, best rank, symbol and conId.
 At least two components must succeed, and a missing component is named in the audit.
 US scanner results are intersected with the saved authoritative listing membership before ranking.
@@ -87,7 +91,7 @@ timestamp. The immutable market/session/profile snapshot stores selected and exc
 scanner ranks and failures. Reloads reuse it; no retrospective checkpoint or missing trade prefix
 is replayed. Historical `ACTIVITY_SHORTLIST_V1` retains its 50-stock, one-minute capture semantics.
 The dashboard exposes the current profile's timestamp, watchlist and selection audit.
-The new profile cannot reuse prior `ACTIVITY_CAPACITY_V3_SCREEN50` or five-stock
+The new profile cannot reuse prior `ACTIVITY_LIQUIDITY_V1` or `ACTIVITY_CAPACITY_V3_SCREEN50` or five-stock
 `ACTIVITY_CAPACITY_V2_WARNINGS` snapshots. Both remain immutable. A nullable
 `most_active_avg_usd_rank` column preserves liquidity ranks without relabelling old volume ranks.
 Legacy V1 retains its original three components.
@@ -104,7 +108,9 @@ normal cancellation acknowledgements do not. Code 492 remains a precision warnin
 
 A read-only gateway check on 2026-09-10 returned 50 corporation-filtered liquidity results for
 the US, Canada, UK, Germany, France, Netherlands, Switzerland, Australia, Hong Kong, Japan and
-South Korea. The configured South Africa location was rejected by IBKR. Most overseas results
+South Korea. The configured South Africa location was rejected by IBKR. A follow-up contract-detail check
+identified PHPD, NGAS and USGB as ETCs despite passing CORP; the verified-type V2 profile excludes
+these before selection. The alternative Common scanner filter did not reliably filter this gateway. Most overseas results
 carried precision warning 492. These checks establish API behavior, not profitability, full
 market coverage, or entitlement to the historical and live data needed for entry.
 `scripts/migrate_activity_filter.py` writes a separate configuration with V2 runs archived and V3

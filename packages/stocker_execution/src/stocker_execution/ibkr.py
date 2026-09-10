@@ -366,6 +366,8 @@ class IbkrConnection:
         self._completed_orders_loaded = False
         self._scanner_capabilities: ScannerCapabilities | None = None
         self._qualified_stock_cache: dict[tuple[str, str, str, str], QualifiedInstrument] = {}
+        self._scanner_stock_type_cache: dict[int, str] = {}
+        self._scanner_contract_semaphore = asyncio.Semaphore(4)
         self._active_market_data: dict[
             tuple[int, str, str, str, int], _ActiveMarketDataSubscription
         ] = {}
@@ -666,6 +668,7 @@ class IbkrConnection:
         self._completed_orders_loaded = False
         self._scanner_capabilities = None
         self._qualified_stock_cache.clear()
+        self._scanner_stock_type_cache.clear()
         if was_connected:
             self._connection_epoch += 1
 
@@ -1306,6 +1309,35 @@ class IbkrConnection:
         self._scanner_capabilities = discovered
         return discovered
 
+    async def _scanner_stock_type(self, raw: Any) -> str:
+        details = raw.contractDetails
+        contract = details.contract
+        con_id = int(getattr(contract, "conId", 0))
+        if con_id <= 0 or contract.secType != "STK":
+            raise IbkrError("STOCK_CLASSIFICATION_UNAVAILABLE")
+        cached = self._scanner_stock_type_cache.get(con_id)
+        if cached is not None:
+            return cached
+        stock_type = str(getattr(details, "stockType", "")).strip().upper()
+        if not stock_type:
+            async with self._scanner_contract_semaphore:
+                resolved = await asyncio.wait_for(
+                    self._client.reqContractDetailsAsync(contract),
+                    timeout=self.config.request_timeout_seconds,
+                )
+            matching = [
+                item for item in resolved
+                if getattr(getattr(item, "contract", None), "conId", None) == con_id
+                and getattr(getattr(item, "contract", None), "secType", None) == "STK"
+            ]
+            if len(matching) != 1:
+                raise IbkrError("STOCK_CLASSIFICATION_UNAVAILABLE")
+            stock_type = str(getattr(matching[0], "stockType", "")).strip().upper()
+        if not stock_type:
+            raise IbkrError("STOCK_CLASSIFICATION_UNAVAILABLE")
+        self._scanner_stock_type_cache[con_id] = stock_type
+        return stock_type
+
     async def activity_scan(
         self,
         *,
@@ -1376,20 +1408,36 @@ class IbkrConnection:
                 subscription.marketCapBelow = cap.scanner_maximum_millions
         try:
             scan = await self._bounded_scanner_data(subscription, filter_options)
-            rows = scan.rows
+            rows = tuple(sorted(
+                scan.rows, key=lambda item: int(cast(Any, item).rank)
+            )[:max_results])
         except Exception as exc:
             raise IbkrError(
                 f"IBKR {component.value} scanner request failed: {sanitize_ibkr_message(exc)}"
             ) from exc
         results: list[ScannerCandidate] = []
         seen: set[tuple[str, int | None]] = set()
-        for raw in sorted(rows, key=lambda item: int(cast(Any, item).rank)):
+        classification_warnings: list[str] = []
+        if stock_type_filter == "CORP":
+            types = await asyncio.gather(
+                *(self._scanner_stock_type(row) for row in rows), return_exceptions=True,
+            )
+            eligible: list[object] = []
+            for raw, stock_type in zip(rows, types, strict=True):
+                symbol = str(cast(Any, raw).contractDetails.contract.symbol)
+                if isinstance(stock_type, BaseException):
+                    classification_warnings.append(
+                        f"{symbol}: STOCK_CLASSIFICATION_UNAVAILABLE"
+                    )
+                elif stock_type in {"COMMON", "CORP", "ADR", "REIT"}:
+                    eligible.append(raw)
+                else:
+                    classification_warnings.append(f"{symbol}: STOCK_TYPE_EXCLUDED ({stock_type})")
+            rows = tuple(eligible)
+            if not rows and classification_warnings:
+                raise IbkrError("; ".join(classification_warnings))
+        for raw in rows:
             contract = cast(Any, raw).contractDetails.contract
-            stock_type = str(getattr(cast(Any, raw).contractDetails, "stockType", "")).upper()
-            if stock_type_filter == "CORP" and stock_type in {
-                "ETF", "ETN", "CEF", "ETMF", "EFN",
-            }:
-                continue
             symbol = str(contract.symbol).strip().upper()
             con_id = int(contract.conId) if int(getattr(contract, "conId", 0)) > 0 else None
             identity = (symbol, con_id)
@@ -1409,7 +1457,7 @@ class IbkrConnection:
                         else None
                     ),
                     currency=str(contract.currency or market.currency).upper(),
-                    warning="; ".join(scan.warnings),
+                    warning="; ".join((*scan.warnings, *classification_warnings)),
                 )
             )
         return tuple(results[:max_results])

@@ -1881,7 +1881,8 @@ class StockerRuntime:
             membership.run_id
             for item in self._qualification.ineligible
             if item.symbol in {
-                "ACTIVITY_SHORTLIST_V1", "ACTIVITY_CAPACITY_V2", "ACTIVITY_LIQUIDITY_V1"
+                "ACTIVITY_SHORTLIST_V1", "ACTIVITY_CAPACITY_V2",
+                "ACTIVITY_LIQUIDITY_V1", "ACTIVITY_LIQUIDITY_V2",
             }
             and item.reason in {"SCHEDULED", "ACTIVITY_SHORTLIST_NOT_READY"}
             for membership in item.memberships
@@ -2210,7 +2211,7 @@ class StockerRuntime:
             for failure in self._qualification.ineligible
             if failure.symbol not in {
                 "HOT_BY_VOLUME", "ACTIVITY_SHORTLIST_V1", "ACTIVITY_CAPACITY_V2",
-                "ACTIVITY_LIQUIDITY_V1",
+                "ACTIVITY_LIQUIDITY_V1", "ACTIVITY_LIQUIDITY_V2",
             }
             for membership in failure.memberships
             if membership.run_id in run_markets

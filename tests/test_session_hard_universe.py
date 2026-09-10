@@ -7,7 +7,7 @@ import pytest
 
 from stocker_core.markets import ActivityScanner, CapBucket, MarketId, get_market
 from stocker_core.methods import SESSION_HARD
-from stocker_core.runs import ACTIVITY_LIQUIDITY_V1_ID, Environment, RunInstance, RunState
+from stocker_core.runs import ACTIVITY_LIQUIDITY_V2_ID, Environment, RunInstance, RunState
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 from stocker_execution.activity_shortlist import ScannerCandidate, ScannerCapabilities
 from stocker_execution.ibkr import IbkrConnection, QualifiedInstrument
@@ -112,8 +112,8 @@ def test_method_uses_existing_local_session_scan_and_reloads_snapshot(tmp_path, 
             market_id.value,
             CapBucket.ALL,
             now[0].astimezone(ZoneInfo(market.timezone)).date(),
-            profile_id=ACTIVITY_LIQUIDITY_V1_ID,
-            profile_version=ACTIVITY_LIQUIDITY_V1_ID,
+            profile_id=ACTIVITY_LIQUIDITY_V2_ID,
+            profile_version=ACTIVITY_LIQUIDITY_V2_ID,
         )
         assert snapshot.screen_timestamp == now[0]
         assert len(snapshot.candidates) == 50
@@ -147,7 +147,7 @@ def test_us_listing_membership_is_applied_before_ranking_and_qualification(tmp_p
     assert broker.resolved == ["TEST8"]
 
 
-def test_150_scanner_hits_are_bounded_to_50_before_contract_work(tmp_path):
+def test_150_scanner_hits_are_bounded_to_50_before_history_work(tmp_path):
     from test_stage10_extension_builder import add
 
     class DisjointScans(MarketBroker):
@@ -175,7 +175,7 @@ def test_150_scanner_hits_are_bounded_to_50_before_contract_work(tmp_path):
     )
     snapshot = search.activity.store.get(
         run.market_id.value, CapBucket.ALL, now.date(),
-        profile_id=ACTIVITY_LIQUIDITY_V1_ID, profile_version=ACTIVITY_LIQUIDITY_V1_ID,
+        profile_id=ACTIVITY_LIQUIDITY_V2_ID, profile_version=ACTIVITY_LIQUIDITY_V2_ID,
     )
     assert len(snapshot.candidates) == 150
     selected = {c.symbol for c in snapshot.candidates if c.selected}
@@ -229,7 +229,7 @@ def test_dashboard_reads_current_profile_not_legacy_shortlist(tmp_path):
     assert reads.runs()[0]["candidate_count"] == 50
     detail = reads.run_detail(run.run_id)
     assert detail["watchlist_size"] == 50
-    assert detail["activity_screen"]["profile_id"] == ACTIVITY_LIQUIDITY_V1_ID
+    assert detail["activity_screen"]["profile_id"] == ACTIVITY_LIQUIDITY_V2_ID
     assert len(detail["activity_screen"]["candidates"]) == 50
     assert detail["activity_screen"]["candidates"][0]["most_active_avg_usd_rank"] == 1
 

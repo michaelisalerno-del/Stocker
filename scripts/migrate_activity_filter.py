@@ -18,7 +18,7 @@ from stocker_core.markets import get_market
 from stocker_core.methods import SESSION_HARD
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 
-PREVIOUS_VERSION = "SESSION_HARD_CAUSAL_Q1_ACTIVITY_V3"
+PREVIOUS_VERSION = "SESSION_HARD_CAUSAL_Q1_ACTIVITY_V4"
 
 
 def migrate(payload: dict[str, Any]) -> tuple[RunsConfig, dict[str, str]]:

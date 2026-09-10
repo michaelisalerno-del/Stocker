@@ -13,6 +13,7 @@ from stocker_core.universes import Identifier, UniverseCatalog, UniverseDefiniti
 
 ACTIVITY_CAPACITY_V2_VERSION = "ACTIVITY_CAPACITY_V3_SCREEN50"
 ACTIVITY_LIQUIDITY_V1_ID = "ACTIVITY_LIQUIDITY_V1"
+ACTIVITY_LIQUIDITY_V2_ID = "ACTIVITY_LIQUIDITY_V2"
 
 
 def activity_snapshot_version(profile_id: str) -> str:
@@ -118,7 +119,10 @@ class RunConfig(BaseModel):
         """A method-owned discovery profile, or a historical explicit screen."""
         return (
             (self.method_spec or {}).get("universe_search", {}).get("activity_profile")
-            in {ACTIVITY_SHORTLIST_V1_ID, "ACTIVITY_CAPACITY_V2", ACTIVITY_LIQUIDITY_V1_ID}
+            in {
+                ACTIVITY_SHORTLIST_V1_ID, "ACTIVITY_CAPACITY_V2",
+                ACTIVITY_LIQUIDITY_V1_ID, ACTIVITY_LIQUIDITY_V2_ID,
+            }
         ) or (
             self.screen is not None and self.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
         )

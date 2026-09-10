@@ -44,6 +44,14 @@ class IbkrError(RuntimeError):
     """A clear failure at the IBKR connection or data boundary."""
 
 
+class IbkrHistoricalDataUnavailable(IbkrError):
+    """A completed individual history response has no usable bars."""
+
+
+class IbkrInstrumentUnavailable(IbkrError):
+    """A completed contract response cannot identify an eligible stock."""
+
+
 MAX_ACTIVE_SCANNERS = 10
 HISTORICAL_REQUEST_CONCURRENCY = 4
 
@@ -1108,17 +1116,19 @@ class IbkrConnection:
             ) from exc
 
         if len(results) != 1 or results[0] is None:
-            raise IbkrError(f"IBKR stock contract {normalized_symbol} could not be resolved")
+            raise IbkrInstrumentUnavailable(
+                f"IBKR stock contract {normalized_symbol} could not be resolved"
+            )
         result = results[0]
         if isinstance(result, list):
-            raise IbkrError(
+            raise IbkrInstrumentUnavailable(
                 f"IBKR stock contract {normalized_symbol} resolved ambiguously "
                 f"to {len(result)} contracts"
             )
 
         contract = cast(_QualifiedContract, result)
         if contract.secType != "STK" or contract.conId <= 0:
-            raise IbkrError(
+            raise IbkrInstrumentUnavailable(
                 f"IBKR returned an invalid qualified stock contract for {normalized_symbol}"
             )
         qualified = QualifiedInstrument(
@@ -1465,7 +1475,9 @@ class IbkrConnection:
                 if getattr(getattr(detail, "contract", None), "conId", None) == row.con_id
             ]
             if len(matching) != 1:
-                raise IbkrError(f"INVALID_CONTRACT: conId {row.con_id} is ambiguous or unavailable")
+                raise IbkrInstrumentUnavailable(
+                    f"INVALID_CONTRACT: conId {row.con_id} is ambiguous or unavailable"
+                )
             detail = matching[0]
             contract = detail.contract
             stock_type = str(getattr(detail, "stockType", "")).strip().upper()
@@ -1661,13 +1673,15 @@ class IbkrConnection:
                 )
 
         if not source_bars:
-            raise IbkrError(f"IBKR historical data returned no bars for {instrument.symbol}")
+            raise IbkrHistoricalDataUnavailable(
+                f"IBKR historical data returned no bars for {instrument.symbol}"
+            )
         bars = tuple(
             _normalize_historical_bar(cast(_SourceBar, bar), index=index)
             for index, bar in enumerate(source_bars)
         )
         if len(bars) < minimum_bars:
-            raise IbkrError(
+            raise IbkrHistoricalDataUnavailable(
                 f"IBKR historical data returned {len(bars)} bars; "
                 f"at least {minimum_bars} required for {instrument.symbol}"
             )
@@ -1676,11 +1690,11 @@ class IbkrConnection:
                 current.timestamp > previous.timestamp for previous, current in pairwise(bars)
             )
         except TypeError as exc:
-            raise IbkrError(
+            raise IbkrHistoricalDataUnavailable(
                 f"IBKR historical timestamps are incompatible for {instrument.symbol}"
             ) from exc
         if not timestamps_increase:
-            raise IbkrError(
+            raise IbkrHistoricalDataUnavailable(
                 f"IBKR historical timestamps are not strictly increasing for {instrument.symbol}"
             )
         return bars
@@ -1972,7 +1986,9 @@ def _normalize_historical_bar(source: _SourceBar, *, index: int) -> HistoricalBa
         close = float(source.close)
         volume = float(source.volume)
     except (AttributeError, TypeError, ValueError) as exc:
-        raise IbkrError(f"IBKR returned invalid historical bar at index {index}") from exc
+        raise IbkrHistoricalDataUnavailable(
+            f"IBKR returned invalid historical bar at index {index}"
+        ) from exc
 
     try:
         return validate_historical_bar(
@@ -1986,7 +2002,7 @@ def _normalize_historical_bar(source: _SourceBar, *, index: int) -> HistoricalBa
             )
         )
     except ValueError as exc:
-        raise IbkrError(f"IBKR returned {exc} at index {index}") from exc
+        raise IbkrHistoricalDataUnavailable(f"IBKR returned {exc} at index {index}") from exc
 
 
 def _available_price(value: float) -> float | None:

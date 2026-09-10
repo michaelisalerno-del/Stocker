@@ -27,13 +27,13 @@ class UniverseRunBuilder:
                         f"{s.opens_at:%H:%M}–{s.closes_at:%H:%M}"
                         for s in get_market(m).regular_sessions
                     ),
-                    "scanner_readiness": "METHOD_OWNED_ACTIVITY_FILTER",
+                    "scanner_readiness": "BROAD_UNIVERSE_REQUIRED",
                     "experimental": get_market(m).listing_membership is None,
-                    "search_policy": "Method-owned IBKR discovery · separate watch/feed capacity",
+                    "search_policy": "Range5 250 → RV10 50 → RV15 30 · broad universe required",
                     "validation": (
                         "US development candidate"
                         if get_market(m).listing_membership
-                        else "Unvalidated cross-market PAPER test"
+                        else "UNVALIDATED_CROSS_MARKET_PAPER_TRANSFER"
                     ),
                 }
                 for m in markets
@@ -49,7 +49,7 @@ class UniverseRunBuilder:
                 for method in installed_methods()
             ],
             "candidate_screen": {
-                "label": "Activity ranking, capacity limit, then required-data checks",
+                "label": "Range5 HIGH250 → RV10 HIGH50 → RV15 HIGH30",
                 "screen_active_minutes_after_open": 15,
             },
         }
@@ -63,8 +63,11 @@ class UniverseRunBuilder:
         strategy_version: str,
         environment: Environment,
         risk: RunRiskConfig | None = None,
+        historical_reproduction: bool = False,
     ) -> tuple[RunsConfig, RunConfig]:
         method = get_method(strategy_id, strategy_version)
+        if not historical_reproduction and method not in installed_methods():
+            raise ValueError("Historical method versions cannot create new runs")
         market = get_market(market_id)
         spec = method.specification(market.market_id)
         if environment.value not in method.environments:
@@ -104,7 +107,9 @@ class UniverseRunBuilder:
             universe_snapshot=universe,
             universe_source=(
                 UniverseSource.DYNAMIC_IBKR
-                if method.discovery_profile(market.market_id) is not None else None
+                if method.discovery_profile(market.market_id) is not None else
+                UniverseSource.AUTHORITATIVE_LISTINGS if market.listing_membership else
+                UniverseSource.CACHED_MARKET_UNIVERSE
             ),
             discovery_profile=method.discovery_profile(market.market_id),
         )

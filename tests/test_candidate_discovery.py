@@ -8,13 +8,14 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+from legacy_discovery_support import UniverseRunBuilder
 from stocker_core.config import IbkrConfig, RunsConfig
 from stocker_core.discovery import SESSION_HARD_DISCOVERY, DiscoveryProfile, UniverseSource
 from stocker_core.markets import CAP_BUCKETS_V1, CapBucket, MarketId, get_market
-from stocker_core.methods import SESSION_HARD, content_hash
+from stocker_core.methods import LEGACY_SESSION_HARD as SESSION_HARD
+from stocker_core.methods import content_hash
 from stocker_core.runs import Environment, RunConfig, RunInstance, RunState
 from stocker_core.universes import InstrumentReference
-from stocker_dashboard.universe_runs import UniverseRunBuilder
 from stocker_execution.activity_shortlist import ScannerCapabilities
 from stocker_execution.discovery import (
     CandidateDiscovery,

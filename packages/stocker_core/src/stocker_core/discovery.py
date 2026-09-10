@@ -10,6 +10,8 @@ from stocker_core.markets import ActivityScanner, CapBucket
 
 class UniverseSource(StrEnum):
     DYNAMIC_IBKR = "DYNAMIC_IBKR"
+    AUTHORITATIVE_LISTINGS = "AUTHORITATIVE_LISTINGS"
+    CACHED_MARKET_UNIVERSE = "CACHED_MARKET_UNIVERSE"
     FIXED = "FIXED"
     RESEARCH = "RESEARCH"
 

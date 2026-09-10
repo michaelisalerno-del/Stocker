@@ -7,7 +7,7 @@ The user selects the market and method; the method determines what stocks are ap
 
 The current catalogue exposes one method, **Session HARD**, across Stocker's market catalogue.
 Its stable internal identity is `SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D`;
-its current version is `SESSION_HARD_CAUSAL_Q1_DISCOVERY_V7`. The old name remains an internal
+its current version is `SESSION_HARD_CAUSAL_Q1_CANDIDATES_V8`. The old name remains an internal
 identity for history continuity, not a second selectable strategy. The method remains PAPER-only.
 Non-US markets are labelled **unvalidated cross-market PAPER tests**. Operational calendar/scanner
 support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on those markets.
@@ -15,7 +15,9 @@ support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on
 ```text
 Market → Method → saved Run
                     ↓
- method-owned activity shortlist → capacity limit → required-data screening
+ broad eligible universe → Range5 HIGH250 → RV10 HIGH50 → RV15 HIGH30
+                    ↓
+ method-required IBKR history/PRE preparation → required-data screening
                     ↓
  suitability diagnostics → T0 qualification → MODEL_T0 Q1 veto
                     ↓
@@ -27,8 +29,8 @@ Market → Method → saved Run
 ```
 
 There is no user-selected cap bucket, activity screen, strategy ranking, or generic exit override
-in the current run builder. Market cap remains metadata and a research diagnostic. No exploratory
-midcap, volatility or liquidity finding has become an admission filter.
+in the current run builder. Market cap remains metadata and a research diagnostic. Candidate selection uses only the
+frozen opening range/RV chain; scanner activity/liquidity ranks are not admission rules.
 
 ## Small method boundary
 
@@ -57,74 +59,23 @@ There is no plugin loader, factory hierarchy or dependency-injection container.
 
 ### Universe, data and suitability
 
-For **every market + Session HARD**, discovery now follows [candidate-discovery.md](candidate-discovery.md):
-five independent canonical cap-band scans, an audited conId watch pool, then the existing
-Stage 5 identity/history boundary. This path does not load or intersect saved listing membership.
-The method owns its profile; neither scanner ranks nor discovery limits alter trading rules.
-Non-USD cap boundaries use an audited IBKR FX snapshot; price minima use USD scanner prices.
-All markets use the same normalized Stage 5 boundary. Unsupported Gateway locations fail
-explicitly; Johannesburg is currently unadvertised. The following describes historical
-activity profiles only; new runs do not use these legacy discovery policies.
+New runs follow [candidate-discovery.md](candidate-discovery.md): acquisition of a saved broad
+eligible market population, then the frozen Range5 HIGH250 -> RV10 HIGH50 -> RV15 HIGH30 recipe.
+US uses authoritative named listing snapshots. Other markets need an explicitly configured
+broad market universe; unavailable sources/data degrade explicitly. No activity TOP50 or cap
+scanner watch limit precedes Range250. Cross-market transfer remains unvalidated and PAPER-only.
 
-For US NASDAQ/NYSE selections the universe builder resolves authoritative listing
-membership. The existing Nasdaq Trader snapshot records source URLs, retrieval/file times and
-non-ETF/non-test issues. IBKR qualification proves tradable STK identity and reports failures
-per symbol. A run embeds the actual membership snapshot, so refreshing the catalogue does not
-silently change that run. Refresh membership explicitly with
-`stocker universe refresh-us-listings` before creating a new run.
+The method specification owns candidate stages and evidence. MethodServices supplies their
+lifecycle and readiness callbacks; the shared scheduler gates all method history/checkpoints
+until final TOP30. Exact final RTH minute requests use existing IBKR history infrastructure.
+Stage snapshots, identities, input bars and reasons persist atomically, with SQL count summaries.
+No expensive prior-close/HV/PRE work runs across the broad opening population. Stock-local
+historical cache remains intact. Only final TOP30 enters the existing run-scoped strategy state.
 
-Other market selections use `ACTIVITY_LIQUIDITY_V2` before price-history evaluation.
-Its three IBKR components are TOP_TRADE_RATE, MOST_ACTIVE_AVG_USD and HOT_BY_VOLUME:
-current trade activity, normal dollar turnover and unusual daily volume. Each request applies
-the native `stockTypeFilter=CORP` before IBKR's 50-row limit. Because that filter admits ETCs,
-missing stock classifications are retrieved through IBKR contract details before ranking the
-final 50. Only COMMON, CORP, ADR and REIT classifications qualify. Unknown/failed classifications
-are excluded per symbol and recorded alongside known non-equity exclusions in the scan audit.
-Contract-detail requests are bounded to four concurrent requests and successful classifications
-are cached per connection. Metadata work covers at most 150 scan hits; history work covers only
-the final 50. No invented price or volume threshold is applied.
-Ranking remains scanner hit count, equal-weight rank sum, best rank, symbol and conId.
-At least two components must succeed, and a missing component is named in the audit.
-US scanner results are intersected with the saved authoritative listing membership before ranking.
-Up to 50 stocks per market proceed to contract/history evaluation, independently of the live-feed
-budget. Three component scans return at most 150 merged contracts before this final cap.
-The 50-stock screening pool is an operational bound, not a validated optimal size.
-Shared broker tick limits still apply: the current 100-line budget allows five tick-by-tick feeds,
-including when markets overlap. Screening 50 does not promise 50 live entry streams.
-Unavailable complete tick prefixes prevent entry and appear in readiness reporting.
-No market-cap restriction is applied. This changes the method's population and is explicitly
-an unvalidated PAPER activity filter, not evidence of profitability or cross-market model transfer.
-
-Capture occurs on the first available attempt at/after 15 active minutes, with the actual capture
-timestamp. The immutable market/session/profile snapshot stores selected and excluded candidates,
-scanner ranks and failures. Reloads reuse it; no retrospective checkpoint or missing trade prefix
-is replayed. Historical `ACTIVITY_SHORTLIST_V1` retains its 50-stock, one-minute capture semantics.
-The dashboard exposes the current profile's timestamp, watchlist and selection audit.
-The new profile cannot reuse prior `ACTIVITY_LIQUIDITY_V1` or `ACTIVITY_CAPACITY_V3_SCREEN50` or five-stock
-`ACTIVITY_CAPACITY_V2_WARNINGS` snapshots. Both remain immutable. A nullable
-`most_active_avg_usd_rank` column preserves liquidity ranks without relabelling old volume ranks.
-Legacy V1 retains its original three components.
-It retains IBKR's returned discovery results
-when warning 492 reports limited scanner precision. The warning is scoped to its request and
-persisted in the selection audit. Scanner discovery is separate from the actual historical and
-streaming data checks required for entry ([IBKR scanner documentation](https://interactivebrokers.github.io/tws-api/market_scanners.html)).
-The earlier `ENTITLED` revision incorrectly turned that warning into a market-wide block;
-its snapshots remain stored but cannot seed the corrected path. Actual failed requests still
-fail screening when fewer than two components succeed. No missing prices or trade events are
-estimated or substituted, and no full-listing fallback is used. Request-scoped scanner errors,
-including an unsupported location returned alongside an empty result, fail the component;
-normal cancellation acknowledgements do not. Code 492 remains a precision warning.
-
-A read-only gateway check on 2026-09-10 returned 50 corporation-filtered liquidity results for
-the US, Canada, UK, Germany, France, Netherlands, Switzerland, Australia, Hong Kong, Japan and
-South Korea. The configured South Africa location was rejected by IBKR. A follow-up contract-detail check
-identified PHPD, NGAS and USGB as ETCs despite passing CORP; the verified-type V2 profile excludes
-these before selection. The alternative Common scanner filter did not reliably filter this gateway. Most overseas results
-carried precision warning 492. These checks establish API behavior, not profitability, full
-market coverage, or entitlement to the historical and live data needed for entry.
-`scripts/migrate_activity_filter.py` writes a separate configuration with V2 runs archived and V3
-PAPER replacements retaining risk settings and enabled state; historical specs and database rows
-are preserved. Archived specifications retain their hash check and cannot be started.
+V7's five-cap-scan discovery and older activity profiles are legacy behavior retained for saved
+runs and historical audits. V7 remains runnable with its original spec/hash; only V8 is selectable
+for new runs. Migration creates disabled PAPER replacements in a separate configuration and
+preserves all history. No scanner-recall solution, capacity increase or LIVE activation is included.
 
 Session prefixes expand actual exchange five-minute slots into one-minute requirements, excluding
 scheduled lunch breaks. Historical request durations include elapsed break time. Frozen directional
@@ -168,7 +119,7 @@ Full saved universes and configuration history are downloaded on demand through
 method checkpoint times distinguish the latest evaluation from "no further checkpoints today".
 The run view separately shows shared broker history request and pending-work counters; these
 are not completed-stock counts and reset on application restart (also at the UTC day boundary).
-Session HARD's data composition sets `prepare_history_on_ready`: its session-wide prior-close
+The legacy V7 Session HARD data composition sets `prepare_history_on_ready`: its session-wide prior-close
 history is prepared once after qualification, including before open or after the final checkpoint.
 Restart reuses cached IBKR bars and resumes missing history. This uses the same bounded shared
 job as checkpoint prefetch; it does not subscribe to live trades or evaluate entries outside the
@@ -438,7 +389,8 @@ local capture windows and remain unvalidated cross-market PAPER tests, as descri
 Migration is additive: new method tables and nullable execution provenance/deadline/timeout
 columns; old rows and research artifacts are retained. Old signals deserialize with absent new
 fields. Legacy configuration enums and old calculation/payoff/scanner sources remain solely to
-read history and reproduce research. Old methods cannot start through runtime, API or controls.
+read history and reproduce research. Saved V7 runs remain runnable with their original specifications;
+new run creation selects V8. Earlier archived method versions remain read-only.
 There is no destructive reset or conversion of old decisions into the new method.
 
 Retired runs can be marked `archived: true` with `enabled: false`. They disappear from operational

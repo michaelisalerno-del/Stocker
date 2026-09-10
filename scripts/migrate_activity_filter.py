@@ -15,7 +15,7 @@ import yaml
 
 from stocker_core.config import RunsConfig
 from stocker_core.markets import get_market
-from stocker_core.methods import SESSION_HARD
+from stocker_core.methods import LEGACY_SESSION_HARD as SESSION_HARD
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 
 PREVIOUS_VERSION = "SESSION_HARD_CAUSAL_Q1_DISCOVERY_V6"
@@ -65,6 +65,7 @@ def migrate(payload: dict[str, Any]) -> tuple[RunsConfig, dict[str, str]]:
             strategy_version=SESSION_HARD.version,
             environment=previous.environment,
             risk=previous.risk,
+            historical_reproduction=True,
         )
         if previous.discovery_profile is not None and current.discovery_profile is not None:
             # Carry forward operational budgets/minima, keeping the new method-owned policy.

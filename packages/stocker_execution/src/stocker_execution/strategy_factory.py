@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
 from stocker_core.markets import MarketId
-from stocker_core.methods import SESSION_HARD, get_method
+from stocker_core.methods import LEGACY_SESSION_HARD, SESSION_HARD, get_method
 from stocker_core.runs import RunInstance
 from stocker_execution.session_hard_method import SessionHardMethod
 
@@ -32,9 +32,18 @@ class MethodServices:
     qualify: Callable[[Sequence[RunInstance]], Awaitable[Stage5QualificationResult]] | None = None
     prepare_history_on_ready: bool = False
     incremental_checkpoints: bool = False
+    universe_lifecycle: (
+        Callable[
+            [RunInstance, MarketSession, datetime], Awaitable[Stage5QualificationResult | None]
+        ]
+        | None
+    ) = None
+    universe_ready: Callable[[str, date], bool] | None = None
+    universe_status: Callable[[str, date], dict[str, Any] | None] | None = None
+    stop_universe: Callable[[], Awaitable[None]] | None = None
 
 
-def session_hard_services(
+def legacy_session_hard_services(
     broker: IbkrConnection,
     cache: IbkrHistoryCache,
     store: Stage5SnapshotStore,
@@ -77,9 +86,46 @@ def session_hard_services(
     )
 
 
+def session_hard_services(
+    broker: IbkrConnection,
+    cache: IbkrHistoryCache,
+    store: Stage5SnapshotStore,
+    clock: Callable[[], datetime],
+    logger: Any,
+) -> MethodServices:
+    from dataclasses import replace
+
+    from stocker_execution.candidate_pipeline import (
+        CandidatePipeline,
+        CandidateStore,
+        ConfiguredUniverseProvider,
+        OpeningBarSource,
+    )
+
+    services = legacy_session_hard_services(broker, cache, store, clock, logger)
+    candidates = CandidatePipeline(
+        CandidateStore(store.path),
+        ConfiguredUniverseProvider(broker),
+        OpeningBarSource(broker, cache),
+        clock,
+    )
+    return replace(
+        services,
+        qualify=candidates.qualify,
+        universe_lifecycle=candidates.advance,
+        universe_ready=candidates.ready,
+        universe_status=candidates.store.summary,
+        stop_universe=candidates.stop,
+    )
+
+
 # Add a method's engine and data composition here; UI never branches on its name.
 _PACKAGES = {
     (SESSION_HARD.method_id, SESSION_HARD.version): (SessionHardMethod, session_hard_services),
+    (LEGACY_SESSION_HARD.method_id, LEGACY_SESSION_HARD.version): (
+        SessionHardMethod,
+        legacy_session_hard_services,
+    ),
 }
 
 
@@ -95,7 +141,7 @@ def create_strategy(
     except KeyError as exc:
         raise ValueError(f"Unsupported runtime strategy: {strategy_id}/{strategy_version}") from exc
     get_method(strategy_id, strategy_version).specification(market)
-    return engine(market, clock=clock)
+    return engine(market, clock=clock, method_version=strategy_version)
 
 
 def create_method_services(

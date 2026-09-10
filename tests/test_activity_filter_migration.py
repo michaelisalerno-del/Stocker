@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
+from legacy_discovery_support import add
 from stocker_core.methods import content_hash, validate_run_method
 from stocker_core.runs import RunConfig, RunRiskConfig
-from test_stage10_extension_builder import add
 
 
 def migration():

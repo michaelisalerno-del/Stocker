@@ -44,12 +44,11 @@ in the runtime trading hot path.
 - The future dashboard is not part of the trading engine; dashboard failure must not affect trading.
 - A Method owns how it finds, qualifies, vetoes, enters, manages and exits trades.
   Method packages supply universe/search and data services plus pure decision logic.
-  Dynamic discovery is method-owned (see docs/candidate-discovery.md): reuse CAP_BUCKETS_V1,
-  persist raw observations and rejection stages, and pass qualified conIds into Stage 5.
-  All market selections use method-owned profiles. Native cap filters use listing currency:
-  translate canonical USD boundaries with an audited IBKR FX quote, never relabel local caps.
-  Discovery/watch ordering must never become a Session HARD trade score. Do not tune
-  discovery criteria from historical winners/losers or change the frozen method to fit a pool.
+  New Session HARD candidate selection is Range5 HIGH250 -> RV10 HIGH50 -> RV15 HIGH30.
+  Universe acquisition is separate; use saved broad eligible populations and explicit capacity
+  diagnostics, never a silent legacy activity/scanner shortlist fallback. See docs/candidate-discovery.md.
+  Legacy discovery profiles and audits remain intact for original saved runs.
+  Candidate scores, scanner ranks and Session HARD trading scores must stay distinct.
   Pure calculations receive data; shared IBKR execution submits method-produced intentions.
 - Account exposure, permissions, reconciliation and emergency controls remain shared.
 - Add a method through the catalogue and explicit composition seam described in docs/ARCHITECTURE.md;

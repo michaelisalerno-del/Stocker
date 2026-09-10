@@ -26,13 +26,14 @@ units, stale symbols, ambiguous symbols, and other non-stock issues therefore fa
 are reported for that symbol, and do not stop the batch. Loading the snapshot itself makes no IBKR,
 historical-bar, option, PRE, or order request.
 
-The method owns universe construction. Every market + Session HARD defaults to
-`DYNAMIC_IBKR`: independent cap scans with no saved-listing intersection. See
-[candidate-discovery.md](candidate-discovery.md) for configuration, lifecycle and audit storage.
-NASDAQ/NYSE/TSX use exchange-specific scanner locations. Explicit `FIXED` and
-`RESEARCH` sources retain deterministic members and converge on the same Stage 5 interface.
-Refreshing listings does not mutate existing fixed runs.
-The minimal configuration has no active runs until a method run is created:
+New Session HARD PAPER runs preserve broad named US membership and pass its eligible normalized
+identities into Range5 HIGH250 -> RV10 HIGH50 -> RV15 HIGH30. Other markets require a configured
+broad market universe. No scanner activity rank, cap bucket or liquidity score enters selection.
+Missing sources and broad opening-bar throughput limits are explicit degraded diagnostics.
+See [candidate-discovery.md](candidate-discovery.md) for timing, evidence, persistence and migration.
+
+The normal builder remains Market -> Method. The method embeds the exact source population in
+each new run; refreshing listing files does not mutate saved runs. The minimal configuration is:
 
 ```yaml
 named_universe_snapshot: ../universes/us-listed.csv
@@ -40,14 +41,10 @@ universes: []
 runs: []
 ```
 
-The other existing market choices are available for unvalidated cross-market PAPER testing.
-Session HARD owns their dynamic discovery profiles, with five canonical USD cap bands and
-audited IBKR FX conversion to native scanner units. Capture occurs at/after 15 active minutes
-after the local open; daily lifecycle and explicit rebuild are shared across markets.
-The pool is a resource limit, not a validated suitability rule or complete market enumeration.
-Unsupported scanner locations fail visibly. Old saved universes and archived runs remain readable.
-Legacy screens cannot be selected as independent current Session HARD filters. Cap remains metadata/research input,
-not a global live strategy control. See [ARCHITECTURE.md](ARCHITECTURE.md).
+Legacy V7 dynamic IBKR discovery and older activity snapshots remain readable with their original
+selection semantics. They do not define selection for new runs. Future scanner acquisition must
+establish recall independently; it is not equivalent to the broad validated research population.
+Non-US candidate transfer is `UNVALIDATED_CROSS_MARKET_PAPER_TRANSFER` without formula changes.
 
 The older research universe data manager below remains separate. Its current provider is EODHD,
 and its history is not a production or PAPER PRE input.

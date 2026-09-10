@@ -25,7 +25,12 @@ from stocker_core.markets import (
     MarketId,
     get_market,
 )
-from stocker_core.methods import content_hash, installed_methods, validate_run_method
+from stocker_core.methods import (
+    content_hash,
+    installed_methods,
+    runnable_methods,
+    validate_run_method,
+)
 from stocker_core.runs import Environment, RunConfig, RunInstance, RunManager
 from stocker_core.strategies import SESSION_HARD_HV_METHOD
 from stocker_core.universes import UniverseCatalog
@@ -134,6 +139,17 @@ class MarketSession:
     opens_at: datetime | None
     closes_at: datetime | None
     active_bar_starts: tuple[datetime, ...] = ()
+
+    def minute_prefix(self, minutes: int) -> tuple[datetime, ...]:
+        """Exact first active regular-session minutes, excluding calendar breaks."""
+        if self.opens_at is None or self.closes_at is None or minutes <= 0:
+            raise ValueError("No regular-session prefix")
+        starts = self.active_bar_starts or tuple(_five_minute_slots(self.opens_at, self.closes_at))
+        prefix = tuple(start + timedelta(minutes=i) for start in starts for i in range(5)
+                       if start + timedelta(minutes=i+1) <= self.closes_at)[:minutes]
+        if len(prefix) != minutes:
+            raise ValueError("Session too short for candidate stage")
+        return prefix
 
     def checkpoint_times(
         self, checkpoints: Sequence[int] = SESSION_HARD_CHECKPOINTS
@@ -1369,6 +1385,9 @@ class StockerRuntime:
         """Stop new decisions, persist local state, and disconnect without cancelling protection."""
 
         self._stopping = True
+        for services in self._method_services.values():
+            if services.stop_universe is not None:
+                await services.stop_universe()
         self._state = ApplicationState.STOPPING
         checkpoints = list(self._checkpoint_tasks.values())
         for task in checkpoints:
@@ -1709,6 +1728,18 @@ class StockerRuntime:
         # Existing waiting entries precede bulk work. Reconciliation stays first.
         with self._timing("entries_before_preparation"):
             await self._observe_entries(_aware(self._clock()))
+        for instance in self._manager.list_runs():
+            lifecycle = self._services_for(instance.config).universe_lifecycle
+            if lifecycle is None:
+                continue
+            if instance.config.enabled and not self._checkpoint_owner_active(instance):
+                continue
+            market = self._resolve_market(instance, _aware(self._clock()))
+            if market is not None:
+                self._sessions[instance.config.run_id] = market
+                update = await lifecycle(instance, market, _aware(self._clock()))
+                if update is not None:
+                    self._replace_qualification_for({instance.config.run_id}, update)
         with self._timing("session_and_shortlist_refresh"):
             await self._refresh_activity_sessions(_aware(self._clock()))
             await self._refresh_scheduled_activity_shortlists(_aware(self._clock()))
@@ -1745,6 +1776,8 @@ class StockerRuntime:
                 ),
                 "",
             )
+            if not self._universe_ready(run, market):
+                continue
             for checkpoint, t0 in self._services_for(run).checkpoints(market):
                 if t0 > now:
                     continue
@@ -1774,7 +1807,11 @@ class StockerRuntime:
     def _services_for(self, run: RunConfig) -> MethodServices:
         if not self._method_services:
             return self._default_method_services
-        return self._method_services[str(run.strategy_version)]
+        return self._method_services.get(str(run.strategy_version), self._default_method_services)
+
+    def _universe_ready(self, run: RunConfig, market: MarketSession) -> bool:
+        readiness = self._services_for(run).universe_ready
+        return readiness is None or readiness(run.run_id, market.session)
 
     async def _prepare_upcoming_expected_moves(self, now: datetime) -> None:
         enabled = {i.config.run_id for i in self._manager.list_runs() if i.config.enabled}
@@ -1812,6 +1849,8 @@ class StockerRuntime:
             if market is None:
                 continue
             services = self._services_for(instance.config)
+            if not self._universe_ready(instance.config, market):
+                continue
             schedule = services.checkpoints(market)
             if services.prepare_history_on_ready and schedule:
                 requests, _ = self._qualification_for({run_id})
@@ -2216,7 +2255,6 @@ class StockerRuntime:
             for membership in failure.memberships
             if membership.run_id in run_markets
         }
-        from stocker_core.methods import installed_methods
         from stocker_execution.discovery import scanner_requests
 
         discovery_readiness = {}
@@ -2385,14 +2423,26 @@ class StockerRuntime:
             progress = self._checkpoint_progress.get(run.run_id, {})
             if progress and market and progress["t0"].date() != market.session:
                 progress = {}
+            universe_status = self._services_for(run).universe_status
+            candidate_status = (universe_status(run.run_id, market.session)
+                                if universe_status and market else None)
+            candidate_degraded = bool(candidate_status and candidate_status["state"] == "DEGRADED")
             run_statuses.append(
                 RunStatus(
                     run_id=run.run_id,
                     universe=run.universe,
                     strategy=run.strategy,
                     environment=run.environment,
-                    state=self._run_states.get(run.run_id, RunRuntimeState.STOPPED),
-                    reason=self._run_reasons.get(run.run_id, ""),
+                    state=(
+                        RunRuntimeState.DEGRADED
+                        if candidate_degraded and run.enabled
+                        else self._run_states.get(run.run_id, RunRuntimeState.STOPPED)
+                    ),
+                    reason=(
+                        candidate_status["reason"]
+                        if candidate_degraded and candidate_status
+                        else self._run_reasons.get(run.run_id, "")
+                    ),
                     session=market.session if market else None,
                     market=market.state if market else None,
                     instruments_ready=ready,
@@ -3416,7 +3466,7 @@ def build_runtime(
             data_clock,
             logger,
         )
-        for method in installed_methods()
+        for method in runnable_methods()
     }
     default = next(iter(services.values()))
 

@@ -74,10 +74,14 @@ class SessionHardMethod(SessionHardStructureDStrategy):
     """Reuse frozen T0 qualification; Q1 precedes arming; actual first break selects side."""
 
     def __init__(
-        self, market: MarketId = MarketId.US_ALL, *, clock: Callable[[], datetime] | None = None
+        self, market: MarketId = MarketId.US_ALL, *, clock: Callable[[], datetime] | None = None,
+        method_version: str = SESSION_HARD.version
     ) -> None:
-        super().__init__(strategy_id=SESSION_HARD.method_id, strategy_version=SESSION_HARD.version)
-        self.spec = SESSION_HARD.specification(market)
+        from stocker_core.methods import get_method
+
+        method = get_method(SESSION_HARD.method_id, method_version)
+        super().__init__(strategy_id=method.method_id, strategy_version=method.version)
+        self.spec = method.specification(market)
         self.spec_hash = content_hash(self.spec)
         self.model = FrozenWhipsawModel()
         self._clock = clock or (lambda: datetime.now(UTC))

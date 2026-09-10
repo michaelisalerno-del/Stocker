@@ -5,10 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from stocker_core.candidate_selection import (
+    SESSION_HARD_CANDIDATE_RECIPE,
+    candidate_evidence_status,
+)
 from stocker_core.discovery import SESSION_HARD_DISCOVERY, DiscoveryProfile
 from stocker_core.markets import (
     MARKET_CATALOGUE,
@@ -91,11 +95,11 @@ class MethodDefinition:
         return self.specification_builder(selected)
 
 
-def session_hard_specification(selected: MarketId) -> dict[str, Any]:
+def legacy_session_hard_specification(selected: MarketId) -> dict[str, Any]:
     q1 = verified_q1_spec()
     spec: dict[str, Any] = {
-        "method_id": SESSION_HARD.method_id,
-        "method_version": SESSION_HARD.version,
+        "method_id": LEGACY_SESSION_HARD.method_id,
+        "method_version": LEGACY_SESSION_HARD.version,
         "market": selected.value,
         "universe_search": {
             "builder": "IBKR_ACTIVITY_LIQUIDITY_V2",
@@ -170,7 +174,7 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
             "prospective_q1": PROSPECTIVE_SPEC_SHA256,
         },
     }
-    profile = SESSION_HARD.discovery_profile(selected)
+    profile = LEGACY_SESSION_HARD.discovery_profile(selected)
     if profile is not None:
         spec["universe_search"] = {
             "builder": "DYNAMIC_IBKR",
@@ -197,7 +201,7 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
     return spec
 
 
-SESSION_HARD = MethodDefinition(
+LEGACY_SESSION_HARD = MethodDefinition(
     method_id="SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
     version="SESSION_HARD_CAUSAL_Q1_DISCOVERY_V7",
     config_name="SESSION_HARD",
@@ -207,7 +211,7 @@ SESSION_HARD = MethodDefinition(
         *(m.market_id for m in MARKET_CATALOGUE if m.market_id is not MarketId.US_ALL),
     ),
     environments=("PAPER",),
-    specification_builder=session_hard_specification,
+    specification_builder=legacy_session_hard_specification,
     universe_builder=session_hard_universe,
     discovery_profiles=tuple(
         (
@@ -226,12 +230,100 @@ SESSION_HARD = MethodDefinition(
 )
 
 
+
+def candidate_universe(
+    listings: Sequence[UniverseDefinition], selected: MarketId
+) -> UniverseDefinition:
+    market = get_market(selected)
+    source = next((u for u in listings if u.universe_id == market.listing_membership), None)
+    if source is None and market.listing_membership is None:
+        source = next(
+            (
+                u
+                for u in listings
+                if u.market_spec is not None
+                and u.market_spec.market_id == selected
+                and u.members
+                and u.market_spec.cap_bucket is CapBucket.ALL
+                and not u.universe_id.endswith("_METHOD_ACTIVITY")
+            ),
+            None,
+        )
+    return UniverseDefinition(
+        universe_id=f"{selected.value}_OPENING_CANDIDATES_V1",
+        name=market.display_name,
+        members=source.members if source else (),
+        market_spec=MarketUniverseSpec(market_id=selected, cap_bucket=CapBucket.ALL),
+    )
+
+
+def session_hard_specification(selected: MarketId) -> dict[str, Any]:
+    # Trading specification is inherited byte-for-byte in value; only acquisition,
+    # candidate reduction and operational version/capacity lineage change.
+    spec = legacy_session_hard_specification(selected)
+    market = get_market(selected)
+    recipe = json.loads(json.dumps(asdict(SESSION_HARD_CANDIDATE_RECIPE)))
+    recipe["stages"] = [
+        dict(
+            asdict(stage),
+            offset_active_minutes=stage.minutes,
+            formula=(
+                "(max(high)-min(low))/first_open"
+                if stage.feature == "RANGE"
+                else "sqrt(log(C0/O0)^2 + sum(log(Cj/Cj-1)^2))"
+            ),
+        )
+        for stage in SESSION_HARD_CANDIDATE_RECIPE.stages
+    ]
+    recipe.update(
+        missing_policy="MISSING_LAST",
+        tie_policy="ASCENDING_SHA256_SYMBOL",
+        evidence_status=candidate_evidence_status(selected).value,
+        cross_market_evidence=(
+            "US_DEVELOPMENT_POPULATION"
+            if market.country == "US"
+            else "UNVALIDATED_CROSS_MARKET_PAPER_TRANSFER"
+        ),
+    )
+    spec["method_version"] = SESSION_HARD.version
+    spec["candidate_selection"] = recipe
+    spec["universe_search"] = {
+        "builder": "BROAD_ELIGIBLE_MARKET_UNIVERSE",
+        "source": "AUTHORITATIVE_LISTINGS"
+        if market.listing_membership
+        else "CACHED_MARKET_UNIVERSE",
+        "cap_constraint": None,
+        "eligibility": ["COMMON", "CORP", "ADR", "REIT"],
+        "scanner_source_evidence": "UNVALIDATED_UPSTREAM_ACQUISITION",
+        "missing_source": "BROAD_UNIVERSE_UNAVAILABLE",
+        "opening_data_failure": "BROAD_OPENING_DATA_CAPACITY_UNRESOLVED",
+        "calendar": market.calendar,
+        "timezone": market.timezone,
+    }
+    spec["ranking_capacity"] = "Frozen candidate stages; existing shared account/feed capacity"
+    return spec
+
+
+SESSION_HARD = replace(
+    LEGACY_SESSION_HARD,
+    version="SESSION_HARD_CAUSAL_Q1_CANDIDATES_V8",
+    specification_builder=session_hard_specification,
+    universe_builder=candidate_universe,
+    discovery_profiles=(),
+)
+
+
+def runnable_methods() -> tuple[MethodDefinition, ...]:
+    """Existing V7 runs keep their operational behavior; only V8 is selectable."""
+    return (SESSION_HARD, LEGACY_SESSION_HARD)
+
+
 def installed_methods() -> tuple[MethodDefinition, ...]:
     return (SESSION_HARD,)
 
 
 def get_method(method_id: str, version: str) -> MethodDefinition:
-    for method in installed_methods():
+    for method in runnable_methods():
         if (method.method_id, method.version) == (method_id, version):
             return method
     raise ValueError(f"Method is historical-only or unknown: {method_id}/{version}")

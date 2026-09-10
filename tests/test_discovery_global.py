@@ -6,8 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from legacy_discovery_support import add
 from stocker_core.markets import MarketId, get_market
-from stocker_core.methods import SESSION_HARD, content_hash
+from stocker_core.methods import LEGACY_SESSION_HARD as SESSION_HARD
+from stocker_core.methods import content_hash
 from stocker_execution.discovery import CandidateDiscovery, DiscoveryStore, scanner_requests
 from stocker_execution.ibkr import CurrentQuote, IbkrError
 from test_candidate_discovery import CAPABILITIES, FILTERS
@@ -18,7 +20,6 @@ from test_ibkr_resources import (
     wait_until,
 )
 from test_session_hard_universe import MarketBroker
-from test_stage10_extension_builder import add
 
 
 @pytest.mark.parametrize("currency,rate", [("GBP", 0.8), ("JPY", 150), ("HKD", 8)])

@@ -5,10 +5,10 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from legacy_discovery_support import UniverseRunBuilder
 from stocker_core.markets import ActivityScanner, CapBucket, MarketId, get_market
-from stocker_core.methods import SESSION_HARD
+from stocker_core.methods import LEGACY_SESSION_HARD as SESSION_HARD
 from stocker_core.runs import Environment, RunInstance, RunState
-from stocker_dashboard.universe_runs import UniverseRunBuilder
 from stocker_execution.activity_shortlist import ScannerCandidate, ScannerCapabilities
 from stocker_execution.discovery import DiscoveryFx, DiscoveryRow, DiscoveryStore
 from stocker_execution.ibkr import IbkrConnection, QualifiedInstrument
@@ -142,8 +142,8 @@ def test_method_uses_existing_local_session_scan_and_reloads_snapshot(tmp_path, 
 
 
 def test_seeded_membership_does_not_limit_exchange_discovery(tmp_path):
+    from legacy_discovery_support import add
     from stocker_core.universes import InstrumentReference
-    from test_stage10_extension_builder import add
 
     config, run = add(market=MarketId.US_NASDAQ)
     universe = config.universes[-1].model_copy(
@@ -159,7 +159,7 @@ def test_seeded_membership_does_not_limit_exchange_discovery(tmp_path):
 
 
 def test_250_scanner_hits_are_bounded_to_150_before_history_work(tmp_path):
-    from test_stage10_extension_builder import add
+    from legacy_discovery_support import add
 
     class DisjointScans(MarketBroker):
         async def discovery_scan(self, request):
@@ -189,8 +189,8 @@ def test_250_scanner_hits_are_bounded_to_150_before_history_work(tmp_path):
 
 
 def test_screen_size_is_independent_of_feed_budget_and_scanner_failures_stay_isolated(tmp_path):
+    from legacy_discovery_support import add
     from stocker_execution.ibkr import IbkrError
-    from test_stage10_extension_builder import add
 
     config, run = add(market=MarketId.UK_LSE)
     instance = RunInstance(run, config.universes[-1], RunState.ACTIVE)
@@ -216,8 +216,8 @@ def test_screen_size_is_independent_of_feed_budget_and_scanner_failures_stay_iso
 
 
 def test_dashboard_reads_current_profile_not_legacy_shortlist(tmp_path):
+    from legacy_discovery_support import add
     from test_stage10_dashboard import _seed_authoritative_state
-    from test_stage10_extension_builder import add
 
     reads = _seed_authoritative_state(tmp_path)
     config, run = add(market=MarketId.UK_LSE)
@@ -238,11 +238,11 @@ def test_dashboard_reads_current_profile_not_legacy_shortlist(tmp_path):
 
 
 def test_five_stock_snapshot_is_preserved_but_not_reused(tmp_path):
+    from legacy_discovery_support import add
     from stocker_execution.activity_shortlist import (
         ActivityShortlistService,
         ActivityShortlistStore,
     )
-    from test_stage10_extension_builder import add
 
     config, run = add(market=MarketId.UK_LSE)
     now = datetime(2026, 9, 8, 8, tzinfo=UTC)
@@ -286,12 +286,12 @@ def test_five_stock_snapshot_is_preserved_but_not_reused(tmp_path):
 def test_method_uses_exact_active_prefix_across_lunch_break(tmp_path, market_id):
     from dataclasses import replace
 
+    from legacy_discovery_support import add
     from stocker_execution.history import IbkrHistoryCache
     from stocker_execution.ibkr import HistoricalBar
     from stocker_execution.runtime import ExchangeSessionResolver
     from stocker_execution.session_hard_data import SOURCE, IbkrSessionDataSource
     from test_stage6_session_hard_strategy import ready_snapshot
-    from test_stage10_extension_builder import add
 
     _, run = add(market=market_id)
     session = ExchangeSessionResolver().resolve(run, datetime(2026, 9, 8, 4, tzinfo=UTC))

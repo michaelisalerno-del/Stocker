@@ -6,11 +6,11 @@ from datetime import UTC, datetime
 
 import pytest
 
+from legacy_discovery_support import UniverseRunBuilder
 from stocker_core.config import RunsConfig, load_ibkr_config
 from stocker_core.markets import MARKET_CATALOGUE
-from stocker_core.methods import SESSION_HARD
+from stocker_core.methods import LEGACY_SESSION_HARD as SESSION_HARD
 from stocker_core.runs import Environment
-from stocker_dashboard.universe_runs import UniverseRunBuilder
 from stocker_execution.discovery import CandidateDiscovery, DiscoveryStore, watch_identities
 from stocker_execution.ibkr import IbkrConnection
 

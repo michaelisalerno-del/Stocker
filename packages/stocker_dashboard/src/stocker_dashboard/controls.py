@@ -96,7 +96,11 @@ class RunControlService:
 
         options = self._builder.options()
         readiness: dict[str, str] = {}
-        if self.runtime is not None:
+        markets = options["markets"]
+        assert isinstance(markets, list)
+        if self.runtime is not None and any(
+            m.get("scanner_readiness") != "BROAD_UNIVERSE_REQUIRED" for m in markets
+        ):
             inspect_readiness = getattr(self.runtime, "activity_scanner_readiness", None)
             if inspect_readiness is not None:
                 readiness = await inspect_readiness()
@@ -105,6 +109,8 @@ class RunControlService:
         for market in markets:
             assert isinstance(market, dict)
             market_id = str(market["market_id"])
+            if market.get("scanner_readiness") == "BROAD_UNIVERSE_REQUIRED":
+                continue
             market["scanner_readiness"] = readiness.get(
                 market_id,
                 "BROKER_NOT_CONNECTED",

@@ -15,6 +15,7 @@ from stocker_core.strategies import installed_strategies
 from stocker_core.universes import UniverseDefinition
 from stocker_dashboard.performance import PerformancePeriod, RunPerformanceService
 from stocker_execution.activity_shortlist import ActivityShortlistStore
+from stocker_execution.candidate_pipeline import CandidateStore
 from stocker_execution.discovery import DiscoveryStore, discovery_summary
 from stocker_execution.execution_ledger import ExecutionLedger, ExecutionRecord
 from stocker_execution.execution_models import OrderLifecycle
@@ -49,6 +50,7 @@ class DashboardReadService:
         self.clock = clock or (lambda: datetime.now(tz=UTC))
         self.activity_store = activity_store
         self.discovery_store = DiscoveryStore(stage5_store.path, initialize=False)
+        self.candidate_store = CandidateStore(stage5_store.path, initialize=False)
         self.performance_service = RunPerformanceService(ledger, clock=self.clock)
 
     def overview(self) -> dict[str, Any]:
@@ -154,6 +156,8 @@ class DashboardReadService:
             today = self.performance_service.performance(run, PerformancePeriod.TODAY)
             recent = self.performance_service.performance(run, PerformancePeriod.SESSIONS_20)
             discovery = self.discovery_diagnostic(run.run_id, selected_session)
+            selection = (self.candidate_store.summary(run.run_id, selected_session)
+                         if run.uses_candidate_selection else None)
             checkpoint = (
                 runtime.evaluation_checkpoint or runtime.next_checkpoint if runtime else None
             )
@@ -173,21 +177,28 @@ class DashboardReadService:
                     "enabled": run.enabled,
                     "status": runtime.state.value if runtime else "CONFIGURED",
                     "market": runtime.market.value if runtime and runtime.market else None,
-                    "current_or_next_checkpoint": (
-                        checkpoint.isoformat() if checkpoint else None
-                    ),
+                    "current_or_next_checkpoint": (checkpoint.isoformat() if checkpoint else None),
+                    "candidate_selection": selection,
                     "candidate_count": (
-                        discovery["watch_pool_size"] if discovery else
-                        sum(item.selected for item in screen.candidates)
+                        selection["watchlist_size"]
+                        if selection
+                        else discovery["watch_pool_size"]
+                        if discovery
+                        else sum(item.selected for item in screen.candidates)
                         if screen is not None
-                        else runtime.instruments_ready if runtime else count
+                        else runtime.instruments_ready
+                        if runtime
+                        else count
                     ),
                     "signals_today": runtime.signals_today if runtime else 0,
                     "open_positions": runtime.open_positions if runtime else 0,
                     "reason": runtime.reason if runtime else "",
                     "search_status": (
-                        discovery["status"] if discovery
-                        else screen.status.value if screen else None
+                        discovery["status"]
+                        if discovery
+                        else screen.status.value
+                        if screen
+                        else None
                     ),
                     "discovery": discovery,
                     "currency": today["currency"] or self._run_currency(run),
@@ -218,6 +229,18 @@ class DashboardReadService:
             ),
             "source": run.universe_source.value if run.universe_source else None,
             "last_successful_discovery": successes[0]["completed_at"] if successes else None,
+        }
+
+    def candidate_selection_details(
+        self, run_id: str, session: date, limit: int, offset: int
+    ) -> dict[str, Any]:
+        self._run(run_id)
+        summary = self.candidate_store.summary(run_id, session)
+        return {
+            "summary": summary,
+            "rows": self.candidate_store.details(run_id, session, limit, offset) if summary else [],
+            "limit": limit,
+            "offset": offset,
         }
 
     def discovery_runs(self, run_id: str, limit: int = 20, offset: int = 0) -> dict[str, Any]:
@@ -276,6 +299,13 @@ class DashboardReadService:
             )
         today = self.performance_service.performance(run, PerformancePeriod.TODAY)
         discovery = self.discovery_diagnostic(run.run_id, selected_session)
+        selection = (
+            self.candidate_store.summary(run.run_id, selected_session)
+            if run.uses_candidate_selection
+            else None
+        )
+        if selection is not None:
+            selection["session_hard_qualified"] = counts["qualified"]
         if discovery:
             current_capture = (
                 discovery.get("ready_at") is not None and latest_checkpoint is not None
@@ -322,25 +352,33 @@ class DashboardReadService:
                 runtime.evaluation_state
                 if runtime and runtime.evaluation_state in {"EVALUATING", "INCOMPLETE"}
                 else "NO_MORE_CHECKPOINTS_TODAY"
-                if runtime and runtime.last_scheduled_checkpoint
+                if runtime
+                and runtime.last_scheduled_checkpoint
                 and self.clock() >= runtime.last_scheduled_checkpoint
-                and runtime.next_checkpoint is None else "AWAITING_CHECKPOINT"
+                and runtime.next_checkpoint is None
+                else "AWAITING_CHECKPOINT"
             ),
             "evaluation_progress": {
                 "completed": runtime.evaluation_completed if runtime else 0,
                 "total": runtime.evaluation_total if runtime else 0,
                 "checkpoint": runtime.evaluation_checkpoint.isoformat()
-                if runtime and runtime.evaluation_checkpoint else None,
+                if runtime and runtime.evaluation_checkpoint
+                else None,
                 "preparing_history": runtime.preparing_history if runtime else False,
                 "trade_stream_unavailable": runtime.trade_stream_unavailable if runtime else 0,
             },
             "downloads": (
-                {"scope": "ALL_RUNS", "requests": status.ibkr_resources.historical_requests_today,
-                 "pending": status.ibkr_resources.pending_historical_work}
-                if status.ibkr_resources is not None else None
+                {
+                    "scope": "ALL_RUNS",
+                    "requests": status.ibkr_resources.historical_requests_today,
+                    "pending": status.ibkr_resources.pending_historical_work,
+                }
+                if status.ibkr_resources is not None
+                else None
             ),
             "market_state": runtime.market.value if runtime and runtime.market else None,
             "session": selected_session.isoformat(),
+            "candidate_selection": selection,
             "discovery": discovery,
             "universe_source": (
                 run.universe_source.value if run.universe_source else "LEGACY_ACTIVITY"
@@ -350,12 +388,21 @@ class DashboardReadService:
             ),
             "screen_timestamp": screen.screen_timestamp.isoformat() if screen else None,
             "activity_screen": self.screen(
-                market.market_id.value, run.cap_bucket.value, selected_session,
+                market.market_id.value,
+                run.cap_bucket.value,
+                selected_session,
                 profile_id=run.activity_profile_id,
-            ) if screen is not None and market is not None and run.cap_bucket is not None else None,
+            )
+            if screen is not None and market is not None and run.cap_bucket is not None
+            else None,
             "watchlist_size": (
-                discovery["watch_pool_size"] if discovery
-                else sum(item.selected for item in screen.candidates) if screen else 0
+                selection["watchlist_size"]
+                if selection
+                else discovery["watch_pool_size"]
+                if discovery
+                else sum(item.selected for item in screen.candidates)
+                if screen
+                else 0
             ),
             "today_realised_pnl": today["realised_pnl"],
             "current_unrealised_pnl": today["unrealised_pnl"],
@@ -364,12 +411,15 @@ class DashboardReadService:
                 {
                     "stage": "Universe eligibility",
                     "count": (
-                        discovery["unique_candidates"] if discovery
+                        discovery["unique_candidates"]
+                        if discovery
                         else len((run.universe_snapshot or self._universe(run.universe)).members)
                     ),
                 },
-                {"stage": "Stock eligibility", "count": runtime.instruments_ready
-                 if runtime else latest_total},
+                {
+                    "stage": "Stock eligibility",
+                    "count": runtime.instruments_ready if runtime else latest_total,
+                },
                 {
                     "stage": "Required data ready",
                     "count": ready_count,

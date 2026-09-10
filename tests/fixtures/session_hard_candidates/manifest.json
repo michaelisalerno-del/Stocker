@@ -1,0 +1,41 @@
+{
+  "purpose": "Research-only test fixtures; never production or PAPER history inputs",
+  "research": "session_hard_initial_rv50_recall_v0",
+  "evidence": "Already exposed US development/validation population, not untouched evidence",
+  "sources": [
+    {
+      "session": "2025-06-02",
+      "source_file": "2025-06-02.parquet",
+      "source_sha256": "8a5b9fd95fef185a65fac18440689da20c955135f05bd589622f85fc855e6a28",
+      "opening_utc": "2025-06-02T13:30:00+00:00"
+    },
+    {
+      "session": "2025-07-03",
+      "source_file": "2025-07-03.parquet",
+      "source_sha256": "127e089a09a3e7426ddc00850b10b1172f1dcac65bdc9bc0aabc2e3699736c05",
+      "opening_utc": "2025-07-03T13:30:00+00:00"
+    },
+    {
+      "session": "2025-07-17",
+      "source_file": "2025-07-17.parquet",
+      "source_sha256": "e8eccd0cb7bee0304cfd0de496bd4a15274e76de502d07c5495edd491bc9b142",
+      "opening_utc": "2025-07-17T13:30:00+00:00"
+    }
+  ],
+  "downstream_rv15_source_sha256": "bb066ef8d313021d6d2a01805a33612fffc73d5e7d3af9963c2bcfab83e5597e",
+  "research_sha256": {
+    "causal_features.parquet": "3130f6e982d1ac34db8fd76126512f2e39e678c637a4522a5f98951933ee09e5",
+    "initial_pool_watchlists.json": "e30cdcfa7f43d42402725ee7aebbd9e867d4d0560f46b4bb58fa15c5d899396d",
+    "post_initial_rv50_watchlists.json": "ead3b4414ad97e18ea7730ae2206c72aa2392053c5a06cf2b1708555469ae004",
+    "final_rv30_watchlists.json": "68693f958244708a346fa370644415e6c9a0732f1e083d2abef85d4467bfdfd5",
+    "frozen_initial_recipe.json": "76b6202ce8ad5c6c57b44fe0fefe8611fda39d0bba48c8810690210878cc9bfa",
+    "session_source_inventory.csv": "0d4319f6ccae3de80edba550aa1f590540ac82af52bc9fc7942fa1d3f45aa6cc"
+  },
+  "fixtures_sha256": {
+    "opening_bars.parquet": "a9c32bb7ca3e1f63fb3ff0a0745f0e498afc4ce15aadd863188766cd21e5256f",
+    "expected_scores.parquet": "2deb62774e62e6cf177065c4f3ac27378484e69d4e4103394736fc68e0128496",
+    "expected_watchlists.json": "a336fedac1ba62af606ffe59b6f76fb31d62112c5a76699d0bfcbfbfe496fbca"
+  },
+  "identity_note": "Tests use deterministic synthetic conIds; research symbol ties unchanged",
+  "cap_note": "Saved current static cap metadata is descriptive only; never a selector input"
+}

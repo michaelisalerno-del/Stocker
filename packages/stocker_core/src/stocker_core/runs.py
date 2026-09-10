@@ -106,6 +106,10 @@ class RunConfig(BaseModel):
     discovery_profile: DiscoveryProfile | None = None
 
     @property
+    def uses_candidate_selection(self) -> bool:
+        return "candidate_selection" in (self.method_spec or {})
+
+    @property
     def uses_dynamic_discovery(self) -> bool:
         return self.universe_source is UniverseSource.DYNAMIC_IBKR
 
@@ -124,6 +128,8 @@ class RunConfig(BaseModel):
     @property
     def uses_activity_shortlist(self) -> bool:
         """A method-owned discovery profile, or a historical explicit screen."""
+        if self.uses_candidate_selection:
+            return False
         if self.universe_source in {UniverseSource.FIXED, UniverseSource.RESEARCH}:
             return False
         if self.uses_dynamic_discovery:
@@ -208,6 +214,20 @@ class RunConfig(BaseModel):
                     raise ValueError("Run method specification does not match frozen package")
                 if self.strategy != method.config_name:
                     raise ValueError("Run method identity mismatch")
+                if self.uses_candidate_selection:
+                    from stocker_core.markets import get_market
+                    market = get_market(self.market_id)
+                    if self.session is None or (
+                        self.session.start != market.regular_sessions[0].opens_at
+                        or self.session.end != market.regular_sessions[-1].closes_at
+                        or self.session.timezone != market.timezone
+                        or self.session.calendar != market.calendar
+                    ):
+                        raise ValueError("Candidate selection requires canonical market session")
+                    if self.uses_dynamic_discovery:
+                        raise ValueError(
+                            "Unvalidated scanner acquisition is not enabled for new runs"
+                        )
                 if self.uses_dynamic_discovery:
                     owned = method.discovery_profile(self.market_id)
                     if owned is None or self.discovery_profile is None or any(

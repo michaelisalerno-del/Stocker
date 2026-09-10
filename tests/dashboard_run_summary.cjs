@@ -15,6 +15,7 @@ const path = require("node:path");
     let evaluation = "NO_MORE_CHECKPOINTS_TODAY";
     let activity = null;
     let discovery = null;
+    let selection = null;
     const staticPath = path.join(__dirname, "../packages/stocker_dashboard/src/stocker_dashboard/static");
     await page.context().route("http://stocker.test/**", async route => {
       const url = new URL(route.request().url());
@@ -29,6 +30,7 @@ const path = require("node:path");
         method_spec: { entry: { trigger_M: 0.2 } },
         activity_screen: activity,
         discovery,
+        candidate_selection: selection,
         funnel: [{ stage: "Stock eligibility", count: 6570 }, { stage: "Required data ready", count: 153 }],
       });
       if (url.pathname === "/api/runs/test/performance") return json({ history: [], currency: "USD", closed_trades: 0 });
@@ -90,6 +92,26 @@ const path = require("node:path");
     await page.getByText("Discovery diagnostics", { exact: true }).click();
     assert.equal(await page.getByRole("link", { name: "Inspect discovery runs, filters and candidate provenance" }).getAttribute("href"), "/api/runs/test/discovery");
     assert(!await page.locator("main").innerText().then(text => text.includes("FULL_UNIVERSE_DATA")));
+    discovery = null;
+    selection = {
+      state: "SESSION_HARD_ACTIVE", reason: "", session: "2026-09-08",
+      broad_eligible: 6570, source_population_count: 6570, source: "AUTHORITATIVE_LISTINGS",
+      recipe: { cross_market_evidence: "US_DEVELOPMENT_POPULATION", evidence_status: "VALIDATED_EXISTING_RESEARCH" },
+      stages: [{minutes:5,stage_id:"RANGE250",selected:250}, {minutes:10,stage_id:"RV50",selected:50}, {minutes:15,stage_id:"RV30",selected:30}],
+      session_hard_qualified: 4,
+    };
+    await page.evaluate(() => refreshCurrentPage());
+    assert.match(await page.locator("main").innerText(), /Broad eligible/);
+    assert.match(await page.locator("main").innerText(), /Range5 HIGH250 → RV10 HIGH50 → RV15 HIGH30/);
+    assert.equal(await page.locator("main").getByRole("row").count(), 0);
+    selection.recipe.cross_market_evidence = "UNVALIDATED_CROSS_MARKET_PAPER_TRANSFER";
+    selection.recipe.evidence_status = "UNVALIDATED_TRANSFER";
+    selection.state = "DEGRADED";
+    selection.reason = "BROAD_OPENING_DATA_CAPACITY_UNRESOLVED";
+    await page.evaluate(() => refreshCurrentPage());
+    assert.match(await page.locator("main").innerText(), /UNVALIDATED_CROSS_MARKET_PAPER_TRANSFER/);
+    assert.match(await page.locator("main").innerText(), /BROAD_OPENING_DATA_CAPACITY_UNRESOLVED/);
+    assert.equal(auditDownloads, 1);
     assert.deepEqual(errors, []);
     console.log("PASS: compact summary, live download refresh, checkpoint status, on-demand audit, GET-only");
   } finally { await browser.close(); }

@@ -3,7 +3,7 @@
 import pytest
 
 from stocker_core.config import RunsConfig
-from stocker_core.markets import CapBucket, MarketId
+from stocker_core.markets import CapBucket, MarketId, get_market
 from stocker_core.methods import SESSION_HARD, validate_run_method
 from stocker_core.runs import Environment, RunConfig
 from stocker_core.universes import UniverseDefinition
@@ -47,17 +47,23 @@ def test_method_owns_listing_universe_and_no_cap_filter(market):
     assert run.market_id == market
     assert run.cap_bucket is CapBucket.ALL
     assert run.screen is None
-    assert not run.universe_snapshot.members
-    assert run.uses_dynamic_discovery
-    assert run.uses_activity_shortlist
+    assert bool(run.universe_snapshot.members) == (
+        get_market(market).listing_membership is not None
+    )
+    assert not run.uses_dynamic_discovery
+    assert not run.uses_activity_shortlist
+    assert run.uses_candidate_selection
     assert run.method_spec["universe_search"]["cap_constraint"] is None
     assert run.candidate_screen_id == "METHOD_REQUIRED_DATA"
 
 
 def test_other_markets_restore_paper_testing_without_claiming_validation():
     _, run = add(market=MarketId.UK_LSE)
-    assert run.method_spec["universe_search"]["validation"] == "UNVALIDATED_CROSS_MARKET_PAPER_TEST"
-    assert run.uses_activity_shortlist and run.screen is None
+    assert (
+        run.method_spec["candidate_selection"]["cross_market_evidence"]
+        == "UNVALIDATED_CROSS_MARKET_PAPER_TRANSFER"
+    )
+    assert run.uses_candidate_selection and run.screen is None
     assert run.session.calendar == "XLON"
     us = add(market=MarketId.US_ALL)[1]
     for component in ("qualification", "vetoes", "direction", "entry", "exits", "artifact_hashes"):
@@ -75,7 +81,7 @@ def test_disable_readd_retains_saved_run_identity_and_snapshot():
     assert resumed.universe_snapshot == run.universe_snapshot
 
 
-def test_custom_basket_does_not_limit_dynamic_market_discovery():
+def test_custom_basket_is_not_silently_used_as_broad_market_universe():
     config = RunsConfig(
         universes=(
             UniverseDefinition(
@@ -86,7 +92,8 @@ def test_custom_basket_does_not_limit_dynamic_market_discovery():
         )
     )
     _, run = add(config)
-    assert run.uses_dynamic_discovery
+    assert not run.uses_dynamic_discovery
+    assert run.uses_candidate_selection
     assert not run.universe_snapshot.members
 
 

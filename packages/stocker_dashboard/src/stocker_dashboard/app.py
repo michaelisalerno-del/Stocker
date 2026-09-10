@@ -113,6 +113,13 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             headers={"Content-Disposition": 'attachment; filename="run-provenance.json"'},
         )
 
+    @app.get("/api/runs/{run_id}/candidate-selection")
+    def candidate_selection(
+        run_id: str, session: date, limit: int = Query(50, ge=1, le=250),
+        offset: int = Query(0, ge=0),
+    ) -> dict[str, Any]:
+        return reads.candidate_selection_details(run_id, session, limit, offset)
+
     @app.get("/api/runs/{run_id}/discovery")
     def discovery_runs(
         run_id: str, limit: int = Query(default=20, ge=1, le=100),

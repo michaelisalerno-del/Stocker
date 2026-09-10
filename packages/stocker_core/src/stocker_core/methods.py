@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from stocker_core.discovery import SESSION_HARD_DISCOVERY, DiscoveryProfile
 from stocker_core.markets import (
     MARKET_CATALOGUE,
     CapBucket,
@@ -49,7 +50,7 @@ def session_hard_universe(
     listings: Sequence[UniverseDefinition], selected: MarketId
 ) -> UniverseDefinition:
     market = get_market(selected)
-    if market.listing_membership is None:
+    if selected is MarketId.US_ALL or market.listing_membership is None:
         return UniverseDefinition(
             universe_id=f"{selected.value}_METHOD_ACTIVITY",
             name=market.display_name,
@@ -76,6 +77,10 @@ class MethodDefinition:
     environments: tuple[str, ...]
     specification_builder: Callable[[MarketId], dict[str, Any]]
     universe_builder: Callable[[Sequence[UniverseDefinition], MarketId], UniverseDefinition]
+    discovery_profiles: tuple[tuple[MarketId, DiscoveryProfile], ...] = ()
+
+    def discovery_profile(self, market: MarketId) -> DiscoveryProfile | None:
+        return dict(self.discovery_profiles).get(market)
 
     @property
     def strategy_id(self) -> str:
@@ -175,6 +180,22 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
             "prospective_q1": PROSPECTIVE_SPEC_SHA256,
         },
     }
+    if selected is MarketId.US_ALL:
+        spec["universe_search"] = {
+            "builder": "DYNAMIC_IBKR",
+            "activity_profile": SESSION_HARD_DISCOVERY.profile_id,
+            "discovery_profile": SESSION_HARD_DISCOVERY.model_dump(mode="json"),
+            "capture_active_minutes": 15,
+            "capture_policy": "Once per run/session; explicit rebuild while disabled",
+            "capacity_scope": "Resource watch pool; independent of trade ranking/feed limits",
+            "coverage": "Five canonical cap bands; broker identities; no saved listing filter",
+            "cap_constraint": None,
+            "validation": "UNVALIDATED_ACTIVITY_FILTER_PAPER_TEST",
+        }
+        spec["ranking_capacity"] = (
+            "Configurable discovery watch pool; independent shared account/feed capacity applies; "
+            "missing causal trade streams prevent entry and remain visible"
+        )
     if get_market(selected).listing_membership is None:
         # Sharing a discovery profile is not evidence of model transfer.
         spec["universe_search"].update(
@@ -187,7 +208,7 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
 
 SESSION_HARD = MethodDefinition(
     method_id="SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D",
-    version="SESSION_HARD_CAUSAL_Q1_ACTIVITY_V5",
+    version="SESSION_HARD_CAUSAL_Q1_DISCOVERY_V6",
     config_name="SESSION_HARD",
     label="Session HARD",
     supported_markets=(
@@ -197,6 +218,7 @@ SESSION_HARD = MethodDefinition(
     environments=("PAPER",),
     specification_builder=session_hard_specification,
     universe_builder=session_hard_universe,
+    discovery_profiles=((MarketId.US_ALL, SESSION_HARD_DISCOVERY),),
 )
 
 

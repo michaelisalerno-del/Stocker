@@ -7,7 +7,7 @@ The user selects the market and method; the method determines what stocks are ap
 
 The current catalogue exposes one method, **Session HARD**, across Stocker's market catalogue.
 Its stable internal identity is `SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D`;
-its current version is `SESSION_HARD_CAUSAL_Q1_ACTIVITY_V5`. The old name remains an internal
+its current version is `SESSION_HARD_CAUSAL_Q1_DISCOVERY_V6`. The old name remains an internal
 identity for history continuity, not a second selectable strategy. The method remains PAPER-only.
 Non-US markets are labelled **unvalidated cross-market PAPER tests**. Operational calendar/scanner
 support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on those markets.
@@ -57,14 +57,20 @@ There is no plugin loader, factory hierarchy or dependency-injection container.
 
 ### Universe, data and suitability
 
-For US markets the universe builder resolves authoritative NASDAQ/NYSE/US_ALL listing
+For **US / All + Session HARD**, discovery now follows [candidate-discovery.md](candidate-discovery.md):
+five independent canonical cap-band scans, an audited conId watch pool, then the existing
+Stage 5 identity/history boundary. This path does not load or intersect saved listing membership.
+The method owns its profile; neither scanner ranks nor discovery limits alter trading rules.
+The following legacy description still applies to the other market selections.
+
+For US NASDAQ/NYSE selections the universe builder resolves authoritative listing
 membership. The existing Nasdaq Trader snapshot records source URLs, retrieval/file times and
 non-ETF/non-test issues. IBKR qualification proves tradable STK identity and reports failures
 per symbol. A run embeds the actual membership snapshot, so refreshing the catalogue does not
 silently change that run. Refresh membership explicitly with
 `stocker universe refresh-us-listings` before creating a new run.
 
-Every supported market uses `ACTIVITY_LIQUIDITY_V2` before price-history evaluation.
+Other market selections use `ACTIVITY_LIQUIDITY_V2` before price-history evaluation.
 Its three IBKR components are TOP_TRADE_RATE, MOST_ACTIVE_AVG_USD and HOT_BY_VOLUME:
 current trade activity, normal dollar turnover and unusual daily volume. Each request applies
 the native `stockTypeFilter=CORP` before IBKR's 50-row limit. Because that filter admits ETCs,

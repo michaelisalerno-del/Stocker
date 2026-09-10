@@ -47,7 +47,9 @@ def test_method_owns_listing_universe_and_no_cap_filter(market):
     assert run.market_id == market
     assert run.cap_bucket is CapBucket.ALL
     assert run.screen is None
-    assert bool(run.universe_snapshot.members) == bool(get_market(market).listing_membership)
+    assert bool(run.universe_snapshot.members) == (
+        bool(get_market(market).listing_membership) and market is not MarketId.US_ALL
+    )
     assert run.uses_activity_shortlist
     assert run.method_spec["universe_search"]["cap_constraint"] is None
     assert run.candidate_screen_id == "METHOD_REQUIRED_DATA"

@@ -16,6 +16,40 @@ def migration():
     return module
 
 
+def test_us_migration_retains_old_members_but_new_discovery_has_no_listing_dependency():
+    from stocker_core.discovery import UniverseSource
+    from stocker_core.markets import MarketId
+
+    config, _run = add(market=MarketId.US_ALL)
+    payload = config.model_dump(mode="json")
+    previous = payload["runs"][0]
+    previous.update(
+        run_id="old-fixed-us",
+        strategy_version=migration().PREVIOUS_VERSION,
+        candidate_screen_version=migration().PREVIOUS_VERSION,
+        universe_source=None, discovery_profile=None,
+        universe="US_ALL_METHOD_LISTINGS",
+    )
+    previous["method_spec"]["method_version"] = migration().PREVIOUS_VERSION
+    previous["method_spec"]["universe_search"] = {
+        "builder": "IBKR_ACTIVITY_LIQUIDITY_V2", "activity_profile": "ACTIVITY_LIQUIDITY_V2",
+    }
+    previous["method_spec_hash"] = content_hash(previous["method_spec"])
+    previous["universe_snapshot"].update(
+        universe_id="US_ALL_METHOD_LISTINGS",
+        members=[{"symbol": "SEED", "exchange": "SMART", "currency": "USD"}],
+    )
+    payload["universes"] = [previous["universe_snapshot"]]
+    upgraded, mapping = migration().migrate(payload)
+    old, new = upgraded.runs
+    assert old.archived and not old.enabled
+    assert old.universe_snapshot.members[0].symbol == "SEED"
+    assert new.universe_source is UniverseSource.DYNAMIC_IBKR
+    assert not new.universe_snapshot.members
+    assert mapping == {old.run_id: new.run_id}
+    validate_run_method(new)
+
+
 @pytest.mark.parametrize("enabled", [True, False])
 @pytest.mark.parametrize("catalogue_present", [True, False])
 def test_upgrade_preserves_history_risk_environment_and_enabled_state(enabled, catalogue_present):

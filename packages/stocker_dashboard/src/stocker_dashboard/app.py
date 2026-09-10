@@ -113,6 +113,20 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             headers={"Content-Disposition": 'attachment; filename="run-provenance.json"'},
         )
 
+    @app.get("/api/runs/{run_id}/discovery")
+    def discovery_runs(
+        run_id: str, limit: int = Query(default=20, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        return reads.discovery_runs(run_id, limit, offset)
+
+    @app.post("/api/runs/{run_id}/discovery/refresh")
+    async def refresh_discovery(run_id: str) -> dict[str, object]:
+        try:
+            return await controls.refresh_discovery(run_id, reads.stage5_store.path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/api/runs/{run_id}/performance")
     def run_performance(
         run_id: str,

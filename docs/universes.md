@@ -26,8 +26,12 @@ units, stale symbols, ambiguous symbols, and other non-stock issues therefore fa
 are reported for that symbol, and do not stop the batch. Loading the snapshot itself makes no IBKR,
 historical-bar, option, PRE, or order request.
 
-The method owns universe construction. The dashboard selects authoritative membership for the
-market and embeds it with the new run; refreshing listings does not mutate existing runs.
+The method owns universe construction. US / All + Session HARD defaults to
+`DYNAMIC_IBKR`: independent cap scans with no saved-listing intersection. See
+[candidate-discovery.md](candidate-discovery.md) for configuration, lifecycle and audit storage.
+NASDAQ/NYSE selections retain their saved authoritative membership. Explicit `FIXED` and
+`RESEARCH` sources retain deterministic members and converge on the same Stage 5 interface.
+Refreshing listings does not mutate existing fixed runs.
 The minimal configuration has no active runs until a method run is created:
 
 ```yaml

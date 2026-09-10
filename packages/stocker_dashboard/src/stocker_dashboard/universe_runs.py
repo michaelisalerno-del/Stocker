@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from stocker_core.config import RunsConfig
+from stocker_core.discovery import UniverseSource
 from stocker_core.markets import CapBucket, MarketId, get_market
 from stocker_core.methods import content_hash, get_method, installed_methods
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig, RunWindow
@@ -28,7 +29,7 @@ class UniverseRunBuilder:
                     ),
                     "scanner_readiness": "METHOD_OWNED_ACTIVITY_FILTER",
                     "experimental": get_market(m).listing_membership is None,
-                    "search_policy": "IBKR activity shortlist · sized to tick-feed capacity",
+                    "search_policy": "Method-owned IBKR discovery · separate watch/feed capacity",
                     "validation": (
                         "US development candidate"
                         if get_market(m).listing_membership
@@ -101,6 +102,11 @@ class UniverseRunBuilder:
             method_spec=spec,
             method_spec_hash=digest,
             universe_snapshot=universe,
+            universe_source=(
+                UniverseSource.DYNAMIC_IBKR
+                if method.discovery_profile(market.market_id) is not None else None
+            ),
+            discovery_profile=method.discovery_profile(market.market_id),
         )
         universes = tuple(u for u in config.universes if u.universe_id != universe.universe_id)
         return config.model_copy(

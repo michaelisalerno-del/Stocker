@@ -50,7 +50,7 @@ class MarketBroker(IbkrConnection):
         raise AssertionError("Universe testing must never submit orders")
 
 
-@pytest.mark.parametrize("market_id", list(MarketId))
+@pytest.mark.parametrize("market_id", [m for m in MarketId if m is not MarketId.US_ALL])
 def test_method_uses_existing_local_session_scan_and_reloads_snapshot(tmp_path, market_id):
     async def scenario():
         from stocker_core.universes import InstrumentReference

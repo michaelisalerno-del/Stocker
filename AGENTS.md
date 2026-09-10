@@ -44,6 +44,10 @@ in the runtime trading hot path.
 - The future dashboard is not part of the trading engine; dashboard failure must not affect trading.
 - A Method owns how it finds, qualifies, vetoes, enters, manages and exits trades.
   Method packages supply universe/search and data services plus pure decision logic.
+  Dynamic discovery is method-owned (see docs/candidate-discovery.md): reuse CAP_BUCKETS_V1,
+  persist raw observations and rejection stages, and pass qualified conIds into Stage 5.
+  Discovery/watch ordering must never become a Session HARD trade score. Do not tune
+  discovery criteria from historical winners/losers or change the frozen method to fit a pool.
   Pure calculations receive data; shared IBKR execution submits method-produced intentions.
 - Account exposure, permissions, reconciliation and emergency controls remain shared.
 - Add a method through the catalogue and explicit composition seam described in docs/ARCHITECTURE.md;

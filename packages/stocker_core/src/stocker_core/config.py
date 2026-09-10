@@ -104,7 +104,7 @@ class RunsConfig(BaseModel):
     # Frozen Session HARD research round-trip cost; replaceable independently
     # of the admission rule. No other installed strategy uses this assumption.
     session_hard_hv_round_trip_cost_bps: float = Field(default=10.0, ge=0.0, allow_inf_nan=False)
-    universes: tuple[UniverseDefinition, ...] = Field(min_length=1)
+    universes: tuple[UniverseDefinition, ...] = ()
     runs: tuple[RunConfig, ...] = ()
 
     @model_validator(mode="after")

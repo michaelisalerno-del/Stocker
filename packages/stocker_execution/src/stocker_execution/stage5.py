@@ -671,12 +671,15 @@ async def qualify_active_runs(
     runs: Sequence[RunInstance],
     *,
     activity_snapshots: Mapping[str, ActivityShortlistSnapshot] | None = None,
+    candidate_identities: Mapping[str, Sequence[QualifiedInstrument]] | None = None,
 ) -> Stage5QualificationResult:
     """Screen active memberships, qualify them, then deduplicate physical stocks by conId."""
 
     if not isinstance(ibkr, IbkrConnection):
         raise TypeError("Stage 5 qualification requires the Stage 2 IbkrConnection")
     activity_snapshots = activity_snapshots or {}
+    candidate_identities = candidate_identities or {}
+    qualified: dict[int, tuple[QualifiedInstrument, set[Stage5Membership]]] = {}
     screened_symbols_by_run: dict[str, frozenset[str]] = {}
     ineligible: list[Stage5IneligibleInstrument] = []
     screened_runs = [
@@ -725,6 +728,19 @@ async def qualify_active_runs(
         if run.state is not RunState.ACTIVE:
             continue
         membership = Stage5Membership(run.config.run_id, run.universe.universe_id)
+        if run.config.run_id in candidate_identities:
+            for instrument in candidate_identities[run.config.run_id]:
+                if instrument.con_id <= 0 or instrument.security_type != "STK":
+                    ineligible.append(Stage5IneligibleInstrument(
+                        instrument.symbol, (membership,), "INVALID_CONTRACT",
+                    ))
+                    continue
+                existing = qualified.get(instrument.con_id)
+                if existing is None:
+                    qualified[instrument.con_id] = (instrument, {membership})
+                else:
+                    existing[1].add(membership)
+            continue
         if run.config.uses_activity_shortlist:
             snapshot = activity_snapshots.get(run.config.run_id)
             if snapshot is None or snapshot.status is not ActivityShortlistStatus.READY:
@@ -758,7 +774,6 @@ async def qualify_active_runs(
                 continue
             references.setdefault(reference, set()).add(membership)
 
-    qualified: dict[int, tuple[QualifiedInstrument, set[Stage5Membership]]] = {}
     reference_order = sorted(
         references,
         key=lambda item: (

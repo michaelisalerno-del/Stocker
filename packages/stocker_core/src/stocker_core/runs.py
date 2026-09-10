@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from stocker_core.discovery import DiscoveryProfile, UniverseSource
 from stocker_core.markets import CAP_BUCKETS_V1, CapBucket, MarketId
 from stocker_core.universes import Identifier, UniverseCatalog, UniverseDefinition
 
@@ -101,6 +102,12 @@ class RunConfig(BaseModel):
     method_spec: dict[str, Any] | None = None
     method_spec_hash: str | None = None
     universe_snapshot: UniverseDefinition | None = None
+    universe_source: UniverseSource | None = None
+    discovery_profile: DiscoveryProfile | None = None
+
+    @property
+    def uses_dynamic_discovery(self) -> bool:
+        return self.universe_source is UniverseSource.DYNAMIC_IBKR
 
     @property
     def activity_profile_id(self) -> str:
@@ -117,6 +124,10 @@ class RunConfig(BaseModel):
     @property
     def uses_activity_shortlist(self) -> bool:
         """A method-owned discovery profile, or a historical explicit screen."""
+        if self.universe_source in {UniverseSource.FIXED, UniverseSource.RESEARCH}:
+            return False
+        if self.uses_dynamic_discovery:
+            return True
         return (
             (self.method_spec or {}).get("universe_search", {}).get("activity_profile")
             in {
@@ -135,6 +146,26 @@ class RunConfig(BaseModel):
     @model_validator(mode="after")
     def validate_lineage(self) -> "RunConfig":
         from stocker_core.strategies import SESSION_HARD_HV_METHOD
+
+        if (
+            self.universe_source is None
+            and (self.method_spec or {}).get("universe_search", {}).get("builder") == "DYNAMIC_IBKR"
+        ):
+            object.__setattr__(self, "universe_source", UniverseSource.DYNAMIC_IBKR)
+            object.__setattr__(
+                self, "discovery_profile",
+                self.discovery_profile or DiscoveryProfile.model_validate(
+                    (self.method_spec or {})["universe_search"]["discovery_profile"],
+                ),
+            )
+        if self.uses_dynamic_discovery and self.discovery_profile is None:
+            raise ValueError("DYNAMIC_IBKR requires an explicit discovery profile")
+        if self.discovery_profile is not None and not self.uses_dynamic_discovery:
+            raise ValueError("Discovery profile requires DYNAMIC_IBKR")
+        if self.universe_source in {UniverseSource.FIXED, UniverseSource.RESEARCH} and (
+            self.universe_snapshot is None or not self.universe_snapshot.members
+        ):
+            raise ValueError("FIXED/RESEARCH requires an explicit populated universe snapshot")
 
         if self.archived and self.enabled:
             raise ValueError("Archived runs cannot be enabled")
@@ -177,6 +208,16 @@ class RunConfig(BaseModel):
                     raise ValueError("Run method specification does not match frozen package")
                 if self.strategy != method.config_name:
                     raise ValueError("Run method identity mismatch")
+                if self.uses_dynamic_discovery:
+                    owned = method.discovery_profile(self.market_id)
+                    if owned is None or self.discovery_profile is None or any(
+                        getattr(owned, field) != getattr(self.discovery_profile, field)
+                        for field in (
+                            "profile_id", "version", "cap_bands", "scanner",
+                            "stock_type_filter", "allowed_stock_types",
+                        )
+                    ):
+                        raise ValueError("Discovery policy must belong to the selected method")
                 if self.cap_bucket is not CapBucket.ALL or self.screen is not None:
                     raise ValueError(
                         "Universe/search belongs to the method; cap/screen override rejected"

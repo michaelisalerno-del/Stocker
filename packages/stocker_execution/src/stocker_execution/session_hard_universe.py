@@ -1,4 +1,4 @@
-"""Bound contract/history work using the same audited activity filter in every market."""
+"""Method-owned watch identities feeding the existing contract/history boundary."""
 
 from collections.abc import Callable, Sequence
 from datetime import datetime
@@ -13,14 +13,21 @@ from stocker_execution.activity_shortlist import (
     ActivityShortlistStatus,
     ActivityShortlistStore,
 )
-from stocker_execution.ibkr import IbkrConnection
-from stocker_execution.stage5 import Stage5QualificationResult, qualify_active_runs
+from stocker_execution.discovery import CandidateDiscovery, DiscoveryStore, watch_identities
+from stocker_execution.ibkr import IbkrConnection, QualifiedInstrument
+from stocker_execution.stage5 import (
+    Stage5IneligibleInstrument,
+    Stage5Membership,
+    Stage5QualificationResult,
+    qualify_active_runs,
+)
 
 
 class SessionHardUniverseSearch:
     def __init__(self, broker: IbkrConnection, database: Path, clock: Callable[[], datetime]):
         self.broker = broker
         self.clock = clock
+        self.discovery = CandidateDiscovery(broker, DiscoveryStore(database), clock)
         self.activity = ActivityShortlistService(
             ActivityShortlistStore(database),
             profile_id=ACTIVITY_LIQUIDITY_V2_ID,
@@ -36,6 +43,8 @@ class SessionHardUniverseSearch:
 
         now = self.clock()
         snapshots: dict[str, ActivityShortlistSnapshot] = {}
+        identities: dict[str, tuple[QualifiedInstrument, ...]] = {}
+        failures: list[Stage5IneligibleInstrument] = []
         for instance in runs:
             run = instance.config
             if not run.uses_activity_shortlist:
@@ -43,6 +52,27 @@ class SessionHardUniverseSearch:
             assert run.market_id is not None
             market = ExchangeSessionResolver().resolve(run, now)
             definition = get_market(run.market_id)
+            if run.uses_dynamic_discovery:
+                if len(market.active_bar_starts) <= 3:
+                    failures.append(Stage5IneligibleInstrument(
+                        run.activity_profile_id,
+                        (Stage5Membership(run.run_id, instance.universe.universe_id),),
+                        "SCANNER_NOT_AVAILABLE: no regular session",
+                    ))
+                    identities[run.run_id] = ()
+                    continue
+                document = await self.discovery.discover(
+                    run, definition, market.session, now, market.active_bar_starts[3],
+                )
+                identities[run.run_id] = watch_identities(document)
+                if document["status"] != "READY":
+                    failures.append(Stage5IneligibleInstrument(
+                        run.activity_profile_id,
+                        (Stage5Membership(run.run_id, instance.universe.universe_id),),
+                        "SCHEDULED" if document["status"] == "SCHEDULED"
+                        else f'{document["status"]}: {document["reason"]}',
+                    ))
+                continue
             if len(market.active_bar_starts) <= 3:
                 snapshots[run.run_id] = ActivityShortlistSnapshot(
                     market_id=run.market_id.value,
@@ -71,4 +101,7 @@ class SessionHardUniverseSearch:
                     else None
                 ),
             )
-        return await qualify_active_runs(self.broker, runs, activity_snapshots=snapshots)
+        result = await qualify_active_runs(
+            self.broker, runs, activity_snapshots=snapshots, candidate_identities=identities,
+        )
+        return Stage5QualificationResult(result.requests, (*result.ineligible, *failures))

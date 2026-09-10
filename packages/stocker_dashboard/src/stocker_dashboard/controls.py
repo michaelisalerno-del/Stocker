@@ -209,6 +209,22 @@ class RunControlService:
             config, current = self._config_and_run(run_id)
             return await self._replace_run(config, current, ApplyMode.HOT_APPLY, enabled=False)
 
+    async def refresh_discovery(self, run_id: str, database: Path) -> dict[str, object]:
+        from stocker_execution.discovery import DiscoveryStore
+
+        async with self._lock:
+            _config, run = self._config_and_run(run_id)
+            validate_run_method(run)
+            if not run.uses_dynamic_discovery:
+                raise ValueError("This run does not use dynamic discovery")
+            if run.enabled:
+                raise ValueError("Disable the run before rebuilding its watch pool")
+            DiscoveryStore(database).request_refresh(run_id)
+            return {
+                "persisted": True, "runtime_applied": False, "apply_mode": "ON_ENABLE",
+                "detail": "New discovery generation requested. Enable the run to rebuild.",
+            }
+
     async def update_run_config(
         self,
         run_id: str,

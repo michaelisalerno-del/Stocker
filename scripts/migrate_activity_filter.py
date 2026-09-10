@@ -18,7 +18,8 @@ from stocker_core.markets import get_market
 from stocker_core.methods import SESSION_HARD
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 
-PREVIOUS_VERSION = "SESSION_HARD_CAUSAL_Q1_ACTIVITY_V4"
+PREVIOUS_VERSION = "SESSION_HARD_CAUSAL_Q1_ACTIVITY_V5"
+PREVIOUS_VERSIONS = {PREVIOUS_VERSION, "SESSION_HARD_CAUSAL_Q1_ACTIVITY_V4"}
 
 
 def migrate(payload: dict[str, Any]) -> tuple[RunsConfig, dict[str, str]]:
@@ -27,7 +28,7 @@ def migrate(payload: dict[str, Any]) -> tuple[RunsConfig, dict[str, str]]:
     for row in updated.get("runs", []):
         if (
             row.get("strategy_id") == SESSION_HARD.method_id
-            and row.get("strategy_version") == PREVIOUS_VERSION
+            and row.get("strategy_version") in PREVIOUS_VERSIONS
             and not row.get("archived", False)
         ):
             if row.get("environment") != "PAPER":
@@ -42,7 +43,7 @@ def migrate(payload: dict[str, Any]) -> tuple[RunsConfig, dict[str, str]]:
         assert previous.market_id is not None
         original_universes = config.universes
         listing_id = get_market(previous.market_id).listing_membership
-        if listing_id is not None:
+        if listing_id is not None and SESSION_HARD.discovery_profile(previous.market_id) is None:
             snapshot = previous.universe_snapshot
             if snapshot is None or not snapshot.members:
                 raise ValueError("Migration requires the previous run's saved listing membership")
@@ -63,7 +64,7 @@ def migrate(payload: dict[str, Any]) -> tuple[RunsConfig, dict[str, str]]:
             environment=previous.environment,
             risk=previous.risk,
         )
-        if listing_id is not None:
+        if listing_id is not None and SESSION_HARD.discovery_profile(previous.market_id) is None:
             config = config.model_copy(
                 update={
                     "universes": (

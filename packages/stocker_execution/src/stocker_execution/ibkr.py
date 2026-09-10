@@ -16,6 +16,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 if TYPE_CHECKING:
+    from stocker_execution.discovery import DiscoveryRow, DiscoveryScan
     from stocker_execution.session_hard_method import TradeEvent
 
 import structlog
@@ -367,6 +368,7 @@ class IbkrConnection:
         self._scanner_capabilities: ScannerCapabilities | None = None
         self._qualified_stock_cache: dict[tuple[str, str, str, str], QualifiedInstrument] = {}
         self._scanner_stock_type_cache: dict[int, str] = {}
+        self._discovery_contract_cache: dict[int, tuple[QualifiedInstrument, str]] = {}
         self._scanner_contract_semaphore = asyncio.Semaphore(4)
         self._active_market_data: dict[
             tuple[int, str, str, str, int], _ActiveMarketDataSubscription
@@ -669,6 +671,7 @@ class IbkrConnection:
         self._scanner_capabilities = None
         self._qualified_stock_cache.clear()
         self._scanner_stock_type_cache.clear()
+        self._discovery_contract_cache.clear()
         if was_connected:
             self._connection_epoch += 1
 
@@ -1337,6 +1340,90 @@ class IbkrConnection:
             raise IbkrError("STOCK_CLASSIFICATION_UNAVAILABLE")
         self._scanner_stock_type_cache[con_id] = stock_type
         return stock_type
+
+    async def discovery_scan(self, request: DiscoveryScan) -> tuple[DiscoveryRow, ...]:
+        """Raw scanner boundary: preserve every observation, including invalid identities."""
+        from ib_async import ScannerSubscription, TagValue
+
+        from stocker_execution.discovery import DiscoveryRow
+
+        self._require_connected()
+        subscription = ScannerSubscription(
+            numberOfRows=request.rows, instrument=request.instrument,
+            locationCode=request.location, scanCode=request.scanner,
+            stockTypeFilter=request.stock_type,
+            abovePrice=request.minimum_price, aboveVolume=request.minimum_volume,
+        )
+        # Native TWS fields are explicitly millions, unlike vendor-specific USD aliases.
+        if request.minimum_cap_millions is not None:
+            subscription.marketCapAbove = request.minimum_cap_millions
+        if request.maximum_cap_millions is not None:
+            subscription.marketCapBelow = request.maximum_cap_millions
+        scan = await self._bounded_scanner_data(subscription, [
+            TagValue("avgVolumeAbove", str(request.minimum_average_volume)),
+        ])
+        rows: list[DiscoveryRow] = []
+        for raw in scan.rows:
+            detail = getattr(raw, "contractDetails", None)
+            contract = getattr(detail, "contract", None)
+            rows.append(DiscoveryRow(
+                con_id=int(getattr(contract, "conId", 0) or 0),
+                symbol=str(getattr(contract, "symbol", "")).strip().upper(),
+                exchange=str(getattr(contract, "exchange", "") or "SMART").upper(),
+                primary_exchange=getattr(contract, "primaryExchange", None) or None,
+                currency=str(getattr(contract, "currency", "")).upper(),
+                security_type=str(getattr(contract, "secType", "")).upper(),
+                raw_rank=int(getattr(raw, "rank", -1)),
+                metadata={
+                    "stock_type": str(getattr(detail, "stockType", "")),
+                    "long_name": str(getattr(detail, "longName", "")),
+                    "trading_class": str(getattr(contract, "tradingClass", "")),
+                    "local_symbol": str(getattr(contract, "localSymbol", "")),
+                    "distance": str(getattr(raw, "distance", "")),
+                    "benchmark": str(getattr(raw, "benchmark", "")),
+                    "projection": str(getattr(raw, "projection", "")),
+                    "legs": str(getattr(raw, "legsStr", "")),
+                    "warning": "; ".join(scan.warnings),
+                },
+            ))
+        return tuple(rows)
+
+    async def qualify_discovery_candidate(
+        self, row: DiscoveryRow
+    ) -> tuple[QualifiedInstrument, str]:
+        """Resolve by conId once; share the existing connection and contract pacing budget."""
+        from ib_async import Contract
+
+        self._require_connected()
+        async with self._scanner_contract_semaphore:
+            cached = self._discovery_contract_cache.get(row.con_id)
+            if cached is not None:
+                return cached
+            details = await asyncio.wait_for(
+                self._client.reqContractDetailsAsync(
+                    Contract(conId=row.con_id, exchange=row.exchange)
+                ), timeout=self.config.request_timeout_seconds,
+            )
+            matching = [
+                cast(Any, detail) for detail in details
+                if getattr(getattr(detail, "contract", None), "conId", None) == row.con_id
+            ]
+            if len(matching) != 1:
+                raise IbkrError(f"INVALID_CONTRACT: conId {row.con_id} is ambiguous or unavailable")
+            detail = matching[0]
+            contract = detail.contract
+            stock_type = str(getattr(detail, "stockType", "")).strip().upper()
+            if not stock_type:
+                raise IbkrError(f"MARKET_DATA_UNAVAILABLE: classification for conId {row.con_id}")
+            instrument = QualifiedInstrument(
+                symbol=contract.symbol, con_id=contract.conId,
+                exchange=contract.exchange or "SMART",
+                primary_exchange=contract.primaryExchange or None,
+                currency=contract.currency, security_type=contract.secType,
+            )
+            result = instrument, stock_type
+            self._discovery_contract_cache[row.con_id] = result
+            return result
 
     async def activity_scan(
         self,

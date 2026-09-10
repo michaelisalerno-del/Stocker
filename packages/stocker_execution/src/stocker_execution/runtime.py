@@ -1476,6 +1476,8 @@ class StockerRuntime:
                         current.strategy != updated.strategy,
                         current.environment is not updated.environment,
                         current.session != updated.session,
+                        current.universe_source != updated.universe_source,
+                        current.discovery_profile != updated.discovery_profile,
                         not current.enabled,
                     )
                 )
@@ -1880,10 +1882,7 @@ class StockerRuntime:
         pending_run_ids = {
             membership.run_id
             for item in self._qualification.ineligible
-            if item.symbol in {
-                "ACTIVITY_SHORTLIST_V1", "ACTIVITY_CAPACITY_V2",
-                "ACTIVITY_LIQUIDITY_V1", "ACTIVITY_LIQUIDITY_V2",
-            }
+            if item.symbol in {r.activity_profile_id for r in self._config.runs}
             and item.reason in {"SCHEDULED", "ACTIVITY_SHORTLIST_NOT_READY"}
             for membership in item.memberships
         }
@@ -2213,11 +2212,25 @@ class StockerRuntime:
                 "HOT_BY_VOLUME", "ACTIVITY_SHORTLIST_V1", "ACTIVITY_CAPACITY_V2",
                 "ACTIVITY_LIQUIDITY_V1", "ACTIVITY_LIQUIDITY_V2",
             }
+            and failure.symbol not in {r.activity_profile_id for r in self._config.runs}
             for membership in failure.memberships
             if membership.run_id in run_markets
         }
+        from stocker_core.methods import installed_methods
+        from stocker_execution.discovery import scanner_requests
+
+        discovery_readiness = {}
+        for method in installed_methods():
+            for market_id, profile in method.discovery_profiles:
+                try:
+                    scanner_requests(profile, get_market(market_id), capabilities)
+                    discovery_readiness[market_id] = "AVAILABLE"
+                except ValueError as exc:
+                    discovery_readiness[market_id] = str(exc)
         return {
             market.market_id.value: (
+                discovery_readiness[market.market_id]
+                if market.market_id in discovery_readiness else
                 "CONTRACT_QUALIFICATION_FAILED"
                 if market.market_id in failed_markets and market.market_id not in qualified_markets
                 else "AVAILABLE"

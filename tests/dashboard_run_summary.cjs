@@ -14,6 +14,7 @@ const path = require("node:path");
     let auditDownloads = 0;
     let evaluation = "NO_MORE_CHECKPOINTS_TODAY";
     let activity = null;
+    let discovery = null;
     const staticPath = path.join(__dirname, "../packages/stocker_dashboard/src/stocker_dashboard/static");
     await page.context().route("http://stocker.test/**", async route => {
       const url = new URL(route.request().url());
@@ -27,6 +28,7 @@ const path = require("node:path");
         downloads: { scope: "ALL_RUNS", requests, pending: 4 },
         method_spec: { entry: { trigger_M: 0.2 } },
         activity_screen: activity,
+        discovery,
         funnel: [{ stage: "Stock eligibility", count: 6570 }, { stage: "Required data ready", count: 153 }],
       });
       if (url.pathname === "/api/runs/test/performance") return json({ history: [], currency: "USD", closed_trades: 0 });
@@ -73,6 +75,18 @@ const path = require("node:path");
     await page.getByText("Inspect stock selection", { exact: true }).click();
     assert.match(await page.locator("main").innerText(), /AAPL/);
     assert.match(await page.locator("main").innerText(), /Outside capacity limit/);
+    activity = null;
+    discovery = {
+      status: "READY", reason: "", raw_candidates: 214, unique_candidates: 187,
+      watch_pool_size: 150, session_hard_qualified: 4,
+      last_successful_discovery: "2026-09-08T13:46:00Z",
+    };
+    await page.evaluate(() => refreshCurrentPage());
+    assert.match(await page.locator("main").innerText(), /Dynamic universe: IBKR/i);
+    assert.match(await page.locator("main").innerText(), /Raw: 214 · Unique: 187 · Watch pool: 150 · Session HARD qualified: 4/);
+    assert.equal(await page.getByRole("button", { name: "Rebuild on next enable" }).isDisabled(), true);
+    await page.getByText("Discovery diagnostics", { exact: true }).click();
+    assert.equal(await page.getByRole("link", { name: "Inspect discovery runs, filters and candidate provenance" }).getAttribute("href"), "/api/runs/test/discovery");
     assert(!await page.locator("main").innerText().then(text => text.includes("FULL_UNIVERSE_DATA")));
     assert.deepEqual(errors, []);
     console.log("PASS: compact summary, live download refresh, checkpoint status, on-demand audit, GET-only");

@@ -275,3 +275,38 @@ disabled. `--audit-only --oracle --session YYYY-MM-DD --resume-audit` resumes an
 saved audit. The audit waits until that session's close. Normal pytest uses fakes and never
 needs a Gateway. No actual scanner count, recall or completion-time claim is made until this
 command or the PAPER runtime observes real sessions.
+
+### Read-only capability and scanner access checks
+
+`benchmark_scanner_acquisition.py --capabilities-only` can inspect the PAPER Gateway
+without a saved V9 run or dedicated Gateway. It requests scanner parameters only,
+persists the original XML in the specified separate database, and writes a sibling
+`.scanner-check.json` capability matrix for all supported profiles (or `--markets`).
+
+`--scanner-check` instead runs one finite snapshot of each advertised acquisition
+component, with at most two concurrent scanner requests, existing callback/cancellation
+handling, shared identical requests, and exact raw rank/conId provenance. It uses no
+opening-history queue, tick-by-tick entry feeds, candidate-stage or strategy state.
+An explicit `--scan-codes` list may inspect exact Gateway-advertised codes under the
+separate `SCANNER_ACCESS_DIAGNOSTIC_EXPLICIT_CODES` diagnostic identity. This does not
+change the production acquisition recipe. Unsupported codes are never substituted.
+
+Example after inspecting the actual Gateway matrix:
+
+```bash
+rtk .venv/bin/python scripts/benchmark_scanner_acquisition.py \
+  --ibkr-config PAPER_CONNECTION.yaml --client-id UNUSED_CLIENT_ID \
+  --state scanner-access.sqlite --capabilities-only
+rtk .venv/bin/python scripts/benchmark_scanner_acquisition.py \
+  --ibkr-config PAPER_CONNECTION.yaml --client-id UNUSED_CLIENT_ID \
+  --state scanner-snapshots.sqlite --scanner-check \
+  --markets US_ALL UK_LSE AUSTRALIA_ASX \
+  --scan-codes TOP_TRADE_RATE TOP_VOLUME_RATE HOT_BY_VOLUME TOP_OPEN_PERC_GAIN TOP_OPEN_PERC_LOSE
+```
+
+The final two codes in the example were observed on Gateway API version 178 on
+2026-09-10; other Gateways must be inspected first. These are access diagnostics,
+not an opening-session benchmark or proof of account subscriptions. Warning 492
+remains request-scoped evidence of imprecise scanner results. Full opening sweeps,
+Range/RV throughput and delayed oracle recall still require the dedicated-Gateway
+benchmark, the saved broad population and the intended causal session window.

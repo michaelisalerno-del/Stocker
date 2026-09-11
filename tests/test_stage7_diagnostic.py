@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+from click import unstyle
+from typer import rich_utils
 from typer.testing import CliRunner
 
 from stocker_core.cli import app
@@ -21,12 +24,17 @@ def _base_arguments() -> list[str]:
     ]
 
 
-def test_diagnostic_never_transmits_without_explicit_confirmation() -> None:
-    result = CliRunner().invoke(app, _base_arguments())
+@pytest.mark.parametrize("force_color", [False, True])
+def test_diagnostic_never_transmits_without_explicit_confirmation(monkeypatch, force_color) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(rich_utils, "FORCE_TERMINAL", force_color)
+    monkeypatch.setattr(rich_utils, "COLOR_SYSTEM", "standard" if force_color else None)
+    result = CliRunner().invoke(app, _base_arguments(), color=force_color)
 
     assert result.exit_code != 0
-    assert "--confirm-paper-order is required" in result.output
-    assert "no order was transmitted" in result.output
+    output = unstyle(result.output)
+    assert "--confirm-paper-order is required" in output
+    assert "no order was transmitted" in output
 
 
 def test_diagnostic_rejects_live_run_before_connecting(tmp_path: Path) -> None:

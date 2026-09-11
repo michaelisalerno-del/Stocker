@@ -60,6 +60,9 @@ reverse_proxy 127.0.0.1:8765 {
 
 Load the token into Caddy and Stocker from a root-owned mode-0600 systemd EnvironmentFile.
 Generate it on the server, never in a browser URL, static JavaScript or normal logs.
+Alternatively, place the upstream directive with a literal generated token in a
+root-owned, caddy-group-readable mode-0640 Caddy include; Stocker reads the same token
+from its mode-0600 EnvironmentFile. This permits a graceful Caddy configuration reload.
 Preserve existing proxy authentication credentials. Validate Caddy config without
 printing its expanded secret. Reject cross-site fetch metadata and mismatched Origin
 on reads and controls; unauthenticated websocket access is rejected as well.

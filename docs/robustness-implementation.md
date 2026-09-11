@@ -75,8 +75,8 @@ During implementation:
   locked Playwright dependency. Node was supplied from the desktop's bundled runtime.
 - `uv run --no-sync python scripts/server_smoke.py`: passed in a clean temporary
   server-only environment, 60 packages, network prohibited during runtime smoke.
-- Final `bash scripts/check.sh`: format/lint/type/Python/frontend passed; isolated
-  server check result is appended below. Python: **1,065 passed, 14 skipped,
+- Final `bash scripts/check.sh`: all six checks passed, including the isolated
+  server install and offline smoke. Python: **1,065 passed, 14 skipped,
   10 existing warnings**, 94.36 seconds.
 - `git diff --check`: passed.
 - `git fetch origin main`: passed; latest main c417e1c included by equivalent cherry-pick.
@@ -123,3 +123,18 @@ Backup/restore tests are isolated and disconnected. They do not verify the actua
 backup schedule or offsite retention. Main-branch protections remain an operator action.
 No GitHub administrative setting was changed. Production verification and release outcome
 must be appended from actual deployment evidence, not inferred from local tests.
+
+## Remote CI portability correction
+
+CI run 34627171018 on 6bee84b independently passed format, lint, typing, frontend
+and server installation. Python reported 1,064 passed, 14 skipped and one failure:
+the existing diagnostic-confirmation assertion matched raw ANSI-colored output.
+The failure was reproduced locally by explicitly forcing colored Typer output.
+The test now checks the same complete messages after Click ANSI normalization and
+covers both plain and colored output (four focused tests passed). Order-confirmation
+requirements and assertions remain intact. No runtime code changed for this correction.
+
+The server preparation at 6bee84b used a separate fresh locked environment and passed
+offline model/dashboard checks as both root and the actual stocker service user.
+All 397 existing deployed files matched c417e1c, with no server-only application files.
+The active service has not yet been switched; release/CI final evidence follows.

@@ -265,3 +265,15 @@ The 6ff4a9d deployment above is the first successful cutover record. Subsequent
 numerical-profile release identity and its final CI/deployment outcome are recorded
 in the task handover and the server's System surface and private verification reports.
 The profile does not change the numerical path on the existing server's V2/V3 CPU.
+
+CI run 34630257236 verified the numerical correction on an X86_V4-capable runner:
+all exact frozen-score cases passed, with diagnostics showing the application profile
+selecting X86_V3 for float64 log. The run reported 1,067 passed, 14 skipped and two
+different failures in the incorporated scanner regression. Its fake broker assumed
+natural request overlap despite independent SQLite thread scheduling, and the
+three-sweep case exceeded a two-second whole-test watchdog. The test now uses a
+two-party barrier to require actual concurrent scanner calls and a 30-second deadlock
+watchdog. All existing pool, request, qualification, concurrency and persisted-state
+assertions remain exact. Qualification still cannot finish until every requested sweep
+arrives, so restoring the original blocking defect would still deadlock and fail.
+No scanner implementation or method deadline changed for this test correction.

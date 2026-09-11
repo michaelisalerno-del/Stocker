@@ -605,14 +605,27 @@ def test_contract_checks_do_not_hold_scanner_slots_or_delay_sweeps(tmp_path, swe
         _, instance, session = setup_run(count=10)
         now = [session.opens_at]
         all_scans_received = asyncio.Event()
+        first_scans_overlap = asyncio.Barrier(2)
+        scans_entered = active_scans = 0
         expected_requests = 35 * len(sweeps)
 
         class SlowQualificationBroker(Broker):
             async def acquisition_scan(self, request, audit):
-                rows = await super().acquisition_scan(request, audit)
-                if len(self.requests) == expected_requests:
-                    all_scans_received.set()
-                return rows
+                nonlocal scans_entered, active_scans
+                scans_entered += 1
+                active_scans += 1
+                self.maximum = max(self.maximum, active_scans)
+                try:
+                    # Guarantee overlap despite independent database-thread scheduling.
+                    # A serial scanner implementation cannot pass this barrier.
+                    if scans_entered <= 2:
+                        await first_scans_overlap.wait()
+                    rows = await super().acquisition_scan(request, audit)
+                    if len(self.requests) == expected_requests:
+                        all_scans_received.set()
+                    return rows
+                finally:
+                    active_scans -= 1
 
             async def qualify_discovery_candidate(self, row):
                 await all_scans_received.wait()
@@ -625,7 +638,9 @@ def test_contract_checks_do_not_hold_scanner_slots_or_delay_sweeps(tmp_path, swe
         recipe = ACQUISITION_EXPERIMENT_V1.model_copy(update={"sweep_active_seconds": sweeps})
         store = AcquisitionStore(tmp_path / "nonblocking-scans.sqlite")
         provider = ScannerAcquisition(broker, store, lambda: now[0], wait, recipe)
-        pool, errors = await asyncio.wait_for(provider.acquire(instance), timeout=2)
+        # A deadlock watchdog, not a disk-speed assertion. The fake clock governs
+        # causal deadlines; the event above requires every sweep before qualification.
+        pool, errors = await asyncio.wait_for(provider.acquire(instance), timeout=30)
         assert not errors
         assert len(pool) == 6
         assert len(broker.requests) == expected_requests

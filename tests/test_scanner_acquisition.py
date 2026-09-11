@@ -595,3 +595,118 @@ def test_missing_live_prefix_fails_but_oracle_can_audit_missingness(tmp_path):
         assert len(rows) == 2 and rows[0]["payload"]["missing_prefix"]
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("sweeps", [(60,), (60, 180, 240)])
+def test_contract_checks_do_not_hold_scanner_slots_or_delay_sweeps(tmp_path, sweeps):
+    """US 2026-09-11: slow contract checks blocked later scanner snapshots."""
+
+    async def scenario():
+        _, instance, session = setup_run(count=10)
+        now = [session.opens_at]
+        all_scans_received = asyncio.Event()
+        expected_requests = 35 * len(sweeps)
+
+        class SlowQualificationBroker(Broker):
+            async def acquisition_scan(self, request, audit):
+                rows = await super().acquisition_scan(request, audit)
+                if len(self.requests) == expected_requests:
+                    all_scans_received.set()
+                return rows
+
+            async def qualify_discovery_candidate(self, row):
+                await all_scans_received.wait()
+                return await super().qualify_discovery_candidate(row)
+
+        async def wait(due):
+            now[0] = due
+
+        broker = SlowQualificationBroker()
+        recipe = ACQUISITION_EXPERIMENT_V1.model_copy(update={"sweep_active_seconds": sweeps})
+        store = AcquisitionStore(tmp_path / "nonblocking-scans.sqlite")
+        provider = ScannerAcquisition(broker, store, lambda: now[0], wait, recipe)
+        pool, errors = await asyncio.wait_for(provider.acquire(instance), timeout=2)
+        assert not errors
+        assert len(pool) == 6
+        assert len(broker.requests) == expected_requests
+        assert broker.maximum == recipe.scanner_concurrency
+        assert broker.qualifications == 6
+        assert store.summary(instance.config.run_id, session.session)["state"] == (
+            "SCANNER_ACQUISITION_READY"
+        )
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("ending", ["cancel", "deadline"])
+def test_pending_contract_checks_cannot_write_after_acquisition_seals(tmp_path, ending):
+    async def scenario():
+        _, instance, session = setup_run(count=10)
+        now = [session.opens_at]
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class WaitingBroker(Broker):
+            pending = 0
+
+            async def qualify_discovery_candidate(self, row):
+                self.pending += 1
+                entered.set()
+                try:
+                    await release.wait()
+                    return await super().qualify_discovery_candidate(row)
+                finally:
+                    self.pending -= 1
+
+        async def wait(due):
+            now[0] = max(now[0], due)
+
+        broker = WaitingBroker()
+        recipe = ACQUISITION_EXPERIMENT_V1.model_copy(update={"sweep_active_seconds": (60,)})
+        store = AcquisitionStore(tmp_path / "cancel-qualification.sqlite")
+        provider = ScannerAcquisition(broker, store, lambda: now[0], wait, recipe)
+        task = asyncio.create_task(provider.acquire(instance))
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        if ending == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            now[0] = session.minute_prefix(5)[-1] + timedelta(minutes=1)
+            release.set()
+            _, errors = await asyncio.wait_for(task, timeout=2)
+            assert errors[0]["acquisition_failure"]
+        assert broker.pending == 0
+        saved = store.session(instance.config.run_id, session.session)
+        assert saved["sealed"]
+        assert store.pool(instance.config.run_id, session.session) == ()
+        before = store.details(instance.config.run_id, session.session, "components", 200, 0)
+        release.set()
+        await asyncio.sleep(0)
+        assert (
+            store.details(instance.config.run_id, session.session, "components", 200, 0) == before
+        )
+        calls = len(broker.requests)
+        _, errors = await provider.acquire(instance)
+        assert errors[0]["acquisition_failure"] and len(broker.requests) == calls
+
+    asyncio.run(scenario())
+
+
+def test_acquisition_timeout_has_an_actionable_persisted_reason(tmp_path):
+    class TimedOut:
+        async def acquire(self, instance):
+            raise TimeoutError()
+
+    async def scenario():
+        _, instance, session = setup_run(count=1)
+        now = [session.opens_at]
+        store = CandidateStore(tmp_path / "deadline-reason.sqlite")
+        pipeline = CandidatePipeline(store, TimedOut(), Source(), lambda: now[0])
+        await drain(pipeline, instance, session, now)
+        summary = store.summary(instance.config.run_id, session.session)
+        assert summary["state"] == "DEGRADED"
+        assert "ACQUISITION_DEADLINE_EXCEEDED" in summary["reason"]
+        assert summary["completed_stages"] == 0
+
+    asyncio.run(scenario())

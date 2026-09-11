@@ -617,6 +617,12 @@ class CandidatePipeline:
         except asyncio.CancelledError:
             self.store.fail(*key, "CANDIDATE_SELECTION_INTERRUPTED", self.clock())
             raise
+        except TimeoutError:
+            self.store.fail(
+                *key,
+                f"{CAPACITY_REASON}: ACQUISITION_DEADLINE_EXCEEDED ({due.isoformat()})",
+                self.clock(),
+            )
         except Exception as exc:
             self.store.fail(*key, f"{CAPACITY_REASON}: {exc}", self.clock())
 

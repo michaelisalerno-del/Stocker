@@ -170,8 +170,8 @@ preparation, signals and cohort labels. Existing Q1, entry, risk and PAPER/LIVE 
 `SESSION_HARD_IBKR_ACQUISITION_EXPERIMENT_V1` is an experiment, not a validated scanner
 filter. It declares three sweeps at OPEN+60/+180/+240 active seconds, two concurrent scanner
 requests per sweep, and up to 50 rows per component. The broker's shared ten-scanner ceiling
-and message throttle still apply. No acquisition-pool cap is enabled; there is no measured eligible opening
-union size yet. After-hours raw scanner-contract counts do not establish that population. A 35-component matrix would make 105 requests over three sweeps,
+and message throttle still apply. No acquisition-pool cap is enabled. The failed 2026-09-11 US session accumulated 816
+eligible identities before its acquisition deadline; this was not a completed selection. After-hours raw scanner-contract counts do not establish that population. A 35-component matrix would make 105 requests over three sweeps,
 with at most 5,250 raw observations before duplicates, eligibility and actual Gateway limits.
 
 The matrix requests TOP_TRADE_RATE, TOP_VOLUME_RATE and HOT_BY_VOLUME only when advertised.
@@ -315,3 +315,27 @@ not an opening-session benchmark or proof of account subscriptions. Warning 492
 remains request-scoped evidence of imprecise scanner results. Full opening sweeps,
 Range/RV throughput and delayed oracle recall still require the dedicated-Gateway
 benchmark, the saved broad population and the intended causal session window.
+
+
+### US acquisition scheduling regression, 2026-09-11
+
+The first prospective US opening exposed contract qualification holding the two acquisition
+scanner slots after scannerDataEnd/cancellation. The OPEN+1 sweep's last scanner response
+arrived after OPEN+4; all 35 OPEN+3 components consequently missed their window. At OPEN+5,
+60 components had completed, two were interrupted during qualification and eight had not
+started. The failed union contained 816 eligible identities from 3,080 raw hits / 1,236 distinct
+scanner conIds; no Range5 opening-history requests started. Gateway remained connected and
+reconciled. This is acquisition failure evidence, not successful throughput or recall validation.
+
+Scanner collection now releases its slot after persisting the raw response. Separate bounded
+per-component tasks perform the same conId, stock-classification and listing-membership checks
+through the existing broker contract semaphore/message throttle. They overlap subsequent scans
+and sweeps; the acquisition still waits for every qualification before sealing. Cancellation
+cancels and drains all qualification tasks before sealing, so none can mutate a frozen pool.
+Scanner concurrency remains two, the shared broker scanner/contract limits are unchanged, and
+all 105 configured components, sweep offsets, cap partitions and eligibility rules are retained.
+New component audits distinguish scanner response time from qualification start/completion.
+Acquisition timeouts persist ACQUISITION_DEADLINE_EXCEEDED and their actual boundary rather than
+an empty exception message. The observed failed session remains immutable and cannot be repaired
+with later data. Prospective complete opening-prefix throughput and oracle recall still need
+subsequent market sessions. Range250 -> RV50 -> RV30 and all Session HARD trading rules are unchanged.

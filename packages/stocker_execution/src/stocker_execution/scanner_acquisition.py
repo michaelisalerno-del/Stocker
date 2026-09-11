@@ -132,6 +132,7 @@ class ScannerAcquisition:
         if saved["sealed"]:
             return self._result(*key, recipe=recipe)
         fatal = ""
+        qualification_tasks: list[asyncio.Task[None]] = []
         try:
             capabilities = await self.broker.scanner_capabilities()
             capability_id = await asyncio.to_thread(
@@ -151,6 +152,68 @@ class ScannerAcquisition:
                 refs.setdefault((reference.symbol, reference.currency), []).append((i, reference))
             qualified: dict[int, tuple[CandidateIdentity, int] | None] = {}
             qualification_locks: dict[int, asyncio.Lock] = {}
+
+            async def qualify_rows(
+                plan: AcquisitionScan,
+                sweep: int,
+                rows: tuple[DiscoveryRow, ...],
+                received: datetime,
+                audit: dict[str, Any],
+            ) -> None:
+                try:
+                    async with asyncio.timeout(max(0, (cutoff - self.clock()).total_seconds())):
+                        audit["qualification_started_at"] = self.clock().isoformat()
+                        # Qualification allocates no price/history streams.
+                        rejections = []
+                        for row in rows:
+                            async with qualification_locks.setdefault(row.con_id, asyncio.Lock()):
+                                if row.con_id not in qualified:
+                                    qualified[row.con_id] = await self._eligible(
+                                        row, refs, run.market_id
+                                    )
+                            member = qualified[row.con_id]
+                            if member is None:
+                                rejections.append(row.con_id)
+                                continue
+                            identity, index = member
+                            if self.clock() >= cutoff:
+                                raise ValueError("SCANNER_QUALIFICATION_DEADLINE")
+                            await asyncio.to_thread(
+                                self.store.add_pool,
+                                *key,
+                                identity,
+                                index,
+                                sweep,
+                                received,
+                                row.raw_rank,
+                            )
+                        audit["rejected_conids"] = rejections
+                        if self.clock() >= cutoff:
+                            raise ValueError("SCANNER_QUALIFICATION_DEADLINE")
+                        audit["qualification_completed_at"] = self.clock().isoformat()
+                        await asyncio.to_thread(
+                            self.store.component, *key, sweep, plan.component_id, "COMPLETE", audit
+                        )
+                except asyncio.CancelledError:
+                    await asyncio.to_thread(
+                        self.store.component,
+                        *key,
+                        sweep,
+                        plan.component_id,
+                        "FAILED",
+                        audit | {"error": "SCANNER_QUALIFICATION_INTERRUPTED"},
+                    )
+                    raise
+                except Exception as exc:
+                    await asyncio.to_thread(
+                        self.store.component,
+                        *key,
+                        sweep,
+                        plan.component_id,
+                        "FAILED",
+                        audit | {"error": str(exc) or type(exc).__name__},
+                    )
+
             self._sweep_results = {
                 k: v for k, v in self._sweep_results.items() if k[0] >= session.session
             }
@@ -251,42 +314,13 @@ class ScannerAcquisition:
                                 )
                                 if received >= cutoff:
                                     raise ValueError("SCANNER_ACQUISITION_DEADLINE")
-                                # Qualification allocates no price/history streams.
-                                rejections = []
-                                for row in rows:
-                                    async with qualification_locks.setdefault(
-                                        row.con_id, asyncio.Lock()
-                                    ):
-                                        if row.con_id not in qualified:
-                                            qualified[row.con_id] = await self._eligible(
-                                                row, refs, run.market_id
-                                            )
-                                    member = qualified[row.con_id]
-                                    if member is None:
-                                        rejections.append(row.con_id)
-                                        continue
-                                    identity, index = member
-                                    if self.clock() >= cutoff:
-                                        raise ValueError("SCANNER_QUALIFICATION_DEADLINE")
-                                    await asyncio.to_thread(
-                                        self.store.add_pool,
-                                        *key,
-                                        identity,
-                                        index,
-                                        sweep,
-                                        received,
-                                        row.raw_rank,
+                                # Release the scanner slot after scannerDataEnd/cancellation.
+                                # Contract checks use the broker's existing bounded ingress;
+                                # they must not block remaining scans or later sweep times.
+                                qualification_tasks.append(
+                                    asyncio.create_task(
+                                        qualify_rows(plan, sweep, rows, received, audit)
                                     )
-                                audit["rejected_conids"] = rejections
-                                if self.clock() >= cutoff:
-                                    raise ValueError("SCANNER_QUALIFICATION_DEADLINE")
-                                await asyncio.to_thread(
-                                    self.store.component,
-                                    *key,
-                                    sweep,
-                                    plan.component_id,
-                                    "COMPLETE",
-                                    audit,
                                 )
                         except asyncio.CancelledError:
                             await asyncio.to_thread(
@@ -309,12 +343,18 @@ class ScannerAcquisition:
                             )
 
                 await asyncio.gather(*(component(plan) for plan in plans))
+            await asyncio.gather(*qualification_tasks)
         except asyncio.CancelledError:
             fatal = "SCANNER_ACQUISITION_INTERRUPTED"
             raise
         except Exception as exc:
             fatal = str(exc)
         finally:
+            # No eligibility worker may write into the pool after it is sealed.
+            for task in qualification_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*qualification_tasks, return_exceptions=True)
             await asyncio.to_thread(
                 self.store.seal,
                 *key,

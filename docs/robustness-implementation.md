@@ -34,7 +34,7 @@ Reviewable increments:
 - [x] Independently reporting checks and isolated locked server smoke.
 - [x] Consistent SQLite WAL snapshot and disconnected restore regression.
 - [x] README, architecture and operations documentation updated.
-- [ ] Remote CI and authorized deployment verified (append actual outcome below).
+- [x] Remote CI and authorized deployment verified (actual outcome below).
 
 | Finding | Disposition and implementation | Regression evidence |
 |---|---|---|
@@ -75,9 +75,9 @@ During implementation:
   locked Playwright dependency. Node was supplied from the desktop's bundled runtime.
 - `uv run --no-sync python scripts/server_smoke.py`: passed in a clean temporary
   server-only environment, 60 packages, network prohibited during runtime smoke.
-- Final `bash scripts/check.sh`: all six checks passed, including the isolated
-  server install and offline smoke. Python: **1,065 passed, 14 skipped,
-  10 existing warnings**, 94.36 seconds.
+- Final `bash scripts/check.sh` at `6ff4a9d`: all six checks passed, including the
+  isolated server install and offline smoke. Python: **1,066 passed, 14 skipped,
+  10 existing warnings**, 92.78 seconds. Format: 269 files; typing: 142 source files.
 - `git diff --check`: passed.
 - `git fetch origin main`: passed; latest main c417e1c included by equivalent cherry-pick.
 
@@ -121,8 +121,8 @@ acquisition failures remain historical facts and cannot be repaired by redeploym
 
 Backup/restore tests are isolated and disconnected. They do not verify the actual server's
 backup schedule or offsite retention. Main-branch protections remain an operator action.
-No GitHub administrative setting was changed. Production verification and release outcome
-must be appended from actual deployment evidence, not inferred from local tests.
+No GitHub administrative setting was changed. Actual deployment verification is recorded
+below, separately from local tests.
 
 ## Remote CI portability correction
 
@@ -137,4 +137,95 @@ requirements and assertions remain intact. No runtime code changed for this corr
 The server preparation at 6bee84b used a separate fresh locked environment and passed
 offline model/dashboard checks as both root and the actual stocker service user.
 All 397 existing deployed files matched c417e1c, with no server-only application files.
-The active service has not yet been switched; release/CI final evidence follows.
+At that preparation point the active service remained unchanged; final evidence follows.
+
+## Verified release checks
+
+[GitHub CI run 34627755643](https://github.com/michaelisalerno-del/Stocker/actions/runs/34627755643)
+passed all six independent jobs on `6ff4a9d885ee0edffa3b363cf9187ec5416f2bfc`:
+format, lint, typing, Python, frontend and server installation. Remote Python results:
+**1,066 passed, 14 skipped, 10 warnings**, 226.81 seconds. These are actual remote
+results, separate from the local run above. The diagnostic correction adds a colored
+output case; it does not alter application code.
+
+The exact `git archive` release SHA-256 was
+`961242ef82b69d3e5ba4293945017a2d75163a9fada733149cdde17ad8b6b204`.
+On the server, `uv sync --locked --no-default-groups --group server` created its own
+environment, and `scripts/server_smoke.py --installed` passed as both root and the
+`stocker` service user. The smoke forbids network connections and submits no orders.
+Immediately before deployment, `git fetch origin main` still resolved to c417e1c.
+
+## Actual deployment and handover
+
+At 2026-09-11 17:34:43 UTC the application had switched successfully from c417e1c to
+**`6ff4a9d885ee0edffa3b363cf9187ec5416f2bfc`**, through
+`/opt/stocker/current` on the existing server. PAPER reconciled within 95.1 seconds.
+The final documentation commit records this evidence; deployed application code stays
+at the CI-verified revision above. The branch is
+`fix/robustness-professionalisation-20260911`; main was not merged or force-pushed.
+
+The application service was stopped for the consistent backup and restarted on the
+prepared release. Caddy was validated and gracefully reloaded. The Gateway process ID
+did not change. There were no open positions, unresolved entry plans or orders today
+at cutover, and no orders were placed by this task.
+
+Verified before/after:
+- Runs and IBKR configuration files remained byte-identical; all 27 saved identities
+  were retained. The three enabled runs retain their original settings.
+- Ledger/history counts remained: one execution plan, 28 fills, one execution attempt,
+  54,502 runtime signals and zero opening candidate stage rows. Candidate session
+  records were unchanged. The sole existing execution plan was already closed.
+- The System API reports the exact deployed commit, with dirty state honestly unknown
+  for an archive installation. Configuration revision:
+  `6ddf8eccb4cb4ce3935ce5afb8dfacf105c0d71778cbbf65ce630efe80f33df0`.
+- Authenticated backend reads and all three dashboard static assets succeeded; asset
+  bytes matched the prepared release. Public unauthenticated page/System/control probes
+  returned 401. Direct backend equivalents and forged identity headers returned 403.
+  Authenticated requests with a foreign Origin or cross-site metadata returned 403.
+- An external connection attempt to backend port 8765 timed out (curl exit 28).
+  This is one observed probe, not proof of every possible network path.
+- Existing Caddy Basic credentials and TLS configuration were preserved. A private,
+  loopback-only upstream token now prevents bypassing Caddy authentication. Its value
+  is held only in restricted server configuration, never in JavaScript or this report.
+
+The private verified snapshot is at
+`/var/lib/stocker/backups/robustness-6ff4a9d/state`; deployment and HTTP verification
+reports are in its parent directory. It contains a SQLite online-backup snapshot,
+matching configuration and frozen artifacts with checksums. The isolated WAL restore
+test described above is distinct from this real snapshot verification. No production
+database restore was performed, and no backup schedule or offsite retention was proved.
+
+Exact operational entry commands, run through `rtk`:
+```sh
+ssh -o ConnectTimeout=10 root@139.59.178.164 python3 - < .stocker/prepare-release.py
+ssh -o ConnectTimeout=10 root@139.59.178.164 'runuser -u stocker -- /opt/stocker/releases/6ff4a9d885ee0edffa3b363cf9187ec5416f2bfc/.venv/bin/python /opt/stocker/releases/6ff4a9d885ee0edffa3b363cf9187ec5416f2bfc/scripts/server_smoke.py --installed'
+ssh -o ConnectTimeout=10 root@139.59.178.164 python3 - < .stocker/deploy-release.py
+ssh -o ConnectTimeout=10 root@139.59.178.164 python3 - < .stocker/verify-deployment.py
+gh run view 34627755643 --repo michaelisalerno-del/Stocker --json status,conclusion,jobs
+curl --connect-timeout 3 --max-time 5 -sS -o /dev/null -w '%{http_code}\n' http://139.59.178.164:8765/
+```
+The one-use preparation/deployment/probe scripts and copied non-secret verification
+reports remain in the ignored local `.stocker` task directory. The reusable install,
+backup and recovery procedures are tracked in `scripts/` and the recovery runbook.
+
+Material limits and operator actions:
+- **New entries are blocked** for all three enabled runs until the operator sets an
+  explicit `risk.max_gross_notional`; no financial ceiling was invented. Saved enabled
+  status and a READY method do not override this gate. New IBKR credit admission has
+  fake-broker test evidence, but was not exercised by submitting an actual entry.
+- Existing US `BROAD_OPENING_DATA_CAPACITY_UNRESOLVED` and UK
+  `CANDIDATE_SELECTION_WINDOW_MISSED` states remain. Australia is READY. Redeployment
+  did not reconstruct missed session evidence or rerun selection.
+- The observed server configuration is 100 quote lines and five tick-by-tick slots;
+  actual entitlement remains unknown. Zero streams were active at verification.
+- The operator should verify their authenticated browser login, review network access
+  paths and backup retention, and configure all six CI checks as required branch
+  protections. No administrative settings were changed. Main remains c417e1c; this
+  release is deployed directly from the published task branch.
+
+Implementation entry points: `packages/stocker_execution/src/stocker_execution/`
+contains `execution_ledger.py`, `stage7.py`, `ibkr.py` and `runtime.py`;
+`packages/stocker_dashboard/src/stocker_dashboard/` contains `controls.py`, `app.py`,
+`security.py` and `static/dashboard.js`; the configuration schema is
+`packages/stocker_core/src/stocker_core/runs.py`. The finding table above maps their
+changed functions to focused regressions. Optional later ideas are outside this release.

@@ -179,7 +179,7 @@ class ServerConfig(BaseSettings):
 def _read_yaml(path: str | Path) -> dict[str, Any]:
     config_path = Path(path)
     with config_path.open("r", encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle) or {}
+        raw = yaml.load(handle, Loader=yaml.CSafeLoader) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"Config file must contain a YAML mapping: {config_path}")
     return raw

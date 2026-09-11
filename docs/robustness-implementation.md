@@ -277,3 +277,31 @@ watchdog. All existing pool, request, qualification, concurrency and persisted-s
 assertions remain exact. Qualification still cannot finish until every requested sweep
 arrives, so restoring the original blocking defect would still deadlock and fail.
 No scanner implementation or method deadline changed for this test correction.
+
+## Follow-up: slow dashboard and delayed pause acknowledgement
+
+The user reported this on deployed `d392d83230bc1c98251266d585cd3cb032f023ef`.
+Read-only probes confirmed Australia was saved disabled and subsequently reported
+`DISABLED / New entries paused` by the running service, with zero positions and
+zero orders that day. During the command, both a static CSS read and overview
+exceeded 12 seconds. A stack-only `py-spy dump` found the main asyncio thread in
+`yaml.safe_load`, called by the dashboard's `changed()` response refresh. The
+8.9 MB configuration includes historical snapshots; these are retained.
+
+The control path also synchronously parsed configuration before its pause gate
+and synchronously serialized the save. Three HTTP regression cases reproduced
+these defects before the fix. `disable_run` now gates the runtime before any disk
+read; asynchronous controls and response refreshes offload large YAML work.
+An independent storage lock serializes writes without queuing pause behind broker
+preparation. Pause reads after prior writes, preserving concurrently saved run
+identities. A cancelled writer retains the storage lock until its worker finishes.
+Response refreshes are ordered so an older load cannot overwrite newer read state.
+PyYAML's `CSafeLoader`/`CSafeDumper` retain safe construction and atomic replacement
+while avoiding the slow pure-Python parser/emitter. Existing saved schemas and
+all frozen artifacts remain unchanged; a subsequent save may change YAML formatting.
+
+The five new regressions cover held reads, writes and response refreshes with
+concurrent HTTP access, and concurrent identity persistence with/without writer
+cancellation. The dashboard, runtime and configuration focused suites pass.
+Full release checks, isolated large-configuration measurements, and deployment
+verification are reported with the final release identity in the task handover.

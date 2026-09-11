@@ -1332,6 +1332,61 @@ def test_start_acknowledges_before_slow_qualification_and_survives_page_reload(t
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("cancel_writer", [False, True])
+def test_pause_preserves_identity_during_inflight_save(tmp_path, monkeypatch, cancel_writer):
+    import threading
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        writing = asyncio.Event()
+        paused = asyncio.Event()
+        release = threading.Event()
+
+        class PausingRuntime(RecordingRuntime):
+            def pause_new_entries(self, run_id):
+                paused.set()
+                return self.status()
+
+        runs_path, broker_path = _write_control_files(tmp_path)
+        controls = RunControlService(runs_path, broker_path, runtime=PausingRuntime())
+        config = load_runs_config(runs_path)
+        new_run = config.runs[1].model_copy(update={"run_id": "NEW-PAPER"})
+        updated = config.model_copy(update={"runs": (*config.runs, new_run)})
+        original = controls._write_runs
+        writes = []
+
+        def held(config):
+            writes.append(config)
+            if len(writes) == 1:
+                loop.call_soon_threadsafe(writing.set)
+                assert release.wait(10)
+            original(config)
+
+        monkeypatch.setattr(controls, "_write_runs", held)
+        saving = asyncio.create_task(controls._save_runs(updated))
+        await asyncio.wait_for(writing.wait(), 5)
+        if cancel_writer:
+            saving.cancel()
+        pausing = asyncio.create_task(controls.disable_run("US-SH-LIVE"))
+        try:
+            await asyncio.wait_for(paused.wait(), 5)
+            assert len(writes) == 1
+            assert not pausing.done()
+        finally:
+            release.set()
+        if cancel_writer:
+            with pytest.raises(asyncio.CancelledError):
+                await saving
+        else:
+            await saving
+        assert (await pausing).persisted
+        saved = load_runs_config(runs_path)
+        assert [r.run_id for r in saved.runs] == [r.run_id for r in updated.runs]
+        assert not next(r for r in saved.runs if r.run_id == "US-SH-LIVE").enabled
+
+    asyncio.run(scenario())
+
+
 def test_universe_builder_default_risk_is_valid_for_html_number_input(
     tmp_path: Path,
 ) -> None:
@@ -1529,3 +1584,71 @@ def test_control_exception_returns_safe_correlated_error(tmp_path, monkeypatch):
     assert "NEVER-EXPOSE" not in response.text
     assert "reference" in response.json()["detail"]
     assert "Control" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("phase", ["read", "write", "response"])
+def test_pause_gates_before_disk_work_and_keeps_http_responsive(tmp_path, monkeypatch, phase):
+    import threading
+
+    import stocker_dashboard.app as app_module
+    import stocker_dashboard.controls as controls_module
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        loop_thread = threading.get_ident()
+        paused = asyncio.Event()
+        entered = asyncio.Event()
+        release = threading.Event()
+
+        class PausingRuntime(RecordingRuntime):
+            def pause_new_entries(self, run_id):
+                paused.set()
+                return self.status()
+
+        runs_path, broker_path = _write_control_files(tmp_path)
+        service = _seed_authoritative_state(tmp_path)
+        controls = RunControlService(runs_path, broker_path, runtime=PausingRuntime())
+        if phase == "write":
+            owner, name = controls, "_write_runs"
+        else:
+            owner = controls_module if phase == "read" else app_module
+            name = "load_runs_config"
+        original = getattr(owner, name)
+
+        def held(*args, **kwargs):
+            assert paused.is_set(), "Pause must fence entry before reading configuration"
+            assert threading.get_ident() != loop_thread, "YAML work blocked the runtime loop"
+            loop.call_soon_threadsafe(entered.set)
+            assert release.wait(10), "Test did not release disk work"
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(owner, name, held)
+        app = create_dashboard_app(service, controls)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+        ) as client:
+            request = asyncio.create_task(client.post("/api/runs/US-SH-LIVE/disable"))
+            waiting = asyncio.create_task(entered.wait())
+            try:
+                done, _ = await asyncio.wait(
+                    [request, waiting], timeout=10, return_when=asyncio.FIRST_COMPLETED
+                )
+                if request in done:
+                    await request  # Surface the exact blocked-thread/pause-order assertion.
+                assert waiting in done
+                assert paused.is_set()
+                response = await asyncio.wait_for(client.get("/static/dashboard.css"), 5)
+                assert response.status_code == 200
+            finally:
+                release.set()
+                waiting.cancel()
+            response = await request
+            assert response.status_code == 200
+            assert response.json()["persisted"]
+            assert response.json()["runtime_applied"]
+            assert not next(
+                r for r in load_runs_config(runs_path).runs if r.run_id == "US-SH-LIVE"
+            ).enabled
+            assert not next(r for r in service.config.runs if r.run_id == "US-SH-LIVE").enabled
+
+    asyncio.run(scenario())

@@ -78,6 +78,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
     start_task: asyncio.Task[None] | None = None
     start_status: dict[str, Any] = {"status": "IDLE"}
     start_request: tuple[Environment, UniverseRunBody] | None = None
+    config_refresh_lock = asyncio.Lock()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -180,7 +181,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
         body: UniverseRunBody, environment: Environment
     ) -> dict[str, object]:
         try:
-            return changed(
+            return await changed(
                 await controls.add_universe_run(
                     market_id=body.market_id,
                     strategy_id=body.strategy_id,
@@ -269,14 +270,14 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
     @app.post("/api/universe-runs/{run_id}/disable")
     async def disable_universe_run(run_id: str) -> dict[str, object]:
         try:
-            return changed(await controls.disable_run(run_id))
+            return await changed(await controls.disable_run(run_id))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.post("/api/universe-runs/{run_id}/enable")
     async def enable_universe_run(run_id: str, body: ConfirmationBody) -> dict[str, object]:
         try:
-            return changed(await controls.enable_run(run_id, confirmation=confirmation(body)))
+            return await changed(await controls.enable_run(run_id, confirmation=confirmation(body)))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
@@ -374,30 +375,35 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             return None
         return LiveConfirmation(body.confirmed, body.target_account)
 
-    def changed(result: ControlResult) -> dict[str, object]:
-        reads.config = load_runs_config(controls.runs_config_path)
+    async def refresh_config() -> None:
+        # Prevent an older slow load from replacing a newer displayed configuration.
+        async with config_refresh_lock:
+            reads.config = await asyncio.to_thread(load_runs_config, controls.runs_config_path)
+
+    async def changed(result: ControlResult) -> dict[str, object]:
         if not result.persisted:
             raise HTTPException(status_code=503, detail=result.detail)
-        return result.as_dict()
+        await refresh_config()
+        return await asyncio.to_thread(result.as_dict)
 
     @app.post("/api/runs/{run_id}/enable")
     async def enable(run_id: str, body: ConfirmationBody) -> dict[str, Any]:
         try:
-            return changed(await controls.enable_run(run_id, confirmation=confirmation(body)))
+            return await changed(await controls.enable_run(run_id, confirmation=confirmation(body)))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.post("/api/runs/{run_id}/disable")
     async def disable(run_id: str) -> dict[str, Any]:
         try:
-            return changed(await controls.disable_run(run_id))
+            return await changed(await controls.disable_run(run_id))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.put("/api/runs/{run_id}")
     async def update(run_id: str, body: RunUpdateBody) -> dict[str, Any]:
         try:
-            return changed(
+            return await changed(
                 await controls.update_run_config(
                     run_id,
                     universe=body.universe,
@@ -414,7 +420,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
     @app.post("/api/runs/{run_id}/environment")
     async def environment(run_id: str, body: EnvironmentBody) -> dict[str, Any]:
         try:
-            return changed(
+            return await changed(
                 await controls.change_execution_environment(
                     run_id, body.environment, confirmation=confirmation(body)
                 )
@@ -444,7 +450,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
                 currency=body.currency,
                 security_type=body.security_type,
             )
-            reads.config = load_runs_config(controls.runs_config_path)
+            await refresh_config()
             return result.as_dict()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=safe_error(exc)) from exc

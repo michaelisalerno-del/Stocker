@@ -98,6 +98,7 @@ class RunControlService:
         self.ibkr_config_path = Path(ibkr_config_path)
         self.runtime = runtime
         self._lock = asyncio.Lock()
+        self._storage_lock = asyncio.Lock()
         self._pause_latches: set[str] = set()
         self._pause_revisions: dict[str, int] = {}
         self._builder = UniverseRunBuilder()
@@ -154,7 +155,7 @@ class RunControlService:
         )
         requested_revisions = dict(self._pause_revisions)
         async with self._lock:
-            current = load_runs_config(self.runs_config_path)
+            current = await asyncio.to_thread(load_runs_config, self.runs_config_path)
             updated, run = self._builder.add(
                 current,
                 market_id=market_id,
@@ -194,13 +195,13 @@ class RunControlService:
                     run,
                 )
             if self.runtime is None:
-                self._write_runs(updated)
+                await self._save_runs(updated)
                 return ControlResult(
                     True, False, ApplyMode.RESTART_RUN, "Saved; active runtime unavailable", run=run
                 )
             # Persist the identity before any runtime activation. Failure cannot
             # leave an enabled identity that disappears at restart.
-            self._write_runs(updated)
+            await self._save_runs(updated)
             result = await self._apply_runs(updated, {run.run_id}, ApplyMode.RESTART_RUN, run=run)
             if not result.runtime_applied:
                 return ControlResult(
@@ -218,7 +219,7 @@ class RunControlService:
     ) -> ControlResult:
         requested_revision = self._pause_revisions.get(run_id, 0)
         async with self._lock:
-            config, current = self._config_and_run(run_id)
+            config, current = await asyncio.to_thread(self._config_and_run, run_id)
             validate_run_method(current)
             if current.environment is Environment.LIVE:
                 self._confirm_live(current, confirmation)
@@ -237,15 +238,19 @@ class RunControlService:
         pause = getattr(self.runtime, "pause_new_entries", None)
         if pause is None:
             async with self._lock:
-                config, current = self._config_and_run(run_id)
+                config, current = await asyncio.to_thread(self._config_and_run, run_id)
                 return await self._replace_run(config, current, ApplyMode.HOT_APPLY, enabled=False)
-        config, current = self._config_and_run(run_id)
+        status = pause(run_id)
         self._pause_latches.add(run_id)
         self._pause_revisions[run_id] = self._pause_revisions.get(run_id, 0) + 1
-        status = pause(run_id)
-        paused = current.model_copy(update={"enabled": False})
+        paused = None
         try:
-            self._write_runs(config)
+            # Serialize only storage, never wait for a command preparing with IBKR.
+            # Read after prior writes finish so a concurrent new identity is retained.
+            async with self._storage_lock:
+                config, current = await asyncio.to_thread(self._config_and_run, run_id)
+                paused = current.model_copy(update={"enabled": False})
+                await self._finish_runs_write(config)
         except Exception as exc:
             return ControlResult(
                 False,
@@ -291,7 +296,7 @@ class RunControlService:
         from stocker_execution.discovery import DiscoveryStore
 
         async with self._lock:
-            _config, run = self._config_and_run(run_id)
+            _config, run = await asyncio.to_thread(self._config_and_run, run_id)
             validate_run_method(run)
             if not run.uses_dynamic_discovery:
                 raise ValueError("This run does not use dynamic discovery")
@@ -317,7 +322,7 @@ class RunControlService:
         confirmation: LiveConfirmation | None = None,
     ) -> ControlResult:
         async with self._lock:
-            config, current = self._config_and_run(run_id)
+            config, current = await asyncio.to_thread(self._config_and_run, run_id)
             if risk_per_trade <= 0 or risk_per_trade > 1:
                 raise ValueError("risk_per_trade must be greater than zero and no more than one")
             if max_concurrent_positions is not None and max_concurrent_positions <= 0:
@@ -359,7 +364,7 @@ class RunControlService:
         confirmation: LiveConfirmation | None = None,
     ) -> ControlResult:
         async with self._lock:
-            config, current = self._config_and_run(run_id)
+            config, current = await asyncio.to_thread(self._config_and_run, run_id)
             if current.market_id is not None and environment is not current.environment:
                 raise ValueError(
                     "execution environment is run identity; create the separate PAPER or LIVE run"
@@ -426,7 +431,7 @@ class RunControlService:
             normalized_id = universe_id.strip().upper()
             if not normalized_id.startswith("CUSTOM"):
                 raise ValueError("Only CUSTOM universes may be edited")
-            config = load_runs_config(self.runs_config_path)
+            config = await asyncio.to_thread(load_runs_config, self.runs_config_path)
             existing = next(
                 (item for item in config.universes if item.universe_id == normalized_id), None
             )
@@ -467,7 +472,7 @@ class RunControlService:
                 run.run_id for run in updated.runs if run.universe == normalized_id and run.enabled
             }
             if self.runtime is None:
-                self._write_runs(updated)
+                await self._save_runs(updated)
                 return ControlResult(
                     True,
                     False,
@@ -544,7 +549,7 @@ class RunControlService:
             runs=runs,
         )
         if self.runtime is None:
-            self._write_runs(validated)
+            await self._save_runs(validated)
             return ControlResult(
                 True,
                 False,
@@ -675,7 +680,7 @@ class RunControlService:
         result: ControlResult,
     ) -> ControlResult:
         try:
-            self._write_runs(updated)
+            await self._save_runs(updated)
         except Exception as persistence_error:
             if self.runtime is None:
                 raise
@@ -736,6 +741,19 @@ class RunControlService:
             raise ValueError("IBKR config must contain a YAML mapping")
         return raw
 
+    async def _save_runs(self, config: RunsConfig) -> None:
+        async with self._storage_lock:
+            await self._finish_runs_write(config)
+
+    async def _finish_runs_write(self, config: RunsConfig) -> None:
+        # Cancellation cannot release the storage lock while a worker still writes.
+        task = asyncio.create_task(asyncio.to_thread(self._write_runs, config))
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await task
+            raise
+
     def _write_runs(self, config: RunsConfig) -> None:
         config = self._with_pauses(config)
         self._write_yaml(
@@ -770,7 +788,7 @@ class RunControlService:
         )
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                yaml.safe_dump(payload, handle, sort_keys=False)
+                yaml.dump(payload, handle, Dumper=yaml.CSafeDumper, sort_keys=False)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, path)

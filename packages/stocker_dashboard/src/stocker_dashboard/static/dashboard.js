@@ -10,6 +10,7 @@ let pageRevision = 0;
 let headerRevision = 0;
 let renderingPage = false;
 const readControllers = new Set();
+const pendingRunControls = new Set();
 const INTERACTIVE_ROUTES = new Set(["universes", "candidates", "trades", "settings"]);
 
 const RUN_COLUMNS = [
@@ -242,13 +243,42 @@ async function universesPage(refreshing = false) {
 
 function bindUniverseControls() {
   main.querySelectorAll("[data-universe-control]").forEach((button) => button.addEventListener("click", async () => {
+    const runId = button.dataset.runId, control = button.dataset.universeControl;
+    if (!beginRunControl(runId, control)) return;
     try {
       let body = {};
       if (button.dataset.environment === "LIVE" && button.dataset.universeControl === "enable") body = await confirmLive(button.dataset.runId);
       lastOutcome = await api(`/api/universe-runs/${encodeURIComponent(button.dataset.runId)}/${button.dataset.universeControl}`, { method: "POST", body: JSON.stringify(body) });
       await render();
     } catch (error) { if (error.message !== "cancelled") alert(error.message); }
+    finally { endRunControl(runId, control); }
   }));
+  refreshRunControlButtons();
+}
+
+function refreshRunControlButtons() {
+  main.querySelectorAll("[data-control], [data-universe-control]").forEach(button => {
+    const control = button.dataset.control || button.dataset.universeControl;
+    if (!["enable", "disable"].includes(control)) return;
+    if (!button.dataset.idleLabel) {
+      button.dataset.idleLabel = button.textContent;
+      button.dataset.idleDisabled = String(button.disabled);
+    }
+    const pending = pendingRunControls.has(`${button.dataset.runId}:${control}`);
+    button.disabled = pending || button.dataset.idleDisabled === "true";
+    button.textContent = pending ? (control === "enable" ? "Enabling…" : "Pausing…") : button.dataset.idleLabel;
+  });
+}
+function beginRunControl(runId, control) {
+  const key = `${runId}:${control}`;
+  if (pendingRunControls.has(key)) return false;
+  pendingRunControls.add(key);
+  refreshRunControlButtons();
+  return true;
+}
+function endRunControl(runId, control) {
+  pendingRunControls.delete(`${runId}:${control}`);
+  refreshRunControlButtons();
 }
 
 function showRunStartStatus() {
@@ -336,10 +366,15 @@ async function runDetail(runId) {
     <section class="section"><div class="section-head"><h2>Run configuration</h2></div><div class="detail-grid">${grid}</div><details><summary>Method specification</summary><pre>${esc(JSON.stringify({ method: run.strategy_id, version: run.strategy_version, spec_hash: run.method_spec_hash, specification: run.method_spec }, null, 2))}</pre><a href="/api/runs/${encodeURIComponent(runId)}/provenance" download="run-provenance.json">Download full run audit record</a></details></section>
     <section class="section"><div class="section-head"><h2>Preparation and evaluation</h2></div><p class="notice">${esc(evaluationStatus)}</p><p role="status">${esc(preparation)}</p><p role="status">${esc(downloads)}</p><p class="muted">${run.last_checkpoint ? `Results below are from ${esc(new Date(run.last_checkpoint).toLocaleString())}.` : "No checkpoint results yet."} Eligibility counts broker-qualified stocks; evaluation totals update as batches finish.</p><div class="funnel">${funnel}</div><p><a href="/candidates?run=${encodeURIComponent(runId)}&status=READY">Browse data-ready stocks</a> · <a href="/candidates?run=${encodeURIComponent(runId)}&status=WAITING_FOR_ENTRY">View armed candidates</a></p></section>
     ${acquisitionPanel}${selectionPanel}${discoveryPanel}${activityPanel}<section class="section"><div class="section-head"><h2>Performance</h2><div class="tabs">${periods}</div></div><div class="metric-strip performance-strip">${metrics}</div>${table(historyColumns, performance.history)}</section>`;
-  main.querySelectorAll("[data-control]").forEach((button) => button.addEventListener("click", () => runControl(run, button.dataset.control)));
+  main.querySelectorAll("[data-control]").forEach((button) => {
+    button.dataset.runId = run.run_id;
+    button.addEventListener("click", () => runControl(run, button.dataset.control));
+  });
+  refreshRunControlButtons();
   main.querySelectorAll("[data-performance-period]").forEach((button) => button.addEventListener("click", () => { location.href = `/runs?run=${encodeURIComponent(runId)}&period=${button.dataset.performancePeriod}`; }));
 }
 async function runControl(run, control) {
+  if (!beginRunControl(run.run_id, control)) return;
   try {
     let result = null;
     if (control === "refresh-discovery") result = await api(`/api/runs/${encodeURIComponent(run.run_id)}/discovery/refresh`, { method: "POST" });
@@ -365,6 +400,7 @@ async function runControl(run, control) {
     if (result) lastOutcome = result;
     await render();
   } catch (error) { if (error.message !== "cancelled") alert(error.message); }
+  finally { endRunControl(run.run_id, control); }
 }
 async function confirmLive(runId, proposedRisk = null) {
   const context = await api(`/api/runs/${encodeURIComponent(runId)}/live-confirmation`);

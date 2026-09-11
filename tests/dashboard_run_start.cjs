@@ -58,8 +58,35 @@ const path = require("node:path");
     assert.match(await page.locator("#run-start-status").innerText(), /FAILED: IBKR test failure/);
     assert.equal(await page.getByRole("button", { name: "Start PAPER run" }).isDisabled(), false);
     assert(await page.getByRole("button", { name: "Add to LIVE" }).isDisabled());
+    let enabled = false, controlPosts = 0, releaseControl;
+    const controlPending = new Promise(resolve => { releaseControl = resolve; });
+    await page.route("http://stocker.test/api/universe-runs", route => route.fulfill({ json: {
+      PAPER: [{run_id: "test", environment: "PAPER", enabled, status: enabled ? "STARTING" : "DISABLED", display_name: "Test run"}], LIVE: []
+    }}));
+    await page.route("http://stocker.test/api/universe-runs/test/enable", async route => {
+      controlPosts++;
+      await controlPending;
+      enabled = true;
+      await route.fulfill({json: {persisted: true, runtime_applied: true, apply_mode: "HOT_APPLY", detail: "Saved; preparing (not ready)"}});
+    });
+    await page.evaluate(() => refreshCurrentPage());
+    await page.getByRole("button", {name: "Re-enable PAPER", exact: true}).click();
+    const enabling = page.getByRole("button", {name: "Enabling…", exact: true});
+    await enabling.waitFor({timeout: 3000});
+    assert(await enabling.isDisabled());
+    await page.evaluate(() => refreshCurrentPage());
+    assert(await enabling.isDisabled(), "Refresh must preserve pending command feedback");
+    await enabling.dispatchEvent("click");
+    enabled = true;
+    await page.evaluate(() => refreshCurrentPage());
+    assert.equal(await page.getByRole("button", {name: "Pause new entries", exact: true}).isDisabled(), false);
+    releaseControl();
+    await page.getByRole("button", {name: "Pause new entries", exact: true}).waitFor();
+    await page.getByText("Saved; preparing (not ready)", {exact: false}).waitFor();
+    assert.equal(controlPosts, 1);
+    assert.match(await page.locator("main").innerText(), /preparing \(not ready\)/);
     assert.deepEqual(errors, []);
-    console.log("PASS: start feedback, duplicate prevention, reload, visible failure, PAPER-only");
+    console.log("PASS: start/enable feedback, duplicate prevention across refresh, pause available during enable, visible failure, PAPER-only");
   } finally {
     await browser.close();
   }

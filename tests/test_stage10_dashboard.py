@@ -1702,3 +1702,32 @@ def test_late_control_result_cannot_publish_older_saved_configuration(tmp_path, 
             assert service.config == new
 
     asyncio.run(scenario())
+
+
+def test_saved_yaml_shares_only_identical_memberships_and_preserves_history(tmp_path):
+    config = _config()
+    universe = config.universes[0]
+    different = universe.model_copy(
+        update={
+            "universe_id": "CUSTOM-GBP",
+            "members": tuple(m.model_copy(update={"currency": "GBP"}) for m in universe.members),
+        }
+    )
+    config = config.model_copy(
+        update={
+            "universes": (*config.universes, different),
+            "runs": tuple(
+                r.model_copy(update={"universe_snapshot": universe}) for r in config.runs
+            ),
+        }
+    )
+    path = tmp_path / "runs.yaml"
+    controls = RunControlService(path, tmp_path / "broker.yaml")
+    controls._write_runs(config)
+    text = path.read_text()
+    assert text.count("symbol: NVDA") == 2, "Repeated identical snapshots should use YAML aliases"
+    assert "&id" in text and "*id" in text
+    assert load_runs_config(path) == config
+    # Typed snapshots remain independent after loading the YAML references.
+    loaded = load_runs_config(path)
+    assert loaded.runs[0].universe_snapshot is not loaded.runs[1].universe_snapshot

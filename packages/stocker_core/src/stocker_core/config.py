@@ -1,5 +1,6 @@
 """Typed configuration loading for research and execution processes."""
 
+import json
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -299,7 +300,7 @@ def runs_config_storage_payload(
 
     payload = config.model_dump(mode="json")
     if named_universe_snapshot is None:
-        return payload
+        return _share_stored_memberships(payload)
     named = {
         universe.universe_id: universe
         for universe in config.universes
@@ -316,12 +317,29 @@ def runs_config_storage_payload(
         if source is not None and universe.members == source.members:
             item["members"] = []
         persisted_universes.append(item)
-    return {
-        "session_hard_hv_round_trip_cost_bps": config.session_hard_hv_round_trip_cost_bps,
-        "named_universe_snapshot": named_universe_snapshot,
-        "universes": persisted_universes,
-        "runs": payload["runs"],
-    }
+    return _share_stored_memberships(
+        {
+            "session_hard_hv_round_trip_cost_bps": config.session_hard_hv_round_trip_cost_bps,
+            "named_universe_snapshot": named_universe_snapshot,
+            "universes": persisted_universes,
+            "runs": payload["runs"],
+        }
+    )
+
+
+def _share_stored_memberships(payload: dict[str, Any]) -> dict[str, object]:
+    """Let YAML aliases encode equal lists without removing any snapshot values."""
+    memberships: dict[str, list[dict[str, Any]]] = {}
+    universes = [
+        *payload["universes"],
+        *(run["universe_snapshot"] for run in payload["runs"] if run.get("universe_snapshot")),
+    ]
+    for universe in universes:
+        members = universe.get("members")
+        if members:
+            identity = json.dumps(members, sort_keys=True, separators=(",", ":"))
+            universe["members"] = memberships.setdefault(identity, members)
+    return payload
 
 
 def load_ibkr_config(path: str | Path, environment: Environment) -> IbkrConfig:

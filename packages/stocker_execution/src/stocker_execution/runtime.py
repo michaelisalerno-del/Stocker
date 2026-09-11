@@ -403,6 +403,11 @@ Qualifier = Callable[[Sequence[RunInstance]], Awaitable[Stage5QualificationResul
 class ExchangeSessionResolver:
     """Resolve a run's configured exchange day without using machine-local time."""
 
+    def __init__(self) -> None:
+        # The installed calendar is static. Retain only its latest requested day;
+        # clock state and configured window clipping are still resolved each call.
+        self._schedules: dict[str, tuple[date, Any]] = {}
+
     def resolve(self, run: RunConfig, now: datetime) -> MarketSession:
         aware_now = _aware(now)
         if run.session is None:
@@ -411,8 +416,14 @@ class ExchangeSessionResolver:
         timezone = ZoneInfo(str(window.timezone))
         local_now = aware_now.astimezone(timezone)
         session = local_now.date()
-        calendar = get_market_calendar(str(window.calendar))
-        schedule = calendar.schedule(start_date=session, end_date=session)
+        calendar_name = str(window.calendar)
+        cached = self._schedules.get(calendar_name)
+        if cached is None or cached[0] != session:
+            calendar = get_market_calendar(calendar_name)
+            schedule = calendar.schedule(start_date=session, end_date=session)
+            self._schedules[calendar_name] = (session, schedule)
+        else:
+            schedule = cached[1]
         if schedule.empty:
             return MarketSession(session, MarketSessionState.CLOSED_DAY, None, None)
         configured_open = datetime.combine(session, window.start, tzinfo=timezone).astimezone(UTC)

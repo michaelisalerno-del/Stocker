@@ -311,3 +311,28 @@ pause; it gated entries in 0.0102 seconds but acknowledged in 27.77 seconds. Thi
 exposed the redundant post-save read removed by the saved-snapshot response.
 Full release checks, isolated large-configuration measurements, and deployment
 verification are reported with the final release identity in the task handover.
+
+## Follow-up: remaining cycle stalls and slow Enable
+
+On `cd091a8`, a ten-second stack profile found 270 of 314 samples inside
+exchange-calendar resolution; each cycle reconstructed the same calendar/day
+several times. `ExchangeSessionResolver` now retains the latest schedule per
+calendar, while recalculating the current clock state, configured window and slots.
+Regressions cover intra-day transitions, changed windows, holidays, half-days and
+US daylight saving. Existing market and frozen method calculations are unchanged.
+
+The saved 8.9 MB configuration contained nine identical 7,497-member lists and
+three copies of each of two other lists. Storage now shares exactly equal member
+lists using standard YAML anchors/aliases. No identities, member ordering, snapshot
+values or provenance are removed. Both the old and new representation load through
+the existing schema; typed snapshots are independent after loading. Atomic writes
+remain in place. Operators should edit risk and run controls through the dashboard,
+and should not manually edit frozen membership anchors. Code rollback can read the
+new YAML representation without a database migration.
+
+The browser immediately labels pending controls, suppresses duplicate operations
+across panel refreshes, and leaves Pause available while Enable is pending. API
+timeout uncertainty and broker readiness remain distinct from a saved change.
+Both Python regressions and the browser pending-state regression failed before
+their fixes and passed afterward. Release validation includes an offline copy of
+the real saved configuration and a disconnected enable/pause benchmark.

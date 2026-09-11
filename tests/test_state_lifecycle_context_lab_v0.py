@@ -41,9 +41,7 @@ def _trade_row(
 def _dense_rows(*, symbol: str, session_date: str, compressed: bool) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for index in range(12):
-        timestamp = pd.Timestamp(f"{session_date}T14:30:00Z") + pd.Timedelta(
-            minutes=index * 5
-        )
+        timestamp = pd.Timestamp(f"{session_date}T14:30:00Z") + pd.Timedelta(minutes=index * 5)
         prior = index < 10
         compression = "compressed" if compressed or not prior else "expanded"
         efficiency = "choppy_efficiency" if compressed or not prior else "directional_efficiency"
@@ -339,9 +337,8 @@ def test_numeric_scan_counts_match_csv_replayed_threshold_flags(tmp_path: Path) 
     csv_path = tmp_path / "trade_context_features.csv"
     _write_csv(csv_path, trades)
     reloaded = pd.read_csv(csv_path)
-    replay_mask = (
-        reloaded["personality"].eq("active_liquidation")
-        & (pd.to_numeric(reloaded[feature], errors="coerce") <= float(boundary_row["threshold"]))
+    replay_mask = reloaded["personality"].eq("active_liquidation") & (
+        pd.to_numeric(reloaded[feature], errors="coerce") <= float(boundary_row["threshold"])
     )
 
     assert int(boundary_row["train_count"]) == int(

@@ -173,11 +173,21 @@ def test_overview_surfaces_tick_capacity_and_incomplete_checkpoint(tmp_path):
     status = _runtime_status()
     service.runtime_status = lambda: replace(
         status,
-        ibkr_resources=replace(resource, capacity_rejects_today=12,
-                               last_resource_error="10190: tick-by-tick limit reached"),
-        runs=(replace(status.runs[0], evaluation_state="INCOMPLETE",
-                      evaluation_completed=4, evaluation_total=100,
-                      trade_stream_unavailable=95), *status.runs[1:]),
+        ibkr_resources=replace(
+            resource,
+            capacity_rejects_today=12,
+            last_resource_error="10190: tick-by-tick limit reached",
+        ),
+        runs=(
+            replace(
+                status.runs[0],
+                evaluation_state="INCOMPLETE",
+                evaluation_completed=4,
+                evaluation_total=100,
+                trade_stream_unavailable=95,
+            ),
+            *status.runs[1:],
+        ),
     )
     overview = service.overview()
     assert overview["system"] == "ATTENTION"
@@ -457,14 +467,19 @@ def test_system_resource_view_is_read_only_and_labels_stocker_budget(tmp_path: P
     assert first["ibkr_account_line_limit"] is None
     assert first["active_market_data_lines"] == 0
     latest = replace(
-        status(), ibkr_resources=replace(
+        status(),
+        ibkr_resources=replace(
             connection.resource_status(), historical_requests_today=123, pending_historical_work=4
-        )
+        ),
     )
     service.runtime_status = lambda: replace(
-        latest, runs=tuple(replace(run, next_checkpoint=None,
-                                  last_scheduled_checkpoint=NOW - timedelta(minutes=10))
-                           for run in latest.runs)
+        latest,
+        runs=tuple(
+            replace(
+                run, next_checkpoint=None, last_scheduled_checkpoint=NOW - timedelta(minutes=10)
+            )
+            for run in latest.runs
+        ),
     )
     detail = service.run_detail("US-SH-LIVE")
     assert detail["evaluation_status"] == "NO_MORE_CHECKPOINTS_TODAY"

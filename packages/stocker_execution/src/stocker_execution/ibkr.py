@@ -380,7 +380,8 @@ class IbkrConnection:
         self._scanner_timing_installed = False
         self.audit_history_lock = asyncio.Lock()
         self._history_request_context: ContextVar[list[int] | None] = ContextVar(
-            "ibkr_history_request", default=None)
+            "ibkr_history_request", default=None
+        )
         self._history_capture_installed = False
         self._qualified_stock_cache: dict[tuple[str, str, str, str], QualifiedInstrument] = {}
         self._scanner_stock_type_cache: dict[int, str] = {}
@@ -529,7 +530,8 @@ class IbkrConnection:
             )
         )
         entitlement = code != 492 and (
-            code == 354 or any(
+            code == 354
+            or any(
                 phrase in normalized
                 for phrase in ("not subscribed", "market data permission", "not entitled")
             )
@@ -1020,7 +1022,8 @@ class IbkrConnection:
             # ib_async creates a zero-valued placeholder before the actual report arrives.
             commission = (
                 _optional_number(getattr(report, "commission", None))
-                if getattr(report, "execId", "") == str(execution.execId) else None
+                if getattr(report, "execId", "") == str(execution.execId)
+                else None
             )
             fills.append(
                 BrokerFill(
@@ -1187,7 +1190,8 @@ class IbkrConnection:
         self,
         subscription: object,
         filter_options: list[object] | None = None,
-        *, audit: dict[str, Any] | None = None,
+        *,
+        audit: dict[str, Any] | None = None,
     ) -> _ScannerResult:
         """Collect one scan and guarantee broker-side cancellation on every exit."""
 
@@ -1215,7 +1219,8 @@ class IbkrConnection:
                                 timeout=self.config.request_timeout_seconds,
                             )
                             failures = [
-                                error for error in errors
+                                error
+                                for error in errors
                                 if error.request_id == data_list.reqId
                                 and error.code != 492
                                 and not (
@@ -1223,17 +1228,21 @@ class IbkrConnection:
                                     and "scanner subscription cancelled" in error.message.lower()
                                 )
                                 and not (
-                                    error.code == 165 and not result
+                                    error.code == 165
+                                    and not result
                                     and error.message.lower().endswith("no items retrieved")
                                 )
                             ]
                             if failures:
-                                raise IbkrError("; ".join(
-                                    f"{error.code}: {error.message}" for error in failures
-                                ))
+                                raise IbkrError(
+                                    "; ".join(
+                                        f"{error.code}: {error.message}" for error in failures
+                                    )
+                                )
                             warnings = tuple(
                                 f"IBKR scanner precision warning (492): {e.message}"
-                                for e in errors if e.request_id == data_list.reqId and e.code == 492
+                                for e in errors
+                                if e.request_id == data_list.reqId and e.code == 492
                             )
                             if audit is not None:
                                 audit.update(row_count=len(result), warnings=list(warnings))
@@ -1257,8 +1266,11 @@ class IbkrConnection:
                         timeout=self.config.request_timeout_seconds,
                     )
                 if audit is not None:
-                    audit.update(row_count=len(result), completed_at=datetime.now(UTC).isoformat(),
-                                 timing_note="High-level client; callback times unavailable")
+                    audit.update(
+                        row_count=len(result),
+                        completed_at=datetime.now(UTC).isoformat(),
+                        timing_note="High-level client; callback times unavailable",
+                    )
                 return _ScannerResult(tuple(result))
             finally:
                 self._active_scanners -= 1
@@ -1267,17 +1279,20 @@ class IbkrConnection:
         """Observe existing wrapper callbacks without changing scanner delivery."""
         if self._scanner_timing_installed:
             return
-        for name, field in (("scannerData", "first_response"),
-                            ("scannerDataEnd", "scanner_data_end")):
+        for name, field in (
+            ("scannerData", "first_response"),
+            ("scannerDataEnd", "scanner_data_end"),
+        ):
             original = getattr(wrapper, name, None)
             if not callable(original):
                 continue
-            def observed(*args: Any, _original: Any = original,
-                         _field: str = field) -> Any:
+
+            def observed(*args: Any, _original: Any = original, _field: str = field) -> Any:
                 audit = self._scanner_timings.get(int(args[0]))
                 if audit is not None:
                     audit.setdefault(_field, datetime.now(UTC).isoformat())
                 return _original(*args)
+
             setattr(wrapper, name, observed)
         self._scanner_timing_installed = True
 
@@ -1357,8 +1372,9 @@ class IbkrConnection:
                     )
         descriptions: dict[str, str] = {}
         for element in root.iter():
-            children = {child.tag.rsplit("}", 1)[-1]: (child.text or "").strip()
-                        for child in element}
+            children = {
+                child.tag.rsplit("}", 1)[-1]: (child.text or "").strip() for child in element
+            }
             if children.get("scanCode"):
                 descriptions[children["scanCode"]] = " ".join(
                     children.get(key, "") for key in ("displayName", "name", "scanName")
@@ -1403,7 +1419,8 @@ class IbkrConnection:
                     timeout=self.config.request_timeout_seconds,
                 )
             matching = [
-                item for item in resolved
+                item
+                for item in resolved
                 if getattr(getattr(item, "contract", None), "conId", None) == con_id
                 and getattr(getattr(item, "contract", None), "secType", None) == "STK"
             ]
@@ -1438,27 +1455,41 @@ class IbkrConnection:
                     )
                 contract = cast(Any, details[0]).contract
                 if (
-                    contract.conId <= 0 or contract.secType != "CASH"
-                    or contract.symbol != pair[:3] or contract.currency != pair[3:]
+                    contract.conId <= 0
+                    or contract.secType != "CASH"
+                    or contract.symbol != pair[:3]
+                    or contract.currency != pair[3:]
                 ):
                     raise IbkrError(f"INVALID_CONTRACT: IBKR scanner FX pair {pair}")
                 instrument = QualifiedInstrument(
-                    contract.symbol, contract.conId, contract.exchange or "IDEALPRO",
-                    None, contract.currency, "CASH",
+                    contract.symbol,
+                    contract.conId,
+                    contract.exchange or "IDEALPRO",
+                    None,
+                    contract.currency,
+                    "CASH",
                 )
                 self._discovery_fx_contracts[pair] = instrument
         quote = await self.current_quote(instrument)
         if (
-            quote.bid is None or quote.ask is None or quote.ask < quote.bid
-            or quote.timestamp is None or quote.timestamp.tzinfo is None
+            quote.bid is None
+            or quote.ask is None
+            or quote.ask < quote.bid
+            or quote.timestamp is None
+            or quote.timestamp.tzinfo is None
             or not 0 <= (datetime.now(UTC) - quote.timestamp).total_seconds() <= 120
             or quote.market_data_type != 1
         ):
             raise IbkrError(f"MARKET_DATA_UNAVAILABLE: current two-sided FX quote for {pair}")
         mid = (quote.bid + quote.ask) / 2
         return DiscoveryFx(
-            currency, 1 / mid if inverse else mid, instrument.con_id, pair,
-            quote.bid, quote.ask, quote.timestamp.isoformat(),
+            currency,
+            1 / mid if inverse else mid,
+            instrument.con_id,
+            pair,
+            quote.bid,
+            quote.ask,
+            quote.timestamp.isoformat(),
         )
 
     async def acquisition_scan(
@@ -1471,15 +1502,20 @@ class IbkrConnection:
 
         self._require_connected()
         caps = await self.scanner_capabilities()
-        if (request.unsupported_reason or request.location not in caps.locations
-                or request.scan_code not in caps.scan_codes_for(request.location)
-                or not caps.supports_instrument(request.location, request.instrument)
-                or any(key not in caps.filters_for(request.location)
-                       for key, _ in request.filters)):
+        if (
+            request.unsupported_reason
+            or request.location not in caps.locations
+            or request.scan_code not in caps.scan_codes_for(request.location)
+            or not caps.supports_instrument(request.location, request.instrument)
+            or any(key not in caps.filters_for(request.location) for key, _ in request.filters)
+        ):
             raise IbkrError(request.unsupported_reason or "SCANNER_COMPONENT_UNSUPPORTED")
-        subscription = ScannerSubscription(numberOfRows=request.rows, instrument=request.instrument,
-                                           locationCode=request.location,
-                                           scanCode=request.scan_code)
+        subscription = ScannerSubscription(
+            numberOfRows=request.rows,
+            instrument=request.instrument,
+            locationCode=request.location,
+            scanCode=request.scan_code,
+        )
         filters: list[object] = []
         for key, value in request.filters:
             if key in {"marketCapAbove", "marketCapBelow"}:
@@ -1489,17 +1525,22 @@ class IbkrConnection:
         started = perf_counter()
         try:
             scan = await self._bounded_scanner_data(subscription, filters, audit=audit)
-            return tuple(DiscoveryRow(
-                int(getattr(raw.contractDetails.contract, "conId", 0) or 0),
-                str(getattr(raw.contractDetails.contract, "symbol", "")).upper(),
-                str(getattr(raw.contractDetails.contract, "exchange", "") or "SMART"),
-                getattr(raw.contractDetails.contract, "primaryExchange", None) or None,
-                str(getattr(raw.contractDetails.contract, "currency", "")).upper(),
-                str(getattr(raw.contractDetails.contract, "secType", "")).upper(),
-                int(getattr(raw, "rank", -1)),
-                {"stock_type": str(getattr(raw.contractDetails, "stockType", "")),
-                 "warning": "; ".join(scan.warnings)},
-            ) for raw in cast(Sequence[Any], scan.rows))
+            return tuple(
+                DiscoveryRow(
+                    int(getattr(raw.contractDetails.contract, "conId", 0) or 0),
+                    str(getattr(raw.contractDetails.contract, "symbol", "")).upper(),
+                    str(getattr(raw.contractDetails.contract, "exchange", "") or "SMART"),
+                    getattr(raw.contractDetails.contract, "primaryExchange", None) or None,
+                    str(getattr(raw.contractDetails.contract, "currency", "")).upper(),
+                    str(getattr(raw.contractDetails.contract, "secType", "")).upper(),
+                    int(getattr(raw, "rank", -1)),
+                    {
+                        "stock_type": str(getattr(raw.contractDetails, "stockType", "")),
+                        "warning": "; ".join(scan.warnings),
+                    },
+                )
+                for raw in cast(Sequence[Any], scan.rows)
+            )
         except BaseException as exc:
             audit["error"] = sanitize_ibkr_message(exc) or type(exc).__name__
             raise
@@ -1515,8 +1556,10 @@ class IbkrConnection:
 
         self._require_connected()
         subscription = ScannerSubscription(
-            numberOfRows=request.rows, instrument=request.instrument,
-            locationCode=request.location, scanCode=request.scanner,
+            numberOfRows=request.rows,
+            instrument=request.instrument,
+            locationCode=request.location,
+            scanCode=request.scanner,
             stockTypeFilter=request.stock_type,
             aboveVolume=request.minimum_volume,
         )
@@ -1536,26 +1579,28 @@ class IbkrConnection:
         for raw in scan.rows:
             detail = getattr(raw, "contractDetails", None)
             contract = getattr(detail, "contract", None)
-            rows.append(DiscoveryRow(
-                con_id=int(getattr(contract, "conId", 0) or 0),
-                symbol=str(getattr(contract, "symbol", "")).strip().upper(),
-                exchange=str(getattr(contract, "exchange", "") or "SMART").upper(),
-                primary_exchange=getattr(contract, "primaryExchange", None) or None,
-                currency=str(getattr(contract, "currency", "")).upper(),
-                security_type=str(getattr(contract, "secType", "")).upper(),
-                raw_rank=int(getattr(raw, "rank", -1)),
-                metadata={
-                    "stock_type": str(getattr(detail, "stockType", "")),
-                    "long_name": str(getattr(detail, "longName", "")),
-                    "trading_class": str(getattr(contract, "tradingClass", "")),
-                    "local_symbol": str(getattr(contract, "localSymbol", "")),
-                    "distance": str(getattr(raw, "distance", "")),
-                    "benchmark": str(getattr(raw, "benchmark", "")),
-                    "projection": str(getattr(raw, "projection", "")),
-                    "legs": str(getattr(raw, "legsStr", "")),
-                    "warning": "; ".join(scan.warnings),
-                },
-            ))
+            rows.append(
+                DiscoveryRow(
+                    con_id=int(getattr(contract, "conId", 0) or 0),
+                    symbol=str(getattr(contract, "symbol", "")).strip().upper(),
+                    exchange=str(getattr(contract, "exchange", "") or "SMART").upper(),
+                    primary_exchange=getattr(contract, "primaryExchange", None) or None,
+                    currency=str(getattr(contract, "currency", "")).upper(),
+                    security_type=str(getattr(contract, "secType", "")).upper(),
+                    raw_rank=int(getattr(raw, "rank", -1)),
+                    metadata={
+                        "stock_type": str(getattr(detail, "stockType", "")),
+                        "long_name": str(getattr(detail, "longName", "")),
+                        "trading_class": str(getattr(contract, "tradingClass", "")),
+                        "local_symbol": str(getattr(contract, "localSymbol", "")),
+                        "distance": str(getattr(raw, "distance", "")),
+                        "benchmark": str(getattr(raw, "benchmark", "")),
+                        "projection": str(getattr(raw, "projection", "")),
+                        "legs": str(getattr(raw, "legsStr", "")),
+                        "warning": "; ".join(scan.warnings),
+                    },
+                )
+            )
         return tuple(rows)
 
     async def qualify_discovery_candidate(
@@ -1572,10 +1617,12 @@ class IbkrConnection:
             details = await asyncio.wait_for(
                 self._client.reqContractDetailsAsync(
                     Contract(conId=row.con_id, exchange=row.exchange)
-                ), timeout=self.config.request_timeout_seconds,
+                ),
+                timeout=self.config.request_timeout_seconds,
             )
             matching = [
-                cast(Any, detail) for detail in details
+                cast(Any, detail)
+                for detail in details
                 if getattr(getattr(detail, "contract", None), "conId", None) == row.con_id
             ]
             if len(matching) != 1:
@@ -1588,10 +1635,12 @@ class IbkrConnection:
             if not stock_type:
                 raise IbkrError(f"MARKET_DATA_UNAVAILABLE: classification for conId {row.con_id}")
             instrument = QualifiedInstrument(
-                symbol=contract.symbol, con_id=contract.conId,
+                symbol=contract.symbol,
+                con_id=contract.conId,
                 exchange=contract.exchange or "SMART",
                 primary_exchange=contract.primaryExchange or None,
-                currency=contract.currency, security_type=contract.secType,
+                currency=contract.currency,
+                security_type=contract.secType,
             )
             result = instrument, stock_type
             self._discovery_contract_cache[row.con_id] = result
@@ -1667,9 +1716,9 @@ class IbkrConnection:
                 subscription.marketCapBelow = cap.scanner_maximum_millions
         try:
             scan = await self._bounded_scanner_data(subscription, filter_options)
-            rows = tuple(sorted(
-                scan.rows, key=lambda item: int(cast(Any, item).rank)
-            )[:max_results])
+            rows = tuple(
+                sorted(scan.rows, key=lambda item: int(cast(Any, item).rank))[:max_results]
+            )
         except Exception as exc:
             raise IbkrError(
                 f"IBKR {component.value} scanner request failed: {sanitize_ibkr_message(exc)}"
@@ -1679,15 +1728,14 @@ class IbkrConnection:
         classification_warnings: list[str] = []
         if stock_type_filter == "CORP":
             types = await asyncio.gather(
-                *(self._scanner_stock_type(row) for row in rows), return_exceptions=True,
+                *(self._scanner_stock_type(row) for row in rows),
+                return_exceptions=True,
             )
             eligible: list[object] = []
             for raw, stock_type in zip(rows, types, strict=True):
                 symbol = str(cast(Any, raw).contractDetails.contract.symbol)
                 if isinstance(stock_type, BaseException):
-                    classification_warnings.append(
-                        f"{symbol}: STOCK_CLASSIFICATION_UNAVAILABLE"
-                    )
+                    classification_warnings.append(f"{symbol}: STOCK_CLASSIFICATION_UNAVAILABLE")
                 elif stock_type in {"COMMON", "CORP", "ADR", "REIT"}:
                     eligible.append(raw)
                 else:
@@ -1726,11 +1774,13 @@ class IbkrConnection:
         wrapper = getattr(self._client, "wrapper", None)
         start = getattr(wrapper, "startReq", None)
         if wrapper is not None and callable(start) and not self._history_capture_installed:
+
             def capture(key: Any, *args: Any, **options: Any) -> Any:
                 ids = self._history_request_context.get()
                 if ids is not None and isinstance(key, int):
                     ids.append(key)
                 return start(key, *args, **options)
+
             wrapper.startReq = capture
             self._history_capture_installed = True
         ids: list[int] = []
@@ -1741,10 +1791,15 @@ class IbkrConnection:
                 # The outer timeout propagates failure instead of ib_async's empty-list timeout.
                 async with asyncio.timeout(self.config.request_timeout_seconds):
                     result = await self._client.reqHistoricalDataAsync(
-                        contract, **kwargs, timeout=0)
+                        contract, **kwargs, timeout=0
+                    )
                 completed = True
-                failures = [e for e in errors if e.request_id in ids
-                            and not ("no data" in e.message.lower() and e.code in {162, 165})]
+                failures = [
+                    e
+                    for e in errors
+                    if e.request_id in ids
+                    and not ("no data" in e.message.lower() and e.code in {162, 165})
+                ]
                 if failures:
                     raise IbkrError("; ".join(f"{e.code}: {e.message}" for e in failures))
                 return result

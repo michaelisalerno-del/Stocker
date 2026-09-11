@@ -54,24 +54,33 @@ class SessionHardUniverseSearch:
             definition = get_market(run.market_id)
             if run.uses_dynamic_discovery:
                 if len(market.active_bar_starts) <= 3:
-                    failures.append(Stage5IneligibleInstrument(
-                        run.activity_profile_id,
-                        (Stage5Membership(run.run_id, instance.universe.universe_id),),
-                        "SCANNER_NOT_AVAILABLE: no regular session",
-                    ))
+                    failures.append(
+                        Stage5IneligibleInstrument(
+                            run.activity_profile_id,
+                            (Stage5Membership(run.run_id, instance.universe.universe_id),),
+                            "SCANNER_NOT_AVAILABLE: no regular session",
+                        )
+                    )
                     identities[run.run_id] = ()
                     continue
                 document = await self.discovery.discover(
-                    run, definition, market.session, now, market.active_bar_starts[3],
+                    run,
+                    definition,
+                    market.session,
+                    now,
+                    market.active_bar_starts[3],
                 )
                 identities[run.run_id] = watch_identities(document)
                 if document["status"] != "READY":
-                    failures.append(Stage5IneligibleInstrument(
-                        run.activity_profile_id,
-                        (Stage5Membership(run.run_id, instance.universe.universe_id),),
-                        "SCHEDULED" if document["status"] == "SCHEDULED"
-                        else f'{document["status"]}: {document["reason"]}',
-                    ))
+                    failures.append(
+                        Stage5IneligibleInstrument(
+                            run.activity_profile_id,
+                            (Stage5Membership(run.run_id, instance.universe.universe_id),),
+                            "SCHEDULED"
+                            if document["status"] == "SCHEDULED"
+                            else f"{document['status']}: {document['reason']}",
+                        )
+                    )
                 continue
             if len(market.active_bar_starts) <= 3:
                 snapshots[run.run_id] = ActivityShortlistSnapshot(
@@ -102,6 +111,9 @@ class SessionHardUniverseSearch:
                 ),
             )
         result = await qualify_active_runs(
-            self.broker, runs, activity_snapshots=snapshots, candidate_identities=identities,
+            self.broker,
+            runs,
+            activity_snapshots=snapshots,
+            candidate_identities=identities,
         )
         return Stage5QualificationResult(result.requests, (*result.ineligible, *failures))

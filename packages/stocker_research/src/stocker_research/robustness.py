@@ -231,8 +231,7 @@ def build_partial_pass_row(
         "cost_stress_survives_1_5x": bool(cost_stress_survives_1_5x),
         "median_trade_positive": float(median_trade) > 0,
         "median_trade": float(median_trade),
-        "top_split_concentration_ok": float(top_positive_split_share)
-        <= concentration_threshold,
+        "top_split_concentration_ok": float(top_positive_split_share) <= concentration_threshold,
         "top_positive_split_share": float(top_positive_split_share),
         "top_trade_concentration_ok": float(top_winner_share) <= concentration_threshold,
         "top_winner_share": float(top_winner_share),

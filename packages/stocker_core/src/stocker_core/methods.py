@@ -216,19 +216,20 @@ LEGACY_SESSION_HARD = MethodDefinition(
     discovery_profiles=tuple(
         (
             market.market_id,
-            SESSION_HARD_DISCOVERY.model_copy(update={
-                # Advertised Gateway locations; scope NASDAQ/NYSE/TSX before row limits.
-                "scanner_location": {
-                    MarketId.US_NASDAQ: "STK.NASDAQ",
-                    MarketId.US_NYSE: "STK.NYSE",
-                    MarketId.CANADA_TSX: "STK.NA.TSE",
-                }.get(market.market_id, market.scanner_location),
-            }),
+            SESSION_HARD_DISCOVERY.model_copy(
+                update={
+                    # Advertised Gateway locations; scope NASDAQ/NYSE/TSX before row limits.
+                    "scanner_location": {
+                        MarketId.US_NASDAQ: "STK.NASDAQ",
+                        MarketId.US_NYSE: "STK.NYSE",
+                        MarketId.CANADA_TSX: "STK.NA.TSE",
+                    }.get(market.market_id, market.scanner_location),
+                }
+            ),
         )
         for market in MARKET_CATALOGUE
     ),
 )
-
 
 
 def candidate_universe(
@@ -319,9 +320,11 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
     spec = session_hard_candidate_specification(selected)
     spec["method_version"] = SESSION_HARD.version
     spec["universe_acquisition"] = ACQUISITION_EXPERIMENT_V1.model_dump(mode="json")
-    spec["universe_search"] = dict(spec["universe_search"],
+    spec["universe_search"] = dict(
+        spec["universe_search"],
         acquisition="SCANNER_ASSISTED_UNIVERSE_ACQUISITION",
-        acquisition_evidence="UNVALIDATED_UPSTREAM_ACQUISITION")
+        acquisition_evidence="UNVALIDATED_UPSTREAM_ACQUISITION",
+    )
     return spec
 
 

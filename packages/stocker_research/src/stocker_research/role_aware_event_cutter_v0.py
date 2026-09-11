@@ -384,15 +384,13 @@ def _available_filter_features(rows: pd.DataFrame) -> list[str]:
 def _add_derived_features(rows: pd.DataFrame) -> pd.DataFrame:
     data = rows.copy()
     if {"prior_3_bar_return", "prior_6_bar_return"}.issubset(data.columns):
-        data["return_deceleration_3_vs_6"] = (
-            pd.to_numeric(data["prior_3_bar_return"], errors="coerce")
-            - pd.to_numeric(data["prior_6_bar_return"], errors="coerce")
-        )
+        data["return_deceleration_3_vs_6"] = pd.to_numeric(
+            data["prior_3_bar_return"], errors="coerce"
+        ) - pd.to_numeric(data["prior_6_bar_return"], errors="coerce")
     if {"prior_6_bar_return", "prior_12_bar_return"}.issubset(data.columns):
-        data["return_deceleration_6_vs_12"] = (
-            pd.to_numeric(data["prior_6_bar_return"], errors="coerce")
-            - pd.to_numeric(data["prior_12_bar_return"], errors="coerce")
-        )
+        data["return_deceleration_6_vs_12"] = pd.to_numeric(
+            data["prior_6_bar_return"], errors="coerce"
+        ) - pd.to_numeric(data["prior_12_bar_return"], errors="coerce")
     return data
 
 
@@ -912,9 +910,7 @@ def _same_symbol_random_baseline(
             "baseline": "same_symbol_random_same_count",
             "retained_count": int(len(retained_rows)),
             **{
-                key: _nanmedian_or_nan(
-                    [float(row.get(key, math.nan)) for row in sampled_metrics]
-                )
+                key: _nanmedian_or_nan([float(row.get(key, math.nan)) for row in sampled_metrics])
                 for key in keys
             },
         }
@@ -1014,9 +1010,7 @@ def _state_summary_rows(
             test_rows = test_state[
                 pd.to_numeric(test_state[return_column], errors="coerce").notna()
             ]
-            all_rows = state_rows[
-                pd.to_numeric(state_rows[return_column], errors="coerce").notna()
-            ]
+            all_rows = state_rows[pd.to_numeric(state_rows[return_column], errors="coerce").notna()]
             if all_rows.empty:
                 continue
             direction = estimate_role_direction(
@@ -1197,8 +1191,7 @@ def _filter_search(
                 )
                 same_symbol_excess = (
                     (objective_after - same_symbol_objective) * 10_000
-                    if not math.isnan(objective_after)
-                    and not math.isnan(same_symbol_objective)
+                    if not math.isnan(objective_after) and not math.isnan(same_symbol_objective)
                     else math.nan
                 )
                 oos_lift = (
@@ -1208,8 +1201,7 @@ def _filter_search(
                 )
                 concentration_warning = _has_concentration_warning(metrics, config)
                 random_beaten = bool(
-                    not math.isnan(random_excess)
-                    and random_excess >= config.min_random_excess_bps
+                    not math.isnan(random_excess) and random_excess >= config.min_random_excess_bps
                 )
                 same_symbol_random_beaten = bool(
                     not math.isnan(same_symbol_excess)
@@ -1258,12 +1250,8 @@ def _filter_search(
                         "pre_concentration_gate_passed": pre_concentration_gate,
                         "concentration_warning": concentration_warning,
                         "gate_passed": gate_passed,
-                        "selected_decision": selected_decision
-                        if gate_passed
-                        else "reject_filter",
-                        "rejection_reason": ""
-                        if gate_passed
-                        else rejection_reason,
+                        "selected_decision": selected_decision if gate_passed else "reject_filter",
+                        "rejection_reason": "" if gate_passed else rejection_reason,
                     }
                 )
                 concentration_rows.extend(
@@ -1301,52 +1289,51 @@ def build_decision(
             "edge_claimed": False,
         }
     gate_passed = selected_filters["gate_passed"].fillna(False).astype(bool)
-    pre_concentration = selected_filters.get(
-        "pre_concentration_gate_passed",
-        pd.Series(False, index=selected_filters.index),
-    ).fillna(False).astype(bool)
+    pre_concentration = (
+        selected_filters.get(
+            "pre_concentration_gate_passed",
+            pd.Series(False, index=selected_filters.index),
+        )
+        .fillna(False)
+        .astype(bool)
+    )
     passed = selected_filters[gate_passed]
     warning_filter_ids = (
         set(concentration_warnings["filter_id"].astype(str))
         if "filter_id" in concentration_warnings
         else set()
     )
-    passed_concentrated = (
-        not passed.empty
-        and (
-            passed["concentration_warning"].fillna(False).astype(bool).any()
-            or passed["filter_id"].astype(str).isin(warning_filter_ids).any()
-        )
+    passed_concentrated = not passed.empty and (
+        passed["concentration_warning"].fillna(False).astype(bool).any()
+        or passed["filter_id"].astype(str).isin(warning_filter_ids).any()
     )
     pre_concentration_only = selected_filters[pre_concentration & ~gate_passed]
-    pre_concentration_rejected = (
-        not pre_concentration_only.empty
-        and (
-            pre_concentration_only["concentration_warning"].fillna(False).astype(bool).any()
-            or pre_concentration_only["filter_id"].astype(str).isin(warning_filter_ids).any()
-        )
+    pre_concentration_rejected = not pre_concentration_only.empty and (
+        pre_concentration_only["concentration_warning"].fillna(False).astype(bool).any()
+        or pre_concentration_only["filter_id"].astype(str).isin(warning_filter_ids).any()
     )
     if passed_concentrated:
         decision = "reject_concentrated"
         reasons = ["one or more otherwise passing role-aware filters were concentration dominated"]
     elif not passed.empty:
         decisions = set(passed["selected_decision"].astype(str))
-        decision = (
-            "continue_research_mixed_roles" if len(decisions) > 1 else next(iter(decisions))
-        )
+        decision = "continue_research_mixed_roles" if len(decisions) > 1 else next(iter(decisions))
         reasons = ["at least one role-aware filter passed OOS, random, and concentration gates"]
     elif pre_concentration_rejected:
         decision = "reject_concentrated"
         reasons = ["one or more otherwise passing role-aware filters were concentration dominated"]
-    elif not selected_filters.get(
-        "random_beaten",
-        pd.Series(False, index=selected_filters.index),
-    ).fillna(False).astype(bool).any():
+    elif (
+        not selected_filters.get(
+            "random_beaten",
+            pd.Series(False, index=selected_filters.index),
+        )
+        .fillna(False)
+        .astype(bool)
+        .any()
+    ):
         decision = "reject_random_baseline_better"
         reasons = ["candidate filters did not beat random same-count baselines"]
-    elif not (
-        selected_filters["oos_role_objective_lift_bps"].fillna(-np.inf) > 0.0
-    ).any():
+    elif not (selected_filters["oos_role_objective_lift_bps"].fillna(-np.inf) > 0.0).any():
         decision = "reject_no_oos_lift"
         reasons = ["candidate filters did not improve held-out role-aware objective"]
     else:
@@ -1414,11 +1401,15 @@ def _summary_markdown(
     no_trade_states = [
         state for state, info in EVENT_STATE_ROLES.items() if info["role"] == "no_trade_filter"
     ]
-    negative_useful = state_summary[
-        state_summary["expected_direction"].eq(-1)
-        & (state_summary["raw_median_forward_return_after"] < 0.0)
-        & (state_summary["aligned_median_return_after"] > 0.0)
-    ] if not state_summary.empty else pd.DataFrame()
+    negative_useful = (
+        state_summary[
+            state_summary["expected_direction"].eq(-1)
+            & (state_summary["raw_median_forward_return_after"] < 0.0)
+            & (state_summary["aligned_median_return_after"] > 0.0)
+        ]
+        if not state_summary.empty
+        else pd.DataFrame()
+    )
     beat_random = (
         filter_oos[filter_oos["random_beaten"].fillna(False).astype(bool)]
         if not filter_oos.empty

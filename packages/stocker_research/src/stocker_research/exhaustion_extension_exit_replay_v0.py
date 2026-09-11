@@ -205,8 +205,7 @@ def _load_selected_exhaustion_filters(input_filter_report_dir: Path) -> pd.DataF
     missing = sorted(required - set(data.columns))
     if missing:
         raise ValueError(
-            "selected_exhaustion_regime_filter_results.csv missing required "
-            f"columns: {missing}"
+            f"selected_exhaustion_regime_filter_results.csv missing required columns: {missing}"
         )
     if "verdict" in data:
         data = data[data["verdict"].astype(str).eq("pass_exhaustion_regime_filter")].copy()
@@ -379,9 +378,7 @@ def _build_exit_sweep(
                         "filter_threshold": float(rule["filter_threshold"]),
                         "filter_rule": rule["filter_rule"],
                         "filter_selection_score": float(rule["selection_score"]),
-                        "train_end_timestamp": train_end.isoformat()
-                        if pd.notna(train_end)
-                        else "",
+                        "train_end_timestamp": train_end.isoformat() if pd.notna(train_end) else "",
                         "stop_model": stop_model,
                         "target_r": float(target_r),
                         **stats,
@@ -836,9 +833,7 @@ def run_exhaustion_extension_exit_replay_lab(
     max_drawdown = float(daily["drawdown_r"].min()) if not daily.empty else math.nan
     conc = _concentration(trade_frame)
 
-    run_id = "exhaustion_extension_exit_replay_v0_" + datetime.now(UTC).strftime(
-        "%Y%m%dT%H%M%SZ"
-    )
+    run_id = "exhaustion_extension_exit_replay_v0_" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = output_dir / run_id
     paths = {
         "summary_json": run_dir / "summary.json",
@@ -877,8 +872,7 @@ def run_exhaustion_extension_exit_replay_lab(
         "order_placement": "disabled",
         "edge_claimed": False,
         "volume_label": (
-            "historical_volume from existing local candidate/event reports; "
-            "no new vendor fetch"
+            "historical_volume from existing local candidate/event reports; no new vendor fetch"
         ),
         "input_exhaustion_event_dir": str(input_exhaustion_event_dir),
         "input_filter_report_dir": str(input_filter_report_dir),

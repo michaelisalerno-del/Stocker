@@ -43,8 +43,9 @@ class MarketBroker(IbkrConnection):
         )
 
     async def discovery_fx(self, currency):
-        return DiscoveryFx(currency, 2, 900, "USD" + currency, 1.9, 2.1,
-                           datetime.now(UTC).isoformat())
+        return DiscoveryFx(
+            currency, 2, 900, "USD" + currency, 1.9, 2.1, datetime.now(UTC).isoformat()
+        )
 
     async def discovery_scan(self, request):
         self.scans.append(request)
@@ -56,7 +57,12 @@ class MarketBroker(IbkrConnection):
     async def qualify_discovery_candidate(self, row):
         self.resolved.append(row.symbol)
         return QualifiedInstrument(
-            row.symbol, row.con_id, row.exchange, row.primary_exchange, row.currency, "STK",
+            row.symbol,
+            row.con_id,
+            row.exchange,
+            row.primary_exchange,
+            row.currency,
+            "STK",
         ), "COMMON"
 
     async def resolve_stock(self, symbol, *, exchange, currency, primary_exchange=None):
@@ -163,12 +169,23 @@ def test_250_scanner_hits_are_bounded_to_150_before_history_work(tmp_path):
 
     class DisjointScans(MarketBroker):
         async def discovery_scan(self, request):
-            offset = list(SESSION_HARD.discovery_profile(self.market.market_id).cap_bands).index(
-                request.cap_band
-            ) * 50
+            offset = (
+                list(SESSION_HARD.discovery_profile(self.market.market_id).cap_bands).index(
+                    request.cap_band
+                )
+                * 50
+            )
             return tuple(
-                DiscoveryRow(123 + offset + i, f"TEST{offset + i}", "SMART", None,
-                             self.market.currency, "STK", i, {})
+                DiscoveryRow(
+                    123 + offset + i,
+                    f"TEST{offset + i}",
+                    "SMART",
+                    None,
+                    self.market.currency,
+                    "STK",
+                    i,
+                    {},
+                )
                 for i in range(request.rows)
             )
 
@@ -179,9 +196,7 @@ def test_250_scanner_hits_are_bounded_to_150_before_history_work(tmp_path):
     broker = DisjointScans(get_market(MarketId.UK_LSE))
     now = datetime(2026, 9, 8, 8, tzinfo=UTC)
     search = SessionHardUniverseSearch(broker, tmp_path / "screen.sqlite", lambda: now)
-    result = asyncio.run(
-        search.qualify((RunInstance(run, config.universes[-1], RunState.ACTIVE),))
-    )
+    result = asyncio.run(search.qualify((RunInstance(run, config.universes[-1], RunState.ACTIVE),)))
     audit = search.discovery.store.history(run.run_id)[0]
     assert len(audit["observations"]) == len(broker.resolved) == 250
     assert len(result.requests) == sum(c["in_watch_pool"] for c in audit["candidates"]) == 150
@@ -250,9 +265,11 @@ def test_five_stock_snapshot_is_preserved_but_not_reused(tmp_path):
     path = tmp_path / "activity.sqlite"
     store = ActivityShortlistStore(path)
     legacy = ActivityShortlistService(
-        store, profile_id="ACTIVITY_CAPACITY_V2",
+        store,
+        profile_id="ACTIVITY_CAPACITY_V2",
         profile_version="ACTIVITY_CAPACITY_V2_WARNINGS",
-        watch_limit=5, allow_late_capture=True
+        watch_limit=5,
+        allow_late_capture=True,
     )
     original = asyncio.run(
         legacy.get_or_create(

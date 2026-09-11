@@ -4,6 +4,7 @@ from stocker_execution.stage5 import calculate_pre_move
 
 STAGE6_PRE_MOVE_M_THRESHOLD = 0.475764059845861
 
+
 def test_stage6_strategy_threshold_equality_does_not_qualify() -> None:
     result = calculate_pre_move(
         expected_absolute_return_15m=1.0,

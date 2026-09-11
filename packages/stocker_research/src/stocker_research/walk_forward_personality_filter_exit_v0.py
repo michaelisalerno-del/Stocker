@@ -253,16 +253,12 @@ def _load_combo_universe(
     if data.empty:
         return data
     sort_cols = [
-        column
-        for column in ("personality", "combined_score", "test_event_count")
-        if column in data
+        column for column in ("personality", "combined_score", "test_event_count") if column in data
     ]
     ascending = [True] + [False] * (len(sort_cols) - 1)
     data = data.sort_values(sort_cols, ascending=ascending, kind="mergesort")
     return (
-        data.groupby("personality", as_index=False)
-        .head(top_per_personality)
-        .reset_index(drop=True)
+        data.groupby("personality", as_index=False).head(top_per_personality).reset_index(drop=True)
     )
 
 
@@ -462,9 +458,7 @@ def _select_filter_candidates_for_combo(
                         "filter_operator": operator,
                         "filter_threshold": threshold,
                         "filter_rule": f"{feature} {operator} {threshold:.6g}",
-                        "train_end_timestamp": train_end.isoformat()
-                        if pd.notna(train_end)
-                        else "",
+                        "train_end_timestamp": train_end.isoformat() if pd.notna(train_end) else "",
                         **base,
                         **stats,
                         "train_median_lift_bps": median_lift,
@@ -931,9 +925,7 @@ def _decision(
     reasons: list[str] = []
     total_net_r = float(trades["net_r"].sum()) if not trades.empty else 0.0
     positive_months = (
-        int((monthly_summary["total_net_r"] > 0.0).sum())
-        if not monthly_summary.empty
-        else 0
+        int((monthly_summary["total_net_r"] > 0.0).sum()) if not monthly_summary.empty else 0
     )
     conc = _concentration(trades)
     if len(trades) < config.min_total_trades:
@@ -1179,7 +1171,9 @@ def _load_dead_chop_blocker_book(
             "blocker_selection_score": pd.to_numeric(
                 data["excess_vs_random_same_count"],
                 errors="coerce",
-            ).fillna(0.0).to_numpy(),
+            )
+            .fillna(0.0)
+            .to_numpy(),
         }
     )
     return output.loc[:, columns].reset_index(drop=True)
@@ -1387,9 +1381,7 @@ def _build_selected_exit_sweep(
                         "filter_threshold": float(candidate["filter_threshold"]),
                         "filter_rule": candidate["filter_rule"],
                         "filter_selection_score": float(candidate["selection_score"]),
-                        "train_end_timestamp": train_end.isoformat()
-                        if pd.notna(train_end)
-                        else "",
+                        "train_end_timestamp": train_end.isoformat() if pd.notna(train_end) else "",
                         "stop_model": stop_model,
                         "target_r": float(target_r),
                         **stats,
@@ -1716,9 +1708,7 @@ def run_walk_forward_selected_filter_exit_lab(
     selected_frame = pd.concat(all_selected, ignore_index=True) if all_selected else pd.DataFrame()
     signal_frame = pd.concat(all_signals, ignore_index=True) if all_signals else pd.DataFrame()
     blocked_signal_frame = (
-        pd.concat(all_blocked_signals, ignore_index=True)
-        if all_blocked_signals
-        else pd.DataFrame()
+        pd.concat(all_blocked_signals, ignore_index=True) if all_blocked_signals else pd.DataFrame()
     )
     trade_frame = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
     missed_frame = pd.concat(all_missed, ignore_index=True) if all_missed else pd.DataFrame()
@@ -1745,17 +1735,12 @@ def run_walk_forward_selected_filter_exit_lab(
     total_net_r = float(trade_frame["net_r"].sum()) if not trade_frame.empty else 0.0
     win_rate = float((trade_frame["net_r"] > 0.0).mean()) if not trade_frame.empty else math.nan
     positive_month_count = (
-        int((monthly_summary["total_net_r"] > 0.0).sum())
-        if not monthly_summary.empty
-        else 0
+        int((monthly_summary["total_net_r"] > 0.0).sum()) if not monthly_summary.empty else 0
     )
     max_drawdown = float(daily["drawdown_r"].min()) if not daily.empty else math.nan
     conc = _concentration(trade_frame)
 
-    run_id = (
-        "walk_forward_selected_filter_exit_v0_"
-        f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
-    )
+    run_id = f"walk_forward_selected_filter_exit_v0_{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
     run_dir = output_dir / run_id
     paths = {
         "summary_json": run_dir / "summary.json",
@@ -2016,16 +2001,13 @@ def run_walk_forward_personality_filter_exit_lab(
     total_net_r = float(trade_frame["net_r"].sum()) if not trade_frame.empty else 0.0
     win_rate = float((trade_frame["net_r"] > 0.0).mean()) if not trade_frame.empty else math.nan
     positive_month_count = (
-        int((monthly_summary["total_net_r"] > 0.0).sum())
-        if not monthly_summary.empty
-        else 0
+        int((monthly_summary["total_net_r"] > 0.0).sum()) if not monthly_summary.empty else 0
     )
     max_drawdown = float(daily["drawdown_r"].min()) if not daily.empty else math.nan
     conc = _concentration(trade_frame)
 
     run_id = (
-        "walk_forward_personality_filter_exit_v0_"
-        f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
+        f"walk_forward_personality_filter_exit_v0_{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
     )
     run_dir = output_dir / run_id
     paths = {

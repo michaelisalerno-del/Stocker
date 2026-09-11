@@ -386,8 +386,7 @@ def run_personality_rulebook_lab(
         else pd.DataFrame()
     )
     personality_summary = (
-        rule_summary.groupby(["personality", "role"], as_index=False)
-        .agg(
+        rule_summary.groupby(["personality", "role"], as_index=False).agg(
             rule_count=("rule_id", "count"),
             passed_rule_count=(
                 "verdict",

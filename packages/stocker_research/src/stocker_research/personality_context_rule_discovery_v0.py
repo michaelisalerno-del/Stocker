@@ -214,9 +214,7 @@ def _load_pair_rows(
                 else 0.0,
             }
         )
-    no_prior = (
-        pd.concat(no_prior_frames, ignore_index=True) if no_prior_frames else pd.DataFrame()
-    )
+    no_prior = pd.concat(no_prior_frames, ignore_index=True) if no_prior_frames else pd.DataFrame()
     candidate_only = (
         pd.concat(candidate_only_frames, ignore_index=True)
         if candidate_only_frames
@@ -487,34 +485,22 @@ def _evaluate_rule_sample(
     if active.empty:
         return _empty_rule_metrics(sample_name), window_rows
     total_r = float(active["admitted_total_net_r"].sum())
-    max_share = (
-        float(active["admitted_total_net_r"].max() / total_r) if total_r > 0.0 else math.nan
-    )
+    max_share = float(active["admitted_total_net_r"].max() / total_r) if total_r > 0.0 else math.nan
     metrics = {
         f"{sample_name}_active_windows": int(len(active)),
-        f"{sample_name}_positive_windows": int(
-            (active["admitted_total_net_r"] > 0.0).sum()
-        ),
-        f"{sample_name}_negative_windows": int(
-            (active["admitted_total_net_r"] < 0.0).sum()
-        ),
+        f"{sample_name}_positive_windows": int((active["admitted_total_net_r"] > 0.0).sum()),
+        f"{sample_name}_negative_windows": int((active["admitted_total_net_r"] < 0.0).sum()),
         f"{sample_name}_admitted_count": int(active["admitted_count"].sum()),
         f"{sample_name}_admitted_total_net_r": total_r,
-        f"{sample_name}_admitted_win_count": int(
-            (personality_rows[mask]["net_r"] > 0.0).sum()
-        ),
-        f"{sample_name}_admitted_loss_count": int(
-            (personality_rows[mask]["net_r"] <= 0.0).sum()
-        ),
+        f"{sample_name}_admitted_win_count": int((personality_rows[mask]["net_r"] > 0.0).sum()),
+        f"{sample_name}_admitted_loss_count": int((personality_rows[mask]["net_r"] <= 0.0).sum()),
         f"{sample_name}_same_count_random_median_total_r": float(
             active["same_count_random_median_r"].sum()
         ),
         f"{sample_name}_excess_vs_random_median_r": float(
             active["excess_vs_random_median_r"].sum()
         ),
-        f"{sample_name}_worst_window_net_r": float(
-            active["admitted_total_net_r"].min()
-        ),
+        f"{sample_name}_worst_window_net_r": float(active["admitted_total_net_r"].min()),
         f"{sample_name}_best_window_net_r": float(active["admitted_total_net_r"].max()),
         f"{sample_name}_max_single_window_share": max_share,
     }
@@ -639,8 +625,7 @@ def _union_rule(left: _Rule, right: _Rule) -> _Rule | None:
         return None
     alternatives = (*left.alternatives, *right.alternatives)
     expression = " OR ".join(
-        " AND ".join(_term_expression(term) for term in terms)
-        for terms in alternatives
+        " AND ".join(_term_expression(term) for term in terms) for terms in alternatives
     )
     return _Rule(
         rule_name=f"personality_context_rule_discovery: {left.personality} IF {expression}",
@@ -788,9 +773,7 @@ def run_personality_context_rule_discovery_lab(
     if not report_pairs:
         raise ValueError("Supply at least one report pair.")
     config = config or PersonalityContextRuleDiscoveryConfig()
-    run_id = "personality_context_rule_discovery_v0_" + datetime.now(UTC).strftime(
-        "%Y%m%dT%H%M%SZ"
-    )
+    run_id = "personality_context_rule_discovery_v0_" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = output_dir / run_id
     no_prior, candidate_only, portfolios = _load_pair_rows(report_pairs, config=config)
     target_no_prior = _target_rows(no_prior, config=config)
@@ -810,9 +793,7 @@ def run_personality_context_rule_discovery_lab(
         config=config,
     )
     all_results = _sort_rule_results(pd.concat([atomic_results, union_results]))
-    window_results = pd.concat([atomic_window_results, union_window_results]).reset_index(
-        drop=True
-    )
+    window_results = pd.concat([atomic_window_results, union_window_results]).reset_index(drop=True)
     selected = all_results[all_results["support_status"].ne(NOT_SUPPORTED)].copy()
     selected = _sort_rule_results(selected)
     decision, reasons = _decision(selected)

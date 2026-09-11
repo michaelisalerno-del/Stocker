@@ -105,10 +105,14 @@ def _extract_exhaustion_events(candidate_events: pd.DataFrame) -> pd.DataFrame:
         return events
     events["event_state"] = "exhaustion_extension"
     events["event_family"] = "extension_exhaustion"
-    expected_direction = pd.to_numeric(
-        events.get("expected_direction", pd.Series(0, index=events.index)),
-        errors="coerce",
-    ).fillna(0).astype(int)
+    expected_direction = (
+        pd.to_numeric(
+            events.get("expected_direction", pd.Series(0, index=events.index)),
+            errors="coerce",
+        )
+        .fillna(0)
+        .astype(int)
+    )
     events["event_direction"] = np.select(
         [expected_direction > 0, expected_direction < 0],
         ["long_reversal_or_no_chase", "short_reversal_or_no_chase"],
@@ -239,8 +243,7 @@ def run_sparse_exhaustion_extension_lab(
         "order_placement": "disabled",
         "edge_claimed": False,
         "volume_label": (
-            "historical_volume from existing local candidate personality scan; "
-            "no new vendor fetch"
+            "historical_volume from existing local candidate personality scan; no new vendor fetch"
         ),
         "event_count": int(len(exhaustion_events)),
         "selected_horizon_count": int(len(selected_horizons)),

@@ -15,9 +15,7 @@ QUESTION_BENCHMARK_FAILURE = (
 QUESTION_NULL_FAILURE = (
     "Null-model failure dominates; inspect whether timing edge survives shuffles."
 )
-QUESTION_COST_FAILURE = (
-    "Costs appear to kill this setup; inspect spread and slippage sensitivity."
-)
+QUESTION_COST_FAILURE = "Costs appear to kill this setup; inspect spread and slippage sensitivity."
 QUESTION_LOW_SAMPLE = (
     "Trade count is too low; inspect whether filters are over-constraining samples."
 )

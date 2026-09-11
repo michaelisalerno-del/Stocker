@@ -213,9 +213,7 @@ def test_asx_activity_scan_uses_live_ibkr_scanner_identity_and_cap_filter_names(
 def test_activity_scan_rejects_an_instrument_not_advertised_for_the_location() -> None:
     client = CurrentAsxScannerClient()
     broker = connection(client)
-    incorrect_market = replace(
-        get_market(MarketId.AUSTRALIA_ASX), scanner_instrument="STK"
-    )
+    incorrect_market = replace(get_market(MarketId.AUSTRALIA_ASX), scanner_instrument="STK")
 
     with pytest.raises(IbkrError, match="SCANNER_NOT_AVAILABLE"):
         asyncio.run(

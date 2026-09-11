@@ -559,21 +559,21 @@ def build_behavioral_state_frame(
     data["failed_new_high"] = (
         data["new_session_high"] & close.lt(prior_session_high_to_date)
     ).fillna(False)
-    data["failed_new_low"] = (
-        data["new_session_low"] & close.gt(prior_session_low_to_date)
-    ).fillna(False)
+    data["failed_new_low"] = (data["new_session_low"] & close.gt(prior_session_low_to_date)).fillna(
+        False
+    )
     data["prior_high_break"] = high.gt(
         pd.to_numeric(data["previous_session_high"], errors="coerce")
     ).fillna(False)
     data["prior_low_break"] = low.lt(
         pd.to_numeric(data["previous_session_low"], errors="coerce")
     ).fillna(False)
-    data["prior_recent_high"] = pd.to_numeric(data["recent_high"], errors="coerce").groupby(
-        data["session_date"]
-    ).shift(1)
-    data["prior_recent_low"] = pd.to_numeric(data["recent_low"], errors="coerce").groupby(
-        data["session_date"]
-    ).shift(1)
+    data["prior_recent_high"] = (
+        pd.to_numeric(data["recent_high"], errors="coerce").groupby(data["session_date"]).shift(1)
+    )
+    data["prior_recent_low"] = (
+        pd.to_numeric(data["recent_low"], errors="coerce").groupby(data["session_date"]).shift(1)
+    )
     bar_index = pd.to_numeric(data["bar_index_in_session"], errors="coerce")
     minutes_from_open = pd.to_numeric(data["minutes_from_session_open"], errors="coerce")
     data["bar_index_bucket"] = pd.cut(
@@ -705,9 +705,9 @@ def label_behavioral_states(
     dist_or_low = pd.to_numeric(data["distance_from_opening_range_low_pct"], errors="coerce")
     range_zscore = pd.to_numeric(data["range_zscore"], errors="coerce")
     return_zscore = pd.to_numeric(data["return_zscore"], errors="coerce")
-    opening_complete = data.get("opening_range_complete", pd.Series(False, index=data.index)).astype(
-        bool
-    )
+    opening_complete = data.get(
+        "opening_range_complete", pd.Series(False, index=data.index)
+    ).astype(bool)
     above_vwap = data.get("above_vwap", pd.Series(False, index=data.index)).astype(bool)
     below_vwap = data.get("below_vwap", pd.Series(False, index=data.index)).astype(bool)
     open_above_previous_high = data.get(
@@ -1009,14 +1009,17 @@ def label_behavioral_states(
         data[field] = data["primary_state_label"].map(
             {label: values[field] for label, values in STATE_DEFINITIONS.items()}
         )
-    data.loc[data["primary_state_label"].eq("unclassified"), [
-        "state_family",
-        "state_subtype",
-        "state_direction",
-        "state_energy",
-        "state_location",
-        "stimulus_label",
-    ]] = ["unclassified", "unclassified", "neutral", "unknown", "unknown", "none"]
+    data.loc[
+        data["primary_state_label"].eq("unclassified"),
+        [
+            "state_family",
+            "state_subtype",
+            "state_direction",
+            "state_energy",
+            "state_location",
+            "stimulus_label",
+        ],
+    ] = ["unclassified", "unclassified", "neutral", "unknown", "unknown", "none"]
     group_keys = ["symbol", "session_date"] if "symbol" in data else ["session_date"]
     data["previous_state_label"] = (
         data.groupby(group_keys)["primary_state_label"].shift(1).fillna("session_start")
@@ -1187,9 +1190,7 @@ def _sample_matched_random_values(
         if exact.empty:
             row_bucket = int(float(row["bar_index_in_session"]) // 6)
             bucket = symbol_pool[
-                (
-                    pd.to_numeric(symbol_pool["bar_index_in_session"], errors="coerce") // 6
-                )
+                (pd.to_numeric(symbol_pool["bar_index_in_session"], errors="coerce") // 6)
                 == row_bucket
             ]
             candidates = bucket if not bucket.empty else symbol_pool
@@ -1316,8 +1317,7 @@ def build_random_baseline(
                     "random_median_return": random_median,
                     "random_win_rate": random_win_rate,
                     "random_median_abs_return": random_abs,
-                    "state_excess_vs_random_median": float(state_returns.median())
-                    - random_median
+                    "state_excess_vs_random_median": float(state_returns.median()) - random_median
                     if not math.isnan(random_median)
                     else math.nan,
                     "state_abs_movement_vs_random": float(state_abs.median()) - random_abs
@@ -1421,12 +1421,18 @@ def build_horizon_events(frame: pd.DataFrame, config: BehavioralStateConfig) -> 
         data["previous_state_label"] = data["state_transition_from"]
     if "state_transition" in data and not data["state_transition"].astype(str).any():
         data["state_transition"] = (
-            data["state_transition_from"].astype(str) + "->" + data["state_transition_to"].astype(str)
+            data["state_transition_from"].astype(str)
+            + "->"
+            + data["state_transition_to"].astype(str)
         )
 
-    close = pd.to_numeric(data["close"], errors="coerce") if "close" in data else pd.Series(
-        np.nan,
-        index=data.index,
+    close = (
+        pd.to_numeric(data["close"], errors="coerce")
+        if "close" in data
+        else pd.Series(
+            np.nan,
+            index=data.index,
+        )
     )
     path_scale = pd.to_numeric(
         data.get("rolling_intraday_range_pct", pd.Series(np.nan, index=data.index)),
@@ -1439,13 +1445,17 @@ def build_horizon_events(frame: pd.DataFrame, config: BehavioralStateConfig) -> 
         )
     )
     path_scale = path_scale.fillna(
-        pd.to_numeric(data.get("bar_range_pct", pd.Series(np.nan, index=data.index)), errors="coerce")
+        pd.to_numeric(
+            data.get("bar_range_pct", pd.Series(np.nan, index=data.index)), errors="coerce"
+        )
     )
     path_scale = path_scale.replace(0.0, np.nan).abs()
     data["path_scale"] = path_scale
     path_group_keys = ["symbol", "session_date"] if "symbol" in data else ["session_date"]
     for step in range(1, max_horizon + 1):
-        future_close = data.groupby(path_group_keys)["close"].shift(-step) if "close" in data else close
+        future_close = (
+            data.groupby(path_group_keys)["close"].shift(-step) if "close" in data else close
+        )
         path_return = _safe_pct_distance(pd.to_numeric(future_close, errors="coerce"), close)
         data[f"path_return_{step}"] = path_return
         data[f"normalized_path_return_{step}"] = _safe_divide(path_return, path_scale)
@@ -1479,19 +1489,23 @@ def build_horizon_events(frame: pd.DataFrame, config: BehavioralStateConfig) -> 
         valid["mfe"] = path_frame.max(axis=1)
         valid["mae"] = path_frame.min(axis=1)
         valid["time_to_mfe"] = path_frame.apply(
-            lambda row: int(np.nanargmax(row.to_numpy(dtype=float)) + 1)
-            if row.notna().any()
-            else math.nan,
+            lambda row: (
+                int(np.nanargmax(row.to_numpy(dtype=float)) + 1) if row.notna().any() else math.nan
+            ),
             axis=1,
         )
         valid["time_to_mae"] = path_frame.apply(
-            lambda row: int(np.nanargmin(row.to_numpy(dtype=float)) + 1)
-            if row.notna().any()
-            else math.nan,
+            lambda row: (
+                int(np.nanargmin(row.to_numpy(dtype=float)) + 1) if row.notna().any() else math.nan
+            ),
             axis=1,
         )
-        valid["recoil_ratio"] = _safe_divide(valid["mfe"] - valid["final_return"], valid["mfe"].abs())
-        valid["continuation_score"] = _safe_divide(valid["final_return"], path_frame.abs().max(axis=1))
+        valid["recoil_ratio"] = _safe_divide(
+            valid["mfe"] - valid["final_return"], valid["mfe"].abs()
+        )
+        valid["continuation_score"] = _safe_divide(
+            valid["final_return"], path_frame.abs().max(axis=1)
+        )
         valid["failure_score"] = _safe_divide(-valid["final_return"], path_frame.abs().max(axis=1))
         valid["raw_row_index"] = valid.index.astype(int)
         rows.append(valid)
@@ -1502,7 +1516,9 @@ def build_horizon_events(frame: pd.DataFrame, config: BehavioralStateConfig) -> 
 
 
 def _event_sort_columns(events: pd.DataFrame) -> list[str]:
-    columns = [column for column in ("symbol", "session_date", "response_horizon") if column in events]
+    columns = [
+        column for column in ("symbol", "session_date", "response_horizon") if column in events
+    ]
     if "timestamp" in events:
         columns.append("timestamp")
     elif "bar_index_in_session" in events:
@@ -1523,8 +1539,8 @@ def _add_event_count_columns(
     if "session_date" in source:
         group_columns.append("session_date")
     raw_counts = source.groupby(group_columns, dropna=False).size().rename("raw_row_count")
-    independent_counts = selected.groupby(group_columns, dropna=False).size().rename(
-        "independent_event_count"
+    independent_counts = (
+        selected.groupby(group_columns, dropna=False).size().rename("independent_event_count")
     )
     output = selected.copy()
     key_frame = output[group_columns]
@@ -1635,7 +1651,9 @@ def _walk_forward_mask(events: pd.DataFrame, train_fraction: float = 0.60) -> pd
         return pd.Series(dtype=bool)
     timestamps = pd.to_datetime(events["timestamp"], utc=True, errors="coerce")
     sorted_positions = timestamps.sort_values(kind="mergesort").index.tolist()
-    train_count = max(1, min(len(sorted_positions) - 1, int(len(sorted_positions) * train_fraction)))
+    train_count = max(
+        1, min(len(sorted_positions) - 1, int(len(sorted_positions) * train_fraction))
+    )
     train_indices = set(sorted_positions[:train_count])
     return pd.Series([index in train_indices for index in events.index], index=events.index)
 
@@ -1741,8 +1759,7 @@ def _run_oos_for_split(
             and test_symbol_count >= config.min_test_symbols_per_state
             and not math.isnan(accuracy)
             and not math.isnan(generic_accuracy)
-            and accuracy - generic_accuracy
-            >= config.min_oos_directional_accuracy_excess_vs_generic
+            and accuracy - generic_accuracy >= config.min_oos_directional_accuracy_excess_vs_generic
             and excess_bps >= config.min_oos_median_return_excess_vs_generic_bps
         )
         rows.append(
@@ -1908,8 +1925,7 @@ def build_permutation_baseline(
                 perm_p95 = math.nan
             else:
                 p_value = float(
-                    ((perm_series.abs() >= abs(observed_median)).sum() + 1)
-                    / (len(perm_series) + 1)
+                    ((perm_series.abs() >= abs(observed_median)).sum() + 1) / (len(perm_series) + 1)
                 )
                 percentile = float((perm_series <= observed_median).mean())
                 perm_mean = float(perm_series.mean())
@@ -2055,9 +2071,7 @@ def run_nearest_neighbor_similarity(
             )
         ]
         selected_positions = (
-            cross_symbol_positions
-            or non_same_session_positions
-            or candidate_positions
+            cross_symbol_positions or non_same_session_positions or candidate_positions
         )[: config.nearest_neighbors]
         if not selected_positions:
             continue
@@ -2247,7 +2261,9 @@ def run_nearest_neighbor_oos_similarity(
             cross_symbol = same_horizon[same_horizon["symbol"].ne(source["symbol"])]
             cross_values = [
                 float(value)
-                for value in pd.to_numeric(cross_symbol["response_return"], errors="coerce").dropna()
+                for value in pd.to_numeric(
+                    cross_symbol["response_return"], errors="coerce"
+                ).dropna()
             ]
             neighbor_median = float(neighbor_values.median())
             details.append(
@@ -2368,7 +2384,11 @@ def _fit_state_fingerprint(
         for column in feature_columns
         if column in events.columns and column in STATE_FINGERPRINT_CATEGORICAL_COLUMNS
     ]
-    numeric = events[numeric_columns].apply(pd.to_numeric, errors="coerce") if numeric_columns else pd.DataFrame(index=events.index)
+    numeric = (
+        events[numeric_columns].apply(pd.to_numeric, errors="coerce")
+        if numeric_columns
+        else pd.DataFrame(index=events.index)
+    )
     numeric = numeric.replace([np.inf, -np.inf], np.nan)
     medians = numeric.median(numeric_only=True) if not numeric.empty else pd.Series(dtype=float)
     filled = numeric.fillna(medians) if not numeric.empty else numeric
@@ -2608,9 +2628,9 @@ def run_same_state_cross_symbol_similarity(
             "different_state_cross_symbol": same_horizon
             & different_symbol
             & data["primary_state_label"].ne(source["primary_state_label"]),
-            "same_symbol_random": same_horizon & data["symbol"].eq(source["symbol"]) & (
-                data.index != source_index
-            ),
+            "same_symbol_random": same_horizon
+            & data["symbol"].eq(source["symbol"])
+            & (data.index != source_index),
         }
         for baseline_name, mask in baseline_specs.items():
             if "time_of_day_bucket" in data and baseline_name != "same_symbol_random":
@@ -2631,8 +2651,9 @@ def run_same_state_cross_symbol_similarity(
                     source_vector=source_vector,
                     match_vector=selected_vector,
                     feature_distance=float(
-                        _feature_distance(feature_frame, source_index, pd.Index([selected.name]))
-                        .iloc[0]
+                        _feature_distance(
+                            feature_frame, source_index, pd.Index([selected.name])
+                        ).iloc[0]
                     ),
                     baseline=baseline_name,
                 )
@@ -2709,14 +2730,16 @@ def run_fingerprint_cross_symbol_similarity(
             "different_state_cross_symbol": same_horizon
             & different_symbol
             & data["primary_state_label"].ne(source["primary_state_label"]),
-            "same_symbol_random": same_horizon & data["symbol"].eq(source["symbol"]) & (
-                data.index != source_index
-            ),
+            "same_symbol_random": same_horizon
+            & data["symbol"].eq(source["symbol"])
+            & (data.index != source_index),
         }
         for baseline_name, mask in baseline_specs.items():
             pool = data[mask]
             if "time_of_day_bucket" in data and baseline_name != "same_symbol_random":
-                bucket_pool = data[mask & data["time_of_day_bucket"].eq(source.get("time_of_day_bucket"))]
+                bucket_pool = data[
+                    mask & data["time_of_day_bucket"].eq(source.get("time_of_day_bucket"))
+                ]
                 if not bucket_pool.empty:
                     pool = bucket_pool
             if pool.empty:
@@ -2729,8 +2752,9 @@ def run_fingerprint_cross_symbol_similarity(
                     source_vector=source_vector,
                     match_vector=_path_vector(selected, path_columns),
                     feature_distance=float(
-                        _feature_distance(feature_frame, source_index, pd.Index([selected.name]))
-                        .iloc[0]
+                        _feature_distance(
+                            feature_frame, source_index, pd.Index([selected.name])
+                        ).iloc[0]
                     ),
                     baseline=baseline_name,
                 )
@@ -2787,7 +2811,9 @@ def _summarize_oos_shape_rows(
         source_returns = pd.to_numeric(group["source_response_return"], errors="coerce")
         match_returns = pd.to_numeric(group["match_response_return"], errors="coerce")
         source_event_count = int(
-            group[["source_symbol", "source_timestamp", "source_horizon"]].drop_duplicates().shape[0]
+            group[["source_symbol", "source_timestamp", "source_horizon"]]
+            .drop_duplicates()
+            .shape[0]
         )
         output_rows.append(
             {
@@ -2874,9 +2900,7 @@ def run_oos_response_shape_similarity(
                 max(1, config.nearest_neighbors)
             )
             baseline_name = (
-                "label_cross_symbol"
-                if similarity_mode == "label"
-                else "fingerprint_cross_symbol"
+                "label_cross_symbol" if similarity_mode == "label" else "fingerprint_cross_symbol"
             )
             for _, match in candidates.iterrows():
                 rows.append(
@@ -2951,15 +2975,45 @@ def build_manual_audit_examples() -> pd.DataFrame:
     """Reference rows from the manual audit that the v2 lab should make inspectable."""
 
     rows = [
-        ("HOOD", "2026-04-15", "initiative buying / controlled pullback", "initiative_buying_controlled_pullback"),
-        ("HOOD", "2025-07-02", "strong squeeze / initiative buying after early pullback", "momentum_memory"),
-        ("GLW", "2026-06-24", "liquidation/whipsaw into squeeze/initiative continuation", "liquidation_failed_low_squeeze"),
+        (
+            "HOOD",
+            "2026-04-15",
+            "initiative buying / controlled pullback",
+            "initiative_buying_controlled_pullback",
+        ),
+        (
+            "HOOD",
+            "2025-07-02",
+            "strong squeeze / initiative buying after early pullback",
+            "momentum_memory",
+        ),
+        (
+            "GLW",
+            "2026-06-24",
+            "liquidation/whipsaw into squeeze/initiative continuation",
+            "liquidation_failed_low_squeeze",
+        ),
         ("GLW", "2026-06-24", "huge extension near high into exhaustion/recoil", "exhaustion_fade"),
         ("HOOD", "2025-07-01", "bullish shock failure / recoil", "bullish_shock_failure"),
         ("CRM", "2026-06-24", "early pop, rejection, fade", "failed_open_long_block"),
-        ("HOOD", "2026-06-24", "opening liquidation / failed-open selling", "failed_open_down_continuation"),
-        ("GLW", "2026-05-12", "active liquidation then failed early bounce", "failed_bounce_active_liquidation"),
-        ("GLW", "2026-02-17", "flush/reclaim/controlled recovery", "liquidation_failed_low_squeeze"),
+        (
+            "HOOD",
+            "2026-06-24",
+            "opening liquidation / failed-open selling",
+            "failed_open_down_continuation",
+        ),
+        (
+            "GLW",
+            "2026-05-12",
+            "active liquidation then failed early bounce",
+            "failed_bounce_active_liquidation",
+        ),
+        (
+            "GLW",
+            "2026-02-17",
+            "flush/reclaim/controlled recovery",
+            "liquidation_failed_low_squeeze",
+        ),
         ("FCX", "2026-02-17", "flush/reclaim but muted", "slow_snapback"),
         ("CRM", "2025-10-10", "failed-open / trend-down", "trend_day_down"),
         ("CRM", "2026-02-17", "clean opening-drive/downtrend state", "opening_drive_down"),
@@ -3037,8 +3091,8 @@ def build_state_priority_conflicts(rows: pd.DataFrame) -> pd.DataFrame:
 def build_primary_state_distribution(rows: pd.DataFrame) -> pd.DataFrame:
     if rows.empty:
         return pd.DataFrame(columns=["primary_state_label", "row_count", "row_share"])
-    counts = rows["primary_state_label"].value_counts(dropna=False).rename_axis(
-        "primary_state_label"
+    counts = (
+        rows["primary_state_label"].value_counts(dropna=False).rename_axis("primary_state_label")
     )
     output = counts.reset_index(name="row_count")
     output["row_share"] = output["row_count"] / max(1, int(len(rows)))
@@ -3171,7 +3225,15 @@ def build_concentration_reports(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     symbol_columns = ["state", "horizon", "top_symbol", "top_symbol_share", "event_count"]
     session_columns = ["state", "horizon", "top_session", "top_session_share", "event_count"]
-    warning_columns = ["scope", "state", "horizon", "dominant_value", "share", "threshold", "warning"]
+    warning_columns = [
+        "scope",
+        "state",
+        "horizon",
+        "dominant_value",
+        "share",
+        "threshold",
+        "warning",
+    ]
     if events.empty:
         return (
             pd.DataFrame(columns=symbol_columns),
@@ -3436,9 +3498,7 @@ def build_stimulus_response_matrix(
                 permutation_lookup[key] = {
                     "permutation_p_value": p_value,
                     "permutation_percentile": float(row["permutation_percentile"]),
-                    "permutation_median_return_mean": float(
-                        row["permutation_median_return_mean"]
-                    ),
+                    "permutation_median_return_mean": float(row["permutation_median_return_mean"]),
                 }
     rows: list[dict[str, Any]] = []
     for (stimulus, state, horizon), group in events.groupby(
@@ -3452,18 +3512,26 @@ def build_stimulus_response_matrix(
         key = (str(stimulus), int(horizon))
         generic_median = float(generic.loc[key]) if key in generic.index else math.nan
         median_return = float(returns.median())
-        state_excess = median_return - generic_median if not math.isnan(generic_median) else math.nan
+        state_excess = (
+            median_return - generic_median if not math.isnan(generic_median) else math.nan
+        )
         permutation = permutation_lookup.get((str(state), int(horizon)), {})
         random_mean = permutation.get("permutation_median_return_mean", math.nan)
-        random_label_excess = median_return - random_mean if not math.isnan(random_mean) else math.nan
+        random_label_excess = (
+            median_return - random_mean if not math.isnan(random_mean) else math.nan
+        )
         p_value = permutation.get("permutation_p_value", math.nan)
-        verdict = "continue_research" if (
-            len(returns) >= config.min_independent_events_per_state_horizon
-            and not math.isnan(state_excess)
-            and state_excess * 10_000 >= config.min_oos_median_return_excess_vs_generic_bps
-            and not math.isnan(p_value)
-            and p_value <= config.permutation_p_value_max
-        ) else "mixed_response"
+        verdict = (
+            "continue_research"
+            if (
+                len(returns) >= config.min_independent_events_per_state_horizon
+                and not math.isnan(state_excess)
+                and state_excess * 10_000 >= config.min_oos_median_return_excess_vs_generic_bps
+                and not math.isnan(p_value)
+                and p_value <= config.permutation_p_value_max
+            )
+            else "mixed_response"
+        )
         rows.append(
             {
                 "stimulus_label": str(stimulus),
@@ -3592,12 +3660,18 @@ def run_template_overlay_diagnostics(
         for variant, result in results.items():
             excess = (result.net_return - generic_net) * 10_000
             random_excess = (result.net_return - random_net) * 10_000
-            verdict = "continue_research" if (
-                variant == "state_gated"
-                and excess >= config.min_template_net_return_excess_vs_generic_bps
-                and random_excess >= config.min_template_net_return_excess_vs_generic_bps
-                and result.number_of_trades > 0
-            ) else "reject_no_template_lift" if variant == "state_gated" else "diagnostic"
+            verdict = (
+                "continue_research"
+                if (
+                    variant == "state_gated"
+                    and excess >= config.min_template_net_return_excess_vs_generic_bps
+                    and random_excess >= config.min_template_net_return_excess_vs_generic_bps
+                    and result.number_of_trades > 0
+                )
+                else "reject_no_template_lift"
+                if variant == "state_gated"
+                else "diagnostic"
+            )
             rows.append(
                 {
                     "template": config.template,
@@ -3677,7 +3751,9 @@ def build_decision_summary(
     if not pipeline_passed:
         reasons.append("pipeline did not complete for all requested symbols")
 
-    shape_baselines = response_shape_baselines if response_shape_baselines is not None else pd.DataFrame()
+    shape_baselines = (
+        response_shape_baselines if response_shape_baselines is not None else pd.DataFrame()
+    )
     fingerprint_baselines = (
         fingerprint_shape_baselines if fingerprint_shape_baselines is not None else pd.DataFrame()
     )
@@ -3745,14 +3821,18 @@ def build_decision_summary(
             matches = permutation_baseline[
                 (permutation_baseline["state"] == state)
                 & (permutation_baseline["horizon"] == horizon)
-                & (pd.to_numeric(permutation_baseline["permutation_p_value"], errors="coerce")
-                <= config.permutation_p_value_max)
+                & (
+                    pd.to_numeric(permutation_baseline["permutation_p_value"], errors="coerce")
+                    <= config.permutation_p_value_max
+                )
             ]
             if not matches.empty:
                 permutation_ok = True
                 break
     label_oos_supported = _shape_similarity_supported(
-        oos_shape[oos_shape["similarity_mode"].eq("label")] if not oos_shape.empty else pd.DataFrame(),
+        oos_shape[oos_shape["similarity_mode"].eq("label")]
+        if not oos_shape.empty
+        else pd.DataFrame(),
         main_baseline="label_cross_symbol",
         config=config,
     )
@@ -3806,7 +3886,8 @@ def build_decision_summary(
                 errors="coerce",
             )
             template_overlay_supported = bool(
-                float(generic_excess.median()) >= config.min_template_net_return_excess_vs_generic_bps
+                float(generic_excess.median())
+                >= config.min_template_net_return_excess_vs_generic_bps
                 and float(random_excess.median())
                 >= config.min_template_net_return_excess_vs_generic_bps
             )
@@ -3815,13 +3896,10 @@ def build_decision_summary(
     else:
         reasons.append("template overlay was not run")
 
-    insufficient_events = (
-        oos_state_response.empty
-        or (
-            "test_event_count" in oos_state_response
-            and pd.to_numeric(oos_state_response["test_event_count"], errors="coerce").max()
-            < config.min_independent_events_per_state_horizon
-        )
+    insufficient_events = oos_state_response.empty or (
+        "test_event_count" in oos_state_response
+        and pd.to_numeric(oos_state_response["test_event_count"], errors="coerce").max()
+        < config.min_independent_events_per_state_horizon
     )
     if not pipeline_passed:
         decision = "reject_insufficient_independent_events"
@@ -3891,9 +3969,9 @@ def _markdown_table(rows: list[dict[str, Any]], headers: list[str]) -> str:
 
 
 def _markdown(summary: dict[str, Any]) -> str:
-    decision_reasons = "\n".join(
-        f"- {reason}" for reason in summary["decision_reasons"]
-    ) or "- None"
+    decision_reasons = (
+        "\n".join(f"- {reason}" for reason in summary["decision_reasons"]) or "- None"
+    )
     warnings = "\n".join(f"- {warning}" for warning in summary["warnings"]) or "- None"
     top_rejected = summary.get("top_rejected_states", [])
     continuing = summary.get("states_worth_continuing_research", [])
@@ -4109,7 +4187,9 @@ def run_behavioral_state_similarity_lab(
         config=cfg,
     )
     oos_similarity_features = [
-        column for column in DEFAULT_SIMILARITY_FEATURE_COLUMNS if column in independent_events.columns
+        column
+        for column in DEFAULT_SIMILARITY_FEATURE_COLUMNS
+        if column in independent_events.columns
     ]
     oos_neighbor_events = independent_events
     if len(oos_neighbor_events) > MAX_NEAREST_NEIGHBOR_EVENTS:
@@ -4146,7 +4226,9 @@ def run_behavioral_state_similarity_lab(
         config=cfg,
     )
     fingerprint_features = [
-        column for column in STATE_FINGERPRINT_FEATURE_COLUMNS if column in independent_events.columns
+        column
+        for column in STATE_FINGERPRINT_FEATURE_COLUMNS
+        if column in independent_events.columns
     ]
     (
         fingerprint_cross_symbol_matches,
@@ -4324,7 +4406,8 @@ def run_behavioral_state_similarity_lab(
             beats_random = (
                 not math.isnan(fingerprint_similarity)
                 and not math.isnan(random_similarity)
-                and fingerprint_similarity - random_similarity >= cfg.min_similarity_excess_vs_random
+                and fingerprint_similarity - random_similarity
+                >= cfg.min_similarity_excess_vs_random
             )
             beats_different = (
                 not math.isnan(fingerprint_similarity)
@@ -4354,9 +4437,7 @@ def run_behavioral_state_similarity_lab(
         ).head(50)
 
     dead_chop_blocking_quality = [
-        row
-        for row in _records(stimulus_response_matrix)
-        if row.get("state_label") == "dead_chop"
+        row for row in _records(stimulus_response_matrix) if row.get("state_label") == "dead_chop"
     ][:12]
 
     event_csv_path = run_dir / "events.csv"

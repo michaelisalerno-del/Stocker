@@ -38,10 +38,15 @@ async def inspect_scanners(args: argparse.Namespace) -> None:
         "started_at": datetime.now(UTC).isoformat(),
         "markets": [],
     }
-    recipe = (AcquisitionRecipe(
-        recipe_id="SCANNER_ACCESS_DIAGNOSTIC_EXPLICIT_CODES",
-        evaluation_period="ACCESS_CHECK_ONLY", families=tuple(args.scan_codes),
-    ) if args.scan_codes else ACQUISITION_EXPERIMENT_V1)
+    recipe = (
+        AcquisitionRecipe(
+            recipe_id="SCANNER_ACCESS_DIAGNOSTIC_EXPLICIT_CODES",
+            evaluation_period="ACCESS_CHECK_ONLY",
+            families=tuple(args.scan_codes),
+        )
+        if args.scan_codes
+        else ACQUISITION_EXPERIMENT_V1
+    )
     report["recipe"] = recipe.model_dump(mode="json")
     output = args.state.with_suffix(".scanner-check.json")
     try:
@@ -50,13 +55,21 @@ async def inspect_scanners(args: argparse.Namespace) -> None:
         report.update(
             capabilities_digest=store.save_capabilities(asdict(capabilities)),
             gateway_api_version=capabilities.server_version,
-            codes=sorted(capabilities.scan_codes), locations=sorted(capabilities.locations),
+            codes=sorted(capabilities.scan_codes),
+            locations=sorted(capabilities.locations),
             filters=sorted(capabilities.filters),
             descriptions=capabilities.scan_descriptions,
         )
         output.write_text(encoded(report))
-        print(json.dumps({k:report[k] for k in
-              ("mode", "capabilities_digest", "gateway_api_version", "codes")}), flush=True)
+        print(
+            json.dumps(
+                {
+                    k: report[k]
+                    for k in ("mode", "capabilities_digest", "gateway_api_version", "codes")
+                }
+            ),
+            flush=True,
+        )
         semaphore = asyncio.Semaphore(2)
         shared: dict[tuple[Any, ...], dict[str, Any]] = {}
         fx_cache: dict[str, tuple[float | None, str]] = {}
@@ -72,12 +85,15 @@ async def inspect_scanners(args: argparse.Namespace) -> None:
                 fx, fx_error = fx_cache[market.currency]
             plans = acquisition_scans(recipe, market, capabilities, fx)
             result: dict[str, Any] = {
-                "market": market.market_id.value, "location": market.scanner_location,
-                "fx_local_per_usd": fx, "fx_error": fx_error,
+                "market": market.market_id.value,
+                "location": market.scanner_location,
+                "fx_local_per_usd": fx,
+                "fx_error": fx_error,
                 "components": [asdict(plan) for plan in plans],
             }
             report["markets"].append(result)
             if args.scanner_check:
+
                 async def check(plan: AcquisitionScan, row: dict[str, Any]) -> None:
                     if plan.unsupported_reason:
                         row["status"] = "UNSUPPORTED"
@@ -90,26 +106,40 @@ async def inspect_scanners(args: argparse.Namespace) -> None:
                         audit: dict[str, Any] = {}
                         try:
                             rows = await broker.acquisition_scan(plan, audit)
-                            observed = {"status": "COMPLETE", "audit": audit,
-                                        "hits": [asdict(hit) for hit in rows]}
+                            observed = {
+                                "status": "COMPLETE",
+                                "audit": audit,
+                                "hits": [asdict(hit) for hit in rows],
+                            }
                         except Exception as exc:
                             observed = {"status": "FAILED", "audit": audit, "error": str(exc)}
                         shared[key] = observed
                         row.update(observed)
-                await asyncio.gather(*(
-                    check(p, r) for p, r in zip(plans, result["components"], strict=True)
-                ))
+
+                await asyncio.gather(
+                    *(check(p, r) for p, r in zip(plans, result["components"], strict=True))
+                )
             output.write_text(encoded(report))
-            print(json.dumps({
-                "market": result["market"], "location": result["location"],
-                "supported_components": sum(not p.unsupported_reason for p in plans),
-                "complete": sum(r.get("status") == "COMPLETE" for r in result["components"]),
-                "failed": sum(r.get("status") == "FAILED" for r in result["components"]),
-                "unsupported": sorted({p.unsupported_reason for p in plans
-                                       if p.unsupported_reason}),
-                "unique_raw_conids": len({h["con_id"] for r in result["components"]
-                                          for h in r.get("hits", [])}),
-            }), flush=True)
+            print(
+                json.dumps(
+                    {
+                        "market": result["market"],
+                        "location": result["location"],
+                        "supported_components": sum(not p.unsupported_reason for p in plans),
+                        "complete": sum(
+                            r.get("status") == "COMPLETE" for r in result["components"]
+                        ),
+                        "failed": sum(r.get("status") == "FAILED" for r in result["components"]),
+                        "unsupported": sorted(
+                            {p.unsupported_reason for p in plans if p.unsupported_reason}
+                        ),
+                        "unique_raw_conids": len(
+                            {h["con_id"] for r in result["components"] for h in r.get("hits", [])}
+                        ),
+                    }
+                ),
+                flush=True,
+            )
     finally:
         broker.disconnect()
         report["finished_at"] = datetime.now(UTC).isoformat()
@@ -230,20 +260,28 @@ def main() -> None:
     parser.add_argument("--run-id")
     parser.add_argument("--client-id", type=int, required=True)
     parser.add_argument("--state", type=Path, required=True, help="Dedicated benchmark database")
-    parser.add_argument(
-        "--history-cache", type=Path, help="IBKR-only historical cache"
-    )
+    parser.add_argument("--history-cache", type=Path, help="IBKR-only historical cache")
     parser.add_argument(
         "--recipe", type=Path, help="Predeclared versioned experimental matrix JSON"
     )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--capabilities-only", action="store_true")
-    modes.add_argument("--scanner-check", action="store_true",
-                       help="One bounded snapshot of advertised components; no history or strategy")
-    parser.add_argument("--markets", nargs="+", choices=[m.value for m in MarketId],
-                        help="Inspection markets; defaults to the supported market catalogue")
-    parser.add_argument("--scan-codes", nargs="+",
-                        help="Explicit advertised codes for diagnostics only; never changes V1")
+    modes.add_argument(
+        "--scanner-check",
+        action="store_true",
+        help="One bounded snapshot of advertised components; no history or strategy",
+    )
+    parser.add_argument(
+        "--markets",
+        nargs="+",
+        choices=[m.value for m in MarketId],
+        help="Inspection markets; defaults to the supported market catalogue",
+    )
+    parser.add_argument(
+        "--scan-codes",
+        nargs="+",
+        help="Explicit advertised codes for diagnostics only; never changes V1",
+    )
     parser.add_argument("--audit-only", action="store_true")
     parser.add_argument("--resume-audit", action="store_true")
     parser.add_argument("--session", type=date.fromisoformat)

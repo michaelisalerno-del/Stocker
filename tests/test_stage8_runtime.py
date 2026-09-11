@@ -593,7 +593,9 @@ def test_slow_preparation_does_not_hold_run_controls_or_shutdown(tmp_path):
 
         run = _hv_run()
         runtime = _runtime(
-            tmp_path, FakeBroker(), run,
+            tmp_path,
+            FakeBroker(),
+            run,
             clock=MutableClock(datetime(2026, 9, 2, 13, 56, tzinfo=UTC)),
             stage5_by_strategy={
                 SESSION_HARD_HV_METHOD.strategy_version: Stage5Analyzer(SlowHistory())
@@ -669,7 +671,8 @@ def test_wrong_account_prevents_readiness(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("finish", ["disable", "deadline", "complete"])
 def test_incremental_checkpoint_publishes_results_and_controls_survive_slow_history(
-    tmp_path, finish,
+    tmp_path,
+    finish,
 ):
     async def scenario():
         clock = MutableClock()
@@ -695,10 +698,13 @@ def test_incremental_checkpoint_publishes_results_and_controls_survive_slow_hist
         )
         await runtime.start()
         original = runtime._qualification.requests[0]
-        runtime._qualification = Stage5QualificationResult(tuple(
-            replace(original, instrument=replace(original.instrument, con_id=1000+i))
-            for i in range(5)
-        ), ())
+        runtime._qualification = Stage5QualificationResult(
+            tuple(
+                replace(original, instrument=replace(original.instrument, con_id=1000 + i))
+                for i in range(5)
+            ),
+            (),
+        )
         clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
         await asyncio.wait_for(runtime.poll_once(), timeout=0.5)
         await asyncio.wait_for(stalled.wait(), timeout=2)
@@ -717,9 +723,7 @@ def test_incremental_checkpoint_publishes_results_and_controls_survive_slow_hist
             await asyncio.wait_for(cancelled.wait(), timeout=0.5)
         else:
             release.set()
-        await asyncio.wait_for(
-            asyncio.gather(*runtime._checkpoint_tasks.values()), timeout=1
-        )
+        await asyncio.wait_for(asyncio.gather(*runtime._checkpoint_tasks.values()), timeout=1)
         progress = runtime.status().runs[0]
         assert progress.evaluation_state == ("COMPLETED" if finish == "complete" else "INCOMPLETE")
         assert progress.evaluation_completed == (5 if finish == "complete" else 4)
@@ -742,11 +746,19 @@ def test_session_history_resumes_without_opening_entry_streams(tmp_path, hour):
             features = FakeFeatureService()
             broker = FakeBroker()
             streams = []
+
             class Source(EmptyEntrySource):
                 def prepare_trades(self, instrument, captured=streams):
                     captured.append(instrument)
-            runtime = _runtime(tmp_path, broker, _hv_run(), clock=clock, feature_service=features,
-                               entry_source=Source())
+
+            runtime = _runtime(
+                tmp_path,
+                broker,
+                _hv_run(),
+                clock=clock,
+                feature_service=features,
+                entry_source=Source(),
+            )
             runtime._default_method_services = replace(
                 runtime._default_method_services, prepare_history_on_ready=True
             )
@@ -761,6 +773,7 @@ def test_session_history_resumes_without_opening_entry_streams(tmp_path, hour):
             assert streams == []
             assert broker.submitted == []
             await runtime.stop()
+
     asyncio.run(scenario())
 
 
@@ -1888,12 +1901,20 @@ def test_deadline_fill_and_closed_trade_commission_are_known_runtime_events(tmp_
     ledger = ExecutionLedger(tmp_path / "execution.sqlite3")
     assert ledger.recover_open_order(_open_order(plan, 104, OrderRole.TIMEOUT))
     entry = _fill(
-        plan, execution_id="entry", order_id=101, side=OrderAction.SELL,
-        quantity=plan.quantity, price=plan.entry_reference,
+        plan,
+        execution_id="entry",
+        order_id=101,
+        side=OrderAction.SELL,
+        quantity=plan.quantity,
+        price=plan.entry_reference,
     )
     close = _fill(
-        plan, execution_id="deadline", order_id=104, side=OrderAction.BUY,
-        quantity=plan.quantity, price=plan.entry_reference,
+        plan,
+        execution_id="deadline",
+        order_id=104,
+        side=OrderAction.BUY,
+        quantity=plan.quantity,
+        price=plan.entry_reference,
     )
     assert runtime.record_fill(entry)
     assert runtime.record_fill(close)

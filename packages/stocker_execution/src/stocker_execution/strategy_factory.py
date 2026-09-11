@@ -126,8 +126,11 @@ def session_hard_services(
 
 
 def acquired_session_hard_services(
-    broker: IbkrConnection, cache: IbkrHistoryCache, store: Stage5SnapshotStore,
-    clock: Callable[[], datetime], logger: Any,
+    broker: IbkrConnection,
+    cache: IbkrHistoryCache,
+    store: Stage5SnapshotStore,
+    clock: Callable[[], datetime],
+    logger: Any,
 ) -> MethodServices:
     from dataclasses import replace
 
@@ -136,18 +139,26 @@ def acquired_session_hard_services(
 
     services = legacy_session_hard_services(broker, cache, store, clock, logger)
     candidates = AcquiredCandidates(broker, cache, CandidateStore(store.path), clock)
-    return replace(services, qualify=candidates.qualify, universe_lifecycle=candidates.advance,
-                   universe_ready=candidates.ready, universe_status=candidates.summary,
-                   stop_universe=candidates.stop, background_work=candidates.background)
+    return replace(
+        services,
+        qualify=candidates.qualify,
+        universe_lifecycle=candidates.advance,
+        universe_ready=candidates.ready,
+        universe_status=candidates.summary,
+        stop_universe=candidates.stop,
+        background_work=candidates.background,
+    )
 
 
 # Add a method's engine and data composition here; UI never branches on its name.
 _PACKAGES = {
     (SESSION_HARD.method_id, SESSION_HARD.version): (
-        SessionHardMethod, acquired_session_hard_services,
+        SessionHardMethod,
+        acquired_session_hard_services,
     ),
     (SESSION_HARD_CANDIDATES_V8.method_id, SESSION_HARD_CANDIDATES_V8.version): (
-        SessionHardMethod, session_hard_services,
+        SessionHardMethod,
+        session_hard_services,
     ),
     (LEGACY_SESSION_HARD.method_id, LEGACY_SESSION_HARD.version): (
         SessionHardMethod,

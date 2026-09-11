@@ -76,8 +76,11 @@ class DiscoveryBroker(Protocol):
 
 
 def scanner_requests(
-    profile: DiscoveryProfile, market: MarketDefinition, capabilities: ScannerCapabilities,
-    *, local_per_usd: float | None = None,
+    profile: DiscoveryProfile,
+    market: MarketDefinition,
+    capabilities: ScannerCapabilities,
+    *,
+    local_per_usd: float | None = None,
 ) -> tuple[DiscoveryScan, ...]:
     """Validate the entire profile before issuing any scan; never substitute scan codes."""
     if local_per_usd is not None and (not isfinite(local_per_usd) or local_per_usd <= 0):
@@ -103,6 +106,7 @@ def scanner_requests(
             f"SCANNER_NOT_SUPPORTED: {market.scanner_instrument}/{location}/"
             f"{profile.scanner.value}; missing filters: {', '.join(missing) or 'none'}"
         )
+
     def local_millions(usd: int | None) -> float | None:
         rate = local_per_usd if local_per_usd is not None else 1
         return usd * rate / 1_000_000 if usd is not None else None
@@ -242,9 +246,9 @@ def discovery_summary(document: dict[str, Any]) -> dict[str, Any]:
         "duplicate_observations": sum(
             r.get("rejection_reason") == "DUPLICATE_CONID" for r in observations
         ),
-        "warnings": sorted({
-            r["metadata"]["warning"] for r in observations if r["metadata"].get("warning")
-        }),
+        "warnings": sorted(
+            {r["metadata"]["warning"] for r in observations if r["metadata"].get("warning")}
+        ),
         "fx_conversion": document.get("fx_conversion"),
         "watch_pool_size": (
             sum(c["in_watch_pool"] for c in candidates) if document["status"] == "READY" else 0
@@ -354,7 +358,9 @@ class CandidateDiscovery:
                     raise ValueError("MARKET_DATA_UNAVAILABLE: scanner FX currency mismatch")
                 document["fx_conversion"] = asdict(fx)
                 requests = scanner_requests(
-                    profile, market, await self.broker.scanner_capabilities(),
+                    profile,
+                    market,
+                    await self.broker.scanner_capabilities(),
                     local_per_usd=fx.local_per_usd,
                 )
                 for segment, request in zip(document["segments"], requests, strict=True):

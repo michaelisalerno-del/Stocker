@@ -247,9 +247,13 @@ def test_real_runtime_gates_history_and_builds_state_only_from_rv30(tmp_path, sc
 
             async def wait(due):
                 clock.now = due
+
             provider = ScannerAcquisition(
-                WideBroker(MarketId.US_NASDAQ), AcquisitionStore(tmp_path / "acquisition.sqlite"),
-                lambda: clock.now, wait)
+                WideBroker(MarketId.US_NASDAQ),
+                AcquisitionStore(tmp_path / "acquisition.sqlite"),
+                lambda: clock.now,
+                wait,
+            )
         pipeline = CandidatePipeline(
             CandidateStore(tmp_path / "candidates.sqlite"), provider, source, lambda: clock.now
         )
@@ -412,8 +416,9 @@ def test_partial_broker_qualification_failure_never_becomes_a_smaller_broad_univ
                 for r in db.execute("SELECT payload FROM opening_candidate_rejections")
             ]
         assert sum(r["acquisition_failure"] for r in reasons) == 1
-        resumed = CandidatePipeline(CandidateStore(pipeline.store.path), Provider(),
-                                    Source(), lambda: clock[0])
+        resumed = CandidatePipeline(
+            CandidateStore(pipeline.store.path), Provider(), Source(), lambda: clock[0]
+        )
         assert not (await resumed.advance(instance, session, clock[0])).requests
 
     asyncio.run(scenario())

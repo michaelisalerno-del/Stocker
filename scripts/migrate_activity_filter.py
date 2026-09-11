@@ -20,7 +20,9 @@ from stocker_dashboard.universe_runs import UniverseRunBuilder
 
 PREVIOUS_VERSION = "SESSION_HARD_CAUSAL_Q1_DISCOVERY_V6"
 PREVIOUS_VERSIONS = {
-    PREVIOUS_VERSION, "SESSION_HARD_CAUSAL_Q1_ACTIVITY_V5", "SESSION_HARD_CAUSAL_Q1_ACTIVITY_V4",
+    PREVIOUS_VERSION,
+    "SESSION_HARD_CAUSAL_Q1_ACTIVITY_V5",
+    "SESSION_HARD_CAUSAL_Q1_ACTIVITY_V4",
 }
 
 
@@ -69,18 +71,28 @@ def migrate(payload: dict[str, Any]) -> tuple[RunsConfig, dict[str, str]]:
         )
         if previous.discovery_profile is not None and current.discovery_profile is not None:
             # Carry forward operational budgets/minima, keeping the new method-owned policy.
-            profile = current.discovery_profile.model_copy(update={
-                field: getattr(previous.discovery_profile, field)
-                for field in (
-                    "results_per_band", "merged_candidate_limit", "monitoring_limit",
-                    "scan_concurrency", "minimum_price", "minimum_volume",
-                    "minimum_average_volume",
-                )
-            })
+            profile = current.discovery_profile.model_copy(
+                update={
+                    field: getattr(previous.discovery_profile, field)
+                    for field in (
+                        "results_per_band",
+                        "merged_candidate_limit",
+                        "monitoring_limit",
+                        "scan_concurrency",
+                        "minimum_price",
+                        "minimum_volume",
+                        "minimum_average_volume",
+                    )
+                }
+            )
             current = current.model_copy(update={"discovery_profile": profile})
-            config = config.model_copy(update={
-                "runs": tuple(current if r.run_id == current.run_id else r for r in config.runs),
-            })
+            config = config.model_copy(
+                update={
+                    "runs": tuple(
+                        current if r.run_id == current.run_id else r for r in config.runs
+                    ),
+                }
+            )
         if listing_id is not None and SESSION_HARD.discovery_profile(previous.market_id) is None:
             config = config.model_copy(
                 update={

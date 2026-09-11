@@ -179,9 +179,7 @@ def _load_trades(input_expression_report_dir: Path) -> pd.DataFrame:
         raise ValueError(f"Expression trades missing required columns: {missing_columns}")
     trades["timestamp"] = pd.to_datetime(trades["timestamp"], utc=True, errors="coerce")
     trades["session_date"] = pd.to_datetime(trades["session_date"]).dt.strftime("%Y-%m-%d")
-    trades["bar_index_in_session"] = pd.to_numeric(
-        trades["bar_index_in_session"], errors="coerce"
-    )
+    trades["bar_index_in_session"] = pd.to_numeric(trades["bar_index_in_session"], errors="coerce")
     if "month" not in trades:
         trades["month"] = trades["timestamp"].dt.strftime("%Y-%m")
     else:
@@ -198,9 +196,7 @@ def _load_event_rows(input_event_dir: Path) -> pd.DataFrame:
         return events
     events["timestamp"] = pd.to_datetime(events["timestamp"], utc=True, errors="coerce")
     events["session_date"] = pd.to_datetime(events["session_date"]).dt.strftime("%Y-%m-%d")
-    events["bar_index_in_session"] = pd.to_numeric(
-        events["bar_index_in_session"], errors="coerce"
-    )
+    events["bar_index_in_session"] = pd.to_numeric(events["bar_index_in_session"], errors="coerce")
     mapped = events["event_state"].astype(str).map(EVENT_STATE_PERSONALITY)
     events["event_personality"] = mapped.map(
         lambda value: value[0] if isinstance(value, tuple) else "unknown"
@@ -280,9 +276,7 @@ def _load_dense_symbol_frame(
     dense["symbol"] = symbol.upper()
     dense["timestamp"] = pd.to_datetime(dense["timestamp"], utc=True, errors="coerce")
     dense["session_date"] = pd.to_datetime(dense["session_date"]).dt.strftime("%Y-%m-%d")
-    dense["bar_index_in_session"] = pd.to_numeric(
-        dense["bar_index_in_session"], errors="coerce"
-    )
+    dense["bar_index_in_session"] = pd.to_numeric(dense["bar_index_in_session"], errors="coerce")
     return cast(
         pd.DataFrame,
         dense.sort_values(["session_date", "bar_index_in_session"], kind="mergesort"),
@@ -385,9 +379,7 @@ def _add_prior_event_cluster_features(
         return trades
     event_groups = {
         (str(symbol).upper(), str(session_date)): group
-        for (symbol, session_date), group in events.groupby(
-            ["symbol", "session_date"], sort=False
-        )
+        for (symbol, session_date), group in events.groupby(["symbol", "session_date"], sort=False)
     }
     rows: list[dict[str, Any]] = []
     for trade_index, trade in trades.iterrows():
@@ -417,9 +409,7 @@ def _add_prior_event_cluster_features(
             feature_row[f"cluster_unique_state_count_{window}"] = (
                 int(states.nunique()) if len(prior) else 0
             )
-            feature_row[f"cluster_same_state_count_{window}"] = int(
-                states.eq(current_state).sum()
-            )
+            feature_row[f"cluster_same_state_count_{window}"] = int(states.eq(current_state).sum())
             feature_row[f"cluster_same_personality_count_{window}"] = int(
                 personalities.eq(current_personality).sum()
             )
@@ -661,8 +651,7 @@ def _prior_regime_categorical_columns(trades: pd.DataFrame) -> list[str]:
         for column in trades.columns
         if column.startswith("prev_")
         and any(
-            column.endswith(f"{regime_column}_dominant")
-            or column.endswith(f"{regime_column}_last")
+            column.endswith(f"{regime_column}_dominant") or column.endswith(f"{regime_column}_last")
             for regime_column in REGIME_COLUMNS
         )
     ]
@@ -878,9 +867,7 @@ def run_state_lifecycle_context_lab(
         else "reject_no_train_and_oos_context_candidates"
     )
 
-    run_id = "state_lifecycle_context_lab_v0_" + datetime.now(tz=UTC).strftime(
-        "%Y%m%dT%H%M%SZ"
-    )
+    run_id = "state_lifecycle_context_lab_v0_" + datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = output_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     paths = {

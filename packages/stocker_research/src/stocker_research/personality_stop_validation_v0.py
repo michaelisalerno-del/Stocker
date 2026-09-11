@@ -952,9 +952,10 @@ def evaluate_personality_stop_models(
 
 def _decision(results: pd.DataFrame, selected: pd.DataFrame) -> str:
     if selected.empty:
-        if not results.empty and results["reject_reasons"].astype(str).str.contains(
-            "dominated", na=False
-        ).all():
+        if (
+            not results.empty
+            and results["reject_reasons"].astype(str).str.contains("dominated", na=False).all()
+        ):
             return "reject_concentrated"
         return "reject_no_stop_model_improvement"
     return "continue_research_stop_model"
@@ -1001,10 +1002,14 @@ def _summary_lines(
         "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     if not selected.empty:
-        for _, row in selected.sort_values(
-            ["median_final_r_conservative", "win_rate_after_stop"],
-            ascending=[False, False],
-        ).head(40).iterrows():
+        for _, row in (
+            selected.sort_values(
+                ["median_final_r_conservative", "win_rate_after_stop"],
+                ascending=[False, False],
+            )
+            .head(40)
+            .iterrows()
+        ):
             lines.append(
                 "| "
                 + " | ".join(

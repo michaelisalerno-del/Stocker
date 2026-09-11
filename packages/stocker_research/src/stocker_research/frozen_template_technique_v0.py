@@ -191,8 +191,7 @@ def _fetch_eodhd_rows(
         )
     if config.timeframe not in {"1m", "5m", "1h"}:
         raise ValueError(
-            "frozen template technique EODHD download supports intraday "
-            "timeframes 1m, 5m, and 1h"
+            "frozen template technique EODHD download supports intraday timeframes 1m, 5m, and 1h"
         )
 
     client = eodhd.EODHDClient(config=eodhd_config)
@@ -263,12 +262,10 @@ def _write_summary_md(path: Path, payload: dict[str, Any]) -> None:
         "",
         "## Stages",
         "",
-        "- EODHD download: "
-        + ("enabled" if payload["download_eodhd"] else "skipped"),
+        "- EODHD download: " + ("enabled" if payload["download_eodhd"] else "skipped"),
         f"- Bar cleaner symbols: {payload['bar_cleaner']['symbols_cleaned']}",
         f"- State-event rows: {payload['state_event_detector']['total_event_rows']}",
-        "- Frozen-template transfer rows: "
-        f"{payload['template_transfer']['trade_count']}",
+        f"- Frozen-template transfer rows: {payload['template_transfer']['trade_count']}",
         "",
         "## Files",
         "",
@@ -345,9 +342,7 @@ def run_frozen_template_technique_v0(
         ),
     )
 
-    transfer_summary = json.loads(
-        transfer_result.summary_json_path.read_text(encoding="utf-8")
-    )
+    transfer_summary = json.loads(transfer_result.summary_json_path.read_text(encoding="utf-8"))
     decision = "continue_research_packaged_frozen_template_technique"
     paths = {
         "summary_json": run_dir / "summary.json",
@@ -381,9 +376,7 @@ def run_frozen_template_technique_v0(
             "symbols_cleaned": int(len(bar_cleaner)),
             "rows_before": int(bar_cleaner["rows_before"].sum()),
             "rows_after": int(bar_cleaner["rows_after"].sum()),
-            "duplicate_timestamps_removed": int(
-                bar_cleaner["duplicate_timestamps_removed"].sum()
-            ),
+            "duplicate_timestamps_removed": int(bar_cleaner["duplicate_timestamps_removed"].sum()),
             "validation_errors": int(bar_cleaner["validation_errors"].sum()),
             "validation_warnings": int(bar_cleaner["validation_warnings"].sum()),
         },
@@ -401,12 +394,8 @@ def run_frozen_template_technique_v0(
             "output_dir": str(transfer_result.output_dir),
             "summary_json_path": str(transfer_result.summary_json_path),
             "decision": transfer_result.decision,
-            "all_row_count": int(
-                transfer_summary.get("frozen_template_transfer_all_row_count", 0)
-            ),
-            "trade_count": int(
-                transfer_summary.get("frozen_template_transfer_trade_count", 0)
-            ),
+            "all_row_count": int(transfer_summary.get("frozen_template_transfer_all_row_count", 0)),
+            "trade_count": int(transfer_summary.get("frozen_template_transfer_trade_count", 0)),
             "total_r": transfer_summary.get("frozen_template_transfer_total_r"),
         },
         "reports": {

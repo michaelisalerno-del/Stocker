@@ -451,9 +451,7 @@ def _position_policy_rows(
                 "scored_exposure": adjusted_exposure,
                 "exposure_reduction_pct": float(reduction),
                 "raw_session_flat_compliant": bool(raw.get("session_flat_compliant", False)),
-                "scored_session_flat_compliant": bool(
-                    scored.get("session_flat_compliant", False)
-                ),
+                "scored_session_flat_compliant": bool(scored.get("session_flat_compliant", False)),
                 "policy_adjusted_trade_count": _as_int(
                     selected.get("test_trade_count", selected.get("trade_count"))
                 ),
@@ -572,8 +570,7 @@ def _classification_anatomy(payloads: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _markdown(summary: dict[str, Any]) -> str:
     available_range = (
-        f"{summary['actual_available_range']['from']} to "
-        f"{summary['actual_available_range']['to']}"
+        f"{summary['actual_available_range']['from']} to {summary['actual_available_range']['to']}"
     )
     bucket_lines = "\n".join(
         f"- `{bucket}`: {count}"
@@ -587,9 +584,7 @@ def _markdown(summary: dict[str, Any]) -> str:
     )
     if not symbol_lines:
         symbol_lines = "- None"
-    interpretation_lines = "\n".join(
-        f"- {item}" for item in summary["session_data_interpretation"]
-    )
+    interpretation_lines = "\n".join(f"- {item}" for item in summary["session_data_interpretation"])
     mismatch_lines = "\n".join(
         (
             "- `{symbol}` `{session_date}` extra `{first_extra_timestamp}` "
@@ -776,9 +771,7 @@ def build_intraday_session_integrity_summary(
     error_bucket_count = severity_counts.get("error", 0)
     warning_bucket_count = severity_counts.get("warning", 0)
     if error_bucket_count:
-        recommendation = (
-            "B. Fix session/calendar/timestamp handling before more research."
-        )
+        recommendation = "B. Fix session/calendar/timestamp handling before more research."
     elif any(
         summary.get("scored_session_flat_compliant_count", 0) != summary.get("experiment_count", 0)
         for summary in policy_by_hypothesis.values()

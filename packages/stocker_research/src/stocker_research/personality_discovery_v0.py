@@ -153,8 +153,7 @@ CAVEAT_FIELDS_BY_FAMILY: dict[str, tuple[str, ...]] = {
     + FILTER_FEATURES_BY_FAMILY["auction_location"],
     "event_quality": REGIME_FIELDS_BY_FAMILY["event_quality"]
     + FILTER_FEATURES_BY_FAMILY["event_quality"],
-    "time_of_day": REGIME_FIELDS_BY_FAMILY["time_of_day"]
-    + FILTER_FEATURES_BY_FAMILY["time"],
+    "time_of_day": REGIME_FIELDS_BY_FAMILY["time_of_day"] + FILTER_FEATURES_BY_FAMILY["time"],
     "cross_stock_alignment": REGIME_FIELDS_BY_FAMILY["cross_stock_alignment"]
     + FILTER_FEATURES_BY_FAMILY["cross_stock_alignment"],
     "freshness": (
@@ -820,9 +819,7 @@ def _format_bps(value: Any) -> str:
 
 def _latest_input(input_dir: Path | None, input_base_dir: Path) -> Path:
     return (
-        input_dir
-        if input_dir is not None
-        else find_latest_state_event_detector_run(input_base_dir)
+        input_dir if input_dir is not None else find_latest_state_event_detector_run(input_base_dir)
     )
 
 
@@ -934,9 +931,7 @@ def run_personality_discovery_lab(
                     train_regime = train_all[
                         train_all[regime_field].astype(str) == str(regime_value)
                     ]
-                    test_regime = test_all[
-                        test_all[regime_field].astype(str) == str(regime_value)
-                    ]
+                    test_regime = test_all[test_all[regime_field].astype(str) == str(regime_value)]
                     if train_regime.empty:
                         continue
                     regime_train_rate = float(train_regime["same_result"].mean())
@@ -1164,9 +1159,7 @@ def run_personality_discovery_lab(
                 "decision": "continue_research" if best is not None else "reject_no_oos_rule",
                 "best_horizon": int(best["horizon"]) if best is not None else math.nan,
                 "best_regime": (
-                    f"{best['regime_field']}={best['regime_value']}"
-                    if best is not None
-                    else ""
+                    f"{best['regime_field']}={best['regime_value']}" if best is not None else ""
                 ),
                 "best_filter": best["filter_rule"] if best is not None else "",
                 "best_test_count": int(best["retained_test_count"]) if best is not None else 0,

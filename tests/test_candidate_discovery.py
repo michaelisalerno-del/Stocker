@@ -561,7 +561,8 @@ def test_broker_adapter_preserves_raw_rows_uses_native_cap_units_and_caches_coni
         assert subscription.abovePrice > 1e100  # Local-price filter remains unset.
         assert subscription.aboveVolume == 1000
         assert [(f.tag, f.value) for f in filters] == [
-            ("avgVolumeAbove", "100000"), ("usdPriceAbove", "1"),
+            ("avgVolumeAbove", "100000"),
+            ("usdPriceAbove", "1"),
         ]
         assert await connection.qualify_discovery_candidate(rows[0]) == (
             await connection.qualify_discovery_candidate(rows[1])

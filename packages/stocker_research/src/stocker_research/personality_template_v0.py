@@ -334,9 +334,7 @@ def _stop_loss_metrics(
     stop_loss_bps: tuple[float, ...],
 ) -> dict[str, float]:
     if expected_direction == 0 or rows.empty:
-        return {
-            f"stop_{int(stop)}bps_hit_rate": math.nan for stop in stop_loss_bps
-        } | {
+        return {f"stop_{int(stop)}bps_hit_rate": math.nan for stop in stop_loss_bps} | {
             f"stop_{int(stop)}bps_survival_rate": math.nan for stop in stop_loss_bps
         }
     if expected_direction > 0:
@@ -355,9 +353,7 @@ def _stop_loss_metrics(
     for stop in stop_loss_bps:
         hit = adverse_bps >= stop
         has_values = hit.notna().any()
-        metrics[f"stop_{int(stop)}bps_hit_rate"] = (
-            float(hit.mean()) if has_values else math.nan
-        )
+        metrics[f"stop_{int(stop)}bps_hit_rate"] = float(hit.mean()) if has_values else math.nan
         metrics[f"stop_{int(stop)}bps_survival_rate"] = (
             float((~hit).mean()) if has_values else math.nan
         )
@@ -511,12 +507,7 @@ def evaluate_personality_templates(
                     random_result = _random_baseline(
                         regime_pool,
                         count=len(retained),
-                        seed=(
-                            config.random_seed
-                            + template_index * 1009
-                            + filter_index
-                            + horizon
-                        ),
+                        seed=(config.random_seed + template_index * 1009 + filter_index + horizon),
                         iterations=config.random_iterations,
                     )
                     concentration = _concentration(retained)
@@ -531,8 +522,7 @@ def evaluate_personality_templates(
                         reasons.append("low_month_count")
                     if (
                         not math.isnan(float(concentration["single_symbol_share"]))
-                        and concentration["single_symbol_share"]
-                        > template.max_single_symbol_share
+                        and concentration["single_symbol_share"] > template.max_single_symbol_share
                     ):
                         reasons.append("single_symbol_dominated")
                     if (
@@ -860,10 +850,14 @@ def run_personality_template_lab(
                 "| --- | --- | --- | ---: | ---: | ---: | ---: |",
             ]
         )
-        for _, row in stop_rows.sort_values(
-            ["retained_median_score", "retained_event_count"],
-            ascending=[False, False],
-        ).head(20).iterrows():
+        for _, row in (
+            stop_rows.sort_values(
+                ["retained_median_score", "retained_event_count"],
+                ascending=[False, False],
+            )
+            .head(20)
+            .iterrows()
+        ):
             lines.append(
                 "| "
                 + " | ".join(

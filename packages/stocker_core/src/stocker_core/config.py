@@ -222,7 +222,8 @@ def load_runs_config(path: str | Path) -> RunsConfig:
     dynamic_universes = {
         str(item.get("universe", ""))
         for item in runs
-        if isinstance(item, dict) and (
+        if isinstance(item, dict)
+        and (
             item.get("universe_source") == "DYNAMIC_IBKR"
             or (
                 item.get("universe_source") is None
@@ -258,7 +259,8 @@ def load_runs_config(path: str | Path) -> RunsConfig:
         hydrated_inline: list[object] = []
         for item in inline:
             if (
-                not isinstance(item, dict) or item.get("members")
+                not isinstance(item, dict)
+                or item.get("members")
                 or item.get("universe_id") in dynamic_universes
             ):
                 hydrated_inline.append(item)

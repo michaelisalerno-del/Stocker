@@ -251,10 +251,15 @@ def _signals_to_trades(
     ordered["_timestamp_sort"] = pd.to_datetime(ordered["timestamp"], utc=True, errors="coerce")
     ordered = ordered.sort_values(["_timestamp_sort", "symbol"], kind="mergesort")
     if config.one_trade_per_symbol_session:
-        trade_mask = ~ordered[["symbol", "session_date"]].astype(str).agg(
-            "|".join,
-            axis=1,
-        ).duplicated()
+        trade_mask = (
+            ~ordered[["symbol", "session_date"]]
+            .astype(str)
+            .agg(
+                "|".join,
+                axis=1,
+            )
+            .duplicated()
+        )
     else:
         trade_mask = pd.Series(True, index=ordered.index)
     trades = ordered[trade_mask].copy()
@@ -366,9 +371,9 @@ def _random_live_baseline(
     rng = np.random.default_rng(config.random_seed)
     rows: list[dict[str, Any]] = []
     replay_pool = replay_events.reset_index(drop=True)
-    params = trades[
-        ["horizon", "expected_direction", "stop_model", "target_r"]
-    ].reset_index(drop=True)
+    params = trades[["horizon", "expected_direction", "stop_model", "target_r"]].reset_index(
+        drop=True
+    )
     valid_indices_by_horizon = {
         horizon: replay_pool.index[replay_pool[_return_column(horizon)].notna()].to_numpy()
         for horizon in sorted(params["horizon"].astype(int).unique())

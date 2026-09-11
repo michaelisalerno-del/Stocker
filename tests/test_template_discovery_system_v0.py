@@ -272,9 +272,7 @@ def test_atom_discovery_skips_overbroad_numeric_atoms() -> None:
                 "month": "2025-08",
                 "loop_id": f"loop_{index % 4}",
                 "source_distance_from_session_high_pct": -0.01,
-                "source_auction_session_open_location": "below"
-                if index < 20
-                else "above",
+                "source_auction_session_open_location": "below" if index < 20 else "above",
             }
             for index in range(40)
         ]
@@ -389,8 +387,7 @@ def test_routing_admission_diversifies_participation_families() -> None:
             operator="<=",
             value=0.6648,
             expression=(
-                "normal_or_low_cumulative_volume "
-                "(source_relative_cumulative_volume <= 0.6648)"
+                "normal_or_low_cumulative_volume (source_relative_cumulative_volume <= 0.6648)"
             ),
         ),
         DiscoveryAtom(
@@ -412,9 +409,7 @@ def test_routing_admission_diversifies_participation_families() -> None:
             max_single_symbol_share=1.0,
         ),
     )
-    selected_expressions = scorecard.loc[
-        scorecard["selected_for_routing"], "expression"
-    ].tolist()
+    selected_expressions = scorecard.loc[scorecard["selected_for_routing"], "expression"].tolist()
 
     assert any("normal_or_low_cumulative_volume" in item for item in selected_expressions)
     assert any(" AND low_cumulative_volume (" in item for item in selected_expressions)
@@ -578,15 +573,9 @@ def test_clean_slate_container_routing_generates_reports_without_saved_inputs(
     assert set(c0_parent["stage"]) == {"fixed_c0_parent"}
     assert "b0_state" in b0_summary.columns or b0_summary.empty
     assert not loop_refinement.empty
-    assert {"source_visible", "next_event_start"}.intersection(
-        set(loop_refinement["visibility"])
-    )
-    assert set(loop_context_admissions["candidate_kind"]).issubset(
-        {"admission_refinement"}
-    )
-    assert set(loop_context_blockers["candidate_kind"]).issubset(
-        {"blocker_refinement"}
-    )
+    assert {"source_visible", "next_event_start"}.intersection(set(loop_refinement["visibility"]))
+    assert set(loop_context_admissions["candidate_kind"]).issubset({"admission_refinement"})
+    assert set(loop_context_blockers["candidate_kind"]).issubset({"blocker_refinement"})
     assert not regimes.empty
     assert not mixed_regimes.empty
     assert not transition_regimes.empty
@@ -623,9 +612,7 @@ def test_container_routing_can_be_bounded_for_large_reports(tmp_path: Path) -> N
     smid = _write_event_surface(tmp_path, "smid")
     residual = _write_event_surface(tmp_path, "residual", residual=True)
     config = _config("container-routing")
-    config = TemplateDiscoverySystemConfig(
-        **{**config.__dict__, "max_containers_to_route": 1}
-    )
+    config = TemplateDiscoverySystemConfig(**{**config.__dict__, "max_containers_to_route": 1})
 
     result = run_template_discovery_system_lab(
         input_event_rows=(
@@ -753,9 +740,7 @@ def test_family_r_replay_uses_source_excursions_for_old_transition_parity() -> N
                 "timestamp": pd.Timestamp("2024-08-05T14:35:00Z"),
                 "month": "2024-08",
                 "loop_id": (
-                    "controlled_pullback_after_bullish_impulse"
-                    "__to__"
-                    "failed_bullish_impulse_recoil"
+                    "controlled_pullback_after_bullish_impulse__to__failed_bullish_impulse_recoil"
                 ),
                 "source_auction_session_open_location": "below",
                 "source_relative_cumulative_volume": 0.40,
@@ -826,9 +811,7 @@ def test_family_replay_transitions_filter_family_loops_before_target_priority() 
     )
 
     assert set(transitions["loop_id"]) == {
-        "controlled_pullback_after_bullish_impulse"
-        "__to__"
-        "failed_bullish_impulse_recoil"
+        "controlled_pullback_after_bullish_impulse__to__failed_bullish_impulse_recoil"
     }
     assert transitions["forward_6_bar_return"].iloc[0] == -0.01
 
@@ -997,10 +980,7 @@ def test_template_component_selection_scores_and_selects_components_by_code(
         "fixed_next_confirmation_choppy_open_down_source_h6",
         "extended_directional_impulse_pullback_confirmation_note_v0",
         "low_volume_reclaim_repair_behavior_loop_split_v0",
-        (
-            "controlled_pullback_after_bullish_impulse"
-            "__to__failed_bounce_active_liquidation"
-        ),
+        ("controlled_pullback_after_bullish_impulse__to__failed_bounce_active_liquidation"),
     }
     assert set(rejected["rule_id"]) == {
         "fixed_next_confirmation_fast_failed_reclaim_short_source_h6",
@@ -1130,9 +1110,7 @@ def test_frozen_template_transfer_replay_rematerializes_source_context(
         "fixed_next_confirmation_fast_failed_reclaim_short_source_h6",
     }
     fast = all_rows[
-        all_rows["rule_id"].eq(
-            "fixed_next_confirmation_fast_failed_reclaim_short_source_h6"
-        )
+        all_rows["rule_id"].eq("fixed_next_confirmation_fast_failed_reclaim_short_source_h6")
     ].iloc[0]
     assert fast["symbol"] == "FAST"
     assert fast["event_state"] == "failed_open_down_continuation"

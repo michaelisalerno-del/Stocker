@@ -81,22 +81,33 @@ class DashboardReadService:
             if run.state.value not in {"ACTIVE", "READY"}:
                 continue
             if run.trade_stream_unavailable:
-                attention.append({"scope": run.run_id, "message": (
-                    f"{run.trade_stream_unavailable} stocks could not obtain a required trade feed "
-                    "at the latest preparation checkpoint; entry coverage is incomplete."
-                )})
+                attention.append(
+                    {
+                        "scope": run.run_id,
+                        "message": (
+                            f"{run.trade_stream_unavailable} stocks could not obtain a required trade feed "
+                            "at the latest preparation checkpoint; entry coverage is incomplete."
+                        ),
+                    }
+                )
             if run.evaluation_state in {"EVALUATING", "INCOMPLETE"}:
-                attention.append({"scope": run.run_id, "message": (
-                    f"Checkpoint {run.evaluation_state.lower()}: "
-                    f"{run.evaluation_completed}/{run.evaluation_total} stocks evaluated."
-                )})
+                attention.append(
+                    {
+                        "scope": run.run_id,
+                        "message": (
+                            f"Checkpoint {run.evaluation_state.lower()}: "
+                            f"{run.evaluation_completed}/{run.evaluation_total} stocks evaluated."
+                        ),
+                    }
+                )
             elif run.preparing_history:
                 attention.append(
                     {"scope": run.run_id, "message": "Preparing required IBKR history."}
                 )
         return {
             "as_of": self.clock().isoformat(),
-            "system": "ATTENTION" if attention and status.application.value == "READY"
+            "system": "ATTENTION"
+            if attention and status.application.value == "READY"
             else status.application.value,
             "environments": environments,
             "active_runs": sum(run.state.value == "ACTIVE" for run in status.runs),
@@ -158,8 +169,11 @@ class DashboardReadService:
             today = self.performance_service.performance(run, PerformancePeriod.TODAY)
             recent = self.performance_service.performance(run, PerformancePeriod.SESSIONS_20)
             discovery = self.discovery_diagnostic(run.run_id, selected_session)
-            selection = (self.candidate_store.summary(run.run_id, selected_session)
-                         if run.uses_candidate_selection else None)
+            selection = (
+                self.candidate_store.summary(run.run_id, selected_session)
+                if run.uses_candidate_selection
+                else None
+            )
             checkpoint = (
                 runtime.evaluation_checkpoint or runtime.next_checkpoint if runtime else None
             )
@@ -182,7 +196,8 @@ class DashboardReadService:
                     "current_or_next_checkpoint": (checkpoint.isoformat() if checkpoint else None),
                     "candidate_selection": selection,
                     "acquisition": self.acquisition_store.summary(run.run_id, selected_session)
-                    if run.method_spec and "universe_acquisition" in run.method_spec else None,
+                    if run.method_spec and "universe_acquisition" in run.method_spec
+                    else None,
                     "candidate_count": (
                         selection["watchlist_size"]
                         if selection
@@ -215,18 +230,29 @@ class DashboardReadService:
         return result
 
     def discovery_diagnostic(
-        self, run_id: str, session: date | None = None,
+        self,
+        run_id: str,
+        session: date | None = None,
     ) -> dict[str, Any] | None:
         run = self._run(run_id)
         if not run.uses_dynamic_discovery:
             return None
         rows = self.discovery_store.history(run_id, session=session, limit=1)
         successes = self.discovery_store.history(run_id, successful_only=True, limit=1)
-        summary = discovery_summary(rows[0]) if rows else {
-            "status": "NOT_STARTED", "reason": "", "raw_candidates": 0, "unique_candidates": 0,
-            "watch_pool_size": 0, "rejected_candidates": 0,
-            "rejection_counts": {}, "per_cap_band": {},
-        }
+        summary = (
+            discovery_summary(rows[0])
+            if rows
+            else {
+                "status": "NOT_STARTED",
+                "reason": "",
+                "raw_candidates": 0,
+                "unique_candidates": 0,
+                "watch_pool_size": 0,
+                "rejected_candidates": 0,
+                "rejection_counts": {},
+                "per_cap_band": {},
+            }
+        )
         return summary | {
             "refresh_requested": (
                 bool(rows) and rows[0]["generation"] < self.discovery_store.generation(run_id)
@@ -235,19 +261,33 @@ class DashboardReadService:
             "last_successful_discovery": successes[0]["completed_at"] if successes else None,
         }
 
-    def acquisition_details(self, run_id: str, session: date, kind: str,
-                            limit: int, offset: int) -> dict[str, Any]:
+    def acquisition_details(
+        self, run_id: str, session: date, kind: str, limit: int, offset: int
+    ) -> dict[str, Any]:
         summary = self.acquisition_store.summary(run_id, session)
-        allowed = {"hits", "components", "pool", "broad", "requests", "oracle",
-                   "targets", "misses", "contributions"}
+        allowed = {
+            "hits",
+            "components",
+            "pool",
+            "broad",
+            "requests",
+            "oracle",
+            "targets",
+            "misses",
+            "contributions",
+        }
         if kind not in allowed:
             raise ValueError("Unknown acquisition detail kind")
-        return {"summary": summary,
-                "rows": self.acquisition_store.details(run_id, session, kind, limit, offset)
-                        if summary else [],
-                "recall_history": self.acquisition_store.recall_history(run_id) if summary else {},
-                "benchmark": self.acquisition_store.benchmark(run_id, session) if summary else {},
-                "limit": limit, "offset": offset}
+        return {
+            "summary": summary,
+            "rows": self.acquisition_store.details(run_id, session, kind, limit, offset)
+            if summary
+            else [],
+            "recall_history": self.acquisition_store.recall_history(run_id) if summary else {},
+            "benchmark": self.acquisition_store.benchmark(run_id, session) if summary else {},
+            "limit": limit,
+            "offset": offset,
+        }
 
     def candidate_selection_details(
         self, run_id: str, session: date, limit: int, offset: int
@@ -265,7 +305,8 @@ class DashboardReadService:
         self._run(run_id)
         return {
             "runs": self.discovery_store.history(run_id, limit=limit, offset=offset),
-            "limit": limit, "offset": offset,
+            "limit": limit,
+            "offset": offset,
             "qualification_link": {
                 "keys": ["run_id", "con_id", "session", "checkpoint"],
                 "candidates_url": f"/api/candidates?run_id={run_id}",
@@ -296,24 +337,29 @@ class DashboardReadService:
             )
         counts = self.runtime_store.signal_counts(run_id, selected_session, latest_checkpoint)
         all_plans = self.ledger.list_records(run_id=run_id, limit=500)[0]
-        signals = self.runtime_store.load_signals(
-            run_id, session=selected_session, t0=latest_checkpoint,
-            signal_ids=tuple(item.signal_id for item in all_plans),
-        ) if latest_checkpoint is not None else ()
-        signal_ids = {item.signal_id for item in signals}
-        plans = tuple(
-            item
-            for item in all_plans
-            if item.signal_id in signal_ids
+        signals = (
+            self.runtime_store.load_signals(
+                run_id,
+                session=selected_session,
+                t0=latest_checkpoint,
+                signal_ids=tuple(item.signal_id for item in all_plans),
+            )
+            if latest_checkpoint is not None
+            else ()
         )
+        signal_ids = {item.signal_id for item in signals}
+        plans = tuple(item for item in all_plans if item.signal_id in signal_ids)
         positions = self.positions()
         account = self._account(run.environment)
         market = get_market(run.market_id) if run.market_id is not None else None
         screen = None
         if self.activity_store is not None and market is not None and run.cap_bucket is not None:
             screen = self.activity_store.get(
-                market.market_id.value, run.cap_bucket, selected_session,
-                profile_id=run.activity_profile_id, profile_version=run.activity_profile_version,
+                market.market_id.value,
+                run.cap_bucket,
+                selected_session,
+                profile_id=run.activity_profile_id,
+                profile_version=run.activity_profile_version,
             )
         today = self.performance_service.performance(run, PerformancePeriod.TODAY)
         discovery = self.discovery_diagnostic(run.run_id, selected_session)
@@ -326,7 +372,8 @@ class DashboardReadService:
             selection["session_hard_qualified"] = counts["qualified"]
         if discovery:
             current_capture = (
-                discovery.get("ready_at") is not None and latest_checkpoint is not None
+                discovery.get("ready_at") is not None
+                and latest_checkpoint is not None
                 and latest_checkpoint >= datetime.fromisoformat(discovery["ready_at"])
             )
             discovery.update(
@@ -397,8 +444,9 @@ class DashboardReadService:
             "market_state": runtime.market.value if runtime and runtime.market else None,
             "session": selected_session.isoformat(),
             "candidate_selection": selection,
-                    "acquisition": self.acquisition_store.summary(run.run_id, selected_session)
-                    if run.method_spec and "universe_acquisition" in run.method_spec else None,
+            "acquisition": self.acquisition_store.summary(run.run_id, selected_session)
+            if run.method_spec and "universe_acquisition" in run.method_spec
+            else None,
             "discovery": discovery,
             "universe_source": (
                 run.universe_source.value if run.universe_source else "LEGACY_ACTIVITY"
@@ -483,8 +531,12 @@ class DashboardReadService:
         }
 
     def screen(
-        self, market_id: str, cap_bucket: str, session: date,
-        *, profile_id: str = "ACTIVITY_SHORTLIST_V1",
+        self,
+        market_id: str,
+        cap_bucket: str,
+        session: date,
+        *,
+        profile_id: str = "ACTIVITY_SHORTLIST_V1",
     ) -> dict[str, Any]:
         if self.activity_store is None:
             raise ValueError("activity shortlist store is unavailable")
@@ -492,8 +544,11 @@ class DashboardReadService:
         from stocker_core.runs import activity_snapshot_version
 
         snapshot = self.activity_store.get(
-            market_id, CapBucket(cap_bucket), session,
-            profile_id=profile_id, profile_version=activity_snapshot_version(profile_id),
+            market_id,
+            CapBucket(cap_bucket),
+            session,
+            profile_id=profile_id,
+            profile_version=activity_snapshot_version(profile_id),
         )
         if snapshot is None:
             raise ValueError("unknown activity shortlist snapshot")
@@ -558,7 +613,9 @@ class DashboardReadService:
                 (
                     item
                     for item in self.runtime_store.load_signals(
-                        selected_run, session=selected_session, t0=selected_checkpoint,
+                        selected_run,
+                        session=selected_session,
+                        t0=selected_checkpoint,
                         status=signal_status,
                     )
                     if item.session == selected_session
@@ -602,7 +659,9 @@ class DashboardReadService:
         signals = {
             (item.underlying_con_id, item.session, item.t0): item
             for item in self.runtime_store.load_signals(
-                selected_run, session=selected_session, t0=selected_checkpoint,
+                selected_run,
+                session=selected_session,
+                t0=selected_checkpoint,
                 con_ids=tuple(row.con_id for row in rows if row.con_id is not None),
             )
         }
@@ -1058,7 +1117,8 @@ class DashboardReadService:
             "side": record.side.value,
             "quantity": record.intended_quantity,
             "order_type": (
-                "LIMIT + PROTECTION" if record.entry_limit_price is not None
+                "LIMIT + PROTECTION"
+                if record.entry_limit_price is not None
                 else "MARKET + PROTECTION"
             ),
             "entry": record.entry_reference,

@@ -459,27 +459,14 @@ def _candidate_conditions(data: pd.DataFrame) -> dict[str, tuple[pd.Series, pd.S
     reclaim_from_low = _numeric(data, "reclaim_from_recent_low")
 
     above_reference = (
-        above_vwap
-        | (dist_vwap > -0.0015)
-        | (dist_or_mid > -0.0015)
-        | dist_or_mid.isna()
+        above_vwap | (dist_vwap > -0.0015) | (dist_or_mid > -0.0015) | dist_or_mid.isna()
     )
-    bullish_impulse = (
-        (prior_12 > 0.007)
-        | (prior_6 > 0.0045)
-        | (impulse_return > 0.008)
-    )
+    bullish_impulse = (prior_12 > 0.007) | (prior_6 > 0.0045) | (impulse_return > 0.008)
     abnormal_impulse = _available_or_true(
-        (impulse_range_zscore > 0.35)
-        | (impulse_relative_volume > 1.10)
-        | (impulse_return > 0.008),
+        (impulse_range_zscore > 0.35) | (impulse_relative_volume > 1.10) | (impulse_return > 0.008),
         impulse_range_zscore.combine_first(impulse_relative_volume),
     )
-    shallow_pullback = (
-        (prior_3 <= 0.0025)
-        & (prior_3 > -0.0075)
-        & (pullback_depth > -0.018)
-    )
+    shallow_pullback = (prior_3 <= 0.0025) & (prior_3 > -0.0075) & (pullback_depth > -0.018)
     structure_held = close >= (impulse_midpoint * 0.995)
     volume_contracts = _available_or_true(impulse_volume_ratio <= 1.10, impulse_volume_ratio)
     stabilizes = (close_location >= 0.45) & (
@@ -767,8 +754,7 @@ def detect_state_events(
         events = _select_non_overlapping(events, embargo_bars=max(cfg.horizons, default=0))
     elif cfg.event_mode not in {"all_rows", "state_entry_only"}:
         raise ValueError(
-            "event_mode must be one of all_rows, state_entry_only, "
-            "state_entry_non_overlapping"
+            "event_mode must be one of all_rows, state_entry_only, state_entry_non_overlapping"
         )
     return events.sort_values(["symbol", "timestamp", "event_state"]).reset_index(drop=True)
 
@@ -827,10 +813,14 @@ def audit_manual_state_examples(
         symbol = example["symbol"]
         session_date = example["session_date"]
         expected_states = tuple(example["expected_event_states"])
-        session_events = data[
-            data.get("symbol", pd.Series(dtype=str)).eq(symbol)
-            & data.get("session_date", pd.Series(dtype=str)).eq(session_date)
-        ] if not data.empty else pd.DataFrame()
+        session_events = (
+            data[
+                data.get("symbol", pd.Series(dtype=str)).eq(symbol)
+                & data.get("session_date", pd.Series(dtype=str)).eq(session_date)
+            ]
+            if not data.empty
+            else pd.DataFrame()
+        )
         matched = session_events[
             session_events.get("event_state", pd.Series(dtype=str)).isin(expected_states)
         ]
@@ -952,9 +942,7 @@ def summarize_event_state_responses(
                     "symbol_count": int(valid["symbol"].nunique()),
                     "session_count": int(
                         (
-                            valid["symbol"].astype(str)
-                            + "|"
-                            + valid["session_date"].astype(str)
+                            valid["symbol"].astype(str) + "|" + valid["session_date"].astype(str)
                         ).nunique()
                     ),
                     "median_forward_return": float(returns.median()),
@@ -1024,10 +1012,7 @@ def _horizon_event_rows(
 
 
 def _path_vector(row: pd.Series, horizon: int) -> np.ndarray:
-    values = [
-        row.get(f"path_return_{step}", np.nan)
-        for step in range(1, horizon + 1)
-    ]
+    values = [row.get(f"path_return_{step}", np.nan) for step in range(1, horizon + 1)]
     vector = pd.to_numeric(pd.Series(values), errors="coerce").dropna().to_numpy(dtype=float)
     return vector
 
@@ -1117,12 +1102,16 @@ def run_same_event_cross_symbol_similarity(
         if same_state_pool.empty:
             same_state_pool = data[same_horizon & different_symbol & same_state]
         if not same_state_pool.empty:
-            chosen = same_state_pool.assign(
-                _bar_distance=(
-                    pd.to_numeric(same_state_pool["bar_index_in_session"], errors="coerce")
-                    - float(source["bar_index_in_session"])
-                ).abs()
-            ).sort_values(["_bar_distance", "timestamp"]).iloc[0]
+            chosen = (
+                same_state_pool.assign(
+                    _bar_distance=(
+                        pd.to_numeric(same_state_pool["bar_index_in_session"], errors="coerce")
+                        - float(source["bar_index_in_session"])
+                    ).abs()
+                )
+                .sort_values(["_bar_distance", "timestamp"])
+                .iloc[0]
+            )
             raw_rows.append(_match_metrics(source, chosen, baseline="same_event_cross_symbol"))
 
         baseline_pools = {
@@ -1417,9 +1406,8 @@ def _same_event_similarity_supported_pairs(similarity: pd.DataFrame) -> set[tupl
             float(row["response_sign_agreement"]) > float(random_first["response_sign_agreement"])
             and float(row["response_sign_agreement"])
             > float(different_first["response_sign_agreement"])
-            and float(row["median_abs_return_difference"]) < float(
-                random_first["median_abs_return_difference"]
-            )
+            and float(row["median_abs_return_difference"])
+            < float(random_first["median_abs_return_difference"])
         ):
             supported.add((str(state), int(horizon)))
     return supported
@@ -1450,15 +1438,18 @@ def build_decision(
         else pd.DataFrame()
     )
     enough_pairs = {
-        (str(row["event_state"]), int(row["horizon"]))
-        for _, row in enough_sample_frame.iterrows()
+        (str(row["event_state"]), int(row["horizon"])) for _, row in enough_sample_frame.iterrows()
     }
     same_event_pairs = _same_event_similarity_supported_pairs(similarity)
-    oos_pairs = {
-        (str(row["event_state"]), int(row["horizon"]))
-        for _, row in oos_response.iterrows()
-        if bool(row.get("gate_passed", False))
-    } if not oos_response.empty else set()
+    oos_pairs = (
+        {
+            (str(row["event_state"]), int(row["horizon"]))
+            for _, row in oos_response.iterrows()
+            if bool(row.get("gate_passed", False))
+        }
+        if not oos_response.empty
+        else set()
+    )
     supported_pairs = enough_pairs & same_event_pairs & oos_pairs
     enough_samples = bool(enough_pairs)
     same_event_supported = bool(same_event_pairs)
@@ -1493,20 +1484,21 @@ def build_decision(
         "event_states_with_enough_sample": event_state_summary[
             (event_state_summary["event_count"] >= config.min_events_for_similarity)
             & (event_state_summary["symbol_count"] >= config.min_symbols_for_key_state)
-        ]["event_state"].drop_duplicates().astype(str).tolist()
+        ]["event_state"]
+        .drop_duplicates()
+        .astype(str)
+        .tolist()
         if not event_state_summary.empty
         else [],
         "supported_state_horizons": [
-            {"event_state": state, "horizon": horizon}
-            for state, horizon in sorted(supported_pairs)
+            {"event_state": state, "horizon": horizon} for state, horizon in sorted(supported_pairs)
         ],
         "same_event_cross_symbol_supported_pairs": [
             {"event_state": state, "horizon": horizon}
             for state, horizon in sorted(same_event_pairs)
         ],
         "oos_supported_pairs": [
-            {"event_state": state, "horizon": horizon}
-            for state, horizon in sorted(oos_pairs)
+            {"event_state": state, "horizon": horizon} for state, horizon in sorted(oos_pairs)
         ],
         "same_event_cross_symbol_supported": same_event_supported,
         "oos_supported": oos_supported,
@@ -1571,13 +1563,25 @@ def _summary_markdown(
         else "manual_reproduction_failed"
     )
     failed_manual = manual_audit[manual_audit["detected_expected_event"].eq(False)]
-    enough = event_state_summary[
-        event_state_summary["event_state"].isin(summary["decision"]["event_states_with_enough_sample"])
-    ] if not event_state_summary.empty else pd.DataFrame()
+    enough = (
+        event_state_summary[
+            event_state_summary["event_state"].isin(
+                summary["decision"]["event_states_with_enough_sample"]
+            )
+        ]
+        if not event_state_summary.empty
+        else pd.DataFrame()
+    )
     same_event = similarity[similarity["baseline"].eq("same_event_cross_symbol")]
-    failed_states = event_state_summary[
-        ~event_state_summary["event_state"].isin(summary["decision"]["event_states_with_enough_sample"])
-    ] if not event_state_summary.empty else pd.DataFrame()
+    failed_states = (
+        event_state_summary[
+            ~event_state_summary["event_state"].isin(
+                summary["decision"]["event_states_with_enough_sample"]
+            )
+        ]
+        if not event_state_summary.empty
+        else pd.DataFrame()
+    )
     supported_horizons = pd.DataFrame(summary["decision"].get("supported_state_horizons", []))
     supported_event_states = (
         set(supported_horizons["event_state"].astype(str).tolist())

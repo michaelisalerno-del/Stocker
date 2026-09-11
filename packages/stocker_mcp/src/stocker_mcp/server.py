@@ -106,17 +106,13 @@ def _transport_security(
 
     loopback = host in {"127.0.0.1", "localhost", "::1"}
     normalised = [
-        host
-        for host in (_normalise_allowed_host(value) for value in allowed_hosts)
-        if host
+        host for host in (_normalise_allowed_host(value) for value in allowed_hosts) if host
     ]
     if not loopback and not normalised:
         return None
 
     hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"] if loopback else []
-    origins = (
-        ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"] if loopback else []
-    )
+    origins = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"] if loopback else []
     for allowed in normalised:
         hosts.append(allowed)
         if ":" not in allowed:
@@ -308,9 +304,7 @@ def build_server(
         limit: int = 100,
         database: str | None = None,
     ) -> dict[str, Any]:
-        return database_tools.db_get_latest_catalysts(
-            symbol=symbol, limit=limit, database=database
-        )
+        return database_tools.db_get_latest_catalysts(symbol=symbol, limit=limit, database=database)
 
     @mcp.tool(**_tool_kwargs("db_get_trade_attribution"))
     def db_get_trade_attribution(
@@ -642,8 +636,7 @@ def doctor(
     auth_env_ready = bool(os.environ.get(auth_token_env))
     oauth_setup_ready = bool(os.environ.get(oauth_setup_code_env))
     if transport == "http" and (
-        (auth_mode == "bearer" and auth_env_ready)
-        or (auth_mode == "oauth" and oauth_setup_ready)
+        (auth_mode == "bearer" and auth_env_ready) or (auth_mode == "oauth" and oauth_setup_ready)
     ):
         try:
             build_http_app(

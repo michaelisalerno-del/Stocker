@@ -145,8 +145,12 @@ class MarketSession:
         if self.opens_at is None or self.closes_at is None or minutes <= 0:
             raise ValueError("No regular-session prefix")
         starts = self.active_bar_starts or tuple(_five_minute_slots(self.opens_at, self.closes_at))
-        prefix = tuple(start + timedelta(minutes=i) for start in starts for i in range(5)
-                       if start + timedelta(minutes=i+1) <= self.closes_at)[:minutes]
+        prefix = tuple(
+            start + timedelta(minutes=i)
+            for start in starts
+            for i in range(5)
+            if start + timedelta(minutes=i + 1) <= self.closes_at
+        )[:minutes]
         if len(prefix) != minutes:
             raise ValueError("Session too short for candidate stage")
         return prefix
@@ -857,9 +861,14 @@ class RuntimeStore:
             )
 
     def load_signals(
-        self, run_id: str, *, session: date | None = None, t0: datetime | None = None,
+        self,
+        run_id: str,
+        *,
+        session: date | None = None,
+        t0: datetime | None = None,
         signal_ids: Sequence[str] | None = None,
-        con_ids: Sequence[int] | None = None, status: SignalStatus | None = None,
+        con_ids: Sequence[int] | None = None,
+        status: SignalStatus | None = None,
     ) -> tuple[StrategySignal, ...]:
         """Load signals for one run; callers apply the live session/window rules."""
 
@@ -877,8 +886,11 @@ class RuntimeStore:
         if con_ids is not None:
             if not con_ids:
                 return ()
-            conditions.append("json_extract(payload, '$.underlying_con_id') IN ("
-                              + ",".join("?" for _ in con_ids) + ")")
+            conditions.append(
+                "json_extract(payload, '$.underlying_con_id') IN ("
+                + ",".join("?" for _ in con_ids)
+                + ")"
+            )
             params.extend(con_ids)
         if signal_ids is not None:
             if not signal_ids:
@@ -887,7 +899,8 @@ class RuntimeStore:
             params.extend(signal_ids)
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT payload FROM runtime_signals WHERE " + " AND ".join(conditions)
+                "SELECT payload FROM runtime_signals WHERE "
+                + " AND ".join(conditions)
                 + " ORDER BY session, signal_id",
                 params,
             ).fetchall()
@@ -1457,8 +1470,9 @@ class StockerRuntime:
             now = _aware(self._clock())
             previous_states = dict(self._run_states)
             for key, task in self._checkpoint_tasks.items():
-                if not any(updated_by_id[owner].enabled
-                           for owner in self._checkpoint_task_owners[key]):
+                if not any(
+                    updated_by_id[owner].enabled for owner in self._checkpoint_task_owners[key]
+                ):
                     task.cancel()
             prepared_runs: list[RunInstance] = []
             previous_environments: dict[str, Environment] = {}
@@ -1741,9 +1755,11 @@ class StockerRuntime:
                 if update is not None:
                     self._replace_qualification_for({instance.config.run_id}, update)
         # Audit jobs get no slots while any enabled market or trading preparation is active.
-        background_owners = [(owner, self._services_for(owner.config).background_work)
-                             for owner in self._manager.list_runs()
-                             if self._services_for(owner.config).background_work is not None]
+        background_owners = [
+            (owner, self._services_for(owner.config).background_work)
+            for owner in self._manager.list_runs()
+            if self._services_for(owner.config).background_work is not None
+        ]
         if background_owners:
             background_allowed = not self._expected_move_tasks and not self._checkpoint_tasks
             for owner in self._manager.list_runs():
@@ -1753,16 +1769,21 @@ class StockerRuntime:
                 broker = self._destinations[owner.config.environment].broker
                 configuration = getattr(broker, "config", None)
                 guard = timedelta(seconds=getattr(configuration, "request_timeout_seconds", 60))
-                if (audit_session and audit_session.opens_at and audit_session.closes_at
-                        and audit_session.opens_at - guard <= now < audit_session.closes_at):
+                if (
+                    audit_session
+                    and audit_session.opens_at
+                    and audit_session.closes_at
+                    and audit_session.opens_at - guard <= now < audit_session.closes_at
+                ):
                     background_allowed = False
             for owner, background in background_owners:
                 assert background is not None
                 try:
                     await background(owner, background_allowed and owner.config.enabled)
                 except Exception as exc:
-                    self._logger.warning("method_background_failed",
-                                         run_id=owner.config.run_id, reason=str(exc))
+                    self._logger.warning(
+                        "method_background_failed", run_id=owner.config.run_id, reason=str(exc)
+                    )
         with self._timing("session_and_shortlist_refresh"):
             await self._refresh_activity_sessions(_aware(self._clock()))
             await self._refresh_scheduled_activity_shortlists(_aware(self._clock()))
@@ -1839,7 +1860,8 @@ class StockerRuntime:
     async def _prepare_upcoming_expected_moves(self, now: datetime) -> None:
         enabled = {i.config.run_id for i in self._manager.list_runs() if i.config.enabled}
         self._session_history_prepared = {
-            run_id: key for run_id, key in self._session_history_prepared.items()
+            run_id: key
+            for run_id, key in self._session_history_prepared.items()
             if run_id in enabled
         }
         for pending_key, (task, owners) in tuple(self._expected_move_tasks.items()):
@@ -1881,8 +1903,11 @@ class StockerRuntime:
                 if self._session_history_prepared.get(run_id) != history_key:
                     self._session_history_prepared[run_id] = history_key
                     self._start_expected_move_preparation(
-                        strategy.strategy_version, market.session, schedule[0][1],
-                        requests, {run_id},
+                        strategy.strategy_version,
+                        market.session,
+                        schedule[0][1],
+                        requests,
+                        {run_id},
                     )
             for _checkpoint, t0 in schedule:
                 if not now < t0 <= now + timedelta(minutes=lead):
@@ -1916,13 +1941,21 @@ class StockerRuntime:
             for run_id in run_ids:
                 self._trade_stream_failures[run_id] = failures
             if failures:
-                self._logger.warning("checkpoint_stream_capacity", unavailable=failures,
-                                     requested=len(requests), t0=t0.isoformat())
+                self._logger.warning(
+                    "checkpoint_stream_capacity",
+                    unavailable=failures,
+                    requested=len(requests),
+                    t0=t0.isoformat(),
+                )
             self._start_expected_move_preparation(version, session, t0, requests, run_ids)
 
     def _start_expected_move_preparation(
-        self, version: str, session: date, t0: datetime,
-        requests: Sequence[Stage5QualifiedRequest], run_ids: set[str],
+        self,
+        version: str,
+        session: date,
+        t0: datetime,
+        requests: Sequence[Stage5QualifiedRequest],
+        run_ids: set[str],
     ) -> None:
         # Share bounded background history work; this never opens live trade streams.
         task_key = version, session, tuple(sorted(r.instrument.con_id for r in requests))
@@ -1932,7 +1965,8 @@ class StockerRuntime:
                     self._stage5_by_strategy[version].prepare_expected_moves(
                         requests, session=session, t0=t0
                     )
-                ), frozenset(run_ids),
+                ),
+                frozenset(run_ids),
             )
         else:
             task, owners = self._expected_move_tasks[task_key]
@@ -2270,9 +2304,13 @@ class StockerRuntime:
         failed_markets = {
             run_markets[membership.run_id]
             for failure in self._qualification.ineligible
-            if failure.symbol not in {
-                "HOT_BY_VOLUME", "ACTIVITY_SHORTLIST_V1", "ACTIVITY_CAPACITY_V2",
-                "ACTIVITY_LIQUIDITY_V1", "ACTIVITY_LIQUIDITY_V2",
+            if failure.symbol
+            not in {
+                "HOT_BY_VOLUME",
+                "ACTIVITY_SHORTLIST_V1",
+                "ACTIVITY_CAPACITY_V2",
+                "ACTIVITY_LIQUIDITY_V1",
+                "ACTIVITY_LIQUIDITY_V2",
             }
             and failure.symbol not in {r.activity_profile_id for r in self._config.runs}
             for membership in failure.memberships
@@ -2291,8 +2329,8 @@ class StockerRuntime:
         return {
             market.market_id.value: (
                 discovery_readiness[market.market_id]
-                if market.market_id in discovery_readiness else
-                "CONTRACT_QUALIFICATION_FAILED"
+                if market.market_id in discovery_readiness
+                else "CONTRACT_QUALIFICATION_FAILED"
                 if market.market_id in failed_markets and market.market_id not in qualified_markets
                 else "AVAILABLE"
                 if market.scanner_location in capabilities.locations
@@ -2399,7 +2437,8 @@ class StockerRuntime:
             return False
         matching_execution = self._execution.get(matching.run_id)
         accepted = (
-            matching_execution.record_fill(fill) if matching_execution is not None
+            matching_execution.record_fill(fill)
+            if matching_execution is not None
             else self._ledger.record_fill(fill)
         )
         if not accepted:
@@ -2447,8 +2486,9 @@ class StockerRuntime:
             if progress and market and progress["t0"].date() != market.session:
                 progress = {}
             universe_status = self._services_for(run).universe_status
-            candidate_status = (universe_status(run.run_id, market.session)
-                                if universe_status and market else None)
+            candidate_status = (
+                universe_status(run.run_id, market.session) if universe_status and market else None
+            )
             candidate_degraded = bool(candidate_status and candidate_status["state"] == "DEGRADED")
             run_statuses.append(
                 RunStatus(
@@ -2634,8 +2674,13 @@ class StockerRuntime:
                     instance.config.run_id for instance in grouped[version]
                 )
                 self._checkpoint_tasks[key] = asyncio.create_task(
-                    self._evaluate_incrementally(grouped[version], stage5=stage5,
-                                                 session=session, t0=t0, checkpoint=checkpoint)
+                    self._evaluate_incrementally(
+                        grouped[version],
+                        stage5=stage5,
+                        session=session,
+                        t0=t0,
+                        checkpoint=checkpoint,
+                    )
                 )
                 continue
             await self._evaluate_strategy_group(
@@ -2647,8 +2692,13 @@ class StockerRuntime:
             )
 
     async def _evaluate_incrementally(
-        self, instances: Sequence[RunInstance], *, stage5: Stage5Analyzer,
-        session: date, t0: datetime, checkpoint: int,
+        self,
+        instances: Sequence[RunInstance],
+        *,
+        stage5: Stage5Analyzer,
+        session: date,
+        t0: datetime,
+        checkpoint: int,
     ) -> None:
         """Publish bounded batches without holding the scheduler during broker I/O."""
         run_ids = {item.config.run_id for item in instances}
@@ -2656,9 +2706,12 @@ class StockerRuntime:
         for instance in instances:
             run_id = instance.config.run_id
             self._checkpoint_progress[run_id] = {
-                "t0": t0, "completed": 0, "total": sum(
+                "t0": t0,
+                "completed": 0,
+                "total": sum(
                     any(m.run_id == run_id for m in request.memberships) for request in requests
-                ), "state": "EVALUATING",
+                ),
+                "state": "EVALUATING",
             }
         outcome = CheckpointState.COMPLETED
         reason = ""
@@ -2673,8 +2726,12 @@ class StockerRuntime:
                     if _aware(self._clock()) >= t0 + timedelta(minutes=5):
                         raise TimeoutError
                     await self._evaluate_strategy_group(
-                        active, stage5=stage5, session=session, t0=t0, checkpoint=checkpoint,
-                        batch=requests[offset:offset + 4],
+                        active,
+                        stage5=stage5,
+                        session=session,
+                        t0=t0,
+                        checkpoint=checkpoint,
+                        batch=requests[offset : offset + 4],
                         batch_ineligible=ineligible if offset == 0 else (),
                         background=True,
                     )
@@ -2697,22 +2754,35 @@ class StockerRuntime:
                 )
                 if outcome is CheckpointState.COMPLETED:
                     self._store.increment(run_id, session, "checkpoints_processed")
-                self._logger.info("checkpoint_finished", run_id=run_id, t0=t0.isoformat(),
-                                  completed=progress["completed"], total=progress["total"],
-                                  state=progress["state"], reason=reason)
+                self._logger.info(
+                    "checkpoint_finished",
+                    run_id=run_id,
+                    t0=t0.isoformat(),
+                    completed=progress["completed"],
+                    total=progress["total"],
+                    state=progress["state"],
+                    reason=reason,
+                )
 
     def _checkpoint_owner_active(self, instance: RunInstance) -> bool:
         run = instance.config
         current = self._manager.get_run(run.run_id).config
         return (
-            not self._stopping and current.enabled and current == run
+            not self._stopping
+            and current.enabled
+            and current == run
             and self._environment_ready.get(run.environment, False)
             and self._run_states.get(run.run_id) in {RunRuntimeState.READY, RunRuntimeState.ACTIVE}
         )
 
     async def _evaluate_strategy_group(
-        self, instances: Sequence[RunInstance], *, stage5: Stage5Analyzer,
-        session: date, t0: datetime, checkpoint: int,
+        self,
+        instances: Sequence[RunInstance],
+        *,
+        stage5: Stage5Analyzer,
+        session: date,
+        t0: datetime,
+        checkpoint: int,
         batch: Sequence[Stage5QualifiedRequest] | None = None,
         batch_ineligible: Sequence[Stage5IneligibleInstrument] = (),
         background: bool = False,
@@ -2733,8 +2803,10 @@ class StockerRuntime:
         for instance in instances:
             run = instance.config
             valid_rows = tuple(row for row in rows if run.run_id in row.run_ids)
-            if any(row.session != session or row.t0 != t0 or row.t0.tzinfo is None
-                   for row in valid_rows):
+            if any(
+                row.session != session or row.t0 != t0 or row.t0.tzinfo is None
+                for row in valid_rows
+            ):
                 if background:
                     raise ValueError("STALE_OR_SESSION_MISMATCHED_INPUT")
                 self._fail_checkpoint(
@@ -2743,7 +2815,9 @@ class StockerRuntime:
                 continue
             try:
                 context = await self._services_for(run).context.context_for(
-                    run, valid_rows, checkpoint,
+                    run,
+                    valid_rows,
+                    checkpoint,
                     {request.instrument.con_id: request.instrument for request in requests},
                     self._store.cohort_history(run.run_id),
                 )
@@ -2760,8 +2834,9 @@ class StockerRuntime:
                         continue
                     if _aware(self._clock()) >= t0 + timedelta(minutes=5):
                         raise TimeoutError
-                    self._record_checkpoint_rows(run, valid_rows, context, session, t0, checkpoint,
-                                                 finalize=False)
+                    self._record_checkpoint_rows(
+                        run, valid_rows, context, session, t0, checkpoint, finalize=False
+                    )
                     self._checkpoint_progress[run.run_id]["completed"] += sum(
                         row.con_id is not None for row in valid_rows
                     )
@@ -2769,9 +2844,15 @@ class StockerRuntime:
                 self._record_checkpoint_rows(run, valid_rows, context, session, t0, checkpoint)
 
     def _record_checkpoint_rows(
-        self, run: RunConfig, valid_rows: Sequence[Stage5FeatureSnapshot],
-        context: StrategyContext, session: date, t0: datetime, checkpoint: int,
-        *, finalize: bool = True,
+        self,
+        run: RunConfig,
+        valid_rows: Sequence[Stage5FeatureSnapshot],
+        context: StrategyContext,
+        session: date,
+        t0: datetime,
+        checkpoint: int,
+        *,
+        finalize: bool = True,
     ) -> None:
         now = _aware(self._clock())
         strategy = self._strategies[run.run_id]
@@ -2801,13 +2882,21 @@ class StockerRuntime:
         if finalize:
             self._store.increment(run.run_id, session, "checkpoints_processed")
             self._store.mark_checkpoint(
-                run.run_id, session, t0, CheckpointState.COMPLETED,
-                f"Stage 5 ready={ready_count}; candidate_errors={candidate_errors}", now,
+                run.run_id,
+                session,
+                t0,
+                CheckpointState.COMPLETED,
+                f"Stage 5 ready={ready_count}; candidate_errors={candidate_errors}",
+                now,
             )
         self._logger.info(
-            "checkpoint_batch_processed", run_id=run.run_id, t0=t0.isoformat(),
-            checkpoint=checkpoint, instruments_ready=ready_count,
-            pre_context_not_ready=context_not_ready, strategy_signals=waiting,
+            "checkpoint_batch_processed",
+            run_id=run.run_id,
+            t0=t0.isoformat(),
+            checkpoint=checkpoint,
+            instruments_ready=ready_count,
+            pre_context_not_ready=context_not_ready,
+            strategy_signals=waiting,
             candidate_errors=candidate_errors,
         )
 
@@ -2849,9 +2938,12 @@ class StockerRuntime:
                     strategy.observe_trades(events)
                     observed_signals = strategy.signals
                     self._store.save_signals(
-                        tuple(s for s in observed_signals
-                              if s is not before_observation.get(s.signal_id)
-                              and s != before_observation.get(s.signal_id)),
+                        tuple(
+                            s
+                            for s in observed_signals
+                            if s is not before_observation.get(s.signal_id)
+                            and s != before_observation.get(s.signal_id)
+                        ),
                         now,
                     )
                 attempted = self._ledger.attempted_signal_ids(run.run_id)
@@ -2936,7 +3028,8 @@ class StockerRuntime:
                     admitted.append(signal)
                 self._store.save_signals(
                     tuple(
-                        s for s in strategy.signals
+                        s
+                        for s in strategy.signals
                         if s is not before_admission.get(s.signal_id)
                         and s != before_admission.get(s.signal_id)
                     ),

@@ -168,13 +168,17 @@ def test_failure_anatomy_summary_groups_rejected_diagnostics(tmp_path: Path) -> 
     assert ma["classification_anatomy"]["no_train_selected_parameter_count"] == 1
     assert ma["partial_pass_matrix"][0]["diagnostic_only"] is True
     assert ma["metric_distributions"]["median_selected_test_net_return"] == 0.025
-    assert payload["best_rejected_cases"]["moving_average_momentum"][
-        "by_selected_test_net_return"
-    ][0]["diagnostic_case_type"] == "rejected_diagnostic_case"
+    assert (
+        payload["best_rejected_cases"]["moving_average_momentum"]["by_selected_test_net_return"][0][
+            "diagnostic_case_type"
+        ]
+        == "rejected_diagnostic_case"
+    )
     assert payload["too_few_trades_drilldown"][0]["minimum_required_trades"] == 20
-    assert payload["train_selection_failure_drilldown"][0]["best_test_diagnostic"][
-        "parameter_set_id"
-    ] == "ps_0042"
+    assert (
+        payload["train_selection_failure_drilldown"][0]["best_test_diagnostic"]["parameter_set_id"]
+        == "ps_0042"
+    )
     assert payload["holding_policy_drilldown"][0]["holding_policy_decision"]["evidence_tier"]
     assert payload["report_contract_check"]["malformed_report_count"] == 1
     assert "daily templates" in result.summary_markdown_path.read_text(encoding="utf-8")

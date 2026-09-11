@@ -116,9 +116,7 @@ def normalize_prices(frame: pd.DataFrame) -> pd.DataFrame:
     result = result.drop_duplicates("timestamp", keep="last").sort_values(
         "timestamp", kind="mergesort"
     )
-    numeric = result[["open", "high", "low", "close"]].apply(
-        pd.to_numeric, errors="raise"
-    )
+    numeric = result[["open", "high", "low", "close"]].apply(pd.to_numeric, errors="raise")
     if result.empty or not np.isfinite(numeric.to_numpy(float)).all():
         raise ValueError("price input contains missing or non-finite OHLC")
     if not bool(numeric.gt(0).all().all()):
@@ -154,8 +152,7 @@ def calculate_realized_m_20(
     starts["endpoint_close"] = prices["close"].reindex(endpoints).to_numpy()
     starts["endpoint_session"] = prices["session_date"].reindex(endpoints).to_numpy()
     starts = starts.loc[
-        starts["endpoint_close"].notna()
-        & starts["endpoint_session"].eq(starts["session_date"])
+        starts["endpoint_close"].notna() & starts["endpoint_session"].eq(starts["session_date"])
     ]
     starts = (
         starts.sort_index(kind="mergesort")
@@ -174,9 +171,7 @@ def calculate_realized_m_20(
     if timestamp not in prices.index or timestamp - pd.Timedelta(minutes=3) not in prices.index:
         raise ValueError("T0 or T0-minus-3-minute OPEN is missing")
     source_p0 = float(cast(Any, prices.at[timestamp, "open"]))
-    source_prior = float(
-        cast(Any, prices.at[timestamp - pd.Timedelta(minutes=3), "open"])
-    )
+    source_prior = float(cast(Any, prices.at[timestamp - pd.Timedelta(minutes=3), "open"]))
     aligned_prior = source_prior * (current_p0 / source_p0)
     pre_move_m = abs(current_p0 - aligned_prior) / realized_price
     return RealizedResult(count, realized_return, realized_price, pre_move_m)
@@ -316,9 +311,7 @@ def _provider_paths(source_root: Path, stocker_local: Path, cohort: str, symbol:
     elif cohort == "BROAD2025":
         inventory = pd.read_csv(broad / "data_inventory.csv").set_index("canonical_ticker")
         value = inventory.at[symbol, "one_minute_path"]
-        generated_path = (
-            broad / f"data/broad_1m_2025/symbol={symbol}/timeframe=1m/data.parquet"
-        )
+        generated_path = broad / f"data/broad_1m_2025/symbol={symbol}/timeframe=1m/data.parquet"
         paths = [generated_path if pd.isna(value) else Path(str(value))]
     else:
         raise ValueError(f"unsupported provider cohort {cohort}")
@@ -384,9 +377,7 @@ def _summary_metrics(frame: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def _source_difference_metrics(
-    ibkr: pd.DataFrame, existing: pd.DataFrame
-) -> dict[str, Any]:
+def _source_difference_metrics(ibkr: pd.DataFrame, existing: pd.DataFrame) -> dict[str, Any]:
     start = pd.Timestamp(ibkr.index.min())
     end = pd.Timestamp(ibkr.index.max())
     provider = existing.loc[(existing.index >= start) & (existing.index <= end)]
@@ -406,12 +397,8 @@ def _source_difference_metrics(
         "ibkr_only_timestamps": len(ibkr.index.difference(provider.index)),
         "provider_only_timestamps": len(provider.index.difference(ibkr.index)),
         "median_provider_ibkr_close_ratio": float(close_ratio.median()),
-        "median_absolute_close_percentage_difference": float(
-            absolute_close_pct.median() * 100
-        ),
-        "maximum_absolute_close_percentage_difference": float(
-            absolute_close_pct.max() * 100
-        ),
+        "median_absolute_close_percentage_difference": float(absolute_close_pct.median() * 100),
+        "maximum_absolute_close_percentage_difference": float(absolute_close_pct.max() * 100),
         "exact_ohlc_rows": int(
             provider_common[["open", "high", "low", "close"]]
             .eq(ibkr_common[["open", "high", "low", "close"]])
@@ -450,9 +437,7 @@ def compare(args: argparse.Namespace) -> None:
         symbol = str(case.stock)
         cohort = str(case.cohort)
         if symbol not in ibkr_cache:
-            ibkr_cache[symbol] = normalize_prices(
-                pd.read_csv(ibkr_dir / f"{symbol}_ibkr_1m.csv")
-            )
+            ibkr_cache[symbol] = normalize_prices(pd.read_csv(ibkr_dir / f"{symbol}_ibkr_1m.csv"))
         key = (cohort, symbol)
         if key not in provider_cache:
             provider_cache[key] = _load_provider_prices(
@@ -497,9 +482,7 @@ def compare(args: argparse.Namespace) -> None:
     comparison.to_csv(output / "comparisons.csv", index=False, lineterminator="\n")
     _write_json(output / "equivalence_summary.json", _summary_metrics(comparison))
     source_differences = {
-        f"{cohort}/{symbol}": _source_difference_metrics(
-            ibkr_cache[symbol], provider_prices
-        )
+        f"{cohort}/{symbol}": _source_difference_metrics(ibkr_cache[symbol], provider_prices)
         for (cohort, symbol), provider_prices in sorted(provider_cache.items())
     }
     _write_json(output / "source_differences.json", source_differences)

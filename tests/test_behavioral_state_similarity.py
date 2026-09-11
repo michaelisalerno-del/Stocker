@@ -405,9 +405,11 @@ def test_same_state_cross_symbol_matching_is_strict_same_state_and_cross_symbol(
     assert (matches["source_state"] == matches["match_state"]).all()
     assert set(matches["match_state"]) == {"initiative_buying_continuation"}
     assert (matches["match_state"] != "dead_chop").all()
-    assert {"same_state_cross_symbol", "different_state_cross_symbol", "random_cross_symbol"}.issubset(
-        set(baselines["baseline"])
-    )
+    assert {
+        "same_state_cross_symbol",
+        "different_state_cross_symbol",
+        "random_cross_symbol",
+    }.issubset(set(baselines["baseline"]))
     assert summary.iloc[0]["state"] == "initiative_buying_continuation"
 
 

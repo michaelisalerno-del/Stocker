@@ -45,9 +45,7 @@ class FakeIbClient:
     ) -> list[object]:
         return []
 
-    async def reqHistoricalDataAsync(
-        self, contract: object, **kwargs: object
-    ) -> list[object]:
+    async def reqHistoricalDataAsync(self, contract: object, **kwargs: object) -> list[object]:
         self.requests += 1
         if isinstance(self.result, Exception):
             raise self.result
@@ -213,9 +211,7 @@ def test_invalid_cached_bar_is_rejected_as_not_ready(tmp_path: Path) -> None:
     with sqlite3.connect(cache.path) as connection:
         connection.execute("UPDATE ibkr_history_bars SET high = 1.0")
 
-    snapshot = cache.get_required_history(
-        instrument(), semantics, (timestamp,), as_of=timestamp
-    )
+    snapshot = cache.get_required_history(instrument(), semantics, (timestamp,), as_of=timestamp)
 
     assert snapshot.status is HistoryStatus.NOT_READY
     assert snapshot.bars == ()
@@ -235,9 +231,7 @@ def test_future_cached_bars_are_excluded_by_as_of(tmp_path: Path) -> None:
         tuple(bar(timestamp, 150.0 + index) for index, timestamp in enumerate(timestamps)),
     )
 
-    snapshot = cache.get_required_history(
-        instrument(), semantics, timestamps, as_of=timestamps[1]
-    )
+    snapshot = cache.get_required_history(instrument(), semantics, timestamps, as_of=timestamps[1])
 
     assert snapshot.status is HistoryStatus.NOT_READY
     assert tuple(item.timestamp for item in snapshot.bars) == timestamps[:2]

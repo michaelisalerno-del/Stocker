@@ -380,9 +380,7 @@ def run_pre_registered_edge_proof(
                 "caveated_signal_count": int(len(caveated)),
                 "trade_count": int(len(trades)),
                 "symbol_count": int(trades["symbol"].nunique()) if not trades.empty else 0,
-                "session_count": int(trades["session_date"].nunique())
-                if not trades.empty
-                else 0,
+                "session_count": int(trades["session_date"].nunique()) if not trades.empty else 0,
                 "total_net_r": float(net_r.sum()) if not trades.empty else 0.0,
                 "median_net_r": float(net_r.median()) if not trades.empty else math.nan,
                 "mean_net_r": float(net_r.mean()) if not trades.empty else math.nan,
@@ -395,9 +393,7 @@ def run_pre_registered_edge_proof(
         )
 
     signals_frame = pd.concat(all_signals, ignore_index=True) if all_signals else pd.DataFrame()
-    caveated_frame = (
-        pd.concat(all_caveated, ignore_index=True) if all_caveated else pd.DataFrame()
-    )
+    caveated_frame = pd.concat(all_caveated, ignore_index=True) if all_caveated else pd.DataFrame()
     trades_frame = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
     random_frame = pd.concat(all_random, ignore_index=True) if all_random else pd.DataFrame()
     monthly = pd.DataFrame(month_rows) if month_rows else _empty_monthly_summary()

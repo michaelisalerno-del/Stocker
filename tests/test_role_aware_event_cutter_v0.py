@@ -112,9 +112,7 @@ def test_event_role_mapping_uses_expected_roles() -> None:
     assert EVENT_STATE_ROLES["controlled_pullback_after_bullish_impulse"]["role"] == (
         "long_candidate"
     )
-    assert EVENT_STATE_ROLES["failed_open_down_continuation"][
-        "default_expected_direction"
-    ] == -1
+    assert EVENT_STATE_ROLES["failed_open_down_continuation"]["default_expected_direction"] == -1
     assert EVENT_STATE_ROLES["dead_chop_blocker"]["default_expected_direction"] == 0
 
 

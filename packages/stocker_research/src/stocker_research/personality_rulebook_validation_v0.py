@@ -396,9 +396,7 @@ def run_personality_rulebook_validation(
         else pd.DataFrame()
     )
     decision = (
-        "continue_research_rulebook_transfer"
-        if not passed.empty
-        else "reject_no_rulebook_transfer"
+        "continue_research_rulebook_transfer" if not passed.empty else "reject_no_rulebook_transfer"
     )
 
     run_id = f"personality_rulebook_validation_v0_{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"

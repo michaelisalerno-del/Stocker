@@ -9,10 +9,7 @@ import pandas as pd
 import pytest
 
 MODULE_PATH = (
-    Path(__file__).parents[1]
-    / "research"
-    / "realized_m_20_ibkr_fast_v0"
-    / "run_experiment.py"
+    Path(__file__).parents[1] / "research" / "realized_m_20_ibkr_fast_v0" / "run_experiment.py"
 )
 SPEC = importlib.util.spec_from_file_location("realized_m_20_ibkr_fast_v0", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None

@@ -731,9 +731,13 @@ async def qualify_active_runs(
         if run.config.run_id in candidate_identities:
             for instrument in candidate_identities[run.config.run_id]:
                 if instrument.con_id <= 0 or instrument.security_type != "STK":
-                    ineligible.append(Stage5IneligibleInstrument(
-                        instrument.symbol, (membership,), "INVALID_CONTRACT",
-                    ))
+                    ineligible.append(
+                        Stage5IneligibleInstrument(
+                            instrument.symbol,
+                            (membership,),
+                            "INVALID_CONTRACT",
+                        )
+                    )
                     continue
                 existing = qualified.get(instrument.con_id)
                 if existing is None:

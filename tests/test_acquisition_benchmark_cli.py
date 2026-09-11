@@ -1,4 +1,5 @@
 """Read-only inspection cannot instantiate the causal benchmark or execution engine."""
+
 import argparse
 import asyncio
 import importlib.util
@@ -21,9 +22,12 @@ spec.loader.exec_module(cli)
 
 def arguments(tmp_path, scanner_check=False):
     return argparse.Namespace(
-        ibkr_config=tmp_path / "unused.yaml", client_id=292,
-        state=tmp_path / "inspection.sqlite", capabilities_only=not scanner_check,
-        scanner_check=scanner_check, markets=["US_ALL", "US_NASDAQ"],
+        ibkr_config=tmp_path / "unused.yaml",
+        client_id=292,
+        state=tmp_path / "inspection.sqlite",
+        capabilities_only=not scanner_check,
+        scanner_check=scanner_check,
+        markets=["US_ALL", "US_NASDAQ"],
         scan_codes=["TOP_TRADE_RATE", "HOT_BY_VOLUME"],
         confirm_dedicated_paper_gateway=False,
     )
@@ -47,7 +51,8 @@ def test_readonly_inspection_isolated_and_bounded(tmp_path, monkeypatch, scanner
                 frozenset({"STK.US.MAJOR"}),
                 frozenset({"TOP_TRADE_RATE", "HOT_BY_VOLUME"}),
                 frozenset({"marketCapAbove", "marketCapBelow"}),
-                raw_xml="<ScannerParameters/>", server_version="FAKE",
+                raw_xml="<ScannerParameters/>",
+                server_version="FAKE",
             )
 
         async def acquisition_scan(self, plan, audit):

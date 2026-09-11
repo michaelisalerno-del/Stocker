@@ -665,10 +665,7 @@ def _selected_candidates(
 ) -> list[_Candidate]:
     if strict_results.empty:
         return []
-    selected_keys = {
-        _candidate_key(row)
-        for _, row in strict_results.head(max_rules).iterrows()
-    }
+    selected_keys = {_candidate_key(row) for _, row in strict_results.head(max_rules).iterrows()}
     return [
         candidate
         for candidate in candidates
@@ -798,9 +795,7 @@ def run_conditional_context_caveat_lab(
     trade_flags = _build_trade_flags(rows, selected_candidates)
     decision, decision_reasons = _decision(strict_results)
 
-    run_id = "conditional_context_caveat_v0_" + datetime.now(UTC).strftime(
-        "%Y%m%dT%H%M%SZ"
-    )
+    run_id = "conditional_context_caveat_v0_" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = output_dir / run_id
     paths = {
         "summary_json": run_dir / "summary.json",
@@ -826,9 +821,7 @@ def run_conditional_context_caveat_lab(
         all_results["strict_status"].value_counts().to_dict() if not all_results.empty else {}
     )
     selected_status_counts = (
-        strict_results["strict_status"].value_counts().to_dict()
-        if not strict_results.empty
-        else {}
+        strict_results["strict_status"].value_counts().to_dict() if not strict_results.empty else {}
     )
     payload: dict[str, Any] = {
         "run_id": run_id,

@@ -251,9 +251,8 @@ def add_shadow_candidate_trigger_features(
     out[weak_share_col] = out[weak_share_col].fillna(0.0)
     out[shadow_net_col] = out[shadow_net_col].fillna(0.0)
 
-    weak_cluster = (
-        out[count_col].ge(config.min_prior_candidates)
-        & out[weak_share_col].ge(config.weak_context_share_threshold)
+    weak_cluster = out[count_col].ge(config.min_prior_candidates) & out[weak_share_col].ge(
+        config.weak_context_share_threshold
     )
     trigger = weak_cluster & out[shadow_net_col].le(config.shadow_net_r_threshold)
     out["weak_context_cluster_trigger"] = _bool_object(weak_cluster)
@@ -315,9 +314,7 @@ def _select_anti_stale_rule(
             lift = float(keep_stats["mean_r"]) - float(base_stats["mean_r"])
             if float(keep_stats["net_r"]) <= 0.0 or lift <= 0.0:
                 continue
-            score = lift * math.sqrt(float(keep_stats["count"])) + 0.01 * float(
-                keep_stats["net_r"]
-            )
+            score = lift * math.sqrt(float(keep_stats["count"])) + 0.01 * float(keep_stats["net_r"])
             rules.append(
                 _AntiStaleRule(
                     feature=feature,
@@ -464,8 +461,7 @@ def _policy_summary(monthly: pd.DataFrame) -> pd.DataFrame:
                 "positive_months": int((group["kept_net_r"] > 0.0).sum()),
                 "random_median_sum": float(group["random_median_net_r"].sum()),
                 "random_p95_sum": float(group["random_p95_net_r"].sum()),
-                "excess_vs_random_median_sum": kept_net
-                - float(group["random_median_net_r"].sum()),
+                "excess_vs_random_median_sum": kept_net - float(group["random_median_net_r"].sum()),
             }
         )
     return pd.DataFrame(records)
@@ -509,9 +505,7 @@ def run_shadow_candidate_trigger_audit(
     summary = _policy_summary(monthly)
     decision = _decision(summary)
 
-    run_id = "shadow_candidate_trigger_audit_v0_" + datetime.now(tz=UTC).strftime(
-        "%Y%m%dT%H%M%SZ"
-    )
+    run_id = "shadow_candidate_trigger_audit_v0_" + datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = output_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 

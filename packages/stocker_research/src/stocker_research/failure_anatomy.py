@@ -629,8 +629,7 @@ def _top_findings(
         findings.append(f"Most common reason: {top_reason} ({top_reason_count}).")
     candidate_count = _candidate_count(classification_counts)
     findings.append(
-        f"Candidate-labelled reports remain {candidate_count}; "
-        "rejected cases are diagnostic only."
+        f"Candidate-labelled reports remain {candidate_count}; rejected cases are diagnostic only."
     )
     holding_rejections = sum(1 for report in reports if _holding_policy_rejected(report))
     findings.append(f"Holding-policy rejection count: {holding_rejections}.")

@@ -27,12 +27,14 @@ def test_us_migration_retains_old_members_but_new_discovery_has_no_listing_depen
         run_id="old-fixed-us",
         strategy_version=migration().PREVIOUS_VERSION,
         candidate_screen_version=migration().PREVIOUS_VERSION,
-        universe_source=None, discovery_profile=None,
+        universe_source=None,
+        discovery_profile=None,
         universe="US_ALL_METHOD_LISTINGS",
     )
     previous["method_spec"]["method_version"] = migration().PREVIOUS_VERSION
     previous["method_spec"]["universe_search"] = {
-        "builder": "IBKR_ACTIVITY_LIQUIDITY_V2", "activity_profile": "ACTIVITY_LIQUIDITY_V2",
+        "builder": "IBKR_ACTIVITY_LIQUIDITY_V2",
+        "activity_profile": "ACTIVITY_LIQUIDITY_V2",
     }
     previous["method_spec_hash"] = content_hash(previous["method_spec"])
     previous["universe_snapshot"].update(

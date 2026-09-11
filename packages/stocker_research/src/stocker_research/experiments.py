@@ -300,9 +300,7 @@ def _run_grid(
                 "train_position_policy": summarize_position_policy_effect(
                     train_position_policy_results
                 ),
-                "position_policy": summarize_position_policy_effect(
-                    test_position_policy_results
-                ),
+                "position_policy": summarize_position_policy_effect(test_position_policy_results),
             }
         )
     return rows

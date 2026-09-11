@@ -137,8 +137,10 @@ class RunConfig(BaseModel):
         return (
             (self.method_spec or {}).get("universe_search", {}).get("activity_profile")
             in {
-                ACTIVITY_SHORTLIST_V1_ID, "ACTIVITY_CAPACITY_V2",
-                ACTIVITY_LIQUIDITY_V1_ID, ACTIVITY_LIQUIDITY_V2_ID,
+                ACTIVITY_SHORTLIST_V1_ID,
+                "ACTIVITY_CAPACITY_V2",
+                ACTIVITY_LIQUIDITY_V1_ID,
+                ACTIVITY_LIQUIDITY_V2_ID,
             }
         ) or (
             self.screen is not None and self.screen.method is CandidateScreen.ACTIVITY_SHORTLIST_V1
@@ -159,8 +161,10 @@ class RunConfig(BaseModel):
         ):
             object.__setattr__(self, "universe_source", UniverseSource.DYNAMIC_IBKR)
             object.__setattr__(
-                self, "discovery_profile",
-                self.discovery_profile or DiscoveryProfile.model_validate(
+                self,
+                "discovery_profile",
+                self.discovery_profile
+                or DiscoveryProfile.model_validate(
                     (self.method_spec or {})["universe_search"]["discovery_profile"],
                 ),
             )
@@ -216,6 +220,7 @@ class RunConfig(BaseModel):
                     raise ValueError("Run method identity mismatch")
                 if self.uses_candidate_selection:
                     from stocker_core.markets import get_market
+
                     market = get_market(self.market_id)
                     if self.session is None or (
                         self.session.start != market.regular_sessions[0].opens_at
@@ -230,12 +235,21 @@ class RunConfig(BaseModel):
                         )
                 if self.uses_dynamic_discovery:
                     owned = method.discovery_profile(self.market_id)
-                    if owned is None or self.discovery_profile is None or any(
-                        getattr(owned, field) != getattr(self.discovery_profile, field)
-                        for field in (
-                            "profile_id", "version", "cap_bands", "scanner",
-                            "stock_type_filter", "allowed_stock_types",
-                            "price_currency", "scanner_location",
+                    if (
+                        owned is None
+                        or self.discovery_profile is None
+                        or any(
+                            getattr(owned, field) != getattr(self.discovery_profile, field)
+                            for field in (
+                                "profile_id",
+                                "version",
+                                "cap_bands",
+                                "scanner",
+                                "stock_type_filter",
+                                "allowed_stock_types",
+                                "price_currency",
+                                "scanner_location",
+                            )
                         )
                     ):
                         raise ValueError("Discovery policy must belong to the selected method")

@@ -807,9 +807,7 @@ def run_personality_context_admission_lab(
     trade_flags = _build_trade_flags(blocked_all, selected_candidates)
     decision, decision_reasons = _decision(selected, all_results)
 
-    run_id = "personality_context_admission_v0_" + datetime.now(UTC).strftime(
-        "%Y%m%dT%H%M%SZ"
-    )
+    run_id = "personality_context_admission_v0_" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = output_dir / run_id
     paths = {
         "summary_json": run_dir / "summary.json",

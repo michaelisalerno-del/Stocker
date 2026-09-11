@@ -110,8 +110,11 @@ class WideBroker(Broker):
 
 @pytest.mark.parametrize("market_id", [MarketId.US_ALL, MarketId.UK_LSE, MarketId.AUSTRALIA_ASX])
 def test_observed_gateway_since_open_codes_exclude_overnight_gaps(market_id):
-    fixture = json.loads((Path(__file__).parent / "fixtures/scanner_acquisition/"
-                          "gateway_178_opening_codes.json").read_text())
+    fixture = json.loads(
+        (
+            Path(__file__).parent / "fixtures/scanner_acquisition/gateway_178_opening_codes.json"
+        ).read_text()
+    )
     caps = ScannerCapabilities(
         locations=frozenset(fixture["locations"]),
         scan_codes=frozenset(fixture["scan_codes"]),
@@ -129,18 +132,24 @@ def test_observed_gateway_since_open_codes_exclude_overnight_gaps(market_id):
     assert not {"HIGH_OPEN_GAP", "LOW_OPEN_GAP"} & {p.scan_code for p in plans}
     missing = replace(caps, scan_codes=caps.scan_codes - {"TOP_OPEN_PERC_GAIN"})
     failed = acquisition_scans(ACQUISITION_EXPERIMENT_V1, get_market(market_id), missing, 1.0)
-    assert all(p.unsupported_reason and not p.scan_code for p in failed
-               if p.family == "OPENING_PERCENT_GAIN")
-    assert all(not p.unsupported_reason for p in failed
-               if p.family != "OPENING_PERCENT_GAIN")
-    scoped = replace(caps, location_scan_codes={
-        get_market(market_id).scanner_location: caps.scan_codes - {"TOP_OPEN_PERC_LOSE"}
-    })
-    restricted = acquisition_scans(
-        ACQUISITION_EXPERIMENT_V1, get_market(market_id), scoped, 1.0
+    assert all(
+        p.unsupported_reason and not p.scan_code
+        for p in failed
+        if p.family == "OPENING_PERCENT_GAIN"
     )
-    assert all(p.unsupported_reason and not p.scan_code for p in restricted
-               if p.family == "OPENING_PERCENT_LOSS")
+    assert all(not p.unsupported_reason for p in failed if p.family != "OPENING_PERCENT_GAIN")
+    scoped = replace(
+        caps,
+        location_scan_codes={
+            get_market(market_id).scanner_location: caps.scan_codes - {"TOP_OPEN_PERC_LOSE"}
+        },
+    )
+    restricted = acquisition_scans(ACQUISITION_EXPERIMENT_V1, get_market(market_id), scoped, 1.0)
+    assert all(
+        p.unsupported_reason and not p.scan_code
+        for p in restricted
+        if p.family == "OPENING_PERCENT_LOSS"
+    )
 
 
 def test_capabilities_define_exact_components_and_floorless_coverage():

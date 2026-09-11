@@ -173,15 +173,11 @@ def test_each_event_detector_fires_on_minimal_synthetic_example() -> None:
         "controlled_pullback_after_bullish_impulse": _controlled_pullback_frame(),
         "failed_bullish_impulse_recoil": _with_volume_pattern(
             _frame_from_closes(
-                [100 + index * 0.20 for index in range(13)]
-                + [101.20]
-                + [102.40] * 20,
+                [100 + index * 0.20 for index in range(13)] + [101.20] + [102.40] * 20,
             )
         ),
         "liquidation_failed_low_reclaim": _frame_from_closes(
-            [100 - index * 0.18 for index in range(13)]
-            + [98.00, 97.80, 98.00]
-            + [98.10] * 20,
+            [100 - index * 0.18 for index in range(13)] + [98.00, 97.80, 98.00] + [98.10] * 20,
         ),
         "failed_bounce_active_liquidation": _frame_from_closes(
             [

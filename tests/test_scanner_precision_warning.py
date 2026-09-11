@@ -106,13 +106,20 @@ def test_unsupported_location_error_is_not_a_successful_empty_scan():
             frozenset({"MOST_ACTIVE_AVG_USD"}),
             frozenset(),
         )
-        task = asyncio.create_task(broker.activity_scan(
-            market=market, cap_bucket=CapBucket.ALL,
-            component=ActivityScanner.MOST_ACTIVE_AVG_USD, stock_type_filter="CORP",
-        ))
+        task = asyncio.create_task(
+            broker.activity_scan(
+                market=market,
+                cap_bucket=CapBucket.ALL,
+                component=ActivityScanner.MOST_ACTIVE_AVG_USD,
+                stock_type_filter="CORP",
+            )
+        )
         await wait_until(lambda: len(client.wrapper.futures), 1)
         client.errorEvent.emit(
-            71, 162, "Market Scanner is not configured for one of the chosen locations.", None,
+            71,
+            162,
+            "Market Scanner is not configured for one of the chosen locations.",
+            None,
         )
         client.wrapper.futures[0].set_result([])
         with pytest.raises(IbkrError, match="not configured"):

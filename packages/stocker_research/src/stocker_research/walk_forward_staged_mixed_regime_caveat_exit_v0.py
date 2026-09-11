@@ -685,9 +685,7 @@ def _prior_replay_personality_acceptance_book(
                 "train_win_rate": win_rate,
                 "accepted": accepted,
                 "rejection_reason": "|".join(reasons),
-                "min_personality_train_trades": int(
-                    config.min_prior_replay_personality_trades
-                ),
+                "min_personality_train_trades": int(config.min_prior_replay_personality_trades),
                 "min_personality_train_total_net_r": float(
                     config.min_prior_replay_personality_total_net_r
                 ),
@@ -707,9 +705,7 @@ def _apply_personality_acceptance(
         return selected.copy()
     if acceptance.empty or "accepted" not in acceptance or "personality" not in acceptance:
         return selected.iloc[0:0].copy()
-    accepted = set(
-        acceptance.loc[acceptance["accepted"].astype(bool), "personality"].astype(str)
-    )
+    accepted = set(acceptance.loc[acceptance["accepted"].astype(bool), "personality"].astype(str))
     return selected[selected["personality"].astype(str).isin(accepted)].copy()
 
 
@@ -879,10 +875,13 @@ def _select_staged_train_caveat_book(
         return _empty_caveat_book()
     result = pd.DataFrame(selected_rows)
     result["caveat_rule_id"] = np.arange(len(result), dtype=int)
-    return result.reindex(columns=_caveat_book_columns() + [
-        "train_marginal_flagged_count",
-        "train_marginal_flagged_total_net_r",
-    ])
+    return result.reindex(
+        columns=_caveat_book_columns()
+        + [
+            "train_marginal_flagged_count",
+            "train_marginal_flagged_total_net_r",
+        ]
+    )
 
 
 def _combine_caveat_books(
@@ -1033,9 +1032,7 @@ def _build_staged_exit_sweep(
                         "filter_threshold": float(candidate["filter_threshold"]),
                         "filter_rule": candidate["filter_rule"],
                         "filter_selection_score": float(candidate["selection_score"]),
-                        "train_end_timestamp": train_end.isoformat()
-                        if pd.notna(train_end)
-                        else "",
+                        "train_end_timestamp": train_end.isoformat() if pd.notna(train_end) else "",
                         "stop_model": stop_model,
                         "target_r": float(target_r),
                         "eligible_symbols": "|".join(
@@ -1874,9 +1871,7 @@ def run_staged_mixed_regime_caveat_exit_lab(
         "enable_prior_replay_personality_acceptance": bool(
             config.enable_prior_replay_personality_acceptance
         ),
-        "min_prior_replay_personality_trades": int(
-            config.min_prior_replay_personality_trades
-        ),
+        "min_prior_replay_personality_trades": int(config.min_prior_replay_personality_trades),
         "min_prior_replay_personality_total_net_r": float(
             config.min_prior_replay_personality_total_net_r
         ),
@@ -1892,14 +1887,10 @@ def run_staged_mixed_regime_caveat_exit_lab(
         "enable_staged_train_caveats": bool(config.enable_staged_train_caveats),
         "mixed_regime_filter_count": int(len(selected_filter_book)),
         "caveat_rule_count": int(len(caveat_book)),
-        "accepted_personality_count": int(
-            monthly_summary["accepted_personality_count"].sum()
-        )
+        "accepted_personality_count": int(monthly_summary["accepted_personality_count"].sum())
         if "accepted_personality_count" in monthly_summary
         else 0,
-        "rejected_personality_count": int(
-            monthly_summary["rejected_personality_count"].sum()
-        )
+        "rejected_personality_count": int(monthly_summary["rejected_personality_count"].sum())
         if "rejected_personality_count" in monthly_summary
         else 0,
         "selected_candidate_count": int(len(selected_frame)),

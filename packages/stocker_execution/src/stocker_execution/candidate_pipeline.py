@@ -167,8 +167,13 @@ class OpeningBarSource:
         self._locks: dict[tuple[int, datetime, tuple[datetime, ...]], asyncio.Lock] = {}
 
     async def prefix(
-        self, identity: CandidateIdentity, expected: tuple[datetime, ...], due: datetime,
-        *, diagnostic: dict[str, Any] | None = None, use_cache: bool = False,
+        self,
+        identity: CandidateIdentity,
+        expected: tuple[datetime, ...],
+        due: datetime,
+        *,
+        diagnostic: dict[str, Any] | None = None,
+        use_cache: bool = False,
     ) -> tuple[HistoricalBar, ...]:
         observed = diagnostic if diagnostic is not None else {}
         observed.update(started_at=datetime.now(UTC).isoformat(), broker_request=0, cache_hit=0)
@@ -176,12 +181,19 @@ class OpeningBarSource:
         try:
             return await self._prefix(identity, expected, due, observed, use_cache)
         finally:
-            observed.update(completed_at=datetime.now(UTC).isoformat(),
-                            latency_ms=(perf_counter()-started)*1000)
+            observed.update(
+                completed_at=datetime.now(UTC).isoformat(),
+                latency_ms=(perf_counter() - started) * 1000,
+            )
 
-    async def _prefix(self, identity: CandidateIdentity, expected: tuple[datetime, ...],
-                      due: datetime, observed: dict[str, Any], use_cache: bool
-                      ) -> tuple[HistoricalBar, ...]:
+    async def _prefix(
+        self,
+        identity: CandidateIdentity,
+        expected: tuple[datetime, ...],
+        due: datetime,
+        observed: dict[str, Any],
+        use_cache: bool,
+    ) -> tuple[HistoricalBar, ...]:
         self.prune(due.date() - timedelta(days=1))
         key = identity.con_id, due, expected
         async with self._locks.setdefault(key, asyncio.Lock()):
@@ -189,8 +201,12 @@ class OpeningBarSource:
                 observed["cache_hit"] = 1
             elif use_cache:
                 snapshot = await asyncio.to_thread(
-                    self.cache.get_required_history, instrument(identity),
-                    HistorySemantics("1 min", "TRADES", True), expected, as_of=due)
+                    self.cache.get_required_history,
+                    instrument(identity),
+                    HistorySemantics("1 min", "TRADES", True),
+                    expected,
+                    as_of=due,
+                )
                 if snapshot.status is HistoryStatus.READY:
                     self._bars[key] = snapshot.bars
                     observed["cache_hit"] = 1
@@ -366,8 +382,13 @@ class CandidateStore:
             db.execute(
                 "UPDATE opening_candidate_sessions SET state=?,reason=?,updated_at=? "
                 "WHERE run_id=? AND session=?",
-                ("DEGRADED" if failure_reason else "BROAD_ELIGIBLE", failure_reason,
-                 now.isoformat(), run_id, session.isoformat()),
+                (
+                    "DEGRADED" if failure_reason else "BROAD_ELIGIBLE",
+                    failure_reason,
+                    now.isoformat(),
+                    run_id,
+                    session.isoformat(),
+                ),
             )
 
     def fail(self, run_id: str, session: date, reason: str, now: datetime) -> None:

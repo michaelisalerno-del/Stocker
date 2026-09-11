@@ -32,8 +32,10 @@ def test_gateway_discovery(tmp_path, market):
         try:
             now = datetime.now(UTC)
             _, run = UniverseRunBuilder().add(
-                RunsConfig(), market_id=market.market_id,
-                strategy_id=SESSION_HARD.method_id, strategy_version=SESSION_HARD.version,
+                RunsConfig(),
+                market_id=market.market_id,
+                strategy_id=SESSION_HARD.method_id,
+                strategy_version=SESSION_HARD.version,
                 environment=Environment.PAPER,
             )
             result = await CandidateDiscovery(

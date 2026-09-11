@@ -46,8 +46,7 @@ def migrate(payload: dict[str, Any]) -> tuple[RunsConfig, dict[str, str]]:
             (
                 r
                 for r in config.runs
-                if r.market_id == old.market_id
-                and r.strategy_version == SESSION_HARD.version
+                if r.market_id == old.market_id and r.strategy_version == SESSION_HARD.version
             ),
             None,
         )

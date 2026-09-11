@@ -19,12 +19,8 @@ from typing import Any
 
 import pandas as pd
 
-DEFAULT_STAGE4_1_OUTPUT_DIR = Path(
-    "data/reports/research/stage4_1_intraday_feature_audit"
-)
-DEFAULT_STAGE4_1_UNIVERSE = Path(
-    "data/universes/research_ready/us_liquid_25_5m_intraday.json"
-)
+DEFAULT_STAGE4_1_OUTPUT_DIR = Path("data/reports/research/stage4_1_intraday_feature_audit")
+DEFAULT_STAGE4_1_UNIVERSE = Path("data/universes/research_ready/us_liquid_25_5m_intraday.json")
 KEY_FEATURE_COLUMNS = [
     "opening_range_high",
     "opening_range_low",
@@ -220,9 +216,9 @@ def add_session_clock_features(
     data["session_id"] = data["session_date"].map(_session_id_from_label).astype(int)
     data["bar_index_in_session"] = data.groupby("session_date").cumcount().astype(int)
     session_sizes = data.groupby("session_date")["timestamp"].transform("size").astype(int)
-    data["bars_remaining_in_session"] = (
-        session_sizes - data["bar_index_in_session"] - 1
-    ).astype(int)
+    data["bars_remaining_in_session"] = (session_sizes - data["bar_index_in_session"] - 1).astype(
+        int
+    )
     data["is_first_bar_of_session"] = data["bar_index_in_session"].eq(0)
     data["is_last_bar_of_session"] = data["bars_remaining_in_session"].eq(0)
 
@@ -269,9 +265,7 @@ def add_session_clock_features(
             warning_reason = "incomplete_session"
 
         regular_flags = [
-            timestamp in expected
-            and timestamp >= session_open
-            and timestamp <= session_close
+            timestamp in expected and timestamp >= session_open and timestamp <= session_close
             for timestamp in session_timestamps
         ]
         data.loc[group_index, "calendar_session_open"] = session_open
@@ -311,12 +305,11 @@ def add_time_window_flags(
     regular = data.get("is_regular_session_bar", pd.Series(True, index=data.index)).astype(bool)
     data["after_open_buffer"] = minutes_from_open >= cfg.open_buffer_minutes
     data["before_close_cutoff"] = minutes_to_close > cfg.entry_cutoff_before_close_minutes
-    data["in_opening_range_window"] = (
-        (minutes_from_open >= 0) & (minutes_from_open < cfg.opening_minutes)
+    data["in_opening_range_window"] = (minutes_from_open >= 0) & (
+        minutes_from_open < cfg.opening_minutes
     )
-    data["in_midday_window"] = (
-        (minutes_from_open >= cfg.midday_start_minutes)
-        & (minutes_from_open < cfg.midday_end_minutes)
+    data["in_midday_window"] = (minutes_from_open >= cfg.midday_start_minutes) & (
+        minutes_from_open < cfg.midday_end_minutes
     )
     data["in_late_day_window"] = minutes_from_open >= cfg.late_day_start_minutes
     data["no_entry_window"] = minutes_to_close <= cfg.entry_cutoff_before_close_minutes
@@ -423,10 +416,14 @@ def add_relative_volume_features(
     data["cumulative_session_volume"] = volume.fillna(0.0).groupby(data["session_date"]).cumsum()
 
     def prior_mean(series: pd.Series) -> pd.Series:
-        return series.shift(1).rolling(
-            lookback_sessions,
-            min_periods=lookback_sessions,
-        ).mean()
+        return (
+            series.shift(1)
+            .rolling(
+                lookback_sessions,
+                min_periods=lookback_sessions,
+            )
+            .mean()
+        )
 
     baseline_bar_volume = data.groupby("bar_index_in_session")["volume"].transform(prior_mean)
     baseline_cumulative_volume = data.groupby("bar_index_in_session")[
@@ -450,10 +447,7 @@ def add_previous_session_levels(frame: pd.DataFrame) -> pd.DataFrame:
     if "session_date" not in data:
         data = add_session_clock_features(data)
     session_order = (
-        data.groupby("session_date", sort=True)["timestamp"]
-        .min()
-        .sort_values()
-        .index.tolist()
+        data.groupby("session_date", sort=True)["timestamp"].min().sort_values().index.tolist()
     )
     high_by_session = data.groupby("session_date")["high"].max().reindex(session_order)
     low_by_session = data.groupby("session_date")["low"].min().reindex(session_order)
@@ -467,9 +461,9 @@ def add_previous_session_levels(frame: pd.DataFrame) -> pd.DataFrame:
     data["previous_session_low"] = data["session_date"].map(prev_low.to_dict())
     data["previous_session_close"] = data["session_date"].map(prev_close.to_dict())
     session_open = data["session_date"].map(open_by_session.to_dict())
-    data["gap_vs_previous_close"] = (
-        session_open - data["previous_session_close"]
-    ) / data["previous_session_close"]
+    data["gap_vs_previous_close"] = (session_open - data["previous_session_close"]) / data[
+        "previous_session_close"
+    ]
     data["open_above_previous_high"] = session_open > data["previous_session_high"]
     data["open_below_previous_low"] = session_open < data["previous_session_low"]
     data.loc[
@@ -524,8 +518,8 @@ def add_intraday_range_compression_features(
         "min",
     )
     data["rolling_intraday_range"] = data["recent_high"] - data["recent_low"]
-    data["rolling_intraday_range_pct"] = (
-        data["rolling_intraday_range"] / pd.to_numeric(data["close"], errors="coerce")
+    data["rolling_intraday_range_pct"] = data["rolling_intraday_range"] / pd.to_numeric(
+        data["close"], errors="coerce"
     )
     rolling_mean = _rolling_by_session(
         data,
@@ -703,18 +697,14 @@ def _markdown(summary: dict[str, Any]) -> str:
     session_warnings = summary["session_warning_summary"]
     actual_range_from = summary["actual_available_range"]["from"]
     actual_range_to = summary["actual_available_range"]["to"]
-    previous_level_availability = availability[
-        "previous_session_levels_availability_mean"
-    ]
+    previous_level_availability = availability["previous_session_levels_availability_mean"]
     null_lines = "\n".join(
-        f"- `{column}`: {rate:.4f}"
-        for column, rate in null_rates["mean_null_rates"].items()
+        f"- `{column}`: {rate:.4f}" for column, rate in null_rates["mean_null_rates"].items()
     )
     if not null_lines:
         null_lines = "- None"
     warning_lines = "\n".join(
-        f"- `{reason}`: {count}"
-        for reason, count in session_warnings["warning_reasons"].items()
+        f"- `{reason}`: {count}" for reason, count in session_warnings["warning_reasons"].items()
     )
     if not warning_lines:
         warning_lines = "- None"
@@ -849,11 +839,7 @@ def build_intraday_feature_audit(
                 )
         for session_date, group in features.groupby("session_date"):
             session_warning_reasons = sorted(
-                {
-                    str(reason)
-                    for reason in group["session_warning_reason"]
-                    if reason
-                }
+                {str(reason) for reason in group["session_warning_reason"] if reason}
             )
             session_rows.append(
                 {
@@ -893,11 +879,7 @@ def build_intraday_feature_audit(
 
     mean_null_rates: dict[str, float] = {}
     for column in KEY_FEATURE_COLUMNS:
-        values = [
-            float(row["null_rate"])
-            for row in null_rows
-            if row["feature"] == column
-        ]
+        values = [float(row["null_rate"]) for row in null_rows if row["feature"] == column]
         if values:
             mean_null_rates[column] = float(mean(values))
 
@@ -949,9 +931,7 @@ def build_intraday_feature_audit(
         "symbols": symbols,
         "symbol_count": len(symbols),
         "symbols_audited": [
-            row["symbol"]
-            for row in availability_rows
-            if not row["feature_generation_error"]
+            row["symbol"] for row in availability_rows if not row["feature_generation_error"]
         ],
         "feature_error_count": len(errors),
         "feature_generation_errors": errors,

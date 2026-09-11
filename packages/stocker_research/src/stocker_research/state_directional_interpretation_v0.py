@@ -260,8 +260,8 @@ def add_aligned_return_columns(
     if expected_direction == 0:
         data[aligned_column] = -returns.abs()
         data[consistency_column] = (
-            returns.abs() <= returns.abs().median()
-        ).map(bool).astype(object)
+            (returns.abs() <= returns.abs().median()).map(bool).astype(object)
+        )
         return data
     aligned = returns * expected_direction
     data[aligned_column] = aligned
@@ -495,11 +495,13 @@ def run_random_blocker_baseline(
         "blocker_net_value_bps": float(np.nanmedian(net_values)),
     }
 
+
 def _as_float(value: Any) -> float:
     try:
         return float(value)
     except (TypeError, ValueError):
         return math.nan
+
 
 def _decision_evaluation(
     row: pd.Series,
@@ -518,12 +520,8 @@ def _decision_evaluation(
         if not math.isnan(oos_aligned):
             aligned = oos_aligned
             win_rate = _as_float(oos_row.get("test_aligned_win_rate", math.nan))
-            random_median = _as_float(
-                oos_row.get("random_aligned_median_return", random_median)
-            )
-            generic_median = _as_float(
-                oos_row.get("generic_aligned_median_return", generic_median)
-            )
+            random_median = _as_float(oos_row.get("random_aligned_median_return", random_median))
+            generic_median = _as_float(oos_row.get("generic_aligned_median_return", generic_median))
             basis = "oos_60_40"
     random_excess = (
         (aligned - random_median) * 10_000
@@ -786,10 +784,14 @@ def build_directional_decision(
             "edge_claimed": False,
         }
     rows = directional_summary.copy()
-    no_trade_quality_lookup = {
-        (str(row["event_state"]), int(row["horizon"])): float(row["no_trade_quality_score"])
-        for _, row in no_trade_summary.iterrows()
-    } if not no_trade_summary.empty else {}
+    no_trade_quality_lookup = (
+        {
+            (str(row["event_state"]), int(row["horizon"])): float(row["no_trade_quality_score"])
+            for _, row in no_trade_summary.iterrows()
+        }
+        if not no_trade_summary.empty
+        else {}
+    )
     oos_lookup = {
         (str(row["event_state"]), int(row["horizon"])): row
         for _, row in (oos_response if oos_response is not None else pd.DataFrame()).iterrows()
@@ -881,11 +883,15 @@ def _summary_markdown(
     no_trade_states = [
         state for state, role in EVENT_STATE_ROLES.items() if role == "no_trade_blocker"
     ]
-    negative_useful = directional_summary[
-        directional_summary["expected_direction"].eq(-1)
-        & (directional_summary["raw_median_return"] < 0.0)
-        & (directional_summary["aligned_median_return"] > 0.0)
-    ] if not directional_summary.empty else pd.DataFrame()
+    negative_useful = (
+        directional_summary[
+            directional_summary["expected_direction"].eq(-1)
+            & (directional_summary["raw_median_return"] < 0.0)
+            & (directional_summary["aligned_median_return"] > 0.0)
+        ]
+        if not directional_summary.empty
+        else pd.DataFrame()
+    )
     rejected = directional_summary.copy()
     if not rejected.empty and decision.get("state_decisions"):
         decision_frame = pd.DataFrame(decision["state_decisions"])

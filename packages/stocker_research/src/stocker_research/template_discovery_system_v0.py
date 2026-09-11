@@ -61,16 +61,8 @@ DEFAULT_FAMILY_STOP_MODELS = (
     "structure_opening_range_extreme_10bps",
 )
 DEFAULT_FAMILY_TARGET_R_MULTIPLES = (1.0, 1.5, 2.0)
-FAMILY_LOOP1 = (
-    "controlled_pullback_after_bullish_impulse"
-    "__to__"
-    "failed_bullish_impulse_recoil"
-)
-FAMILY_LOOP2 = (
-    "failed_bounce_active_liquidation"
-    "__to__"
-    "failed_bullish_impulse_recoil"
-)
+FAMILY_LOOP1 = "controlled_pullback_after_bullish_impulse__to__failed_bullish_impulse_recoil"
+FAMILY_LOOP2 = "failed_bounce_active_liquidation__to__failed_bullish_impulse_recoil"
 EVENT_STATE_PRIORITY = {
     state: index
     for index, state in enumerate(
@@ -322,10 +314,7 @@ FROZEN_TEMPLATE_TRANSFER_SPECS = (
         component="current_fixed_next",
         rule_id="fixed_next_confirmation_choppy_open_down_source_h6",
         row_source="source_context",
-        loop_id=(
-            "failed_open_down_continuation__to__"
-            "failed_bounce_active_liquidation"
-        ),
+        loop_id=("failed_open_down_continuation__to__failed_bounce_active_liquidation"),
         event_states=(),
         expression=(
             "NOT (source_compression_zscore <= -0.408248) "
@@ -341,10 +330,7 @@ FROZEN_TEMPLATE_TRANSFER_SPECS = (
         component="current_fixed_next",
         rule_id="fixed_next_confirmation_fast_failed_reclaim_short_source_h6",
         row_source="source_context",
-        loop_id=(
-            "failed_open_down_continuation__to__"
-            "liquidation_failed_low_reclaim"
-        ),
+        loop_id=("failed_open_down_continuation__to__liquidation_failed_low_reclaim"),
         event_states=(),
         expression="NOT (broad_failed_recoil_event_share_prior <= 0.484635)",
         expected_direction=-1,
@@ -357,10 +343,7 @@ FROZEN_TEMPLATE_TRANSFER_SPECS = (
         component="omitted_saved_loop",
         rule_id="extended_directional_impulse_pullback_confirmation_note_v0",
         row_source="transitions",
-        loop_id=(
-            "failed_bullish_impulse_recoil__to__"
-            "controlled_pullback_after_bullish_impulse"
-        ),
+        loop_id=("failed_bullish_impulse_recoil__to__controlled_pullback_after_bullish_impulse"),
         event_states=(),
         expression=(
             "source_compression_x_efficiency_regime == expanded|directional_efficiency "
@@ -415,15 +398,9 @@ FROZEN_TEMPLATE_TRANSFER_SPECS = (
     ),
     FrozenTemplateTransferSpec(
         component="strict_other_loop_addon",
-        rule_id=(
-            "controlled_pullback_after_bullish_impulse__to__"
-            "failed_bounce_active_liquidation"
-        ),
+        rule_id=("controlled_pullback_after_bullish_impulse__to__failed_bounce_active_liquidation"),
         row_source="transitions",
-        loop_id=(
-            "controlled_pullback_after_bullish_impulse__to__"
-            "failed_bounce_active_liquidation"
-        ),
+        loop_id=("controlled_pullback_after_bullish_impulse__to__failed_bounce_active_liquidation"),
         event_states=(),
         expression="relative_volume_at_bar_index <= 0.666793",
         expected_direction=-1,
@@ -855,14 +832,22 @@ def _frozen_transfer_market_states(events: pd.DataFrame) -> pd.DataFrame:
             ["score_ret20", "score_breadth_up", "score_above_ma", "score_drawdown"]
         ].mean(axis=1)
         rows["b0_stress_score_raw"] = rows["score_vol"]
-        rows["b0_direction_score"] = rows["b0_direction_score_raw"].rolling(
-            10,
-            min_periods=5,
-        ).mean()
-        rows["b0_stress_score"] = rows["b0_stress_score_raw"].rolling(
-            10,
-            min_periods=5,
-        ).mean()
+        rows["b0_direction_score"] = (
+            rows["b0_direction_score_raw"]
+            .rolling(
+                10,
+                min_periods=5,
+            )
+            .mean()
+        )
+        rows["b0_stress_score"] = (
+            rows["b0_stress_score_raw"]
+            .rolling(
+                10,
+                min_periods=5,
+            )
+            .mean()
+        )
         rows["b0_raw_state"] = [
             _raw_frozen_transfer_b0_state(direction, stress)
             for direction, stress in zip(
@@ -877,9 +862,7 @@ def _frozen_transfer_market_states(events: pd.DataFrame) -> pd.DataFrame:
             min_hold_sessions=12,
         )
         rows["detector_id"] = _frozen_transfer_detector_id()
-        rows["detector_label"] = (
-            "direction + volatility, 10-session smooth, 5-confirm, 12-hold"
-        )
+        rows["detector_label"] = "direction + volatility, 10-session smooth, 5-confirm, 12-hold"
         frames.append(rows)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
@@ -1079,9 +1062,7 @@ def _rematerialize_frozen_transfer_source_events(
         utc=True,
         errors="coerce",
     ).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    event_rows["_source_event_state_key"] = (
-        event_rows["event_state"].fillna("").astype(str)
-    )
+    event_rows["_source_event_state_key"] = event_rows["event_state"].fillna("").astype(str)
 
     context_columns = [
         "surface",
@@ -1095,9 +1076,7 @@ def _rematerialize_frozen_transfer_source_events(
         "event_rows_between_source_and_next_event",
         *_frozen_transfer_market_context_columns(),
     ]
-    context = selected[
-        [column for column in context_columns if column in selected.columns]
-    ].copy()
+    context = selected[[column for column in context_columns if column in selected.columns]].copy()
     context["_source_event_state_key"] = context["source_event_state"].fillna("").astype(str)
     context = context.rename(
         columns={
@@ -1163,9 +1142,7 @@ def _run_frozen_template_transfer_specs(
             scored["spec_order"] = spec_order
             scored["template_expression"] = spec.expression
             scored["template_exact"] = spec.exact
-            scored["missing_features_dropped"] = (
-                ",".join(missing) if skip_missing else ""
-            )
+            scored["missing_features_dropped"] = ",".join(missing) if skip_missing else ""
             detail.append(scored)
 
         audit_rows.append(
@@ -1180,17 +1157,11 @@ def _run_frozen_template_transfer_specs(
                 "candidate_rows_before_score": int(len(selected)),
                 "score_source_rows": int(len(score_source)),
                 "scored_rows": int(len(scored)),
-                "missing_policy": "drop_missing_terms"
-                if skip_missing
-                else "require_all_terms",
+                "missing_policy": "drop_missing_terms" if skip_missing else "require_all_terms",
             }
         )
 
-    all_detail = (
-        pd.concat(detail, ignore_index=True, sort=False)
-        if detail
-        else pd.DataFrame()
-    )
+    all_detail = pd.concat(detail, ignore_index=True, sort=False) if detail else pd.DataFrame()
     return all_detail, pd.DataFrame(audit_rows)
 
 
@@ -1398,8 +1369,7 @@ def _load_component_candidate_rows(config: TemplateDiscoverySystemConfig) -> pd.
         rows = rows.copy()
         if "symbol" not in rows or "timestamp" not in rows:
             raise ValueError(
-                "Component candidate rows must include symbol and timestamp columns: "
-                f"{path}"
+                f"Component candidate rows must include symbol and timestamp columns: {path}"
             )
         if "component" not in rows:
             rows["component"] = _infer_component_from_path(path)
@@ -1505,9 +1475,7 @@ def _score_component_candidates(
         )
         reasons = _component_selection_gate_reasons(summary, config)
         summary["selected"] = not reasons
-        summary["selection_reason"] = (
-            "passes_component_selection_gates" if not reasons else ""
-        )
+        summary["selection_reason"] = "passes_component_selection_gates" if not reasons else ""
         summary["reject_reason"] = ";".join(reasons)
         records.append(summary)
 
@@ -1524,12 +1492,7 @@ def _score_component_candidates(
     ).reset_index(drop=True)
     if config.max_component_candidates_per_family > 0:
         selected = scorecard["selected"].astype(bool)
-        selected_ranks = (
-            scorecard.loc[selected]
-            .groupby("component", sort=False)
-            .cumcount()
-            .add(1)
-        )
+        selected_ranks = scorecard.loc[selected].groupby("component", sort=False).cumcount().add(1)
         scorecard.loc[selected, "component_selection_rank"] = selected_ranks
         over_rank = (
             scorecard["component_selection_rank"].fillna(0).astype(int)
@@ -1543,9 +1506,9 @@ def _score_component_candidates(
             scorecard.loc[over_rank, "reject_reason"].astype(str).eq(""),
             "component_candidate_rank_above_max",
         )
-    scorecard["component_selection_rank"] = scorecard[
-        "component_selection_rank"
-    ].fillna(0).astype(int)
+    scorecard["component_selection_rank"] = (
+        scorecard["component_selection_rank"].fillna(0).astype(int)
+    )
     return scorecard.drop(columns=["_component_priority"], errors="ignore")
 
 
@@ -1562,9 +1525,7 @@ def _selected_component_rows(
     if keys.empty:
         return pd.DataFrame(columns=rows.columns)
     selected = rows.merge(keys, on=["component", "selection_id"], how="inner")
-    return selected.sort_values("candidate_input_order", kind="mergesort").reset_index(
-        drop=True
-    )
+    return selected.sort_values("candidate_input_order", kind="mergesort").reset_index(drop=True)
 
 
 def _component_selection_book(scorecard: pd.DataFrame) -> pd.DataFrame:
@@ -1832,9 +1793,7 @@ def _load_event_rows(inputs: tuple[TemplateDiscoveryEventInput, ...]) -> pd.Data
             excluded_surface = label.removeprefix("residual_ex_")
             excluded_symbols = symbols_by_surface.get(excluded_surface)
             if excluded_symbols:
-                rows = rows.loc[
-                    ~rows["symbol"].astype(str).isin(excluded_symbols)
-                ].copy()
+                rows = rows.loc[~rows["symbol"].astype(str).isin(excluded_symbols)].copy()
         frames.append(rows)
 
     return pd.concat(frames, ignore_index=True)
@@ -1845,9 +1804,9 @@ def _build_transitions(events: pd.DataFrame) -> pd.DataFrame:
     for surface, surface_rows in events.groupby("surface", sort=False):
         rows = surface_rows.copy()
         rows["timestamp"] = pd.to_datetime(rows["timestamp"], utc=True)
-        rows = rows.sort_values(
-            ["symbol", "session_date", "timestamp", "event_state"]
-        ).reset_index(drop=True)
+        rows = rows.sort_values(["symbol", "session_date", "timestamp", "event_state"]).reset_index(
+            drop=True
+        )
         rows["_source_row_id"] = np.arange(len(rows))
         timestamp_heads = (
             rows[["symbol", "session_date", "timestamp"]]
@@ -1867,11 +1826,7 @@ def _build_transitions(events: pd.DataFrame) -> pd.DataFrame:
         sources = sources[sources["_next_timestamp"].notna()].copy()
         target_rows = rows.drop(columns=["_source_row_id"]).copy()
         target_rows["_target_priority"] = (
-            target_rows["event_state"]
-            .astype(str)
-            .map(EVENT_STATE_PRIORITY)
-            .fillna(999)
-            .astype(int)
+            target_rows["event_state"].astype(str).map(EVENT_STATE_PRIORITY).fillna(999).astype(int)
         )
         target_rows = (
             target_rows.sort_values(
@@ -1967,9 +1922,11 @@ def _build_transitions(events: pd.DataFrame) -> pd.DataFrame:
         frames.append(merged)
     if not frames:
         return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True).sort_values(
-        ["surface", "symbol", "timestamp", "loop_id"]
-    ).reset_index(drop=True)
+    return (
+        pd.concat(frames, ignore_index=True)
+        .sort_values(["surface", "symbol", "timestamp", "loop_id"])
+        .reset_index(drop=True)
+    )
 
 
 def _build_family_replay_transitions(
@@ -1990,9 +1947,7 @@ def _build_family_replay_transitions(
         rows = surface_rows.copy()
         rows["timestamp"] = pd.to_datetime(rows["timestamp"], utc=True)
         rows["session_date"] = rows["session_date"].astype(str)
-        rows = rows.sort_values(["symbol", "session_date", "timestamp"]).reset_index(
-            drop=True
-        )
+        rows = rows.sort_values(["symbol", "session_date", "timestamp"]).reset_index(drop=True)
         rows["_source_row_id"] = rows.index
         timestamp_heads = (
             rows[["symbol", "session_date", "timestamp"]]
@@ -2049,17 +2004,12 @@ def _build_family_replay_transitions(
             & base["event_state"].astype(str).ne(base["next_event_state"].astype(str))
         ].copy()
         base["source_current_event_state"] = base["event_state"].astype(str)
-        base["loop_id"] = (
-            base["source_current_event_state"] + "__to__" + base["next_event_state"]
-        )
+        base["loop_id"] = base["source_current_event_state"] + "__to__" + base["next_event_state"]
         base = base[base["loop_id"].isin(loop_ids)].copy()
         if base.empty:
             continue
         base["_target_priority"] = (
-            base["next_event_state"]
-            .map(EVENT_STATE_PRIORITY)
-            .fillna(999)
-            .astype(int)
+            base["next_event_state"].map(EVENT_STATE_PRIORITY).fillna(999).astype(int)
         )
         base = (
             base.sort_values(["_source_row_id", "_target_priority", "next_event_state"])
@@ -2101,9 +2051,11 @@ def _build_family_replay_transitions(
         frames.append(base)
     if not frames:
         return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True).sort_values(
-        ["surface", "symbol", "timestamp", "loop_id"]
-    ).reset_index(drop=True)
+    return (
+        pd.concat(frames, ignore_index=True)
+        .sort_values(["surface", "symbol", "timestamp", "loop_id"])
+        .reset_index(drop=True)
+    )
 
 
 def _behavior_loop_columns() -> list[str]:
@@ -2480,9 +2432,7 @@ def _summarize_named_route_candidates(
                 "b0_state": candidate.get("b0_state", ""),
                 "rows": int(len(selected)),
                 "parent_rows": int(len(parent)),
-                "row_share_of_parent": float(len(selected) / len(parent))
-                if len(parent)
-                else None,
+                "row_share_of_parent": float(len(selected) / len(parent)) if len(parent) else None,
                 "symbols": int(selected["symbol"].nunique()) if not selected.empty else 0,
                 "months": int(selected["month"].nunique()) if not selected.empty else 0,
                 "single_symbol_share": float(symbol_counts.iloc[0] / len(selected))
@@ -2716,13 +2666,16 @@ def _b0_market_states(
         rows["b0_direction_score_raw"] = rows[
             ["score_ret20", "score_breadth_up", "score_above_ma", "score_drawdown"]
         ].mean(axis=1)
-        rows["b0_direction_score"] = rows["b0_direction_score_raw"].rolling(
-            config.b0_smooth_window,
-            min_periods=max(2, config.b0_smooth_window // 2),
-        ).mean()
+        rows["b0_direction_score"] = (
+            rows["b0_direction_score_raw"]
+            .rolling(
+                config.b0_smooth_window,
+                min_periods=max(2, config.b0_smooth_window // 2),
+            )
+            .mean()
+        )
         rows["b0_raw_state"] = [
-            _raw_b0_state(direction, config)
-            for direction in rows["b0_direction_score"].tolist()
+            _raw_b0_state(direction, config) for direction in rows["b0_direction_score"].tolist()
         ]
         rows["b0_state"] = _confirm_b0_states(
             rows["b0_raw_state"].tolist(),
@@ -2992,9 +2945,7 @@ def _evaluate_loop_context_refinement(
                             loop_rows["surface"].eq(surface)
                             & _period_mask(loop_rows, period, config)
                         ]
-                        inside = period_rows.loc[
-                            term.mask.reindex(period_rows.index).fillna(False)
-                        ]
+                        inside = period_rows.loc[term.mask.reindex(period_rows.index).fillna(False)]
                         outside = period_rows.loc[
                             ~term.mask.reindex(period_rows.index).fillna(False)
                         ]
@@ -3034,9 +2985,7 @@ def _evaluate_loop_context_refinement(
                             value <= -config.route_lift_bar for value in first_two
                         ) and all(value <= 0.02 for value in transfer)
                         record["mean_signed_lift"] = float(np.mean(lifts))
-                        record["mean_abs_lift"] = float(
-                            np.mean([abs(value) for value in lifts])
-                        )
+                        record["mean_abs_lift"] = float(np.mean([abs(value) for value in lifts]))
                     else:
                         record["mean_signed_lift"] = None
                         record["mean_abs_lift"] = None
@@ -3394,9 +3343,7 @@ def _candidate_masks(
         )
         if symbol_share is not None and symbol_share > config.max_single_symbol_share:
             return
-        axes = sorted(
-            {atom_by_id[atom_id].axis for atom_id in spec.atoms if atom_id in atom_by_id}
-        )
+        axes = sorted({atom_by_id[atom_id].axis for atom_id in spec.atoms if atom_id in atom_by_id})
         record: dict[str, Any] = {
             "container_id": spec.container_id,
             "source": spec.source,
@@ -3486,8 +3433,8 @@ def _candidate_masks(
     selected_ids = {str(item["container_id"]) for item in routed}
     shell_frame = pd.DataFrame(shell_rows)
     if not shell_frame.empty:
-        shell_frame["selected_for_routing"] = shell_frame["container_id"].astype(str).isin(
-            selected_ids
+        shell_frame["selected_for_routing"] = (
+            shell_frame["container_id"].astype(str).isin(selected_ids)
         )
         shell_frame = shell_frame.sort_values(
             [
@@ -3564,9 +3511,7 @@ def _evaluate_routes(
                             loop_rows["surface"].eq(surface)
                             & _period_mask(loop_rows, period, config)
                         ]
-                        inside = period_rows.loc[
-                            mask.reindex(period_rows.index).fillna(False)
-                        ]
+                        inside = period_rows.loc[mask.reindex(period_rows.index).fillna(False)]
                         parent_part = parent_mask.reindex(period_rows.index).fillna(False)
                         candidate_part = mask.reindex(period_rows.index).fillna(False)
                         outside_mask = parent_part & ~candidate_part
@@ -3720,12 +3665,9 @@ def _score_container_routes(containers: pd.DataFrame, routes: pd.DataFrame) -> p
     scored["routing_score"] = (
         pd.to_numeric(scored["stable_route_count"], errors="coerce").fillna(0) * 10.0
         + pd.to_numeric(scored["stable_route_loop_count"], errors="coerce").fillna(0) * 5.0
-        + pd.to_numeric(scored["consistent_sign_route_count"], errors="coerce").fillna(0)
-        * 2.0
-        + pd.to_numeric(scored["stable_route_mean_abs_lift"], errors="coerce").fillna(0.0)
-        * 100.0
-        + pd.to_numeric(scored["eligible_route_mean_abs_lift"], errors="coerce").fillna(0.0)
-        * 20.0
+        + pd.to_numeric(scored["consistent_sign_route_count"], errors="coerce").fillna(0) * 2.0
+        + pd.to_numeric(scored["stable_route_mean_abs_lift"], errors="coerce").fillna(0.0) * 100.0
+        + pd.to_numeric(scored["eligible_route_mean_abs_lift"], errors="coerce").fillna(0.0) * 20.0
         + np.minimum(pd.to_numeric(scored["loops"], errors="coerce").fillna(0), 8)
         - pd.to_numeric(scored["single_symbol_share"], errors="coerce").fillna(1.0) * 4.0
     )
@@ -3916,7 +3858,9 @@ def _run_replay(
                                     pd.Series(scored["target_hit"]).astype(bool).mean()
                                 ),
                                 "ambiguous_stop_target_rate": float(
-                                    pd.Series(scored["target_stop_order_ambiguous"]).astype(bool).mean()
+                                    pd.Series(scored["target_stop_order_ambiguous"])
+                                    .astype(bool)
+                                    .mean()
                                 ),
                                 "median_max_favorable_r": float(
                                     pd.to_numeric(
@@ -4043,8 +3987,7 @@ def _family_candidate_specs(
             "expected_direction": -1,
             "visibility": "source_visible",
             "expression": (
-                "selected_discovered_container AND "
-                "source_compression_regime == compressed"
+                "selected_discovered_container AND source_compression_regime == compressed"
             ),
             "mask": container & source_compression,
         },
@@ -4324,6 +4267,7 @@ def _family_scorecard(
         ["candidate_id", "stop_model", "target_r"],
         sort=False,
     ):
+
         def get(
             surface: str,
             period: str,
@@ -4416,16 +4360,20 @@ def _family_scorecard(
     frame = pd.DataFrame(records)
     if frame.empty:
         return pd.DataFrame(columns=_family_replay_scorecard_columns())
-    return frame.reindex(columns=_family_replay_scorecard_columns()).sort_values(
-        [
-            "min_period_final_close_mean_r",
-            "combined_final_close_total_r",
-            "smid_full_final_close_total_r",
-        ],
-        ascending=[False, False, False],
-        na_position="last",
-        kind="mergesort",
-    ).reset_index(drop=True)
+    return (
+        frame.reindex(columns=_family_replay_scorecard_columns())
+        .sort_values(
+            [
+                "min_period_final_close_mean_r",
+                "combined_final_close_total_r",
+                "smid_full_final_close_total_r",
+            ],
+            ascending=[False, False, False],
+            na_position="last",
+            kind="mergesort",
+        )
+        .reset_index(drop=True)
+    )
 
 
 def _family_cost_focus(summary: pd.DataFrame, scorecard: pd.DataFrame) -> pd.DataFrame:
@@ -4444,8 +4392,10 @@ def _family_cost_focus(summary: pd.DataFrame, scorecard: pd.DataFrame) -> pd.Dat
                 & summary["period"].isin(["fresh_year", "saved_year", "full_available"])
             ].copy()
         )
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(
-        columns=_family_replay_summary_columns()
+    return (
+        pd.concat(frames, ignore_index=True)
+        if frames
+        else pd.DataFrame(columns=_family_replay_summary_columns())
     )
 
 
@@ -4657,8 +4607,7 @@ def _empty_standard_report_paths(run_dir: Path) -> dict[str, Path]:
         "behavior_loop_scorecard": run_dir / "behavior_loop_scorecard.csv",
         "loop_regime_occupancy": run_dir / "loop_regime_occupancy.csv",
         "loop_mixed_regime_occupancy": run_dir / "loop_mixed_regime_occupancy.csv",
-        "loop_transition_regime_occupancy": run_dir
-        / "loop_transition_regime_occupancy.csv",
+        "loop_transition_regime_occupancy": run_dir / "loop_transition_regime_occupancy.csv",
         "c0_parent_readout": run_dir / "c0_parent_readout.csv",
         "b0_state_summary": run_dir / "b0_state_summary.csv",
         "b0_route_detail": run_dir / "b0_route_detail.csv",
@@ -4675,10 +4624,8 @@ def _empty_standard_report_paths(run_dir: Path) -> dict[str, Path]:
         "replay_results": run_dir / "replay_results.csv",
         "family_r_replay_summary": run_dir / "family_r_replay_summary.csv",
         "family_r_replay_scorecard": run_dir / "family_r_replay_scorecard.csv",
-        "family_r_replay_cost_sensitivity": run_dir
-        / "family_r_replay_cost_sensitivity.csv",
-        "family_r_replay_selected_events": run_dir
-        / "family_r_replay_selected_events.csv",
+        "family_r_replay_cost_sensitivity": run_dir / "family_r_replay_cost_sensitivity.csv",
+        "family_r_replay_selected_events": run_dir / "family_r_replay_selected_events.csv",
     }
 
 
@@ -4744,14 +4691,12 @@ def _run_frozen_template_transfer_replay_mode(
         "summary_markdown": run_dir / "summary.md",
         "decision_json": run_dir / "decision.json",
         **standard_paths,
-        "frozen_template_transfer_all_rows": run_dir
-        / "frozen_template_transfer_all_rows.csv",
+        "frozen_template_transfer_all_rows": run_dir / "frozen_template_transfer_all_rows.csv",
         "frozen_template_transfer_exact_dedupe_trades": run_dir
         / "frozen_template_transfer_exact_dedupe_trades.csv",
         "frozen_template_transfer_template_audit": run_dir
         / "frozen_template_transfer_template_audit.csv",
-        "frozen_template_transfer_summary": run_dir
-        / "frozen_template_transfer_summary.csv",
+        "frozen_template_transfer_summary": run_dir / "frozen_template_transfer_summary.csv",
         "frozen_template_transfer_component_summary": run_dir
         / "frozen_template_transfer_component_summary.csv",
         "frozen_template_transfer_component_summary_after_dedupe": run_dir
@@ -4797,15 +4742,11 @@ def _run_frozen_template_transfer_replay_mode(
         "summary_markdown": "summary.md",
         "decision_json": "decision.json",
         **_standard_report_names(),
-        "frozen_template_transfer_all_rows": (
-            "frozen_template_transfer_all_rows.csv"
-        ),
+        "frozen_template_transfer_all_rows": ("frozen_template_transfer_all_rows.csv"),
         "frozen_template_transfer_exact_dedupe_trades": (
             "frozen_template_transfer_exact_dedupe_trades.csv"
         ),
-        "frozen_template_transfer_template_audit": (
-            "frozen_template_transfer_template_audit.csv"
-        ),
+        "frozen_template_transfer_template_audit": ("frozen_template_transfer_template_audit.csv"),
         "frozen_template_transfer_summary": "frozen_template_transfer_summary.csv",
         "frozen_template_transfer_component_summary": (
             "frozen_template_transfer_component_summary.csv"
@@ -4813,12 +4754,8 @@ def _run_frozen_template_transfer_replay_mode(
         "frozen_template_transfer_component_summary_after_dedupe": (
             "frozen_template_transfer_component_summary_after_dedupe.csv"
         ),
-        "frozen_template_transfer_rule_summary": (
-            "frozen_template_transfer_rule_summary.csv"
-        ),
-        "frozen_template_transfer_period_summary": (
-            "frozen_template_transfer_period_summary.csv"
-        ),
+        "frozen_template_transfer_rule_summary": ("frozen_template_transfer_rule_summary.csv"),
+        "frozen_template_transfer_period_summary": ("frozen_template_transfer_period_summary.csv"),
         "frozen_template_transfer_monthly_summary": (
             "frozen_template_transfer_monthly_summary.csv"
         ),
@@ -4876,9 +4813,7 @@ def _run_frozen_template_transfer_replay_mode(
         "frozen_template_transfer_trade_count": int(len(deduped_trades)),
         "frozen_template_transfer_exact_overlap_count": overlap_count,
         "frozen_template_transfer_total_r": total_r,
-        "frozen_template_transfer_component_count": int(
-            deduped_trades["component"].nunique()
-        )
+        "frozen_template_transfer_component_count": int(deduped_trades["component"].nunique())
         if "component" in deduped_trades
         else 0,
         "frozen_template_transfer_rule_count": int(deduped_trades["rule_id"].nunique())
@@ -4924,9 +4859,7 @@ def _run_frozen_template_transfer_replay_mode(
         behavior_loop_scorecard_csv_path=paths["behavior_loop_scorecard"],
         loop_regime_occupancy_csv_path=paths["loop_regime_occupancy"],
         loop_mixed_regime_occupancy_csv_path=paths["loop_mixed_regime_occupancy"],
-        loop_transition_regime_occupancy_csv_path=paths[
-            "loop_transition_regime_occupancy"
-        ],
+        loop_transition_regime_occupancy_csv_path=paths["loop_transition_regime_occupancy"],
         c0_parent_readout_csv_path=paths["c0_parent_readout"],
         b0_state_summary_csv_path=paths["b0_state_summary"],
         b0_route_detail_csv_path=paths["b0_route_detail"],
@@ -4975,8 +4908,7 @@ def _run_frozen_combo_replay_mode(
         **standard_paths,
         "frozen_candidate_book": run_dir / "frozen_candidate_book.csv",
         "frozen_combo_all_components": run_dir / "frozen_combo_all_components.csv",
-        "frozen_combo_exact_dedupe_trades": run_dir
-        / "frozen_combo_exact_dedupe_trades.csv",
+        "frozen_combo_exact_dedupe_trades": run_dir / "frozen_combo_exact_dedupe_trades.csv",
         "frozen_combo_summary": run_dir / "frozen_combo_summary.csv",
         "frozen_combo_component_summary": run_dir / "frozen_combo_component_summary.csv",
         "frozen_combo_component_summary_after_dedupe": run_dir
@@ -5103,9 +5035,7 @@ def _run_frozen_combo_replay_mode(
         behavior_loop_scorecard_csv_path=paths["behavior_loop_scorecard"],
         loop_regime_occupancy_csv_path=paths["loop_regime_occupancy"],
         loop_mixed_regime_occupancy_csv_path=paths["loop_mixed_regime_occupancy"],
-        loop_transition_regime_occupancy_csv_path=paths[
-            "loop_transition_regime_occupancy"
-        ],
+        loop_transition_regime_occupancy_csv_path=paths["loop_transition_regime_occupancy"],
         c0_parent_readout_csv_path=paths["c0_parent_readout"],
         b0_state_summary_csv_path=paths["b0_state_summary"],
         b0_route_detail_csv_path=paths["b0_route_detail"],
@@ -5155,22 +5085,17 @@ def _run_template_component_selection_mode(
         "decision_json": run_dir / "decision.json",
         **standard_paths,
         "component_candidate_rows": run_dir / "component_candidate_rows.csv",
-        "component_candidate_scorecard": run_dir
-        / "component_candidate_scorecard.csv",
+        "component_candidate_scorecard": run_dir / "component_candidate_scorecard.csv",
         "selected_candidate_book": run_dir / "selected_candidate_book.csv",
-        "rejected_component_candidates": run_dir
-        / "rejected_component_candidates.csv",
+        "rejected_component_candidates": run_dir / "rejected_component_candidates.csv",
         "selected_component_rows": run_dir / "selected_component_rows.csv",
-        "selected_combo_exact_dedupe_trades": run_dir
-        / "selected_combo_exact_dedupe_trades.csv",
+        "selected_combo_exact_dedupe_trades": run_dir / "selected_combo_exact_dedupe_trades.csv",
         "selected_combo_summary": run_dir / "selected_combo_summary.csv",
-        "selected_combo_component_summary": run_dir
-        / "selected_combo_component_summary.csv",
+        "selected_combo_component_summary": run_dir / "selected_combo_component_summary.csv",
         "selected_combo_component_summary_after_dedupe": run_dir
         / "selected_combo_component_summary_after_dedupe.csv",
         "selected_combo_rule_summary": run_dir / "selected_combo_rule_summary.csv",
-        "selected_combo_monthly_summary": run_dir
-        / "selected_combo_monthly_summary.csv",
+        "selected_combo_monthly_summary": run_dir / "selected_combo_monthly_summary.csv",
     }
 
     for path in standard_paths.values():
@@ -5210,9 +5135,7 @@ def _run_template_component_selection_mode(
         "selected_candidate_book": "selected_candidate_book.csv",
         "rejected_component_candidates": "rejected_component_candidates.csv",
         "selected_component_rows": "selected_component_rows.csv",
-        "selected_combo_exact_dedupe_trades": (
-            "selected_combo_exact_dedupe_trades.csv"
-        ),
+        "selected_combo_exact_dedupe_trades": ("selected_combo_exact_dedupe_trades.csv"),
         "selected_combo_summary": "selected_combo_summary.csv",
         "selected_combo_component_summary": "selected_combo_component_summary.csv",
         "selected_combo_component_summary_after_dedupe": (
@@ -5308,9 +5231,7 @@ def _run_template_component_selection_mode(
         behavior_loop_scorecard_csv_path=paths["behavior_loop_scorecard"],
         loop_regime_occupancy_csv_path=paths["loop_regime_occupancy"],
         loop_mixed_regime_occupancy_csv_path=paths["loop_mixed_regime_occupancy"],
-        loop_transition_regime_occupancy_csv_path=paths[
-            "loop_transition_regime_occupancy"
-        ],
+        loop_transition_regime_occupancy_csv_path=paths["loop_transition_regime_occupancy"],
         c0_parent_readout_csv_path=paths["c0_parent_readout"],
         b0_state_summary_csv_path=paths["b0_state_summary"],
         b0_route_detail_csv_path=paths["b0_route_detail"],
@@ -5397,15 +5318,19 @@ def run_template_discovery_system_lab(
         candidate_loop_ids,
         config,
     )
-    loop_context_admissions = loop_context_refinement[
-        loop_context_refinement["candidate_kind"].eq("admission_refinement")
-    ].copy() if not loop_context_refinement.empty else pd.DataFrame(
-        columns=_loop_refinement_columns()
+    loop_context_admissions = (
+        loop_context_refinement[
+            loop_context_refinement["candidate_kind"].eq("admission_refinement")
+        ].copy()
+        if not loop_context_refinement.empty
+        else pd.DataFrame(columns=_loop_refinement_columns())
     )
-    loop_context_blockers = loop_context_refinement[
-        loop_context_refinement["candidate_kind"].eq("blocker_refinement")
-    ].copy() if not loop_context_refinement.empty else pd.DataFrame(
-        columns=_loop_refinement_columns()
+    loop_context_blockers = (
+        loop_context_refinement[
+            loop_context_refinement["candidate_kind"].eq("blocker_refinement")
+        ].copy()
+        if not loop_context_refinement.empty
+        else pd.DataFrame(columns=_loop_refinement_columns())
     )
     atoms, atom_scorecard = _generate_atoms(routed_transitions, config)
     candidates, container_scorecard = _candidate_masks(routed_transitions, atoms, config)
@@ -5451,8 +5376,7 @@ def run_template_discovery_system_lab(
         "behavior_loop_scorecard": run_dir / "behavior_loop_scorecard.csv",
         "loop_regime_occupancy": run_dir / "loop_regime_occupancy.csv",
         "loop_mixed_regime_occupancy": run_dir / "loop_mixed_regime_occupancy.csv",
-        "loop_transition_regime_occupancy": run_dir
-        / "loop_transition_regime_occupancy.csv",
+        "loop_transition_regime_occupancy": run_dir / "loop_transition_regime_occupancy.csv",
         "c0_parent_readout": run_dir / "c0_parent_readout.csv",
         "b0_state_summary": run_dir / "b0_state_summary.csv",
         "b0_route_detail": run_dir / "b0_route_detail.csv",
@@ -5469,10 +5393,8 @@ def run_template_discovery_system_lab(
         "replay_results": run_dir / "replay_results.csv",
         "family_r_replay_summary": run_dir / "family_r_replay_summary.csv",
         "family_r_replay_scorecard": run_dir / "family_r_replay_scorecard.csv",
-        "family_r_replay_cost_sensitivity": run_dir
-        / "family_r_replay_cost_sensitivity.csv",
-        "family_r_replay_selected_events": run_dir
-        / "family_r_replay_selected_events.csv",
+        "family_r_replay_cost_sensitivity": run_dir / "family_r_replay_cost_sensitivity.csv",
+        "family_r_replay_selected_events": run_dir / "family_r_replay_selected_events.csv",
     }
 
     _write_csv(paths["behavior_loop_scorecard"], behavior_loop_scorecard)
@@ -5645,9 +5567,7 @@ def run_template_discovery_system_lab(
         behavior_loop_scorecard_csv_path=paths["behavior_loop_scorecard"],
         loop_regime_occupancy_csv_path=paths["loop_regime_occupancy"],
         loop_mixed_regime_occupancy_csv_path=paths["loop_mixed_regime_occupancy"],
-        loop_transition_regime_occupancy_csv_path=paths[
-            "loop_transition_regime_occupancy"
-        ],
+        loop_transition_regime_occupancy_csv_path=paths["loop_transition_regime_occupancy"],
         c0_parent_readout_csv_path=paths["c0_parent_readout"],
         b0_state_summary_csv_path=paths["b0_state_summary"],
         b0_route_detail_csv_path=paths["b0_route_detail"],

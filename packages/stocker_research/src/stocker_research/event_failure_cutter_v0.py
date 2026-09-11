@@ -307,10 +307,7 @@ def add_rolling_symbol_state_efficacy(
                 f"symbol_state_h{horizon}_prior_{window}_session_median_return"
                 for window in windows
             ],
-            *[
-                f"symbol_state_h{horizon}_prior_{window}_session_win_rate"
-                for window in windows
-            ],
+            *[f"symbol_state_h{horizon}_prior_{window}_session_win_rate" for window in windows],
         ]
         data = data.merge(
             session[merge_columns],
@@ -810,8 +807,7 @@ def _feature_distribution_good_vs_bad(
                         "good_median": good_median,
                         "bad_median": bad_median,
                         "median_difference_bad_minus_good": bad_median - good_median,
-                        "abs_standardized_difference": abs(bad_median - good_median)
-                        / iqr
+                        "abs_standardized_difference": abs(bad_median - good_median) / iqr
                         if iqr
                         else math.nan,
                     }
@@ -913,8 +909,10 @@ def _state_failure_examples(
                     .head(examples_per_group)
                 )
             else:
-                selected = group.assign(_sort=returns).sort_values("_sort", ascending=False).head(
-                    examples_per_group
+                selected = (
+                    group.assign(_sort=returns)
+                    .sort_values("_sort", ascending=False)
+                    .head(examples_per_group)
                 )
             for _, row in selected.iterrows():
                 record = {
@@ -1237,19 +1235,31 @@ def _summary_markdown(
     concentration_warnings: pd.DataFrame,
 ) -> str:
     decision = summary["decision"]["decision"]
-    passed = filter_oos_results[
-        filter_oos_results["gate_passed"].fillna(False).astype(bool)
-    ] if not filter_oos_results.empty else pd.DataFrame()
-    failed = filter_oos_results[
-        ~filter_oos_results["gate_passed"].fillna(False).astype(bool)
-    ] if not filter_oos_results.empty else pd.DataFrame()
-    failed_states = failure_attribution[
-        ~failure_attribution["event_state"].isin(passed["event_state"].unique())
-    ] if not failure_attribution.empty and not passed.empty else failure_attribution
-    top_features = feature_distribution.sort_values(
-        "abs_standardized_difference",
-        ascending=False,
-    ).head(12) if not feature_distribution.empty else pd.DataFrame()
+    passed = (
+        filter_oos_results[filter_oos_results["gate_passed"].fillna(False).astype(bool)]
+        if not filter_oos_results.empty
+        else pd.DataFrame()
+    )
+    failed = (
+        filter_oos_results[~filter_oos_results["gate_passed"].fillna(False).astype(bool)]
+        if not filter_oos_results.empty
+        else pd.DataFrame()
+    )
+    failed_states = (
+        failure_attribution[
+            ~failure_attribution["event_state"].isin(passed["event_state"].unique())
+        ]
+        if not failure_attribution.empty and not passed.empty
+        else failure_attribution
+    )
+    top_features = (
+        feature_distribution.sort_values(
+            "abs_standardized_difference",
+            ascending=False,
+        ).head(12)
+        if not feature_distribution.empty
+        else pd.DataFrame()
+    )
     continue_text = (
         "Continue research only on the passing filter/event/horizon pairs."
         if decision == "continue_research"

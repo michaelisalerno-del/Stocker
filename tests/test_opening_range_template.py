@@ -19,9 +19,7 @@ def _intraday_frame(
     rows: list[dict[str, float | pd.Timestamp]] = []
     overrides = overrides or {}
     for session_index in range(sessions):
-        session_open = pd.Timestamp("2024-01-02 14:30", tz="UTC") + pd.Timedelta(
-            days=session_index
-        )
+        session_open = pd.Timestamp("2024-01-02 14:30", tz="UTC") + pd.Timedelta(days=session_index)
         for bar_index in range(bars_per_session):
             timestamp = session_open + pd.Timedelta(minutes=5 * bar_index)
             if bar_index == 0:

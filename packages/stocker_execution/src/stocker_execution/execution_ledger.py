@@ -107,7 +107,8 @@ class ExecutionRecord:
             risk = None
         slippage = (
             direction * (self.average_fill_price - self.entry_reference)
-            if self.average_fill_price is not None else None
+            if self.average_fill_price is not None
+            else None
         )
         return {
             "entry_reference": self.entry_reference,
@@ -120,16 +121,19 @@ class ExecutionRecord:
             "fill_relative_risk": self.fill_relative_risk,
             "fill_relative_reward": self.fill_relative_reward,
             "entry_slippage_bps": slippage / self.entry_reference * 10000
-            if slippage is not None and self.entry_reference > 0 else None,
+            if slippage is not None and self.entry_reference > 0
+            else None,
             "entry_slippage_r": slippage / risk
-            if slippage is not None and risk is not None else None,
+            if slippage is not None and risk is not None
+            else None,
             "method_reference_r": (
                 direction * (self.average_exit_price - self.entry_reference) / risk
-                if self.average_exit_price is not None and risk is not None else None
+                if self.average_exit_price is not None and risk is not None
+                else None
             ),
             "realized_execution_r": self.realized_pnl / (self.filled_quantity * risk)
-            if self.realized_pnl is not None and self.filled_quantity > 0
-            and risk is not None else None,
+            if self.realized_pnl is not None and self.filled_quantity > 0 and risk is not None
+            else None,
             "exit_reason": self.exit_reason,
             "commission_total": self.commission_total,
             "commissions_complete": self.commissions_complete,
@@ -678,8 +682,14 @@ class ExecutionLedger:
                         WHERE environment = ? AND account = ? AND execution_id = ?
                           AND order_plan_id = ? AND commission IS NOT ?
                         """,
-                        (fill.commission, fill.environment.value, fill.account,
-                         fill.execution_id, plan_id, fill.commission),
+                        (
+                            fill.commission,
+                            fill.environment.value,
+                            fill.account,
+                            fill.execution_id,
+                            plan_id,
+                            fill.commission,
+                        ),
                     )
                     if enriched.rowcount:
                         self._refresh_aggregate(connection, plan_id)
@@ -1179,7 +1189,8 @@ class ExecutionLedger:
         exit_reason = None
         if closed:
             exit_reason = (
-                "METHOD_DEADLINE" if exits[-1]["role"] == OrderRole.TIMEOUT.value
+                "METHOD_DEADLINE"
+                if exits[-1]["role"] == OrderRole.TIMEOUT.value
                 else str(exits[-1]["role"])
             )
         if closed and entry_average is not None and exit_average is not None:

@@ -74,8 +74,11 @@ class SessionHardMethod(SessionHardStructureDStrategy):
     """Reuse frozen T0 qualification; Q1 precedes arming; actual first break selects side."""
 
     def __init__(
-        self, market: MarketId = MarketId.US_ALL, *, clock: Callable[[], datetime] | None = None,
-        method_version: str = SESSION_HARD.version
+        self,
+        market: MarketId = MarketId.US_ALL,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        method_version: str = SESSION_HARD.version,
     ) -> None:
         from stocker_core.methods import get_method
 
@@ -156,9 +159,8 @@ class SessionHardMethod(SessionHardStructureDStrategy):
             raise ValueError("strategy expiry time must be timezone-aware")
         expired = []
         for signal_id, signal in tuple(self._signals.items()):
-            if (
-                signal.status is SignalStatus.WAITING_FOR_ENTRY
-                and now >= signal.t0 + timedelta(minutes=5)
+            if signal.status is SignalStatus.WAITING_FOR_ENTRY and now >= signal.t0 + timedelta(
+                minutes=5
             ):
                 updated = replace(
                     signal, status=SignalStatus.EXPIRED, reason="ENTRY_WINDOW_EXPIRED"

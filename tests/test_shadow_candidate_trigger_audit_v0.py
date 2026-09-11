@@ -47,10 +47,7 @@ def _context_row(
 
 def test_shadow_candidate_trigger_features_use_only_prior_candidates() -> None:
     rows = pd.DataFrame(
-        [
-            _context_row(idx=idx, net_r=-0.20, anti_stale_feature=1.0, weak=True)
-            for idx in range(9)
-        ]
+        [_context_row(idx=idx, net_r=-0.20, anti_stale_feature=1.0, weak=True) for idx in range(9)]
         + [_context_row(idx=9, net_r=1.0, anti_stale_feature=1.0, weak=False)]
     )
 

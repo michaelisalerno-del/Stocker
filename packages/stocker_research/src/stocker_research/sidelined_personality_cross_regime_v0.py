@@ -608,9 +608,7 @@ def _candidate_filter_results(
                     if excess_vs_random <= 0:
                         reject_reasons.append("random_same_count_not_beaten")
                     verdict = (
-                        "promote_for_retest"
-                        if not reject_reasons
-                        else "reject_sidelined_filter"
+                        "promote_for_retest" if not reject_reasons else "reject_sidelined_filter"
                     )
                     output.append(
                         {
@@ -630,12 +628,8 @@ def _candidate_filter_results(
                             "threshold": threshold,
                             "retained_train_count": int(len(retained_train)),
                             "retained_test_count": int(len(retained_test)),
-                            "regime_test_same_result_rate": regime_test_score[
-                                "same_result_rate"
-                            ],
-                            "filtered_train_same_result_rate": train_score[
-                                "same_result_rate"
-                            ],
+                            "regime_test_same_result_rate": regime_test_score["same_result_rate"],
+                            "filtered_train_same_result_rate": train_score["same_result_rate"],
                             "filtered_test_same_result_rate": test_score["same_result_rate"],
                             "test_lift_vs_regime": test_lift,
                             "filtered_test_median_aligned_return": test_score[
@@ -896,9 +890,7 @@ def run_sidelined_personality_cross_regime_lab(
         ),
     )
 
-    run_id = "sidelined_personality_cross_regime_v0_" + datetime.now(UTC).strftime(
-        "%Y%m%dT%H%M%SZ"
-    )
+    run_id = "sidelined_personality_cross_regime_v0_" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = output_dir / run_id
     paths = {
         "summary_json": run_dir / "summary.json",

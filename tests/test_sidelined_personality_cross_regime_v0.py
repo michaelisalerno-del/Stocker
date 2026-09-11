@@ -90,9 +90,7 @@ def _write_sidelined_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
                     "range_zscore": -0.7,
                     "relative_volume_at_bar_index": 0.8,
                     "relative_cumulative_volume": 0.8,
-                    "forward_12_bar_return": 0.0004
-                    if low_move
-                    else 0.006 + month_index * 0.001,
+                    "forward_12_bar_return": 0.0004 if low_move else 0.006 + month_index * 0.001,
                     "forward_12_bar_mfe": 0.0008 if low_move else 0.008,
                     "forward_12_bar_mae": -0.0007 if low_move else -0.002,
                 }

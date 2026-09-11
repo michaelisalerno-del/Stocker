@@ -91,9 +91,8 @@ def _dirty_frame(symbol: str) -> pd.DataFrame:
     duplicate = clean.iloc[[12]].copy()
     duplicate["close"] = pd.to_numeric(duplicate["close"]) + 0.01
     duplicate["high"] = pd.to_numeric(duplicate["high"]) + 0.01
-    return (
-        pd.concat([clean.iloc[5:], duplicate, clean.iloc[:5]], ignore_index=True)
-        .reset_index(drop=True)
+    return pd.concat([clean.iloc[5:], duplicate, clean.iloc[:5]], ignore_index=True).reset_index(
+        drop=True
     )
 
 

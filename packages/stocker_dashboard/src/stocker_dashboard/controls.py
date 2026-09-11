@@ -227,7 +227,9 @@ class RunControlService:
                 raise ValueError("Disable the run before rebuilding its watch pool")
             DiscoveryStore(database).request_refresh(run_id)
             return {
-                "persisted": True, "runtime_applied": False, "apply_mode": "ON_ENABLE",
+                "persisted": True,
+                "runtime_applied": False,
+                "apply_mode": "ON_ENABLE",
                 "detail": "New discovery generation requested. Enable the run to rebuild.",
             }
 

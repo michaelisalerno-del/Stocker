@@ -2306,3 +2306,46 @@ def test_queued_enable_cannot_undo_newer_pause(tmp_path):
         await runtime.stop()
 
     asyncio.run(scenario())
+
+
+def test_old_preparation_cannot_replace_newer_enabled_configuration(tmp_path):
+    async def scenario():
+        run = _run("changing", enabled=False)
+        runtime = _runtime(tmp_path, FakeBroker(), run)
+        await runtime.start()
+        original = runtime._qualify
+        entered, release = asyncio.Event(), asyncio.Event()
+        calls = 0
+
+        async def qualify(instances):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                entered.set()
+                await release.wait()
+            return await original(instances)
+
+        runtime._qualify = qualify
+        enabled = run.model_copy(update={"enabled": True})
+        old = asyncio.create_task(
+            runtime.apply_runs_config(_runs(enabled), frozenset({run.run_id}))
+        )
+        await asyncio.wait_for(entered.wait(), 2)
+        newer = enabled.model_copy(
+            update={"risk": enabled.risk.model_copy(update={"risk_per_trade": 0.0002})}
+        )
+        await runtime.apply_runs_config(_runs(newer), frozenset({run.run_id}))
+        applied = runtime._manager.get_run(run.run_id).config
+        assert applied.risk == newer.risk and applied.enabled
+        execution = runtime._execution[run.run_id]
+        strategy = runtime._strategies[run.run_id]
+        release.set()
+        await old
+        assert runtime._manager.get_run(run.run_id).config == applied
+        assert runtime._execution[run.run_id] is execution
+        assert execution.run_config.risk == newer.risk and execution.run_config.enabled
+        assert runtime._strategies[run.run_id] is strategy
+        assert runtime.status().runs[0].state is RunRuntimeState.ACTIVE
+        await runtime.stop()
+
+    asyncio.run(scenario())

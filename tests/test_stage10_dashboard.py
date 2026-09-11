@@ -1495,6 +1495,19 @@ def test_first_run_write_failure_never_activates_identity(tmp_path, monkeypatch)
         )
     assert runtime.run_updates == []
     assert runs_path.read_bytes() == before
+    from stocker_dashboard.factory import build_dashboard_app
+
+    with TestClient(
+        build_dashboard_app(
+            runs_config_path=runs_path,
+            ibkr_config_path=broker_path,
+            database_path=tmp_path / "failed-save-restart.sqlite",
+        )
+    ) as client:
+        restarted_ids = {row["run_id"] for row in client.get("/api/runs").json()}
+    assert restarted_ids == {
+        run.run_id for run in load_runs_config(runs_path).runs if not run.archived
+    }
 
 
 def test_saved_identity_survives_activation_failure_and_retry(tmp_path):

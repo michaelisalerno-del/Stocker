@@ -43,6 +43,10 @@ const path = require("node:path");
     assert.equal(await input.inputValue(), "2026-09-11T14:00");
     assert.equal(await input.evaluate(node => document.activeElement === node), true);
     assert.match(await page.locator("#candidate-results").innerText(), /SECOND/);
+    const stalePanel = await page.locator("#candidate-results").innerHTML();
+    await page.evaluate(() => refreshHeader());
+    assert.equal(await page.locator("#candidate-results").innerHTML(), stalePanel,
+      "a successful header read must not make stale panel data fresh");
     fail = true;
     await page.evaluate(() => refreshCurrentPage());
     assert.match(await page.locator("#candidate-results").innerText(), /STALE.*Received/s);
@@ -58,7 +62,9 @@ const path = require("node:path");
     await page.evaluate(() => {
       clearTimeout(timer);
       window.originalFetch = window.fetch;
+      window.mutationCalls = 0;
       window.fetch = (_url, options) => new Promise((_resolve, reject) => {
+        if (options.method === "POST") ++window.mutationCalls;
         options.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
       });
       window.readResult = api("/hung").catch(error => error.message);
@@ -68,8 +74,34 @@ const path = require("node:path");
     await page.evaluate(() => { window.mutationResult = api("/control", { method: "POST" }).catch(error => error.message); });
     await page.clock.runFor(30001);
     assert.match(await page.evaluate(() => window.mutationResult), /outcome unknown/);
+    assert.equal(await page.evaluate(() => window.mutationCalls), 1);
     await page.evaluate(() => { window.fetch = window.originalFetch; });
     assert.equal((await page.evaluate(() => api("/api/runs")))[0].run_id, "test");
+
+    // Exercise the actual polling cycle, not only the request helper.
+    await page.evaluate(() => {
+      clearTimeout(timer);
+      window.fetch = (url, options) => {
+        if (!String(url).startsWith("/api/candidates")) return window.originalFetch(url, options);
+        window.panelReadStarted = true;
+        return new Promise((_resolve, reject) => options.signal.addEventListener("abort",
+          () => reject(new DOMException("Aborted", "AbortError"))));
+      };
+      window.hungRefresh = refreshCurrentPage();
+    });
+    await page.waitForFunction(() => window.panelReadStarted === true);
+    await page.clock.runFor(8001);
+    await page.evaluate(() => window.hungRefresh);
+    assert.equal(await page.evaluate(() => refreshingPage), false);
+    assert.equal(await page.evaluate(() => readControllers.size), 0);
+    assert.match(await page.locator("#candidate-results").innerText(), /STALE.*RECOVERED/s);
+    symbol = "POLL_RECOVERED";
+    await page.evaluate(() => { window.fetch = window.originalFetch; });
+    await page.clock.runFor(10001);
+    await page.getByText("POLL_RECOVERED", {exact: true}).waitFor();
+    assert.doesNotMatch(await page.locator("#candidate-results").innerText(), /STALE/);
+    assert.equal(await page.evaluate(() => window.mutationCalls), 1);
+    await page.evaluate(() => clearTimeout(timer));
     assert.equal(await page.evaluate(() => riskFraction("0.1")), 0.001);
     for (const value of ["", "NaN", "0", "101", "-1"]) {
       assert.equal(await page.evaluate(value => { try { riskFraction(value); return false; } catch (_) { return true; } }, value), true);

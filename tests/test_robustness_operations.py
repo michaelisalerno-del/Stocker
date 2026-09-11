@@ -125,3 +125,51 @@ def test_consistent_snapshot_restore_retains_unresolved_identity(tmp_path):
     (bundle / "configuration" / "runs.yaml").write_text("changed")
     with pytest.raises(ValueError, match="checksum"):
         module.verify(bundle)
+
+
+def test_real_dashboard_routes_share_security_boundary(tmp_path, monkeypatch):
+    from stocker_dashboard.app import create_dashboard_app
+    from test_stage10_dashboard import _seed_authoritative_state
+
+    monkeypatch.delenv("STOCKER_DASHBOARD_PROXY_TOKEN", raising=False)
+    monkeypatch.setenv("STOCKER_DASHBOARD_PASSWORD", "test-only-password-0123456789")
+    monkeypatch.setenv("STOCKER_DASHBOARD_ORIGIN", "https://stocker.example")
+    dashboard = create_dashboard_app(_seed_authoritative_state(tmp_path), None)
+    with TestClient(dashboard, base_url="https://stocker.example") as client:
+        for route in dashboard.routes:
+            if not getattr(route, "methods", None):
+                continue
+            path = route.path
+            # Authentication must reject before route/path/body validation.
+            for method in route.methods - {"HEAD", "OPTIONS"}:
+                response = client.request(method, path)
+                assert response.status_code == 401, (method, path, response.text)
+                assert "Access-Control-Allow-Origin" not in response.headers
+        assert client.get("/static/dashboard.js").status_code == 401
+        authorized = client.get("/api/system", auth=("stocker", "test-only-password-0123456789"))
+        assert authorized.status_code == 200
+        assert "test-only-password" not in authorized.text
+
+
+def test_websocket_boundary_rejects_before_application(monkeypatch):
+    import asyncio
+
+    monkeypatch.delenv("STOCKER_DASHBOARD_PROXY_TOKEN", raising=False)
+    monkeypatch.setenv("STOCKER_DASHBOARD_PASSWORD", "test-only-password-0123456789")
+    monkeypatch.setenv("STOCKER_DASHBOARD_ORIGIN", "https://stocker.example")
+
+    async def scenario():
+        async def forbidden(scope, receive, send):
+            pytest.fail("unauthenticated websocket reached application")
+
+        messages = []
+
+        async def send(message):
+            messages.append(message)
+
+        await DashboardSecurity(forbidden)(
+            {"type": "websocket", "headers": [(b"host", b"stocker.example")]}, None, send
+        )
+        assert messages == [{"type": "websocket.close", "code": 1008}]
+
+    asyncio.run(scenario())

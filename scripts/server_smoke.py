@@ -15,6 +15,7 @@ from pathlib import Path
 def smoke() -> None:
     import stocker_launcher
 
+    stocker_launcher.configure_numeric_runtime()
     stocker_launcher._ensure_monorepo_src_paths()
     import httpx
 

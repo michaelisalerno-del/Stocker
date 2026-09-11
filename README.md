@@ -64,6 +64,14 @@ Service launch uses the prepared `.venv/bin/stocker` directly or `uv run --no-sy
 plain `uv run` can add the default research/dev groups. The server retains
 scikit-learn 1.8.0 and joblib because the frozen model requires them.
 
+The installed `stocker` and `stocker-mcp` launchers select the verified NumPy x86
+V2/V3 numerical path before imports; tests and server smoke use the same profile.
+NumPy's AVX-512 logarithm path produced one-bit differences in frozen scores on some
+CI runners. Exact fixture assertions and formulas remain unchanged. ARM is unchanged.
+Direct library integrations must call `stocker_launcher.configure_numeric_runtime()`
+before importing NumPy or Stocker numerical modules. After editing the force-included
+launcher locally, rebuild it with `uv sync --locked --all-groups --reinstall-package stocker`.
+
 Unauthenticated access is local-only. Remote use requires an explicitly protected
 HTTPS deployment. The [dashboard security modes](docs/STAGE10_DASHBOARD.md#security)
 cover every API and stream, including protection against backend/proxy bypass.

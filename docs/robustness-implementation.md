@@ -229,3 +229,39 @@ contains `execution_ledger.py`, `stage7.py`, `ibkr.py` and `runtime.py`;
 `security.py` and `static/dashboard.js`; the configuration schema is
 `packages/stocker_core/src/stocker_core/runs.py`. The finding table above maps their
 changed functions to focused regressions. Optional later ideas are outside this release.
+
+## Post-deployment numerical reproducibility correction
+
+The documentation-only CI run 34629079092 and diagnostic run 34629694002 each
+reported **1,063 passed, 14 skipped and three failed** exact frozen-score tests.
+Both application code and those tests were unchanged from the earlier green run.
+The first differences were one ULP in RV scores for ALL, AES and BAX. The failing
+runner's NumPy 2.4.6 diagnostics selected `X86_V4` for float64 `log`; the existing
+server has V2/V3 support and reproduced all **4,782** frozen scores and all three-stage
+watchlists exactly in a disconnected process using a separate prepared environment.
+The Mac also reproduced the exact scores. No broker connection was used by these probes.
+
+`stocker_launcher.configure_numeric_runtime` now makes the verified numerical path
+explicit before console application imports. On x86 it retains any existing CPU
+restrictions and excludes NumPy's `X86_V4`, `AVX512_ICL` and `AVX512_SPR` dispatch
+targets; ARM remains unchanged. Pytest initialization and server smoke call the same
+helper. This is a shared application startup setting, not a test-only relaxation.
+The frozen candidate function, all exact equality/order/watchlist assertions, model
+and fixture files remain unchanged. This preserves the established numerical path
+on newer hardware rather than accepting altered scores. NumPy documents its
+[CPU dispatch environment setting](https://numpy.org/doc/2.4/reference/global_state.html).
+
+Both console-entrypoint regressions failed before the helper was added; they now
+verify that the profile applies before application startup and preserves operator
+restrictions. An ARM regression verifies its environment remains unchanged. The
+existing exact-score suite supplies the real numerical regression on CI hardware.
+An initial local check found the installed force-included launcher still had the old
+contents; `uv sync --locked --all-groups --reinstall-package stocker` rebuilt it.
+A direct launcher mypy check also exposed an existing importlib path-protocol typing
+issue; converting its filesystem path through `str` resolves that without changing
+the package-location behavior. No dependency or lockfile change was needed.
+
+The 6ff4a9d deployment above is the first successful cutover record. Subsequent
+numerical-profile release identity and its final CI/deployment outcome are recorded
+in the task handover and the server's System surface and private verification reports.
+The profile does not change the numerical path on the existing server's V2/V3 CPU.

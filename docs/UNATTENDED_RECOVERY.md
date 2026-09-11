@@ -168,6 +168,15 @@ before any new entry. Never delete unknown exposure or reuse old signals to bypa
 
 ## Rollback and diagnosis
 
+For a move to different CPU hardware, verify frozen candidate fixtures in the prepared
+environment before activating it. The installed console launcher configures NumPy's
+x86 V2/V3 numerical path before imports, as do pytest and the isolated server smoke.
+Do not bypass this initialization when embedding numerical modules. Some AVX-512
+NumPy kernels differ by one ULP from the frozen evidence even with the same lockfile.
+Inspect `numpy.show_runtime()` and `numpy.lib.introspect.opt_func_info(func_name="^log$")`
+after calling `stocker_launcher.configure_numeric_runtime()` when diagnosing this.
+Do not loosen score assertions, regenerate fixtures or change selection to mask it.
+
 Code rollback switches to a retained release; it is **not** permission to restore an older
 database or configuration over newer history. This release adds nullable ledger columns
 and an optional YAML exposure setting; earlier binaries may reject newer configuration

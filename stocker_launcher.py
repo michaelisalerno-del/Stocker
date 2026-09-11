@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import platform
 import sys
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
@@ -19,6 +21,21 @@ PACKAGE_SRC_DIRS: tuple[str, ...] = (
 )
 
 
+def configure_numeric_runtime() -> None:
+    """Select the frozen evidence's NumPy path before importing numerical modules.
+
+    NumPy 2.4's X86_V4 log kernel differs by one ULP on saved candidate fixtures.
+    Keep the verified x86 V2/V3 path on newer CPUs too; ARM is unchanged. Existing
+    operator restrictions remain in force. This applies to execution and tests,
+    rather than relaxing exact-score assertions or rewriting frozen mathematics.
+    """
+    if platform.machine().lower() not in {"x86_64", "amd64"}:
+        return
+    disabled = os.environ.get("NPY_DISABLE_CPU_FEATURES", "").replace(",", " ").split()
+    disabled.extend(("X86_V4", "AVX512_ICL", "AVX512_SPR"))
+    os.environ["NPY_DISABLE_CPU_FEATURES"] = ",".join(dict.fromkeys(disabled))
+
+
 def _editable_project_root() -> Path | None:
     try:
         dist = distribution("stocker")
@@ -26,7 +43,7 @@ def _editable_project_root() -> Path | None:
         return None
     for file in dist.files or ():
         if str(file).endswith("direct_url.json"):
-            direct_url_path = Path(dist.locate_file(file))
+            direct_url_path = Path(str(dist.locate_file(file)))
             payload = json.loads(direct_url_path.read_text(encoding="utf-8"))
             url = str(payload.get("url", ""))
             if url.startswith("file://"):
@@ -46,6 +63,7 @@ def _ensure_monorepo_src_paths() -> None:
 def main() -> object:
     """Run the Stocker Typer app from editable or installed environments."""
 
+    configure_numeric_runtime()
     try:
         from stocker_core.cli import app
     except ModuleNotFoundError:
@@ -57,6 +75,7 @@ def main() -> object:
 def mcp_main() -> object:
     """Run the Stocker MCP server from editable or installed environments."""
 
+    configure_numeric_runtime()
     try:
         from stocker_mcp.server import main as server_main
     except ModuleNotFoundError:

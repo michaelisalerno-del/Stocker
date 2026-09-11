@@ -36,4 +36,6 @@ jobs:
         run: bash scripts/check.sh ${{ matrix.check }}
       - name: Numerical runtime diagnostics
         if: always() && matrix.check == 'python'
-        run: uv run --no-sync python -c 'import numpy; numpy.show_runtime(); print(numpy.lib.introspect.opt_func_info(func_name="log"))'
+        run: |
+          uv run --no-sync python -c 'import numpy; numpy.show_runtime(); print(numpy.lib.introspect.opt_func_info(func_name="^log$"))'
+          uv run --no-sync python -c 'import stocker_launcher; stocker_launcher.configure_numeric_runtime(); import numpy; numpy.show_runtime(); print(numpy.lib.introspect.opt_func_info(func_name="^log$"))'

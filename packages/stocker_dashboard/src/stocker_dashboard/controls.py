@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
@@ -72,6 +72,7 @@ class ControlResult:
     detail: str
     runtime: RuntimeStatus | None = None
     run: RunConfig | None = None
+    saved_snapshot: tuple[int, RunsConfig] | None = field(default=None, repr=False)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -99,6 +100,7 @@ class RunControlService:
         self.runtime = runtime
         self._lock = asyncio.Lock()
         self._storage_lock = asyncio.Lock()
+        self._saved_snapshot: tuple[int, RunsConfig] | None = None
         self._pause_latches: set[str] = set()
         self._pause_revisions: dict[str, int] = {}
         self._builder = UniverseRunBuilder()
@@ -197,7 +199,12 @@ class RunControlService:
             if self.runtime is None:
                 await self._save_runs(updated)
                 return ControlResult(
-                    True, False, ApplyMode.RESTART_RUN, "Saved; active runtime unavailable", run=run
+                    True,
+                    False,
+                    ApplyMode.RESTART_RUN,
+                    "Saved; active runtime unavailable",
+                    run=run,
+                    saved_snapshot=self._saved_snapshot,
                 )
             # Persist the identity before any runtime activation. Failure cannot
             # leave an enabled identity that disappears at restart.
@@ -211,6 +218,7 @@ class RunControlService:
                     "Saved; activation failed. Restart will retry the saved configuration.",
                     result.runtime,
                     run,
+                    saved_snapshot=self._saved_snapshot,
                 )
             return self._persisted(result)
 
@@ -270,6 +278,7 @@ class RunControlService:
             "Saved and paused new entries; positions and broker protection remain managed",
             status,
             paused,
+            saved_snapshot=self._saved_snapshot,
         )
 
     def _allow_entries(self, run_id: str, requested_revision: int) -> None:
@@ -478,6 +487,7 @@ class RunControlService:
                     False,
                     ApplyMode.RESTART_RUN,
                     "Saved; active runtime unavailable",
+                    saved_snapshot=self._saved_snapshot,
                 )
             result = await self._apply_runs(
                 updated,
@@ -556,6 +566,7 @@ class RunControlService:
                 mode,
                 "Saved; runtime restart required",
                 run=updated,
+                saved_snapshot=self._saved_snapshot,
             )
         if target_environment is not None:
             runtime_environment = next(
@@ -654,8 +665,7 @@ class RunControlService:
         )
         return ControlResult(False, True, ApplyMode.RECONNECT_ENVIRONMENT, detail, status)
 
-    @staticmethod
-    def _persisted(result: ControlResult) -> ControlResult:
+    def _persisted(self, result: ControlResult) -> ControlResult:
         detail = result.detail
         if detail.startswith("Applied"):
             detail = f"Saved and {detail[0].lower()}{detail[1:]}"
@@ -670,6 +680,7 @@ class RunControlService:
             detail,
             result.runtime,
             result.run,
+            saved_snapshot=self._saved_snapshot,
         )
 
     async def _persist_runs_after_apply(
@@ -763,6 +774,8 @@ class RunControlService:
                 named_universe_snapshot=self._named_universe_snapshot,
             ),
         )
+        revision = self._saved_snapshot[0] + 1 if self._saved_snapshot else 1
+        self._saved_snapshot = (revision, config)
 
     def _read_named_universe_snapshot_reference(self) -> str | None:
         """Read the one top-level storage directive without parsing a large YAML tree."""

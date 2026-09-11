@@ -295,13 +295,19 @@ read; asynchronous controls and response refreshes offload large YAML work.
 An independent storage lock serializes writes without queuing pause behind broker
 preparation. Pause reads after prior writes, preserving concurrently saved run
 identities. A cancelled writer retains the storage lock until its worker finishes.
-Response refreshes are ordered so an older load cannot overwrite newer read state.
+Responses reuse the exact completed save snapshot instead of reparsing the large
+file; its monotonic write revision prevents a late response publishing older state.
+Commands that did not write still load off the runtime thread under a refresh lock.
 PyYAML's `CSafeLoader`/`CSafeDumper` retain safe construction and atomic replacement
 while avoiding the slow pure-Python parser/emitter. Existing saved schemas and
 all frozen artifacts remain unchanged; a subsequent save may change YAML formatting.
 
-The five new regressions cover held reads, writes and response refreshes with
+The six new regressions cover held reads, writes and response serialization with
 concurrent HTTP access, and concurrent identity persistence with/without writer
-cancellation. The dashboard, runtime and configuration focused suites pass.
+cancellation, plus out-of-order result publication. The dashboard, runtime and
+configuration focused suites pass. The initial isolated server benchmark preserved
+all 27 identities and every configuration value except its requested temporary
+pause; it gated entries in 0.0102 seconds but acknowledged in 27.77 seconds. This
+exposed the redundant post-save read removed by the saved-snapshot response.
 Full release checks, isolated large-configuration measurements, and deployment
 verification are reported with the final release identity in the task handover.

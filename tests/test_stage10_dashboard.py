@@ -1610,8 +1610,15 @@ def test_pause_gates_before_disk_work_and_keeps_http_responsive(tmp_path, monkey
         controls = RunControlService(runs_path, broker_path, runtime=PausingRuntime())
         if phase == "write":
             owner, name = controls, "_write_runs"
+        elif phase == "response":
+            owner, name = controls_module.ControlResult, "as_dict"
+
+            def no_response_reload(*args):
+                raise AssertionError("A successful save must not reparse the same configuration")
+
+            monkeypatch.setattr(app_module, "load_runs_config", no_response_reload)
         else:
-            owner = controls_module if phase == "read" else app_module
+            owner = controls_module
             name = "load_runs_config"
         original = getattr(owner, name)
 
@@ -1650,5 +1657,48 @@ def test_pause_gates_before_disk_work_and_keeps_http_responsive(tmp_path, monkey
                 r for r in load_runs_config(runs_path).runs if r.run_id == "US-SH-LIVE"
             ).enabled
             assert not next(r for r in service.config.runs if r.run_id == "US-SH-LIVE").enabled
+
+    asyncio.run(scenario())
+
+
+def test_late_control_result_cannot_publish_older_saved_configuration(tmp_path, monkeypatch):
+    from stocker_dashboard.controls import ApplyMode, ControlResult
+
+    async def scenario():
+        runs_path, broker_path = _write_control_files(tmp_path)
+        controls = RunControlService(runs_path, broker_path)
+        service = _seed_authoritative_state(tmp_path)
+        old = service.config
+        new = old.model_copy(
+            update={"runs": tuple(r.model_copy(update={"enabled": False}) for r in old.runs)}
+        )
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def finish(run_id):
+            if run_id == "old":
+                entered.set()
+                await release.wait()
+            return ControlResult(
+                True,
+                True,
+                ApplyMode.HOT_APPLY,
+                "Saved",
+                saved_snapshot=(1, old) if run_id == "old" else (2, new),
+            )
+
+        monkeypatch.setattr(controls, "disable_run", finish)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(create_dashboard_app(service, controls)),
+            base_url="http://127.0.0.1",
+        ) as client:
+            first = asyncio.create_task(client.post("/api/runs/old/disable"))
+            await asyncio.wait_for(entered.wait(), 5)
+            try:
+                assert (await client.post("/api/runs/new/disable")).status_code == 200
+                assert service.config == new
+            finally:
+                release.set()
+            assert (await first).status_code == 200
+            assert service.config == new
 
     asyncio.run(scenario())

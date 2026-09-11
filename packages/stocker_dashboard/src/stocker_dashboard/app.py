@@ -79,6 +79,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
     start_status: dict[str, Any] = {"status": "IDLE"}
     start_request: tuple[Environment, UniverseRunBody] | None = None
     config_refresh_lock = asyncio.Lock()
+    saved_config_revision = 0
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -375,15 +376,22 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             return None
         return LiveConfirmation(body.confirmed, body.target_account)
 
-    async def refresh_config() -> None:
+    async def refresh_config(result: ControlResult) -> None:
+        nonlocal saved_config_revision
         # Prevent an older slow load from replacing a newer displayed configuration.
         async with config_refresh_lock:
-            reads.config = await asyncio.to_thread(load_runs_config, controls.runs_config_path)
+            if result.saved_snapshot is not None:
+                revision, config = result.saved_snapshot
+                if revision >= saved_config_revision:
+                    reads.config = config
+                    saved_config_revision = revision
+            else:
+                reads.config = await asyncio.to_thread(load_runs_config, controls.runs_config_path)
 
     async def changed(result: ControlResult) -> dict[str, object]:
         if not result.persisted:
             raise HTTPException(status_code=503, detail=result.detail)
-        await refresh_config()
+        await refresh_config(result)
         return await asyncio.to_thread(result.as_dict)
 
     @app.post("/api/runs/{run_id}/enable")
@@ -450,7 +458,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
                 currency=body.currency,
                 security_type=body.security_type,
             )
-            await refresh_config()
+            await refresh_config(result)
             return result.as_dict()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=safe_error(exc)) from exc

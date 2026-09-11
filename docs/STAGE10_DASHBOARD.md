@@ -99,3 +99,9 @@ the corresponding exception type/location without echoing arbitrary secret-beari
 System includes observed code revision, method version and a non-secret configuration hash.
 Unavailable revision metadata is reported as unavailable; release installation should set
 `STOCKER_BUILD_REVISION` to the exact verified 40-character commit.
+
+The supported application currently defines no SSE or websocket data route. The shared
+ASGI security middleware also rejects unauthorized websocket scopes should a route be
+added. Route-inventory regression tests cover every current HTTP handler and static assets.
+Source guarantees do not establish today's service bind, proxy configuration or TLS;
+verify these on the actual host for each release.

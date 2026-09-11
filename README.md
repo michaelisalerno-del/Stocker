@@ -92,6 +92,11 @@ See [execution admission](docs/execution_safety.md#shared-entry-admission) for
 currency, pending exposure, broker credit preview and migration details.
 A configured market-data budget is not proof of IBKR entitlement or complete tick coverage.
 
+An admission prepared under an older run configuration is rejected before submission.
+Terminal broker status can precede execution details: reported fills remain reserved
+until reconciled, including across restart. See the
+[completed local acceptance evidence](docs/robustness-implementation.md#continuation-acceptance).
+
 ## Checks
 
 ```bash

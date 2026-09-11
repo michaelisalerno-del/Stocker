@@ -188,6 +188,20 @@ environment reconciliation, data capacity and checkpoint coverage. For an uncert
 response, read back the existing run/start operation before retrying. For unknown submission,
 reconcile broker evidence; never release the reservation based on elapsed time.
 
+The continuation adds nullable `broker_reported_entry_filled` metadata to existing
+execution plans. Upgrade retains all identities, fills and protection. A migrated
+terminal order with an unknown cumulative fill remains unresolved until fresh broker
+status/execution reconciliation; it is not assumed flat. A terminal status received
+before its fills also blocks new entry until those details arrive. Investigate the
+broker's executions and protective orders if that state persists; do not remove the row.
+Rolling back to a binary that ignores this metadata restores the callback-ordering
+gap, so keep entries paused until using a verified compatible release.
+
+The latest isolated restore regression and opening-to-dashboard rehearsal are listed
+in [continuation acceptance](robustness-implementation.md#continuation-acceptance).
+They use temporary state and test inputs, and do not verify production scheduling,
+offsite retention or current server security.
+
 Recommended server checks include systemd state and ExecStart, socket bind addresses,
 proxy authentication on controls/streams, spoofed-header rejection, TLS validity and an
 external backend-port probe. An isolated restore does not establish that the production

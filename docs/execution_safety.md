@@ -94,3 +94,26 @@ filled exposure persists until broker-confirmed exits. Submission timeout/lost
 acknowledgement retains the plan, signal idempotency and capacity across restart.
 There is no arbitrary expiry or blind resubmission. Additive nullable ledger columns
 preserve earlier rows and audit identities; unavailable historical sizing remains unknown.
+
+Broker status and execution-detail callbacks may arrive in either order. The ledger
+retains the highest reported cumulative parent fill separately from actual execution
+records. A terminal parent releases its cancelled remainder, but reported shares
+whose executions have not arrived still reserve exposure and block reconciliation.
+The ledger never creates a position from a status report. Later lower/duplicate
+reports cannot erase known fills. Older rows without this field require fresh
+broker status when their terminal quantity is unresolved; conclusively rejected
+local pre-submission plans remain settled.
+
+Run configuration is captured before admission's first await and checked again after
+quote preparation and credit preview. A newer risk setting or pause invalidates that
+preparation. After the last credit await, final checks, marking SUBMITTING and the
+IBKR adapter's synchronous bracket transmission contain no intervening event-loop
+yield. Once transmission starts, its outcome must be reconciled; a later
+pause does not revoke or delete it.
+
+Supported operation is one integrated runtime/control process using one authoritative
+SQLite state database for an account. The reservation transaction also serializes
+independent connections to that database. Independent databases or multiple independently
+configured trading services for the same broker account are outside this boundary.
+Broker fills and market value can change independently of local transactions; a
+notional admission ceiling is not a promise that future marked exposure never rises.

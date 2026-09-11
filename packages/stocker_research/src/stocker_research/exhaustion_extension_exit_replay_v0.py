@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+import typing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -215,7 +216,7 @@ def _load_selected_exhaustion_filters(input_filter_report_dir: Path) -> pd.DataF
         lift = pd.to_numeric(data["test_median_lift_vs_exhaustion"], errors="coerce").fillna(0.0)
     else:
         lift = pd.Series(0.0, index=data.index)
-    rate = pd.to_numeric(data.get("filtered_test_same_result_rate", 0.0), errors="coerce")
+    rate = pd.to_numeric(data["filtered_test_same_result_rate"], errors="coerce")
     rate = rate.fillna(0.0)
     selected = pd.DataFrame(
         {
@@ -301,7 +302,7 @@ def _score_exit_model_by_direction(
 ) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for direction, group in rows.groupby("expected_direction"):
-        direction_int = int(direction)
+        direction_int = int(typing.cast(int, direction))
         if direction_int not in {-1, 1}:
             continue
         scored = _score_exit_model(
@@ -366,7 +367,7 @@ def _build_exit_sweep(
                 rows.append(
                     {
                         "month": month,
-                        "selected_filter_rank": int(selected_filter_rank),
+                        "selected_filter_rank": int(typing.cast(int, selected_filter_rank)),
                         "personality": "exhaustion_extension",
                         "event_state": "exhaustion_extension",
                         "horizon": int(rule["horizon"]),

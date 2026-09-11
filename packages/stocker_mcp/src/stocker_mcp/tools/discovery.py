@@ -484,7 +484,6 @@ def fetch(id: str, context: StockerMCPContext | None = None) -> dict[str, Any]:
     resolved = _context(context)
     prefix, parts, line_anchor = _parse_id(id)
     handlers = {
-        "code": _fetch_code,
         "hypotheses": _fetch_hypothesis,
         "reports": _fetch_report,
         "runs": _fetch_run,
@@ -493,7 +492,7 @@ def fetch(id: str, context: StockerMCPContext | None = None) -> dict[str, Any]:
         "workspace": _fetch_workspace,
     }
     if prefix == "code":
-        result = handlers[prefix](parts, line_anchor, resolved)
+        result = _fetch_code(parts, line_anchor, resolved)
     else:
         if line_anchor is not None:
             raise SecurityError(f"anchors are unsupported for {prefix} ids")

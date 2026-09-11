@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+import typing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -565,7 +566,7 @@ def _score_exit_model(
         default="time_exit",
     )
     net = pd.to_numeric(data["net_r"], errors="coerce")
-    return data[np.isfinite(net)].reset_index(drop=True)
+    return typing.cast(pd.DataFrame, data[np.isfinite(net)].reset_index(drop=True))
 
 
 def _exit_summary(rows: pd.DataFrame, prefix: str) -> dict[str, Any]:
@@ -632,7 +633,7 @@ def _build_exit_sweep(
                 )
                 rows.append(
                     {
-                        **candidate.to_dict(),
+                        **typing.cast(dict[str, Any], candidate.to_dict()),
                         "stop_model": stop_model,
                         "target_r": float(target_r),
                         **stats,
@@ -739,7 +740,7 @@ def _random_month_baseline(
     replay_events: pd.DataFrame,
     trades: pd.DataFrame,
     *,
-    config: WalkForwardPersonalityFilterExitConfig,
+    config: WalkForwardPersonalityFilterExitConfig | WalkForwardSelectedFilterExitConfig,
     seed: int,
 ) -> pd.DataFrame:
     if replay_events.empty or trades.empty:
@@ -873,7 +874,7 @@ def _blocker_caveat_summary(blocked_signals: pd.DataFrame) -> pd.DataFrame:
         conc = _concentration(group)
         rows.append(
             {
-                "blocker_rule_id": int(float(key[0])),
+                "blocker_rule_id": int(float(typing.cast(float, key[0]))),
                 "blocker_personality": str(key[1]),
                 "blocker_filter_rule": str(key[2]),
                 "blocked_signal_count": int(len(group)),
@@ -920,7 +921,7 @@ def _decision(
     trades: pd.DataFrame,
     monthly_summary: pd.DataFrame,
     random_month_sum: float,
-    config: WalkForwardPersonalityFilterExitConfig,
+    config: WalkForwardPersonalityFilterExitConfig | WalkForwardSelectedFilterExitConfig,
 ) -> tuple[str, list[str]]:
     reasons: list[str] = []
     total_net_r = float(trades["net_r"].sum()) if not trades.empty else 0.0
@@ -949,7 +950,7 @@ def _decision(
 
 def _concentration_warnings(
     trades: pd.DataFrame,
-    config: WalkForwardPersonalityFilterExitConfig,
+    config: WalkForwardPersonalityFilterExitConfig | WalkForwardSelectedFilterExitConfig,
 ) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     if trades.empty:
@@ -1165,7 +1166,7 @@ def _load_dead_chop_blocker_book(
                 data["threshold"],
                 errors="coerce",
             ).to_numpy(),
-            "blocker_filter_rule": data.get("filter_rule", "").astype(str).to_numpy()
+            "blocker_filter_rule": data["filter_rule"].astype(str).to_numpy()
             if "filter_rule" in data
             else data["feature"].astype(str).to_numpy(),
             "blocker_selection_score": pd.to_numeric(
@@ -1369,7 +1370,7 @@ def _build_selected_exit_sweep(
                 rows.append(
                     {
                         "month": month,
-                        "selected_filter_rank": int(selected_filter_rank),
+                        "selected_filter_rank": int(typing.cast(int, selected_filter_rank)),
                         "personality": candidate["personality"],
                         "event_state": candidate["event_state"],
                         "horizon": int(candidate["horizon"]),

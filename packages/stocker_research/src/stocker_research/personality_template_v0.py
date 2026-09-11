@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import typing
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -507,7 +508,12 @@ def evaluate_personality_templates(
                     random_result = _random_baseline(
                         regime_pool,
                         count=len(retained),
-                        seed=(config.random_seed + template_index * 1009 + filter_index + horizon),
+                        seed=(
+                            config.random_seed
+                            + template_index * 1009
+                            + typing.cast(int, filter_index)
+                            + horizon
+                        ),
                         iterations=config.random_iterations,
                     )
                     concentration = _concentration(retained)
@@ -552,7 +558,7 @@ def evaluate_personality_templates(
                         reasons.append("no_lift_vs_base_template")
                     if not random_rate_beaten and not random_median_beaten:
                         reasons.append("random_same_count_not_beaten")
-                    row = {
+                    row: dict[Any, Any] = {
                         "template_id": template.template_id,
                         "personality": template.personality,
                         "parent_event_state": template.parent_event_state,

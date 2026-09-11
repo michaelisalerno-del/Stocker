@@ -14,7 +14,7 @@ import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -110,7 +110,7 @@ def _load_events(input_event_dir: Path) -> pd.DataFrame:
     path = input_event_dir / "event_rows.csv"
     if not path.exists():
         raise FileNotFoundError(f"Missing event rows: {path}")
-    events = cast(pd.DataFrame, _add_missing_discovery_features(pd.read_csv(path))).copy()
+    events = _add_missing_discovery_features(pd.read_csv(path)).copy()
     events["_wf_timestamp"] = pd.to_datetime(events["timestamp"], utc=True, errors="coerce")
     if "month" not in events:
         events["month"] = events["_wf_timestamp"].dt.strftime("%Y-%m")
@@ -168,18 +168,18 @@ def _freeze_candidates(
 def _freeze_caveats(input_staged_report_dir: Path, source_month: str) -> pd.DataFrame:
     path = input_staged_report_dir / "caveat_rule_book.csv"
     if not path.exists():
-        return cast(pd.DataFrame, _empty_caveat_book())
+        return _empty_caveat_book()
     caveats = pd.read_csv(path)
     if caveats.empty or "month" not in caveats:
-        return cast(pd.DataFrame, _empty_caveat_book())
+        return _empty_caveat_book()
     frozen = caveats[caveats["month"].astype(str).eq(source_month)].copy()
     if frozen.empty:
-        return cast(pd.DataFrame, _empty_caveat_book())
+        return _empty_caveat_book()
     for column in _caveat_book_columns():
         if column not in frozen:
             frozen[column] = np.nan
     frozen["caveat_rule_id"] = np.arange(len(frozen), dtype=int)
-    return cast(pd.DataFrame, frozen.loc[:, _caveat_book_columns()].reset_index(drop=True))
+    return frozen.loc[:, _caveat_book_columns()].reset_index(drop=True)
 
 
 def _exit_config(config: PreRegisteredEdgeProofConfig) -> WalkForwardSelectedFilterExitConfig:

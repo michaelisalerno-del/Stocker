@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import typing
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from functools import lru_cache
@@ -58,7 +59,7 @@ def _raw_positions(frame: pd.DataFrame, positions: pd.Series) -> pd.Series:
 
 
 def _session_labels(timestamps: pd.Series) -> pd.Series:
-    return timestamps.dt.date
+    return typing.cast(pd.Series, timestamps.dt.date)
 
 
 @lru_cache(maxsize=128)
@@ -173,7 +174,7 @@ def apply_holding_policy_to_positions(
         sessions_seen += 1
         indices = [int(index) for index in group_index]
         observed_close = timestamps.take(indices).max()
-        session_close = calendar_closes.get(session_label)
+        session_close = calendar_closes.get(typing.cast(date, session_label))
         if session_close is None:
             session_close = observed_close
             if market_calendar:

@@ -295,10 +295,10 @@ def get_trade_feature_buckets(
         if item.get("net_return") is not None:
             current["net_returns"].append(_float_value(item, "net_return"))
     summaries: list[dict[str, Any]] = []
-    for bucket in buckets.values():
-        net_returns = bucket.pop("net_returns")
-        bucket["average_net_return"] = mean(net_returns) if net_returns else None
-        summaries.append(bucket)
+    for summary_bucket in buckets.values():
+        net_returns = summary_bucket.pop("net_returns")
+        summary_bucket["average_net_return"] = mean(net_returns) if net_returns else None
+        summaries.append(summary_bucket)
     summaries.sort(key=lambda item: int(item["trade_count"]), reverse=True)
     resolved.log_tool_call(
         "get_trade_feature_buckets",

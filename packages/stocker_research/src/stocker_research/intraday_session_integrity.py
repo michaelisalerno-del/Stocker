@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import typing
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -238,7 +239,7 @@ def analyze_symbol_sessions(
     rows: list[dict[str, Any]] = []
 
     for session_index, session in schedule.iterrows():
-        session_date = pd.Timestamp(session_index).date()
+        session_date = pd.Timestamp(typing.cast(pd.Timestamp, session_index)).date()
         if session_date not in actual_by_date:
             continue
         market_open = pd.Timestamp(session["market_open"]).tz_convert("UTC")

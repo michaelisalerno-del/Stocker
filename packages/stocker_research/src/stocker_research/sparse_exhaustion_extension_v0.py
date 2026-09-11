@@ -136,7 +136,7 @@ def _horizon_summary(exhaustion_events: pd.DataFrame) -> pd.DataFrame:
                 "same_result_rate",
             ]
         )
-    direction = pd.to_numeric(exhaustion_events.get("expected_direction", 0), errors="coerce")
+    direction = pd.to_numeric(exhaustion_events["expected_direction"], errors="coerce")
     for horizon in (6, 9, 12, 24):
         ret_col = f"forward_{horizon}_bar_return"
         if ret_col not in exhaustion_events:

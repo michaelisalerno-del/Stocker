@@ -199,8 +199,8 @@ def _json_safe_scalar(value: Any) -> Any:
     try:
         import pandas as pd
     except ImportError:
-        pd = None
-    if pd is not None:
+        pass
+    else:
         try:
             if pd.isna(value):
                 return None

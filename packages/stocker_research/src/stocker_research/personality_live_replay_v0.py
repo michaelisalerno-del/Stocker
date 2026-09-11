@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import re
+import typing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -158,7 +159,7 @@ def _candidate_matches(
             structure_buffer_bps=config.structure_buffer_bps,
             min_structure_stop_bps=config.min_structure_stop_bps,
         )
-        matched["candidate_rank"] = int(candidate_rank)
+        matched["candidate_rank"] = int(typing.cast(int, candidate_rank))
         matched["template_id"] = str(candidate["template_id"])
         matched["personality"] = str(candidate.get("personality", candidate["template_id"]))
         matched["role"] = str(candidate["role"])

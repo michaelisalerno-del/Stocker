@@ -11,6 +11,7 @@ import itertools
 import json
 import math
 import re
+import typing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -2548,7 +2549,9 @@ def _market_daily_for_b0(daily: pd.DataFrame) -> pd.DataFrame:
             broad_median_ret_20d=("ret_20d", "median"),
             broad_breadth_20d_up=(
                 "ret_20d",
-                lambda series: float((pd.to_numeric(series, errors="coerce") > 0).mean()),
+                lambda series: float(
+                    (pd.to_numeric(typing.cast(pd.Series, series), errors="coerce") > 0).mean()
+                ),
             ),
             broad_breadth_above_20d_ma=("above_20d_ma", "mean"),
             broad_median_drawdown_20d=("drawdown_20d", "median"),
@@ -2822,11 +2825,11 @@ def _generate_loop_refinement_terms(
 ) -> list[_RefinementTerm]:
     base = _term_base_rows(loop_rows, config)
     terms: list[_RefinementTerm] = []
-    categorical_groups = (
+    categorical_groups: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("source_visible", PRE_SNAPSHOT_CATEGORICAL_FEATURES),
         ("next_event_start", NEXT_START_CATEGORICAL_FEATURES),
     )
-    numeric_groups = (
+    numeric_groups: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("source_visible", PRE_SNAPSHOT_NUMERIC_FEATURES),
         ("next_event_start", NEXT_START_NUMERIC_FEATURES),
     )
@@ -2889,7 +2892,7 @@ def _generate_loop_refinement_terms(
                             visibility=visibility,  # type: ignore[arg-type]
                             feature=feature,
                             operator=operator,
-                            value_label=f"p{int(quantile * 100)}",
+                            value_label=f"p{int(typing.cast(float, quantile) * 100)}",
                             threshold=threshold,
                             expression=f"{feature} {operator} {threshold:g}",
                             discovery_rows=discovery_rows,
@@ -3178,7 +3181,7 @@ def _generate_atoms(
                 continue
             counts = _str(primary, feature).value_counts()
             for value, count in counts.items():
-                if not value or value.lower() in {"nan", "none", "<na>"}:
+                if not value or typing.cast(str, value).lower() in {"nan", "none", "<na>"}:
                     continue
                 if float(count) / max(1, len(primary)) > 0.85:
                     continue
@@ -4293,7 +4296,7 @@ def _family_scorecard(
             "visibility": spec["visibility"],
             "expression": spec["expression"],
             "stop_model": stop_model,
-            "target_r": float(target_r),
+            "target_r": float(typing.cast(float, target_r)),
             "smid_fresh_rows": get("smid24", "fresh_year", "rows"),
             "smid_fresh_final_close_total_r": get(
                 "smid24",

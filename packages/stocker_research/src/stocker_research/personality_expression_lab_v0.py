@@ -127,7 +127,7 @@ def _load_events(input_event_dir: Path) -> pd.DataFrame:
     events["month"] = pd.to_datetime(events["timestamp"], utc=True, errors="coerce").dt.strftime(
         "%Y-%m"
     )
-    return cast(pd.DataFrame, events)
+    return events
 
 
 def _expression_columns() -> list[str]:
@@ -205,7 +205,7 @@ def _load_expression_rules(
         ("filtered_test_same_result_rate", 0.0),
     ]:
         if column not in data:
-            data[column] = default
+            data[column] = cast(str | int | float | bool, default)
     data = data.sort_values(
         ["retained_test_count", "test_lift_vs_personality", "filtered_test_same_result_rate"],
         ascending=[False, False, False],
@@ -304,7 +304,7 @@ def _score_expression_split(
     )
     scored["exit_selection_score"] = 0.0
     trades, _missed = _dedupe_trades(scored)
-    return cast(pd.DataFrame, trades)
+    return trades
 
 
 def _candidate_sweep(

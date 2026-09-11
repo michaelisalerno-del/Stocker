@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -1334,7 +1334,7 @@ def _entry_policy_diagnostics(signals: pd.DataFrame) -> pd.DataFrame:
 
 
 def _dedupe_staged_trades(signals: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    return cast(tuple[pd.DataFrame, pd.DataFrame], _dedupe_trades(signals))
+    return _dedupe_trades(signals)
 
 
 def _sparse_quality_reasons(

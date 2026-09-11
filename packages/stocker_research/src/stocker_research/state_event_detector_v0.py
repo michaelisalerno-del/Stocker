@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import typing
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -1126,25 +1127,25 @@ def run_same_event_cross_symbol_similarity(
             ],
         }
         for baseline, pool in baseline_pools.items():
-            chosen = _select_pool_row(pool, rng)
-            if chosen is not None:
-                raw_rows.append(_match_metrics(source, chosen, baseline=baseline))
+            baseline_choice = _select_pool_row(pool, rng)
+            if baseline_choice is not None:
+                raw_rows.append(_match_metrics(source, baseline_choice, baseline=baseline))
 
     raw = pd.DataFrame(raw_rows)
     if raw.empty:
         empty = pd.DataFrame(columns=columns)
         return empty, empty
     summary_rows: list[dict[str, Any]] = []
-    for (baseline, event_state, horizon), group in raw.groupby(
+    for (baseline_key, event_state, horizon), group in raw.groupby(
         ["baseline", "source_event_state", "horizon"],
         sort=True,
     ):
         source_events = group[["source_symbol", "source_timestamp", "horizon"]].drop_duplicates()
         summary_rows.append(
             {
-                "baseline": str(baseline),
+                "baseline": str(baseline_key),
                 "event_state": str(event_state),
-                "horizon": int(horizon),
+                "horizon": int(typing.cast(int, horizon)),
                 "source_event_count": int(len(source_events)),
                 "match_count": int(len(group)),
                 "response_sign_agreement": float(group["response_sign_agreement"].mean()),
@@ -1227,14 +1228,15 @@ def run_oos_event_response_test(
             sort=True,
         ):
             state_test = test[
-                test["event_state"].eq(event_state) & test["response_horizon"].eq(horizon)
+                test["event_state"].eq(typing.cast(str, event_state))
+                & test["response_horizon"].eq(typing.cast(int, horizon))
             ]
             if state_test.empty:
                 continue
             train_returns = pd.to_numeric(state_train["response_return"], errors="coerce").dropna()
             test_returns = pd.to_numeric(state_test["response_return"], errors="coerce").dropna()
-            generic_train = train[train["response_horizon"].eq(horizon)]
-            generic_test = test[test["response_horizon"].eq(horizon)]
+            generic_train = train[train["response_horizon"].eq(typing.cast(int, horizon))]
+            generic_test = test[test["response_horizon"].eq(typing.cast(int, horizon))]
             generic_train_returns = pd.to_numeric(
                 generic_train["response_return"],
                 errors="coerce",
@@ -1272,7 +1274,7 @@ def run_oos_event_response_test(
                     "split_mode": split_mode,
                     "fold": fold,
                     "event_state": str(event_state),
-                    "horizon": int(horizon),
+                    "horizon": int(typing.cast(int, horizon)),
                     "train_event_count": int(len(train_returns)),
                     "test_event_count": int(len(test_returns)),
                     "train_symbol_count": train_symbol_count,

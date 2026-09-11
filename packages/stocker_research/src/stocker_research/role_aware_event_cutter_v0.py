@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import typing
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -878,7 +879,7 @@ def _same_symbol_random_baseline(
     for _ in range(max(1, iterations)):
         sample_indices: list[Any] = []
         for symbol, count in retained_counts.items():
-            pool = test_rows[test_rows["symbol"].astype(str).eq(symbol)]
+            pool = test_rows[test_rows["symbol"].astype(str).eq(typing.cast(str, symbol))]
             if pool.empty:
                 continue
             chosen = rng.choice(
@@ -1177,7 +1178,7 @@ def _filter_search(
                             "event_state": str(event_state),
                             "horizon": int(horizon),
                             "role": role,
-                            **baseline.to_dict(),
+                            **typing.cast(dict[str, Any], baseline.to_dict()),
                         }
                     )
                 objective_after = float(metrics["role_objective_after"])

@@ -771,7 +771,7 @@ def _decide(
     reasons: list[str] = []
     external_pass = False
     if not external.empty and "verdict" in external:
-        external_pass = external["verdict"].astype(str).str.startswith("pass").any()
+        external_pass = bool(external["verdict"].astype(str).str.startswith("pass").any())
     if not selected.empty or external_pass:
         return "continue_research_sidelined_personality", reasons
     if sparse_sidelined_count == 0:

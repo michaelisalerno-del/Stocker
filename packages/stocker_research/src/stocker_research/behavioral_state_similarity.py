@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import typing
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
@@ -676,7 +677,7 @@ def label_behavioral_states(
     """Add deterministic, leakage-safe v0 behavioral state labels."""
 
     data = frame.copy()
-    open_ = pd.to_numeric(data["open"], errors="coerce")
+    _ = pd.to_numeric(data["open"], errors="coerce")
     high = pd.to_numeric(data["high"], errors="coerce")
     low = pd.to_numeric(data["low"], errors="coerce")
     close = pd.to_numeric(data["close"], errors="coerce")
@@ -701,8 +702,8 @@ def label_behavioral_states(
     range_crosses = pd.to_numeric(data["range_cross_count_12"], errors="coerce")
     minutes_from_open = pd.to_numeric(data["minutes_from_session_open"], errors="coerce")
     dist_session_open = pd.to_numeric(data["distance_from_session_open_pct"], errors="coerce")
-    dist_or_high = pd.to_numeric(data["distance_from_opening_range_high_pct"], errors="coerce")
-    dist_or_low = pd.to_numeric(data["distance_from_opening_range_low_pct"], errors="coerce")
+    _ = pd.to_numeric(data["distance_from_opening_range_high_pct"], errors="coerce")
+    _ = pd.to_numeric(data["distance_from_opening_range_low_pct"], errors="coerce")
     range_zscore = pd.to_numeric(data["range_zscore"], errors="coerce")
     return_zscore = pd.to_numeric(data["return_zscore"], errors="coerce")
     opening_complete = data.get(
@@ -1416,7 +1417,7 @@ def build_horizon_events(frame: pd.DataFrame, config: BehavioralStateConfig) -> 
         "state_priority_conflict": False,
     }.items():
         if column not in data:
-            data[column] = fallback
+            data[column] = typing.cast(str | int | bool, fallback)
     if "previous_state_label" in data and not data["previous_state_label"].astype(str).any():
         data["previous_state_label"] = data["state_transition_from"]
     if "state_transition" in data and not data["state_transition"].astype(str).any():
@@ -1631,7 +1632,7 @@ def summarize_horizon_state_responses(events: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             {
                 "state": str(state),
-                "horizon": int(horizon),
+                "horizon": int(typing.cast(int, horizon)),
                 "event_count": int(len(returns)),
                 "symbol_count": int(group["symbol"].nunique()) if "symbol" in group else 0,
                 "session_count": int(group["session_date"].nunique())
@@ -1767,7 +1768,7 @@ def _run_oos_for_split(
                 "split_mode": split_mode,
                 "fold": fold,
                 "state": str(state),
-                "horizon": int(horizon),
+                "horizon": int(typing.cast(int, horizon)),
                 "train_event_count": int(len(train_returns)),
                 "test_event_count": int(len(test_returns)),
                 "train_symbol_count": train_symbol_count,
@@ -1902,7 +1903,7 @@ def build_permutation_baseline(
             ].agg(["count", "median"])
             for key in keys:
                 if key in permuted_stats.index:
-                    stat = permuted_stats.loc[key]
+                    stat = typing.cast(pd.Series, permuted_stats.loc[key])
                     permuted_counts[key].append(int(stat["count"]))
                     permuted_medians[key].append(float(stat["median"]))
                 else:
@@ -1912,7 +1913,7 @@ def build_permutation_baseline(
             state, horizon = key
             if key not in observed_stats.index:
                 continue
-            observed = observed_stats.loc[key]
+            observed = typing.cast(pd.Series, observed_stats.loc[key])
             if int(observed["observed_event_count"]) <= 0:
                 continue
             observed_median = float(observed["observed_median_return"])
@@ -2067,7 +2068,7 @@ def run_nearest_neighbor_similarity(
             for position in candidate_positions
             if not (
                 working.iloc[position]["symbol"] == source["symbol"]
-                and working.iloc[position].get("session_date") == source.get("session_date")
+                and working.iloc[position].get("session_date") == source["session_date"]
             )
         ]
         selected_positions = (
@@ -2281,7 +2282,8 @@ def run_nearest_neighbor_oos_similarity(
         return pd.DataFrame(columns=columns)
     detail_frame = pd.DataFrame(details)
     rows: list[dict[str, Any]] = []
-    for (state, horizon), group in detail_frame.groupby(["state", "horizon"], sort=True):
+    for (state, grouped_horizon), group in detail_frame.groupby(["state", "horizon"], sort=True):
+        horizon = typing.cast(int, grouped_horizon)
         cross_agreement = pd.to_numeric(
             group["cross_symbol_sign_agreement"],
             errors="coerce",
@@ -2327,7 +2329,7 @@ def _path_vector(row: pd.Series, columns: list[str]) -> np.ndarray:
     values = pd.to_numeric(row.reindex(columns), errors="coerce").to_numpy(dtype=float)
     if np.isnan(values).all():
         return np.array([], dtype=float)
-    return np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
+    return typing.cast(np.ndarray, np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0))
 
 
 def _shape_metrics(source_vector: np.ndarray, match_vector: np.ndarray) -> dict[str, float]:
@@ -2366,7 +2368,9 @@ def _feature_matrix(events: pd.DataFrame, feature_columns: list[str]) -> pd.Data
     medians = features.median(numeric_only=True)
     features = features.fillna(medians)
     std = features.std(ddof=0).replace(0.0, np.nan)
-    return ((features - features.mean(numeric_only=True)) / std).fillna(0.0)
+    return typing.cast(
+        pd.DataFrame, ((features - features.mean(numeric_only=True)) / std).fillna(0.0)
+    )
 
 
 def _fit_state_fingerprint(
@@ -2542,7 +2546,7 @@ def _summarize_shape_rows(rows: pd.DataFrame) -> pd.DataFrame:
             {
                 "baseline": str(baseline),
                 "state": str(state),
-                "horizon": int(horizon),
+                "horizon": int(typing.cast(int, horizon)),
                 "match_count": int(len(group)),
                 "median_path_correlation": float(
                     pd.to_numeric(group["path_correlation"], errors="coerce").median()
@@ -2597,18 +2601,20 @@ def run_same_state_cross_symbol_similarity(
         same_state = data["primary_state_label"].eq(source["primary_state_label"])
         candidate_mask = same_horizon & different_symbol & same_state
         if require_same_stimulus and "stimulus_label" in data:
-            candidate_mask &= data["stimulus_label"].eq(source.get("stimulus_label"))
+            candidate_mask &= data["stimulus_label"].eq(source["stimulus_label"])
         if match_time_bucket and "time_of_day_bucket" in data:
-            candidate_mask &= data["time_of_day_bucket"].eq(source.get("time_of_day_bucket"))
+            candidate_mask &= data["time_of_day_bucket"].eq(source["time_of_day_bucket"])
         candidates = data[candidate_mask].copy()
         if candidates.empty and match_time_bucket and "time_of_day_bucket" in data:
             candidate_mask = same_horizon & different_symbol & same_state
             candidates = data[candidate_mask].copy()
         if candidates.empty:
             continue
-        distances = _feature_distance(feature_frame, source_index, candidates.index)
+        distances = _feature_distance(
+            feature_frame, typing.cast(int, source_index), candidates.index
+        )
         candidates["_feature_distance"] = distances
-        candidates["_same_session"] = candidates["session_date"].eq(source.get("session_date"))
+        candidates["_same_session"] = candidates["session_date"].eq(source["session_date"])
         candidates = candidates.sort_values(["_same_session", "_feature_distance"]).head(top_k)
         for _, match in candidates.iterrows():
             match_vector = _path_vector(match, path_columns)
@@ -2634,7 +2640,7 @@ def run_same_state_cross_symbol_similarity(
         }
         for baseline_name, mask in baseline_specs.items():
             if "time_of_day_bucket" in data and baseline_name != "same_symbol_random":
-                bucket_mask = mask & data["time_of_day_bucket"].eq(source.get("time_of_day_bucket"))
+                bucket_mask = mask & data["time_of_day_bucket"].eq(source["time_of_day_bucket"])
                 pool = data[bucket_mask]
                 if pool.empty:
                     pool = data[mask]
@@ -2652,7 +2658,7 @@ def run_same_state_cross_symbol_similarity(
                     match_vector=selected_vector,
                     feature_distance=float(
                         _feature_distance(
-                            feature_frame, source_index, pd.Index([selected.name])
+                            feature_frame, typing.cast(int, source_index), pd.Index([selected.name])
                         ).iloc[0]
                     ),
                     baseline=baseline_name,
@@ -2703,15 +2709,17 @@ def run_fingerprint_cross_symbol_similarity(
         different_symbol = data["symbol"].ne(source["symbol"])
         candidate_mask = same_horizon & different_symbol
         if match_time_bucket and "time_of_day_bucket" in data:
-            candidate_mask &= data["time_of_day_bucket"].eq(source.get("time_of_day_bucket"))
+            candidate_mask &= data["time_of_day_bucket"].eq(source["time_of_day_bucket"])
         candidates = data[candidate_mask].copy()
         if candidates.empty and match_time_bucket and "time_of_day_bucket" in data:
             candidates = data[same_horizon & different_symbol].copy()
         if candidates.empty:
             continue
-        distances = _feature_distance(feature_frame, source_index, candidates.index)
+        distances = _feature_distance(
+            feature_frame, typing.cast(int, source_index), candidates.index
+        )
         candidates["_feature_distance"] = distances
-        candidates["_same_session"] = candidates["session_date"].eq(source.get("session_date"))
+        candidates["_same_session"] = candidates["session_date"].eq(source["session_date"])
         candidates = candidates.sort_values(["_same_session", "_feature_distance"]).head(top_k)
         for _, match in candidates.iterrows():
             match_rows.append(
@@ -2738,7 +2746,7 @@ def run_fingerprint_cross_symbol_similarity(
             pool = data[mask]
             if "time_of_day_bucket" in data and baseline_name != "same_symbol_random":
                 bucket_pool = data[
-                    mask & data["time_of_day_bucket"].eq(source.get("time_of_day_bucket"))
+                    mask & data["time_of_day_bucket"].eq(source["time_of_day_bucket"])
                 ]
                 if not bucket_pool.empty:
                     pool = bucket_pool
@@ -2753,7 +2761,7 @@ def run_fingerprint_cross_symbol_similarity(
                     match_vector=_path_vector(selected, path_columns),
                     feature_distance=float(
                         _feature_distance(
-                            feature_frame, source_index, pd.Index([selected.name])
+                            feature_frame, typing.cast(int, source_index), pd.Index([selected.name])
                         ).iloc[0]
                     ),
                     baseline=baseline_name,
@@ -2823,7 +2831,7 @@ def _summarize_oos_shape_rows(
                 "fit_scope": "train_only",
                 "baseline": str(baseline),
                 "state": str(state),
-                "horizon": int(horizon),
+                "horizon": int(typing.cast(int, horizon)),
                 "test_event_count": source_event_count,
                 "match_count": int(len(group)),
                 "median_path_correlation": float(
@@ -2892,7 +2900,7 @@ def run_oos_response_shape_similarity(
             candidate_mask &= train["primary_state_label"].eq(source["primary_state_label"])
         candidates = train[candidate_mask].copy()
         if not candidates.empty:
-            source_feature = test_features.loc[source_index].to_numpy(dtype=float)
+            source_feature = test_features.loc[typing.cast(int, source_index)].to_numpy(dtype=float)
             candidate_matrix = train_features.loc[candidates.index].to_numpy(dtype=float)
             distances = np.linalg.norm(candidate_matrix - source_feature, axis=1)
             candidates["_feature_distance"] = distances
@@ -2925,7 +2933,7 @@ def run_oos_response_shape_similarity(
             pool = train[mask]
             if "time_of_day_bucket" in train and baseline_name != "same_symbol_random":
                 bucket_pool = train[
-                    mask & train["time_of_day_bucket"].eq(source.get("time_of_day_bucket"))
+                    mask & train["time_of_day_bucket"].eq(source["time_of_day_bucket"])
                 ]
                 if not bucket_pool.empty:
                     pool = bucket_pool
@@ -3138,7 +3146,7 @@ def build_per_symbol_state_response(events: pd.DataFrame) -> pd.DataFrame:
             {
                 "symbol": str(symbol),
                 "state": str(state),
-                "horizon": int(horizon),
+                "horizon": int(typing.cast(int, horizon)),
                 "event_count": int(len(returns)),
                 "median_forward_return": float(returns.median()),
                 "win_rate": float((returns > 0.0).mean()),
@@ -3210,7 +3218,7 @@ def build_time_of_day_state_summary(events: pd.DataFrame) -> pd.DataFrame:
             {
                 "time_of_day_bucket": str(bucket),
                 "state": str(state),
-                "horizon": int(horizon),
+                "horizon": int(typing.cast(int, horizon)),
                 "event_count": int(len(returns)),
                 "median_forward_return": float(returns.median()) if not returns.empty else math.nan,
             }
@@ -3257,7 +3265,7 @@ def build_concentration_reports(
         symbol_rows.append(
             {
                 "state": str(state),
-                "horizon": int(horizon),
+                "horizon": int(typing.cast(int, horizon)),
                 "top_symbol": top_symbol,
                 "top_symbol_share": top_symbol_share,
                 "event_count": event_count,
@@ -3266,7 +3274,7 @@ def build_concentration_reports(
         session_rows.append(
             {
                 "state": str(state),
-                "horizon": int(horizon),
+                "horizon": int(typing.cast(int, horizon)),
                 "top_session": top_session,
                 "top_session_share": top_session_share,
                 "event_count": event_count,
@@ -3277,7 +3285,7 @@ def build_concentration_reports(
                 {
                     "scope": "symbol",
                     "state": str(state),
-                    "horizon": int(horizon),
+                    "horizon": int(typing.cast(int, horizon)),
                     "dominant_value": top_symbol,
                     "share": top_symbol_share,
                     "threshold": config.max_single_symbol_share,
@@ -3289,7 +3297,7 @@ def build_concentration_reports(
                 {
                     "scope": "session",
                     "state": str(state),
-                    "horizon": int(horizon),
+                    "horizon": int(typing.cast(int, horizon)),
                     "dominant_value": top_session,
                     "share": top_session_share,
                     "threshold": config.max_single_session_share,
@@ -3306,7 +3314,7 @@ def build_concentration_reports(
                     {
                         "scope": "month",
                         "state": str(state),
-                        "horizon": int(horizon),
+                        "horizon": int(typing.cast(int, horizon)),
                         "dominant_value": str(month_share.index[0]),
                         "share": float(month_share.iloc[0]),
                         "threshold": config.max_single_month_share,
@@ -3320,7 +3328,7 @@ def build_concentration_reports(
                     {
                         "scope": "time_of_day",
                         "state": str(state),
-                        "horizon": int(horizon),
+                        "horizon": int(typing.cast(int, horizon)),
                         "dominant_value": str(time_share.index[0]),
                         "share": float(time_share.iloc[0]),
                         "threshold": 0.80,
@@ -3509,13 +3517,13 @@ def build_stimulus_response_matrix(
         returns = pd.to_numeric(group["response_return"], errors="coerce").dropna()
         if returns.empty:
             continue
-        key = (str(stimulus), int(horizon))
+        key = (str(stimulus), int(typing.cast(int, horizon)))
         generic_median = float(generic.loc[key]) if key in generic.index else math.nan
         median_return = float(returns.median())
         state_excess = (
             median_return - generic_median if not math.isnan(generic_median) else math.nan
         )
-        permutation = permutation_lookup.get((str(state), int(horizon)), {})
+        permutation = permutation_lookup.get((str(state), int(typing.cast(int, horizon))), {})
         random_mean = permutation.get("permutation_median_return_mean", math.nan)
         random_label_excess = (
             median_return - random_mean if not math.isnan(random_mean) else math.nan
@@ -3536,7 +3544,7 @@ def build_stimulus_response_matrix(
             {
                 "stimulus_label": str(stimulus),
                 "state_label": str(state),
-                "horizon": int(horizon),
+                "horizon": int(typing.cast(int, horizon)),
                 "event_count": int(len(returns)),
                 "median_forward_return": median_return,
                 "win_rate": float((returns > 0.0).mean()),
@@ -3568,9 +3576,13 @@ def apply_state_gate_to_positions(positions: pd.Series, allowed_entries: pd.Seri
             current_position = 0.0
         elif is_new_entry:
             current_position = target if bool(allowed.iloc[index]) else 0.0
-        elif target > 0.0 and current_position <= 0.0 and bool(allowed.iloc[index]):
-            current_position = target
-        elif target > 0.0 and current_position > 0.0:
+        elif (
+            target > 0.0
+            and current_position <= 0.0
+            and bool(allowed.iloc[index])
+            or target > 0.0
+            and current_position > 0.0
+        ):
             current_position = target
         elif target <= 0.0:
             current_position = 0.0
@@ -3784,7 +3796,8 @@ def build_decision_summary(
         )
         if not label_shape_diagnostic_supported:
             reasons.append(
-                "same-state cross-symbol response paths did not beat random and different-state baselines"
+                "same-state cross-symbol response paths did not beat "
+                "random and different-state baselines"
             )
         if same_state.empty:
             reasons.append("no strict same-state cross-symbol matches were found")
@@ -3799,7 +3812,8 @@ def build_decision_summary(
         )
         if not fingerprint_shape_diagnostic_supported:
             reasons.append(
-                "fingerprint cross-symbol response paths did not beat random and different-state baselines"
+                "fingerprint cross-symbol response paths did not beat "
+                "random and different-state baselines"
             )
 
     if oos_state_response.empty:
@@ -3814,7 +3828,7 @@ def build_decision_summary(
         for (state, horizon), group in oos_state_response.groupby(["state", "horizon"], sort=True):
             pass_share = float(group["gate_passed"].astype(bool).mean())
             if pass_share >= config.required_positive_folds_share:
-                positive_oos_groups.add((str(state), int(horizon)))
+                positive_oos_groups.add((str(state), int(typing.cast(int, horizon))))
     permutation_ok = False
     if positive_oos_groups and not permutation_baseline.empty:
         for state, horizon in positive_oos_groups:
@@ -4017,35 +4031,142 @@ live data, place orders, loosen gates, alter live templates, or promote candidat
 
 ## Same-State Cross-Symbol Similarity
 
-{_markdown_table(shape_rows, ["baseline", "state", "horizon", "match_count", "median_cosine_similarity", "median_euclidean_distance", "median_abs_return_diff"])}
+{
+        _markdown_table(
+            shape_rows,
+            [
+                "baseline",
+                "state",
+                "horizon",
+                "match_count",
+                "median_cosine_similarity",
+                "median_euclidean_distance",
+                "median_abs_return_diff",
+            ],
+        )
+    }
 
 ## Fingerprint Cross-Symbol Similarity
 
-{_markdown_table(fingerprint_rows, ["baseline", "state", "horizon", "match_count", "median_cosine_similarity", "median_euclidean_distance", "median_abs_return_diff"])}
+{
+        _markdown_table(
+            fingerprint_rows,
+            [
+                "baseline",
+                "state",
+                "horizon",
+                "match_count",
+                "median_cosine_similarity",
+                "median_euclidean_distance",
+                "median_abs_return_diff",
+            ],
+        )
+    }
 
 ## OOS Response-Shape Similarity
 
-{_markdown_table(oos_shape_rows, ["similarity_mode", "baseline", "state", "horizon", "test_event_count", "median_cosine_similarity", "median_euclidean_distance", "median_abs_return_diff", "fit_scope"])}
+{
+        _markdown_table(
+            oos_shape_rows,
+            [
+                "similarity_mode",
+                "baseline",
+                "state",
+                "horizon",
+                "test_event_count",
+                "median_cosine_similarity",
+                "median_euclidean_distance",
+                "median_abs_return_diff",
+                "fit_scope",
+            ],
+        )
+    }
 
 ## Out-of-Sample State Response
 
-{_markdown_table(oos_rows, ["split_mode", "fold", "state", "horizon", "test_event_count", "directional_accuracy_excess_vs_generic", "oos_median_return_excess_vs_generic_bps", "verdict"])}
+{
+        _markdown_table(
+            oos_rows,
+            [
+                "split_mode",
+                "fold",
+                "state",
+                "horizon",
+                "test_event_count",
+                "directional_accuracy_excess_vs_generic",
+                "oos_median_return_excess_vs_generic_bps",
+                "verdict",
+            ],
+        )
+    }
 
 ## Leave-One-Symbol-Out Summary
 
-{_markdown_table(loso_rows, ["split_mode", "fold", "state", "horizon", "test_event_count", "directional_accuracy_excess_vs_generic", "oos_median_return_excess_vs_generic_bps", "verdict"])}
+{
+        _markdown_table(
+            loso_rows,
+            [
+                "split_mode",
+                "fold",
+                "state",
+                "horizon",
+                "test_event_count",
+                "directional_accuracy_excess_vs_generic",
+                "oos_median_return_excess_vs_generic_bps",
+                "verdict",
+            ],
+        )
+    }
 
 ## Stimulus Response Matrix
 
-{_markdown_table(stimulus_rows, ["stimulus_label", "state_label", "horizon", "event_count", "state_excess_vs_generic", "random_label_excess", "permutation_percentile", "verdict"])}
+{
+        _markdown_table(
+            stimulus_rows,
+            [
+                "stimulus_label",
+                "state_label",
+                "horizon",
+                "event_count",
+                "state_excess_vs_generic",
+                "random_label_excess",
+                "permutation_percentile",
+                "verdict",
+            ],
+        )
+    }
 
 ## Best Same-State Cross-Stock States
 
-{_markdown_table(best_same_state, ["state", "horizon", "match_count", "median_cosine_similarity", "random_cosine_similarity", "different_state_cosine_similarity"])}
+{
+        _markdown_table(
+            best_same_state,
+            [
+                "state",
+                "horizon",
+                "match_count",
+                "median_cosine_similarity",
+                "random_cosine_similarity",
+                "different_state_cosine_similarity",
+            ],
+        )
+    }
 
 ## Best Fingerprint Cross-Stock States
 
-{_markdown_table(best_fingerprint, ["state", "horizon", "match_count", "median_cosine_similarity", "random_cosine_similarity", "different_state_cosine_similarity"])}
+{
+        _markdown_table(
+            best_fingerprint,
+            [
+                "state",
+                "horizon",
+                "match_count",
+                "median_cosine_similarity",
+                "random_cosine_similarity",
+                "different_state_cosine_similarity",
+            ],
+        )
+    }
 
 ## Top Rejected States
 
@@ -4057,19 +4178,71 @@ live data, place orders, loosen gates, alter live templates, or promote candidat
 
 ## States Needing Subtype Split
 
-{_markdown_table(subtype_split, ["state", "horizon", "match_count", "median_cosine_similarity", "random_cosine_similarity", "different_state_cosine_similarity", "reason"])}
+{
+        _markdown_table(
+            subtype_split,
+            [
+                "state",
+                "horizon",
+                "match_count",
+                "median_cosine_similarity",
+                "random_cosine_similarity",
+                "different_state_cosine_similarity",
+                "reason",
+            ],
+        )
+    }
 
 ## Dead Chop Blocking Quality
 
-{_markdown_table(dead_chop_rows, ["stimulus_label", "state_label", "horizon", "event_count", "median_forward_return", "win_rate", "state_excess_vs_generic", "verdict"])}
+{
+        _markdown_table(
+            dead_chop_rows,
+            [
+                "stimulus_label",
+                "state_label",
+                "horizon",
+                "event_count",
+                "median_forward_return",
+                "win_rate",
+                "state_excess_vs_generic",
+                "verdict",
+            ],
+        )
+    }
 
 ## Template Overlay
 
-{_markdown_table(template_rows, ["template", "variant", "symbol", "net_return", "number_of_trades", "net_return_excess_vs_generic_bps", "net_return_excess_vs_random_gate_bps", "verdict"])}
+{
+        _markdown_table(
+            template_rows,
+            [
+                "template",
+                "variant",
+                "symbol",
+                "net_return",
+                "number_of_trades",
+                "net_return_excess_vs_generic_bps",
+                "net_return_excess_vs_random_gate_bps",
+                "verdict",
+            ],
+        )
+    }
 
 ## Manual Audit Examples
 
-{_markdown_table(audit_rows, ["symbol", "session_date", "manual_state_note", "expected_lab_state", "report_found_in_checkout"])}
+{
+        _markdown_table(
+            audit_rows,
+            [
+                "symbol",
+                "session_date",
+                "manual_state_note",
+                "expected_lab_state",
+                "report_found_in_checkout",
+            ],
+        )
+    }
 
 ## Warnings
 
@@ -4358,7 +4531,7 @@ def run_behavioral_state_similarity_lab(
             same_similarity = float(same_row["median_cosine_similarity"])
             output_row = {
                 "state": str(state),
-                "horizon": int(horizon),
+                "horizon": int(typing.cast(int, horizon)),
                 "match_count": int(same_row["match_count"]),
                 "median_cosine_similarity": same_similarity,
                 "random_cosine_similarity": random_similarity,
@@ -4419,7 +4592,7 @@ def run_behavioral_state_similarity_lab(
                 best_fingerprint_states.append(
                     {
                         "state": str(state),
-                        "horizon": int(horizon),
+                        "horizon": int(typing.cast(int, horizon)),
                         "match_count": int(fingerprint_row["match_count"]),
                         "median_cosine_similarity": fingerprint_similarity,
                         "random_cosine_similarity": random_similarity,

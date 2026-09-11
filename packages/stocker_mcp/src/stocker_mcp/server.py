@@ -13,7 +13,6 @@ from urllib.parse import urlparse
 from stocker_mcp import __version__
 from stocker_mcp.oauth import OAuthMiddleware, OAuthState
 from stocker_mcp.schemas import (
-    READ_ONLY_ANNOTATIONS,
     TOOL_NAMES,
     get_tool_spec,
 )
@@ -65,7 +64,9 @@ def _tool_kwargs(name: str) -> dict[str, Any]:
     return {
         "title": spec.title,
         "description": spec.description,
-        "annotations": ToolAnnotations(**READ_ONLY_ANNOTATIONS),
+        "annotations": ToolAnnotations(
+            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        ),
         "meta": {"securitySchemes": [{"type": "oauth2", "scopes": ["stocker.read"]}]},
         "structured_output": True,
     }

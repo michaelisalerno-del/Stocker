@@ -387,7 +387,7 @@ def _generate_atomic_rules(
         for term in [*categorical_terms, *numeric_terms]:
             personality_rules.append(_rule_from_terms(personality, (term,), kind="single"))
         for cat, num in itertools.product(categorical_terms, numeric_terms):
-            terms = (cat, num)
+            terms: tuple[_RuleTerm, ...] = (cat, num)
             if _compatible_terms(terms):
                 personality_rules.append(_rule_from_terms(personality, terms, kind="and2"))
         for left, right in itertools.combinations(categorical_terms, 2):

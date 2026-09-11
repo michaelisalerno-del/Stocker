@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import typing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -306,7 +307,7 @@ def run_personality_rulebook_validation(
         random_result = _random_baseline(
             regime_pool if not regime_pool.empty else pool,
             count=len(filtered),
-            seed=config.random_seed + int(rule_index) + horizon,
+            seed=config.random_seed + int(typing.cast(int, rule_index)) + horizon,
             iterations=config.random_iterations,
         )
         concentration = _concentration(filtered)
@@ -346,7 +347,7 @@ def run_personality_rulebook_validation(
             and median_score <= random_result["random_same_count_median_score"]
         ):
             reasons.append("random_median_not_beaten")
-        row = {
+        row: dict[Any, Any] = {
             **rule.to_dict(),
             **concentration,
             **random_result,
@@ -488,19 +489,19 @@ def run_personality_rulebook_validation(
                 "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
-        for _, row in display.iterrows():
+        for _, display_row in display.iterrows():
             lines.append(
                 "| "
                 + " | ".join(
                     [
-                        str(row["personality"]),
-                        str(int(row["horizon"])),
-                        str(row["filter_rule"]),
-                        str(int(row["validation_retained_count"])),
-                        str(int(row["validation_symbol_count"])),
-                        _format_pct(row["validation_filtered_same_result_rate"]),
-                        _format_pct(row["validation_same_result_lift"]),
-                        _format_pct(row["random_same_count_p95_rate"]),
+                        str(display_row["personality"]),
+                        str(int(display_row["horizon"])),
+                        str(display_row["filter_rule"]),
+                        str(int(display_row["validation_retained_count"])),
+                        str(int(display_row["validation_symbol_count"])),
+                        _format_pct(display_row["validation_filtered_same_result_rate"]),
+                        _format_pct(display_row["validation_same_result_lift"]),
+                        _format_pct(display_row["random_same_count_p95_rate"]),
                     ]
                 )
                 + " |"

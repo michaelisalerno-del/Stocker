@@ -216,17 +216,14 @@ def _dataset_for_symbol(
     symbol: str,
     config: StateLifecycleContextConfig,
 ) -> Path:
-    path = cast(
-        Path,
-        dataset_path(
-            DatasetKey(
-                source=config.source,
-                instrument_type=config.instrument_type,
-                symbol=symbol.upper(),
-                timeframe=config.timeframe,
-            ),
-            data_dir=data_dir,
+    path = dataset_path(
+        DatasetKey(
+            source=config.source,
+            instrument_type=config.instrument_type,
+            symbol=symbol.upper(),
+            timeframe=config.timeframe,
         ),
+        data_dir=data_dir,
     )
     if path.exists():
         return path
@@ -235,17 +232,14 @@ def _dataset_for_symbol(
         if symbol.upper().endswith(".US")
         else f"{symbol.upper()}.US"
     )
-    fallback = cast(
-        Path,
-        dataset_path(
-            DatasetKey(
-                source=config.source,
-                instrument_type=config.instrument_type,
-                symbol=fallback_symbol,
-                timeframe=config.timeframe,
-            ),
-            data_dir=data_dir,
+    fallback = dataset_path(
+        DatasetKey(
+            source=config.source,
+            instrument_type=config.instrument_type,
+            symbol=fallback_symbol,
+            timeframe=config.timeframe,
         ),
+        data_dir=data_dir,
     )
     if fallback.exists():
         return fallback
@@ -277,10 +271,7 @@ def _load_dense_symbol_frame(
     dense["timestamp"] = pd.to_datetime(dense["timestamp"], utc=True, errors="coerce")
     dense["session_date"] = pd.to_datetime(dense["session_date"]).dt.strftime("%Y-%m-%d")
     dense["bar_index_in_session"] = pd.to_numeric(dense["bar_index_in_session"], errors="coerce")
-    return cast(
-        pd.DataFrame,
-        dense.sort_values(["session_date", "bar_index_in_session"], kind="mergesort"),
-    )
+    return dense.sort_values(["session_date", "bar_index_in_session"], kind="mergesort")
 
 
 def _add_prior_regime_features(

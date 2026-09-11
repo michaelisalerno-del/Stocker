@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import typing
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
@@ -176,7 +177,7 @@ def _session_id_from_label(session_label: str) -> int:
 
 
 def _session_labels(timestamps: pd.Series) -> pd.Series:
-    return timestamps.dt.date.astype(str)
+    return typing.cast(pd.Series, timestamps.dt.date.astype(str))
 
 
 def add_session_clock_features(
@@ -206,7 +207,7 @@ def add_session_clock_features(
     schedule_by_date: dict[str, tuple[pd.Timestamp, pd.Timestamp]] = {}
     if not schedule.empty:
         for session_date, row in schedule.iterrows():
-            label = str(pd.Timestamp(session_date).date())
+            label = str(pd.Timestamp(typing.cast(pd.Timestamp, session_date)).date())
             schedule_by_date[label] = (
                 pd.Timestamp(row["market_open"]).tz_convert("UTC"),
                 pd.Timestamp(row["market_close"]).tz_convert("UTC"),
@@ -375,7 +376,9 @@ def add_session_vwap(frame: pd.DataFrame, *, price: str = "typical") -> pd.DataF
     data = frame.copy()
     if "session_date" not in data:
         data = add_session_clock_features(data)
-    volume = pd.to_numeric(data.get("volume", 0.0), errors="coerce").clip(lower=0)
+    volume = pd.to_numeric(typing.cast(pd.Series, data.get("volume", 0.0)), errors="coerce").clip(
+        lower=0
+    )
     volume_for_sum = volume.fillna(0.0)
     if price == "close":
         vwap_price = pd.to_numeric(data["close"], errors="coerce")
@@ -411,7 +414,9 @@ def add_relative_volume_features(
     data = frame.copy()
     if "cumulative_session_volume" not in data:
         data = add_session_vwap(data)
-    volume = pd.to_numeric(data.get("volume", 0.0), errors="coerce").clip(lower=0)
+    volume = pd.to_numeric(typing.cast(pd.Series, data.get("volume", 0.0)), errors="coerce").clip(
+        lower=0
+    )
     data["volume"] = volume
     data["cumulative_session_volume"] = volume.fillna(0.0).groupby(data["session_date"]).cumsum()
 

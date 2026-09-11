@@ -10,8 +10,8 @@ from typer.testing import CliRunner
 from stocker_core.cli import app
 from stocker_data.storage import DatasetKey, dataset_path, write_parquet
 from stocker_research.behavioral_state_similarity import (
-    BehavioralStateConfig,
     STATE_FINGERPRINT_FEATURE_COLUMNS,
+    BehavioralStateConfig,
     add_forward_response_columns,
     apply_state_gate_to_positions,
     build_behavioral_state_frame,
@@ -20,13 +20,13 @@ from stocker_research.behavioral_state_similarity import (
     build_permutation_baseline,
     extract_independent_events,
     label_behavioral_states,
-    run_fingerprint_cross_symbol_similarity,
-    run_same_state_cross_symbol_similarity,
     run_behavioral_state_similarity_lab,
+    run_fingerprint_cross_symbol_similarity,
     run_nearest_neighbor_oos_similarity,
-    run_oos_state_response_test,
-    run_oos_response_shape_similarity,
     run_nearest_neighbor_similarity,
+    run_oos_response_shape_similarity,
+    run_oos_state_response_test,
+    run_same_state_cross_symbol_similarity,
     summarize_state_responses,
 )
 

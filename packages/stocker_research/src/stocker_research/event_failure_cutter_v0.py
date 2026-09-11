@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import typing
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -689,7 +690,7 @@ def _run_same_symbol_random_baseline(
     for _ in range(max(1, iterations)):
         sampled_parts: list[pd.DataFrame] = []
         for symbol, count in retained_counts.items():
-            pool = test_rows[test_rows["symbol"].astype(str).eq(symbol)]
+            pool = test_rows[test_rows["symbol"].astype(str).eq(typing.cast(str, symbol))]
             if pool.empty:
                 continue
             sample_size = min(int(count), len(pool))
@@ -975,7 +976,7 @@ def _run_filter_search(
     event_rows: pd.DataFrame,
     *,
     config: EventFailureCutterConfig,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     data = add_rolling_symbol_state_efficacy(
         event_rows,
         horizons=config.horizons,
@@ -1039,7 +1040,7 @@ def _run_filter_search(
                             "filter_id": candidate["filter_id"],
                             "event_state": event_state,
                             "horizon": horizon,
-                            **baseline_row.to_dict(),
+                            **typing.cast(dict[str, Any], baseline_row.to_dict()),
                         }
                     )
                 random_objective = float(random_baseline["median_objective_after"])

@@ -352,6 +352,10 @@ def _map_state_personality(data: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
+def _symbol_set(series: pd.Series) -> object:
+    return set(series.dropna())
+
+
 def _add_cross_stock_alignment_features(frame: pd.DataFrame, minutes: int = 15) -> pd.DataFrame:
     if "timestamp" not in frame or "symbol" not in frame:
         return frame
@@ -364,13 +368,13 @@ def _add_cross_stock_alignment_features(frame: pd.DataFrame, minutes: int = 15) 
 
     personality_symbols = (
         data.groupby(key + ["personality"])["symbol"]
-        .agg(lambda series: set(series.dropna()))
+        .agg(_symbol_set)
         .rename("_same_personality_symbols")
         .reset_index()
     )
     direction_symbols = (
         data.groupby(key + ["default_expected_direction"])["symbol"]
-        .agg(lambda series: set(series.dropna()))
+        .agg(_symbol_set)
         .rename("_same_direction_symbols")
         .reset_index()
     )
@@ -1108,22 +1112,22 @@ def run_personality_discovery_lab(
 
     base = pd.DataFrame(base_rows)
     candidates = pd.DataFrame(candidate_rows)
-    selected = pd.DataFrame(selected_rows)
+    selected_frame = pd.DataFrame(selected_rows)
     random_baseline = pd.DataFrame(random_rows)
     examples_df = pd.DataFrame(examples)
     passed = (
-        selected[selected["verdict"].eq("pass_personality_discovery")].copy()
-        if not selected.empty
+        selected_frame[selected_frame["verdict"].eq("pass_personality_discovery")].copy()
+        if not selected_frame.empty
         else pd.DataFrame()
     )
     rejected = (
-        selected[~selected["verdict"].eq("pass_personality_discovery")].copy()
-        if not selected.empty
+        selected_frame[~selected_frame["verdict"].eq("pass_personality_discovery")].copy()
+        if not selected_frame.empty
         else pd.DataFrame()
     )
     concentration_rows = []
-    if not selected.empty:
-        for _, row in selected.iterrows():
+    if not selected_frame.empty:
+        for _, row in selected_frame.iterrows():
             warnings = []
             if row.get("single_symbol_share", 0) > row.get("max_single_symbol_share", 0.50):
                 warnings.append("single_symbol_dominated")
@@ -1197,7 +1201,7 @@ def run_personality_discovery_lab(
         (paths["loaded_specs"], loaded_specs),
         (paths["base"], base),
         (paths["candidates"], candidates),
-        (paths["selected"], selected),
+        (paths["selected"], selected_frame),
         (paths["passed"], passed),
         (paths["rejected"], rejected),
         (paths["random"], random_baseline),
@@ -1221,7 +1225,7 @@ def run_personality_discovery_lab(
         "event_rows": int(len(events)),
         "base_rows": int(len(base)),
         "candidate_rule_rows": int(len(candidates)),
-        "selected_rule_rows": int(len(selected)),
+        "selected_rule_rows": int(len(selected_frame)),
         "passed_rule_rows": int(len(passed)),
         "passed_personalities": sorted(passed["personality"].unique().tolist())
         if not passed.empty
@@ -1252,7 +1256,7 @@ def run_personality_discovery_lab(
         f"- Loaded specs: `{len(specs)}`",
         f"- Event rows: `{len(events)}`",
         f"- Candidate rule rows: `{len(candidates)}`",
-        f"- Train-selected rule rows: `{len(selected)}`",
+        f"- Train-selected rule rows: `{len(selected_frame)}`",
         f"- Passed rule rows: `{len(passed)}`",
         "",
         "## Personality Decision Matrix",

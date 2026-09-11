@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import typing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -166,7 +167,7 @@ def _split_train_test_by_time(
         return rows.copy(), rows.copy()
     fraction = min(max(float(train_fraction), 0.01), 0.99)
     ordered = rows.copy()
-    timestamps = pd.to_datetime(ordered.get("timestamp"), utc=True, errors="coerce")
+    timestamps = pd.to_datetime(ordered["timestamp"], utc=True, errors="coerce")
     ordered["_split_timestamp"] = timestamps
     sort_columns = [
         column
@@ -190,9 +191,9 @@ def _distance_risk_bps(
     minimum_bps: float,
 ) -> pd.Series:
     if expected_direction > 0:
-        raw = pd.to_numeric(rows.get(long_column, np.nan), errors="coerce") * 10000.0
+        raw = pd.to_numeric(rows[long_column], errors="coerce") * 10000.0
     else:
-        raw = -pd.to_numeric(rows.get(short_column, np.nan), errors="coerce") * 10000.0
+        raw = -pd.to_numeric(rows[short_column], errors="coerce") * 10000.0
     risk = raw + buffer_bps
     return risk.where(risk >= minimum_bps, minimum_bps)
 
@@ -760,6 +761,7 @@ def evaluate_personality_stop_models(
     pd.DataFrame,
     pd.DataFrame,
     pd.DataFrame,
+    pd.DataFrame,
 ]:
     """Evaluate stop models for selected personality caveats."""
 
@@ -830,7 +832,9 @@ def evaluate_personality_stop_models(
                     risk_bps=pool_risk,
                     target_r=target_r,
                 )
-                random_seed = config.random_seed + rule_index * 1009 + model_index * 37
+                random_seed = (
+                    config.random_seed + typing.cast(int, rule_index) * 1009 + model_index * 37
+                )
                 random_result = _random_stop_baseline_from_scored_pool(
                     scored_pool,
                     count=len(retained),

@@ -15,6 +15,7 @@ PACKAGE_SRC_DIRS: tuple[str, ...] = (
     "packages/stocker_backtest/src",
     "packages/stocker_execution/src",
     "packages/stocker_mcp/src",
+    "packages/stocker_dashboard/src",
 )
 
 

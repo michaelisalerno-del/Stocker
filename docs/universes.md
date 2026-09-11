@@ -1,12 +1,53 @@
 # Universes
 
-Stocker uses universes so research starts from a reproducible symbol set instead of
-random manual ticker tests. A universe records where the symbols came from, what
-filters produced them, and what metadata was available at build time.
+Stocker uses universes so runtime and research start from reproducible symbol sets instead of
+random manual ticker tests.
 
-The current universe source is EODHD. FMP may be useful later as a secondary metadata
-provider, but this stage keeps one vendor path: EODHD screener for symbol discovery and
-EODHD history for local datasets.
+## Runtime US Named Universes
+
+Production runtime configuration supports:
+
+- `US_ALL`: all eligible issues in the cached Nasdaq Trader Nasdaq-listed and other-listed files;
+- `NASDAQ`: Nasdaq-listed eligible issues;
+- `NYSE`: issues whose primary listing code is NYSE;
+- `CUSTOM`: inline research/testing members; not the live method builder's universe.
+
+The committed `universes/us-listed.csv` snapshot is sourced from the official Nasdaq Trader Symbol
+Directory. It records source URLs, retrieval time, both source-file creation times, and supported
+universe names. Refresh it explicitly with:
+
+```bash
+uv run stocker universe refresh-us-listings --output universes/us-listed.csv
+```
+
+The refresh excludes rows marked as ETFs or test issues (and Nasdaq NextShares). It does not guess
+security type from issuer names. Stage 2 requests an IBKR stock contract for each member; warrants,
+units, stale symbols, ambiguous symbols, and other non-stock issues therefore fail qualification,
+are reported for that symbol, and do not stop the batch. Loading the snapshot itself makes no IBKR,
+historical-bar, option, PRE, or order request.
+
+New Session HARD PAPER runs preserve broad named US membership and pass its eligible normalized
+identities into Range5 HIGH250 -> RV10 HIGH50 -> RV15 HIGH30. Other markets require a configured
+broad market universe. No scanner activity rank, cap bucket or liquidity score enters selection.
+Missing sources and broad opening-bar throughput limits are explicit degraded diagnostics.
+See [candidate-discovery.md](candidate-discovery.md) for timing, evidence, persistence and migration.
+
+The normal builder remains Market -> Method. The method embeds the exact source population in
+each new run; refreshing listing files does not mutate saved runs. The minimal configuration is:
+
+```yaml
+named_universe_snapshot: ../universes/us-listed.csv
+universes: []
+runs: []
+```
+
+Legacy V7 dynamic IBKR discovery and older activity snapshots remain readable with their original
+selection semantics. They do not define selection for new runs. Future scanner acquisition must
+establish recall independently; it is not equivalent to the broad validated research population.
+Non-US candidate transfer is `UNVALIDATED_CROSS_MARKET_PAPER_TRANSFER` without formula changes.
+
+The older research universe data manager below remains separate. Its current provider is EODHD,
+and its history is not a production or PAPER PRE input.
 
 ## Files
 

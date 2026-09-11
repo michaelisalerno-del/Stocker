@@ -1,0 +1,421 @@
+# Stocker architecture
+
+## Market → Method → Run
+
+A Method owns how it finds, qualifies, vetoes, enters, manages and exits trades.
+The user selects the market and method; the method determines what stocks are appropriate.
+
+The current catalogue exposes one method, **Session HARD**, across Stocker's market catalogue.
+Its stable internal identity is `SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D`;
+its current version is `SESSION_HARD_CAUSAL_Q1_ACQUISITION_V9`. The old name remains an internal
+identity for history continuity, not a second selectable strategy. The method remains PAPER-only.
+Non-US markets are labelled **unvalidated cross-market PAPER tests**. Operational calendar/scanner
+support is not validation of Session HARD, MODEL_T0 or the FIT-derived cutoff on those markets.
+
+```text
+Market → Method → saved Run
+                    ↓
+ broad eligible universe → prospective scanner acquisition union
+                    ↓
+ Range5 HIGH250 → RV10 HIGH50 → RV15 HIGH30
+                    ↓
+ method-required IBKR history/PRE preparation → required-data screening
+                    ↓
+ suitability diagnostics → T0 qualification → MODEL_T0 Q1 veto
+                    ↓
+ arm P0 ± 0.20M → first actual break chooses LONG or SHORT
+                    ↓
+ shared account checks → protected entry → method stop / target / deadline
+                    ↓
+ broker-authoritative fills and positions → persisted lifecycle
+```
+
+There is no user-selected cap bucket, activity screen, strategy ranking, or generic exit override
+in the current run builder. Market cap remains metadata and a research diagnostic. Candidate selection uses only the
+frozen opening range/RV chain; scanner activity/liquidity ranks are not admission rules.
+
+## Small method boundary
+
+- `stocker_core.methods.MethodDefinition` supplies identity/version, supported markets,
+  execution environments, a specification builder and an explicit universe builder.
+- The serializable specification describes search, data/history/warmup, suitability,
+  qualification, vetoes, direction, capacity, entry, exits, economics, shortability,
+  sessions, runtime state and artifact provenance. Its canonical JSON SHA-256 is saved per run.
+- `stocker_execution.strategy_factory` is the explicit composition seam. It associates the
+  method identity/version with its decision engine and `MethodServices`: feature producer,
+  context producer, event source, checkpoint schedule and universe qualification function.
+- The engine evaluates candidates, observes entry events, restores/saves its additional state
+  and advances background state. Session HARD reuses frozen qualification calculations from
+  `session_hard_structure_d.py`; that historical class is not an installed engine.
+- Shared execution consumes intents with side, entry reference, absolute stop/target and deadline.
+  Historical M-distance geometry remains readable. Future methods can supply their own prices.
+  Broker objects stay inside the adapter.
+
+To add a future method, provide these catalogue and composition entries, its specification,
+universe/data services and engine, plus focused behavioral tests. The dashboard reads the catalogue;
+the scheduler uses the supplied checkpoints and services. Do not add method-name branches to the UI
+or shared runtime. Different methods need not share Session HARD's features, vetoes or entry logic.
+There is no plugin loader, factory hierarchy or dependency-injection container.
+
+## Session HARD package
+
+### Universe, data and suitability
+
+New runs follow [candidate-discovery.md](candidate-discovery.md): acquisition of a saved broad
+eligible market membership, a prospective scanner-assisted acquisition union, then frozen Range5 HIGH250 -> RV10 HIGH50 -> RV15 HIGH30 recipe.
+US uses authoritative named listing snapshots. Other markets need an explicitly configured
+broad market universe; unavailable sources/data degrade explicitly. No activity TOP50 or cap
+scanner watch limit precedes Range250. Cross-market transfer remains unvalidated and PAPER-only.
+
+The method specification owns candidate stages and evidence. MethodServices supplies their
+lifecycle and readiness callbacks; the shared scheduler gates all method history/checkpoints
+until final TOP30. Exact final RTH minute requests use existing IBKR history infrastructure.
+Stage snapshots, identities, input bars and reasons persist atomically, with SQL count summaries.
+No expensive prior-close/HV/PRE work runs across the broad opening population. Stock-local
+historical cache remains intact. Only final TOP30 enters the existing run-scoped strategy state.
+
+V7's five-cap-scan discovery and older activity profiles are legacy behavior retained for saved
+runs and historical audits. V7 and V8 remain runnable with their original specs/hashes; only V9 is selectable
+for new runs. Migration creates disabled PAPER replacements in a separate configuration and
+preserves all history. Scanner recall is measured by a delayed audit-only full-market oracle; it is not yet validated.
+No capacity increase or LIVE activation is included.
+
+V9 supplies ScannerAcquisition through the existing UniverseProvider and an idle background
+audit through MethodServices. Scanner ranks only identify contracts for data acquisition.
+The declared experimental matrix uses cached actual Gateway capabilities, floorless/uncapped
+and canonical cap coverage, append-only conId sweeps and bounded cancellation. It does not
+replace the frozen candidate mathematics or admit scanner rank into any strategy score.
+Opening acquisition families use the capability-validated exact `TOP_OPEN_PERC_GAIN` and
+`TOP_OPEN_PERC_LOSE` codes, not overnight gap scans or fuzzy description matches. The real
+Gateway access check found scanner precision warnings outside the US; opening-history
+throughput and recall remain prospective measurements. See scanner-acquisition-followup.md.
+The after-close oracle reconstructs full saved membership using the same candidate functions,
+with separate audit-only tables and prospective recall/contribution diagnostics. It pauses for
+enabled market windows and foreground history work. Normal dashboard/API reads aggregate
+counts and project compact oracle metrics in SQL. See candidate-discovery.md for experiment
+identity, evidence boundaries, deadline behavior and the opt-in read-only PAPER benchmark.
+
+Session prefixes expand actual exchange five-minute slots into one-minute requirements, excluding
+scheduled lunch breaks. Historical request durations include elapsed break time. Frozen directional
+calculations use the verified active-minute prefix; absent required bars still reject the candidate.
+At the exact lunch reopening checkpoint, missing wall-clock T0-3 minute inputs remain unavailable
+and are never interpolated.
+The frozen qualification, MODEL_T0 preprocessing/score, inclusive FIT cutoff and entry/exit geometry
+are identical across markets. No model or trading thresholds are re-fit for transfer.
+
+The dashboard starts runs with `POST /api/universe-runs/paper?background=true`, receiving `202`
+while broker connection and qualification continue. `/api/universe-runs/start-status` exposes
+starting/completed/failed status across page reloads. The start button disables immediately,
+duplicate submissions reuse the pending operation and failures remain visible. The runtime saves
+the run configuration after application; an unfinished start interrupted by a server restart must
+be submitted again. Existing synchronous API callers remain supported.
+The first new run reconciles the account and updates shared readiness before it can trade.
+
+An explicit/manual basket remains a research or test input, not the live builder's dependency.
+There is no newly validated stock-suitability rule beyond universe eligibility and required data.
+Cap, volatility and liquidity relationships are **research-only diagnostics**.
+
+IBKR is the exclusive production/PAPER history source; the cache stores IBKR bars with exact
+conId, timestamp, bar size, TRADES and RTH semantics. No vendor substitution or interpolation occurs.
+Session HARD uses 21 consecutive prior exchange-session final RTH one-minute closes:
+20 log returns, sample standard deviation (`ddof=1`), annualized by `sqrt(252)`.
+Generic tick 104 is retained for historical diagnostics but cannot replace this frozen input.
+
+Checkpoint feature snapshots are committed in one SQLite transaction through a worker thread,
+retaining the existing protection against replacing READY results with transient failures. The
+all-listings run exposed thousands of individual synchronous commits blocking HTTP requests.
+Entry observation and admission persist only changed immutable signals; unchanged rejections
+remain in the ledger without being serialized and rewritten four times per scheduler cycle.
+Expiry changes are still persisted immediately, before market-data awaits.
+Idle observation now reuses one signal snapshot and skips comparison/admission work when no
+candidate is waiting or triggered; identity checks precede field equality for immutable signals.
+Run summaries aggregate checkpoint counts in SQL and load only signals associated with displayed
+orders. An additive index on run/session/JSON T0 supports these reads without altering records.
+Candidate pages fetch only the selected session/checkpoint/status or displayed stock page.
+Full saved universes and configuration history are downloaded on demand through
+`/api/runs/{run_id}/provenance`; ordinary refreshes never fetch or render them. Runtime-provided
+method checkpoint times distinguish the latest evaluation from "no further checkpoints today".
+The run view separately shows shared broker history request and pending-work counters; these
+are not completed-stock counts and reset on application restart (also at the UTC day boundary).
+The legacy V7 Session HARD data composition sets `prepare_history_on_ready`: its session-wide prior-close
+history is prepared once after qualification, including before open or after the final checkpoint.
+Restart reuses cached IBKR bars and resumes missing history. This uses the same bounded shared
+job as checkpoint prefetch; it does not subscribe to live trades or evaluate entries outside the
+existing method windows. Other methods must explicitly opt into session-wide preparation.
+Validation for these follow-up changes: 860 pytest tests passed, including filtered summary reads,
+unchanged-signal comparison avoidance and pre-open/after-checkpoint restart preparation. Both
+`tests/dashboard_run_summary.cjs` and `tests/dashboard_run_start.cjs` passed with all HTTP mocked;
+the summary check covers refresh without loading the full universe and explicit audit retrieval.
+Changed-file Ruff and execution/dashboard mypy passed. No broker orders were used in testing.
+Deployed as `128847db548d109370881b6f41bc4d0d65de7976`. On the existing server data, the run
+summary returned HTTP 200 in 0.248 seconds with a 3,986-byte response while history preparation
+was active; before deployment it timed out at 12 seconds with no bytes. A subsequent overview
+probe took 2.452 seconds, so this does not claim every request has the summary's latency.
+Verification preserved 48,670 signal rows, all three enabled run configurations, frozen artifacts,
+the existing execution plan and 28 fills. The additive checkpoint index was present. History
+resumed after the final entry checkpoint (four requests in progress, zero live subscriptions),
+with no open orders or positions. Backup: `/var/lib/stocker/backups/run-summary-128847d`.
+The combined responsiveness fixes were deployed as `85983be23ee5a8f748aaec14e0ce976e4d221a34`.
+`rtk .venv/bin/pytest -q -o addopts=` passed 857 tests (five existing warnings); changed-file Ruff
+and execution-package mypy passed. Production verification preserved all three saved runs, frozen
+artifact bytes and historical ledger rows, with no open orders/positions or test orders. While
+history preparation was active, overview requests returned HTTP 200 in 0.141–0.148 seconds and
+the root page in 1.782 seconds, replacing the reproduced five-/ten-second zero-byte timeouts.
+This does not solve full-universe data capacity: 6,570 broker-qualified stocks require up to
+137,970 individual prior-close requests before cache hits, and the configured 100-line budget
+rejected 6,470 simultaneous stream requests. These are operational constraints, not new method
+suitability filters; neither the universe nor broker budget was changed by this fix.
+The dashboard's current Stock eligibility count is the number of saved checkpoint feature rows,
+not scan progress; Required data ready distinguishes rows with complete method inputs.
+
+Prior-close preparation shares the exact exchange-calendar timestamps across stocks for each
+calendar/session. Stage 5 uses a bounded set of workers at the existing IBKR historical-request
+concurrency, yielding between instruments even on cache hits. The runtime tracks these downloads
+as background preparation, outside its scheduler/control lock, shares in-flight session work
+between checkpoints, and cancels it on shutdown or when no owning run remains enabled. Missing
+history still reports NOT_READY; no universe filter, data substitution or trading threshold is
+introduced. This fixes the observed all-universe calendar rebuild that starved HTTP requests,
+and prevents a long history download from holding run controls. Regression tests cover calendar
+reuse with unchanged HV, request-loop fairness, and controls/shutdown during stalled history.
+
+The existing expected-move arithmetic uses market active regular minutes:
+`M = P0 × HV × sqrt(15 / (252 × regular_minutes)) × 0.67448975`.
+T0 qualification aggregates the exact completed one-minute prefix into five-minute bars.
+MODEL_T0's four directional predictors use only the prefix ending T0−1 minute.
+Missing exact history rejects the affected candidate; it is not estimated.
+
+### Qualification, veto and causal entry
+
+The reused frozen Model B score qualifies at `score >= 0.999361477`;
+PRE_MOVE must be strictly greater than `0.475764059845861`.
+Checkpoints remain completed five-minute counts 6, 8, …, 34, relative to the market session.
+Existing exchange holidays, timezone/DST and break handling remain in the calendar layer.
+
+The original prior-session HIGH_PRE_MOVE_DOWN_ONLY cohort predictor is maintained independently
+of prospective Q1. It uses the previous 20 qualifying session dates, at least 30 observations,
+the original percentile formula and NON_MID veto. Missing percentile retains the frozen missing
+semantics. Historical completed-bar labels update only this later-session predictor, never entry.
+Persisting a cohort update removes its in-memory duplicate.
+
+The exact saved MODEL_T0 pipeline is loaded only after verifying artifact bytes. Its 19 input
+columns, nonfinite-to-missing preprocessing, FIT imputer, scaler and logistic model are reused.
+There is no live fit, recalibration, assessment ranking or silent veto bypass.
+
+Only qualified, non-vetoed candidates arm UP=`P0+0.20M`, DOWN=`P0−0.20M`.
+Ordered actual TRADES events choose LONG on the first upper break or SHORT on the first lower break.
+Qualification and Q1 must already be available. If the first break preceded arming, the candidate
+expires. A missing event prefix after disconnect/restart cannot be reconstructed from OHLC.
+Later opposite movement never changes an established side or retrospectively cancels an entry.
+
+The entry window is `[T0, T0+5 minutes)`, including when no new print arrives.
+An untriggered candidate expires as `ENTRY_WINDOW_EXPIRED` at the boundary.
+Entry references the frozen threshold, independently of the actual broker fill:
+
+| Direction | Trigger / entry reference | Method stop | Method target |
+|---|---|---|---|
+| LONG | P0 + 0.20M | reference − 0.50M | reference + 1.00M |
+| SHORT | P0 − 0.20M | reference + 0.50M | reference − 1.00M |
+
+Nominal 1R is 0.50M and the deadline is always original T0+15. A first break at
+T0+3 leaves twelve minutes until that deadline, not fifteen.
+The package emits explicit prices/deadline; account settings cannot replace those exits.
+The old TOP5 filter and pooled historical payoff hurdle are historical-only.
+
+### Prospective Q1 freeze and development reconciliation
+
+The old research definition ranks the complete assessment by ascending MODEL_T0 score, then
+signal_id, and splits equal-count quintiles: Q1 was 225/1,121. It is not a prospective rule.
+
+The separate frozen prospective specification uses only the original FIT score distribution:
+931 candidates, 2025-05-19 through 2025-06-30. NumPy 2.4.6 `numpy.quantile`, float64,
+`q=0.20`, `method="linear"` produces **0.22995371253992852**.
+Admission is `whipsaw_risk_score <= q1_risk_cutoff`; equality is admitted.
+There is no live ranking or signal_id tie-break.
+
+Files under `stocker_core/method_artifacts/session_hard/` preserve the exact model,
+parameters/preprocessing, source research specification and FIT score distribution. The full
+prospective specification SHA-256 is
+`de2c4b3b90e9ecfff44cc7da971b2d9700eb277ece423bab6a4ed8e1fb3b6965`.
+MODEL_T0 SHA-256 is
+`68c0f5ebf4a23744a171e32a32a8b336e8d832013692913ca034f744a88e8bc2`.
+The specification records all other hashes, quantile implementation and inclusive tie policy.
+
+`scripts/freeze_session_hard_q1.py` separates freeze and reconciliation; freeze refuses overwrite.
+No protected stocks or FINAL_TIME_HOLDOUT were inspected. No threshold search or refit occurred.
+
+The development-only reconciliation in `session_hard_q1_reconciliation.json` reports:
+
+| Population / measure | Result |
+|---|---:|
+| FIT admitted | 187/931 (20.0859%) |
+| Assessment admitted | 157/1,121 (14.0054%) |
+| Overlap with old assessment Q1 | 157/225; 68 removed, 0 added |
+| Assessment whipsaw | 17/157 (10.8280%) |
+| Fixed first-break total net R bounds | +10.0743 to +28.0501 |
+| Fixed first-break mean net R bounds | +0.06417 to +0.17866 |
+
+The count change is material: the prospective population is about 30.2% smaller than old Q1.
+The cutoff was not adjusted. Economic bounds use the already frozen pre-tick-overlay outcomes,
+10bps round-trip cost, entry ±0.20M, stop 0.50M, target 1.00M, original T0+15 deadline.
+These are operationalisation evidence, **not untouched validation** or a LIVE promotion.
+
+### Execution and account controls
+
+Shared Stage 7 retains explicit environment/account routing, equity/exposure/position limits,
+permissions, quote/signal freshness, duplicate reservation and reconciliation.
+SHORT additionally requires current sufficient IBKR shortable quantity.
+The protected limit entry and stop/target children mirror LONG and SHORT.
+A broker time-conditioned market child implements the deadline; stop, target and timeout share
+OCA reduction for remaining quantity. Stopping a run stops future entries and does not flatten
+exposure or remove protective orders.
+
+The existing close path is installed with the bracket: the parent-linked TIMEOUT market order
+has an IBKR `TimeCondition(isMore=True)` at the original deadline. It shares OCA type 2 with
+the GTC stop/target, reducing/cancelling remaining siblings as exits fill. It does not depend on
+the application's poll loop or a timer restarted at entry. Its fill records `METHOD_DEADLINE`;
+stop and target fills record `STOP` and `TARGET`. There is no second runtime flatten mechanism.
+Broker acceptance/fills remain authoritative; reconciliation reports missing protection explicitly.
+
+Stage 7 already rounds broker prices to the instrument tick grid (LONG stop up / target down;
+SHORT stop down / target up). This execution rule is unchanged. Exact `method_stop_price` and
+`method_target_price` are now stored alongside these submitted `stop_price` and `target_price`
+values. Neither pair is recentered after a fill. For P0=100, M=1, LONG reference=100.20,
+a fill at 100.23 leaves method stop=99.70 and target=101.20.
+
+The ledger retains `entry_reference` separately from `average_fill_price` (exposed as
+`actual_fill_price`), exit fills and commissions. Diagnostics derive signed entry slippage,
+fill-relative stop distance and reward remaining from those persisted prices. Method-reference R
+is the directional exit-price move from the frozen reference divided by nominal risk; execution R
+is actual realised P/L divided by filled quantity times the same nominal risk. Neither uses a
+fill-redefined 1R. The research 10bps assumption never changes broker prices or actual execution P/L.
+Late commission reports enrich an existing execution without adding quantity or another fill count;
+`commissions_complete` distinguishes final reports from P/L that includes only costs received so far.
+Order/position details expose these diagnostics; trade rows expose execution R and exit reason.
+
+TRADES subscriptions start before T0 and share the existing market-data budget. Unavailable
+capacity is observable per-symbol failure; the method does not invent a different stock filter.
+Consumed/expired streams are released, including before quote/borrow admission where possible.
+Broker disconnect protection and exact account verification remain shared boundaries.
+
+## Runs, persistence and recovery
+
+### Data capacity and incremental checkpoint processing
+
+IBKR tick-by-tick streams use a separate local budget of 5% of Stocker's quote-line
+budget (minimum one); this is not a measurement of available account-wide entitlement.
+See [IBKR's tick-by-tick limit](https://www.interactivebrokers.com/docs/tws-api/doc/market-data-live/tick-by-tick-data/request-tick-by-tick-data).
+Error 10190 is recorded as a capacity failure and invalidates the rejected stream's
+causal prefix. A failed stream cannot be interpreted as a valid but quiet market.
+Capacity failures remain visible in the overview, including how many stocks lacked
+a feed at the latest preparation checkpoint. No stock-suitability filter, model,
+entry threshold, account budget or execution geometry is changed.
+
+Session HARD opts into incremental checkpoints at its existing composition seam.
+Four-stock batches fetch inputs and build context outside the scheduler lock, then
+check current run ownership/readiness and the original T0+5 deadline before recording
+decisions under that lock. Results are published as batches finish; reconciliation,
+entry observation and run controls continue during pending downloads. Disabling all
+owners cancels shared work; shutdown cancels all checkpoint work. A timeout retains
+completed results, marks the checkpoint incomplete and never evaluates late inputs.
+One completed-checkpoint counter is recorded for the entire job, not for every batch.
+Historical data remains IBKR-only with unchanged exact timestamps and calculations.
+
+The dashboard reports evaluated/total stock progress, unfinished preparation and
+capacity failures. Stock eligibility means broker-qualified identities, independently
+of saved checkpoint rows. An operational ATTENTION label does not change engine or
+broker execution state. Thousands of simultaneous tick feeds remain beyond a
+100-line configuration: these fixes expose that constraint rather than silently
+redefining the method's universe or promising complete market coverage.
+
+Validation: 866 Python tests passed, including failed-subscription invalidation,
+incremental progress during stalled history, responsive disable/shutdown, exact
+deadline cancellation, and once-only checkpoint completion. Execution/dashboard mypy
+and changed-file Ruff checks passed. All order assertions used fake brokers.
+
+A saved run contains run_id, market, method identity/version/spec/hash, method-generated search
+configuration and universe snapshot, environment, account risk configuration and session window.
+SQLite `method_runs` records start/update times, status and stop reason; configuration revisions
+retain risk/capacity edits. The audit view includes source/mode, universe count, candidate,
+screened/qualified/vetoed/armed/triggered counts, sessions, errors and active/completed plan IDs.
+Candidate count counts recorded opportunities; universe count counts saved listing members.
+
+Signals retain inputs, risk score, Q1 result, armed time, first-break side, event cursor,
+absolute exits, deadline and run/method/artifact provenance. Checkpoints are reserved durably.
+Reload restores candidate and cohort state; it never replays a missed live first break.
+The execution ledger reserves a unique signal before transmission, stores fills once and
+reconciles broker-authoritative orders/positions on every connection epoch.
+
+ARMED recovery restores P0/M, both triggers, arming time, event cursor and window. A missing
+TRADES prefix expires explicitly rather than inferring which threshold broke during downtime.
+A saved first break retains its side, time, threshold reference, absolute geometry and deadline;
+later opposite prints cannot modify it. Pending/open execution recovers persisted broker leg IDs,
+including TIMEOUT, actual fills and the original deadline. Reservation prevents resubmission;
+reconciliation ingests a deadline exit that occurred while disconnected without extending the clock.
+
+The September 2026 exit audit found existing causal first-break and fill-independent geometry
+correct. It corrected no-print expiry at exactly T0+5, recognition of TIMEOUT/closed-order callbacks,
+missing timeout identity during recovery, and missing exit/commission/R diagnostics.
+The execution diagnostics migration adds nullable
+method-price, exit-reason and commission fields plus a completeness flag; existing rows are kept,
+and unknown historical method prices remain unknown. No model, Q1 cutoff, capacity rule or shared
+account protection was changed. Focused tests use in-memory broker clients and temporary SQLite
+files; they verify the emitted timed-close contract without placing venue orders.
+
+### Exit audit verification and deployment (140e50b)
+
+Before the audit, the current method already selected the first causal break, froze threshold-based
+brackets independently of fills, and submitted the original T0+15 timed close. The mismatches were:
+no-print expiry strictly after T0+5 → expiry at T0+5; TIMEOUT/closed-order callbacks treated as
+unexpected → resolved through persisted broker identities; absent timeout identity tolerated during
+recovery → explicit reconciliation failure; ignored late commissions and blank trade R/exit reason
+→ idempotent commission enrichment and actual execution reporting. Existing broker tick rounding,
+Q1 admission, account capacity, permissions, exposure and connectivity controls were retained.
+
+Changed implementation files, relative to their package's `src` directory:
+
+| File / function | Purpose |
+|---|---|
+| `stocker_execution/session_hard_method.py::expire_waiting_before` | Exact half-open window expiry without a new print. |
+| `stocker_execution/execution_models.py::OrderPlan` | Preserve exact method prices alongside broker prices. |
+| `stocker_execution/stage7.py::build_order_plan`, `reconcile` | Carry method prices; detect missing deadline identity on recovery. |
+| `stocker_execution/execution_ledger.py::ExecutionRecord`, `record_fill`, `_refresh_aggregate`, `record_for_order` | Additive persistence, reference/fill/R diagnostics, exit reasons, late commissions and all-leg lookup. |
+| `stocker_execution/runtime.py::record_fill` | Recognize deadline and settled-order callbacks without duplicate fill counts. |
+| `stocker_execution/ibkr.py::read_fills` | Distinguish a missing commission report from a reported zero commission. |
+| `stocker_dashboard/read_service.py::_order`, `_trade`, `_position_row` | Expose method provenance and execution diagnostics; populate trade R/exit reason. |
+| `stocker_dashboard/static/dashboard.js::executionDetails` | Expandable method/fill diagnostics in order and position details. |
+| `tests/test_session_hard_exit_contract.py` | 24 geometry, fill independence, deadline, causality, migration, recovery and reporting cases. |
+| `tests/test_stage7_ibkr.py`, `tests/test_stage8_runtime.py` | Commission-report availability and deadline/late-commission callback regressions. |
+| `docs/ARCHITECTURE.md` | Verified contract, recovery behavior and this audit record. |
+
+Validation: `rtk .venv/bin/pytest -q` passed 852 tests with five existing warnings. The subsequently
+added missing-deadline recovery case passed in the final 24-case focused suite. On the staged Linux
+release, `pytest -o addopts= -q tests/test_session_hard_exit_contract.py tests/test_method_package.py
+tests/test_stage7_ibkr.py tests/test_stage8_runtime.py` passed 118 tests. Ruff passed for changed
+Python files; mypy passed all 42 core/execution/dashboard source files. JavaScript syntax and a
+mocked-browser check of the expandable diagnostics passed. All order tests terminated at fakes.
+
+Release `140e50b551033feae9d8dc29e2310ef0419c2d96` reached READY at 13:28 UTC on 2026-09-08,
+before the US open, with 6,570 qualified US instruments. Deployment verified the saved US/LSE/ASX
+runs and configuration unchanged, all frozen artifact bytes unchanged, the additive migration,
+one existing execution plan, 28 fills and one historical trade retained, and no open orders or
+positions. Backup: `/var/lib/stocker/backups/exit-contract-140e50b` on the server.
+No broker orders were placed by implementation/testing. LIVE remains disabled for this method.
+Venue execution of the timed order was not tested with a real order; only its emitted broker
+contract and fake-broker lifecycle were verified. The existing LSE/ASX runs had missed their
+local capture windows and remain unvalidated cross-market PAPER tests, as described above.
+
+Migration is additive: new method tables and nullable execution provenance/deadline/timeout
+columns; old rows and research artifacts are retained. Old signals deserialize with absent new
+fields. Legacy configuration enums and old calculation/payoff/scanner sources remain solely to
+read history and reproduce research. Saved V7 runs remain runnable with their original specifications;
+new run creation selects V9. Earlier archived method versions remain read-only.
+There is no destructive reset or conversion of old decisions into the new method.
+
+Retired runs can be marked `archived: true` with `enabled: false`. They disappear from operational
+run lists while remaining available to historical trades, orders and candidate details. Archived
+runs cannot be enabled; archiving never deletes ledger rows or changes broker orders.
+
+The FastAPI/vanilla-JS dashboard is a consumer/controller of these boundaries. Market, Method
+and Start PAPER run are primary. Account risk/capacity and detailed method provenance are
+expandable. Standalone dashboard mode edits saved configuration but does not connect or trade.
+Dashboard failures do not stop execution.

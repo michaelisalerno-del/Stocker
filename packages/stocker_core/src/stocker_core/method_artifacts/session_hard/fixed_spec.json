@@ -1,0 +1,99 @@
+{
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "target": {
+    "positive": "TWO_SIDED_WHIPSAW",
+    "negative": "CLEAN_ONE_SIDED",
+    "definition": "Scan exact one-minute bars T0 through T0+4. Stop at first bar reaching either frozen P0\u00b10.20M threshold. Both touched in that bar => TWO_SIDED_WHIPSAW; exactly one touched => CLEAN_ONE_SIDED. No threshold and missing OHLC prefix are separate, not classifier labels. First-side ordering is unnecessary.",
+    "target_only_fields": [
+      "event-minute completed high",
+      "event-minute completed low"
+    ],
+    "missing": "Any missing OHLC in required prefix up to first event => MISSING_PATH; complete five-minute prefix with neither => NO_THRESHOLD"
+  },
+  "t0_predictors": [
+    "score",
+    "PRE_MOVE_M",
+    "cohort_percentile",
+    "M_over_P0_bps",
+    "hv",
+    "typical_vwap_distance",
+    "return_3m",
+    "session_open_distance",
+    "completed_5m_body",
+    "recent_vs_earlier_range_ratio",
+    "current_bar_range_vs_prior_6",
+    "current_volume_vs_session_mean",
+    "current_volume_vs_prior6_mean",
+    "last3_vs_first3_volume",
+    "range_effort",
+    "travel_effort",
+    "absolute_efficiency",
+    "close_retention",
+    "directional_persistence"
+  ],
+  "first_break_predictors": {
+    "first_event_minute": "Categorical 0/1/2/3/4, known at the event; one-hot categories fixed, drop0 reference",
+    "opening_event": "1 if first event is current bar opening print at/beyond either threshold, otherwise0. Uses only that opening print; no first-side or later extrema."
+  },
+  "omissions": {
+    "last_completed_5m_range": "No separate frozen field; retain existing current_bar_range_vs_prior_6 without expanding library",
+    "exact_elapsed_seconds": "Unavailable for all candidates; do not mix tick availability into predictor",
+    "event_previous_close_displacement": "Would require first direction for unresolved bars; omitted",
+    "event_vwap_and_volume": "No uniformly proven event-time cache; omitted",
+    "entry_distance": "Constant0.20M, not informative"
+  },
+  "natural_splits": [
+    "existing NEGATIVE/NONNEGATIVE/MISSING states for typical_vwap_distance,return_3m,session_open_distance,completed_5m_body",
+    "existing prior percentile band state LOW/HIGH/MISSING",
+    "first_event_minute categorical",
+    "opening_event binary"
+  ],
+  "split": {
+    "fit": "existing development sessions <2025-07-01 (May/June)",
+    "assessment": "existing development sessions >=2025-07-01 (July/August), ending original2025-08-15",
+    "random_row_split": false,
+    "stock_overlap": "report explicitly",
+    "no_holdout_access": true
+  },
+  "models": [
+    "MODEL_T0",
+    "MODEL_FIRST_BREAK"
+  ],
+  "preprocessing": "Median imputation fit on fit partition only, with missing indicators learned on fit; keep_empty_features=True; standardisation fitted on fit only. Categorical event-minute one-hot fixed categories0..4 dropping0. No feature selection or interactions.",
+  "logistic": {
+    "C": 0.1,
+    "solver": "lbfgs",
+    "max_iter": 500,
+    "random_state": 20260907,
+    "class_weight": null
+  },
+  "univariate": "Raw numeric values: clean/whipsaw means, standardized mean difference=(mean_whip-mean_clean)/sqrt((var_whip+var_clean)/2), raw-value ROC AUC. No optimized cutoff or orientation. Report fit/assessment/all separately. Natural state counts/rates use existing frozen splits.",
+  "assessment_metrics": [
+    "ROC_AUC",
+    "PR_AUC_average_precision",
+    "Brier",
+    "training-prevalence constant null Brier",
+    "fixed risk quintiles with observed rates and mean predicted probabilities",
+    "month-specific results using same global assessment bucket assignment"
+  ],
+  "quintiles": "Rank assessment predictions ascending, deterministic signal_id tie-break, split into five equal-count groups before inspecting assessment labels. Diagnostic buckets only. Bootstrap preserves original score and bucket memberships. Other population percentiles/buckets reference the assessment score distribution and are labelled FIT or ASSESSMENT.",
+  "bootstrap": {
+    "resamples": 3000,
+    "seed": 20260907,
+    "unit": "symbol",
+    "endpoint": "highest-quintile minus lowest-quintile whipsaw-rate difference, percentage points"
+  },
+  "permutation": {
+    "n_repeats": 20,
+    "seed": 20260907,
+    "scoring": "assessment ROC_AUC drop",
+    "refit": false
+  },
+  "payoff_overlay": "Only after model parameters, predictions, target metrics and quintile memberships are saved and hashed, join the existing cached first-break continuation ledger. No outcome refit. Report coverage and missing-order bias per bucket; no threshold selection.",
+  "scope": "All2060 frozen T0_CAUSAL_NON_MID; no direction prediction, cap/TOP5/hurdle/return/unknown-status filtering, parameter or model-family search. No new data.",
+  "decision_guidance": "Use chronological assessment ranking breadth and July/August stability; strict monotonicity, AUC, calibration, effect interval and payoff coverage reported without selecting a trading threshold. Existing development exposure remains explicit.",
+  "frozen_utc": "2026-09-07T22:44:29.773967+00:00",
+  "predictor_sha256": "2c74f5583d819c1268eb3412a5629512e7ff57c5097aebfe57b6ff5c64b544de"
+}

@@ -1,0 +1,725 @@
+"""Versioned, causal IBKR activity shortlist and immutable session storage."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
+from enum import StrEnum
+from pathlib import Path
+from typing import Protocol
+
+from stocker_core.markets import (
+    LEGACY_ACTIVITY_COMPONENTS,
+    ActivityScanner,
+    CapBucket,
+    MarketDefinition,
+)
+from stocker_core.runs import (
+    ACTIVITY_SHORTLIST_V1_ID,
+    ACTIVITY_SHORTLIST_V1_VERSION,
+    ACTIVITY_SHORTLIST_V1_WATCH_LIMIT,
+)
+
+ACTIVITY_SHORTLIST_ID = ACTIVITY_SHORTLIST_V1_ID
+ACTIVITY_SHORTLIST_VERSION = ACTIVITY_SHORTLIST_V1_VERSION
+ACTIVITY_SHORTLIST_WATCH_LIMIT = ACTIVITY_SHORTLIST_V1_WATCH_LIMIT
+ACTIVITY_SHORTLIST_COMPONENT_LIMIT = 50
+ACTIVITY_SHORTLIST_CAPTURE_WINDOW = timedelta(minutes=1)
+
+
+class ActivityShortlistStatus(StrEnum):
+    READY = "READY"
+    SCHEDULED = "SCHEDULED"
+    MISSED = "SCREEN_MISSED"
+    NOT_AVAILABLE = "ACTIVITY_SHORTLIST_NOT_AVAILABLE"
+    CAP_FILTER_UNAVAILABLE = "CAP_FILTER_UNAVAILABLE"
+    SCANNER_NOT_AVAILABLE = "SCANNER_NOT_AVAILABLE"
+    DATA_NOT_ENTITLED = "DATA_NOT_ENTITLED"
+    BROKER_NOT_CONNECTED = "BROKER_NOT_CONNECTED"
+
+
+@dataclass(frozen=True, slots=True)
+class ScannerCandidate:
+    component: ActivityScanner
+    rank: int
+    symbol: str
+    con_id: int | None
+    exchange: str
+    primary_exchange: str | None
+    currency: str
+    warning: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ActivityCandidate:
+    symbol: str
+    con_id: int | None
+    exchange: str
+    primary_exchange: str | None
+    currency: str
+    top_trade_rate_rank: int | None
+    top_volume_rate_rank: int | None
+    hot_by_volume_rank: int | None
+    scan_hit_count: int
+    best_component_rank: int
+    aggregate_screen_score: float
+    final_shortlist_rank: int | None
+    selected: bool
+    most_active_avg_usd_rank: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ActivityShortlistSnapshot:
+    market_id: str
+    cap_bucket: CapBucket
+    cap_bucket_version: str
+    session: date
+    screen_timestamp: datetime
+    profile_id: str
+    profile_version: str
+    status: ActivityShortlistStatus
+    components: tuple[ActivityScanner, ...]
+    candidates: tuple[ActivityCandidate, ...]
+    reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ScannerCapabilities:
+    locations: frozenset[str]
+    scan_codes: frozenset[str]
+    filters: frozenset[str]
+    location_scan_codes: Mapping[str, frozenset[str]] | None = None
+    location_filters: Mapping[str, frozenset[str]] | None = None
+    location_instruments: Mapping[str, frozenset[str]] | None = None
+
+    retrieved_at: str | None = None
+    server_version: str | None = None
+    raw_xml: str | None = None
+    scan_descriptions: Mapping[str, str] | None = None
+
+    def scan_codes_for(self, location: str) -> frozenset[str]:
+        if self.location_scan_codes and location in self.location_scan_codes:
+            return self.location_scan_codes[location]
+        return self.scan_codes
+
+    def filters_for(self, location: str) -> frozenset[str]:
+        if self.location_filters and location in self.location_filters:
+            return self.location_filters[location]
+        return self.filters
+
+    def supports_instrument(self, location: str, instrument: str) -> bool:
+        if not self.location_instruments or location not in self.location_instruments:
+            return True
+        return instrument in self.location_instruments[location]
+
+
+class ActivityScannerBoundary(Protocol):
+    async def scanner_capabilities(self) -> ScannerCapabilities: ...
+
+    async def activity_scan(
+        self,
+        *,
+        market: MarketDefinition,
+        cap_bucket: CapBucket,
+        component: ActivityScanner,
+        max_results: int = 50,
+        stock_type_filter: str = "",
+    ) -> tuple[ScannerCandidate, ...]: ...
+
+
+def rank_activity_candidates(
+    component_rows: Mapping[ActivityScanner, Sequence[ScannerCandidate]],
+    *,
+    watch_limit: int = ACTIVITY_SHORTLIST_WATCH_LIMIT,
+) -> tuple[ActivityCandidate, ...]:
+    """Merge scanner components using the frozen equal-weight deterministic V1 rule."""
+
+    if not 1 <= watch_limit <= ACTIVITY_SHORTLIST_WATCH_LIMIT:
+        raise ValueError("Activity Shortlist V1 watch limit must be between 1 and 50")
+    if len(component_rows) < 2:
+        raise ValueError("ACTIVITY_SHORTLIST_NOT_AVAILABLE")
+    rows_by_symbol: dict[str, list[ScannerCandidate]] = {}
+    for component in ActivityScanner:
+        for row in component_rows.get(component, ())[:ACTIVITY_SHORTLIST_COMPONENT_LIMIT]:
+            if row.component is not component or not 1 <= row.rank <= 50:
+                continue
+            symbol = row.symbol.strip().upper()
+            if not symbol:
+                continue
+            rows_by_symbol.setdefault(symbol, []).append(row)
+    grouped: dict[tuple[str, int | None], dict[ActivityScanner, ScannerCandidate]] = {}
+    for symbol, rows in rows_by_symbol.items():
+        con_ids = {row.con_id for row in rows if row.con_id is not None}
+        for row in rows:
+            resolved_con_id = row.con_id
+            if resolved_con_id is None and len(con_ids) == 1:
+                resolved_con_id = next(iter(con_ids))
+            key = (symbol, resolved_con_id)
+            current = grouped.setdefault(key, {})
+            previous = current.get(row.component)
+            if previous is None or row.rank < previous.rank:
+                current[row.component] = row
+
+    scored: list[
+        tuple[tuple[object, ...], tuple[str, int | None], dict[ActivityScanner, ScannerCandidate]]
+    ] = []
+    for key, hits in grouped.items():
+        component_ranks = tuple(item.rank for item in hits.values())
+        aggregate = sum((51 - rank) / 50 for rank in component_ranks)
+        scored.append(
+            (
+                (-len(hits), -aggregate, min(component_ranks), key[0], key[1] or 0),
+                key,
+                hits,
+            )
+        )
+    scored.sort(key=lambda item: item[0])
+
+    results: list[ActivityCandidate] = []
+    for index, (_order, (symbol, con_id), hits) in enumerate(scored, start=1):
+        exemplar = min(hits.values(), key=lambda item: (item.rank, item.component.value))
+        rank_by_component = {component: item.rank for component, item in hits.items()}
+        selected = index <= watch_limit
+        results.append(
+            ActivityCandidate(
+                symbol=symbol,
+                con_id=con_id,
+                exchange=exemplar.exchange,
+                primary_exchange=exemplar.primary_exchange,
+                currency=exemplar.currency,
+                top_trade_rate_rank=rank_by_component.get(ActivityScanner.TOP_TRADE_RATE),
+                top_volume_rate_rank=rank_by_component.get(ActivityScanner.TOP_VOLUME_RATE),
+                hot_by_volume_rank=rank_by_component.get(ActivityScanner.HOT_BY_VOLUME),
+                scan_hit_count=len(hits),
+                best_component_rank=min(rank_by_component.values()),
+                aggregate_screen_score=sum((51 - rank) / 50 for rank in rank_by_component.values()),
+                final_shortlist_rank=index if selected else None,
+                selected=selected,
+                most_active_avg_usd_rank=rank_by_component.get(ActivityScanner.MOST_ACTIVE_AVG_USD),
+            )
+        )
+    return tuple(results)
+
+
+class ActivityShortlistStore:
+    """Persist exactly one immutable activity population per generic market/session key."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as connection:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS activity_shortlist_snapshots (
+                    market_id TEXT NOT NULL,
+                    cap_bucket TEXT NOT NULL,
+                    cap_bucket_version TEXT NOT NULL,
+                    session TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    profile_version TEXT NOT NULL,
+                    screen_timestamp TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    components_json TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    PRIMARY KEY (
+                        market_id, cap_bucket, cap_bucket_version, session,
+                        profile_id, profile_version
+                    )
+                );
+                CREATE TABLE IF NOT EXISTS activity_shortlist_candidates (
+                    market_id TEXT NOT NULL,
+                    cap_bucket TEXT NOT NULL,
+                    cap_bucket_version TEXT NOT NULL,
+                    session TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    profile_version TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    con_id INTEGER,
+                    exchange TEXT NOT NULL,
+                    primary_exchange TEXT,
+                    currency TEXT NOT NULL,
+                    top_trade_rate_rank INTEGER,
+                    top_volume_rate_rank INTEGER,
+                    hot_by_volume_rank INTEGER,
+                    scan_hit_count INTEGER NOT NULL,
+                    best_component_rank INTEGER NOT NULL,
+                    aggregate_screen_score REAL NOT NULL,
+                    final_shortlist_rank INTEGER,
+                    selected INTEGER NOT NULL,
+                    PRIMARY KEY (
+                        market_id, cap_bucket, cap_bucket_version, session,
+                        profile_id, profile_version, symbol, con_id
+                    )
+                );
+                """
+            )
+
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(activity_shortlist_candidates)")
+            }
+            if "most_active_avg_usd_rank" not in columns:
+                connection.execute(
+                    "ALTER TABLE activity_shortlist_candidates "
+                    "ADD COLUMN most_active_avg_usd_rank INTEGER"
+                )
+
+    def get(
+        self,
+        market_id: str,
+        cap_bucket: CapBucket,
+        session: date,
+        *,
+        cap_bucket_version: str = "CAP_BUCKETS_V1",
+        profile_id: str = ACTIVITY_SHORTLIST_ID,
+        profile_version: str = ACTIVITY_SHORTLIST_VERSION,
+    ) -> ActivityShortlistSnapshot | None:
+        key = (
+            market_id,
+            cap_bucket.value,
+            cap_bucket_version,
+            session.isoformat(),
+            profile_id,
+            profile_version,
+        )
+        with self._connect() as connection:
+            return self._snapshot_for_key(connection, key)
+
+    @classmethod
+    def latest_read_only(
+        cls,
+        path: str | Path,
+        *,
+        market_id: str,
+        cap_bucket: CapBucket,
+        cap_bucket_version: str = "CAP_BUCKETS_V1",
+        profile_id: str = ACTIVITY_SHORTLIST_ID,
+        profile_version: str = ACTIVITY_SHORTLIST_VERSION,
+    ) -> ActivityShortlistSnapshot | None:
+        """Read the latest frozen screen without creating or changing its database."""
+
+        database = Path(path)
+        if not database.is_file():
+            return None
+        store = cls.__new__(cls)
+        store.path = database
+        try:
+            with store._connect(read_only=True) as connection:
+                row = connection.execute(
+                    """
+                    SELECT session
+                    FROM activity_shortlist_snapshots
+                    WHERE market_id = ? AND cap_bucket = ? AND cap_bucket_version = ?
+                      AND profile_id = ? AND profile_version = ?
+                    ORDER BY session DESC
+                    LIMIT 1
+                    """,
+                    (
+                        market_id,
+                        cap_bucket.value,
+                        cap_bucket_version,
+                        profile_id,
+                        profile_version,
+                    ),
+                ).fetchone()
+                if row is None:
+                    return None
+                key = (
+                    market_id,
+                    cap_bucket.value,
+                    cap_bucket_version,
+                    str(row["session"]),
+                    profile_id,
+                    profile_version,
+                )
+                return store._snapshot_for_key(connection, key)
+        except sqlite3.Error:
+            return None
+
+    def _snapshot_for_key(
+        self,
+        connection: sqlite3.Connection,
+        key: tuple[str, str, str, str, str, str],
+    ) -> ActivityShortlistSnapshot | None:
+        row = connection.execute(
+            """
+            SELECT * FROM activity_shortlist_snapshots
+            WHERE market_id = ? AND cap_bucket = ? AND cap_bucket_version = ?
+              AND session = ? AND profile_id = ? AND profile_version = ?
+            """,
+            key,
+        ).fetchone()
+        if row is None:
+            return None
+        candidate_rows = connection.execute(
+            """
+            SELECT * FROM activity_shortlist_candidates
+            WHERE market_id = ? AND cap_bucket = ? AND cap_bucket_version = ?
+              AND session = ? AND profile_id = ? AND profile_version = ?
+            ORDER BY selected DESC, COALESCE(final_shortlist_rank, 999999), symbol, con_id
+            """,
+            key,
+        ).fetchall()
+        return ActivityShortlistSnapshot(
+            market_id=str(row["market_id"]),
+            cap_bucket=CapBucket(str(row["cap_bucket"])),
+            cap_bucket_version=str(row["cap_bucket_version"]),
+            session=date.fromisoformat(str(row["session"])),
+            screen_timestamp=datetime.fromisoformat(str(row["screen_timestamp"])),
+            profile_id=str(row["profile_id"]),
+            profile_version=str(row["profile_version"]),
+            status=ActivityShortlistStatus(str(row["status"])),
+            components=tuple(ActivityScanner(item) for item in json.loads(row["components_json"])),
+            candidates=tuple(self._candidate(item) for item in candidate_rows),
+            reason=str(row["reason"]),
+        )
+
+    def save_once(self, snapshot: ActivityShortlistSnapshot) -> ActivityShortlistSnapshot:
+        existing = self.get(
+            snapshot.market_id,
+            snapshot.cap_bucket,
+            snapshot.session,
+            cap_bucket_version=snapshot.cap_bucket_version,
+            profile_id=snapshot.profile_id,
+            profile_version=snapshot.profile_version,
+        )
+        if existing is not None:
+            return existing
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            inserted = connection.execute(
+                """
+                INSERT OR IGNORE INTO activity_shortlist_snapshots (
+                    market_id, cap_bucket, cap_bucket_version, session, profile_id,
+                    profile_version, screen_timestamp, status, components_json, reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    snapshot.market_id,
+                    snapshot.cap_bucket.value,
+                    snapshot.cap_bucket_version,
+                    snapshot.session.isoformat(),
+                    snapshot.profile_id,
+                    snapshot.profile_version,
+                    snapshot.screen_timestamp.astimezone(UTC).isoformat(timespec="microseconds"),
+                    snapshot.status.value,
+                    json.dumps([item.value for item in snapshot.components]),
+                    snapshot.reason,
+                ),
+            )
+            if inserted.rowcount:
+                for item in snapshot.candidates:
+                    connection.execute(
+                        """
+                    INSERT OR IGNORE INTO activity_shortlist_candidates (
+                        market_id, cap_bucket, cap_bucket_version, session, profile_id,
+                        profile_version, symbol, con_id, exchange, primary_exchange, currency,
+                        top_trade_rate_rank, top_volume_rate_rank, hot_by_volume_rank,
+                        scan_hit_count, best_component_rank, aggregate_screen_score,
+                        final_shortlist_rank, selected, most_active_avg_usd_rank
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
+                    """,
+                        (
+                            snapshot.market_id,
+                            snapshot.cap_bucket.value,
+                            snapshot.cap_bucket_version,
+                            snapshot.session.isoformat(),
+                            snapshot.profile_id,
+                            snapshot.profile_version,
+                            item.symbol,
+                            item.con_id,
+                            item.exchange,
+                            item.primary_exchange,
+                            item.currency,
+                            item.top_trade_rate_rank,
+                            item.top_volume_rate_rank,
+                            item.hot_by_volume_rank,
+                            item.scan_hit_count,
+                            item.best_component_rank,
+                            item.aggregate_screen_score,
+                            item.final_shortlist_rank,
+                            int(item.selected),
+                            item.most_active_avg_usd_rank,
+                        ),
+                    )
+        return (
+            self.get(
+                snapshot.market_id,
+                snapshot.cap_bucket,
+                snapshot.session,
+                cap_bucket_version=snapshot.cap_bucket_version,
+                profile_id=snapshot.profile_id,
+                profile_version=snapshot.profile_version,
+            )
+            or snapshot
+        )
+
+    @staticmethod
+    def _candidate(row: sqlite3.Row) -> ActivityCandidate:
+        return ActivityCandidate(
+            symbol=str(row["symbol"]),
+            con_id=int(row["con_id"]) if row["con_id"] is not None else None,
+            exchange=str(row["exchange"]),
+            primary_exchange=(str(row["primary_exchange"]) if row["primary_exchange"] else None),
+            currency=str(row["currency"]),
+            top_trade_rate_rank=(
+                int(row["top_trade_rate_rank"]) if row["top_trade_rate_rank"] is not None else None
+            ),
+            top_volume_rate_rank=(
+                int(row["top_volume_rate_rank"])
+                if row["top_volume_rate_rank"] is not None
+                else None
+            ),
+            hot_by_volume_rank=(
+                int(row["hot_by_volume_rank"]) if row["hot_by_volume_rank"] is not None else None
+            ),
+            scan_hit_count=int(row["scan_hit_count"]),
+            best_component_rank=int(row["best_component_rank"]),
+            aggregate_screen_score=float(row["aggregate_screen_score"]),
+            final_shortlist_rank=(
+                int(row["final_shortlist_rank"])
+                if row["final_shortlist_rank"] is not None
+                else None
+            ),
+            selected=bool(row["selected"]),
+            most_active_avg_usd_rank=(
+                int(row["most_active_avg_usd_rank"])
+                if "most_active_avg_usd_rank" in row.keys()  # noqa: SIM118 (sqlite3.Row keys)
+                and row["most_active_avg_usd_rank"] is not None
+                else None
+            ),
+        )
+
+    def _connect(self, *, read_only: bool = False) -> sqlite3.Connection:
+        connection = (
+            sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True)
+            if read_only
+            else sqlite3.connect(self.path)
+        )
+        connection.row_factory = sqlite3.Row
+        return connection
+
+
+class ActivityShortlistService:
+    def __init__(
+        self,
+        store: ActivityShortlistStore,
+        *,
+        profile_id: str = ACTIVITY_SHORTLIST_ID,
+        watch_limit: int = ACTIVITY_SHORTLIST_WATCH_LIMIT,
+        profile_version: str | None = None,
+        allow_late_capture: bool = False,
+        components: tuple[ActivityScanner, ...] = LEGACY_ACTIVITY_COMPONENTS,
+        stock_type_filter: str = "",
+    ) -> None:
+        self.store = store
+        self.profile_id = profile_id
+        self.profile_version = profile_version or profile_id
+        self.watch_limit = watch_limit
+        self.allow_late_capture = allow_late_capture
+        self.components = components
+        self.stock_type_filter = stock_type_filter
+
+    async def get_or_create(
+        self,
+        broker: ActivityScannerBoundary,
+        *,
+        market: MarketDefinition,
+        cap_bucket: CapBucket,
+        session: date,
+        screen_at: datetime,
+        now: datetime,
+        allowed_symbols: frozenset[str] | None = None,
+    ) -> ActivityShortlistSnapshot:
+        existing = self.store.get(
+            market.market_id.value,
+            cap_bucket,
+            session,
+            profile_id=self.profile_id,
+            profile_version=self.profile_version,
+        )
+        if existing is not None:
+            return existing
+        if now < screen_at:
+            return self._status(
+                market, cap_bucket, session, screen_at, ActivityShortlistStatus.SCHEDULED
+            )
+        if self.allow_late_capture:
+            screen_at = now
+        if not self.allow_late_capture and now >= screen_at + ACTIVITY_SHORTLIST_CAPTURE_WINDOW:
+            return self.store.save_once(
+                self._status(
+                    market,
+                    cap_bucket,
+                    session,
+                    screen_at,
+                    ActivityShortlistStatus.MISSED,
+                    "SCREEN_MISSED",
+                )
+            )
+        try:
+            capabilities = await broker.scanner_capabilities()
+        except Exception:
+            return self.store.save_once(
+                self._status(
+                    market,
+                    cap_bucket,
+                    session,
+                    screen_at,
+                    ActivityShortlistStatus.BROKER_NOT_CONNECTED,
+                    "BROKER_NOT_CONNECTED",
+                )
+            )
+        if market.scanner_location not in capabilities.locations:
+            return self.store.save_once(
+                self._status(
+                    market,
+                    cap_bucket,
+                    session,
+                    screen_at,
+                    ActivityShortlistStatus.SCANNER_NOT_AVAILABLE,
+                    "SCANNER_NOT_AVAILABLE",
+                )
+            )
+        if cap_bucket is not CapBucket.ALL and not _supports_cap_bucket(
+            capabilities.filters_for(market.scanner_location), cap_bucket
+        ):
+            return self.store.save_once(
+                self._status(
+                    market,
+                    cap_bucket,
+                    session,
+                    screen_at,
+                    ActivityShortlistStatus.CAP_FILTER_UNAVAILABLE,
+                    "CAP_FILTER_UNAVAILABLE",
+                )
+            )
+        components = tuple(
+            item
+            for item in self.components
+            if item.value in capabilities.scan_codes_for(market.scanner_location)
+        )
+        if len(components) < 2:
+            return self.store.save_once(
+                self._status(
+                    market,
+                    cap_bucket,
+                    session,
+                    screen_at,
+                    ActivityShortlistStatus.NOT_AVAILABLE,
+                    "ACTIVITY_SHORTLIST_NOT_AVAILABLE",
+                    components=components,
+                )
+            )
+        rows: dict[ActivityScanner, tuple[ScannerCandidate, ...]] = {}
+        warnings: list[str] = []
+        entitlement_failure = False
+        cap_filter_failure = False
+        for component in components:
+            try:
+                stock_options = (
+                    {"stock_type_filter": self.stock_type_filter} if self.stock_type_filter else {}
+                )
+                scanned = await broker.activity_scan(
+                    market=market,
+                    cap_bucket=cap_bucket,
+                    component=component,
+                    max_results=ACTIVITY_SHORTLIST_COMPONENT_LIMIT,
+                    **stock_options,
+                )
+            except Exception as exc:
+                text = str(exc).lower()
+                entitled = any(
+                    word in text for word in ("entitle", "subscription", "market data permission")
+                )
+                cap_rejected = cap_bucket is not CapBucket.ALL and (
+                    "cap_filter_unavailable" in text
+                    or ("market" in text and "cap" in text)
+                    or "filter" in text
+                )
+                status = ActivityShortlistStatus.SCANNER_NOT_AVAILABLE
+                if cap_rejected:
+                    status = ActivityShortlistStatus.CAP_FILTER_UNAVAILABLE
+                    cap_filter_failure = True
+                elif entitled:
+                    status = ActivityShortlistStatus.DATA_NOT_ENTITLED
+                if status is ActivityShortlistStatus.DATA_NOT_ENTITLED:
+                    entitlement_failure = True
+                warnings.append(f"{component.value}: {status.value}")
+                continue
+            warnings.extend(f"{component.value}: {row.warning}" for row in scanned if row.warning)
+            if allowed_symbols is not None:
+                scanned = tuple(item for item in scanned if item.symbol in allowed_symbols)
+            rows[component] = scanned
+        used_components = tuple(rows)
+        if len(used_components) < 2:
+            status = (
+                ActivityShortlistStatus.CAP_FILTER_UNAVAILABLE
+                if cap_filter_failure
+                else ActivityShortlistStatus.DATA_NOT_ENTITLED
+                if entitlement_failure
+                else ActivityShortlistStatus.NOT_AVAILABLE
+            )
+            return self.store.save_once(
+                self._status(
+                    market,
+                    cap_bucket,
+                    session,
+                    screen_at,
+                    status,
+                    status.value,
+                    components=used_components,
+                )
+            )
+        snapshot = ActivityShortlistSnapshot(
+            market_id=market.market_id.value,
+            cap_bucket=cap_bucket,
+            cap_bucket_version="CAP_BUCKETS_V1",
+            session=session,
+            screen_timestamp=screen_at.astimezone(UTC),
+            profile_id=self.profile_id,
+            profile_version=self.profile_version,
+            status=ActivityShortlistStatus.READY,
+            components=used_components,
+            candidates=rank_activity_candidates(rows, watch_limit=self.watch_limit),
+            reason="; ".join(dict.fromkeys(warnings)),
+        )
+        return self.store.save_once(snapshot)
+
+    def _status(
+        self,
+        market: MarketDefinition,
+        cap_bucket: CapBucket,
+        session: date,
+        screen_at: datetime,
+        status: ActivityShortlistStatus,
+        reason: str = "",
+        *,
+        components: tuple[ActivityScanner, ...] = (),
+    ) -> ActivityShortlistSnapshot:
+        return ActivityShortlistSnapshot(
+            market.market_id.value,
+            cap_bucket,
+            "CAP_BUCKETS_V1",
+            session,
+            screen_at.astimezone(UTC),
+            self.profile_id,
+            self.profile_version,
+            status,
+            components,
+            (),
+            reason,
+        )
+
+
+def _supports_cap_bucket(filters: frozenset[str], bucket: CapBucket) -> bool:
+    above = bool({"marketCapAbove", "usdMarketCapAbove", "marketCapAbove1e6"} & filters)
+    below = bool({"marketCapBelow", "usdMarketCapBelow", "marketCapBelow1e6"} & filters)
+    if bucket is CapBucket.MEGA:
+        return above
+    return above and below

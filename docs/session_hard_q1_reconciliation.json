@@ -1,0 +1,47 @@
+{
+  "assessment": {
+    "admitted": 157,
+    "admitted_pct": 14.00535236396075,
+    "total": 1121,
+    "whipsaw_count": 17,
+    "whipsaw_rate": 0.10828025477707007
+  },
+  "cutoff_changed_after_reconciliation": false,
+  "economics": {
+    "best_net_R_per_candidate": 0.17866293317819312,
+    "best_total_net_R": 28.050080508976322,
+    "deadline": "original T0+15 minutes",
+    "entry_M": 0.2,
+    "known_count": 140,
+    "known_total_net_R": 30.769087780094445,
+    "round_trip_cost_bps": 10,
+    "source": "Frozen pre-tick-overlay bounds; no recomputation or new orders",
+    "stop_M": 0.5,
+    "target_M": 1.0,
+    "unknown_order_count": 17,
+    "worst_net_R_per_candidate": 0.0641674953148169,
+    "worst_total_net_R": 10.074296764426254
+  },
+  "evidence": "DEVELOPMENT_OPERATIONALISATION_NOT_UNTOUCHED_VALIDATION",
+  "fit": {
+    "admitted": 187,
+    "admitted_pct": 20.085929108485498,
+    "total": 931
+  },
+  "old_assessment_q1": {
+    "count": 225,
+    "old_only": 68,
+    "overlap": 157,
+    "prospective_only": 0
+  },
+  "order_placement": "disabled",
+  "prospective_spec_sha256": "de2c4b3b90e9ecfff44cc7da971b2d9700eb277ece423bab6a4ed8e1fb3b6965",
+  "protected_data_accessed": false,
+  "q1_risk_cutoff": 0.22995371253992852,
+  "source_hashes": {
+    "assessment_scope.csv": "ee669c6bc0b71660826e88249c63f1a8652996e7fc944c474906d1e3a8f20972",
+    "fixed_spec.json": "62077a2e35ab3e674727cd820808fc5c438e2c419e47aac24d9ed77e6dccbe4c",
+    "known_order_outcomes.csv": "c359f623fc5081201768fdee420d4d3294ac83ca6498d231c64cfec469c1f691",
+    "unknown_dual_order_outcomes.csv": "9df886dfcd760ed8f018a4254483bb3fef875a1e212bfe47e4eca644f861d4f0"
+  }
+}

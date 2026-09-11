@@ -1,5 +1,6 @@
 """Command-line interface for Stocker."""
 
+import asyncio
 from pathlib import Path
 from typing import Annotated
 
@@ -9,9 +10,14 @@ from rich.console import Console
 from stocker_core.config import (
     EODHDConfig,
     ResearchConfig,
+    load_ibkr_config,
     load_research_config,
+    load_run_config,
+    load_runs_config,
     load_server_config,
 )
+from stocker_core.runs import Environment, RunManager
+from stocker_core.universes import UniverseCatalog
 
 console = Console()
 app = typer.Typer(no_args_is_help=True, help="Stocker research and execution utilities.")
@@ -25,6 +31,10 @@ app.add_typer(server_app, name="server")
 app.add_typer(universe_app, name="universe")
 
 DEFAULT_RESEARCH_CONFIG = Path("configs/research.example.yaml")
+DEFAULT_RUN_CONFIG = Path("configs/run.example.yaml")
+DEFAULT_RUNS_CONFIG = Path("configs/runs.example.yaml")
+DEFAULT_IBKR_CONFIG = Path("configs/ibkr.example.yaml")
+DEFAULT_RUNTIME_DATABASE = Path(".stocker/stage8-runtime.sqlite3")
 
 
 @app.command()
@@ -32,6 +42,297 @@ def check() -> None:
     """Run a lightweight environment check."""
 
     console.print("Stocker CLI is installed and importable.")
+
+
+@app.command("start")
+def start(config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_RUN_CONFIG) -> None:
+    """Load and report one Stage 1 run without trading."""
+
+    run = load_run_config(config)
+    console.print("Stocker starting")
+    console.print(f"Run: {run.run_id}")
+    console.print(f"Universe: {run.universe}")
+    console.print(f"Strategy: {run.strategy}")
+    console.print(f"Environment: {run.environment.value}")
+    console.print("Stage 1 runtime ready")
+
+
+@app.command("runs-status")
+def runs_status(
+    config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_RUNS_CONFIG,
+    start_runs: Annotated[
+        list[str] | None,
+        typer.Option("--start", help="Mark a configured run active in this diagnostic."),
+    ] = None,
+) -> None:
+    """Show configured universes and independent in-memory run states."""
+
+    try:
+        loaded = load_runs_config(config)
+        catalog = UniverseCatalog(loaded.universes)
+        manager = RunManager(catalog, loaded.runs)
+        for run_id in start_runs or ():
+            manager.start_run(run_id)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid Stage 3 configuration: {exc}") from exc
+
+    console.print("Stocker Stage 3")
+    console.print("\nUNIVERSES")
+    for universe in catalog.list_universes():
+        console.print(f"{universe.universe_id} members={len(universe.members)}")
+
+    console.print("\nRUNS")
+    for instance in manager.list_runs():
+        run = instance.config
+        console.print(f"{instance.state.value}  {run.run_id}")
+        console.print(f"  universe={run.universe}")
+        console.print(f"  strategy={run.strategy}")
+        console.print(f"  environment={run.environment.value}")
+        if run.session is not None:
+            console.print(
+                f"  session={run.session.start.isoformat()}–{run.session.end.isoformat()} "
+                f"{run.session.timezone}"
+            )
+
+
+@app.command("ibkr-check")
+def ibkr_check(
+    run_config: Annotated[
+        Path, typer.Option("--run-config", help="Stage 1 run config selecting PAPER or LIVE.")
+    ] = DEFAULT_RUN_CONFIG,
+    ibkr_config: Annotated[
+        Path, typer.Option("--ibkr-config", help="Explicit PAPER and LIVE IBKR settings.")
+    ] = DEFAULT_IBKR_CONFIG,
+    symbol: Annotated[str, typer.Option("--symbol")] = "AAPL",
+    exchange: Annotated[str, typer.Option("--exchange")] = "SMART",
+    primary_exchange: Annotated[str | None, typer.Option("--primary-exchange")] = "NASDAQ",
+    currency: Annotated[str, typer.Option("--currency")] = "USD",
+    bar_size: Annotated[str, typer.Option("--bar-size")] = "5 mins",
+    duration: Annotated[str, typer.Option("--duration")] = "1 D",
+    what_to_show: Annotated[str, typer.Option("--what-to-show")] = "TRADES",
+    regular_trading_hours: Annotated[bool, typer.Option("--rth/--all-hours")] = True,
+) -> None:
+    """Connect read-only, qualify one stock, request history and a current snapshot."""
+
+    from stocker_execution.ibkr import IbkrConnection, IbkrError
+
+    try:
+        run = load_run_config(run_config)
+        broker_config = load_ibkr_config(ibkr_config, run.environment)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid Stage 2 configuration: {exc}") from exc
+
+    async def diagnose() -> None:
+        connection = IbkrConnection(broker_config)
+        try:
+            session = await connection.connect()
+            console.print(f"IBKR {session.environment.value} connection established")
+            console.print(f"Account: {session.masked_account_id}")
+            instrument = await connection.resolve_stock(
+                symbol,
+                exchange=exchange,
+                primary_exchange=primary_exchange,
+                currency=currency,
+            )
+            console.print(f"{instrument.symbol} resolved: conId={instrument.con_id}")
+            bars = await connection.historical_bars(
+                instrument,
+                bar_size=bar_size,
+                duration=duration,
+                what_to_show=what_to_show,
+                regular_trading_hours=regular_trading_hours,
+            )
+            console.print(f"Historical bars received: {len(bars)}")
+            quote = await connection.current_quote(instrument)
+            console.print(
+                "Current data received: "
+                f"bid={quote.bid} ask={quote.ask} last={quote.last} close={quote.close}"
+            )
+        finally:
+            connection.disconnect()
+            console.print("IBKR disconnected")
+
+    try:
+        asyncio.run(diagnose())
+    except IbkrError as exc:
+        console.print(f"IBKR diagnostic failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("ibkr-resources")
+def ibkr_resources(
+    runs_config: Annotated[
+        Path, typer.Option("--runs-config", help="Configured runs and watchlists to inspect.")
+    ] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[
+        Path, typer.Option("--ibkr-config", help="Explicit PAPER and LIVE IBKR settings.")
+    ] = DEFAULT_IBKR_CONFIG,
+    environment: Annotated[
+        Environment, typer.Option("--environment", help="Broker session whose budget applies.")
+    ] = Environment.PAPER,
+    runtime_database: Annotated[
+        Path,
+        typer.Option("--database", help="Runtime database used only for persisted watchlists."),
+    ] = DEFAULT_RUNTIME_DATABASE,
+    connect: Annotated[
+        bool,
+        typer.Option(
+            "--connect/--no-connect",
+            help="Open one read-only session; disabled by default.",
+        ),
+    ] = False,
+) -> None:
+    """Report process-local IBKR resources and realistic capacity without trading."""
+
+    from stocker_execution.activity_shortlist import ActivityShortlistStore
+    from stocker_execution.ibkr import IbkrConnection, IbkrError
+    from stocker_execution.ibkr_resources import simulate_capacity
+
+    try:
+        configured_runs = load_runs_config(runs_config)
+        broker_config = load_ibkr_config(ibkr_config, environment)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid IBKR resource configuration: {exc}") from exc
+
+    connection = IbkrConnection(broker_config)
+    session_label = f"{environment.value} disconnected diagnostic"
+    if connect:
+
+        async def open_read_only() -> str:
+            session = await connection.connect()
+            return f"{session.environment.value} {session.masked_account_id} connected"
+
+        try:
+            session_label = asyncio.run(open_read_only())
+        except IbkrError as exc:
+            console.print(f"IBKR read-only connection unavailable: {exc}")
+
+    try:
+        status = connection.resource_status()
+        by_universe = {item.universe_id: item for item in configured_runs.universes}
+        physical_identities: set[tuple[object, ...]] = set()
+        physical_con_ids: set[int] = set()
+        configured_memberships = 0
+        watchlists: list[str] = []
+        all_watchlists_available = True
+        for run in configured_runs.runs:
+            if not run.enabled:
+                continue
+            universe = by_universe[run.universe]
+            members = universe.members
+            identities: set[tuple[object, ...]]
+            if run.uses_activity_shortlist:
+                if run.market_id is None or run.cap_bucket is None:
+                    all_watchlists_available = False
+                    watchlists.append(f"{run.run_id}: unavailable (missing market lineage)")
+                    continue
+                stored = ActivityShortlistStore.latest_read_only(
+                    runtime_database,
+                    market_id=run.market_id.value,
+                    cap_bucket=run.cap_bucket,
+                    cap_bucket_version=run.cap_bucket_version or "CAP_BUCKETS_V1",
+                    profile_id="ACTIVITY_SHORTLIST_V1",
+                    profile_version="ACTIVITY_SHORTLIST_V1",
+                )
+                if stored is None:
+                    all_watchlists_available = False
+                    watchlists.append(
+                        f"{run.run_id}: unavailable (no persisted Activity Shortlist)"
+                    )
+                    continue
+                selected = tuple(item for item in stored.candidates if item.selected)
+                identities = {
+                    ("CONID", item.con_id)
+                    if item.con_id is not None
+                    else (
+                        item.symbol,
+                        item.exchange,
+                        item.primary_exchange or "",
+                        item.currency,
+                        "STK",
+                    )
+                    for item in selected
+                }
+                physical_con_ids.update(item.con_id for item in selected if item.con_id is not None)
+                count = len(identities)
+                watchlists.append(
+                    f"{run.run_id}: {count} candidates ({stored.session} {stored.status})"
+                )
+            else:
+                count = len(members)
+                identities = {
+                    (
+                        member.symbol,
+                        member.exchange,
+                        member.primary_exchange,
+                        member.currency,
+                        member.security_type,
+                    )
+                    for member in members
+                }
+                watchlists.append(f"{run.run_id}: {count} candidates (configured universe)")
+            configured_memberships += count
+            physical_identities.update(identities)
+
+        console.print("Stocker IBKR resource diagnostic")
+        console.print(f"Session: {session_label}")
+        console.print(
+            "Scope: this diagnostic connection plus read-only persisted watchlists; "
+            "live runtime counters are exposed on Dashboard / System"
+        )
+        console.print(f"Stocker API line budget: {status.market_data_line_budget}")
+        console.print(
+            f"Diagnostic connection active streaming lines: {status.active_market_data_lines}"
+        )
+        console.print(f"  underlying: {status.active_underlying_lines}")
+        console.print(
+            f"Diagnostic connection active scanner subscriptions: {status.active_scanners}"
+        )
+        console.print(
+            "Historical work: "
+            f"pending={status.pending_historical_work} "
+            f"concurrency={status.historical_concurrency_limit}"
+        )
+        console.print(
+            "ib_async throttle: "
+            f"{status.ib_async_max_requests} requests / "
+            f"{status.ib_async_requests_interval:g} seconds"
+            if status.ib_async_requests_interval is not None
+            else "ib_async throttle: unavailable"
+        )
+        console.print("Current watchlists")
+        for watchlist in watchlists:
+            console.print(f"  {watchlist}")
+        console.print(f"Unique configured physical identities: {len(physical_identities)}")
+        if physical_con_ids:
+            console.print(f"Unique physical conIds: {len(physical_con_ids)} known")
+        else:
+            console.print(
+                "Unique physical conIds: unavailable (no qualified IDs in persisted watchlists)"
+            )
+        if all_watchlists_available:
+            console.print(
+                f"Estimated duplicate savings: {configured_memberships - len(physical_identities)}"
+            )
+        else:
+            console.print("Estimated duplicate savings: unavailable")
+        console.print(f"Last resource/pacing error: {status.last_resource_error or 'none'}")
+        realistic = next(
+            item
+            for item in simulate_capacity(market_data_line_budget=status.market_data_line_budget)
+            if item.name == "REALISTIC_4_RUN"
+        )
+        console.print(
+            "Realistic 4-run simulation: "
+            f"unique_stocks={realistic.unique_stocks} "
+            f"peak_lines={realistic.peak_market_data_lines} "
+            f"scanner_peak={realistic.peak_scanner_concurrency} "
+            f"historical_requests={realistic.historical_requests} "
+            f"pacing_issues={realistic.pacing_issues}"
+        )
+        console.print("No order was transmitted by this diagnostic.")
+    finally:
+        connection.disconnect()
 
 
 @data_app.command("validate")
@@ -521,6 +822,28 @@ def _require_vendor_for_live(
     )
 
 
+@universe_app.command("refresh-us-listings")
+def universe_refresh_us_listings(
+    output: Annotated[Path, typer.Option("--output")] = Path("universes/us-listed.csv"),
+) -> None:
+    """Refresh NASDAQ, NYSE, and US_ALL membership from Nasdaq Trader directories."""
+
+    from stocker_core.universes import refresh_us_universe_snapshot
+
+    try:
+        result = refresh_us_universe_snapshot(output)
+    except (OSError, ValueError) as exc:
+        console.print(f"US listing refresh failed: {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print("US named-universe snapshot refreshed")
+    console.print("source: NASDAQ_TRADER_SYMBOL_DIRECTORY")
+    console.print(f"retrieved_at: {result.retrieved_at.isoformat()}")
+    console.print(f"US_ALL: {result.us_all_count}")
+    console.print(f"NASDAQ: {result.nasdaq_count}")
+    console.print(f"NYSE: {result.nyse_count}")
+    console.print(f"output: {result.output_path}")
+
+
 @universe_app.command("build-eodhd")
 def universe_build_eodhd(
     universe_id: Annotated[str, typer.Option("--id")],
@@ -956,9 +1279,9 @@ def research_failure_anatomy(
 @research_app.command("intraday-session-integrity")
 def research_intraday_session_integrity(
     data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
-    output_dir: Annotated[
-        Path, typer.Option("--output-dir")
-    ] = Path("data/reports/research/stage3_8_intraday_session_integrity"),
+    output_dir: Annotated[Path, typer.Option("--output-dir")] = Path(
+        "data/reports/research/stage3_8_intraday_session_integrity"
+    ),
     stage3_7_summary: Annotated[
         Path, typer.Option("--stage3-7-summary", exists=True, file_okay=True)
     ] = Path("data/reports/research/stage3_7_intraday_5m_session_flat_smoke/summary.json"),
@@ -1011,12 +1334,12 @@ def research_intraday_session_integrity(
 @research_app.command("intraday-feature-audit")
 def research_intraday_feature_audit(
     data_dir: Annotated[Path, typer.Option("--data-dir")] = Path("data"),
-    universe: Annotated[
-        Path, typer.Option("--universe", exists=True, file_okay=True)
-    ] = Path("data/universes/research_ready/us_liquid_25_5m_intraday.json"),
-    output_dir: Annotated[
-        Path, typer.Option("--output-dir")
-    ] = Path("data/reports/research/stage4_1_intraday_feature_audit"),
+    universe: Annotated[Path, typer.Option("--universe", exists=True, file_okay=True)] = Path(
+        "data/universes/research_ready/us_liquid_25_5m_intraday.json"
+    ),
+    output_dir: Annotated[Path, typer.Option("--output-dir")] = Path(
+        "data/reports/research/stage4_1_intraday_feature_audit"
+    ),
     source: Annotated[str, typer.Option("--source")] = "eodhd",
     instrument_type: Annotated[str, typer.Option("--instrument-type")] = "stock",
     timeframe: Annotated[str, typer.Option("--timeframe")] = "5m",
@@ -1345,9 +1668,7 @@ def research_frozen_template_technique(
             "state_event_report_dir": str(result.state_event_report_dir),
             "event_rows_csv_path": str(result.event_rows_csv_path),
             "template_transfer_report_dir": str(result.template_transfer_report_dir),
-            "template_transfer_summary_json_path": str(
-                result.template_transfer_summary_json_path
-            ),
+            "template_transfer_summary_json_path": str(result.template_transfer_summary_json_path),
             "decision_json_path": str(result.decision_json_path),
             "decision": result.decision,
         }
@@ -1387,9 +1708,7 @@ def research_event_failure_cutter(
         run_event_failure_cutter_lab,
     )
 
-    parsed_horizons = tuple(
-        int(part.strip()) for part in horizons.split(",") if part.strip()
-    )
+    parsed_horizons = tuple(int(part.strip()) for part in horizons.split(",") if part.strip())
     if not parsed_horizons:
         raise typer.BadParameter("Supply at least one horizon with --horizons.")
     result = run_event_failure_cutter_lab(
@@ -1417,9 +1736,7 @@ def research_event_failure_cutter(
             "decision_json_path": str(result.decision_json_path),
             "filter_oos_results_csv_path": str(result.filter_oos_results_csv_path),
             "random_filter_baseline_csv_path": str(result.random_filter_baseline_csv_path),
-            "blocker_quality_summary_csv_path": str(
-                result.blocker_quality_summary_csv_path
-            ),
+            "blocker_quality_summary_csv_path": str(result.blocker_quality_summary_csv_path),
             "decision": result.decision,
             "best_filter_count": result.best_filter_count,
         }
@@ -1446,9 +1763,7 @@ def research_state_event_directional_interpretation(
         run_state_directional_interpretation_report,
     )
 
-    parsed_horizons = tuple(
-        int(part.strip()) for part in horizons.split(",") if part.strip()
-    )
+    parsed_horizons = tuple(int(part.strip()) for part in horizons.split(",") if part.strip())
     if not parsed_horizons:
         raise typer.BadParameter("Supply at least one horizon with --horizons.")
     result = run_state_directional_interpretation_report(
@@ -1468,9 +1783,7 @@ def research_state_event_directional_interpretation(
             "input_dir": str(result.input_dir),
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
-            "directional_state_summary_csv_path": str(
-                result.directional_state_summary_csv_path
-            ),
+            "directional_state_summary_csv_path": str(result.directional_state_summary_csv_path),
             "blocker_quality_summary_csv_path": str(result.blocker_quality_summary_csv_path),
             "short_candidate_summary_csv_path": str(result.short_candidate_summary_csv_path),
             "no_trade_quality_summary_csv_path": str(result.no_trade_quality_summary_csv_path),
@@ -1512,9 +1825,7 @@ def research_role_aware_event_cutter(
         run_role_aware_event_cutter_lab,
     )
 
-    parsed_horizons = tuple(
-        int(part.strip()) for part in horizons.split(",") if part.strip()
-    )
+    parsed_horizons = tuple(int(part.strip()) for part in horizons.split(",") if part.strip())
     if not parsed_horizons:
         raise typer.BadParameter("Supply at least one horizon with --horizons.")
     result = run_role_aware_event_cutter_lab(
@@ -1600,9 +1911,7 @@ def research_personality_discovery(
         run_personality_discovery_lab,
     )
 
-    parsed_horizons = tuple(
-        int(part.strip()) for part in horizons.split(",") if part.strip()
-    )
+    parsed_horizons = tuple(int(part.strip()) for part in horizons.split(",") if part.strip())
     if not parsed_horizons:
         raise typer.BadParameter("Supply at least one horizon with --horizons.")
     result = run_personality_discovery_lab(
@@ -2531,9 +2840,7 @@ def research_personality_expression_lab(
             "summary_json_path": str(result.summary_json_path),
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
-            "expression_candidate_sweep_csv_path": str(
-                result.expression_candidate_sweep_csv_path
-            ),
+            "expression_candidate_sweep_csv_path": str(result.expression_candidate_sweep_csv_path),
             "selected_expressions_csv_path": str(result.selected_expressions_csv_path),
             "test_trades_csv_path": str(result.test_trades_csv_path),
             "decision": result.decision,
@@ -2602,9 +2909,7 @@ def research_state_lifecycle_context(
         run_state_lifecycle_context_lab,
     )
 
-    parsed_lookbacks = tuple(
-        int(part.strip()) for part in lookback_bars.split(",") if part.strip()
-    )
+    parsed_lookbacks = tuple(int(part.strip()) for part in lookback_bars.split(",") if part.strip())
     if not parsed_lookbacks:
         raise typer.BadParameter("Supply at least one lookback with --lookback-bars.")
     parsed_calendar = market_calendar.strip()
@@ -2640,9 +2945,7 @@ def research_state_lifecycle_context(
             "decision_json_path": str(result.decision_json_path),
             "trade_context_features_csv_path": str(result.trade_context_features_csv_path),
             "base_summary_csv_path": str(result.base_summary_csv_path),
-            "prior_regime_numeric_scan_csv_path": str(
-                result.prior_regime_numeric_scan_csv_path
-            ),
+            "prior_regime_numeric_scan_csv_path": str(result.prior_regime_numeric_scan_csv_path),
             "prior_regime_categorical_scan_csv_path": str(
                 result.prior_regime_categorical_scan_csv_path
             ),
@@ -2792,9 +3095,7 @@ def research_conditional_context_caveat(
             "summary_json_path": str(result.summary_json_path),
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
-            "conditional_caveat_results_csv_path": str(
-                result.conditional_caveat_results_csv_path
-            ),
+            "conditional_caveat_results_csv_path": str(result.conditional_caveat_results_csv_path),
             "selected_conditional_caveats_csv_path": str(
                 result.selected_conditional_caveats_csv_path
             ),
@@ -2935,13 +3236,9 @@ def research_personality_context_admission(
             "summary_json_path": str(result.summary_json_path),
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
-            "admission_rule_results_csv_path": str(
-                result.admission_rule_results_csv_path
-            ),
+            "admission_rule_results_csv_path": str(result.admission_rule_results_csv_path),
             "selected_admissions_csv_path": str(result.selected_admissions_csv_path),
-            "blocked_candidate_trades_csv_path": str(
-                result.blocked_candidate_trades_csv_path
-            ),
+            "blocked_candidate_trades_csv_path": str(result.blocked_candidate_trades_csv_path),
             "trade_admission_flags_csv_path": str(result.trade_admission_flags_csv_path),
             "decision": result.decision,
             "selected_admission_count": result.selected_admission_count,
@@ -3182,12 +3479,8 @@ def research_template_discovery_system(
             "summary_json_path": str(result.summary_json_path),
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
-            "behavior_loop_scorecard_csv_path": str(
-                result.behavior_loop_scorecard_csv_path
-            ),
-            "loop_regime_occupancy_csv_path": str(
-                result.loop_regime_occupancy_csv_path
-            ),
+            "behavior_loop_scorecard_csv_path": str(result.behavior_loop_scorecard_csv_path),
+            "loop_regime_occupancy_csv_path": str(result.loop_regime_occupancy_csv_path),
             "loop_mixed_regime_occupancy_csv_path": str(
                 result.loop_mixed_regime_occupancy_csv_path
             ),
@@ -3197,15 +3490,9 @@ def research_template_discovery_system(
             "c0_parent_readout_csv_path": str(result.c0_parent_readout_csv_path),
             "b0_state_summary_csv_path": str(result.b0_state_summary_csv_path),
             "b0_route_detail_csv_path": str(result.b0_route_detail_csv_path),
-            "loop_context_refinement_csv_path": str(
-                result.loop_context_refinement_csv_path
-            ),
-            "loop_context_admissions_csv_path": str(
-                result.loop_context_admissions_csv_path
-            ),
-            "loop_context_blockers_csv_path": str(
-                result.loop_context_blockers_csv_path
-            ),
+            "loop_context_refinement_csv_path": str(result.loop_context_refinement_csv_path),
+            "loop_context_admissions_csv_path": str(result.loop_context_admissions_csv_path),
+            "loop_context_blockers_csv_path": str(result.loop_context_blockers_csv_path),
             "atom_scorecard_csv_path": str(result.atom_scorecard_csv_path),
             "container_scorecard_csv_path": str(result.container_scorecard_csv_path),
             "loop_routing_detail_csv_path": str(result.loop_routing_detail_csv_path),
@@ -3239,8 +3526,7 @@ def research_template_discovery_system(
                 result.output_dir / "frozen_template_transfer_all_rows.csv"
             ),
             "frozen_template_transfer_exact_dedupe_trades_csv_path": str(
-                result.output_dir
-                / "frozen_template_transfer_exact_dedupe_trades.csv"
+                result.output_dir / "frozen_template_transfer_exact_dedupe_trades.csv"
             ),
             "frozen_template_transfer_template_audit_csv_path": str(
                 result.output_dir / "frozen_template_transfer_template_audit.csv"
@@ -3323,13 +3609,14 @@ def research_personality_context_workflow(
 ) -> None:
     """Run the research-only single-personality context workflow over report pairs."""
 
-    from stocker_research.personality_context_rule_discovery_v0 import ReportPair
     from stocker_research.personality_context_workflow_v0 import (
         DEFAULT_WORKFLOW_CATEGORICAL_FEATURES,
         DEFAULT_WORKFLOW_NUMERIC_FEATURES,
         PersonalityContextWorkflowConfig,
         run_personality_context_workflow_lab,
     )
+
+    from stocker_research.personality_context_rule_discovery_v0 import ReportPair
 
     parsed_pairs = _parse_report_pair_specs(report_pair or [])
     if not parsed_pairs:
@@ -3354,8 +3641,7 @@ def research_personality_context_workflow(
 
     result = run_personality_context_workflow_lab(
         report_pairs=tuple(
-            ReportPair(label, baseline, candidate)
-            for label, baseline, candidate in parsed_pairs
+            ReportPair(label, baseline, candidate) for label, baseline, candidate in parsed_pairs
         ),
         output_dir=output_dir,
         config=PersonalityContextWorkflowConfig(
@@ -3385,17 +3671,13 @@ def research_personality_context_workflow(
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
             "personality_ranking_csv_path": str(result.personality_ranking_csv_path),
-            "selected_no_prior_trades_csv_path": str(
-                result.selected_no_prior_trades_csv_path
-            ),
+            "selected_no_prior_trades_csv_path": str(result.selected_no_prior_trades_csv_path),
             "selected_candidate_only_trades_csv_path": str(
                 result.selected_candidate_only_trades_csv_path
             ),
             "categorical_commonality_csv_path": str(result.categorical_commonality_csv_path),
             "numeric_commonality_csv_path": str(result.numeric_commonality_csv_path),
-            "no_prior_defensive_screens_csv_path": str(
-                result.no_prior_defensive_screens_csv_path
-            ),
+            "no_prior_defensive_screens_csv_path": str(result.no_prior_defensive_screens_csv_path),
             "yaml_draft_path": str(result.yaml_draft_path),
             "selected_personality": result.selected_personality,
             "decision": result.decision,
@@ -3518,9 +3800,7 @@ def research_personality_context_rule_discovery(
             max_negative_windows=max_negative_windows,
             max_single_window_share=max_single_window_share,
             max_atomic_rules_per_personality=max_atomic_rules_per_personality,
-            max_union_base_rules_per_personality=(
-                max_union_base_rules_per_personality
-            ),
+            max_union_base_rules_per_personality=(max_union_base_rules_per_personality),
             max_union_rules_per_personality=max_union_rules_per_personality,
             random_iterations=random_iterations,
             random_seed=random_seed,
@@ -3650,14 +3930,10 @@ def research_shadow_candidate_trigger_audit(
             "summary_json_path": str(result.summary_json_path),
             "summary_markdown_path": str(result.summary_markdown_path),
             "decision_json_path": str(result.decision_json_path),
-            "shadow_candidate_features_csv_path": str(
-                result.shadow_candidate_features_csv_path
-            ),
+            "shadow_candidate_features_csv_path": str(result.shadow_candidate_features_csv_path),
             "monthly_policy_results_csv_path": str(result.monthly_policy_results_csv_path),
             "policy_summary_csv_path": str(result.policy_summary_csv_path),
-            "trade_shadow_trigger_flags_csv_path": str(
-                result.trade_shadow_trigger_flags_csv_path
-            ),
+            "trade_shadow_trigger_flags_csv_path": str(result.trade_shadow_trigger_flags_csv_path),
             "decision": result.decision,
         }
     )
@@ -3757,9 +4033,7 @@ def research_pre_registered_edge_proof(
             "registration_json_path": str(result.registration_json_path),
             "frozen_candidates_csv_path": str(result.frozen_candidates_csv_path),
             "frozen_caveats_csv_path": str(result.frozen_caveats_csv_path),
-            "evaluation_monthly_summary_csv_path": str(
-                result.evaluation_monthly_summary_csv_path
-            ),
+            "evaluation_monthly_summary_csv_path": str(result.evaluation_monthly_summary_csv_path),
             "evaluation_trades_csv_path": str(result.evaluation_trades_csv_path),
             "decision": result.decision,
             "trade_count": result.trade_count,
@@ -3961,9 +4235,7 @@ def research_walk_forward_staged_mixed_regime_caveat_exit(
         run_staged_mixed_regime_caveat_exit_lab,
     )
 
-    parsed_warmup_months = tuple(
-        part.strip() for part in warmup_months.split(",") if part.strip()
-    )
+    parsed_warmup_months = tuple(part.strip() for part in warmup_months.split(",") if part.strip())
     parsed_months = tuple(part.strip() for part in replay_months.split(",") if part.strip())
     parsed_combined_fields = tuple(
         part.strip() for part in combined_regime_fields.split(",") if part.strip()
@@ -4018,13 +4290,9 @@ def research_walk_forward_staged_mixed_regime_caveat_exit(
             min_personality_train_trades=min_personality_train_trades,
             min_personality_train_total_net_r=min_personality_train_total_net_r,
             min_personality_train_win_rate=min_personality_train_win_rate,
-            enable_prior_replay_personality_acceptance=(
-                enable_prior_replay_personality_acceptance
-            ),
+            enable_prior_replay_personality_acceptance=(enable_prior_replay_personality_acceptance),
             min_prior_replay_personality_trades=min_prior_replay_personality_trades,
-            min_prior_replay_personality_total_net_r=(
-                min_prior_replay_personality_total_net_r
-            ),
+            min_prior_replay_personality_total_net_r=(min_prior_replay_personality_total_net_r),
             min_prior_replay_personality_win_rate=min_prior_replay_personality_win_rate,
             min_staged_caveat_train_trades=min_staged_caveat_train_trades,
             min_staged_caveat_flagged_trades=min_staged_caveat_flagged_trades,
@@ -4352,6 +4620,359 @@ def server_dry_run(
             "trading_enabled": loaded.risk.trading_enabled,
         }
     )
+
+
+@app.command("stage7-paper-diagnostic")
+def stage7_paper_diagnostic(
+    signal_id: Annotated[
+        str, typer.Option("--signal-id", help="Unique diagnostic signal identity.")
+    ],
+    symbol: Annotated[str, typer.Option("--symbol", help="Stock symbol to qualify.")],
+    entry_reference: Annotated[float, typer.Option("--entry-reference", min=0.000001)],
+    m_price: Annotated[float, typer.Option("--m-price", min=0.000001)],
+    risk_per_trade: Annotated[float, typer.Option("--risk-per-trade", min=0.000000001, max=1.0)],
+    confirm_paper_order: Annotated[
+        bool,
+        typer.Option(
+            "--confirm-paper-order",
+            help="Required acknowledgement that this command transmits an IBKR PAPER order.",
+        ),
+    ] = False,
+    run_config: Annotated[Path, typer.Option("--run-config")] = DEFAULT_RUN_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    exchange: Annotated[str, typer.Option("--exchange")] = "SMART",
+    primary_exchange: Annotated[str | None, typer.Option("--primary-exchange")] = "NASDAQ",
+    currency: Annotated[str, typer.Option("--currency")] = "USD",
+    max_concurrent_positions: Annotated[
+        int | None, typer.Option("--max-concurrent-positions", min=1)
+    ] = None,
+    ledger_path: Annotated[Path, typer.Option("--ledger")] = Path(
+        ".stocker/stage7-execution.sqlite3"
+    ),
+    wait_seconds: Annotated[float, typer.Option("--wait-seconds", min=0.0)] = 0.0,
+) -> None:
+    """Deliberately submit one caller-specified, protected IBKR PAPER diagnostic."""
+
+    from stocker_core.runs import Environment, RunRiskConfig
+    from stocker_execution.ibkr import IbkrError
+    from stocker_execution.stage7_diagnostic import run_paper_diagnostic
+
+    if not confirm_paper_order:
+        raise typer.BadParameter("--confirm-paper-order is required; no order was transmitted")
+    try:
+        run = load_run_config(run_config)
+        if run.environment is not Environment.PAPER:
+            raise ValueError("LIVE_EXECUTION_DISABLED")
+        broker = load_ibkr_config(ibkr_config, Environment.PAPER)
+        if broker.expected_account is None:
+            raise ValueError("Stage 7 diagnostic requires expected_account in PAPER IBKR config")
+        run = run.model_copy(
+            update={
+                "risk": RunRiskConfig(
+                    risk_per_trade=risk_per_trade,
+                    max_concurrent_positions=max_concurrent_positions,
+                )
+            }
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid Stage 7 diagnostic configuration: {exc}") from exc
+
+    try:
+        report = asyncio.run(
+            run_paper_diagnostic(
+                run=run,
+                broker_config=broker,
+                signal_id=signal_id,
+                symbol=symbol,
+                exchange=exchange,
+                primary_exchange=primary_exchange,
+                currency=currency,
+                entry_reference=entry_reference,
+                m_price=m_price,
+                ledger_path=ledger_path,
+                wait_seconds=wait_seconds,
+            )
+        )
+    except IbkrError as exc:
+        console.print(f"Stage 7 PAPER diagnostic failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print("Stage 7 IBKR PAPER diagnostic")
+    console.print(f"run: {report.run_id}")
+    console.print("environment: PAPER")
+    console.print(f"account: {report.account}")
+    console.print(f"signal_id: {report.signal_id}")
+    console.print(f"symbol / conId: {report.symbol} / {report.con_id}")
+    console.print(f"account equity: {report.account_equity}")
+    console.print(f"risk fraction: {report.risk_fraction}")
+    console.print(f"risk budget: {report.risk_budget}")
+    console.print(f"entry: {report.entry}")
+    console.print(f"stop: {report.stop}")
+    console.print(f"target: {report.target}")
+    console.print(f"quantity: {report.quantity}")
+    console.print(
+        "IBKR parent/order IDs: "
+        f"{report.parent_order_id}/{report.stop_order_id}/{report.target_order_id}"
+    )
+    console.print(f"entry status: {report.entry_status}")
+    console.print(f"filled quantity: {report.filled_quantity}")
+    console.print(f"average fill: {report.average_fill_price}")
+    console.print(f"protective stop: {report.stop_order_id}")
+    console.print(f"target: {report.target_order_id}")
+    console.print(f"position: {report.position_quantity}")
+    console.print(f"ledger status: {report.ledger_status}")
+
+
+@app.command("stage8-paper-smoke")
+def stage8_paper_smoke(
+    runs_config: Annotated[Path, typer.Option("--runs-config")] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    database: Annotated[Path, typer.Option("--database")] = DEFAULT_RUNTIME_DATABASE,
+) -> None:
+    """Validate PAPER connect, account, reconciliation, preparation, and market data."""
+
+    from stocker_execution.runtime import ApplicationState, build_paper_runtime
+
+    async def diagnose() -> None:
+        runtime = build_paper_runtime(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+        )
+        try:
+            status = await runtime.start()
+            console.print(status.as_text())
+            if status.application is not ApplicationState.READY:
+                raise RuntimeError("Stage 8 runtime did not reach READY")
+            quote = await runtime.market_data_check()
+            console.print(
+                "Market data: "
+                f"{quote.symbol} conId={quote.con_id} "
+                f"bid={quote.bid} ask={quote.ask} last={quote.last}"
+            )
+            console.print("No order was transmitted by this smoke diagnostic.")
+        finally:
+            await runtime.stop()
+
+    try:
+        asyncio.run(diagnose())
+    except (OSError, RuntimeError, ValueError) as exc:
+        console.print(f"Stage 8 PAPER smoke failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("stage8-paper-run")
+def stage8_paper_run(
+    runs_config: Annotated[Path, typer.Option("--runs-config")] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    database: Annotated[Path, typer.Option("--database")] = DEFAULT_RUNTIME_DATABASE,
+    poll_seconds: Annotated[float, typer.Option("--poll-seconds", min=0.1)] = 1.0,
+) -> None:
+    """Run the continuously reconciled Stage 8 PAPER application until interrupted."""
+
+    from stocker_execution.runtime import build_paper_runtime
+
+    async def run() -> None:
+        runtime = build_paper_runtime(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+        )
+        try:
+            await runtime.run_forever(poll_interval_seconds=poll_seconds)
+        finally:
+            await runtime.stop()
+
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        console.print("Stage 8 PAPER runtime stopped")
+
+
+@app.command("stage9-readiness")
+def stage9_readiness(
+    environment: Annotated[str, typer.Option("--environment")] = "LIVE",
+    runs_config: Annotated[Path, typer.Option("--runs-config")] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    database: Annotated[Path, typer.Option("--database")] = DEFAULT_RUNTIME_DATABASE,
+) -> None:
+    """Verify one configured execution environment without submitting an order."""
+
+    from stocker_core.runs import Environment
+    from stocker_execution.runtime import build_runtime
+
+    try:
+        selected = Environment(environment.strip().upper())
+    except ValueError as exc:
+        raise typer.BadParameter("--environment must be PAPER or LIVE") from exc
+
+    async def diagnose() -> None:
+        runtime = build_runtime(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+        )
+        try:
+            await runtime.start()
+            report = await runtime.execution_readiness_diagnostic(selected)
+            console.print(runtime.status().as_text())
+            console.print("")
+            console.print(f"Environment: {report.environment.value}")
+            console.print(f"Connected: {'yes' if report.connected else 'no'}")
+            console.print(f"Account: {report.account or 'unavailable'}")
+            console.print(
+                f"Expected account match: {'yes' if report.expected_account_match else 'no'}"
+            )
+            console.print(
+                f"Account state available: {'yes' if report.account_state_available else 'no'}"
+            )
+            console.print(f"Reconciled: {'yes' if report.reconciled else 'no'}")
+            open_orders = report.open_orders if report.open_orders is not None else "unavailable"
+            positions = report.positions if report.positions is not None else "unavailable"
+            console.print(f"Open orders: {open_orders}")
+            console.print(f"Positions: {positions}")
+            console.print(
+                f"{report.environment.value} readiness: {'READY' if report.ready else 'NOT_READY'}"
+            )
+            console.print("No order was transmitted by this readiness diagnostic.")
+            if not report.ready:
+                raise RuntimeError(report.detail)
+        finally:
+            await runtime.stop()
+
+    try:
+        asyncio.run(diagnose())
+    except (OSError, RuntimeError, ValueError) as exc:
+        console.print(f"Stage 9 readiness diagnostic failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("stage9-run")
+def stage9_run(
+    runs_config: Annotated[Path, typer.Option("--runs-config")] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    database: Annotated[Path, typer.Option("--database")] = DEFAULT_RUNTIME_DATABASE,
+    poll_seconds: Annotated[float, typer.Option("--poll-seconds", min=0.1)] = 1.0,
+) -> None:
+    """Run enabled PAPER and LIVE runs with per-run execution routing."""
+
+    from stocker_execution.runtime import build_runtime
+
+    async def run() -> None:
+        runtime = build_runtime(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+        )
+        try:
+            await runtime.run_forever(poll_interval_seconds=poll_seconds)
+        finally:
+            await runtime.stop()
+
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        console.print("Stage 9 runtime stopped")
+
+
+@app.command("stage10-dashboard")
+def stage10_dashboard(
+    runs_config: Annotated[Path, typer.Option("--runs-config")] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    database: Annotated[Path, typer.Option("--database")] = DEFAULT_RUNTIME_DATABASE,
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", min=1, max=65_535)] = 8000,
+) -> None:
+    """Serve the isolated operational dashboard without starting or trading any run."""
+
+    import uvicorn
+
+    from stocker_dashboard.factory import build_dashboard_app
+
+    try:
+        dashboard = build_dashboard_app(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(f"Invalid Stage 10 dashboard configuration: {exc}") from exc
+    console.print(f"Stocker dashboard: http://{host}:{port}")
+    console.print("Standalone read/control mode; no broker order is transmitted.")
+    uvicorn.run(dashboard, host=host, port=port, log_level="info")
+
+
+@app.command("stage10-run")
+def stage10_run(
+    runs_config: Annotated[Path, typer.Option("--runs-config")] = DEFAULT_RUNS_CONFIG,
+    ibkr_config: Annotated[Path, typer.Option("--ibkr-config")] = DEFAULT_IBKR_CONFIG,
+    database: Annotated[Path, typer.Option("--database")] = DEFAULT_RUNTIME_DATABASE,
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", min=1, max=65_535)] = 8000,
+    poll_seconds: Annotated[float, typer.Option("--poll-seconds", min=0.1)] = 1.0,
+) -> None:
+    """Run Stocker with its dashboard attached to the authoritative runtime."""
+
+    import uvicorn
+
+    from stocker_dashboard.factory import build_dashboard_app
+    from stocker_execution.runtime import build_runtime
+
+    async def serve() -> None:
+        runtime = build_runtime(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+        )
+        dashboard = build_dashboard_app(
+            runs_config_path=runs_config,
+            ibkr_config_path=ibkr_config,
+            database_path=database,
+            runtime=runtime,
+        )
+
+        async def serve_dashboard() -> None:
+            while True:
+                server = uvicorn.Server(
+                    uvicorn.Config(dashboard, host=host, port=port, log_level="info")
+                )
+                try:
+                    await server.serve()
+                except SystemExit as exc:
+                    if exc.code in (None, 0):
+                        return
+                    console.print(f"Dashboard unavailable; trading runtime continues: {exc}")
+                    await asyncio.sleep(1.0)
+                    continue
+                except Exception as exc:
+                    console.print(f"Dashboard unavailable; trading runtime continues: {exc}")
+                    await asyncio.sleep(1.0)
+                    continue
+                return
+
+        runtime_task = asyncio.create_task(runtime.run_forever(poll_interval_seconds=poll_seconds))
+        server_task = asyncio.create_task(serve_dashboard())
+        try:
+            done, _pending = await asyncio.wait(
+                (runtime_task, server_task), return_when=asyncio.FIRST_COMPLETED
+            )
+            if runtime_task in done:
+                server_task.cancel()
+                runtime_task.result()
+        finally:
+            await runtime.stop()
+            if not server_task.done():
+                server_task.cancel()
+            if not runtime_task.done():
+                await runtime_task
+
+    console.print(f"Stocker runtime + dashboard: http://{host}:{port}")
+    console.print("Run controls hot-apply; the dashboard submits no manual order.")
+    console.print("Enabled runs retain normal execution authority; use PAPER for diagnostics.")
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        console.print("Stage 10 runtime and dashboard stopped")
 
 
 if __name__ == "__main__":

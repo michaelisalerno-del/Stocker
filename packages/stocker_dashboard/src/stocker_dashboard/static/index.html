@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Stocker — Operations</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to operational view</a>
+    <header class="topbar">
+      <a class="brand" href="/" data-nav="overview" aria-label="Stocker overview">
+        <span class="brand-mark">S</span><span>STOCKER</span><small>OPS / V1</small>
+      </a>
+      <div class="top-status" aria-live="polite">
+        <div class="status-unit"><span>PAPER</span><strong id="paper-status">—</strong></div>
+        <div class="status-unit live"><span>LIVE</span><strong id="live-status">—</strong></div>
+        <div class="status-unit"><span>SYSTEM</span><strong id="system-status">LOADING</strong></div>
+        <div class="status-unit compact"><span>RUNS</span><strong id="active-runs">—</strong></div>
+        <div class="status-unit compact"><span>POSITIONS</span><strong id="open-positions">—</strong></div>
+      </div>
+      <button class="menu-button" id="menu-button" type="button" aria-label="Toggle navigation" aria-expanded="false">MENU</button>
+    </header>
+    <div class="shell">
+      <aside class="sidebar" id="sidebar">
+        <nav aria-label="Primary">
+          <a href="/" data-nav="overview">Overview</a>
+          <a href="/runs" data-nav="runs">Runs</a>
+          <a href="/universes" data-nav="universes">Start run</a>
+          <a href="/candidates" data-nav="candidates">Candidates</a>
+          <a href="/orders" data-nav="orders">Orders</a>
+          <a href="/positions" data-nav="positions">Positions</a>
+          <a href="/trades" data-nav="trades">Trades</a>
+          <a href="/system" data-nav="system">System</a>
+          <a href="/settings" data-nav="settings">Settings</a>
+        </nav>
+        <div class="sidebar-foot"><span class="pulse"></span>AUTO REFRESH <b id="last-refresh">—</b></div>
+      </aside>
+      <main id="main" tabindex="-1"><div class="loading">Loading operational state…</div></main>
+    </div>
+    <dialog id="live-dialog">
+      <form method="dialog" id="live-form">
+        <p class="eyebrow">LIVE EXECUTION CHANGE</p>
+        <h2>Confirm LIVE destination</h2>
+        <div id="live-context"></div>
+        <label class="confirm-line"><input type="checkbox" id="live-check"> I confirm this run, account, and risk configuration.</label>
+        <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button value="confirm" id="live-confirm" class="danger">Confirm LIVE</button></div>
+      </form>
+    </dialog>
+    <script src="/static/dashboard.js?v=20260909-activity-filter" defer></script>
+  </body>
+</html>

@@ -1,0 +1,64 @@
+{
+  "fixture_id": "BROAD2025_GLW_2025-01-29_CHECKPOINT_6",
+  "source": "relative_rank_v0 frozen classified_trade_ledger + HIGH_PRE_MOVE_DOWN_ONLY entry ledger",
+  "run_id": "BROAD2025_SESSION_HARD",
+  "cohort_history": [
+    {"session": "2025-01-03", "pre_move_m": 0.49386457704973},
+    {"session": "2025-01-03", "pre_move_m": 0.774037328419791},
+    {"session": "2025-01-03", "pre_move_m": 0.726324748769041},
+    {"session": "2025-01-03", "pre_move_m": 1.21607940076822},
+    {"session": "2025-01-03", "pre_move_m": 1.07463606998193},
+    {"session": "2025-01-03", "pre_move_m": 1.36154194202114},
+    {"session": "2025-01-03", "pre_move_m": 0.873690017867173},
+    {"session": "2025-01-07", "pre_move_m": 0.933196762936901},
+    {"session": "2025-01-07", "pre_move_m": 2.07078471433389},
+    {"session": "2025-01-07", "pre_move_m": 1.49176071768065},
+    {"session": "2025-01-07", "pre_move_m": 0.979469772649282},
+    {"session": "2025-01-07", "pre_move_m": 0.763599031921541},
+    {"session": "2025-01-07", "pre_move_m": 0.5422949420234},
+    {"session": "2025-01-08", "pre_move_m": 1.23548342768809},
+    {"session": "2025-01-10", "pre_move_m": 1.9409280256588},
+    {"session": "2025-01-10", "pre_move_m": 1.01825721400623},
+    {"session": "2025-01-10", "pre_move_m": 1.02934248238339},
+    {"session": "2025-01-10", "pre_move_m": 0.707080296109846},
+    {"session": "2025-01-10", "pre_move_m": 0.582657976070271},
+    {"session": "2025-01-14", "pre_move_m": 0.921309917374103},
+    {"session": "2025-01-14", "pre_move_m": 2.16337410839016},
+    {"session": "2025-01-14", "pre_move_m": 0.696951151065401},
+    {"session": "2025-01-16", "pre_move_m": 0.749704802933387},
+    {"session": "2025-01-16", "pre_move_m": 1.03077331644346},
+    {"session": "2025-01-16", "pre_move_m": 0.743678852740751},
+    {"session": "2025-01-16", "pre_move_m": 0.606984035231674},
+    {"session": "2025-01-16", "pre_move_m": 0.99621552266213},
+    {"session": "2025-01-22", "pre_move_m": 1.03385363197471},
+    {"session": "2025-01-22", "pre_move_m": 0.672997486343371},
+    {"session": "2025-01-23", "pre_move_m": 1.06356189871543},
+    {"session": "2025-01-23", "pre_move_m": 0.818313165855985},
+    {"session": "2025-01-23", "pre_move_m": 0.696907478894553},
+    {"session": "2025-01-23", "pre_move_m": 0.682461982579916},
+    {"session": "2025-01-24", "pre_move_m": 0.837003471146366},
+    {"session": "2025-01-28", "pre_move_m": 0.907802639995511}
+  ],
+  "candidates": [
+    {
+      "con_id": 202,
+      "symbol": "GLW",
+      "universe_id": "BROAD2025",
+      "session": "2025-01-29",
+      "t0": "2025-01-29T15:00:00Z",
+      "p0": 52.150001,
+      "m_price": 0.275429305778967,
+      "pre_move_m": 1.74273397613477,
+      "session_hard_score": 0.999976342006068,
+      "session_hard_checkpoint": 6,
+      "entry_bars": [
+        {
+          "timestamp": "2025-01-29T15:00:00Z",
+          "open": 52.150001000000003,
+          "high": 52.200001000958778,
+          "low": 51.860000994439119
+        }
+      ]
+    }
+  ]
+}

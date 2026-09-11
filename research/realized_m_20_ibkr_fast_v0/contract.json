@@ -1,0 +1,23 @@
+{
+  "experiment_id": "IBKR_REALIZED_M_20_HISTORICAL_DATA_FAST_TEST_V0",
+  "research_only": true,
+  "order_placement": "disabled",
+  "symbols": ["WULF", "CRWD", "TSLA", "AAPL", "OKLO"],
+  "history": {
+    "duration": "40 D",
+    "bar_size": "1 min",
+    "what_to_show": "TRADES",
+    "use_rth": true
+  },
+  "realized_m_20": {
+    "lookback_sessions": 20,
+    "minimum_valid_sessions": 10,
+    "endpoint_offset_bars": 14,
+    "timezone": "America/New_York"
+  },
+  "pre_move_threshold": 0.475764059845861,
+  "strategy_logic_changed": false,
+  "session_hard_changed": false,
+  "structure_d_changed": false,
+  "order_handling_changed": false
+}

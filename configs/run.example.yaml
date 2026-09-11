@@ -1,0 +1,6 @@
+# Read-only ibkr-check connection diagnostic; not an executable method run.
+run_id: nasdaq_connection_diagnostic
+enabled: false
+universe: NASDAQ
+strategy: SESSION_HARD
+environment: PAPER

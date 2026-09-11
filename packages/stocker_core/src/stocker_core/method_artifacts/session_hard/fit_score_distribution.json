@@ -1,0 +1,4657 @@
+[
+  {
+    "risk_score": 0.16249901855029775,
+    "session": "2025-05-19",
+    "signal_id": "000b7bca901304304000e74753185766"
+  },
+  {
+    "risk_score": 0.1496763547103775,
+    "session": "2025-05-28",
+    "signal_id": "009beba52b09c739077678a127e66c6d"
+  },
+  {
+    "risk_score": 0.6656368307450403,
+    "session": "2025-05-29",
+    "signal_id": "00bc1aa34c80b3f7c3d9f790b9a521b9"
+  },
+  {
+    "risk_score": 0.20638691441094492,
+    "session": "2025-05-29",
+    "signal_id": "014970dcf41c2261bf3a71a8656c6884"
+  },
+  {
+    "risk_score": 0.550233578319894,
+    "session": "2025-06-09",
+    "signal_id": "019cf185d16411ad3edd164cf21904aa"
+  },
+  {
+    "risk_score": 0.346006292314742,
+    "session": "2025-06-02",
+    "signal_id": "01b1a0883170f1f67627c54826c43212"
+  },
+  {
+    "risk_score": 0.3556835198555988,
+    "session": "2025-05-22",
+    "signal_id": "01e249cb53c2000c68c29bf62c8ada33"
+  },
+  {
+    "risk_score": 0.27937391798358957,
+    "session": "2025-06-30",
+    "signal_id": "020c1d7fe7b50ce2006f48fbd439b26e"
+  },
+  {
+    "risk_score": 0.4542490538813978,
+    "session": "2025-06-16",
+    "signal_id": "026d78e98fcd40af5ca451ffda38db1f"
+  },
+  {
+    "risk_score": 0.6377484683895914,
+    "session": "2025-06-27",
+    "signal_id": "0293dc99ce75487a6a4d705c1bfe0624"
+  },
+  {
+    "risk_score": 0.6315128499669452,
+    "session": "2025-05-22",
+    "signal_id": "02bf3b6e6b5ea57f5729c07a53e86e39"
+  },
+  {
+    "risk_score": 0.3409704580879207,
+    "session": "2025-06-09",
+    "signal_id": "02d038aa400ffde53e4a78ad57e0d9cf"
+  },
+  {
+    "risk_score": 0.2784407311314819,
+    "session": "2025-06-04",
+    "signal_id": "032e87b9ad6a7f7985a824c5ef2cfa22"
+  },
+  {
+    "risk_score": 0.18875509997216353,
+    "session": "2025-06-26",
+    "signal_id": "03422d8465ca3b0caaf7652357a7fabb"
+  },
+  {
+    "risk_score": 0.47359456540496647,
+    "session": "2025-06-23",
+    "signal_id": "0367710c92598c5af0b65359ec5aae57"
+  },
+  {
+    "risk_score": 0.30219562312027626,
+    "session": "2025-05-22",
+    "signal_id": "037025c833743f273e659e465938c5e4"
+  },
+  {
+    "risk_score": 0.3710575534937468,
+    "session": "2025-06-09",
+    "signal_id": "03c2fecd99518189f793add8f6cc33b2"
+  },
+  {
+    "risk_score": 0.07566478453499663,
+    "session": "2025-06-10",
+    "signal_id": "0478ddcbd66b652260c996aab91e97b3"
+  },
+  {
+    "risk_score": 0.19683547605945229,
+    "session": "2025-06-26",
+    "signal_id": "04b75bcce7b82cac259b89608fc9c6c0"
+  },
+  {
+    "risk_score": 0.5591219471346797,
+    "session": "2025-06-02",
+    "signal_id": "04bbc5a92c05159451770311bc1129e1"
+  },
+  {
+    "risk_score": 0.27190520141129,
+    "session": "2025-06-09",
+    "signal_id": "055505d271ee8c33ee06947975a63964"
+  },
+  {
+    "risk_score": 0.32929194290722713,
+    "session": "2025-06-09",
+    "signal_id": "059aef7fc9d7d8a22168eb8e8befb08c"
+  },
+  {
+    "risk_score": 0.2497627058879491,
+    "session": "2025-06-16",
+    "signal_id": "06425d0c69435b24897e6a84abc28980"
+  },
+  {
+    "risk_score": 0.2351774890280163,
+    "session": "2025-06-12",
+    "signal_id": "06df94900a2c779487fe8accc594e51e"
+  },
+  {
+    "risk_score": 0.4370631187307768,
+    "session": "2025-06-26",
+    "signal_id": "0729c192109c0ab34793cc0f734cf800"
+  },
+  {
+    "risk_score": 0.21914439687910864,
+    "session": "2025-06-24",
+    "signal_id": "0802dc0dbb629b36616717c9482f9f0a"
+  },
+  {
+    "risk_score": 0.6283724103945477,
+    "session": "2025-06-02",
+    "signal_id": "081673998f1304da3e1370f09afe0db5"
+  },
+  {
+    "risk_score": 0.4377308827215471,
+    "session": "2025-06-11",
+    "signal_id": "086923fbf4ba012ad2ff7a35710406b7"
+  },
+  {
+    "risk_score": 0.22548034542865497,
+    "session": "2025-06-02",
+    "signal_id": "095e9cc805f58aa6ab761a07ccfe6ed8"
+  },
+  {
+    "risk_score": 0.012639541908117046,
+    "session": "2025-06-10",
+    "signal_id": "098c5379cbad5e3c8f0a0f3ff39f4a11"
+  },
+  {
+    "risk_score": 0.3731125215950104,
+    "session": "2025-05-20",
+    "signal_id": "09a1cedd1096081219f01144b7b5014f"
+  },
+  {
+    "risk_score": 0.28157954836741467,
+    "session": "2025-06-26",
+    "signal_id": "09c7cf850ef98638fd7481546f92a7dc"
+  },
+  {
+    "risk_score": 0.298826352970591,
+    "session": "2025-06-10",
+    "signal_id": "09d4d3cb1201287c35a59a83b0207319"
+  },
+  {
+    "risk_score": 0.17502693570132213,
+    "session": "2025-06-24",
+    "signal_id": "0a3959f47407974486562007fac2d050"
+  },
+  {
+    "risk_score": 0.19959369391670104,
+    "session": "2025-05-22",
+    "signal_id": "0aab63641be9d9f2086307381f4c6e6b"
+  },
+  {
+    "risk_score": 0.37644769411162815,
+    "session": "2025-06-03",
+    "signal_id": "0ac2f028eafde56bf91690d3d2a9a89c"
+  },
+  {
+    "risk_score": 0.4654721613105489,
+    "session": "2025-05-20",
+    "signal_id": "0b03d8e3e1ab92b41820423b85b41a81"
+  },
+  {
+    "risk_score": 0.42454624453244544,
+    "session": "2025-06-25",
+    "signal_id": "0b492ff5da264b901c30e962d3e98a81"
+  },
+  {
+    "risk_score": 0.23695755743301572,
+    "session": "2025-05-27",
+    "signal_id": "0b8bbf941e800e71eba3684e67831588"
+  },
+  {
+    "risk_score": 0.4796141662572842,
+    "session": "2025-06-02",
+    "signal_id": "0bd6fcb60658000227f0a654bd0c13a9"
+  },
+  {
+    "risk_score": 0.37137067886354724,
+    "session": "2025-05-22",
+    "signal_id": "0c37f3e81830be6acfd70c66716907ba"
+  },
+  {
+    "risk_score": 0.5320700250622642,
+    "session": "2025-06-04",
+    "signal_id": "0c54532e87d6a4beb4cc25220844f206"
+  },
+  {
+    "risk_score": 0.5365456755434113,
+    "session": "2025-06-03",
+    "signal_id": "0c7f4979956d49ef9223547428cc1b30"
+  },
+  {
+    "risk_score": 0.21491678180359383,
+    "session": "2025-05-27",
+    "signal_id": "0c85599f6658085d10ce1049c5347f31"
+  },
+  {
+    "risk_score": 0.17711826193981273,
+    "session": "2025-06-04",
+    "signal_id": "0d4474d570c2545e15593008da6d3a95"
+  },
+  {
+    "risk_score": 0.5749462121566454,
+    "session": "2025-05-27",
+    "signal_id": "0d46a8edfcee00927fc1b3fbea7b0ec2"
+  },
+  {
+    "risk_score": 0.42091724456275637,
+    "session": "2025-06-04",
+    "signal_id": "0ea96a33319f5d2c56114db4972a5694"
+  },
+  {
+    "risk_score": 0.45933428635145807,
+    "session": "2025-06-25",
+    "signal_id": "0ed73848f643dc4531cfd1bc3c4b3a4f"
+  },
+  {
+    "risk_score": 0.21061811089832994,
+    "session": "2025-05-19",
+    "signal_id": "0edf5ea4879f149825b6a09b733cf9d4"
+  },
+  {
+    "risk_score": 0.0747701207461751,
+    "session": "2025-06-17",
+    "signal_id": "0ee3412922608e6bc37e57fdbf9cd93b"
+  },
+  {
+    "risk_score": 0.27822274244843564,
+    "session": "2025-06-13",
+    "signal_id": "0f48c4474450fa45d93e026402f27045"
+  },
+  {
+    "risk_score": 0.2982798175673223,
+    "session": "2025-06-25",
+    "signal_id": "0f8b01627b1d3f1c6039b4f00ad25f7d"
+  },
+  {
+    "risk_score": 0.499437187432946,
+    "session": "2025-05-22",
+    "signal_id": "0fa9f4e87b4d92fa91783d67e5655047"
+  },
+  {
+    "risk_score": 0.3340601781475783,
+    "session": "2025-06-02",
+    "signal_id": "0fb08bfe127302985bf58c707c0a4d5c"
+  },
+  {
+    "risk_score": 0.3781156947188265,
+    "session": "2025-05-23",
+    "signal_id": "0fc02926b6847cbf8473eb9a8f70f622"
+  },
+  {
+    "risk_score": 0.6779647547132496,
+    "session": "2025-06-18",
+    "signal_id": "0fd9f4c21f5b4d057455cf843951650f"
+  },
+  {
+    "risk_score": 0.5120843369003072,
+    "session": "2025-05-23",
+    "signal_id": "0ffea91fc09de046a5c91ae0127aebad"
+  },
+  {
+    "risk_score": 0.25298325757246715,
+    "session": "2025-06-16",
+    "signal_id": "100573c4c6621b4f0eed604e922f5c5f"
+  },
+  {
+    "risk_score": 0.2600835776425969,
+    "session": "2025-06-30",
+    "signal_id": "1019284964f0a66379ad3b19a9cc5b08"
+  },
+  {
+    "risk_score": 0.09835566830677517,
+    "session": "2025-06-27",
+    "signal_id": "104082dcb9f2bb47959366d9f0f269bd"
+  },
+  {
+    "risk_score": 0.4458146100524227,
+    "session": "2025-06-09",
+    "signal_id": "10ed557072daca42aa9a0de795e2f927"
+  },
+  {
+    "risk_score": 0.14898052361208952,
+    "session": "2025-06-27",
+    "signal_id": "1102d1441512248206fcaa90ddead435"
+  },
+  {
+    "risk_score": 0.5057667692631389,
+    "session": "2025-06-05",
+    "signal_id": "110f41bc61146cb7e3295be3479c0ff3"
+  },
+  {
+    "risk_score": 0.3099719096972457,
+    "session": "2025-06-26",
+    "signal_id": "1126dd1e3109b5736271c70bab6f1b1d"
+  },
+  {
+    "risk_score": 0.2379479906886617,
+    "session": "2025-05-27",
+    "signal_id": "1149bc5f3bbdaccb0c9e4b0ee00eaf91"
+  },
+  {
+    "risk_score": 0.22836043266674128,
+    "session": "2025-06-23",
+    "signal_id": "11b8ec1f88da4f3a5ea963df222a0da2"
+  },
+  {
+    "risk_score": 0.17786764852111286,
+    "session": "2025-06-26",
+    "signal_id": "11d336462fab00136e64d61cd387005d"
+  },
+  {
+    "risk_score": 0.43555648257231194,
+    "session": "2025-06-25",
+    "signal_id": "11da6d124e53b1beccdd53ea84f8594a"
+  },
+  {
+    "risk_score": 0.42622667085035587,
+    "session": "2025-05-19",
+    "signal_id": "12121e515d4a7660e1162282f2001547"
+  },
+  {
+    "risk_score": 0.426890486714368,
+    "session": "2025-06-10",
+    "signal_id": "121e6837d158edc71d908aa0b6f5b423"
+  },
+  {
+    "risk_score": 0.39506260693952056,
+    "session": "2025-05-23",
+    "signal_id": "12293d66e9bc414f225ec0dbe5bda00b"
+  },
+  {
+    "risk_score": 0.46274114324986854,
+    "session": "2025-06-26",
+    "signal_id": "127ef04570d398491dc8493d4b9d9909"
+  },
+  {
+    "risk_score": 0.409430414948796,
+    "session": "2025-05-22",
+    "signal_id": "12e403b43ff530c9e35b85fa3e5e7d5c"
+  },
+  {
+    "risk_score": 0.3492167432045223,
+    "session": "2025-06-04",
+    "signal_id": "12ef7dd1f635b29930191128a0155084"
+  },
+  {
+    "risk_score": 0.5167162332477212,
+    "session": "2025-06-03",
+    "signal_id": "1355e2a228ddcaa0d4181f683bee73a0"
+  },
+  {
+    "risk_score": 0.36755931354285937,
+    "session": "2025-05-21",
+    "signal_id": "135e13cb467e5c2bbf970e9c22a6087a"
+  },
+  {
+    "risk_score": 0.13499585708345577,
+    "session": "2025-06-27",
+    "signal_id": "13b63f7f1e399c6ce2bac7323ca95fea"
+  },
+  {
+    "risk_score": 0.4998107091359631,
+    "session": "2025-06-23",
+    "signal_id": "1423ebe338166eb105f3074ce6787201"
+  },
+  {
+    "risk_score": 0.4257066126791923,
+    "session": "2025-05-29",
+    "signal_id": "143eb216b88eb81eaf4ed9473d09535e"
+  },
+  {
+    "risk_score": 0.38118448419965467,
+    "session": "2025-05-23",
+    "signal_id": "1442e930b866a4917e79902019846d92"
+  },
+  {
+    "risk_score": 0.40684052591766423,
+    "session": "2025-05-23",
+    "signal_id": "14fb5a1ba02fa59f0799b16c3bdf93d5"
+  },
+  {
+    "risk_score": 0.2419128591603384,
+    "session": "2025-05-22",
+    "signal_id": "15040b05a9e7b845dbe14f45d828c51c"
+  },
+  {
+    "risk_score": 0.20750282009222526,
+    "session": "2025-06-05",
+    "signal_id": "157987631af7456a54238f3e1883bb2b"
+  },
+  {
+    "risk_score": 0.2906223866062712,
+    "session": "2025-06-06",
+    "signal_id": "15853d7b326928127c0adb716d586050"
+  },
+  {
+    "risk_score": 0.1733649648035867,
+    "session": "2025-06-23",
+    "signal_id": "15c68135d9fab0cb34cfbf34548ca47f"
+  },
+  {
+    "risk_score": 0.07424042853600898,
+    "session": "2025-05-23",
+    "signal_id": "15d36779e0130f89b7208f81a45fa210"
+  },
+  {
+    "risk_score": 0.5265755809843885,
+    "session": "2025-05-27",
+    "signal_id": "15d686ee8bd3ce8d9fcc7f87d69c4018"
+  },
+  {
+    "risk_score": 0.3370033600509467,
+    "session": "2025-06-03",
+    "signal_id": "160b37e7f3547f549aa800115cef3d13"
+  },
+  {
+    "risk_score": 0.38275277534503666,
+    "session": "2025-06-11",
+    "signal_id": "161ad4d1fe2def56fdd8dbe578f1c142"
+  },
+  {
+    "risk_score": 0.5428837783806575,
+    "session": "2025-05-22",
+    "signal_id": "161e07e9ee071fb49b44c12363529509"
+  },
+  {
+    "risk_score": 0.3698337458843945,
+    "session": "2025-06-30",
+    "signal_id": "16272039b822a2c14474412db492a8e8"
+  },
+  {
+    "risk_score": 0.15231285014665394,
+    "session": "2025-05-19",
+    "signal_id": "1654f70fd8fff2567ff2563a5cab3158"
+  },
+  {
+    "risk_score": 0.5007923135066741,
+    "session": "2025-06-23",
+    "signal_id": "166619d3ee2a1b294f4f8fb286c806b9"
+  },
+  {
+    "risk_score": 0.3256046667887551,
+    "session": "2025-05-22",
+    "signal_id": "16685751392c8462fc64dbcd912e9b68"
+  },
+  {
+    "risk_score": 0.3380527079019551,
+    "session": "2025-05-20",
+    "signal_id": "1669b85afa76b5fd0bdc08f56d1274c1"
+  },
+  {
+    "risk_score": 0.4047922635983696,
+    "session": "2025-05-23",
+    "signal_id": "16ba01cd223500de8b0b0f754111e090"
+  },
+  {
+    "risk_score": 0.2688809729036236,
+    "session": "2025-05-27",
+    "signal_id": "16e75803e146a7a6865158956d834e69"
+  },
+  {
+    "risk_score": 0.33449874757667597,
+    "session": "2025-06-11",
+    "signal_id": "16ece861580790783c4d5f487660206d"
+  },
+  {
+    "risk_score": 0.25624422801058017,
+    "session": "2025-06-16",
+    "signal_id": "172a2146a37b7ec4a72766364c8b671a"
+  },
+  {
+    "risk_score": 0.37466808544647867,
+    "session": "2025-06-09",
+    "signal_id": "173c171411187b9e672037f267dc5238"
+  },
+  {
+    "risk_score": 0.39687375997521823,
+    "session": "2025-06-10",
+    "signal_id": "17507288fb0c78eea3ae87da65f5229a"
+  },
+  {
+    "risk_score": 0.1808108271443767,
+    "session": "2025-05-20",
+    "signal_id": "17bcd74a3c7d8adae52f317a34cacd18"
+  },
+  {
+    "risk_score": 0.523271624530432,
+    "session": "2025-06-04",
+    "signal_id": "182fd3836cc6eae2b5bb2f8dcb4f4105"
+  },
+  {
+    "risk_score": 0.7858367449931354,
+    "session": "2025-05-22",
+    "signal_id": "1883816e454ed288f7a63716522ddfcd"
+  },
+  {
+    "risk_score": 0.6777403653635744,
+    "session": "2025-06-23",
+    "signal_id": "18dd41cd51c0bfb87ff71d1228b2b60f"
+  },
+  {
+    "risk_score": 0.3333774013410915,
+    "session": "2025-05-20",
+    "signal_id": "18f02b8d880e539d0c4bb98d0f04848c"
+  },
+  {
+    "risk_score": 0.33544622009996694,
+    "session": "2025-05-29",
+    "signal_id": "1928c38e1caa2ba6433336d897482a06"
+  },
+  {
+    "risk_score": 0.4498795051592652,
+    "session": "2025-06-10",
+    "signal_id": "1975ab98cafeabb81533118700031236"
+  },
+  {
+    "risk_score": 0.46933683828822015,
+    "session": "2025-06-09",
+    "signal_id": "19803c5e2f2c7edcb8e444732c737199"
+  },
+  {
+    "risk_score": 0.5137433824607165,
+    "session": "2025-05-30",
+    "signal_id": "19a77564378bfb9d059285859c000548"
+  },
+  {
+    "risk_score": 0.28012851681458234,
+    "session": "2025-06-06",
+    "signal_id": "1a05472a1513813f890bd2d8c354d695"
+  },
+  {
+    "risk_score": 0.34293767012034865,
+    "session": "2025-06-23",
+    "signal_id": "1a4421ec2f25a1174971612db6c9ced0"
+  },
+  {
+    "risk_score": 0.46819896897945984,
+    "session": "2025-05-28",
+    "signal_id": "1a50be9c82f152e2c0a1828e69ce12ec"
+  },
+  {
+    "risk_score": 0.17957569605135595,
+    "session": "2025-06-02",
+    "signal_id": "1a6221b986cb3d334258a689a2f16b90"
+  },
+  {
+    "risk_score": 0.16615850368878682,
+    "session": "2025-05-20",
+    "signal_id": "1af1a42e1fb02a7de917820135ec82f2"
+  },
+  {
+    "risk_score": 0.408072942122291,
+    "session": "2025-06-06",
+    "signal_id": "1af2b50f2aa27c43ff2d29f8ed3b99f5"
+  },
+  {
+    "risk_score": 0.44735317998513,
+    "session": "2025-06-09",
+    "signal_id": "1b72b4c1c7b7691fbb4cd135b2cf3f92"
+  },
+  {
+    "risk_score": 0.635252882511557,
+    "session": "2025-05-22",
+    "signal_id": "1be24d7db09755444eca7a9121b2d36a"
+  },
+  {
+    "risk_score": 0.2961864223366216,
+    "session": "2025-06-06",
+    "signal_id": "1bfd725f2b3a2bf5d0931d2c5f66dcd0"
+  },
+  {
+    "risk_score": 0.3331994966982656,
+    "session": "2025-06-27",
+    "signal_id": "1c57e7056dbc1e5a230141c5643dc6d2"
+  },
+  {
+    "risk_score": 0.36676156017450867,
+    "session": "2025-06-06",
+    "signal_id": "1c5d49eb8db87c1562b30819ce10c62d"
+  },
+  {
+    "risk_score": 0.4630781407414633,
+    "session": "2025-06-04",
+    "signal_id": "1ccd2dad19041a4f39b7a84e9e14ec4c"
+  },
+  {
+    "risk_score": 0.6163457311353853,
+    "session": "2025-06-02",
+    "signal_id": "1cd2b7276c71d752c1062528ea643b1c"
+  },
+  {
+    "risk_score": 0.4481754126453797,
+    "session": "2025-06-12",
+    "signal_id": "1cf4dca5d2956afb959e30ce34502dc1"
+  },
+  {
+    "risk_score": 0.5821618671984935,
+    "session": "2025-06-23",
+    "signal_id": "1d355e99293b3159f9cb44908dc5ed65"
+  },
+  {
+    "risk_score": 0.24667089893441652,
+    "session": "2025-06-11",
+    "signal_id": "1d579b25e02d122972b888fffc6e1ba4"
+  },
+  {
+    "risk_score": 0.32665807571312233,
+    "session": "2025-06-17",
+    "signal_id": "1e796aeff1fcce55143fd107ca314251"
+  },
+  {
+    "risk_score": 0.3765138288549679,
+    "session": "2025-05-23",
+    "signal_id": "1e89ef835d64f6eb59218cac4e562e7e"
+  },
+  {
+    "risk_score": 0.6432793096903806,
+    "session": "2025-06-25",
+    "signal_id": "1eecd64289c6f81824ecc8073391497b"
+  },
+  {
+    "risk_score": 0.2498761223577016,
+    "session": "2025-05-27",
+    "signal_id": "1f0fd23a3cbf6598f783cfab6c22e11f"
+  },
+  {
+    "risk_score": 0.2730522024738373,
+    "session": "2025-06-27",
+    "signal_id": "1fd8e39ec407b7c49817767a2b840dd1"
+  },
+  {
+    "risk_score": 0.5119835471905628,
+    "session": "2025-05-22",
+    "signal_id": "207b0e9ddeb1c9b4f8e1755246c1739d"
+  },
+  {
+    "risk_score": 0.24485691402955537,
+    "session": "2025-06-13",
+    "signal_id": "20f5679a449bd7b02bdc4aadcaf994f4"
+  },
+  {
+    "risk_score": 0.5851283558500169,
+    "session": "2025-05-23",
+    "signal_id": "2138811d10e31c77c7261d9f6260024d"
+  },
+  {
+    "risk_score": 0.5208842664500654,
+    "session": "2025-06-10",
+    "signal_id": "21a4316cd62e350518348a1bfed891a1"
+  },
+  {
+    "risk_score": 0.5477896604080815,
+    "session": "2025-06-18",
+    "signal_id": "21f88da75e2fd0f362966120e4cd3497"
+  },
+  {
+    "risk_score": 0.5638843723031061,
+    "session": "2025-06-09",
+    "signal_id": "221b7aff4be340c832f479070c1583e5"
+  },
+  {
+    "risk_score": 0.266888064013889,
+    "session": "2025-05-20",
+    "signal_id": "22374dc6cd324647d180f5a769c99707"
+  },
+  {
+    "risk_score": 0.626654887139051,
+    "session": "2025-05-27",
+    "signal_id": "2246ac1e38769b4eb3e4abf99c7efea8"
+  },
+  {
+    "risk_score": 0.11781151685288996,
+    "session": "2025-06-27",
+    "signal_id": "2292d3f4509a26f40905722704b26698"
+  },
+  {
+    "risk_score": 0.22656499635224467,
+    "session": "2025-06-30",
+    "signal_id": "229fefc9850a859b80969b1c646f72f1"
+  },
+  {
+    "risk_score": 0.32956884263242625,
+    "session": "2025-06-11",
+    "signal_id": "22b64d6ed04d1d19e5366e9a99ce2e2e"
+  },
+  {
+    "risk_score": 0.6561221470141602,
+    "session": "2025-06-16",
+    "signal_id": "22f2a991e8c8adb8869cefeee6d17043"
+  },
+  {
+    "risk_score": 0.21364751630487666,
+    "session": "2025-06-23",
+    "signal_id": "231cc980dbe1352116b500720d988a13"
+  },
+  {
+    "risk_score": 0.664279915143093,
+    "session": "2025-06-30",
+    "signal_id": "238244638c85b2813598397725bf580f"
+  },
+  {
+    "risk_score": 0.2768289556591905,
+    "session": "2025-06-03",
+    "signal_id": "23a7128b2bcfd8eb5a490843e1b053ba"
+  },
+  {
+    "risk_score": 0.29534460878999674,
+    "session": "2025-06-25",
+    "signal_id": "2410598f40baff7c6d38351e23cc76cc"
+  },
+  {
+    "risk_score": 0.3057158847992031,
+    "session": "2025-06-03",
+    "signal_id": "241ce47db6a7d8537b1a9d15a5908d6d"
+  },
+  {
+    "risk_score": 0.2716345593216955,
+    "session": "2025-05-29",
+    "signal_id": "243d11683e3586a0fd40a799305881a6"
+  },
+  {
+    "risk_score": 0.305620408964627,
+    "session": "2025-05-20",
+    "signal_id": "24531ef6a4f60c7066ae50b30201e7d6"
+  },
+  {
+    "risk_score": 0.4783661848750184,
+    "session": "2025-06-06",
+    "signal_id": "24869fc5fc2d3e1ddc8bad934430c142"
+  },
+  {
+    "risk_score": 0.20600823137909005,
+    "session": "2025-06-05",
+    "signal_id": "24b047c4540800b6802c2a0e42ec5bcb"
+  },
+  {
+    "risk_score": 0.40063593351015153,
+    "session": "2025-06-26",
+    "signal_id": "250505539ba0094be7f84102dd6eb258"
+  },
+  {
+    "risk_score": 0.07945908066921577,
+    "session": "2025-05-29",
+    "signal_id": "250791871221535028451c3eb7d72b12"
+  },
+  {
+    "risk_score": 0.5956782182517115,
+    "session": "2025-05-22",
+    "signal_id": "250b67ae42c9f39f42f221ee1bb10efa"
+  },
+  {
+    "risk_score": 0.3335504650697679,
+    "session": "2025-05-22",
+    "signal_id": "25264d60b8ef0af9bb6824d7447651b0"
+  },
+  {
+    "risk_score": 0.42376246102714354,
+    "session": "2025-06-18",
+    "signal_id": "2544f0e9c92020022c454fe7d3130859"
+  },
+  {
+    "risk_score": 0.5805857643842294,
+    "session": "2025-05-22",
+    "signal_id": "25814c0453a78d9f2384cbb4f0053dc2"
+  },
+  {
+    "risk_score": 0.19633586963173855,
+    "session": "2025-06-26",
+    "signal_id": "25fca089c805927089a04eecff659b8b"
+  },
+  {
+    "risk_score": 0.14493897624623273,
+    "session": "2025-06-06",
+    "signal_id": "263e5490cb106cbea93f3f74ef5c75ef"
+  },
+  {
+    "risk_score": 0.06896418335699961,
+    "session": "2025-06-24",
+    "signal_id": "2644f1d178d080d45b6428432561030f"
+  },
+  {
+    "risk_score": 0.6526133643273772,
+    "session": "2025-05-29",
+    "signal_id": "26619e6d8033728695aea4e6b08680ba"
+  },
+  {
+    "risk_score": 0.20170972776308616,
+    "session": "2025-06-27",
+    "signal_id": "269fac963e4963b9d50e41d7d7720326"
+  },
+  {
+    "risk_score": 0.6482825524708671,
+    "session": "2025-05-27",
+    "signal_id": "26aba7fba4e52c66a919a40842d64e33"
+  },
+  {
+    "risk_score": 0.3945881874271298,
+    "session": "2025-06-02",
+    "signal_id": "2740219bd871ab9d7d9ceff15d2bccfd"
+  },
+  {
+    "risk_score": 0.7176464889359261,
+    "session": "2025-05-22",
+    "signal_id": "27784b25ddbb4b73ce50522392a99b90"
+  },
+  {
+    "risk_score": 0.5695150074137936,
+    "session": "2025-06-02",
+    "signal_id": "279b5192a36f27a78269efd4996c7fe2"
+  },
+  {
+    "risk_score": 0.30160826194970736,
+    "session": "2025-05-30",
+    "signal_id": "283edcff2f1fa1660e43074b9672be24"
+  },
+  {
+    "risk_score": 0.3555591613418974,
+    "session": "2025-06-17",
+    "signal_id": "285040605593c5169184860595e7392d"
+  },
+  {
+    "risk_score": 0.4378212521183017,
+    "session": "2025-06-20",
+    "signal_id": "2864bf160a24038c0068edca6380d967"
+  },
+  {
+    "risk_score": 0.4460745985598975,
+    "session": "2025-06-17",
+    "signal_id": "28ec2314804a969678894d82d9b8dc36"
+  },
+  {
+    "risk_score": 0.25594710050591457,
+    "session": "2025-05-20",
+    "signal_id": "2a2819d7d4a41af655abd0bbdea21c47"
+  },
+  {
+    "risk_score": 0.11270909313194281,
+    "session": "2025-06-04",
+    "signal_id": "2a5b88a4629c216c7dede0d6c85639ee"
+  },
+  {
+    "risk_score": 0.4701581987007764,
+    "session": "2025-06-26",
+    "signal_id": "2a8efe3a2c0f337f6fd777c5026ffb27"
+  },
+  {
+    "risk_score": 0.77953383076204,
+    "session": "2025-05-27",
+    "signal_id": "2ab36d93ad3826ad0e314fe974eb1861"
+  },
+  {
+    "risk_score": 0.6214513587447809,
+    "session": "2025-06-04",
+    "signal_id": "2b130656e88ea11a1c82cb4619513b36"
+  },
+  {
+    "risk_score": 0.3793489520768747,
+    "session": "2025-06-24",
+    "signal_id": "2b444a78c49f58f24bb8a53823ff5f55"
+  },
+  {
+    "risk_score": 0.2749274401796882,
+    "session": "2025-05-21",
+    "signal_id": "2c30ee72a317fee6881a26ba682f9c32"
+  },
+  {
+    "risk_score": 0.42150195199721846,
+    "session": "2025-05-30",
+    "signal_id": "2cca278426d8f2881a8641806d30415b"
+  },
+  {
+    "risk_score": 0.5098146218982653,
+    "session": "2025-06-26",
+    "signal_id": "2d3c46b42bbe378db3db7e0077373e9d"
+  },
+  {
+    "risk_score": 0.3219719429387536,
+    "session": "2025-05-19",
+    "signal_id": "2d7e6222a53dde25b27c1a265a14a971"
+  },
+  {
+    "risk_score": 0.35957295186675403,
+    "session": "2025-06-03",
+    "signal_id": "2d85e9a68a0516a187c0d5d47931bd76"
+  },
+  {
+    "risk_score": 0.369265627914802,
+    "session": "2025-06-11",
+    "signal_id": "2db746cc8a80579827392d42d82d9cae"
+  },
+  {
+    "risk_score": 0.5466546270489916,
+    "session": "2025-05-23",
+    "signal_id": "2e7a309ec0f98d1a225ac0daefb5fabc"
+  },
+  {
+    "risk_score": 0.24878976154523588,
+    "session": "2025-06-20",
+    "signal_id": "2ea296870b83fc6a88a08f5051480b25"
+  },
+  {
+    "risk_score": 0.3657185870529407,
+    "session": "2025-05-21",
+    "signal_id": "2ea93d72166633fb7ea7b7bb46b42abb"
+  },
+  {
+    "risk_score": 0.5965081681347252,
+    "session": "2025-06-16",
+    "signal_id": "2ebe01651af1af581fecad3282df7f98"
+  },
+  {
+    "risk_score": 0.3901854179388399,
+    "session": "2025-06-12",
+    "signal_id": "2ef18f6efbc80f33e8c1c382c0b3e15f"
+  },
+  {
+    "risk_score": 0.17905839819738348,
+    "session": "2025-05-19",
+    "signal_id": "2ef24ed7dfec87ba2e427a9a119a2a5d"
+  },
+  {
+    "risk_score": 0.4950704165510593,
+    "session": "2025-05-21",
+    "signal_id": "2f6f5b7396affeefaf7fc32ebdf532e0"
+  },
+  {
+    "risk_score": 0.2730335451467955,
+    "session": "2025-06-24",
+    "signal_id": "2f847752195585824b85228ee8e4939d"
+  },
+  {
+    "risk_score": 0.5369272582271253,
+    "session": "2025-06-05",
+    "signal_id": "2fb4386800727367606d11508d5d6652"
+  },
+  {
+    "risk_score": 0.3934723403585508,
+    "session": "2025-06-16",
+    "signal_id": "2fe02250ada8bd9f74c56b937adec108"
+  },
+  {
+    "risk_score": 0.6506677145382551,
+    "session": "2025-05-30",
+    "signal_id": "302ece4234408eb42be214843d41cf4b"
+  },
+  {
+    "risk_score": 0.24251412787094728,
+    "session": "2025-06-06",
+    "signal_id": "30681490aedded893d93a5adceea845a"
+  },
+  {
+    "risk_score": 0.30038273564216644,
+    "session": "2025-06-09",
+    "signal_id": "30a96837b454032854e89ce6d099ba8a"
+  },
+  {
+    "risk_score": 0.8052085386683606,
+    "session": "2025-06-24",
+    "signal_id": "30cdb9d28bedc8f5a923735df44949e1"
+  },
+  {
+    "risk_score": 0.44407896538870056,
+    "session": "2025-05-29",
+    "signal_id": "32815755460c6965c32bb00612bf7387"
+  },
+  {
+    "risk_score": 0.01237643917664378,
+    "session": "2025-06-13",
+    "signal_id": "32bac7c92692e65b92d6654236732824"
+  },
+  {
+    "risk_score": 0.14043383743186627,
+    "session": "2025-05-30",
+    "signal_id": "32e66a0bb807a0e33ba5afbfffca4d7e"
+  },
+  {
+    "risk_score": 0.014237710463616167,
+    "session": "2025-06-04",
+    "signal_id": "32ec4ce0b5b5c11db332a29a09d70959"
+  },
+  {
+    "risk_score": 0.38933299029513785,
+    "session": "2025-06-30",
+    "signal_id": "3378ceda95a4e90d482b5d83aef44adc"
+  },
+  {
+    "risk_score": 0.5483922624173526,
+    "session": "2025-06-04",
+    "signal_id": "33ceb4d5fc68c0ae7c1c81b56e61ef7f"
+  },
+  {
+    "risk_score": 0.472777711839605,
+    "session": "2025-06-04",
+    "signal_id": "3405d9947dfd23f2dd08372cb401beb8"
+  },
+  {
+    "risk_score": 0.5485629081735771,
+    "session": "2025-06-16",
+    "signal_id": "34199cfd3235eddbe7a734188bf82d54"
+  },
+  {
+    "risk_score": 0.20602130795710652,
+    "session": "2025-06-18",
+    "signal_id": "344d4a7d61c972aeffd46c82b8dd7e9d"
+  },
+  {
+    "risk_score": 0.2685000841523145,
+    "session": "2025-05-19",
+    "signal_id": "3528b228c7a8d6c4ec634a676dfd3b30"
+  },
+  {
+    "risk_score": 0.2747571196646725,
+    "session": "2025-05-23",
+    "signal_id": "356b29fa3a16330ca8e1e02c07aeb8ef"
+  },
+  {
+    "risk_score": 0.2921121292128636,
+    "session": "2025-06-02",
+    "signal_id": "35a72bdfc82a5e4c617257f600c252af"
+  },
+  {
+    "risk_score": 0.27228621804589004,
+    "session": "2025-05-23",
+    "signal_id": "35f831576d3cafc68688a14f0c61be8f"
+  },
+  {
+    "risk_score": 0.2247401877924878,
+    "session": "2025-06-12",
+    "signal_id": "35fddf0c363cb6e70e596e97b06a3eba"
+  },
+  {
+    "risk_score": 0.08570577653667172,
+    "session": "2025-05-28",
+    "signal_id": "3604654d3df9c9070a37c118a6a77560"
+  },
+  {
+    "risk_score": 0.45259910351968763,
+    "session": "2025-06-16",
+    "signal_id": "361cd956b41815143876616971beaffe"
+  },
+  {
+    "risk_score": 0.3610231702130876,
+    "session": "2025-06-09",
+    "signal_id": "361cf571c98aca42fe7f6a9fba1d3fd5"
+  },
+  {
+    "risk_score": 0.3020271123469382,
+    "session": "2025-05-22",
+    "signal_id": "36530448bb44ee2de09e1e7c1026337d"
+  },
+  {
+    "risk_score": 0.24296956264831654,
+    "session": "2025-06-12",
+    "signal_id": "36550b6cf7a8cbd7e0cbc01d38c791fa"
+  },
+  {
+    "risk_score": 0.44589629056096813,
+    "session": "2025-05-20",
+    "signal_id": "3675c6a462e59479c937df94ac9f392d"
+  },
+  {
+    "risk_score": 0.17593271354910053,
+    "session": "2025-06-09",
+    "signal_id": "36f8d377765237d8dc9a75a216158f40"
+  },
+  {
+    "risk_score": 0.5248074936298159,
+    "session": "2025-05-22",
+    "signal_id": "371b012237eab6ed860a7e15e0f8c6f4"
+  },
+  {
+    "risk_score": 0.5869989736119456,
+    "session": "2025-06-26",
+    "signal_id": "375af446cddf521f067ba04d6c27995e"
+  },
+  {
+    "risk_score": 0.2811860392090985,
+    "session": "2025-06-13",
+    "signal_id": "37a44fce99f99de97f6d4c7bca581f1b"
+  },
+  {
+    "risk_score": 0.26823597786404657,
+    "session": "2025-05-22",
+    "signal_id": "3841d5b85bc1e25f66e7c23af38f9680"
+  },
+  {
+    "risk_score": 0.5210368488188135,
+    "session": "2025-06-23",
+    "signal_id": "38a4f09cae8c28d835222615c45ba658"
+  },
+  {
+    "risk_score": 0.3358100230959664,
+    "session": "2025-06-04",
+    "signal_id": "38d44c05fc005364ba398f892c30deff"
+  },
+  {
+    "risk_score": 0.35701770709289865,
+    "session": "2025-05-29",
+    "signal_id": "3905dc06fe529ea6bc82f8cecc4f11ab"
+  },
+  {
+    "risk_score": 0.6348414868862593,
+    "session": "2025-05-22",
+    "signal_id": "3925355107b933b43ac127e5c18e6f7e"
+  },
+  {
+    "risk_score": 0.4310180598625323,
+    "session": "2025-06-16",
+    "signal_id": "39f40b7e5da7b23de602909c190b4320"
+  },
+  {
+    "risk_score": 0.5111059709589981,
+    "session": "2025-06-10",
+    "signal_id": "3a0cf5f1bb5e5203823997bf598443b4"
+  },
+  {
+    "risk_score": 0.21790824441528597,
+    "session": "2025-05-23",
+    "signal_id": "3a20eb7aa997ebe8b46191c5ff8f427b"
+  },
+  {
+    "risk_score": 0.026267881394134596,
+    "session": "2025-06-20",
+    "signal_id": "3aae9ed2099e99463a4c910df4f70611"
+  },
+  {
+    "risk_score": 0.483544113580788,
+    "session": "2025-06-03",
+    "signal_id": "3abbf7d6c242c591bbd225b8cbe8a4f2"
+  },
+  {
+    "risk_score": 0.31559514719211257,
+    "session": "2025-06-13",
+    "signal_id": "3abcfdbdab4bae1d7e5b1c2acd00caa6"
+  },
+  {
+    "risk_score": 0.5806810943578723,
+    "session": "2025-05-22",
+    "signal_id": "3adf0b8781085db9b0a16ccd09af73d7"
+  },
+  {
+    "risk_score": 0.9017473996042065,
+    "session": "2025-05-22",
+    "signal_id": "3b05a60ee8cf2d539eeb9c741201a0f8"
+  },
+  {
+    "risk_score": 0.2153380823670226,
+    "session": "2025-06-03",
+    "signal_id": "3b4140145d0182cb9ebad23258068b6c"
+  },
+  {
+    "risk_score": 0.39277100428148687,
+    "session": "2025-05-30",
+    "signal_id": "3c464147486cd395349a2c4b243a8960"
+  },
+  {
+    "risk_score": 0.3243194470203141,
+    "session": "2025-06-13",
+    "signal_id": "3c618f35e74329cc626a561f83e5d3f9"
+  },
+  {
+    "risk_score": 0.28184069183564175,
+    "session": "2025-06-05",
+    "signal_id": "3c9491d8e22fa76755c317294f9a69ad"
+  },
+  {
+    "risk_score": 0.37928660346561005,
+    "session": "2025-06-13",
+    "signal_id": "3d2cb2e0a32552e12d1eb32f7479a51c"
+  },
+  {
+    "risk_score": 0.6166224593326218,
+    "session": "2025-06-06",
+    "signal_id": "3d4a8621f8a3a53dcfba90869b349833"
+  },
+  {
+    "risk_score": 0.16190802272935495,
+    "session": "2025-06-30",
+    "signal_id": "3dbefb914c0f9fef1fe8d023d0a75e90"
+  },
+  {
+    "risk_score": 0.20135010425852118,
+    "session": "2025-06-17",
+    "signal_id": "3dd9fd9210b14d44ba203972533c39a1"
+  },
+  {
+    "risk_score": 0.3368904312508006,
+    "session": "2025-06-04",
+    "signal_id": "3e114e0951b6b03d738bdbec28b4d3c8"
+  },
+  {
+    "risk_score": 0.5537627488068896,
+    "session": "2025-06-05",
+    "signal_id": "3e7ab780f1b3c5d27a00b586e1c6b987"
+  },
+  {
+    "risk_score": 0.40441836863740066,
+    "session": "2025-05-22",
+    "signal_id": "3ed5f0995a04fa02c34ee3f0fb3e77b1"
+  },
+  {
+    "risk_score": 0.37604689527837926,
+    "session": "2025-05-19",
+    "signal_id": "3edfa7bd27043586b656af7b32ce88d3"
+  },
+  {
+    "risk_score": 0.37223807803389436,
+    "session": "2025-06-04",
+    "signal_id": "3fadf719b2189fb24a7ba54a6394cc12"
+  },
+  {
+    "risk_score": 0.19210333640149616,
+    "session": "2025-06-16",
+    "signal_id": "4038362af743a0c786d434f0cc0f7cf0"
+  },
+  {
+    "risk_score": 0.3098949035079824,
+    "session": "2025-05-21",
+    "signal_id": "40adb75a3f1e8fce84bf0ed0f4439baa"
+  },
+  {
+    "risk_score": 0.08297992309045589,
+    "session": "2025-06-04",
+    "signal_id": "4125255bb59f08c3f36c210916f2e471"
+  },
+  {
+    "risk_score": 0.570443441664528,
+    "session": "2025-06-24",
+    "signal_id": "4162578bac01fd274c15f7eed29b4da7"
+  },
+  {
+    "risk_score": 0.535943887487423,
+    "session": "2025-05-29",
+    "signal_id": "4167a52426fc65edf2ca9b999efabf50"
+  },
+  {
+    "risk_score": 0.20900642413739431,
+    "session": "2025-06-12",
+    "signal_id": "41ea278db1461fa5ac0589f24ad44d8a"
+  },
+  {
+    "risk_score": 0.38770577769246345,
+    "session": "2025-06-05",
+    "signal_id": "422f43c56c99a594920808f81e2741fc"
+  },
+  {
+    "risk_score": 0.1515566977869604,
+    "session": "2025-05-28",
+    "signal_id": "42510427b08003c4eef731f2d52616b8"
+  },
+  {
+    "risk_score": 0.2876059461912345,
+    "session": "2025-06-03",
+    "signal_id": "427b8661e5f07797e75f6e4139bc133f"
+  },
+  {
+    "risk_score": 0.4704844203951239,
+    "session": "2025-06-03",
+    "signal_id": "4293dcdcbaad98245e0b37d74b3716b2"
+  },
+  {
+    "risk_score": 0.3669712313800543,
+    "session": "2025-06-26",
+    "signal_id": "42b2af15ee1ee8606bdc5545369ae5bf"
+  },
+  {
+    "risk_score": 0.16595185750400446,
+    "session": "2025-05-27",
+    "signal_id": "43ea6f10e8ca0383c258f85b0a8b5942"
+  },
+  {
+    "risk_score": 0.47008001087347134,
+    "session": "2025-06-13",
+    "signal_id": "44648544c391c9ba78db621c7bfa5069"
+  },
+  {
+    "risk_score": 0.5917035936014815,
+    "session": "2025-06-09",
+    "signal_id": "44767ddfbf9cd09c11d3c9746add5c8e"
+  },
+  {
+    "risk_score": 0.014895250621078283,
+    "session": "2025-06-13",
+    "signal_id": "44d54e049ccbf96907a72260a0bb07b5"
+  },
+  {
+    "risk_score": 0.3189939819170054,
+    "session": "2025-06-02",
+    "signal_id": "452ff1e60a4439f8d0495d67f728d8c0"
+  },
+  {
+    "risk_score": 0.32386921311559386,
+    "session": "2025-05-23",
+    "signal_id": "45602868240d05c2248a85b8cf3b83ee"
+  },
+  {
+    "risk_score": 0.42953120978538706,
+    "session": "2025-06-06",
+    "signal_id": "45a6e6fe811316df0dfc1da75111663e"
+  },
+  {
+    "risk_score": 0.5161498865539694,
+    "session": "2025-06-30",
+    "signal_id": "45a77368eb19d4243c32f59f7a436f9d"
+  },
+  {
+    "risk_score": 0.2558969162540563,
+    "session": "2025-05-20",
+    "signal_id": "45b8ac4a6bc410c24129dec50c03f98b"
+  },
+  {
+    "risk_score": 0.27609712063804265,
+    "session": "2025-06-06",
+    "signal_id": "46755f4ae6bb128cbdbdb7ec132722f1"
+  },
+  {
+    "risk_score": 0.6309952263298967,
+    "session": "2025-05-22",
+    "signal_id": "4686b05da30241f07264e279e44a14cd"
+  },
+  {
+    "risk_score": 0.3418689229755794,
+    "session": "2025-05-27",
+    "signal_id": "46e7c64c5b59babff44e781a815fe8f7"
+  },
+  {
+    "risk_score": 0.12779685711661357,
+    "session": "2025-06-09",
+    "signal_id": "47421b0a5292de40d0d310b5e0ed9d0d"
+  },
+  {
+    "risk_score": 0.18712183060525275,
+    "session": "2025-06-09",
+    "signal_id": "47542670f1f068549992e8a4c19cfffd"
+  },
+  {
+    "risk_score": 0.17418143716448542,
+    "session": "2025-06-26",
+    "signal_id": "47a197a3e42d459e4f42a1c4ef4ad75a"
+  },
+  {
+    "risk_score": 0.4102587660394327,
+    "session": "2025-06-10",
+    "signal_id": "489417559f747d4f94e0c30acf98ecd2"
+  },
+  {
+    "risk_score": 0.181212159964217,
+    "session": "2025-05-22",
+    "signal_id": "48b5c40739c9b0112fd15131b7d51761"
+  },
+  {
+    "risk_score": 0.28837386675653753,
+    "session": "2025-05-19",
+    "signal_id": "48c759a5e61193f145e68c8be59983be"
+  },
+  {
+    "risk_score": 0.1731824888440203,
+    "session": "2025-05-20",
+    "signal_id": "48d0d31fc0dca0444b84099956f46ff4"
+  },
+  {
+    "risk_score": 0.6204737056843428,
+    "session": "2025-06-12",
+    "signal_id": "48e5de3cdfbf790a996ad36df5d66277"
+  },
+  {
+    "risk_score": 0.2707395814564655,
+    "session": "2025-06-23",
+    "signal_id": "49ad8884d27f184dfe623bb27b8847f9"
+  },
+  {
+    "risk_score": 0.17382316674374648,
+    "session": "2025-05-21",
+    "signal_id": "49d9fb37f62428484154cdffe201a0a5"
+  },
+  {
+    "risk_score": 0.29304955874761485,
+    "session": "2025-05-27",
+    "signal_id": "49f6c1be9a51e3a06518feedd18f4d00"
+  },
+  {
+    "risk_score": 0.3059230193028511,
+    "session": "2025-06-24",
+    "signal_id": "49fa0d8aa0d20ee5d707a58f2529d453"
+  },
+  {
+    "risk_score": 0.24528679389011257,
+    "session": "2025-06-09",
+    "signal_id": "4a24675949823452d98b9894f9a51f0e"
+  },
+  {
+    "risk_score": 0.45289687077306784,
+    "session": "2025-06-16",
+    "signal_id": "4a3347938572bf453ee703fe0a635e22"
+  },
+  {
+    "risk_score": 0.29318805646011364,
+    "session": "2025-06-27",
+    "signal_id": "4a89c85a021667578126822dc89efe94"
+  },
+  {
+    "risk_score": 0.32812565610980277,
+    "session": "2025-05-19",
+    "signal_id": "4ae2cee88c97ddd9c58185ad9602410e"
+  },
+  {
+    "risk_score": 0.19985035472573448,
+    "session": "2025-05-22",
+    "signal_id": "4b1284face10f2ad3de395afec8db4e0"
+  },
+  {
+    "risk_score": 0.5247014532687735,
+    "session": "2025-06-20",
+    "signal_id": "4b5ae00fac1c596e19fe7e1b45081e3c"
+  },
+  {
+    "risk_score": 0.33944425574872394,
+    "session": "2025-06-04",
+    "signal_id": "4b7f273560365bcf4c75dffb177a1c61"
+  },
+  {
+    "risk_score": 0.5626706266204751,
+    "session": "2025-06-13",
+    "signal_id": "4bfe093ad313d9da705b068af599c3b5"
+  },
+  {
+    "risk_score": 0.35096591448254855,
+    "session": "2025-05-28",
+    "signal_id": "4c3bb05e9bc89611f3172ec4c6b0ed34"
+  },
+  {
+    "risk_score": 0.34604136490928716,
+    "session": "2025-06-10",
+    "signal_id": "4d0454789130e372500b62d393ca9b31"
+  },
+  {
+    "risk_score": 0.2820905921097603,
+    "session": "2025-05-22",
+    "signal_id": "4d3845874a052c58fe33b35ff6c8306d"
+  },
+  {
+    "risk_score": 0.40919420723867167,
+    "session": "2025-06-10",
+    "signal_id": "4d424de61f4539e9bd761d3311e1ff33"
+  },
+  {
+    "risk_score": 0.2874797821144339,
+    "session": "2025-06-24",
+    "signal_id": "4d9168d8009cb506d683707d958a4e34"
+  },
+  {
+    "risk_score": 0.4972947404507876,
+    "session": "2025-06-05",
+    "signal_id": "4dd394fecb6c9e768bd0a729090971e4"
+  },
+  {
+    "risk_score": 0.23041387422349868,
+    "session": "2025-06-05",
+    "signal_id": "4e084152e77204edd66716d0124f734c"
+  },
+  {
+    "risk_score": 0.2237033813188299,
+    "session": "2025-06-30",
+    "signal_id": "4e85e2668d74a4d3284e791b663e6227"
+  },
+  {
+    "risk_score": 0.5769147322659854,
+    "session": "2025-05-29",
+    "signal_id": "4efee89f28d73810191bb622edb0ef97"
+  },
+  {
+    "risk_score": 0.33428584334990136,
+    "session": "2025-05-27",
+    "signal_id": "4f75c9c52fc9ac8ffa6cd19915426080"
+  },
+  {
+    "risk_score": 0.22338605021318497,
+    "session": "2025-05-19",
+    "signal_id": "4faa0d7df482e5a01f1db68ee11ca2ca"
+  },
+  {
+    "risk_score": 0.30363968300427735,
+    "session": "2025-06-10",
+    "signal_id": "4fd91677f777efec5f255068659fddd5"
+  },
+  {
+    "risk_score": 0.3702299873307154,
+    "session": "2025-05-21",
+    "signal_id": "5032f17a0ef97f487035222802ca807a"
+  },
+  {
+    "risk_score": 0.4716882634501458,
+    "session": "2025-06-30",
+    "signal_id": "50409581862c658fc473ea0028f4302e"
+  },
+  {
+    "risk_score": 0.6972518466068426,
+    "session": "2025-05-22",
+    "signal_id": "510dd18a2b4abdab0f074d916126081d"
+  },
+  {
+    "risk_score": 0.2756445725824902,
+    "session": "2025-06-17",
+    "signal_id": "519cb2ce25ba71d04387d24dfd000b08"
+  },
+  {
+    "risk_score": 0.11139198164481069,
+    "session": "2025-05-27",
+    "signal_id": "51c5594f0d5cfee19f88d9c543ec37ee"
+  },
+  {
+    "risk_score": 0.4329695370216492,
+    "session": "2025-06-23",
+    "signal_id": "51d2bfea1561f458b3c64759c13cb380"
+  },
+  {
+    "risk_score": 0.19941008210402886,
+    "session": "2025-06-04",
+    "signal_id": "520e7db69efdf76da861b004b6b1936d"
+  },
+  {
+    "risk_score": 0.31486111154175656,
+    "session": "2025-05-22",
+    "signal_id": "5234a4964532eb58a9b0f42a08539ac3"
+  },
+  {
+    "risk_score": 0.5769712040251215,
+    "session": "2025-05-29",
+    "signal_id": "525dc4e6b3315b24a7bee3f05bb764ec"
+  },
+  {
+    "risk_score": 0.3552093515114561,
+    "session": "2025-06-04",
+    "signal_id": "52658a06840b19e48a697e1a44e6a90d"
+  },
+  {
+    "risk_score": 0.6302293775203847,
+    "session": "2025-06-23",
+    "signal_id": "526845bb902ba867803bc36a8dc9145e"
+  },
+  {
+    "risk_score": 0.6123141462931263,
+    "session": "2025-06-05",
+    "signal_id": "52d74a7543b4f5c29bd905d814f34cfd"
+  },
+  {
+    "risk_score": 0.28964089679802696,
+    "session": "2025-05-20",
+    "signal_id": "535b26c8ecc13e85195841f6e58f9643"
+  },
+  {
+    "risk_score": 0.3554133708108964,
+    "session": "2025-05-27",
+    "signal_id": "539bb797e82195e8868a0851c05d85df"
+  },
+  {
+    "risk_score": 0.4911360534801499,
+    "session": "2025-05-23",
+    "signal_id": "53bafc6295efaae00808c489876ef130"
+  },
+  {
+    "risk_score": 0.5551026297333121,
+    "session": "2025-06-11",
+    "signal_id": "53bf7d907efe280ddfaedfaeb1b2cec6"
+  },
+  {
+    "risk_score": 0.21314562935488046,
+    "session": "2025-06-27",
+    "signal_id": "54070d3182c0f79daf1aa8ffa7133348"
+  },
+  {
+    "risk_score": 0.38943732546563764,
+    "session": "2025-06-03",
+    "signal_id": "546507f35945e7b5aeddf81ea88f9fb5"
+  },
+  {
+    "risk_score": 0.3888236017128623,
+    "session": "2025-06-18",
+    "signal_id": "548689dfb7c3f16c6ee71564bc714524"
+  },
+  {
+    "risk_score": 0.46709982403657985,
+    "session": "2025-05-27",
+    "signal_id": "5491650f3c2d89ba9a2874f3833388fc"
+  },
+  {
+    "risk_score": 0.2318451665684744,
+    "session": "2025-05-19",
+    "signal_id": "54919d69ded51bdcd57523edb8b6bdbb"
+  },
+  {
+    "risk_score": 0.5171871097067194,
+    "session": "2025-06-04",
+    "signal_id": "552fcd5d3cb1b02f7e48211063c60475"
+  },
+  {
+    "risk_score": 0.27504516714707217,
+    "session": "2025-06-27",
+    "signal_id": "55dec9f8b08af6fa1f87197080f8f91b"
+  },
+  {
+    "risk_score": 0.5654039187128711,
+    "session": "2025-06-13",
+    "signal_id": "5696ca9045f8a07b560e202df909e1bc"
+  },
+  {
+    "risk_score": 0.1922570939079704,
+    "session": "2025-06-30",
+    "signal_id": "574935f19aa62879419cf0b270ee1c64"
+  },
+  {
+    "risk_score": 0.2612648585813862,
+    "session": "2025-05-21",
+    "signal_id": "574a061af26aa89fdaeb7270d4729965"
+  },
+  {
+    "risk_score": 0.3879181589017736,
+    "session": "2025-05-28",
+    "signal_id": "57704d2226fc59904659663e39fd3bf6"
+  },
+  {
+    "risk_score": 0.549141539508359,
+    "session": "2025-06-02",
+    "signal_id": "579d10774d0fa4164d63218d9b27412f"
+  },
+  {
+    "risk_score": 0.5673461157558355,
+    "session": "2025-06-12",
+    "signal_id": "5833ecdcca66596b7b6396a0ea9e5f2a"
+  },
+  {
+    "risk_score": 0.3053599265585742,
+    "session": "2025-06-06",
+    "signal_id": "58381a166ae0051d4086977e750d2557"
+  },
+  {
+    "risk_score": 0.6671174162391446,
+    "session": "2025-05-30",
+    "signal_id": "58b6ee85befc8fd20303addbc29b4933"
+  },
+  {
+    "risk_score": 0.3810383201507489,
+    "session": "2025-06-26",
+    "signal_id": "58d544a95d5dc59b7ac28b87513bce4f"
+  },
+  {
+    "risk_score": 0.4819632437558675,
+    "session": "2025-06-11",
+    "signal_id": "5a3fa5100a5cb26efada1ee9cbafd391"
+  },
+  {
+    "risk_score": 0.23501831813810134,
+    "session": "2025-05-20",
+    "signal_id": "5a784d368a9a01df3928fb737776f784"
+  },
+  {
+    "risk_score": 0.41926847189145205,
+    "session": "2025-06-30",
+    "signal_id": "5a8c01f31e7e11b7ef9c8c2c217188c6"
+  },
+  {
+    "risk_score": 0.20503847734922712,
+    "session": "2025-06-23",
+    "signal_id": "5a9402491c3c2e01f15e036008d96903"
+  },
+  {
+    "risk_score": 0.3289209266751117,
+    "session": "2025-05-20",
+    "signal_id": "5aaa67ad258464a3ff5a108022e84ef4"
+  },
+  {
+    "risk_score": 0.5965662862586395,
+    "session": "2025-06-12",
+    "signal_id": "5af389910c2730d2f8c322122c837c0e"
+  },
+  {
+    "risk_score": 0.42503115638565525,
+    "session": "2025-06-17",
+    "signal_id": "5b45bc9702b482905d10435058febb9e"
+  },
+  {
+    "risk_score": 0.44071388588965443,
+    "session": "2025-06-13",
+    "signal_id": "5b4b8ba8442a88e220ce53d17b2a66ed"
+  },
+  {
+    "risk_score": 0.32117375286580574,
+    "session": "2025-05-23",
+    "signal_id": "5b5d9e4b2a7cf28dcba42a24be6e1e30"
+  },
+  {
+    "risk_score": 0.22578558477068011,
+    "session": "2025-05-20",
+    "signal_id": "5b666d3dcfc38d17eda569fcdd69ad40"
+  },
+  {
+    "risk_score": 0.19246389232092959,
+    "session": "2025-05-20",
+    "signal_id": "5b7457ac1ca3170396edf5c0175aeff1"
+  },
+  {
+    "risk_score": 0.16357336226192187,
+    "session": "2025-06-18",
+    "signal_id": "5ba66ecc6b8f44b8e53c5dd10e5ba808"
+  },
+  {
+    "risk_score": 0.48873523829702237,
+    "session": "2025-06-09",
+    "signal_id": "5c0702cc217721891c8ee0b7bb0f8ee1"
+  },
+  {
+    "risk_score": 0.2016211450371249,
+    "session": "2025-05-20",
+    "signal_id": "5cef952b1592ea252b8582950fbff5f2"
+  },
+  {
+    "risk_score": 0.1691686022607293,
+    "session": "2025-06-25",
+    "signal_id": "5d072011ec3ac27c7cc6779db275234e"
+  },
+  {
+    "risk_score": 0.2684175948412837,
+    "session": "2025-06-02",
+    "signal_id": "5d3669cd22014419f32b25a5af31aef0"
+  },
+  {
+    "risk_score": 0.4060551158620701,
+    "session": "2025-06-30",
+    "signal_id": "5d5015b05e1acd20792b6f0099e95e3a"
+  },
+  {
+    "risk_score": 0.2601139793226235,
+    "session": "2025-06-18",
+    "signal_id": "5d62e2b2b62a92da8cce3b5b076a05dc"
+  },
+  {
+    "risk_score": 0.6587687256150165,
+    "session": "2025-05-28",
+    "signal_id": "5d8f75ce29907a49b5a8313a9f5a7c03"
+  },
+  {
+    "risk_score": 0.44877665887421386,
+    "session": "2025-05-23",
+    "signal_id": "5dd0ce11779ecd417f1cb04d24ea9632"
+  },
+  {
+    "risk_score": 0.3066711626266496,
+    "session": "2025-05-21",
+    "signal_id": "5e23a5528afeddd65b2fdffb93fe0b04"
+  },
+  {
+    "risk_score": 0.6320981549734042,
+    "session": "2025-05-22",
+    "signal_id": "5e4907f5806b2a4e9978e7187039dd8a"
+  },
+  {
+    "risk_score": 0.13846928830660804,
+    "session": "2025-06-09",
+    "signal_id": "5e4950adeb570d4fc9f12a2e72cf7b3d"
+  },
+  {
+    "risk_score": 0.48295461884292173,
+    "session": "2025-06-16",
+    "signal_id": "5e65540fd9aa490b46d7ba841a2e150b"
+  },
+  {
+    "risk_score": 0.29419897483460883,
+    "session": "2025-05-28",
+    "signal_id": "5ed459c5d2afaa3c97964d09c86c25ca"
+  },
+  {
+    "risk_score": 0.2774846415492811,
+    "session": "2025-06-09",
+    "signal_id": "5f2b913fc140572c543402ef48e07e93"
+  },
+  {
+    "risk_score": 0.34801570229357626,
+    "session": "2025-05-23",
+    "signal_id": "5f78326c24823a2a70e861385cde7dc3"
+  },
+  {
+    "risk_score": 0.30113548502692433,
+    "session": "2025-06-03",
+    "signal_id": "5f9ddbc3f9d281a40bff92c2691f2a85"
+  },
+  {
+    "risk_score": 0.2412256799117373,
+    "session": "2025-06-03",
+    "signal_id": "5fbb3c8a7a910acc2f6028ae75cd25b4"
+  },
+  {
+    "risk_score": 0.328160963231434,
+    "session": "2025-05-19",
+    "signal_id": "602256b8c7d43b2c41148e57f24fef27"
+  },
+  {
+    "risk_score": 0.1989604256356462,
+    "session": "2025-05-30",
+    "signal_id": "60b7b4bd07e328aec16c146665a7a09c"
+  },
+  {
+    "risk_score": 0.230487349386944,
+    "session": "2025-06-25",
+    "signal_id": "6103617d666ea698267bcca4fe28d65f"
+  },
+  {
+    "risk_score": 0.5942386475217923,
+    "session": "2025-06-12",
+    "signal_id": "61674c5ab13d4c0c603475677824f713"
+  },
+  {
+    "risk_score": 0.5120612840860594,
+    "session": "2025-05-22",
+    "signal_id": "6175c30612c008f8051d87174796acd5"
+  },
+  {
+    "risk_score": 0.015083346678008726,
+    "session": "2025-06-04",
+    "signal_id": "6337174d8f6c645ea6a1f3ae8a801e8d"
+  },
+  {
+    "risk_score": 0.330324907785069,
+    "session": "2025-05-28",
+    "signal_id": "6360a4278d6f5b7c19b305969c4c346d"
+  },
+  {
+    "risk_score": 0.4257858528241142,
+    "session": "2025-06-25",
+    "signal_id": "63e9152757c63d029e20099eb6432dbf"
+  },
+  {
+    "risk_score": 0.33140588117233005,
+    "session": "2025-06-16",
+    "signal_id": "651a26ee5dc085571b9ee94f20232c2d"
+  },
+  {
+    "risk_score": 0.38374057758301555,
+    "session": "2025-06-23",
+    "signal_id": "652de401ecc5e10edb4fa18150dd4774"
+  },
+  {
+    "risk_score": 0.2463106484945815,
+    "session": "2025-06-30",
+    "signal_id": "65ab1a1af43e53afef6e9bf8ef3836e3"
+  },
+  {
+    "risk_score": 0.2973703023968986,
+    "session": "2025-05-20",
+    "signal_id": "65b22103cd7cdf5e19d241b38fe4f29e"
+  },
+  {
+    "risk_score": 0.427713154820619,
+    "session": "2025-06-03",
+    "signal_id": "65b2bedf1a47fc71e317c90f41c6e584"
+  },
+  {
+    "risk_score": 0.3103239614815819,
+    "session": "2025-06-26",
+    "signal_id": "6605ab4dfb1d092007dd24705eda75cb"
+  },
+  {
+    "risk_score": 0.637582503492163,
+    "session": "2025-06-02",
+    "signal_id": "66d501d80abdcded640bb01bbd9a1bed"
+  },
+  {
+    "risk_score": 0.5347991691208344,
+    "session": "2025-06-03",
+    "signal_id": "675245168b10544939e513bfd136a7ac"
+  },
+  {
+    "risk_score": 0.291520620301599,
+    "session": "2025-06-26",
+    "signal_id": "67638f04ff2ff910045787dbfa15d9a2"
+  },
+  {
+    "risk_score": 0.07685292767044212,
+    "session": "2025-06-24",
+    "signal_id": "67736954f425a8f807617fce6f28a8b9"
+  },
+  {
+    "risk_score": 0.3670865335227223,
+    "session": "2025-06-04",
+    "signal_id": "67b0a2020e6d5a30992c0ea2bfd23d4c"
+  },
+  {
+    "risk_score": 0.25696858243543397,
+    "session": "2025-06-18",
+    "signal_id": "67e8367a5aa443b140e60e0921b5c7cb"
+  },
+  {
+    "risk_score": 0.4011882012824327,
+    "session": "2025-06-24",
+    "signal_id": "689be4250eaae7abc0a8e99e58108daa"
+  },
+  {
+    "risk_score": 0.35620056466302014,
+    "session": "2025-06-20",
+    "signal_id": "68a06d32fab5ba7ac526c938f3501d9a"
+  },
+  {
+    "risk_score": 0.4584907224019971,
+    "session": "2025-06-06",
+    "signal_id": "692c4f98a144f0459d3c48d7a21c2213"
+  },
+  {
+    "risk_score": 0.1925392739335009,
+    "session": "2025-06-06",
+    "signal_id": "6950f81203ab5db78b62f6f12fee82e3"
+  },
+  {
+    "risk_score": 0.01925870757839233,
+    "session": "2025-05-21",
+    "signal_id": "6a38f253101d3d83b7dc47885d74abb8"
+  },
+  {
+    "risk_score": 0.12903586567466185,
+    "session": "2025-06-30",
+    "signal_id": "6a5c0dd0f5718e7d7d054d04057170ae"
+  },
+  {
+    "risk_score": 0.4496303963996784,
+    "session": "2025-06-17",
+    "signal_id": "6ad30bc0975b31a312604c3e2d77f6e0"
+  },
+  {
+    "risk_score": 0.5919892095640574,
+    "session": "2025-06-02",
+    "signal_id": "6af68a17abd1ca6944953a32d9995a24"
+  },
+  {
+    "risk_score": 0.4359607180153287,
+    "session": "2025-06-23",
+    "signal_id": "6affa649736f6b39bb3e7905edab2cd5"
+  },
+  {
+    "risk_score": 0.5001529338750494,
+    "session": "2025-06-06",
+    "signal_id": "6b443e4f7e0db662ca5df1833c09eb3d"
+  },
+  {
+    "risk_score": 0.5397622429774795,
+    "session": "2025-06-09",
+    "signal_id": "6bf1b0ece1fb012da6e4be4824f4f574"
+  },
+  {
+    "risk_score": 0.4641771707083896,
+    "session": "2025-05-23",
+    "signal_id": "6c0732bc141785335dd0d0f29d296ae2"
+  },
+  {
+    "risk_score": 0.4080146648967853,
+    "session": "2025-06-04",
+    "signal_id": "6c4b637661f4377a4d28538a82072ec1"
+  },
+  {
+    "risk_score": 0.253990949757994,
+    "session": "2025-06-04",
+    "signal_id": "6c6860d9fb058988587758ef6a2434f1"
+  },
+  {
+    "risk_score": 0.3842731181716626,
+    "session": "2025-05-21",
+    "signal_id": "6c86060a220fa3f1fb084538eacf3808"
+  },
+  {
+    "risk_score": 0.45315049474208347,
+    "session": "2025-06-04",
+    "signal_id": "6caae6c6447ec7c2133e078b3b7c71ae"
+  },
+  {
+    "risk_score": 0.4647592766213036,
+    "session": "2025-06-03",
+    "signal_id": "6cd4f68341e19e837db7360dfd5b0650"
+  },
+  {
+    "risk_score": 0.31908951791917206,
+    "session": "2025-06-23",
+    "signal_id": "6d16bb1973d22d0144932cefdd785ee1"
+  },
+  {
+    "risk_score": 0.5432975904916171,
+    "session": "2025-05-23",
+    "signal_id": "6d38aada5c2e716d3623ad6417b06c69"
+  },
+  {
+    "risk_score": 0.4313338978344521,
+    "session": "2025-06-10",
+    "signal_id": "6d4fe97ffa1a192ade50890ad739ed2f"
+  },
+  {
+    "risk_score": 0.2957301520965442,
+    "session": "2025-06-03",
+    "signal_id": "6d83703f28e74d2bf5ef9efecca4922f"
+  },
+  {
+    "risk_score": 0.2234176168378052,
+    "session": "2025-06-18",
+    "signal_id": "6dcb4ac6d72c083b767fc529865091b6"
+  },
+  {
+    "risk_score": 0.41210979565092426,
+    "session": "2025-06-12",
+    "signal_id": "6e30e71aeaff8d37212b2ca923d8cf88"
+  },
+  {
+    "risk_score": 0.6583661738173463,
+    "session": "2025-06-06",
+    "signal_id": "6e5cdfa2a0278854bb210c54514519bf"
+  },
+  {
+    "risk_score": 0.1654940547209873,
+    "session": "2025-06-06",
+    "signal_id": "6ebbf1cfbcd6cd2e500de05db50b2a56"
+  },
+  {
+    "risk_score": 0.2233898859299814,
+    "session": "2025-06-09",
+    "signal_id": "6ed3d2c730daf80a6eed70221ed959bd"
+  },
+  {
+    "risk_score": 0.4474021142840951,
+    "session": "2025-06-06",
+    "signal_id": "6eebc3913cf0847edcf515cae79ce584"
+  },
+  {
+    "risk_score": 0.23413875559358355,
+    "session": "2025-05-21",
+    "signal_id": "6efb918bfb3bf4a665620ddda6abcec1"
+  },
+  {
+    "risk_score": 0.3939790045223433,
+    "session": "2025-05-22",
+    "signal_id": "6f120e17dfcb5313d561f40d2759af0a"
+  },
+  {
+    "risk_score": 0.34467024319652634,
+    "session": "2025-06-30",
+    "signal_id": "6fb24ee8ab23f7d6bb54bf39d7803788"
+  },
+  {
+    "risk_score": 0.5473855175125714,
+    "session": "2025-06-11",
+    "signal_id": "70501b1e558d6553c2235f365120d0fc"
+  },
+  {
+    "risk_score": 0.39231650214619884,
+    "session": "2025-05-20",
+    "signal_id": "707972b50be7616e17968c04247193b8"
+  },
+  {
+    "risk_score": 0.476987238635153,
+    "session": "2025-06-30",
+    "signal_id": "70bdbfda03d0d94b66591b2f4b524f66"
+  },
+  {
+    "risk_score": 0.46434529854162016,
+    "session": "2025-06-17",
+    "signal_id": "712fda1da9de41519b1fb0135dd29785"
+  },
+  {
+    "risk_score": 0.6539712952165251,
+    "session": "2025-06-13",
+    "signal_id": "71902570bb2bf770c1ffe717b8229127"
+  },
+  {
+    "risk_score": 0.09726554598946928,
+    "session": "2025-06-03",
+    "signal_id": "71f3dc36a79d37079de8ae9e89f67389"
+  },
+  {
+    "risk_score": 0.3355349139356272,
+    "session": "2025-05-21",
+    "signal_id": "71f75604996940e7967a801fd7f9d536"
+  },
+  {
+    "risk_score": 0.24978493955094772,
+    "session": "2025-05-19",
+    "signal_id": "72066c9f99f743303053c771383e5d3a"
+  },
+  {
+    "risk_score": 0.481091201169965,
+    "session": "2025-06-02",
+    "signal_id": "726c8045682464dafe4ea5677ffbbcba"
+  },
+  {
+    "risk_score": 0.3366539285328818,
+    "session": "2025-06-10",
+    "signal_id": "7349ad956b014cb189868087ac6e6548"
+  },
+  {
+    "risk_score": 0.6822794836075934,
+    "session": "2025-05-22",
+    "signal_id": "734a6b497b7ca38884652f817cfb1cb8"
+  },
+  {
+    "risk_score": 0.41574905496661607,
+    "session": "2025-06-02",
+    "signal_id": "73f2afb7b7b1f46b1f242f384523dde2"
+  },
+  {
+    "risk_score": 0.3266061203242328,
+    "session": "2025-06-04",
+    "signal_id": "744118d37243d841b696269071df0731"
+  },
+  {
+    "risk_score": 0.3929359187898745,
+    "session": "2025-06-05",
+    "signal_id": "748645acef5f3495c023435d8ddf882e"
+  },
+  {
+    "risk_score": 0.5507614393283033,
+    "session": "2025-05-29",
+    "signal_id": "74bba2369344f6c5d955408863493059"
+  },
+  {
+    "risk_score": 0.23200558182669437,
+    "session": "2025-06-20",
+    "signal_id": "74c5ab109babf360b48c92f31ae32d97"
+  },
+  {
+    "risk_score": 0.2837220558988204,
+    "session": "2025-05-20",
+    "signal_id": "755068b410a7483f0e0d73578198d2b7"
+  },
+  {
+    "risk_score": 0.37405765847629474,
+    "session": "2025-06-06",
+    "signal_id": "756cf9b0980298bca74e8ba1fbfc1007"
+  },
+  {
+    "risk_score": 0.35058782329790583,
+    "session": "2025-06-02",
+    "signal_id": "75c50007a9a55449877c7270e0e05f64"
+  },
+  {
+    "risk_score": 0.2993495394053275,
+    "session": "2025-05-27",
+    "signal_id": "75fd764e5ea5366881996c30cc5544c1"
+  },
+  {
+    "risk_score": 0.45805011294553566,
+    "session": "2025-06-16",
+    "signal_id": "768d326b008103bfa31cf22736289873"
+  },
+  {
+    "risk_score": 0.24905845738301263,
+    "session": "2025-06-25",
+    "signal_id": "769ef9a3082b9b4ea4e051298355ae75"
+  },
+  {
+    "risk_score": 0.43945573262260823,
+    "session": "2025-06-13",
+    "signal_id": "76a932b461c64e8e04ea3ea0066fb04f"
+  },
+  {
+    "risk_score": 0.18799834177431962,
+    "session": "2025-05-21",
+    "signal_id": "77af90fcdd722e6f2c6653c141846731"
+  },
+  {
+    "risk_score": 0.48325069828915523,
+    "session": "2025-06-12",
+    "signal_id": "780fab37cf946ac79173c480118563d7"
+  },
+  {
+    "risk_score": 0.38116024755602596,
+    "session": "2025-06-02",
+    "signal_id": "7878a3da5dacba0d7ae9742c9bcc8664"
+  },
+  {
+    "risk_score": 0.21041862764293098,
+    "session": "2025-06-06",
+    "signal_id": "78a290dd863c8df9e8456ce6cd92abdb"
+  },
+  {
+    "risk_score": 0.32809000875110417,
+    "session": "2025-05-22",
+    "signal_id": "78b7f6a3aaeba2736ff7b44a1930c393"
+  },
+  {
+    "risk_score": 0.28925933907842255,
+    "session": "2025-05-29",
+    "signal_id": "7a1a2811d720eaaf9c06d1c624170a59"
+  },
+  {
+    "risk_score": 0.355207246038624,
+    "session": "2025-06-23",
+    "signal_id": "7a1b324fa0edeb442a9255041299bd59"
+  },
+  {
+    "risk_score": 0.3262547403585536,
+    "session": "2025-06-23",
+    "signal_id": "7a93db2045f94ffa2c2ce57c394de3b1"
+  },
+  {
+    "risk_score": 0.3098953602062981,
+    "session": "2025-05-21",
+    "signal_id": "7abb29a865c9d3f5dbc3a4825e4a0341"
+  },
+  {
+    "risk_score": 0.23720559434254979,
+    "session": "2025-05-20",
+    "signal_id": "7ad1e06d63b4be0530f3ed8bb053d361"
+  },
+  {
+    "risk_score": 0.4188520183461977,
+    "session": "2025-05-22",
+    "signal_id": "7af5d5891159d48db3b1c8af04e74272"
+  },
+  {
+    "risk_score": 0.37802671564299767,
+    "session": "2025-06-13",
+    "signal_id": "7b350c84b208f4ccb091ce6b8397087c"
+  },
+  {
+    "risk_score": 0.536463475318949,
+    "session": "2025-06-04",
+    "signal_id": "7b35d7c0ffa3005a28fea93adf02765a"
+  },
+  {
+    "risk_score": 0.37453801378402546,
+    "session": "2025-06-04",
+    "signal_id": "7b58d456e1069ab358b1709b55b40fa0"
+  },
+  {
+    "risk_score": 0.6446459231800464,
+    "session": "2025-06-06",
+    "signal_id": "7b6b7f93d2c3ab1575d9a0f8eef89554"
+  },
+  {
+    "risk_score": 0.31342187885890316,
+    "session": "2025-06-30",
+    "signal_id": "7b86003df90e1141375294b5722af3fd"
+  },
+  {
+    "risk_score": 0.4296285482164645,
+    "session": "2025-06-26",
+    "signal_id": "7bf41137757e121fe495ae7eacb6e205"
+  },
+  {
+    "risk_score": 0.4902581096957218,
+    "session": "2025-06-23",
+    "signal_id": "7c00862e4afd98337e870be12285dba1"
+  },
+  {
+    "risk_score": 0.21409324740598695,
+    "session": "2025-05-30",
+    "signal_id": "7c013603f0fd90fb2c0166be1adac5c8"
+  },
+  {
+    "risk_score": 0.5187926171660855,
+    "session": "2025-06-12",
+    "signal_id": "7c30f48a8eb61c458ff8ba09f00126a0"
+  },
+  {
+    "risk_score": 0.24345225043248594,
+    "session": "2025-06-06",
+    "signal_id": "7cf7b01fc69ab5b6e724379bce9a07ce"
+  },
+  {
+    "risk_score": 0.4022511458289989,
+    "session": "2025-06-16",
+    "signal_id": "7d33f34e1ec4d6807ba8b6ad84c343ba"
+  },
+  {
+    "risk_score": 0.24157306073853668,
+    "session": "2025-06-12",
+    "signal_id": "7d48957a8f56db96b1a16b71b52dd369"
+  },
+  {
+    "risk_score": 0.1714697677420935,
+    "session": "2025-06-18",
+    "signal_id": "7d75e92be71e4cca35be4144d78787ea"
+  },
+  {
+    "risk_score": 0.23156214787042032,
+    "session": "2025-06-09",
+    "signal_id": "7d8481142761641cc2acff652a05b9e0"
+  },
+  {
+    "risk_score": 0.6304491920653265,
+    "session": "2025-05-28",
+    "signal_id": "7daa9be8967aefe2f2a95a4192049165"
+  },
+  {
+    "risk_score": 0.5583466826410092,
+    "session": "2025-06-05",
+    "signal_id": "7dfd20bf8674f7acd642eabca4c24c31"
+  },
+  {
+    "risk_score": 0.09448077626634789,
+    "session": "2025-06-27",
+    "signal_id": "7eb393beda09f250b2a4eb1c8573ff9d"
+  },
+  {
+    "risk_score": 0.22281107901959935,
+    "session": "2025-06-12",
+    "signal_id": "7ee87cdf9f3061e24c3aef940ae0034a"
+  },
+  {
+    "risk_score": 0.4972524103717544,
+    "session": "2025-06-24",
+    "signal_id": "7f17c255c32ab763816a38c7fa243106"
+  },
+  {
+    "risk_score": 0.3106795790035127,
+    "session": "2025-05-21",
+    "signal_id": "7f40be72b7fb372a89350b97d7d4c987"
+  },
+  {
+    "risk_score": 0.2454946592158438,
+    "session": "2025-06-27",
+    "signal_id": "7f50b32cd3b917ce7b40226bc501ae51"
+  },
+  {
+    "risk_score": 0.19649517741307426,
+    "session": "2025-05-22",
+    "signal_id": "7f7309ec786a5546f0c6f48832f1bfbb"
+  },
+  {
+    "risk_score": 0.5204622092365182,
+    "session": "2025-05-30",
+    "signal_id": "7f9d209f1155df946f3d647836295e3b"
+  },
+  {
+    "risk_score": 0.2086162304129936,
+    "session": "2025-06-26",
+    "signal_id": "7fb31bfbd3069bb228835d9331006a83"
+  },
+  {
+    "risk_score": 0.40474766089938624,
+    "session": "2025-06-05",
+    "signal_id": "80116e0c0923c5cb8ae51ad9e92a6900"
+  },
+  {
+    "risk_score": 0.3319210734898751,
+    "session": "2025-05-30",
+    "signal_id": "803af91282ca243faeae4bc7ea5e36c3"
+  },
+  {
+    "risk_score": 0.5447772295164801,
+    "session": "2025-06-02",
+    "signal_id": "805be3be8d6862f1f363fd2cf32b3933"
+  },
+  {
+    "risk_score": 0.13544434689072185,
+    "session": "2025-06-05",
+    "signal_id": "8063832a5edcdd88c3bf39e2e6c383c1"
+  },
+  {
+    "risk_score": 0.41042645081418727,
+    "session": "2025-05-29",
+    "signal_id": "80807fae1c7e4e11c31305cf1c58a604"
+  },
+  {
+    "risk_score": 0.3793277188169824,
+    "session": "2025-05-23",
+    "signal_id": "8098e71a77924679a4c820b0c27d8fd5"
+  },
+  {
+    "risk_score": 0.22651167844573794,
+    "session": "2025-05-21",
+    "signal_id": "80e68b4d6ddcb4f06f11b9d1054d9974"
+  },
+  {
+    "risk_score": 0.37395878189768306,
+    "session": "2025-06-06",
+    "signal_id": "813bfb1706a8707a2e5e6e9636b8881d"
+  },
+  {
+    "risk_score": 0.3873465367252487,
+    "session": "2025-06-11",
+    "signal_id": "8154b9bf3254090d9dcdea887ed49ed8"
+  },
+  {
+    "risk_score": 0.38886026077224245,
+    "session": "2025-06-27",
+    "signal_id": "8179ecc2f254e46808be3368d15f31df"
+  },
+  {
+    "risk_score": 0.4557216131995094,
+    "session": "2025-05-28",
+    "signal_id": "81866f550263e430279ba602f1ab0617"
+  },
+  {
+    "risk_score": 0.3941631658107663,
+    "session": "2025-06-23",
+    "signal_id": "818d868132a1d436c5d32318f65226c4"
+  },
+  {
+    "risk_score": 0.09392862390232812,
+    "session": "2025-06-30",
+    "signal_id": "8195c4619d3d3511564effbe09f679f7"
+  },
+  {
+    "risk_score": 0.2125220048307198,
+    "session": "2025-06-09",
+    "signal_id": "81afc1ffe693878cf49a8e839af3c727"
+  },
+  {
+    "risk_score": 0.3043433515984496,
+    "session": "2025-06-30",
+    "signal_id": "829d0009cc48465ef449cda3c7cc5016"
+  },
+  {
+    "risk_score": 0.3708908403580133,
+    "session": "2025-06-09",
+    "signal_id": "82ef7ba8b3efb09447575b43dc7318d9"
+  },
+  {
+    "risk_score": 0.4114134795507937,
+    "session": "2025-06-11",
+    "signal_id": "8301dc4f625f310abe05ce185361efc0"
+  },
+  {
+    "risk_score": 0.39840758575480567,
+    "session": "2025-05-30",
+    "signal_id": "831145d0ef439b221f8926dfb44a9fa8"
+  },
+  {
+    "risk_score": 0.5211841714086695,
+    "session": "2025-05-28",
+    "signal_id": "8313b7ab4f0b1fbfa8abd664281b5b43"
+  },
+  {
+    "risk_score": 0.6166890352357094,
+    "session": "2025-06-09",
+    "signal_id": "836bd53705e78263f08b050aea502b42"
+  },
+  {
+    "risk_score": 0.5377634875306504,
+    "session": "2025-05-23",
+    "signal_id": "837f35e98d4da70d556472275efa3c6a"
+  },
+  {
+    "risk_score": 0.6696439694294385,
+    "session": "2025-05-27",
+    "signal_id": "83bb79a474aa970a22e1324ab7ccc060"
+  },
+  {
+    "risk_score": 0.38142987859730276,
+    "session": "2025-06-02",
+    "signal_id": "83d0a90b1af667fb9776daea4296050d"
+  },
+  {
+    "risk_score": 0.430146543190823,
+    "session": "2025-06-17",
+    "signal_id": "83f45f171b5e27bb447326f7b14b537a"
+  },
+  {
+    "risk_score": 0.7759805987108821,
+    "session": "2025-05-27",
+    "signal_id": "8403f29e7efbb244e9879f65d632a019"
+  },
+  {
+    "risk_score": 0.2580760546219686,
+    "session": "2025-05-28",
+    "signal_id": "84477c34afad4b2c0ca204cc63dbb8e8"
+  },
+  {
+    "risk_score": 0.3556819770789081,
+    "session": "2025-05-21",
+    "signal_id": "845f18e59d3f7979ba51cc322f50364a"
+  },
+  {
+    "risk_score": 0.37177752088141647,
+    "session": "2025-06-09",
+    "signal_id": "84776f812ad47d8cbf8e84b6f765bd4a"
+  },
+  {
+    "risk_score": 0.40688437266432714,
+    "session": "2025-06-30",
+    "signal_id": "848b117b632e8d1a948842de0fc0619b"
+  },
+  {
+    "risk_score": 0.15092802064713629,
+    "session": "2025-05-21",
+    "signal_id": "8541aa655732cb924ef3f22a9806d603"
+  },
+  {
+    "risk_score": 0.6065525771791995,
+    "session": "2025-06-11",
+    "signal_id": "8553e21aae4a78896eddaed156a7918d"
+  },
+  {
+    "risk_score": 0.3607330243317159,
+    "session": "2025-06-05",
+    "signal_id": "8590ea2d2605d0d24c784e04d23ade48"
+  },
+  {
+    "risk_score": 0.4966008800807667,
+    "session": "2025-06-11",
+    "signal_id": "85ada29675fd0db400682790d900a785"
+  },
+  {
+    "risk_score": 0.30915979591969633,
+    "session": "2025-05-21",
+    "signal_id": "85e11ac4c998bb77c4a96e5802c61700"
+  },
+  {
+    "risk_score": 0.2491630077853588,
+    "session": "2025-06-20",
+    "signal_id": "8629ef632305fe670c1099001a1791b3"
+  },
+  {
+    "risk_score": 0.2488232849057575,
+    "session": "2025-06-10",
+    "signal_id": "86ba205102232e2abf9a2013a0f4432f"
+  },
+  {
+    "risk_score": 0.2187292034233276,
+    "session": "2025-06-04",
+    "signal_id": "86cbb849cd94d0255483c463fc7edf86"
+  },
+  {
+    "risk_score": 0.3467762914516772,
+    "session": "2025-06-26",
+    "signal_id": "877ac8f1f6e1d0c86ffd47a1b4e2281b"
+  },
+  {
+    "risk_score": 0.27032800099903187,
+    "session": "2025-06-30",
+    "signal_id": "87aebc20df7beb216ad7fd000edc86a0"
+  },
+  {
+    "risk_score": 0.8231637076452313,
+    "session": "2025-06-24",
+    "signal_id": "8844f38a398b6678851a559a67add76a"
+  },
+  {
+    "risk_score": 0.5551247114890954,
+    "session": "2025-06-04",
+    "signal_id": "88f5e188c59fda2681e26d56526a8353"
+  },
+  {
+    "risk_score": 0.1084088549621275,
+    "session": "2025-06-04",
+    "signal_id": "897a32f8faf8bcf5ae7b20eb0b2b5583"
+  },
+  {
+    "risk_score": 0.3923940931024843,
+    "session": "2025-06-02",
+    "signal_id": "8a1a0c15d5ebb77f078bc8e29128a28c"
+  },
+  {
+    "risk_score": 0.5542016744818961,
+    "session": "2025-06-09",
+    "signal_id": "8a322672cb799d88f037c3537ed55285"
+  },
+  {
+    "risk_score": 0.45434313958584777,
+    "session": "2025-06-03",
+    "signal_id": "8ab64ec27d0c2332fc6ac9fd01754836"
+  },
+  {
+    "risk_score": 0.2598921702702257,
+    "session": "2025-05-19",
+    "signal_id": "8ababae451b58fa05fcbd7dbde8fa52b"
+  },
+  {
+    "risk_score": 0.299564527196867,
+    "session": "2025-06-03",
+    "signal_id": "8ac7051ba771191697d67b0e2ae29a3c"
+  },
+  {
+    "risk_score": 0.33920684268776463,
+    "session": "2025-05-20",
+    "signal_id": "8af750e15df62b9b9624b5d8ec7d8f25"
+  },
+  {
+    "risk_score": 0.6090553765913832,
+    "session": "2025-06-27",
+    "signal_id": "8c5911105ca7f65d582953b0c9ab6c66"
+  },
+  {
+    "risk_score": 0.5460639344348096,
+    "session": "2025-06-27",
+    "signal_id": "8c7fed5fe5857e21fa8ebff145063bd5"
+  },
+  {
+    "risk_score": 0.6230793582026869,
+    "session": "2025-06-27",
+    "signal_id": "8cdea2aaa81e3e453566b3289b211614"
+  },
+  {
+    "risk_score": 0.5066374150301538,
+    "session": "2025-06-30",
+    "signal_id": "8cec19355d6137aaaaca6085f92a18a9"
+  },
+  {
+    "risk_score": 0.29148414164081016,
+    "session": "2025-06-18",
+    "signal_id": "8d0cbe64a555f68d1435da0c9605ab24"
+  },
+  {
+    "risk_score": 0.3174293765932334,
+    "session": "2025-06-18",
+    "signal_id": "8d9cb6a5a88776bc54f076d7ab1761a5"
+  },
+  {
+    "risk_score": 0.16626122234908874,
+    "session": "2025-05-20",
+    "signal_id": "8dd459138205cc51cba45b073e73d99d"
+  },
+  {
+    "risk_score": 0.5606332177002917,
+    "session": "2025-05-23",
+    "signal_id": "8e1912b7f51f1d6e31780ab9f3a8cd8f"
+  },
+  {
+    "risk_score": 0.2791002122259321,
+    "session": "2025-05-29",
+    "signal_id": "8e350d278170db1ba456d8d307c6b120"
+  },
+  {
+    "risk_score": 0.508240666624812,
+    "session": "2025-06-11",
+    "signal_id": "8e479095ec920c50bcc06a50c439eb55"
+  },
+  {
+    "risk_score": 0.35429781753451756,
+    "session": "2025-06-09",
+    "signal_id": "8e961bb98a13b88aa660f835efb2fb86"
+  },
+  {
+    "risk_score": 0.1322303026582944,
+    "session": "2025-06-18",
+    "signal_id": "8f03de436b2ada30ef985062082ec0de"
+  },
+  {
+    "risk_score": 0.20929015282397812,
+    "session": "2025-06-13",
+    "signal_id": "8f1d4b475a692f674db679866c1a4602"
+  },
+  {
+    "risk_score": 0.482848380273624,
+    "session": "2025-06-25",
+    "signal_id": "8f2dbabb76a973850115e7e6feafdcef"
+  },
+  {
+    "risk_score": 0.2007713176118337,
+    "session": "2025-05-19",
+    "signal_id": "8f8f862822e1c53654628d87fae0c51d"
+  },
+  {
+    "risk_score": 0.4947225190339052,
+    "session": "2025-06-13",
+    "signal_id": "900f4e726c9a1e52a97359107c91d275"
+  },
+  {
+    "risk_score": 0.215121893263271,
+    "session": "2025-05-22",
+    "signal_id": "9098bcdf69abc65bfed0c807337479f3"
+  },
+  {
+    "risk_score": 0.2848391302979461,
+    "session": "2025-05-27",
+    "signal_id": "909aaec169c225dc37710e7005d2368d"
+  },
+  {
+    "risk_score": 0.5415299153952177,
+    "session": "2025-06-02",
+    "signal_id": "90eb759b8386b7720a37fb9feb644a27"
+  },
+  {
+    "risk_score": 0.3515088895904642,
+    "session": "2025-06-13",
+    "signal_id": "90f99246b7a624cfc38ca47b07053f97"
+  },
+  {
+    "risk_score": 0.21564211090144175,
+    "session": "2025-05-22",
+    "signal_id": "90fd24d4590ab0da5e7350519c1190c1"
+  },
+  {
+    "risk_score": 0.5001830885365361,
+    "session": "2025-06-02",
+    "signal_id": "915be77458e5bbf1c0312c30d56bf4f4"
+  },
+  {
+    "risk_score": 0.47038425120708993,
+    "session": "2025-06-13",
+    "signal_id": "91681b7ff1281491e09c2e2a0ebbafcc"
+  },
+  {
+    "risk_score": 0.31810557031236325,
+    "session": "2025-05-19",
+    "signal_id": "91a8d5b035e9e2d529921ecf1f297948"
+  },
+  {
+    "risk_score": 0.36629594600846804,
+    "session": "2025-06-06",
+    "signal_id": "91d37c39fb5b976c6f196dc5af119a8a"
+  },
+  {
+    "risk_score": 0.7123939183838025,
+    "session": "2025-06-24",
+    "signal_id": "9296f824bf4ff4093bfa05b54ebccdc0"
+  },
+  {
+    "risk_score": 0.34413557243152837,
+    "session": "2025-06-02",
+    "signal_id": "92c46e2e0d37c3f9107768c6150194c1"
+  },
+  {
+    "risk_score": 0.5432306995149616,
+    "session": "2025-05-23",
+    "signal_id": "9323ab64b614a1a39833e5723923393a"
+  },
+  {
+    "risk_score": 0.3947749986974598,
+    "session": "2025-06-11",
+    "signal_id": "93867a9616bcd028780b64e69aa6ab28"
+  },
+  {
+    "risk_score": 0.5028226609514962,
+    "session": "2025-06-26",
+    "signal_id": "9427ab99d0fbeddb0bda4b76cbdd23cc"
+  },
+  {
+    "risk_score": 0.3193622074570445,
+    "session": "2025-06-20",
+    "signal_id": "949855f95400cdd551dafaaf6fc37417"
+  },
+  {
+    "risk_score": 0.5147351471602547,
+    "session": "2025-06-02",
+    "signal_id": "962cb1e7411441b357fb2e129d166b7a"
+  },
+  {
+    "risk_score": 0.5668272686594925,
+    "session": "2025-06-03",
+    "signal_id": "963395471c9d4e5601d127b10a922dbc"
+  },
+  {
+    "risk_score": 0.6186669783278307,
+    "session": "2025-06-04",
+    "signal_id": "963dfa31cb2e7739bb4bf45992ec7c2c"
+  },
+  {
+    "risk_score": 0.15503650885421053,
+    "session": "2025-05-20",
+    "signal_id": "96956f4c86dbe391d3c99c754bfd1868"
+  },
+  {
+    "risk_score": 0.32992766828205483,
+    "session": "2025-05-19",
+    "signal_id": "9712cee94202fdb20a0ef1ced7015af8"
+  },
+  {
+    "risk_score": 0.3777195078955949,
+    "session": "2025-06-09",
+    "signal_id": "9728269a38dc3396eb6d717879134e65"
+  },
+  {
+    "risk_score": 0.5355088476593356,
+    "session": "2025-06-16",
+    "signal_id": "973a5ef2356eb926ec2db21fb9657a1e"
+  },
+  {
+    "risk_score": 0.4472809857549142,
+    "session": "2025-06-16",
+    "signal_id": "97694049844403d6fc9ef357c75d9868"
+  },
+  {
+    "risk_score": 0.42201152911204765,
+    "session": "2025-06-09",
+    "signal_id": "97924894b79a2fa9584f5a77302d6430"
+  },
+  {
+    "risk_score": 0.4827302598730691,
+    "session": "2025-05-22",
+    "signal_id": "97fa58577e4a73e6d65168a6d693e029"
+  },
+  {
+    "risk_score": 0.4374585424821585,
+    "session": "2025-05-20",
+    "signal_id": "980cc26c7c77a53585198e980f15a8e0"
+  },
+  {
+    "risk_score": 0.592816655381408,
+    "session": "2025-05-27",
+    "signal_id": "9870f5bc41b080aaaac40c3918860f29"
+  },
+  {
+    "risk_score": 0.2755246061909321,
+    "session": "2025-06-24",
+    "signal_id": "989467f94b10a97b3cb0256e54da24ed"
+  },
+  {
+    "risk_score": 0.6159715167806371,
+    "session": "2025-05-22",
+    "signal_id": "98ac767157ef7a32ecc1a61396ea95ed"
+  },
+  {
+    "risk_score": 0.5870942066956863,
+    "session": "2025-05-30",
+    "signal_id": "98dda108fa2a08bc38759f30aa4f9cd3"
+  },
+  {
+    "risk_score": 0.5905716165378607,
+    "session": "2025-06-17",
+    "signal_id": "98e0c68643550bd6ea99c9a580e306d5"
+  },
+  {
+    "risk_score": 0.4875890430529544,
+    "session": "2025-06-12",
+    "signal_id": "991fb3ae258452d389f565cdd613709b"
+  },
+  {
+    "risk_score": 0.1917704876368813,
+    "session": "2025-06-09",
+    "signal_id": "99800a4af090b036bd05038ff050ed8d"
+  },
+  {
+    "risk_score": 0.09772754862131469,
+    "session": "2025-06-25",
+    "signal_id": "99823860e84916c9b393e05b9d2017ed"
+  },
+  {
+    "risk_score": 0.19102876596916446,
+    "session": "2025-05-21",
+    "signal_id": "99a95841d5c245cf36c02021d73071d9"
+  },
+  {
+    "risk_score": 0.2414393464378886,
+    "session": "2025-06-16",
+    "signal_id": "99e37c60c898e4c9f8da8bd98540cfc6"
+  },
+  {
+    "risk_score": 0.6072616936703714,
+    "session": "2025-06-09",
+    "signal_id": "9a1556f5f110abbacd870259fb36a521"
+  },
+  {
+    "risk_score": 0.47904245703950404,
+    "session": "2025-06-24",
+    "signal_id": "9a95203474242fdbf2eee22bc5d9dd2f"
+  },
+  {
+    "risk_score": 0.34724027548101516,
+    "session": "2025-06-12",
+    "signal_id": "9afe0ab47f347212eb305db871cecf5a"
+  },
+  {
+    "risk_score": 0.503234302871197,
+    "session": "2025-06-13",
+    "signal_id": "9b4c09ef66d7eb9955cdd6ed8bba047f"
+  },
+  {
+    "risk_score": 0.5693246092641565,
+    "session": "2025-05-30",
+    "signal_id": "9b5946709e2077b96b7c6a7417032b44"
+  },
+  {
+    "risk_score": 0.31533408780768435,
+    "session": "2025-06-11",
+    "signal_id": "9bf8905820b1e7eee3f5816cb11140f2"
+  },
+  {
+    "risk_score": 0.4729874163414727,
+    "session": "2025-06-10",
+    "signal_id": "9bfa54b36c957d9339922053d21b92fb"
+  },
+  {
+    "risk_score": 0.4418862523950633,
+    "session": "2025-06-24",
+    "signal_id": "9c5fe228a27fae555dfe67156c3b880d"
+  },
+  {
+    "risk_score": 0.5943328261668156,
+    "session": "2025-06-10",
+    "signal_id": "9d1b185ad82d02c2440a09c95715772f"
+  },
+  {
+    "risk_score": 0.438111807106503,
+    "session": "2025-05-27",
+    "signal_id": "9d444c28ca85455297fc594eff010c8b"
+  },
+  {
+    "risk_score": 0.23425192213939283,
+    "session": "2025-06-30",
+    "signal_id": "9d4b828da0d8b599a6c82747ddce0bfe"
+  },
+  {
+    "risk_score": 0.4558606755846234,
+    "session": "2025-06-09",
+    "signal_id": "9db3826008c709da951104cc53332694"
+  },
+  {
+    "risk_score": 0.2564132258636063,
+    "session": "2025-06-04",
+    "signal_id": "9dc6559c1ee0223e1c56d88a90f2b11a"
+  },
+  {
+    "risk_score": 0.4429538282136442,
+    "session": "2025-06-03",
+    "signal_id": "9e113578bb8a0fc0a0ccb8510c0507c3"
+  },
+  {
+    "risk_score": 0.39897397794474093,
+    "session": "2025-06-12",
+    "signal_id": "9e3ca4c890fdd0ee0cf973659c39bec7"
+  },
+  {
+    "risk_score": 0.21031681501266816,
+    "session": "2025-05-21",
+    "signal_id": "9f4922d2e7d80e6d6a97acc3ec23d120"
+  },
+  {
+    "risk_score": 0.2684291005951544,
+    "session": "2025-06-11",
+    "signal_id": "9f65585dc9bdd642cd22cc4ba3f914c8"
+  },
+  {
+    "risk_score": 0.3682553502166505,
+    "session": "2025-06-16",
+    "signal_id": "9f7c466985c12b1b1936a32c47b125b3"
+  },
+  {
+    "risk_score": 0.39989219992773595,
+    "session": "2025-06-02",
+    "signal_id": "9fd7aca3cd42b5b5356c70c3755a6275"
+  },
+  {
+    "risk_score": 0.2769928459037797,
+    "session": "2025-06-09",
+    "signal_id": "9fe0216a580a919f94bf383eac3c8f0c"
+  },
+  {
+    "risk_score": 0.18801036437942822,
+    "session": "2025-06-05",
+    "signal_id": "9fe0c8da66b33aede97e43b103a4506e"
+  },
+  {
+    "risk_score": 0.6576251155603672,
+    "session": "2025-05-29",
+    "signal_id": "9fe751d98b61a95e35d571b29bbc71a9"
+  },
+  {
+    "risk_score": 0.2627766845797007,
+    "session": "2025-05-27",
+    "signal_id": "a01cfd1e6f758cefabdc9593a543748e"
+  },
+  {
+    "risk_score": 0.405316743597645,
+    "session": "2025-05-20",
+    "signal_id": "a0564953aab90f0c9bb746d8fd15807b"
+  },
+  {
+    "risk_score": 0.2260594512826159,
+    "session": "2025-06-18",
+    "signal_id": "a0a9bd68c11cbcee1880df88c2e5d986"
+  },
+  {
+    "risk_score": 0.63647574415631,
+    "session": "2025-05-22",
+    "signal_id": "a166b8ad1f2fa30be32397af2eecd9b3"
+  },
+  {
+    "risk_score": 0.36582979328239673,
+    "session": "2025-06-23",
+    "signal_id": "a17d8a98bb792afb553da749dcffd67f"
+  },
+  {
+    "risk_score": 0.3676088605725461,
+    "session": "2025-06-12",
+    "signal_id": "a1ea95e67978e793b3c5c86416ae1060"
+  },
+  {
+    "risk_score": 0.37729515430877714,
+    "session": "2025-06-10",
+    "signal_id": "a1ed5e9ca98739ca7e269996238b6140"
+  },
+  {
+    "risk_score": 0.16762058378393185,
+    "session": "2025-06-25",
+    "signal_id": "a226effe2deb9db8eddc6fa831b2cdb3"
+  },
+  {
+    "risk_score": 0.4028848090793968,
+    "session": "2025-06-06",
+    "signal_id": "a323b1874b619cc256e0f06970258de6"
+  },
+  {
+    "risk_score": 0.09183550545184922,
+    "session": "2025-06-02",
+    "signal_id": "a329f58f2d12ce28fd73472862c8ca07"
+  },
+  {
+    "risk_score": 0.13981226572806457,
+    "session": "2025-06-04",
+    "signal_id": "a360963926a1f0a194ef42a3fb88304c"
+  },
+  {
+    "risk_score": 0.2252758604529981,
+    "session": "2025-06-09",
+    "signal_id": "a3aefece3bb40a7da6333a06df39e34a"
+  },
+  {
+    "risk_score": 0.3794791146226078,
+    "session": "2025-06-20",
+    "signal_id": "a435f5331bc3491b67085db88917e869"
+  },
+  {
+    "risk_score": 0.24579871426567254,
+    "session": "2025-05-21",
+    "signal_id": "a49cc5ea09083437a9161c92e82687a7"
+  },
+  {
+    "risk_score": 0.24547566223779868,
+    "session": "2025-06-18",
+    "signal_id": "a4df5ed0664d313c2130b6bbe9fbc89d"
+  },
+  {
+    "risk_score": 0.3002871573678601,
+    "session": "2025-06-04",
+    "signal_id": "a4e7a0c3f021aca60e989a800caff136"
+  },
+  {
+    "risk_score": 0.4186118201912603,
+    "session": "2025-06-06",
+    "signal_id": "a4e9d72b00504ae97de4774652b9731b"
+  },
+  {
+    "risk_score": 0.4784632043960436,
+    "session": "2025-06-11",
+    "signal_id": "a4f6f8320c80042e81dfb68e04587a92"
+  },
+  {
+    "risk_score": 0.20247798015172846,
+    "session": "2025-05-21",
+    "signal_id": "a504a797b79853ef9dd6c65e691c79cd"
+  },
+  {
+    "risk_score": 0.25002332508921826,
+    "session": "2025-06-17",
+    "signal_id": "a5171704fe18a3909b8c43cd762e5754"
+  },
+  {
+    "risk_score": 0.5268995165308937,
+    "session": "2025-06-16",
+    "signal_id": "a5201946b07a252d90cde0f00d96f66f"
+  },
+  {
+    "risk_score": 0.21377686075400953,
+    "session": "2025-06-25",
+    "signal_id": "a55c51c5c7735eb77dc591e2695ab901"
+  },
+  {
+    "risk_score": 0.37969138140753367,
+    "session": "2025-06-12",
+    "signal_id": "a5d47d1fe8d2fdc31192dc47d995b553"
+  },
+  {
+    "risk_score": 0.16742027039673685,
+    "session": "2025-06-11",
+    "signal_id": "a5ec549c6c8756c14dc4994cbec91153"
+  },
+  {
+    "risk_score": 0.30187687571581284,
+    "session": "2025-06-26",
+    "signal_id": "a6703fdeb791bf02154d50144c6b7a81"
+  },
+  {
+    "risk_score": 0.5185506805681542,
+    "session": "2025-05-22",
+    "signal_id": "a6820d53b0363797fa5d149887b35a33"
+  },
+  {
+    "risk_score": 0.30976949088719613,
+    "session": "2025-06-26",
+    "signal_id": "a6a187175fd404bbec16bf14eec53248"
+  },
+  {
+    "risk_score": 0.3141774282452671,
+    "session": "2025-06-11",
+    "signal_id": "a6d766289a15c5edede5019507497b27"
+  },
+  {
+    "risk_score": 0.356605653296596,
+    "session": "2025-05-27",
+    "signal_id": "a71fa0c4a3489dc9f6c88b1c6e704a3b"
+  },
+  {
+    "risk_score": 0.07939517176078796,
+    "session": "2025-06-23",
+    "signal_id": "a733eb516b723af99056438c8adeb1b1"
+  },
+  {
+    "risk_score": 0.23022762268571947,
+    "session": "2025-05-22",
+    "signal_id": "a747b48531816e83b458cb68751b2d38"
+  },
+  {
+    "risk_score": 0.37449193078647725,
+    "session": "2025-06-24",
+    "signal_id": "a758c5e27473fdc266479b60242a4691"
+  },
+  {
+    "risk_score": 0.2075732164778493,
+    "session": "2025-06-23",
+    "signal_id": "a788c98ed985a0dae00a0ce15c872dad"
+  },
+  {
+    "risk_score": 0.2887343774375562,
+    "session": "2025-06-02",
+    "signal_id": "a7d689a44f4868807a2649ba0dc8e2c3"
+  },
+  {
+    "risk_score": 0.2551075496592284,
+    "session": "2025-06-24",
+    "signal_id": "a880c61f4b0cf5e60b74d504bd33d00b"
+  },
+  {
+    "risk_score": 0.2625780910508724,
+    "session": "2025-06-16",
+    "signal_id": "a884553a2c54d4d482ec648f320359b5"
+  },
+  {
+    "risk_score": 0.20888074810676005,
+    "session": "2025-06-11",
+    "signal_id": "a8b2c5b7f62951d0757e0254145f2f55"
+  },
+  {
+    "risk_score": 0.22730589865722467,
+    "session": "2025-06-04",
+    "signal_id": "a8ccc058db73d1c1d6a3e06cba5d8a78"
+  },
+  {
+    "risk_score": 0.5571686376060432,
+    "session": "2025-05-22",
+    "signal_id": "a8ef54debc3f9a018253fc8c9d6bdaa5"
+  },
+  {
+    "risk_score": 0.2754901758111759,
+    "session": "2025-05-20",
+    "signal_id": "a987c503172640d48889620f5c4744f1"
+  },
+  {
+    "risk_score": 0.39120497850615954,
+    "session": "2025-05-27",
+    "signal_id": "a9db94c57260894cf79cc265db7998fc"
+  },
+  {
+    "risk_score": 0.48053764764148454,
+    "session": "2025-06-12",
+    "signal_id": "a9f37b955263baf162442e864f81bfc1"
+  },
+  {
+    "risk_score": 0.4832048024034011,
+    "session": "2025-06-16",
+    "signal_id": "aa2d302bb8b15ed29b324dbd4a1983a0"
+  },
+  {
+    "risk_score": 0.35730137133913314,
+    "session": "2025-06-25",
+    "signal_id": "aa48da1b77afb12577c8366ad9f320c7"
+  },
+  {
+    "risk_score": 0.2602206565098612,
+    "session": "2025-05-23",
+    "signal_id": "aadcad12d30c047d1dddab66387ce665"
+  },
+  {
+    "risk_score": 0.5577702251246276,
+    "session": "2025-06-05",
+    "signal_id": "ab5393c8f2d4b6dc36a345338991dac7"
+  },
+  {
+    "risk_score": 0.20216690332591358,
+    "session": "2025-06-16",
+    "signal_id": "ab5d88b45c08d6cfcdaf57e1aa2a7d8e"
+  },
+  {
+    "risk_score": 0.28352620002995693,
+    "session": "2025-06-09",
+    "signal_id": "ab8d17771ff2512f6baf040dab03951c"
+  },
+  {
+    "risk_score": 0.235554812664119,
+    "session": "2025-05-20",
+    "signal_id": "abb2ff195c232224e45b62006021083e"
+  },
+  {
+    "risk_score": 0.20640191193174787,
+    "session": "2025-05-30",
+    "signal_id": "ac0024f800bf7ac49d5ab58c67fb1ac6"
+  },
+  {
+    "risk_score": 0.2081232266274871,
+    "session": "2025-05-30",
+    "signal_id": "aca42b5607e9c49d7f0d6c889f33ca52"
+  },
+  {
+    "risk_score": 0.3728222321878563,
+    "session": "2025-06-11",
+    "signal_id": "ad1404f35487651b8f7157ffa536c1f5"
+  },
+  {
+    "risk_score": 0.5150112657155141,
+    "session": "2025-06-11",
+    "signal_id": "ad3d1d84d1f0959856e49dae7c031d70"
+  },
+  {
+    "risk_score": 0.19648559783655692,
+    "session": "2025-05-27",
+    "signal_id": "adb9089427a8fe8342b005028b886af0"
+  },
+  {
+    "risk_score": 0.10376129765261508,
+    "session": "2025-05-21",
+    "signal_id": "ade5235f0f7e9819a9e23257bea8d7ec"
+  },
+  {
+    "risk_score": 0.32696681555887835,
+    "session": "2025-05-28",
+    "signal_id": "ae349ee150fcc2872315548a6423e084"
+  },
+  {
+    "risk_score": 0.28130144291104625,
+    "session": "2025-06-04",
+    "signal_id": "ae861facaa04e1b2c7ea1a2fe373d565"
+  },
+  {
+    "risk_score": 0.27296023266650477,
+    "session": "2025-06-16",
+    "signal_id": "aeb223ba920b59c5ba421dcc68ae66a5"
+  },
+  {
+    "risk_score": 0.36060395710441495,
+    "session": "2025-06-09",
+    "signal_id": "aeb85eb3e343d74acb60c7dfeb1b8f91"
+  },
+  {
+    "risk_score": 0.5569221261546641,
+    "session": "2025-06-12",
+    "signal_id": "aed630188e396680a070cc2b21a36868"
+  },
+  {
+    "risk_score": 0.44769842786729735,
+    "session": "2025-06-30",
+    "signal_id": "af337b131dd26c4770e4c7e136b14a50"
+  },
+  {
+    "risk_score": 0.3522590784223725,
+    "session": "2025-05-30",
+    "signal_id": "af3dc8e3c02ea78e4a2e2b8211c7fa9c"
+  },
+  {
+    "risk_score": 0.31208334110551045,
+    "session": "2025-05-19",
+    "signal_id": "af8a189295e56ba33e56aafd9400d1c1"
+  },
+  {
+    "risk_score": 0.3520326696434734,
+    "session": "2025-05-20",
+    "signal_id": "af9a1d954d263a3c09042cfa31e3e258"
+  },
+  {
+    "risk_score": 0.48039827674956953,
+    "session": "2025-06-11",
+    "signal_id": "af9ceb0ee4bb863e4ad0882d72eb392e"
+  },
+  {
+    "risk_score": 0.3592877270666211,
+    "session": "2025-05-29",
+    "signal_id": "affa58bf3a97ba12f691aea00ec54606"
+  },
+  {
+    "risk_score": 0.48472729241253654,
+    "session": "2025-06-10",
+    "signal_id": "affde82cbc552430cec390e8a3648420"
+  },
+  {
+    "risk_score": 0.5570284130991211,
+    "session": "2025-06-30",
+    "signal_id": "b003a0f20b4c477205fc84e434ba2d0d"
+  },
+  {
+    "risk_score": 0.4468155177278118,
+    "session": "2025-06-09",
+    "signal_id": "b04621e09fb266d34b5b7bc9db058fd5"
+  },
+  {
+    "risk_score": 0.4483264352199854,
+    "session": "2025-06-18",
+    "signal_id": "b0c015cdc28799242c5dfd9b56e86ff1"
+  },
+  {
+    "risk_score": 0.43811594996637554,
+    "session": "2025-06-03",
+    "signal_id": "b301c6baf9b774722e0dc3afa3b591da"
+  },
+  {
+    "risk_score": 0.3334782407491801,
+    "session": "2025-05-29",
+    "signal_id": "b32e8bf395e37d69d90e7105896f215c"
+  },
+  {
+    "risk_score": 0.5556922999005491,
+    "session": "2025-06-10",
+    "signal_id": "b392f2243965ec15a4024f2023a905ea"
+  },
+  {
+    "risk_score": 0.4008093215458922,
+    "session": "2025-06-18",
+    "signal_id": "b3aa022e3c0261fed529374a18b0cbc3"
+  },
+  {
+    "risk_score": 0.3226729791614551,
+    "session": "2025-05-22",
+    "signal_id": "b4031fba5aeb94fe47849eee20de1a12"
+  },
+  {
+    "risk_score": 0.4050933940915695,
+    "session": "2025-05-22",
+    "signal_id": "b428e5c953007dfed6b7cc363098c902"
+  },
+  {
+    "risk_score": 0.19482041047297666,
+    "session": "2025-06-26",
+    "signal_id": "b44ba797431c1e5721b6f2428fa8c4ac"
+  },
+  {
+    "risk_score": 0.22869313396345084,
+    "session": "2025-06-06",
+    "signal_id": "b49d2188fa7edd5566aecf279cea28bb"
+  },
+  {
+    "risk_score": 0.21384525565328094,
+    "session": "2025-06-20",
+    "signal_id": "b4ec285afcde176bb55ab4613cbae09d"
+  },
+  {
+    "risk_score": 0.17169440217069587,
+    "session": "2025-06-10",
+    "signal_id": "b50cf04c2a2d4b54e2dd5f6ff6c06e85"
+  },
+  {
+    "risk_score": 0.3123908643665188,
+    "session": "2025-06-03",
+    "signal_id": "b5b8b23833b6206650c2a860788356e6"
+  },
+  {
+    "risk_score": 0.6072219277791916,
+    "session": "2025-06-16",
+    "signal_id": "b5e08cdac8eecfd1b5e9acfec236e019"
+  },
+  {
+    "risk_score": 0.5936476897065588,
+    "session": "2025-05-27",
+    "signal_id": "b64c9ea2a69f9fb80a2079b36271b6c6"
+  },
+  {
+    "risk_score": 0.45148508075489413,
+    "session": "2025-06-02",
+    "signal_id": "b6566cd640dd91ad508f85fe1f6f26ea"
+  },
+  {
+    "risk_score": 0.39587247815490073,
+    "session": "2025-05-21",
+    "signal_id": "b659653848cd07a40f2f59457139f8ff"
+  },
+  {
+    "risk_score": 0.22489111783418247,
+    "session": "2025-06-13",
+    "signal_id": "b66490cd027a396f43bcfd019eda4a21"
+  },
+  {
+    "risk_score": 0.6195002578157842,
+    "session": "2025-05-23",
+    "signal_id": "b6bc7ddacae1f1a8dc8a6723c111d92a"
+  },
+  {
+    "risk_score": 0.28564348639037446,
+    "session": "2025-05-27",
+    "signal_id": "b71c2d8c1c369d133fc291ca07555d23"
+  },
+  {
+    "risk_score": 0.6022858837695906,
+    "session": "2025-05-23",
+    "signal_id": "b784850d50fe180efc52880a2fc67d10"
+  },
+  {
+    "risk_score": 0.4742644065637404,
+    "session": "2025-06-04",
+    "signal_id": "b7cabbf5ae8a0ca07cfac12b78dad201"
+  },
+  {
+    "risk_score": 0.2977348972030185,
+    "session": "2025-06-26",
+    "signal_id": "b7e38cd71ff9398d19ef1c30b5363308"
+  },
+  {
+    "risk_score": 0.22995371253992852,
+    "session": "2025-06-24",
+    "signal_id": "b8111d653f0d8f41aa43425cbcb0e5b8"
+  },
+  {
+    "risk_score": 0.4377219530779539,
+    "session": "2025-06-10",
+    "signal_id": "b90a67ec939aba0a4fad322c84d24038"
+  },
+  {
+    "risk_score": 0.5308610512629169,
+    "session": "2025-05-22",
+    "signal_id": "b90def7b8eea6a6a746cc3855009a30c"
+  },
+  {
+    "risk_score": 0.4385493288954681,
+    "session": "2025-06-12",
+    "signal_id": "b92a8a3cdbb835a7d284b609c3f94327"
+  },
+  {
+    "risk_score": 0.3842530255456806,
+    "session": "2025-06-30",
+    "signal_id": "b93808ab5f70e1723371259c850bdb62"
+  },
+  {
+    "risk_score": 0.2491373130980971,
+    "session": "2025-05-21",
+    "signal_id": "b93f0b66b3ae0dbc22eaf831442f8895"
+  },
+  {
+    "risk_score": 0.19800640174217818,
+    "session": "2025-06-30",
+    "signal_id": "b95302b30a597d33c9b6def70f1e9726"
+  },
+  {
+    "risk_score": 0.21433132596219545,
+    "session": "2025-06-04",
+    "signal_id": "ba873774fcb5da459b9755ce1338bc38"
+  },
+  {
+    "risk_score": 0.3662459873418704,
+    "session": "2025-05-21",
+    "signal_id": "baaa18edaea11a6359277c9a07156e27"
+  },
+  {
+    "risk_score": 0.50767761706024,
+    "session": "2025-06-06",
+    "signal_id": "bad985dfcd66e156cc30dbaceae22c90"
+  },
+  {
+    "risk_score": 0.24159793510128905,
+    "session": "2025-06-04",
+    "signal_id": "bb25098cb01d42b8c74dff362d41f8df"
+  },
+  {
+    "risk_score": 0.1341826051942063,
+    "session": "2025-06-26",
+    "signal_id": "bb679fe58db67e9c0505391d327c9ca2"
+  },
+  {
+    "risk_score": 0.18943529324275338,
+    "session": "2025-05-19",
+    "signal_id": "bb843a3352455ac65ec20bfa5f1b8ee4"
+  },
+  {
+    "risk_score": 0.21496930254391167,
+    "session": "2025-06-27",
+    "signal_id": "bbe153c65f5c475e4639170d32763edd"
+  },
+  {
+    "risk_score": 0.6317621515568825,
+    "session": "2025-06-06",
+    "signal_id": "bc074b05fd3cfd9b703399d894fec4e7"
+  },
+  {
+    "risk_score": 0.3791932992655781,
+    "session": "2025-06-30",
+    "signal_id": "bc80475d09fab616ecb235d9efa7609c"
+  },
+  {
+    "risk_score": 0.6546184793158454,
+    "session": "2025-06-09",
+    "signal_id": "bc8d99de38042e0b1ceb39e7d4d1d02e"
+  },
+  {
+    "risk_score": 0.4822668355883517,
+    "session": "2025-05-28",
+    "signal_id": "bc957134d873910964cf2fb9f8750d8f"
+  },
+  {
+    "risk_score": 0.2197965582709419,
+    "session": "2025-06-24",
+    "signal_id": "bcbf8e0b73a36cbdf074479e7cfdbd1a"
+  },
+  {
+    "risk_score": 0.5981839935561939,
+    "session": "2025-05-29",
+    "signal_id": "bce58d2e07bf6ae0aa3a1706dcb73cc7"
+  },
+  {
+    "risk_score": 0.27585984960963067,
+    "session": "2025-05-22",
+    "signal_id": "bce917e4f0828f6b9ff1a8d9e4c99179"
+  },
+  {
+    "risk_score": 0.5322592831123218,
+    "session": "2025-05-20",
+    "signal_id": "bd836632e52a54637bfafe93c1a76605"
+  },
+  {
+    "risk_score": 0.5463717400375294,
+    "session": "2025-05-22",
+    "signal_id": "bd9544f7d3e8e10ed8d312d45072b9cf"
+  },
+  {
+    "risk_score": 0.31039705975216025,
+    "session": "2025-06-09",
+    "signal_id": "bdacda1961a87ccaf37e7ced9fddc743"
+  },
+  {
+    "risk_score": 0.13328296412358723,
+    "session": "2025-06-09",
+    "signal_id": "becc6fbcca1ea4b72fa4029b2168b705"
+  },
+  {
+    "risk_score": 0.17291762480080355,
+    "session": "2025-06-02",
+    "signal_id": "bf00061c4ff6518e570600514e785562"
+  },
+  {
+    "risk_score": 0.487477630375547,
+    "session": "2025-05-27",
+    "signal_id": "bf76bf3f7e2d3c84fdb09a095809c9e6"
+  },
+  {
+    "risk_score": 0.17989345709450782,
+    "session": "2025-05-19",
+    "signal_id": "c01da68bb1aa905f97953321376f0c5b"
+  },
+  {
+    "risk_score": 0.4476627885382102,
+    "session": "2025-05-22",
+    "signal_id": "c0fd8e314609104df3b9dd72e4772008"
+  },
+  {
+    "risk_score": 0.4576610598493505,
+    "session": "2025-05-30",
+    "signal_id": "c10817abd4b4a7b985a294d098eded21"
+  },
+  {
+    "risk_score": 0.5498356966460263,
+    "session": "2025-06-06",
+    "signal_id": "c13974ac46bab2691a003ef79efa71ad"
+  },
+  {
+    "risk_score": 0.29684674215516405,
+    "session": "2025-06-24",
+    "signal_id": "c142e1462255b40af72a34c4a5b1ed07"
+  },
+  {
+    "risk_score": 0.39382105089056413,
+    "session": "2025-06-23",
+    "signal_id": "c168a50f400b927a6e015fe98f9d8474"
+  },
+  {
+    "risk_score": 0.1135403755576482,
+    "session": "2025-06-03",
+    "signal_id": "c1f99c294244f2aea384e6b8c1a8031e"
+  },
+  {
+    "risk_score": 0.5097073330788429,
+    "session": "2025-06-30",
+    "signal_id": "c28f5cbf0857314aa0e739c9a6666cff"
+  },
+  {
+    "risk_score": 0.45573967180332997,
+    "session": "2025-05-27",
+    "signal_id": "c304df7488aba134bd71daa402738f16"
+  },
+  {
+    "risk_score": 0.223778581106595,
+    "session": "2025-05-23",
+    "signal_id": "c3449252e39369e76ff5352263375a8e"
+  },
+  {
+    "risk_score": 0.271849935392123,
+    "session": "2025-06-26",
+    "signal_id": "c3781ec70493a3fa915566513a07acdf"
+  },
+  {
+    "risk_score": 0.6903564544107591,
+    "session": "2025-05-22",
+    "signal_id": "c4497a353ff183be938edcea7cd2e80e"
+  },
+  {
+    "risk_score": 0.24840270077241125,
+    "session": "2025-06-17",
+    "signal_id": "c4f0b6d92465c05b2eed69e39c997678"
+  },
+  {
+    "risk_score": 0.25610687499528,
+    "session": "2025-05-20",
+    "signal_id": "c4fe11636429a1b2372c4dff9d2f35d9"
+  },
+  {
+    "risk_score": 0.2547954802928915,
+    "session": "2025-06-11",
+    "signal_id": "c56f8f91c6fd83171fba7b341eb7d475"
+  },
+  {
+    "risk_score": 0.16072651883290404,
+    "session": "2025-05-19",
+    "signal_id": "c5f0f178a561739595605829a1599bd4"
+  },
+  {
+    "risk_score": 0.428117425013165,
+    "session": "2025-05-23",
+    "signal_id": "c62e84be1be156a0147cc8f8d29f91de"
+  },
+  {
+    "risk_score": 0.41442228824105515,
+    "session": "2025-06-05",
+    "signal_id": "c65162557324b2306f4913847dc86436"
+  },
+  {
+    "risk_score": 0.33146746693228535,
+    "session": "2025-06-10",
+    "signal_id": "c6b8445ab935b1d548546a9d9764a7f2"
+  },
+  {
+    "risk_score": 0.4992603839802426,
+    "session": "2025-06-09",
+    "signal_id": "c6f5b599e23ce946487326ff6b029fbb"
+  },
+  {
+    "risk_score": 0.1068189913022001,
+    "session": "2025-06-25",
+    "signal_id": "c741096045e2ad55b5a35515a2896e1f"
+  },
+  {
+    "risk_score": 0.5854994406017192,
+    "session": "2025-05-29",
+    "signal_id": "c75d16e98c8354af6015eedb5986d000"
+  },
+  {
+    "risk_score": 0.1699533373948682,
+    "session": "2025-06-06",
+    "signal_id": "c76a503e8d369d2ca0e1d2897e69faa3"
+  },
+  {
+    "risk_score": 0.05303972203972543,
+    "session": "2025-06-20",
+    "signal_id": "c83ad43f064f68b48c3a0b414173e5f3"
+  },
+  {
+    "risk_score": 0.2994535157835762,
+    "session": "2025-06-06",
+    "signal_id": "c83fce63703e398484c42ecfd08be6c7"
+  },
+  {
+    "risk_score": 0.5504116762917125,
+    "session": "2025-05-22",
+    "signal_id": "c894be84b4a883c908f7d4591fbe98d2"
+  },
+  {
+    "risk_score": 0.30235138704599396,
+    "session": "2025-05-21",
+    "signal_id": "c8a07e3df8b116db36be91a645f8991f"
+  },
+  {
+    "risk_score": 0.3828640396446818,
+    "session": "2025-05-23",
+    "signal_id": "c8ef842d6d30797c34edae5b0ff14915"
+  },
+  {
+    "risk_score": 0.33252276394266755,
+    "session": "2025-06-10",
+    "signal_id": "c906ee796aa389eb7e4f8b50a5bc4409"
+  },
+  {
+    "risk_score": 0.3828044686747624,
+    "session": "2025-06-06",
+    "signal_id": "ca852d67f7bf736d53829c97a4d72f9d"
+  },
+  {
+    "risk_score": 0.1373486522714453,
+    "session": "2025-05-27",
+    "signal_id": "cacf203d99f69907723c3725ff2651fb"
+  },
+  {
+    "risk_score": 0.3879691621494341,
+    "session": "2025-06-18",
+    "signal_id": "cb1e81919525027c4828f67adb5f374f"
+  },
+  {
+    "risk_score": 0.2512206166591494,
+    "session": "2025-05-27",
+    "signal_id": "cb3e278425247f97491a4ec06265efe3"
+  },
+  {
+    "risk_score": 0.3287019261139012,
+    "session": "2025-05-30",
+    "signal_id": "cbd500163eb4edda6ce0e6f09cc1bb9f"
+  },
+  {
+    "risk_score": 0.5390507219735367,
+    "session": "2025-06-11",
+    "signal_id": "cbee0ef41c0cd2e6453b435368bad113"
+  },
+  {
+    "risk_score": 0.42974369586324296,
+    "session": "2025-06-20",
+    "signal_id": "cc5e3e8498757bb8d733b6f471afd2db"
+  },
+  {
+    "risk_score": 0.48068045211682636,
+    "session": "2025-05-30",
+    "signal_id": "cc96f2d6e8ec1673421111d5062e97ce"
+  },
+  {
+    "risk_score": 0.3966203524943173,
+    "session": "2025-05-19",
+    "signal_id": "ccecf85d9f642db05a8cdd1e233db8dc"
+  },
+  {
+    "risk_score": 0.28025046554515554,
+    "session": "2025-06-26",
+    "signal_id": "ccfd6dbad2b106dbd987a3b310b084d6"
+  },
+  {
+    "risk_score": 0.2959907377578222,
+    "session": "2025-06-11",
+    "signal_id": "cd1b05b933eb8d22896fd44ea6b7059d"
+  },
+  {
+    "risk_score": 0.6073338418487683,
+    "session": "2025-05-30",
+    "signal_id": "cde7da080aff7df09984dcfc077f6214"
+  },
+  {
+    "risk_score": 0.32583122961755107,
+    "session": "2025-06-09",
+    "signal_id": "ce030fd6a64ec04d0d43d4e01fd29dd1"
+  },
+  {
+    "risk_score": 0.16893212515534084,
+    "session": "2025-05-19",
+    "signal_id": "ce13dc0642e6a54d218d9d3d3adf19e8"
+  },
+  {
+    "risk_score": 0.5164105228223149,
+    "session": "2025-06-13",
+    "signal_id": "ce2e0d809da4262c2a1355087e0ccc08"
+  },
+  {
+    "risk_score": 0.3190410093950028,
+    "session": "2025-06-06",
+    "signal_id": "ce8595a50d55062b109f4a199d03a299"
+  },
+  {
+    "risk_score": 0.23977219362396135,
+    "session": "2025-06-02",
+    "signal_id": "ced879adb3657ff02790ebe343f78202"
+  },
+  {
+    "risk_score": 0.08442145675075899,
+    "session": "2025-05-29",
+    "signal_id": "cee65011c9eae7238356264a79973d9a"
+  },
+  {
+    "risk_score": 0.35203230683337533,
+    "session": "2025-06-10",
+    "signal_id": "cf7481419cf9d699933226582321504b"
+  },
+  {
+    "risk_score": 0.257252206766527,
+    "session": "2025-05-21",
+    "signal_id": "cfbe0aa401bedc9f582672ed2bb87a11"
+  },
+  {
+    "risk_score": 0.36922864572247466,
+    "session": "2025-06-03",
+    "signal_id": "cfdb39d12914ebb6765453ba21c273e9"
+  },
+  {
+    "risk_score": 0.31916358485960505,
+    "session": "2025-06-05",
+    "signal_id": "d0691d9da2ec1434b2ee846e03283958"
+  },
+  {
+    "risk_score": 0.36550775609383407,
+    "session": "2025-06-23",
+    "signal_id": "d0bf5bf0ae947d8a64e0a5149b191a31"
+  },
+  {
+    "risk_score": 0.40657397226838593,
+    "session": "2025-06-23",
+    "signal_id": "d0ca71ebf6f23313b12e07ebe81b271a"
+  },
+  {
+    "risk_score": 0.6126821184360856,
+    "session": "2025-06-16",
+    "signal_id": "d10dfd2a1379c42162e32d7797bddeee"
+  },
+  {
+    "risk_score": 0.3543420201394385,
+    "session": "2025-06-16",
+    "signal_id": "d10f37316e46f42155de26495c0df53f"
+  },
+  {
+    "risk_score": 0.28530115615501905,
+    "session": "2025-05-22",
+    "signal_id": "d16d791ff9036d2340d3c57ecd39b74f"
+  },
+  {
+    "risk_score": 0.30265254901868904,
+    "session": "2025-06-02",
+    "signal_id": "d17cd1c308c4c60421a0ab3ccd89ffdf"
+  },
+  {
+    "risk_score": 0.3044391360698308,
+    "session": "2025-06-06",
+    "signal_id": "d1e34cf7e307a40fc09db65d7441693f"
+  },
+  {
+    "risk_score": 0.24000752829877522,
+    "session": "2025-06-03",
+    "signal_id": "d1fcde98a7b995599e30d52eaa316fc1"
+  },
+  {
+    "risk_score": 0.14485636618918724,
+    "session": "2025-06-24",
+    "signal_id": "d21b7a2c5352f7f6a48233df529c7954"
+  },
+  {
+    "risk_score": 0.33386584919826334,
+    "session": "2025-06-02",
+    "signal_id": "d21e99cd8333630ac491721818f23d85"
+  },
+  {
+    "risk_score": 0.33036538344241434,
+    "session": "2025-05-19",
+    "signal_id": "d2256e9187d14d8fa75097e5aafb5868"
+  },
+  {
+    "risk_score": 0.3612094196175914,
+    "session": "2025-06-12",
+    "signal_id": "d254edd05a67e14c8454b264bf57d090"
+  },
+  {
+    "risk_score": 0.3521820684345134,
+    "session": "2025-06-17",
+    "signal_id": "d2e70f0475a353acdb144728c042fe89"
+  },
+  {
+    "risk_score": 0.4201490229098015,
+    "session": "2025-06-30",
+    "signal_id": "d2fffb2dc767373f00cb33e0439b7b45"
+  },
+  {
+    "risk_score": 0.2704331434991102,
+    "session": "2025-05-19",
+    "signal_id": "d345136c01bbe24eae3bc6835e7ca12e"
+  },
+  {
+    "risk_score": 0.3912123510709617,
+    "session": "2025-06-24",
+    "signal_id": "d3c4b2d97a201de6d3bf4faa112ede7e"
+  },
+  {
+    "risk_score": 0.371984179566674,
+    "session": "2025-05-29",
+    "signal_id": "d3c598822cce8b48ce121f287aad7190"
+  },
+  {
+    "risk_score": 0.5704288596152818,
+    "session": "2025-06-16",
+    "signal_id": "d40ef0b9b69961dfd4ce1d6629a8e12d"
+  },
+  {
+    "risk_score": 0.5059790265218422,
+    "session": "2025-06-10",
+    "signal_id": "d44fb9fef2579f3d9751c8195aa99d41"
+  },
+  {
+    "risk_score": 0.4110596585840468,
+    "session": "2025-06-05",
+    "signal_id": "d45c0a6b7eef7719a4cb3b6d6236fb01"
+  },
+  {
+    "risk_score": 0.33179186459486826,
+    "session": "2025-06-26",
+    "signal_id": "d4b346f405770ba85a169ccc8b4f3f6c"
+  },
+  {
+    "risk_score": 0.6469129898504501,
+    "session": "2025-05-23",
+    "signal_id": "d4cd71bf3ad0807e7c3894bcba67844f"
+  },
+  {
+    "risk_score": 0.37336284312497886,
+    "session": "2025-06-03",
+    "signal_id": "d52519c3d4d3ac8f3766a40684e8d292"
+  },
+  {
+    "risk_score": 0.16284699462989916,
+    "session": "2025-05-20",
+    "signal_id": "d5496e0c18b84916c96e694c4cecd3b1"
+  },
+  {
+    "risk_score": 0.23874433775725756,
+    "session": "2025-06-06",
+    "signal_id": "d57e7af3989227857abff2d21fbeea6f"
+  },
+  {
+    "risk_score": 0.36864540063892753,
+    "session": "2025-06-05",
+    "signal_id": "d60296172cf9ee9aa8e33972efcfec5f"
+  },
+  {
+    "risk_score": 0.6119985382798704,
+    "session": "2025-06-04",
+    "signal_id": "d624d6214bfb24b899394a12d869e009"
+  },
+  {
+    "risk_score": 0.28041483717584514,
+    "session": "2025-06-04",
+    "signal_id": "d6a0e1022bed0368b13c65a5a09b132c"
+  },
+  {
+    "risk_score": 0.3357878053749227,
+    "session": "2025-06-23",
+    "signal_id": "d705023d8db44a395736c89772535c76"
+  },
+  {
+    "risk_score": 0.33308555227467435,
+    "session": "2025-06-10",
+    "signal_id": "d750a77381bea38eea5c62c381f449ad"
+  },
+  {
+    "risk_score": 0.25568140906006886,
+    "session": "2025-06-16",
+    "signal_id": "d766d5b4d610379b9b92b2a48d0efe28"
+  },
+  {
+    "risk_score": 0.24801010570774,
+    "session": "2025-06-04",
+    "signal_id": "d7d44cb5ed908f9a51f6aece93e95872"
+  },
+  {
+    "risk_score": 0.19508071218462017,
+    "session": "2025-06-20",
+    "signal_id": "d7d8114e743a270b7aaa67ac7f371bff"
+  },
+  {
+    "risk_score": 0.5282962145743395,
+    "session": "2025-06-10",
+    "signal_id": "d7db58219aee2c308c401c8edb6fe74e"
+  },
+  {
+    "risk_score": 0.2490818089997261,
+    "session": "2025-06-02",
+    "signal_id": "d8bb354c7f72bfde1675f4f16863de51"
+  },
+  {
+    "risk_score": 0.4840100985285188,
+    "session": "2025-06-09",
+    "signal_id": "d8f18d413665fb89f5b7cbed7ca748f4"
+  },
+  {
+    "risk_score": 0.16435354237523492,
+    "session": "2025-05-28",
+    "signal_id": "d97bf36af4016df1690ad34151a74d4d"
+  },
+  {
+    "risk_score": 0.757933031484912,
+    "session": "2025-05-27",
+    "signal_id": "d98336501aedac29a986a6548c3885ec"
+  },
+  {
+    "risk_score": 0.28578373718039707,
+    "session": "2025-05-27",
+    "signal_id": "d9a860eebfeadc367186f17568a61716"
+  },
+  {
+    "risk_score": 0.45490735771371643,
+    "session": "2025-05-27",
+    "signal_id": "da12539a1ff7a1dff33998d238a51f0e"
+  },
+  {
+    "risk_score": 0.36066055838968886,
+    "session": "2025-06-23",
+    "signal_id": "dbbf23fbb61a9ee8b8cd92d17344848a"
+  },
+  {
+    "risk_score": 0.3464194184758752,
+    "session": "2025-05-23",
+    "signal_id": "dbeabdf5b0a2d9ad32574932b34d3ca1"
+  },
+  {
+    "risk_score": 0.501739181514139,
+    "session": "2025-05-30",
+    "signal_id": "dc4975add0f32f406f8c5daeff316f2a"
+  },
+  {
+    "risk_score": 0.18477287383196972,
+    "session": "2025-06-03",
+    "signal_id": "dc589c483b5e20c74ff9aedd29c85970"
+  },
+  {
+    "risk_score": 0.3543658517907329,
+    "session": "2025-05-20",
+    "signal_id": "dca76cfbee212c94772f59fed1e1f370"
+  },
+  {
+    "risk_score": 0.19405257521282776,
+    "session": "2025-06-04",
+    "signal_id": "dcae7f842a0837f548932bdb6fc1bcf3"
+  },
+  {
+    "risk_score": 0.19767804868246922,
+    "session": "2025-06-09",
+    "signal_id": "dcb153ab556a471b0b85ffd2e2792e45"
+  },
+  {
+    "risk_score": 0.4226963550370201,
+    "session": "2025-06-02",
+    "signal_id": "dcb37b6fce3dc0657e3f0ddcd348bfb0"
+  },
+  {
+    "risk_score": 0.7572403857046875,
+    "session": "2025-06-23",
+    "signal_id": "dcdc7aaa179c6032fecf405d9b8165db"
+  },
+  {
+    "risk_score": 0.26087477195737746,
+    "session": "2025-06-05",
+    "signal_id": "dd3b3d52957a791163469584217ea043"
+  },
+  {
+    "risk_score": 0.22678940986226842,
+    "session": "2025-06-03",
+    "signal_id": "dd43e94ec80a7d322ad38e9ed55f2304"
+  },
+  {
+    "risk_score": 0.27824418352396,
+    "session": "2025-06-20",
+    "signal_id": "dd77c1ee428557be647f3b4a90c8557c"
+  },
+  {
+    "risk_score": 0.28177010113258455,
+    "session": "2025-06-20",
+    "signal_id": "dd7f25f4a9737e49168255cef93128d5"
+  },
+  {
+    "risk_score": 0.644518812086217,
+    "session": "2025-05-22",
+    "signal_id": "dde94dd16e5aad0f269109a9e47b88d5"
+  },
+  {
+    "risk_score": 0.2555579964855864,
+    "session": "2025-06-05",
+    "signal_id": "de27acddade66e4d5f79763e157f9156"
+  },
+  {
+    "risk_score": 0.5285007953701996,
+    "session": "2025-06-27",
+    "signal_id": "de7ccef2fdb149412165e950e8376616"
+  },
+  {
+    "risk_score": 0.6313859726227429,
+    "session": "2025-06-10",
+    "signal_id": "df44a36f3f061bb3c1064598585bde5e"
+  },
+  {
+    "risk_score": 0.38225559433920364,
+    "session": "2025-06-03",
+    "signal_id": "e007456bd14399a8434099d86c6c881e"
+  },
+  {
+    "risk_score": 0.523503770465715,
+    "session": "2025-06-24",
+    "signal_id": "e0241de04fc88be438d3b329ed510b59"
+  },
+  {
+    "risk_score": 0.42861038346523617,
+    "session": "2025-06-25",
+    "signal_id": "e0935334870b90ba0094fee4f59c7db4"
+  },
+  {
+    "risk_score": 0.014846789205872638,
+    "session": "2025-06-10",
+    "signal_id": "e0fe3f3bd94339eada1aa93bd5c3cfd1"
+  },
+  {
+    "risk_score": 0.4936975471011754,
+    "session": "2025-06-25",
+    "signal_id": "e186633373da892292bf274c62382792"
+  },
+  {
+    "risk_score": 0.5812205924165207,
+    "session": "2025-06-06",
+    "signal_id": "e198105a3346b6e6dc9f4b7e17d2e75d"
+  },
+  {
+    "risk_score": 0.26393562948408344,
+    "session": "2025-05-29",
+    "signal_id": "e1a92158f44a6aae0dc6746cfb879fd5"
+  },
+  {
+    "risk_score": 0.33522568053547563,
+    "session": "2025-06-10",
+    "signal_id": "e1c3076eb9358b0a3dea99a47c15cb3d"
+  },
+  {
+    "risk_score": 0.49591784739665534,
+    "session": "2025-06-03",
+    "signal_id": "e275cfdbfdc20204856f3bb3b64cb071"
+  },
+  {
+    "risk_score": 0.47860954079860824,
+    "session": "2025-06-27",
+    "signal_id": "e2e777218c7ecbe39c8e278d2b8c7187"
+  },
+  {
+    "risk_score": 0.21459601716761625,
+    "session": "2025-06-27",
+    "signal_id": "e30401b32c1c457d3debb817af5af742"
+  },
+  {
+    "risk_score": 0.39447823936363924,
+    "session": "2025-06-16",
+    "signal_id": "e3a040445e0926659d25a7d730ea122f"
+  },
+  {
+    "risk_score": 0.3568977260021802,
+    "session": "2025-06-09",
+    "signal_id": "e3a4a637adf39c3ea3d1b63d0dc99c5a"
+  },
+  {
+    "risk_score": 0.39056011150150066,
+    "session": "2025-06-03",
+    "signal_id": "e3c7ff1232b9535d15f1a1534c3f6188"
+  },
+  {
+    "risk_score": 0.49278955101119193,
+    "session": "2025-06-23",
+    "signal_id": "e3dd915151654e2e183dd1a56528fa30"
+  },
+  {
+    "risk_score": 0.4774758298122061,
+    "session": "2025-05-22",
+    "signal_id": "e3f56efddf0af48646f21e145db75700"
+  },
+  {
+    "risk_score": 0.37494991470852884,
+    "session": "2025-06-30",
+    "signal_id": "e416ded7bf81224cd7557040ad0f7b51"
+  },
+  {
+    "risk_score": 0.1817209758061362,
+    "session": "2025-05-19",
+    "signal_id": "e41f09e5a08efb772c9f8a25a443f58c"
+  },
+  {
+    "risk_score": 0.2970424808088552,
+    "session": "2025-06-13",
+    "signal_id": "e43f3bd463bceb85e8fa7e2bc3d0a815"
+  },
+  {
+    "risk_score": 0.2987093274071208,
+    "session": "2025-05-21",
+    "signal_id": "e4b13f2a1d129cbd740c4dbca8bdb887"
+  },
+  {
+    "risk_score": 0.1093281052880846,
+    "session": "2025-06-24",
+    "signal_id": "e4e30ac35587e2588b7488f1a6b3173a"
+  },
+  {
+    "risk_score": 0.592611295408918,
+    "session": "2025-06-05",
+    "signal_id": "e561a107fdbe347ec3a05a7bba7635fe"
+  },
+  {
+    "risk_score": 0.5351724034941823,
+    "session": "2025-06-02",
+    "signal_id": "e5a1ecb157ab261baf827b647d7db958"
+  },
+  {
+    "risk_score": 0.34383447162849917,
+    "session": "2025-06-05",
+    "signal_id": "e5a95544eb175cf7ac88cb5c05ee4e19"
+  },
+  {
+    "risk_score": 0.5942998181726488,
+    "session": "2025-06-16",
+    "signal_id": "e5b2b89ed17090a094d0ec7a8d18a15a"
+  },
+  {
+    "risk_score": 0.33154843887206453,
+    "session": "2025-06-16",
+    "signal_id": "e5f4219ef4627f9f6d61df50d4e04492"
+  },
+  {
+    "risk_score": 0.3490439438294082,
+    "session": "2025-06-02",
+    "signal_id": "e695657a6499d30f79442aa96c07d4a4"
+  },
+  {
+    "risk_score": 0.5006341905187814,
+    "session": "2025-06-02",
+    "signal_id": "e714d10666c3c52e5c1af0f1257d08ce"
+  },
+  {
+    "risk_score": 0.37549734800847423,
+    "session": "2025-05-27",
+    "signal_id": "e7244f6797ca176e9283dd6db7dacd4b"
+  },
+  {
+    "risk_score": 0.01614931620639169,
+    "session": "2025-06-13",
+    "signal_id": "e76236da0de7d10714280fc47bfb4367"
+  },
+  {
+    "risk_score": 0.4341497739507507,
+    "session": "2025-05-29",
+    "signal_id": "e8064f91eb2d486a28e1085efa9ff7af"
+  },
+  {
+    "risk_score": 0.4161199710157718,
+    "session": "2025-06-03",
+    "signal_id": "e9406c64a8f175e79511d5f447a0ff61"
+  },
+  {
+    "risk_score": 0.31725760820801624,
+    "session": "2025-05-23",
+    "signal_id": "e98a32dc9c7f73c39ad6f8e298123468"
+  },
+  {
+    "risk_score": 0.6252830915916533,
+    "session": "2025-06-16",
+    "signal_id": "ea03e77b7fb71b3a517f0bb1afffeb49"
+  },
+  {
+    "risk_score": 0.287154917352309,
+    "session": "2025-06-04",
+    "signal_id": "ea09cfd92236ad0b17112eeffd71487c"
+  },
+  {
+    "risk_score": 0.44032183943793374,
+    "session": "2025-06-11",
+    "signal_id": "ea38af420b9e8c5b2688da8a76734d71"
+  },
+  {
+    "risk_score": 0.22831952311856446,
+    "session": "2025-05-19",
+    "signal_id": "ea4b1af5ad1874af6738adaed3d902e0"
+  },
+  {
+    "risk_score": 0.19892009440524408,
+    "session": "2025-05-20",
+    "signal_id": "ea4ea8af40bad8a956dd5d1a4c6c2bb6"
+  },
+  {
+    "risk_score": 0.4844239703968239,
+    "session": "2025-06-09",
+    "signal_id": "ea6504ad2635e0de81765a799e2dd1fd"
+  },
+  {
+    "risk_score": 0.27086454708557384,
+    "session": "2025-06-16",
+    "signal_id": "ea81c185a8078b3f0143c75b7d3876bf"
+  },
+  {
+    "risk_score": 0.3346277286298782,
+    "session": "2025-05-20",
+    "signal_id": "ea9fba6d1e986b8d55c96ba03f9e67ed"
+  },
+  {
+    "risk_score": 0.18187052637596454,
+    "session": "2025-05-23",
+    "signal_id": "eb0ac208a95756405e3eda1fbc561fbd"
+  },
+  {
+    "risk_score": 0.3848815832133176,
+    "session": "2025-06-20",
+    "signal_id": "eb5c9c0b841203d99b330ef3a3444484"
+  },
+  {
+    "risk_score": 0.19365835372385573,
+    "session": "2025-06-30",
+    "signal_id": "ebb8d838f970f8cb9cf58205c0065b15"
+  },
+  {
+    "risk_score": 0.33502287320518326,
+    "session": "2025-05-29",
+    "signal_id": "ebe4fb477fc5737f92efde094c47eece"
+  },
+  {
+    "risk_score": 0.48063993290572954,
+    "session": "2025-05-30",
+    "signal_id": "ed024fbd03f08f19851744d3e59e5c1f"
+  },
+  {
+    "risk_score": 0.09026184823743996,
+    "session": "2025-05-29",
+    "signal_id": "ed18b9d3f88abfcaf6d599383340fa4d"
+  },
+  {
+    "risk_score": 0.2670648732538589,
+    "session": "2025-05-23",
+    "signal_id": "ed1d5bb6901e0250e27d3700d041da77"
+  },
+  {
+    "risk_score": 0.2623754548561712,
+    "session": "2025-06-26",
+    "signal_id": "ed452ab544ad9f73066c2743e2143fce"
+  },
+  {
+    "risk_score": 0.19007515862988725,
+    "session": "2025-06-04",
+    "signal_id": "ed7041c967c939b370d4148a0eb21cc8"
+  },
+  {
+    "risk_score": 0.043556679718707636,
+    "session": "2025-05-30",
+    "signal_id": "edccaa8aff577711233bfbb1eabb852d"
+  },
+  {
+    "risk_score": 0.33956769299552947,
+    "session": "2025-06-20",
+    "signal_id": "ee55583e1736b86652d8203e55cda7a8"
+  },
+  {
+    "risk_score": 0.36112053515006093,
+    "session": "2025-05-21",
+    "signal_id": "eed22248191b1e3989a7e3bfffabef53"
+  },
+  {
+    "risk_score": 0.22154887930881365,
+    "session": "2025-06-06",
+    "signal_id": "ef46cf3f6ed30cd5dc0eabf292cc6d0f"
+  },
+  {
+    "risk_score": 0.29719942388973447,
+    "session": "2025-05-30",
+    "signal_id": "ef9f91d85236d8ef858854062e54febf"
+  },
+  {
+    "risk_score": 0.6742068947571909,
+    "session": "2025-06-20",
+    "signal_id": "eff4c0f46d9840014d2bce1e95773e75"
+  },
+  {
+    "risk_score": 0.36741977590788866,
+    "session": "2025-06-10",
+    "signal_id": "f0174eb66f0e9b10648e7f84663dc83a"
+  },
+  {
+    "risk_score": 0.20601543830318853,
+    "session": "2025-06-27",
+    "signal_id": "f0604f0805951b15eabfcdf0df4ae3fe"
+  },
+  {
+    "risk_score": 0.23651376739605454,
+    "session": "2025-05-20",
+    "signal_id": "f0bb28b090e279062db64d82eea77f6b"
+  },
+  {
+    "risk_score": 0.3715435070573445,
+    "session": "2025-06-10",
+    "signal_id": "f14e11e3a0ba5b60b8330afdc4e621d5"
+  },
+  {
+    "risk_score": 0.45246671577766345,
+    "session": "2025-06-11",
+    "signal_id": "f19eedfc5f963c3f2e249e1366e1288d"
+  },
+  {
+    "risk_score": 0.4740310498562422,
+    "session": "2025-05-27",
+    "signal_id": "f1bf94cd29d8f9f26870af33742c8b95"
+  },
+  {
+    "risk_score": 0.2436188210042657,
+    "session": "2025-06-10",
+    "signal_id": "f1d7bbbda598a7f8061b433b90319c3d"
+  },
+  {
+    "risk_score": 0.35831091091107126,
+    "session": "2025-05-28",
+    "signal_id": "f20258380db8dec387f4c3d6ba36ebc4"
+  },
+  {
+    "risk_score": 0.21781682949279527,
+    "session": "2025-06-25",
+    "signal_id": "f252ebffcb6a9fda0b268aa826f6fc14"
+  },
+  {
+    "risk_score": 0.3368888557874918,
+    "session": "2025-05-21",
+    "signal_id": "f272a590e445e103f47a7e3b20b98df1"
+  },
+  {
+    "risk_score": 0.48511819104257886,
+    "session": "2025-06-30",
+    "signal_id": "f2744922a63c5fb47fd520e1eff4c1e0"
+  },
+  {
+    "risk_score": 0.25411219082890785,
+    "session": "2025-05-21",
+    "signal_id": "f35585d2a2d3d30d746df944bfd05eb0"
+  },
+  {
+    "risk_score": 0.28548703379940726,
+    "session": "2025-06-05",
+    "signal_id": "f35649d1b5f69bc85eaedfc1bf9365e3"
+  },
+  {
+    "risk_score": 0.6066703882275687,
+    "session": "2025-05-29",
+    "signal_id": "f380d688b76809c8020931d04399bcca"
+  },
+  {
+    "risk_score": 0.35798752106838794,
+    "session": "2025-05-27",
+    "signal_id": "f42d2814a1ea2fea673acc97a55d7349"
+  },
+  {
+    "risk_score": 0.2424913075696615,
+    "session": "2025-06-23",
+    "signal_id": "f4ce0f13d0797b0cdd8844d934b3f577"
+  },
+  {
+    "risk_score": 0.2980039194905637,
+    "session": "2025-06-25",
+    "signal_id": "f4f7b1b9d22e335f98ace3113c62dad4"
+  },
+  {
+    "risk_score": 0.46123672385261755,
+    "session": "2025-05-23",
+    "signal_id": "f51a56d0d4293f217faefcd09df5fe58"
+  },
+  {
+    "risk_score": 0.10317042932840376,
+    "session": "2025-05-28",
+    "signal_id": "f53dcb084649220afafc44adf5e98560"
+  },
+  {
+    "risk_score": 0.5225138285932637,
+    "session": "2025-06-04",
+    "signal_id": "f58f22cb60c9387472b7b046cf210310"
+  },
+  {
+    "risk_score": 0.01983722942396204,
+    "session": "2025-06-16",
+    "signal_id": "f5ab2d09005335082e6f83d305bf05d1"
+  },
+  {
+    "risk_score": 0.5812361551540763,
+    "session": "2025-06-04",
+    "signal_id": "f5c05bd5195bb28786cc0eb5dd13dd11"
+  },
+  {
+    "risk_score": 0.38178592155033414,
+    "session": "2025-06-02",
+    "signal_id": "f5d83ac555a9b7d22b82f2a9ce88f0f6"
+  },
+  {
+    "risk_score": 0.23256187046987295,
+    "session": "2025-06-26",
+    "signal_id": "f5e0c469fef5cb009c102d14a341bbb1"
+  },
+  {
+    "risk_score": 0.24192464818429374,
+    "session": "2025-05-29",
+    "signal_id": "f63300b3275e0a134b6aa24452147c79"
+  },
+  {
+    "risk_score": 0.20110549880508796,
+    "session": "2025-05-29",
+    "signal_id": "f6a8717ba7ef8e8410b222f35e3463db"
+  },
+  {
+    "risk_score": 0.20885247528731032,
+    "session": "2025-06-16",
+    "signal_id": "f6e8222f6235d87a4870a117215c6383"
+  },
+  {
+    "risk_score": 0.15369731721784,
+    "session": "2025-05-27",
+    "signal_id": "f70eac1bb08167a001a5f4ff4bb2cdc4"
+  },
+  {
+    "risk_score": 0.1096134889205276,
+    "session": "2025-06-09",
+    "signal_id": "f76ecacc8e03bb3d623548762fc70987"
+  },
+  {
+    "risk_score": 0.22489718820051477,
+    "session": "2025-06-24",
+    "signal_id": "f7d76cd885d03c2664d8f301174d8bec"
+  },
+  {
+    "risk_score": 0.4479571158206297,
+    "session": "2025-06-25",
+    "signal_id": "f83bc94d85fc1fea4b4f1fc5ff0cea04"
+  },
+  {
+    "risk_score": 0.7729043479327832,
+    "session": "2025-06-05",
+    "signal_id": "f87169b1b68feabba27bffe0fd65b6cf"
+  },
+  {
+    "risk_score": 0.0006938986629226625,
+    "session": "2025-05-21",
+    "signal_id": "f88adbff1d6862a8c591e814d5cabb3b"
+  },
+  {
+    "risk_score": 0.3509836369074611,
+    "session": "2025-06-09",
+    "signal_id": "f89fcd8df6eb513e8833264a89e4c766"
+  },
+  {
+    "risk_score": 0.4059705766922314,
+    "session": "2025-06-06",
+    "signal_id": "f8b40993d39208d9d3d383eb37f33666"
+  },
+  {
+    "risk_score": 0.42280504222546506,
+    "session": "2025-05-23",
+    "signal_id": "f8cb2a307c3e7f8557406ad0742ede24"
+  },
+  {
+    "risk_score": 0.2810327056135213,
+    "session": "2025-06-04",
+    "signal_id": "f8de7f1652c9ec009a9f18213810eeda"
+  },
+  {
+    "risk_score": 0.32562742008580275,
+    "session": "2025-06-24",
+    "signal_id": "f944479a86b749743832cf9add8af60f"
+  },
+  {
+    "risk_score": 0.4934351143958032,
+    "session": "2025-06-09",
+    "signal_id": "f94c9396a4f79d4a5524358dfa2283cd"
+  },
+  {
+    "risk_score": 0.46191580937803123,
+    "session": "2025-05-27",
+    "signal_id": "f9cf59696d01dc193032a86fba78ffa1"
+  },
+  {
+    "risk_score": 0.3211338588202509,
+    "session": "2025-05-30",
+    "signal_id": "f9cfe8e52c73fa793e257bb6e3f8a142"
+  },
+  {
+    "risk_score": 0.4321621221657155,
+    "session": "2025-06-03",
+    "signal_id": "fa97e71b2ce43877a323f2d51a18788d"
+  },
+  {
+    "risk_score": 0.28471618914347396,
+    "session": "2025-05-30",
+    "signal_id": "fb020d6a0431f626e92922990edc18e6"
+  },
+  {
+    "risk_score": 0.28990746216325547,
+    "session": "2025-05-21",
+    "signal_id": "fb0388e04368fb32481b4cef4d071283"
+  },
+  {
+    "risk_score": 0.2526378166869241,
+    "session": "2025-05-22",
+    "signal_id": "fb4fd4de1e2ab2ecb63b8411076b4800"
+  },
+  {
+    "risk_score": 0.14551787452364187,
+    "session": "2025-06-27",
+    "signal_id": "fb669703e3776d816e931efdf4978a62"
+  },
+  {
+    "risk_score": 0.28816117566868277,
+    "session": "2025-06-24",
+    "signal_id": "fbb480ea05fa6cc8d656232039ba6e9e"
+  },
+  {
+    "risk_score": 0.47890945979062327,
+    "session": "2025-06-26",
+    "signal_id": "fca141b7ff38b12e9fce6bbe9ed0c6b7"
+  },
+  {
+    "risk_score": 0.3616018629976762,
+    "session": "2025-06-10",
+    "signal_id": "fcaedd9083cd9dddb7fb5bffd0eedf11"
+  },
+  {
+    "risk_score": 0.5731403822164062,
+    "session": "2025-06-04",
+    "signal_id": "fcf7ad1587f63a89ddb7da5e9f657232"
+  },
+  {
+    "risk_score": 0.27812755347955487,
+    "session": "2025-05-19",
+    "signal_id": "fd2006accb95cc057a1d920c52d74dcb"
+  },
+  {
+    "risk_score": 0.39079657142693797,
+    "session": "2025-06-06",
+    "signal_id": "fd3b4fb96217667fd1162ed926a7feb1"
+  },
+  {
+    "risk_score": 0.5808772532685792,
+    "session": "2025-06-16",
+    "signal_id": "fd831eb50c45f3dd55b517420c63b853"
+  },
+  {
+    "risk_score": 0.587718892611684,
+    "session": "2025-06-04",
+    "signal_id": "fd87b500e4b441cf475d467b57671363"
+  },
+  {
+    "risk_score": 0.2176838792863918,
+    "session": "2025-05-20",
+    "signal_id": "fea80df1604191958b7ca7b105900cdf"
+  },
+  {
+    "risk_score": 0.31178470953952026,
+    "session": "2025-06-25",
+    "signal_id": "fff3028c6cffd01291891e2b9d89acfd"
+  }
+]

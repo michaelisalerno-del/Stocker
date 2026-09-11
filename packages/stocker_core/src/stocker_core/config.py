@@ -1,11 +1,19 @@
 """Typed configuration loading for research and execution processes."""
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from stocker_core.markets import get_market
+from stocker_core.runs import Environment, RunConfig
+from stocker_core.universes import (
+    NAMED_US_UNIVERSES,
+    UniverseDefinition,
+    load_us_universe_snapshot,
+)
 
 
 class DataConfig(BaseModel):
@@ -77,6 +85,60 @@ class BrokerConfig(BaseModel):
     api_key_env: str | None = None
 
 
+class IbkrConfig(BaseModel):
+    """Explicit connection settings for one IBKR PAPER or LIVE session."""
+
+    environment: Environment
+    host: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    port: int = Field(ge=1, le=65_535)
+    client_id: int = Field(ge=1)
+    expected_account: str | None = Field(default=None, min_length=1)
+    connect_timeout_seconds: float = Field(default=5.0, gt=0.0)
+    request_timeout_seconds: float = Field(default=60.0, gt=0.0)
+    market_data_line_budget: int = Field(default=100, ge=1)
+
+
+class RunsConfig(BaseModel):
+    """Configured universes and the independent runs that reference them."""
+
+    # Frozen Session HARD research round-trip cost; replaceable independently
+    # of the admission rule. No other installed strategy uses this assumption.
+    session_hard_hv_round_trip_cost_bps: float = Field(default=10.0, ge=0.0, allow_inf_nan=False)
+    universes: tuple[UniverseDefinition, ...] = ()
+    runs: tuple[RunConfig, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_run_references(self) -> "RunsConfig":
+        """Reject duplicate identities and runs that name an absent universe."""
+
+        universe_ids: set[str] = set()
+        universes_by_id: dict[str, UniverseDefinition] = {}
+        for universe in self.universes:
+            if universe.universe_id in universe_ids:
+                raise ValueError(f"Duplicate universe_id: {universe.universe_id}")
+            universe_ids.add(universe.universe_id)
+            universes_by_id[universe.universe_id] = universe
+
+        run_ids: set[str] = set()
+        for run in self.runs:
+            if run.run_id in run_ids:
+                raise ValueError(f"Duplicate run_id: {run.run_id}")
+            run_ids.add(run.run_id)
+            if run.universe not in universe_ids:
+                raise ValueError(f"Unknown universe {run.universe} referenced by run {run.run_id}")
+            if run.market_id is not None:
+                market_spec = universes_by_id[run.universe].market_spec
+                if market_spec is None or (
+                    market_spec.market_id is not run.market_id
+                    or market_spec.cap_bucket is not run.cap_bucket
+                    or market_spec.cap_bucket_version != run.cap_bucket_version
+                ):
+                    raise ValueError(
+                        f"Run {run.run_id} lineage does not match universe {run.universe}"
+                    )
+        return self
+
+
 class ServerSettings(BaseModel):
     """Server runtime settings for future paper/live execution."""
 
@@ -139,3 +201,137 @@ def load_server_config(path: str | Path) -> ServerConfig:
     """Load a server config YAML file."""
 
     return load_config(path, ServerConfig)
+
+
+def load_run_config(path: str | Path) -> RunConfig:
+    """Load a Stage 1 run config YAML file."""
+
+    return load_config(path, RunConfig)
+
+
+def load_runs_config(path: str | Path) -> RunsConfig:
+    """Load the broker-independent multiple-universe and multiple-run configuration."""
+
+    config_path = Path(path)
+    raw = _read_yaml(config_path)
+    snapshot_value = raw.pop("named_universe_snapshot", None)
+    inline = raw.get("universes", [])
+    runs = raw.get("runs", [])
+    if not isinstance(inline, list) or not isinstance(runs, list):
+        return RunsConfig.model_validate(raw)
+    dynamic_universes = {
+        str(item.get("universe", ""))
+        for item in runs
+        if isinstance(item, dict) and (
+            item.get("universe_source") == "DYNAMIC_IBKR"
+            or (
+                item.get("universe_source") is None
+                and (item.get("method_spec") or {}).get("universe_search", {}).get("builder")
+                == "DYNAMIC_IBKR"
+            )
+        )
+    }
+    inline_ids = {str(item.get("universe_id", "")) for item in inline if isinstance(item, dict)}
+    referenced = tuple(
+        dict.fromkeys(
+            str(item.get("universe", ""))
+            for item in runs
+            if isinstance(item, dict) and item.get("universe")
+        )
+    )
+    requested_named = tuple(NAMED_US_UNIVERSES) if snapshot_value is not None else referenced
+    missing_named = tuple(
+        universe_id
+        for universe_id in requested_named
+        if universe_id in NAMED_US_UNIVERSES and universe_id not in inline_ids
+    )
+    if missing_named:
+        if not isinstance(snapshot_value, str) or not snapshot_value.strip():
+            names = ", ".join(missing_named)
+            raise ValueError(
+                f"Named universe {names} requires named_universe_snapshot in {config_path}"
+            )
+        snapshot_path = Path(snapshot_value)
+        if not snapshot_path.is_absolute():
+            snapshot_path = config_path.parent / snapshot_path
+        snapshot = load_us_universe_snapshot(snapshot_path)
+        hydrated_inline: list[object] = []
+        for item in inline:
+            if (
+                not isinstance(item, dict) or item.get("members")
+                or item.get("universe_id") in dynamic_universes
+            ):
+                hydrated_inline.append(item)
+                continue
+            market_spec = item.get("market_spec")
+            market_id = market_spec.get("market_id") if isinstance(market_spec, dict) else None
+            try:
+                listing_membership = get_market(str(market_id)).listing_membership
+            except ValueError:
+                listing_membership = None
+            if listing_membership not in NAMED_US_UNIVERSES:
+                hydrated_inline.append(item)
+                continue
+            hydrated = dict(item)
+            hydrated["members"] = [
+                member.model_dump(mode="python")
+                for member in snapshot.get_universe(listing_membership).members
+            ]
+            hydrated_inline.append(hydrated)
+        raw["universes"] = [
+            *hydrated_inline,
+            *(
+                snapshot.get_universe(universe_id).model_dump(mode="python")
+                for universe_id in missing_named
+            ),
+        ]
+    return RunsConfig.model_validate(raw)
+
+
+def runs_config_storage_payload(
+    config: RunsConfig,
+    *,
+    named_universe_snapshot: str | None = None,
+) -> dict[str, object]:
+    """Serialize runs without duplicating snapshot-owned listing membership."""
+
+    payload = config.model_dump(mode="json")
+    if named_universe_snapshot is None:
+        return payload
+    named = {
+        universe.universe_id: universe
+        for universe in config.universes
+        if universe.universe_id in NAMED_US_UNIVERSES
+    }
+    persisted_universes: list[dict[str, object]] = []
+    for universe in config.universes:
+        if universe.universe_id in NAMED_US_UNIVERSES:
+            continue
+        item = universe.model_dump(mode="json")
+        market = get_market(universe.market_spec.market_id) if universe.market_spec else None
+        listing_membership = market.listing_membership if market else None
+        source = named.get(listing_membership or "")
+        if source is not None and universe.members == source.members:
+            item["members"] = []
+        persisted_universes.append(item)
+    return {
+        "session_hard_hv_round_trip_cost_bps": config.session_hard_hv_round_trip_cost_bps,
+        "named_universe_snapshot": named_universe_snapshot,
+        "universes": persisted_universes,
+        "runs": payload["runs"],
+    }
+
+
+def load_ibkr_config(path: str | Path, environment: Environment) -> IbkrConfig:
+    """Load the explicit IBKR settings selected by a Stage 1 run environment."""
+
+    raw = _read_yaml(path)
+    selected = raw.get(environment.value)
+    if not isinstance(selected, dict):
+        raise ValueError(f"IBKR config has no {environment.value} mapping: {path}")
+    config = IbkrConfig.model_validate(selected)
+    if config.environment is not environment:
+        raise ValueError(
+            f"IBKR {environment.value} mapping declares environment {config.environment.value}"
+        )
+    return config

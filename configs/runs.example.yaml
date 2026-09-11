@@ -1,0 +1,6 @@
+# Start the dashboard, then select Market -> Session HARD -> Start PAPER run.
+# The method saves its specification and authoritative membership with each run.
+# This example starts no run and enables no orders.
+named_universe_snapshot: ../universes/us-listed.csv
+universes: []
+runs: []

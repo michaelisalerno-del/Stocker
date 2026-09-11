@@ -127,7 +127,7 @@ class FakeBroker:
         assert config.environment is self.environment
         self.events.append("reconfigure")
 
-    async def account_state(self) -> BrokerAccountState:
+    async def account_state(self, *, fresh=False) -> BrokerAccountState:
         self.events.append("account_state")
         return BrokerAccountState(
             self.environment,
@@ -136,7 +136,12 @@ class FakeBroker:
             200_000.0,
             self.is_connected,
             self.positions,
+            currency="USD",
+            gross_position_value=sum(abs(p.quantity * p.average_price) for p in self.positions),
         )
+
+    async def check_order_capacity(self, plan, instrument):
+        return None
 
     async def minimum_tick(self, instrument: QualifiedInstrument) -> float:
         return 0.01
@@ -433,7 +438,9 @@ def _run(
         universe="NASDAQ",
         strategy="TEST_EXECUTION",
         environment=environment,
-        risk=RunRiskConfig(risk_per_trade=0.001, max_concurrent_positions=5),
+        risk=RunRiskConfig(
+            max_gross_notional=1000000, risk_per_trade=0.001, max_concurrent_positions=5
+        ),
         session=RunWindow(
             start=time(9, 30),
             end=time(16),
@@ -839,7 +846,9 @@ def test_enabled_run_requires_explicit_market_session_before_broker_connect(
         universe="NASDAQ",
         strategy="TEST_EXECUTION",
         environment=Environment.PAPER,
-        risk=RunRiskConfig(risk_per_trade=0.001, max_concurrent_positions=5),
+        risk=RunRiskConfig(
+            max_gross_notional=1000000, risk_per_trade=0.001, max_concurrent_positions=5
+        ),
     )
     runtime = _runtime(tmp_path, broker, run)
 
@@ -984,6 +993,7 @@ def test_hot_risk_change_drives_future_sizing_without_reconnecting(tmp_path: Pat
         changed = _run().model_copy(
             update={
                 "risk": RunRiskConfig(
+                    max_gross_notional=1000000,
                     risk_per_trade=0.0005,
                     max_concurrent_positions=2,
                 )
@@ -2181,3 +2191,118 @@ def test_no_signal_is_not_an_operational_failure(tmp_path: Path) -> None:
     assert runtime.status().application is ApplicationState.READY
     assert runtime.status().runs[0].state is RunRuntimeState.ACTIVE
     assert runtime.status().runs[0].signals_today == 0
+
+
+def test_preparation_does_not_block_cycles_and_late_result_cannot_undo_pause(tmp_path):
+    async def scenario():
+        clock = MutableClock()
+        features = FakeFeatureService()
+        a, b = _run("a", enabled=False), _run("b")
+        runtime = _runtime(
+            tmp_path,
+            FakeBroker(),
+            a,
+            b,
+            clock=clock,
+            feature_service=features,
+            context_provider=TriggerContextProvider(),
+        )
+        await runtime.start()
+        original = runtime._qualify
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def held(instances):
+            entered.set()
+            await release.wait()
+            return await original(instances)
+
+        runtime._qualify = held
+        update = asyncio.create_task(
+            runtime.apply_runs_config(
+                _runs(a.model_copy(update={"enabled": True}), b), frozenset({"a"})
+            )
+        )
+        await asyncio.wait_for(entered.wait(), 1)
+        clock.now = datetime(2026, 9, 2, 14, 1, tzinfo=UTC)
+        await asyncio.wait_for(runtime.poll_once(), 1)
+        assert features.calls == 1
+        paused = await asyncio.wait_for(runtime.apply_runs_config(_runs(a, b), frozenset({"a"})), 1)
+        assert next(r for r in paused.runs if r.run_id == "a").state is RunRuntimeState.DISABLED
+        release.set()
+        await update
+        assert (
+            next(r for r in runtime.status().runs if r.run_id == "a").state
+            is RunRuntimeState.DISABLED
+        )
+        assert all(m.run_id != "a" for r in runtime._qualification.requests for m in r.memberships)
+        await runtime.stop()
+
+    asyncio.run(scenario())
+
+
+def test_pause_bypasses_command_and_scheduler_locks_and_survives_old_update(tmp_path):
+    import yaml
+
+    from stocker_core.config import load_runs_config
+    from stocker_dashboard.controls import RunControlService
+
+    async def scenario():
+        run = _run("a")
+        runtime = _runtime(tmp_path, FakeBroker(), run)
+        await runtime.start()
+        runs_path, broker_path = tmp_path / "runs.yaml", tmp_path / "ibkr.yaml"
+        runs_path.write_text(yaml.safe_dump(_runs(run).model_dump(mode="json")))
+        controls = RunControlService(runs_path, broker_path, runtime=runtime)
+        async with controls._lock, runtime._cycle_lock:
+            result = await asyncio.wait_for(controls.disable_run("a"), 1)
+            assert result.persisted and result.runtime_applied
+            assert not runtime._manager.get_run("a").config.enabled
+            assert runtime.status().runs[0].state is RunRuntimeState.DISABLED
+        # An older command's already-prepared enabled payload cannot undo pause.
+        await runtime.apply_runs_config(_runs(run), frozenset({"a"}))
+        controls._write_runs(_runs(run))
+        assert not load_runs_config(runs_path).runs[0].enabled
+        assert not runtime._manager.get_run("a").config.enabled
+        assert runtime.status().runs[0].state is RunRuntimeState.DISABLED
+        await runtime.stop()
+
+    asyncio.run(scenario())
+
+
+def test_queued_enable_cannot_undo_newer_pause(tmp_path):
+    import yaml
+
+    from stocker_dashboard.controls import RunControlService
+
+    async def scenario():
+        class ObservedLock(asyncio.Lock):
+            entered = asyncio.Event()
+
+            async def acquire(self):
+                self.entered.set()
+                return await super().acquire()
+
+        run = _hv_run("a")
+        runtime = _runtime(tmp_path, FakeBroker(), run)
+        await runtime.start()
+        runs_path = tmp_path / "runs.yaml"
+        runs_path.write_text(yaml.safe_dump(_runs(run).model_dump(mode="json")))
+        controls = RunControlService(runs_path, tmp_path / "ibkr.yaml", runtime=runtime)
+        lock = ObservedLock()
+        controls._lock = lock
+        await lock.acquire()
+        lock.entered.clear()
+        queued = asyncio.create_task(controls.enable_run("a"))
+        await lock.entered.wait()
+        assert (await controls.disable_run("a")).persisted
+        lock.release()
+        with pytest.raises(ValueError, match="newer pause"):
+            await queued
+        assert not runtime._manager.get_run("a").config.enabled
+        assert runtime.status().runs[0].state is RunRuntimeState.DISABLED
+        # A genuinely later enable is still a supported deliberate operation.
+        assert (await controls.enable_run("a")).persisted
+        assert runtime._manager.get_run("a").config.enabled
+        await runtime.stop()
+
+    asyncio.run(scenario())

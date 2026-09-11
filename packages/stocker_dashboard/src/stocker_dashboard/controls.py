@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import tempfile
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 import yaml
 
@@ -26,6 +28,14 @@ from stocker_core.strategies import installed_strategies
 from stocker_core.universes import InstrumentReference, UniverseDefinition
 from stocker_dashboard.universe_runs import UniverseRunBuilder
 from stocker_execution.runtime import RuntimeStatus
+
+
+def control_failure(exc: Exception, message: str) -> str:
+    reference = uuid4().hex
+    logging.getLogger(__name__).error(
+        "Control failed request_id=%s exception_type=%s", reference, type(exc).__name__
+    )
+    return f"{message}; reference {reference}"
 
 
 class ActiveRuntimeControl(Protocol):
@@ -88,6 +98,8 @@ class RunControlService:
         self.ibkr_config_path = Path(ibkr_config_path)
         self.runtime = runtime
         self._lock = asyncio.Lock()
+        self._pause_latches: set[str] = set()
+        self._pause_revisions: dict[str, int] = {}
         self._builder = UniverseRunBuilder()
         self._named_universe_snapshot = self._read_named_universe_snapshot_reference()
 
@@ -126,6 +138,7 @@ class RunControlService:
         environment: Environment,
         risk_per_trade: float,
         max_concurrent_positions: int | None,
+        max_gross_notional: float | None = None,
         confirmation: LiveConfirmation | None = None,
     ) -> ControlResult:
         """Create or re-enable one exact market/method/environment lineage."""
@@ -137,7 +150,9 @@ class RunControlService:
         risk = RunRiskConfig(
             risk_per_trade=risk_per_trade,
             max_concurrent_positions=max_concurrent_positions,
+            max_gross_notional=max_gross_notional,
         )
+        requested_revisions = dict(self._pause_revisions)
         async with self._lock:
             current = load_runs_config(self.runs_config_path)
             updated, run = self._builder.add(
@@ -150,13 +165,32 @@ class RunControlService:
             )
             if environment is Environment.LIVE:
                 self._confirm_live(run, confirmation, risk=risk)
+            self._allow_entries(run.run_id, requested_revisions.get(run.run_id, 0))
             if updated == current:
+                if self.runtime is None:
+                    return ControlResult(
+                        True,
+                        False,
+                        ApplyMode.HOT_APPLY,
+                        "Already saved; runtime restart required",
+                        run=run,
+                    )
+                present = any(
+                    item.run_id == run.run_id
+                    and item.state.value in {"READY", "ACTIVE", "STARTING"}
+                    for item in self.runtime.status().runs
+                )
+                if not present:
+                    result = await self._apply_runs(
+                        updated, {run.run_id}, ApplyMode.RESTART_RUN, run=run
+                    )
+                    return self._persisted(result)
                 return ControlResult(
                     True,
-                    self.runtime is not None,
+                    True,
                     ApplyMode.HOT_APPLY,
-                    "Run already active",
-                    self.runtime.status() if self.runtime else None,
+                    "Already applied; see run status for readiness",
+                    self.runtime.status(),
                     run,
                 )
             if self.runtime is None:
@@ -164,44 +198,31 @@ class RunControlService:
                 return ControlResult(
                     True, False, ApplyMode.RESTART_RUN, "Saved; active runtime unavailable", run=run
                 )
-            runtime_environment = next(
-                (
-                    item
-                    for item in self.runtime.status().execution_environments
-                    if item.environment is environment
-                ),
-                None,
-            )
-            if runtime_environment is None or not runtime_environment.ready:
-                try:
-                    await self.runtime.replace_broker_config(
-                        load_ibkr_config(self.ibkr_config_path, environment)
-                    )
-                except Exception as exc:
-                    prefix = (
-                        "LIVE_NOT_READY" if environment is Environment.LIVE else "BROKER_NOT_READY"
-                    )
-                    return ControlResult(
-                        False,
-                        False,
-                        ApplyMode.RESTART_RUN,
-                        f"{prefix}: {exc}",
-                        self.runtime.status(),
-                        run,
-                    )
+            # Persist the identity before any runtime activation. Failure cannot
+            # leave an enabled identity that disappears at restart.
+            self._write_runs(updated)
             result = await self._apply_runs(updated, {run.run_id}, ApplyMode.RESTART_RUN, run=run)
             if not result.runtime_applied:
-                return result
-            return await self._persist_runs_after_apply(updated, current, {run.run_id}, result)
+                return ControlResult(
+                    True,
+                    False,
+                    result.apply_mode,
+                    "Saved; activation failed. Restart will retry the saved configuration.",
+                    result.runtime,
+                    run,
+                )
+            return self._persisted(result)
 
     async def enable_run(
         self, run_id: str, *, confirmation: LiveConfirmation | None = None
     ) -> ControlResult:
+        requested_revision = self._pause_revisions.get(run_id, 0)
         async with self._lock:
             config, current = self._config_and_run(run_id)
             validate_run_method(current)
             if current.environment is Environment.LIVE:
                 self._confirm_live(current, confirmation)
+            self._allow_entries(run_id, requested_revision)
             return await self._replace_run(
                 config,
                 current,
@@ -211,9 +232,60 @@ class RunControlService:
             )
 
     async def disable_run(self, run_id: str) -> ControlResult:
-        async with self._lock:
-            config, current = self._config_and_run(run_id)
-            return await self._replace_run(config, current, ApplyMode.HOT_APPLY, enabled=False)
+        # This synchronous prefix is atomic on the application's event loop.
+        # Do not queue the emergency entry gate behind a command awaiting IBKR.
+        pause = getattr(self.runtime, "pause_new_entries", None)
+        if pause is None:
+            async with self._lock:
+                config, current = self._config_and_run(run_id)
+                return await self._replace_run(config, current, ApplyMode.HOT_APPLY, enabled=False)
+        config, current = self._config_and_run(run_id)
+        self._pause_latches.add(run_id)
+        self._pause_revisions[run_id] = self._pause_revisions.get(run_id, 0) + 1
+        status = pause(run_id)
+        paused = current.model_copy(update={"enabled": False})
+        try:
+            self._write_runs(config)
+        except Exception as exc:
+            return ControlResult(
+                False,
+                True,
+                ApplyMode.HOT_APPLY,
+                control_failure(
+                    exc,
+                    "New entries paused; save failed. Restart uses the prior saved configuration",
+                ),
+                status,
+                paused,
+            )
+        return ControlResult(
+            True,
+            True,
+            ApplyMode.HOT_APPLY,
+            "Saved and paused new entries; positions and broker protection remain managed",
+            status,
+            paused,
+        )
+
+    def _allow_entries(self, run_id: str, requested_revision: int) -> None:
+        if requested_revision != self._pause_revisions.get(run_id, 0):
+            raise ValueError("A newer pause superseded this queued enable command")
+        self._pause_latches.discard(run_id)
+        allow = getattr(self.runtime, "allow_new_entries", None)
+        if allow is not None:
+            allow(run_id)
+
+    def _with_pauses(self, config: RunsConfig) -> RunsConfig:
+        return config.model_copy(
+            update={
+                "runs": tuple(
+                    run.model_copy(update={"enabled": False})
+                    if run.run_id in self._pause_latches
+                    else run
+                    for run in config.runs
+                )
+            }
+        )
 
     async def refresh_discovery(self, run_id: str, database: Path) -> dict[str, object]:
         from stocker_execution.discovery import DiscoveryStore
@@ -239,6 +311,7 @@ class RunControlService:
         *,
         risk_per_trade: float,
         max_concurrent_positions: int | None,
+        max_gross_notional: float | None = None,
         universe: str,
         strategy: str,
         confirmation: LiveConfirmation | None = None,
@@ -260,6 +333,7 @@ class RunControlService:
             risk = RunRiskConfig(
                 risk_per_trade=risk_per_trade,
                 max_concurrent_positions=max_concurrent_positions,
+                max_gross_notional=max_gross_notional,
             )
             if current.environment is Environment.LIVE:
                 self._confirm_live(current, confirmation, risk=risk)
@@ -502,7 +576,7 @@ class RunControlService:
                         False,
                         False,
                         mode,
-                        f"{prefix}: {exc}",
+                        control_failure(exc, prefix),
                         self.runtime.status(),
                         updated,
                     )
@@ -522,8 +596,9 @@ class RunControlService:
         if self.runtime is None:
             raise RuntimeError("active runtime is required")
         try:
-            status = await self.runtime.apply_runs_config(
-                config, changed_run_ids=frozenset(changed_run_ids)
+            apply = getattr(self.runtime, "schedule_runs_config", self.runtime.apply_runs_config)
+            status = await apply(
+                self._with_pauses(config), changed_run_ids=frozenset(changed_run_ids)
             )
         except Exception as exc:
             status = self.runtime.status()
@@ -532,16 +607,22 @@ class RunControlService:
                 if run and run.environment is Environment.LIVE
                 else "RUNTIME_NOT_APPLIED"
             )
-            return ControlResult(False, False, mode, f"{prefix}: {exc}", status, run)
+            return ControlResult(False, False, mode, control_failure(exc, prefix), status, run)
         selected = [
             item
             for item in status.runs
             if item.run_id in changed_run_ids and item.state.value == "DEGRADED"
         ]
         detail = "Applied to runtime"
+        preparing = [
+            item
+            for item in status.runs
+            if item.run_id in changed_run_ids and item.state.value == "STARTING"
+        ]
+        if preparing:
+            detail = "Applied; preparing (not ready)"
         if selected:
-            reasons = "; ".join(f"{item.run_id}: {item.reason}" for item in selected)
-            detail = f"Applied; runtime degraded: {reasons}"
+            detail = "Applied; runtime degraded. Inspect run diagnostics."
         return ControlResult(False, True, mode, detail, status, run)
 
     async def _apply_broker(self, config: IbkrConfig) -> ControlResult:
@@ -555,7 +636,7 @@ class RunControlService:
                 False,
                 False,
                 ApplyMode.RECONNECT_ENVIRONMENT,
-                f"BROKER_NOT_APPLIED: {exc}",
+                control_failure(exc, "BROKER_NOT_APPLIED"),
                 status,
             )
         environment = next(
@@ -600,7 +681,7 @@ class RunControlService:
                 raise
             try:
                 await self.runtime.apply_runs_config(
-                    previous, changed_run_ids=frozenset(changed_run_ids)
+                    self._with_pauses(previous), changed_run_ids=frozenset(changed_run_ids)
                 )
             except Exception as rollback_error:
                 raise RuntimeError(
@@ -656,6 +737,7 @@ class RunControlService:
         return raw
 
     def _write_runs(self, config: RunsConfig) -> None:
+        config = self._with_pauses(config)
         self._write_yaml(
             self.runs_config_path,
             runs_config_storage_payload(

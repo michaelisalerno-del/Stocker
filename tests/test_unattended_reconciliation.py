@@ -32,6 +32,14 @@ class UnavailableHistoryClient(FakeOrderClient):
     def __init__(self, *, account: str = "DU123456") -> None:
         super().__init__(account=account)
         self.live_trades: list[object] = []
+        self.account_values[0].currency = "USD"
+        self.account_values.append(
+            SimpleNamespace(account=account, tag="GrossPositionValue", value="0", currency="USD")
+        )
+
+    async def whatIfOrderAsync(self, contract, order):
+        assert order.whatIf is True
+        return SimpleNamespace(initMarginAfter="5000", equityWithLoanAfter="100000", warningText="")
 
     def reqMarketDataType(self, market_data_type):
         assert market_data_type == 1

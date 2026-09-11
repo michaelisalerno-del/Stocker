@@ -344,4 +344,5 @@ def test_method_uses_exact_active_prefix_across_lunch_break(tmp_path, market_id)
     )
     result = asyncio.run(source.context_for(run, (row,), checkpoint, {row.con_id: instrument}, ()))
     assert len(result.whipsaw_features) == 1
+    assert result.required_history_ready == frozenset({row.con_id})
     assert broker.request_duration >= (t0 - minutes[0]).total_seconds()

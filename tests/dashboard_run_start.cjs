@@ -29,6 +29,8 @@ const path = require("node:path");
       if (url.pathname === "/api/universe-runs/paper") {
         assert.equal(url.searchParams.get("background"), "true");
         assert.equal(route.request().postDataJSON().market_id, "UK_LSE");
+        assert.equal(route.request().postDataJSON().risk_per_trade, 0.001);
+        assert.equal(route.request().postDataJSON().max_gross_notional, 100000);
         posts++;
         state = { status: "STARTING", operation_id: "test", detail: "Qualifying method universe" };
         await pending;
@@ -38,6 +40,8 @@ const path = require("node:path");
       return route.fulfill({ body: await fs.readFile(path.join(staticPath, file)), contentType: file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" : "text/html" });
     });
     await page.goto("http://stocker.test/universes");
+    await page.locator("details").evaluate(node => node.open = true);
+    await page.locator("[name=max_gross_notional]").fill("100000");
     await page.getByRole("button", { name: "Start PAPER run" }).click();
     await page.getByRole("button", { name: "Starting…" }).waitFor();
     assert(await page.getByRole("button", { name: "Starting…" }).isDisabled());

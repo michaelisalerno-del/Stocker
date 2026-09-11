@@ -174,6 +174,7 @@ class StrategyContext:
         default_factory=dict
     )
     available_at: datetime | None = None
+    required_history_ready: frozenset[int] | None = None
 
     def __post_init__(self) -> None:
         if not self.run_id.strip():

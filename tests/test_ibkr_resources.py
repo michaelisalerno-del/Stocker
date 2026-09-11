@@ -777,3 +777,41 @@ def test_tick_streams_have_separate_capacity_and_broker_rejection_invalidates_pr
         broker.trade_events(stock(1), t0=datetime.now(UTC))
     assert 1 in client.cancelled
     assert broker.resource_status().active_tick_by_tick_lines == 4
+    assert (
+        broker.trade_stream_status(stock(1), t0=datetime.now(UTC)) == "IBKR_CAPACITY_REJECTED:10190"
+    )
+
+
+@pytest.mark.parametrize("budget,expected", [(100, 5), (600, 30)])
+def test_selected_population_and_observed_causal_coverage_are_distinct(budget, expected):
+    class Client(StreamClient):
+        def __init__(self):
+            super().__init__()
+            self.streams = {}
+
+        def reqTickByTickData(self, contract, *args):
+            stream = SimpleNamespace(updateEvent=CallbackEvent(), tickByTicks=[])
+            self.streams[contract.conId] = stream
+            return stream
+
+        def cancelTickByTickData(self, contract, *args):
+            self.cancelled.append(contract.conId)
+
+    client = Client()
+    broker = connected_stream_boundary(client, budget=budget)
+    selected = tuple(stock(con_id) for con_id in range(1, 31))
+    failures = {}
+    for instrument in selected:
+        try:
+            broker.prepare_trade_events(instrument)
+        except IbkrError as exc:
+            failures[instrument.con_id] = str(exc)
+    t0 = datetime.now(UTC)
+    for stream in client.streams.values():
+        stream.tickByTicks = [SimpleNamespace(time=t0, price=100)]
+        stream.updateEvent.emit(stream)
+    assert len(selected) == 30 and len(failures) == 30 - expected
+    assert (
+        sum(broker.trade_stream_status(i, t0=t0) == "VALID_CAUSAL_STREAM" for i in selected)
+        == expected
+    )

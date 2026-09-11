@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import date, datetime
@@ -22,6 +23,7 @@ from stocker_core.runs import Environment
 from stocker_dashboard.controls import ControlResult, LiveConfirmation, RunControlService
 from stocker_dashboard.performance import PerformancePeriod
 from stocker_dashboard.read_service import DashboardReadService
+from stocker_dashboard.security import DashboardSecurity
 
 
 class ConfirmationBody(BaseModel):
@@ -34,6 +36,7 @@ class RunUpdateBody(ConfirmationBody):
     strategy: str
     risk_per_trade: float
     max_concurrent_positions: int | None = None
+    max_gross_notional: float | None = None
 
 
 class EnvironmentBody(ConfirmationBody):
@@ -66,6 +69,7 @@ class UniverseRunBody(ConfirmationBody):
     strategy_version: str
     risk_per_trade: float
     max_concurrent_positions: int | None = None
+    max_gross_notional: float | None = None
 
 
 def create_dashboard_app(reads: DashboardReadService, controls: RunControlService) -> FastAPI:
@@ -84,15 +88,25 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
                 await start_task
 
     app = FastAPI(title="Stocker Operational Dashboard", docs_url="/api/docs", lifespan=lifespan)
+    app.add_middleware(DashboardSecurity)
     static = Path(__file__).with_name("static")
     app.mount("/static", StaticFiles(directory=static), name="static")
 
-    @app.exception_handler(Exception)
-    async def unavailable(_request: Any, exc: Exception) -> JSONResponse:
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "dashboard read unavailable", "error": str(exc)},
+    def safe_error(exc: Exception, operation: str = "Request") -> str:
+        request_id = uuid4().hex
+        # Do not serialize arbitrary exception messages (broker/config values can be sensitive).
+        logging.getLogger(__name__).error(
+            "%s failed request_id=%s exception_type=%s",
+            operation,
+            request_id,
+            type(exc).__name__,
         )
+        return f"{operation} failed; reference {request_id}"
+
+    @app.exception_handler(Exception)
+    async def unavailable(request: Any, exc: Exception) -> JSONResponse:
+        operation = "Dashboard read" if request.method == "GET" else "Control change"
+        return JSONResponse(status_code=503, content={"detail": safe_error(exc, operation)})
 
     @app.get("/api/overview")
     def overview() -> dict[str, Any]:
@@ -145,7 +159,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
         try:
             return await controls.refresh_discovery(run_id, reads.stage5_store.path)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.get("/api/runs/{run_id}/performance")
     def run_performance(
@@ -174,11 +188,12 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
                     environment=environment,
                     risk_per_trade=body.risk_per_trade,
                     max_concurrent_positions=body.max_concurrent_positions,
+                    max_gross_notional=body.max_gross_notional,
                     confirmation=confirmation(body),
                 )
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.get("/api/universe-runs/start-status")
     async def run_start_status() -> dict[str, Any]:
@@ -193,7 +208,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             if environment.value not in method.environments:
                 raise ValueError(f"{method.label} is PAPER-only")
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
         if start_task is not None and not start_task.done():
             if start_request != (environment, body):
                 raise HTTPException(
@@ -213,7 +228,15 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             try:
                 result = await add_universe_run(body, environment)
                 start_status.update(
-                    status="COMPLETED" if result["persisted"] else "FAILED",
+                    status=(
+                        "FAILED"
+                        if not result["persisted"]
+                        else "COMPLETED"
+                        if result["runtime_applied"]
+                        else "ACTIVATION_FAILED"
+                        if result["runtime"] is not None
+                        else "SAVED"
+                    ),
                     detail=result["detail"],
                     result=result,
                 )
@@ -225,7 +248,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             except Exception as exc:
                 start_status.update(
                     status="FAILED",
-                    detail=str(exc.detail if isinstance(exc, HTTPException) else exc),
+                    detail=safe_error(exc, "Run start"),
                 )
 
         start_task = asyncio.create_task(finish_start(), name="dashboard-run-start")
@@ -248,21 +271,21 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
         try:
             return changed(await controls.disable_run(run_id))
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.post("/api/universe-runs/{run_id}/enable")
     async def enable_universe_run(run_id: str, body: ConfirmationBody) -> dict[str, object]:
         try:
             return changed(await controls.enable_run(run_id, confirmation=confirmation(body)))
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.get("/api/screens/{market_id}/{cap_bucket}/{session}")
     def screen(market_id: str, cap_bucket: str, session: date) -> dict[str, Any]:
         try:
             return reads.screen(market_id, cap_bucket, session)
         except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail=safe_error(exc)) from exc
 
     @app.get("/api/candidates")
     def candidates(
@@ -353,6 +376,8 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
 
     def changed(result: ControlResult) -> dict[str, object]:
         reads.config = load_runs_config(controls.runs_config_path)
+        if not result.persisted:
+            raise HTTPException(status_code=503, detail=result.detail)
         return result.as_dict()
 
     @app.post("/api/runs/{run_id}/enable")
@@ -360,14 +385,14 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
         try:
             return changed(await controls.enable_run(run_id, confirmation=confirmation(body)))
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.post("/api/runs/{run_id}/disable")
     async def disable(run_id: str) -> dict[str, Any]:
         try:
             return changed(await controls.disable_run(run_id))
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.put("/api/runs/{run_id}")
     async def update(run_id: str, body: RunUpdateBody) -> dict[str, Any]:
@@ -379,11 +404,12 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
                     strategy=body.strategy,
                     risk_per_trade=body.risk_per_trade,
                     max_concurrent_positions=body.max_concurrent_positions,
+                    max_gross_notional=body.max_gross_notional,
                     confirmation=confirmation(body),
                 )
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.post("/api/runs/{run_id}/environment")
     async def environment(run_id: str, body: EnvironmentBody) -> dict[str, Any]:
@@ -394,7 +420,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
                 )
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.put("/api/settings/broker/{environment}")
     async def broker_config(environment: Environment, body: BrokerConfigBody) -> dict[str, Any]:
@@ -404,7 +430,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             )
             return result.as_dict()
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.put("/api/settings/universes/{universe_id}")
     async def custom_universe(universe_id: str, body: CustomUniverseBody) -> dict[str, Any]:
@@ -421,7 +447,7 @@ def create_dashboard_app(reads: DashboardReadService, controls: RunControlServic
             reads.config = load_runs_config(controls.runs_config_path)
             return result.as_dict()
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=safe_error(exc)) from exc
 
     @app.get("/{page:path}", response_class=FileResponse)
     def index(page: str = "") -> FileResponse:

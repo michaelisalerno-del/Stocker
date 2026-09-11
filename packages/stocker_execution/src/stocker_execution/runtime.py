@@ -207,6 +207,7 @@ class RunStatus:
     evaluation_state: str = "IDLE"
     preparing_history: bool = False
     trade_stream_unavailable: int = 0
+    feed_coverage: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1183,6 +1184,7 @@ class StockerRuntime:
         self._checkpoint_task_owners: dict[tuple[str, date, datetime], frozenset[str]] = {}
         self._checkpoint_progress: dict[str, dict[str, Any]] = {}
         self._trade_stream_failures: dict[str, int] = {}
+        self._coverage: dict[str, dict[str, Any]] = {}
         self._expected_move_tasks: dict[
             tuple[str, date, tuple[int, ...]], tuple[asyncio.Task[None], frozenset[str]]
         ] = {}
@@ -1190,6 +1192,9 @@ class StockerRuntime:
         self._last_sync: datetime | None = None
         self._stopping = False
         self._cycle_lock = asyncio.Lock()
+        self._entry_pauses: set[str] = set()
+        self._apply_tasks: set[asyncio.Task[None]] = set()
+        self._apply_revisions: dict[str, int] = {}
 
     async def start(self) -> RuntimeStatus:
         """Connect, verify, reconcile, prepare, and only then expose READY."""
@@ -1370,7 +1375,9 @@ class StockerRuntime:
         try:
             self._qualification = await self._qualify(runnable_runs)
         except Exception as exc:
-            self._degrade_runs(runnable_runs, f"instrument preparation failed: {exc}")
+            self._degrade_runs(
+                runnable_runs, self._preparation_error("Instrument preparation failed", exc)
+            )
             self._state = ApplicationState.DEGRADED
             self._logger.error("instrument_preparation_failed", reason=str(exc))
             return self.status()
@@ -1408,7 +1415,10 @@ class StockerRuntime:
         await asyncio.gather(*checkpoints, return_exceptions=True)
         self._checkpoint_tasks.clear()
         self._checkpoint_task_owners.clear()
-        preparation = [task for task, _owners in self._expected_move_tasks.values()]
+        preparation = [
+            *self._apply_tasks,
+            *(task for task, _owners in self._expected_move_tasks.values()),
+        ]
         for task in preparation:
             task.cancel()
         await asyncio.gather(*preparation, return_exceptions=True)
@@ -1438,18 +1448,55 @@ class StockerRuntime:
 
         return self._store
 
+    def pause_new_entries(self, run_id: str) -> RuntimeStatus:
+        """No await: fence entry submission before any slow scheduler/broker request."""
+        paused = self._manager.pause_run(run_id)
+        self._entry_pauses.add(run_id)
+        self._apply_revisions[run_id] = self._apply_revisions.get(run_id, 0) + 1
+        self._config = self._config.model_copy(
+            update={
+                "runs": tuple(
+                    paused.config if run.run_id == run_id else run for run in self._config.runs
+                )
+            }
+        )
+        for owner, execution in self._execution_services():
+            if owner == run_id:
+                execution.update_run_config(
+                    execution.run_config.model_copy(update={"enabled": False})
+                )
+        self._set_run(run_id, RunRuntimeState.DISABLED, "New entries paused")
+        return self.status()
+
+    def allow_new_entries(self, run_id: str) -> None:
+        """Only an explicit later enable command clears the pause fence."""
+        self._entry_pauses.discard(run_id)
+
     async def apply_runs_config(
         self,
         config: RunsConfig,
         changed_run_ids: frozenset[str],
+        *,
+        wait_for_preparation: bool = True,
     ) -> RuntimeStatus:
-        """Apply validated run changes under the scheduler's existing cycle lock."""
+        """Commit intent briefly, prepare off-lock, and publish only current revisions."""
 
         if not changed_run_ids:
             return self.status()
+        config = config.model_copy(
+            update={
+                "runs": tuple(
+                    run.model_copy(update={"enabled": False})
+                    if run.run_id in self._entry_pauses
+                    else run
+                    for run in config.runs
+                )
+            }
+        )
         for run in config.runs:
             if run.run_id in changed_run_ids and run.enabled:
                 validate_run_method(run)
+        captured_config = self._config
         current_by_id = {item.run_id: item for item in self._config.runs}
         updated_by_id = {item.run_id: item for item in config.runs}
         current_universes = {item.universe_id: item for item in self._config.universes}
@@ -1466,7 +1513,10 @@ class StockerRuntime:
         ):
             raise ValueError("hot apply payload changed an undeclared run")
 
+        preparations: list[tuple[RunInstance, Stage7ExecutionService, int]] = []
         async with self._cycle_lock:
+            if self._config is not captured_config:
+                raise ValueError("Configuration changed while waiting; reload before applying")
             now = _aware(self._clock())
             previous_states = dict(self._run_states)
             for key, task in self._checkpoint_tasks.items():
@@ -1474,8 +1524,6 @@ class StockerRuntime:
                     updated_by_id[owner].enabled for owner in self._checkpoint_task_owners[key]
                 ):
                     task.cancel()
-            prepared_runs: list[RunInstance] = []
-            previous_environments: dict[str, Environment] = {}
             self._config = config
             self._manager = RunManager(UniverseCatalog(config.universes), config.runs)
             for run_id, state in previous_states.items():
@@ -1494,9 +1542,12 @@ class StockerRuntime:
             for run_id in (item.run_id for item in config.runs if item.run_id in changed_run_ids):
                 current = current_by_id.get(run_id)
                 updated = updated_by_id[run_id]
+                self._apply_revisions[run_id] = self._apply_revisions.get(run_id, 0) + 1
                 if updated.method_spec is not None:
                     self._store.save_method_run(updated, now)
                 if not updated.enabled:
+                    if run_id in self._execution:
+                        self._execution[run_id].update_run_config(updated)
                     self._set_run(run_id, RunRuntimeState.DISABLED, "disabled by configuration")
                     self._replace_qualification_for({run_id}, Stage5QualificationResult((), ()))
                     self._activity_qualification_session.pop(run_id, None)
@@ -1512,6 +1563,8 @@ class StockerRuntime:
                         current.universe_source != updated.universe_source,
                         current.discovery_profile != updated.discovery_profile,
                         not current.enabled,
+                        previous_states.get(run_id)
+                        not in {RunRuntimeState.READY, RunRuntimeState.ACTIVE},
                     )
                 )
                 if not restart_required and execution is not None:
@@ -1544,94 +1597,127 @@ class StockerRuntime:
                     self._legacy_execution.pop((run_id, updated.environment), None)
                     self._legacy_execution[(run_id, current.environment)] = self._execution[run_id]
                 self._execution[run_id] = execution
-                result = await self._reconcile_execution_services(
-                    tuple(
-                        (identity, service)
-                        for identity, service in self._execution_services()
-                        if service.run_environment is updated.environment
-                    )
-                )
-                self._environment_reconciled[updated.environment] = result.ok
-                self._environment_ready[updated.environment] = result.ok
-                self._state = (
-                    ApplicationState.READY
-                    if any(self._environment_ready.values())
-                    else ApplicationState.DEGRADED
-                )
-                self._store.record_reconciliation(
-                    environment=updated.environment,
-                    account=destination.expected_account,
-                    connection_epoch=destination.broker.connection_epoch,
-                    ok=result.ok,
-                    detail=result.detail,
-                    now=_aware(self._clock()),
-                )
-                if not result.ok:
-                    self._set_run(run_id, RunRuntimeState.DEGRADED, result.detail)
-                    continue
-                strategy = self._strategies.get(run_id)
-                if strategy is None:
-                    self._ensure_strategy(updated, execution, now)
-                else:
-                    self._strategy_runtimes[run_id] = Stage7StrategyRuntime(
-                        strategy=strategy,
-                        execution=execution,
-                    )
-                instance = self._manager.get_run(run_id)
-                market = self._resolve_market(instance, now)
-                if market is None:
-                    continue
-                self._sessions[run_id] = market
-                prepared_runs.append(instance)
-                if current is not None:
-                    previous_environments[run_id] = current.environment
+                revision = self._apply_revisions[run_id]
+                preparations.append((self._manager.get_run(run_id), execution, revision))
 
-            prepared_run_ids = {instance.config.run_id for instance in prepared_runs}
-            if prepared_runs:
-                try:
-                    qualification = await self._qualify(tuple(prepared_runs))
-                except Exception as exc:
-                    self._replace_qualification_for(
-                        prepared_run_ids, Stage5QualificationResult((), ())
-                    )
-                    for run_id in prepared_run_ids:
-                        self._set_run(
-                            run_id,
-                            RunRuntimeState.DEGRADED,
-                            f"instrument preparation failed: {exc}",
-                        )
-                else:
-                    self._replace_qualification_for(prepared_run_ids, qualification)
-                    self._remember_activity_qualification_sessions(prepared_runs)
-                    for run_id in prepared_run_ids:
-                        self._run_ready_at[run_id] = now
-                    self._mark_missed_before(now, prepared_run_ids)
-                    for instance in prepared_runs:
-                        run_id = instance.config.run_id
-                        market = self._sessions[run_id]
-                        self._set_run(
-                            run_id,
-                            RunRuntimeState.ACTIVE
-                            if market.state is MarketSessionState.ACTIVE_SESSION
-                            else RunRuntimeState.READY,
-                            "",
-                        )
-                        self._logger.info(
-                            "run_config_applied",
-                            run_id=run_id,
-                            previous_environment=(
-                                previous_environments[run_id].value
-                                if run_id in previous_environments
-                                else None
-                            ),
-                            environment=instance.config.environment.value,
-                        )
             self._state = (
                 ApplicationState.READY
                 if any(self._environment_ready.values())
                 else ApplicationState.DEGRADED
             )
-            return self.status()
+            preparation_task: asyncio.Task[None] | None = None
+            if preparations:
+                preparation_task = asyncio.create_task(
+                    self._prepare_applied_runs(tuple(preparations))
+                )
+                self._apply_tasks.add(preparation_task)
+                preparation_task.add_done_callback(self._apply_tasks.discard)
+        if preparation_task is not None and wait_for_preparation:
+            await asyncio.shield(preparation_task)
+        return self.status()
+
+    async def schedule_runs_config(
+        self, config: RunsConfig, *, changed_run_ids: frozenset[str]
+    ) -> RuntimeStatus:
+        """Dashboard acknowledgement: applied intent is distinct from READY."""
+        return await self.apply_runs_config(config, changed_run_ids, wait_for_preparation=False)
+
+    async def _prepare_applied_runs(
+        self, preparations: tuple[tuple[RunInstance, Stage7ExecutionService, int], ...]
+    ) -> None:
+        """Reuse batched qualification without holding the scheduler or command lock."""
+        ready: list[tuple[RunInstance, Stage7ExecutionService, int]] = []
+        for instance, execution, revision in preparations:
+            run = instance.config
+            try:
+                destination = self._router.for_environment(run.environment)
+                if not destination.broker.is_connected:
+                    session = await destination.broker.connect()
+                    if not _session_matches_destination(session, destination):
+                        raise ValueError("ACCOUNT_OR_ENVIRONMENT_MISMATCH")
+                result = await execution.reconcile()
+                if not result.ok:
+                    raise ValueError(result.detail)
+                ready.append((instance, execution, revision))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if self._apply_revisions.get(run.run_id) == revision:
+                    self._set_run(
+                        run.run_id,
+                        RunRuntimeState.DEGRADED,
+                        self._preparation_error("Configuration reconciliation failed", exc),
+                    )
+        if not ready:
+            return
+        try:
+            qualification = await self._qualify(tuple(item[0] for item in ready))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            for instance, _execution, revision in ready:
+                if self._apply_revisions.get(instance.config.run_id) == revision:
+                    self._set_run(
+                        instance.config.run_id,
+                        RunRuntimeState.DEGRADED,
+                        self._preparation_error("Instrument preparation failed", exc),
+                    )
+            return
+        async with self._cycle_lock:
+            for instance, execution, revision in ready:
+                run = instance.config
+                run_id = run.run_id
+                if self._apply_revisions.get(run_id) != revision or self._stopping:
+                    continue
+                if not execution.is_reconciled or self._execution.get(run_id) is not execution:
+                    self._set_run(
+                        run_id,
+                        RunRuntimeState.DEGRADED,
+                        "Reconciliation changed during preparation",
+                    )
+                    continue
+                now = _aware(self._clock())
+                self._environment_reconciled[run.environment] = True
+                self._environment_ready[run.environment] = True
+                self._state = ApplicationState.READY
+                self._ensure_strategy(run, execution, now)
+                self._strategy_runtimes[run_id] = Stage7StrategyRuntime(
+                    strategy=self._strategies[run_id], execution=execution
+                )
+                market = self._resolve_market(instance, now)
+                if market is None:
+                    continue
+                self._sessions[run_id] = market
+                scoped = Stage5QualificationResult(
+                    tuple(
+                        Stage5QualifiedRequest(
+                            r.instrument, tuple(m for m in r.memberships if m.run_id == run_id)
+                        )
+                        for r in qualification.requests
+                        if any(m.run_id == run_id for m in r.memberships)
+                    ),
+                    tuple(
+                        Stage5IneligibleInstrument(
+                            r.symbol,
+                            tuple(m for m in r.memberships if m.run_id == run_id),
+                            r.reason,
+                            r.status,
+                        )
+                        for r in qualification.ineligible
+                        if any(m.run_id == run_id for m in r.memberships)
+                    ),
+                )
+                self._replace_qualification_for({run_id}, scoped)
+                self._remember_activity_qualification_sessions((instance,))
+                self._run_ready_at[run_id] = now
+                self._mark_missed_before(now, {run_id})
+                self._set_run(
+                    run_id,
+                    RunRuntimeState.ACTIVE
+                    if market.state is MarketSessionState.ACTIVE_SESSION
+                    else RunRuntimeState.READY,
+                    "",
+                )
 
     async def replace_broker_config(self, config: IbkrConfig) -> RuntimeStatus:
         """Reconnect and reconcile only one edited execution environment."""
@@ -1927,19 +2013,35 @@ class StockerRuntime:
                 continue
             self._expected_move_prepared.add(key)
             failures = 0
+            skipped = {}
             if hasattr(source, "prepare_trades"):
                 for request in requests:
                     try:
                         source.prepare_trades(request.instrument)
                     except Exception as exc:
                         failures += 1
+                        skipped[str(request.instrument.con_id)] = str(exc)
                         self._logger.debug(
                             "trade_stream_unavailable",
                             symbol=request.instrument.symbol,
                             reason=str(exc),
                         )
             for run_id in run_ids:
-                self._trade_stream_failures[run_id] = failures
+                owned = {
+                    str(r.instrument.con_id)
+                    for r in requests
+                    if any(m.run_id == run_id for m in r.memberships)
+                }
+                owned_failures = {key: reason for key, reason in skipped.items() if key in owned}
+                self._trade_stream_failures[run_id] = len(owned_failures)
+                self._coverage[run_id] = {
+                    "checkpoint": t0.isoformat(),
+                    "requested": len(owned),
+                    "subscription_failures": owned_failures,
+                    "history_ready": None,
+                    "evaluated": None,
+                    "skipped": {},
+                }
             if failures:
                 self._logger.warning(
                     "checkpoint_stream_capacity",
@@ -2173,7 +2275,9 @@ class StockerRuntime:
             try:
                 recovered_qualification = await self._qualify(recovered)
             except Exception as exc:
-                self._degrade_runs(recovered, f"instrument preparation failed: {exc}")
+                self._degrade_runs(
+                    recovered, self._preparation_error("Instrument preparation failed", exc)
+                )
                 self._logger.error(
                     "instrument_preparation_failed",
                     environments=sorted(
@@ -2528,6 +2632,7 @@ class StockerRuntime:
                         for task, owners in self._expected_move_tasks.values()
                     ),
                     trade_stream_unavailable=self._trade_stream_failures.get(run.run_id, 0),
+                    feed_coverage=self._feed_coverage(run),
                 )
             )
         execution_statuses = []
@@ -2573,7 +2678,53 @@ class StockerRuntime:
                 return state
         return None
 
+    def _feed_coverage(self, run: RunConfig) -> dict[str, Any] | None:
+        coverage = self._coverage.get(run.run_id)
+        if coverage is None:
+            return None
+        source = self._services_for(run).entries
+        inspect = getattr(source, "trade_stream_status", None)
+        requests, _ = self._qualification_for({run.run_id})
+        streams = {}
+        observed = coverage.setdefault("observed_streams", {})
+        for request in requests:
+            try:
+                value = (
+                    inspect(request.instrument, t0=datetime.fromisoformat(coverage["checkpoint"]))
+                    if inspect
+                    else "OBSERVATION_UNAVAILABLE"
+                )
+            except Exception:
+                value = "OBSERVATION_UNAVAILABLE"
+            key = str(request.instrument.con_id)
+            # Retain evidence for this checkpoint after the normal release of a
+            # consumed stream. A later checkpoint starts a new coverage record.
+            if value == "VALID_CAUSAL_STREAM":
+                observed[key] = value
+            streams[key] = observed.get(key, value)
+        return {
+            **coverage,
+            "streams": streams,
+            "timely_valid_streams": sum(v == "VALID_CAUSAL_STREAM" for v in streams.values()),
+        }
+
+    def _preparation_error(self, message: str, exc: Exception) -> str:
+        import traceback
+        from uuid import uuid4
+
+        reference = uuid4().hex
+        frames = [(frame.name, frame.lineno) for frame in traceback.extract_tb(exc.__traceback__)]
+        self._logger.error(
+            "preparation_failed",
+            request_id=reference,
+            exception_type=type(exc).__name__,
+            frames=frames,
+        )
+        return f"{message}; reference {reference}"
+
     def _set_run(self, run_id: str, state: RunRuntimeState, reason: str) -> None:
+        if run_id in self._entry_pauses and state is not RunRuntimeState.STOPPED:
+            state, reason = RunRuntimeState.DISABLED, "New entries paused"
         self._store.set_method_run_state(run_id, state.value, reason, _aware(self._clock()))
         self._run_states[run_id] = state
         self._run_reasons[run_id] = reason
@@ -2858,11 +3009,13 @@ class StockerRuntime:
         strategy = self._strategies[run.run_id]
         evaluated: list[StrategySignal] = []
         candidate_errors = 0
+        failed_candidates = {}
         for row in valid_rows:
             try:
                 evaluated.extend(strategy.evaluate((row,), context))
             except Exception as exc:
                 candidate_errors += 1
+                failed_candidates[str(row.con_id or row.symbol)] = "STRATEGY_EVALUATION_FAILED"
                 self._logger.error(
                     "strategy_candidate_failed",
                     run_id=run.run_id,
@@ -2874,6 +3027,37 @@ class StockerRuntime:
         strategy.save_runtime_state(self._store)
         waiting = sum(signal.status is SignalStatus.WAITING_FOR_ENTRY for signal in evaluated)
         self._store.increment(run.run_id, session, "signals", waiting)
+        coverage = self._coverage.get(run.run_id)
+        if coverage is not None and coverage["checkpoint"] == t0.isoformat():
+            if coverage["history_ready"] is None:
+                coverage["history_ready"] = 0
+                coverage["evaluated"] = 0
+            coverage["history_ready"] += sum(
+                row.status is Stage5Status.READY
+                and (
+                    context.required_history_ready is None
+                    or row.con_id in context.required_history_ready
+                )
+                for row in valid_rows
+            )
+            coverage["evaluated"] += len(evaluated)
+            coverage["skipped"].update(failed_candidates)
+            if context.required_history_ready is not None:
+                coverage["skipped"].update(
+                    {
+                        str(row.con_id or row.symbol): "METHOD_HISTORY_OR_CONTEXT_UNAVAILABLE"
+                        for row in valid_rows
+                        if row.status is Stage5Status.READY
+                        and row.con_id not in context.required_history_ready
+                    }
+                )
+            coverage["skipped"].update(
+                {
+                    str(row.con_id or row.symbol): row.exclusion_reason or row.status.value
+                    for row in valid_rows
+                    if row.status is not Stage5Status.READY
+                }
+            )
         ready_count = sum(row.status is Stage5Status.READY for row in valid_rows)
         self._store.increment(run.run_id, session, "instruments_ready", ready_count)
         context_not_ready = sum(
@@ -2981,6 +3165,7 @@ class StockerRuntime:
         # candidates or checkpoints whose qualification has not yet completed.
         retained_by_source: dict[int, tuple[EntryBarSource, set[int]]] = {}
         for run, market, strategy, _runtime, instruments, _intents in prepared:
+            self._feed_coverage(run)
             source = self._services_for(run).entries
             retained = retained_by_source.setdefault(id(source), (source, set()))[1]
             retained.update(

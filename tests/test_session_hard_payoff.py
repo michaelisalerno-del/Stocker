@@ -619,4 +619,16 @@ def test_all_simultaneous_admissions_freeze_before_first_broker_await(tmp_path):
     asyncio.run(runtime.poll_once())
     current = [row for row in store.payoff_audit() if row["symbol"] == "AAPL"]
     assert current == []  # Current method never joins the historical payoff pool.
-    assert len(broker.submitted) == 2
+    # Both method evaluations survive; shared admission prevents duplicate account exposure.
+    assert len(store.load_signals("a")) == 1
+    assert len(store.load_signals("b")) == 1
+    assert len(broker.submitted) == 1
+    import sqlite3
+
+    from stocker_execution.execution_ledger import ExecutionLedger
+
+    with sqlite3.connect(ExecutionLedger(tmp_path / "execution.sqlite3").path) as connection:
+        outcomes = connection.execute(
+            "SELECT result_code FROM execution_attempts ORDER BY attempt_id"
+        ).fetchall()
+    assert outcomes == [("SUBMITTED",), ("POSITION_ALREADY_OPEN",)]

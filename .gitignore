@@ -41,3 +41,7 @@ data/reports/*
 *.db
 *.sqlite
 *.sqlite3
+
+# Local release diagnostics and frontend tooling
+.stocker/
+node_modules/

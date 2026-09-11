@@ -1,0 +1,8 @@
+{
+  "name": "stocker-dashboard-tests",
+  "private": true,
+  "scripts": {
+    "test": "node tests/dashboard_run_start.cjs && node tests/dashboard_run_summary.cjs && node tests/dashboard_robustness.cjs"
+  },
+  "devDependencies": {"playwright": "1.62.1"}
+}

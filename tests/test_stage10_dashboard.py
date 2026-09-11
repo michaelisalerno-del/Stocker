@@ -17,6 +17,7 @@ from execution_test_support import (
 )
 from stocker_core.cli import stage10_run
 from stocker_core.config import IbkrConfig, RunsConfig, load_ibkr_config, load_runs_config
+from stocker_core.markets import MarketId
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig, RunWindow
 from stocker_core.strategies import SESSION_HARD_HV_METHOD
 from stocker_core.universes import InstrumentReference, UniverseDefinition
@@ -1067,9 +1068,7 @@ def test_custom_universe_edit_reports_authoritative_degraded_run(
 
     assert result.persisted is True
     assert result.runtime_applied is True
-    assert result.detail == (
-        "Saved and applied; runtime degraded: US-SH-PAPER: instrument preparation failed"
-    )
+    assert result.detail == ("Saved and applied; runtime degraded. Inspect run diagnostics.")
 
 
 def test_settings_http_api_exposes_editable_broker_and_custom_universe_fields(
@@ -1107,8 +1106,9 @@ def test_settings_http_api_exposes_editable_broker_and_custom_universe_fields(
     ]
 
 
+@pytest.mark.parametrize("failure", ["exception", "failed_lifespan"])
 def test_integrated_dashboard_startup_failure_does_not_stop_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     import uvicorn
 
@@ -1143,7 +1143,11 @@ def test_integrated_dashboard_startup_failure_does_not_stop_runtime(
         async def serve(self) -> None:
             type(self).attempts += 1
             if self.attempts == 1:
-                raise SystemExit(1)
+                if failure == "exception":
+                    raise SystemExit(1)
+                self.started = False
+                return
+            self.started = True
             assert runtime.stop_calls == 0
 
     monkeypatch.setattr(stocker_execution.runtime, "build_runtime", lambda **_kwargs: runtime)
@@ -1301,7 +1305,7 @@ def test_start_acknowledges_before_slow_qualification_and_survives_page_reload(t
             "risk_per_trade": 0.001,
         }
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app), base_url="http://test"
+            transport=httpx.ASGITransport(app), base_url="http://127.0.0.1"
         ) as client:
             response = await asyncio.wait_for(
                 client.post("/api/universe-runs/paper?background=true", json=body), 1
@@ -1411,3 +1415,117 @@ def test_dashboard_failure_is_confined_to_http_request(tmp_path: Path) -> None:
     assert response.status_code == 503
     service.runtime_status = original_status
     assert service.overview()["system"] == "READY"
+
+
+def test_first_run_write_failure_never_activates_identity(tmp_path, monkeypatch):
+    runs_path, broker_path = _write_control_files(tmp_path)
+    runtime = RecordingRuntime()
+    controls = RunControlService(runs_path, broker_path, runtime=runtime)
+    before = runs_path.read_bytes()
+
+    def fail(config):
+        raise OSError("injected write failure")
+
+    monkeypatch.setattr(controls, "_write_runs", fail)
+    with pytest.raises(OSError, match="injected"):
+        asyncio.run(
+            controls.add_universe_run(
+                market_id=MarketId.US_NASDAQ,
+                strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+                strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
+                environment=Environment.PAPER,
+                risk_per_trade=0.001,
+                max_concurrent_positions=1,
+            )
+        )
+    assert runtime.run_updates == []
+    assert runs_path.read_bytes() == before
+
+
+def test_saved_identity_survives_activation_failure_and_retry(tmp_path):
+    runs_path, broker_path = _write_control_files(tmp_path)
+    controls = RunControlService(runs_path, broker_path, runtime=RejectingRuntime())
+    result = asyncio.run(
+        controls.add_universe_run(
+            market_id=MarketId.US_NASDAQ,
+            strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+            strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
+            environment=Environment.PAPER,
+            risk_per_trade=0.001,
+            max_concurrent_positions=1,
+        )
+    )
+    assert result.persisted and not result.runtime_applied
+    assert "Restart will retry" in result.detail
+    saved = load_runs_config(runs_path)
+    assert sum(r.run_id == result.run.run_id for r in saved.runs) == 1
+    # A disconnected restart reads the same identity; no execution is initiated.
+    from stocker_dashboard.factory import build_dashboard_app
+
+    with TestClient(
+        build_dashboard_app(
+            runs_config_path=runs_path,
+            ibkr_config_path=broker_path,
+            database_path=tmp_path / "restart.sqlite",
+        )
+    ) as client:
+        rows = client.get("/api/runs").json()
+    assert next(r for r in rows if r["run_id"] == result.run.run_id)["status"] == "STOPPED"
+
+
+def test_retry_saved_partial_activation_reuses_identity(tmp_path):
+    class PartialRuntime(RecordingRuntime):
+        failed = False
+
+        async def apply_runs_config(self, config, *, changed_run_ids):
+            status = await super().apply_runs_config(config, changed_run_ids=changed_run_ids)
+            if not self.failed:
+                self.failed = True
+                self._status = replace(
+                    status,
+                    runs=tuple(replace(r, state=RunRuntimeState.DEGRADED) for r in status.runs),
+                )
+                raise RuntimeError("injected activation interruption")
+            return status
+
+    async def scenario():
+        runs_path, broker_path = _write_control_files(tmp_path)
+        runtime = PartialRuntime()
+        controls = RunControlService(runs_path, broker_path, runtime=runtime)
+        body = dict(
+            market_id=MarketId.US_NASDAQ,
+            strategy_id=SESSION_HARD_HV_METHOD.strategy_id,
+            strategy_version=SESSION_HARD_HV_METHOD.strategy_version,
+            environment=Environment.PAPER,
+            risk_per_trade=0.001,
+            max_concurrent_positions=1,
+            max_gross_notional=100000,
+        )
+        first = await controls.add_universe_run(**body)
+        assert first.persisted and not first.runtime_applied
+        second = await controls.add_universe_run(**body)
+        assert second.persisted and second.runtime_applied
+        assert second.run.run_id == first.run.run_id
+        assert len(runtime.run_updates) == 2
+        assert sum(r.run_id == first.run.run_id for r in load_runs_config(runs_path).runs) == 1
+
+    asyncio.run(scenario())
+
+
+def test_control_exception_returns_safe_correlated_error(tmp_path, monkeypatch):
+    runs_path, broker_path = _write_control_files(tmp_path)
+    controls = RunControlService(runs_path, broker_path)
+
+    async def fail(run_id):
+        raise RuntimeError("password=NEVER-EXPOSE-THIS")
+
+    monkeypatch.setattr(controls, "disable_run", fail)
+    with TestClient(
+        create_dashboard_app(_seed_authoritative_state(tmp_path), controls),
+        raise_server_exceptions=False,
+    ) as client:
+        response = client.post("/api/runs/US-SH-PAPER/disable")
+    assert response.status_code == 503
+    assert "NEVER-EXPOSE" not in response.text
+    assert "reference" in response.json()["detail"]
+    assert "Control" in response.json()["detail"]

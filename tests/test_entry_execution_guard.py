@@ -66,8 +66,16 @@ class QuoteBroker(FakeExecutionBroker):
         self.quote_delay = quote_delay
         self.quote_reads = 0
 
-    async def account_state(self):
-        return BrokerAccountState(self.environment, self.account, 254407, 1000000, True)
+    async def account_state(self, *, fresh=False):
+        return BrokerAccountState(
+            self.environment,
+            self.account,
+            254407,
+            1000000,
+            True,
+            currency="USD",
+            gross_position_value=0,
+        )
 
     async def entry_quote(self, instrument):
         self.quote_reads += 1
@@ -99,7 +107,7 @@ def attempt(
         universe="NASDAQ",
         strategy="SESSION_HARD_HV",
         environment=Environment.PAPER,
-        risk=RunRiskConfig(risk_per_trade=0.001),
+        risk=RunRiskConfig(max_gross_notional=1000000, risk_per_trade=0.001),
     )
     service = Stage7ExecutionService(
         run=run, expected_account=broker.account, broker=broker, ledger=ledger, clock=lambda: now[0]

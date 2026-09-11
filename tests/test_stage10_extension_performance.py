@@ -172,7 +172,16 @@ def test_same_conid_multiple_runs_get_lot_attribution_only_after_broker_reconcil
     first = plan("one", "one-plan", con_id=7, quantity=10, entry=100, created_at=now)
     second = plan("two", "two-plan", con_id=7, quantity=5, entry=110, created_at=now)
     for item, base in ((first, 10), (second, 20)):
-        submit(ledger, item, "DU1", base)
+        # Reconstruct legacy duplicate lots directly; current admission must reject these.
+        import sqlite3
+        from dataclasses import replace
+
+        submit(ledger, replace(item, con_id=base), "DU1", base)
+        with sqlite3.connect(ledger.path) as connection:
+            connection.execute(
+                "UPDATE execution_plans SET con_id = ? WHERE order_plan_id = ?",
+                (item.con_id, item.order_plan_id),
+            )
         fill(
             ledger,
             item,

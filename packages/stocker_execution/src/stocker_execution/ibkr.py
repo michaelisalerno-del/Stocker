@@ -115,6 +115,8 @@ class _IbClient(Protocol):
         fetchFields: Any,
     ) -> object: ...
 
+    def whatIfOrderAsync(self, contract: Any, order: Any) -> Any: ...
+
     def disconnect(self) -> object: ...
 
     def isConnected(self) -> bool: ...
@@ -367,6 +369,7 @@ class IbkrConnection:
         execution_enabled: bool = False,
     ) -> None:
         self.config = config
+        self._account_summary_lock = asyncio.Lock()
         self._client = client if client is not None else _new_client()
         self._library_max_requests = self._configure_ib_async_throttle()
         self._account_id: str | None = None
@@ -548,6 +551,12 @@ class IbkrConnection:
         # reqTickByTickData returned a ticker before the asynchronous error arrived.
         con_id = getattr(_contract, "conId", None)
         if con_id is not None and (code == 10190 or entitlement):
+            if not hasattr(self, "_trade_feed_errors"):
+                self._trade_feed_errors: dict[int, tuple[int, str]] = {}
+            self._trade_feed_errors[int(con_id)] = (
+                self.connection_epoch,
+                f"IBKR_{'ENTITLEMENT' if entitlement else 'CAPACITY'}_REJECTED:{code}",
+            )
             with suppress(Exception):
                 self.release_trade_events(int(con_id))
 
@@ -733,14 +742,18 @@ class IbkrConnection:
         finally:
             event -= capture
 
-    async def account_state(self) -> BrokerAccountState:
+    async def account_state(self, *, fresh: bool = False) -> BrokerAccountState:
         """Read authoritative equity, buying power, and positions for this session."""
 
         self._require_connected()
         try:
-            values = await asyncio.wait_for(
-                self._client.accountSummaryAsync(self.account),
-                timeout=self.config.request_timeout_seconds,
+            values = (
+                await self._fresh_account_summary_serialized()
+                if fresh
+                else await asyncio.wait_for(
+                    self._client.accountSummaryAsync(self.account),
+                    timeout=self.config.request_timeout_seconds,
+                )
             )
             positions = await self.read_positions()
         except TimeoutError as exc:
@@ -758,28 +771,112 @@ class IbkrConnection:
             buying_power=buying_power,
             connected=self.is_connected,
             positions=positions,
+            currency=_account_currency(values, self.account),
+            gross_position_value=_account_value(values, self.account, "GrossPositionValue"),
         )
+
+    async def _fresh_account_summary_serialized(self) -> list[object]:
+        async with self._account_summary_lock:
+            return await self._fresh_account_summary()
+
+    async def _fresh_account_summary(self) -> list[object]:
+        """One bounded, request-attributed snapshot; do not use ib_async's cached summary."""
+        from ib_async import AccountValue
+
+        client = self._client.client
+        wrapper = cast(Any, self._client).wrapper
+        request_id = client.getReqId()
+        values: list[object] = []
+        previous = wrapper.accountSummary
+
+        def receive(req_id: int, account: str, tag: str, value: str, currency: str) -> None:
+            previous(req_id, account, tag, value, currency)
+            if req_id == request_id:
+                values.append(AccountValue(account, tag, value, currency, ""))
+
+        wrapper.accountSummary = receive
+        future = wrapper.startReq(request_id)
+        try:
+            client.reqAccountSummary(
+                request_id, "All", "NetLiquidation,BuyingPower,GrossPositionValue"
+            )
+            await asyncio.wait_for(future, self.config.request_timeout_seconds)
+            return values
+        finally:
+            try:
+                client.cancelAccountSummary(request_id)
+            finally:
+                wrapper._endReq(request_id)
+                wrapper.accountSummary = previous
 
     async def minimum_tick(self, instrument: QualifiedInstrument) -> float:
         """Read the qualified contract's IBKR minimum price increment."""
 
         self._require_connected()
+        request = self._client.reqContractDetailsAsync(_to_ib_contract(instrument))
         try:
-            details = await self._client.reqContractDetailsAsync(_to_ib_contract(instrument))
+            details = await asyncio.wait_for(
+                request,
+                timeout=self.config.request_timeout_seconds,
+            )
             if len(details) != 1:
                 raise IbkrError(
                     f"IBKR returned {len(details)} contract details for {instrument.symbol}"
                 )
             tick = float(cast(Any, details[0]).minTick)
+        except TimeoutError as exc:
+            raise IbkrError(f"IBKR minimum tick request timed out for {instrument.symbol}") from exc
         except Exception as exc:
             if isinstance(exc, IbkrError):
                 raise
             raise IbkrError(
                 f"IBKR minimum tick request failed for {instrument.symbol}: {exc}"
             ) from exc
+        finally:
+            if isinstance(request, asyncio.Future) and request.cancelled():
+                # TWS has no cancelContractDetails request. Drop ib_async's
+                # cancelled waiter; a late ContractDetailsEnd cannot revive it.
+                wrapper = cast(Any, self._client).wrapper
+                for request_id, future in tuple(wrapper._futures.items()):
+                    if future is request:
+                        wrapper._endReq(request_id)
         if not isfinite(tick) or tick <= 0.0:
             raise IbkrError(f"IBKR returned invalid minimum tick for {instrument.symbol}")
         return tick
+
+    async def check_order_capacity(self, plan: OrderPlan, instrument: QualifiedInstrument) -> None:
+        """IBKR credit preview for the final quantity; never estimate margin locally."""
+        self._require_connected()
+        from ib_async import LimitOrder
+
+        if plan.entry_limit_price is None:
+            raise IbkrError("Credit preview requires a bounded entry limit")
+        order = LimitOrder(
+            plan.side.value,
+            plan.quantity,
+            plan.entry_limit_price,
+            account=self.account,
+            whatIf=True,
+        )
+        state = await asyncio.wait_for(
+            self._client.whatIfOrderAsync(_to_ib_contract(instrument), order),
+            timeout=self.config.request_timeout_seconds,
+        )
+        from ib_async.util import UNSET_DOUBLE
+
+        required = float(state.initMarginAfter)
+        equity = float(state.equityWithLoanAfter)
+        if (
+            not isfinite(required)
+            or not isfinite(equity)
+            or abs(required) == UNSET_DOUBLE
+            or abs(equity) == UNSET_DOUBLE
+            or required < 0
+            or equity < required
+            or equity <= 0
+            or state.warningText
+        ):
+            raise IbkrError("IBKR credit preview did not establish sufficient capacity")
 
     async def submit_protected_order(
         self, plan: OrderPlan, instrument: QualifiedInstrument
@@ -1974,6 +2071,7 @@ class IbkrConnection:
                 events.append(TradeEvent(tick.time, tick.price, len(events) + 1))
 
         ticker.updateEvent += receive
+        getattr(self, "_trade_feed_errors", {}).pop(key, None)
         self._causal_trade_streams[key] = (
             self.connection_epoch,
             datetime.now(UTC),
@@ -1992,6 +2090,23 @@ class IbkrConnection:
         if stream is None or stream[0] != self.connection_epoch or stream[1] > t0:
             raise IbkrError("CAUSAL_TRADES_PREFIX_UNAVAILABLE: stream must precede T0")
         return tuple(event for event in stream[2] if event.timestamp >= t0)
+
+    def trade_stream_status(self, instrument: QualifiedInstrument, *, t0: datetime) -> str:
+        """Observed coverage, never inferred from a configured subscription budget."""
+        error = getattr(self, "_trade_feed_errors", {}).get(instrument.con_id)
+        if error and error[0] == self.connection_epoch:
+            return str(error[1])
+        stream = getattr(self, "_causal_trade_streams", {}).get(instrument.con_id)
+        if stream is None or stream[0] != self.connection_epoch or not self.is_connected:
+            return "NOT_SUBSCRIBED"
+        if stream[1] > t0:
+            return "LATE_SUBSCRIPTION"
+        if not any(
+            t0 <= event.timestamp <= datetime.now(UTC) and isfinite(event.price) and event.price > 0
+            for event in stream[2]
+        ):
+            return "WAITING_FOR_VALID_PRINT"
+        return "VALID_CAUSAL_STREAM"
 
     def release_trade_events(self, con_id: int | None = None) -> None:
         streams = getattr(self, "_causal_trade_streams", {})
@@ -2210,7 +2325,11 @@ def _optional_number(value: object) -> float | None:
         number = float(cast(Any, value))
     except (TypeError, ValueError):
         return None
-    return number if isfinite(number) else None
+    return (
+        number
+        if isfinite(number) and abs(number) != float.fromhex("0x1.fffffffffffffp+1023")
+        else None
+    )
 
 
 def _optional_integer(value: object) -> int | None:
@@ -2230,6 +2349,20 @@ def _optional_contract_text(contract: object, field: str) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _account_currency(values: list[object], account: str) -> str | None:
+    currencies = {
+        str(cast(Any, value).currency).upper()
+        for value in values
+        if str(cast(Any, value).account) == account
+        and str(cast(Any, value).tag) in {"NetLiquidation", "GrossPositionValue"}
+    }
+    if len(currencies) == 1:
+        currency = currencies.pop()
+        if len(currency) == 3 and currency.isalpha() and currency != "BASE":
+            return currency
+    return None
 
 
 def _account_value(values: list[object], account: str, tag: str) -> float | None:

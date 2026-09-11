@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
+from math import floor, isfinite
 from pathlib import Path
 
 from stocker_core.runs import Environment
@@ -84,6 +85,8 @@ class ExecutionRecord:
     exit_reason: str | None = None
     commission_total: float | None = None
     commissions_complete: bool = False
+    risk_derived_quantity: int | None = None
+    sizing_reason: str | None = None
 
     @property
     def fill_relative_risk(self) -> float | None:
@@ -111,6 +114,9 @@ class ExecutionRecord:
             else None
         )
         return {
+            "risk_derived_quantity": self.risk_derived_quantity,
+            "admitted_quantity": self.intended_quantity,
+            "sizing_reason": self.sizing_reason,
             "entry_reference": self.entry_reference,
             "actual_fill_price": self.average_fill_price,
             "actual_exit_price": self.average_exit_price,
@@ -189,6 +195,10 @@ class ClosedTradeSummary:
     wins: int
     losses: int
     total_pnl: float
+
+
+class AdmissionRejected(ValueError):
+    """A shared account commitment prevents this new entry."""
 
 
 class ExecutionLedger:
@@ -299,6 +309,10 @@ class ExecutionLedger:
             for column in ("method_stop_price", "method_target_price", "commission_total"):
                 self._ensure_column(connection, "execution_plans", column, "REAL")
             self._ensure_column(connection, "execution_plans", "exit_reason", "TEXT")
+            self._ensure_column(connection, "execution_plans", "risk_derived_quantity", "INTEGER")
+            self._ensure_column(connection, "execution_plans", "sizing_reason", "TEXT")
+            self._ensure_column(connection, "execution_plans", "position_limit", "INTEGER")
+            self._ensure_column(connection, "execution_plans", "gross_notional_limit", "REAL")
             self._ensure_column(
                 connection, "execution_plans", "commissions_complete", "INTEGER NOT NULL DEFAULT 0"
             )
@@ -338,12 +352,108 @@ class ExecutionLedger:
         )
         connection.execute("DROP TABLE execution_fills_stage8")
 
-    def reserve(self, plan: OrderPlan, *, expected_account: str) -> bool:
+    def reserve(
+        self,
+        plan: OrderPlan,
+        *,
+        expected_account: str,
+        positions: tuple[BrokerPosition, ...] = (),
+        max_positions: int | None = None,
+        max_gross_notional: float | None = None,
+        broker_gross_notional: float = 0.0,
+        account_revision: tuple[tuple[object, ...], ...] | None = None,
+        require_settled_entries: bool = False,
+    ) -> bool:
         """Atomically reserve a Stage 6 signal before any broker transmission."""
 
         try:
             with self._connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
+                if connection.execute(
+                    "SELECT 1 FROM execution_plans WHERE signal_id = ?", (plan.signal_id,)
+                ).fetchone():
+                    return False
+                if account_revision is not None and account_revision != self._exposure_revision(
+                    connection, plan.environment, expected_account
+                ):
+                    raise AdmissionRejected("EXECUTION_RECONCILIATION_REQUIRED")
+                if any(
+                    p.account != expected_account or not isfinite(p.quantity) or p.con_id <= 0
+                    for p in positions
+                ):
+                    raise AdmissionRejected("ACCOUNT_STATE_UNAVAILABLE")
+                rows = connection.execute(
+                    """
+                    SELECT p.*, CASE
+                      WHEN p.status IN ('REJECTED', 'CANCELLED')
+                        OR e.status IN ('REJECTED', 'CANCELLED', 'FILLED')
+                      THEN 0 ELSE MAX(0, p.intended_quantity - p.filled_quantity)
+                    END AS remaining
+                    FROM execution_plans p
+                    LEFT JOIN execution_broker_orders e
+                      ON e.order_plan_id = p.order_plan_id AND e.role = 'ENTRY'
+                    WHERE p.environment = ? AND p.expected_account = ?
+                      AND (p.filled_quantity > p.closed_quantity
+                           OR (p.status NOT IN ('REJECTED', 'CANCELLED')
+                               AND p.intended_quantity > p.filled_quantity
+                               AND COALESCE(e.status, '') NOT IN ('REJECTED','CANCELLED','FILLED')))
+                    """,
+                    (plan.environment.value, expected_account),
+                ).fetchall()
+                occupied = {
+                    p.con_id for p in positions if p.account == expected_account and p.quantity != 0
+                }
+                occupied.update(int(row["con_id"]) for row in rows)
+                if plan.con_id in occupied:
+                    raise AdmissionRejected("POSITION_ALREADY_OPEN")
+                limits = [
+                    int(row["position_limit"]) for row in rows if row["position_limit"] is not None
+                ]
+                if max_positions is not None:
+                    limits.append(max_positions)
+                if limits and len(occupied) >= min(limits):
+                    raise AdmissionRejected("CAPACITY_REACHED")
+                if require_settled_entries and any(row["remaining"] > 0 for row in rows):
+                    # IBKR's preview has no attribution proving whether another
+                    # unfilled entry is included. Never estimate or double-debit margin.
+                    raise AdmissionRejected("PENDING_ENTRY_CAPACITY_UNVERIFIED")
+                if account_revision is not None:
+                    local: dict[int, float] = {}
+                    for row in rows:
+                        direction = 1 if row["side"] == "BUY" else -1
+                        local[row["con_id"]] = local.get(row["con_id"], 0) + direction * (
+                            row["filled_quantity"] - row["closed_quantity"]
+                        )
+                    broker = {
+                        p.con_id: p.quantity for p in positions if p.account == expected_account
+                    }
+                    if any(
+                        abs(local.get(key, 0) - broker.get(key, 0)) > 1e-9
+                        for key in local.keys() | broker.keys()
+                    ):
+                        raise AdmissionRejected("EXECUTION_RECONCILIATION_REQUIRED")
+                if max_gross_notional is not None:
+                    limits_notional = [
+                        float(row["gross_notional_limit"])
+                        for row in rows
+                        if row["gross_notional_limit"] is not None
+                    ]
+                    max_gross_notional = min([max_gross_notional, *limits_notional])
+                    pending = sum(row["remaining"] * row["entry_reference"] for row in rows)
+                    if not isfinite(broker_gross_notional) or broker_gross_notional < 0:
+                        raise AdmissionRejected("ACCOUNT_STATE_UNAVAILABLE")
+                    available = max_gross_notional - broker_gross_notional - pending
+                    quantity = min(plan.quantity, floor(max(0, available) / plan.entry_reference))
+                    if quantity < 1:
+                        raise AdmissionRejected("CAPACITY_REACHED")
+                    plan = replace(
+                        plan,
+                        risk_derived_quantity=plan.quantity,
+                        quantity=quantity,
+                        sizing_reason="GROSS_NOTIONAL_LIMIT"
+                        if quantity < plan.quantity
+                        else "RISK",
+                    )
                 connection.execute(
                     """
                     INSERT INTO execution_plans (
@@ -386,9 +496,44 @@ class ExecutionLedger:
                         plan.method_target_price,
                     ),
                 )
+                connection.execute(
+                    "UPDATE execution_plans SET risk_derived_quantity = ?, sizing_reason = ?, "
+                    "position_limit = ?, gross_notional_limit = ? WHERE order_plan_id = ?",
+                    (
+                        plan.risk_derived_quantity,
+                        plan.sizing_reason,
+                        max_positions,
+                        max_gross_notional,
+                        plan.order_plan_id,
+                    ),
+                )
             return True
         except sqlite3.IntegrityError:
-            return False
+            # Only the explicit signal check above represents an idempotent retry.
+            # Other constraint violations are meaningful storage failures.
+            raise
+
+    @staticmethod
+    def _exposure_revision(
+        connection: sqlite3.Connection, environment: Environment, account: str
+    ) -> tuple[tuple[object, ...], ...]:
+        return tuple(
+            tuple(row)
+            for row in connection.execute(
+                "SELECT p.order_plan_id, p.intended_quantity, "
+                "p.filled_quantity, p.closed_quantity, "
+                "p.status, e.status FROM execution_plans p LEFT JOIN execution_broker_orders e "
+                "ON e.order_plan_id=p.order_plan_id AND e.role='ENTRY' "
+                "WHERE p.environment=? AND p.expected_account=? ORDER BY p.order_plan_id",
+                (environment.value, account),
+            )
+        )
+
+    def exposure_revision(
+        self, environment: Environment, account: str
+    ) -> tuple[tuple[object, ...], ...]:
+        with self._connect() as connection:
+            return self._exposure_revision(connection, environment, account)
 
     def mark_submitting(self, order_plan_id: str) -> None:
         with self._connect() as connection:
@@ -775,17 +920,19 @@ class ExecutionLedger:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT * FROM execution_plans
-                WHERE environment = ? AND expected_account = ?
-                  AND status NOT IN (?, ?, ?)
-                ORDER BY created_at, order_plan_id
+                SELECT p.* FROM execution_plans p
+                LEFT JOIN execution_broker_orders e
+                  ON e.order_plan_id = p.order_plan_id AND e.role = 'ENTRY'
+                WHERE p.environment = ? AND p.expected_account = ?
+                  AND (p.filled_quantity > p.closed_quantity
+                    OR (p.status NOT IN ('REJECTED', 'CANCELLED')
+                      AND p.intended_quantity > p.filled_quantity
+                      AND COALESCE(e.status, '') NOT IN ('REJECTED', 'CANCELLED', 'FILLED')))
+                ORDER BY p.created_at, p.order_plan_id
                 """,
                 (
                     environment.value,
                     account,
-                    OrderLifecycle.CLOSED.value,
-                    OrderLifecycle.CANCELLED.value,
-                    OrderLifecycle.REJECTED.value,
                 ),
             ).fetchall()
         return tuple(_record_from_row(row) for row in rows)
@@ -1278,6 +1425,8 @@ def _record_from_row(row: sqlite3.Row) -> ExecutionRecord:
         exit_reason=row["exit_reason"],
         commission_total=_optional_float(row["commission_total"]),
         commissions_complete=bool(row["commissions_complete"]),
+        risk_derived_quantity=row["risk_derived_quantity"],
+        sizing_reason=row["sizing_reason"],
         filled_quantity=float(row["filled_quantity"]),
         average_fill_price=_optional_float(row["average_fill_price"]),
         closed_quantity=float(row["closed_quantity"]),

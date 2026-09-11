@@ -8,8 +8,10 @@ from datetime import UTC, date, datetime, time
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
+from stocker_core.build import CODE_REVISION
 from stocker_core.config import RunsConfig
 from stocker_core.markets import get_market
+from stocker_core.methods import content_hash
 from stocker_core.runs import Environment, RunConfig
 from stocker_core.strategies import installed_strategies
 from stocker_core.universes import UniverseDefinition
@@ -85,7 +87,8 @@ class DashboardReadService:
                     {
                         "scope": run.run_id,
                         "message": (
-                            f"{run.trade_stream_unavailable} stocks could not obtain a required trade feed "
+                            f"{run.trade_stream_unavailable} stocks could not obtain "
+                            "a required trade feed "
                             "at the latest preparation checkpoint; entry coverage is incomplete."
                         ),
                     }
@@ -191,10 +194,14 @@ class DashboardReadService:
                     "environment": run.environment.value,
                     "account": accounts.get(run.environment),
                     "enabled": run.enabled,
+                    "entry_policy": "CONFIGURED"
+                    if run.risk and run.risk.max_gross_notional is not None
+                    else "EXPOSURE_POLICY_REQUIRED",
                     "status": runtime.state.value if runtime else "CONFIGURED",
                     "market": runtime.market.value if runtime and runtime.market else None,
                     "current_or_next_checkpoint": (checkpoint.isoformat() if checkpoint else None),
                     "candidate_selection": selection,
+                    "feed_coverage": runtime.feed_coverage if runtime else None,
                     "acquisition": self.acquisition_store.summary(run.run_id, selected_session)
                     if run.method_spec and "universe_acquisition" in run.method_spec
                     else None,
@@ -408,6 +415,7 @@ class DashboardReadService:
             "enabled": run.enabled,
             "status": runtime.state.value if runtime else "CONFIGURED",
             "risk_per_trade": run.risk.risk_per_trade if run.risk else None,
+            "max_gross_notional": run.risk.max_gross_notional if run.risk else None,
             "max_concurrent_positions": run.risk.max_concurrent_positions if run.risk else None,
             "last_checkpoint": latest_checkpoint.isoformat() if latest_checkpoint else None,
             "next_checkpoint": (
@@ -444,6 +452,7 @@ class DashboardReadService:
             "market_state": runtime.market.value if runtime and runtime.market else None,
             "session": selected_session.isoformat(),
             "candidate_selection": selection,
+            "feed_coverage": runtime.feed_coverage if runtime else None,
             "acquisition": self.acquisition_store.summary(run.run_id, selected_session)
             if run.method_spec and "universe_acquisition" in run.method_spec
             else None,
@@ -990,6 +999,9 @@ class DashboardReadService:
             if run.state.value == "DEGRADED" and run.reason
         )
         return {
+            "code_revision": CODE_REVISION,
+            "configuration_revision": content_hash(self.config.model_dump(mode="json")),
+            "method_versions": sorted({str(run.strategy_version) for run in self.config.runs}),
             "application": status.application.value,
             "environments": environments,
             "ibkr_api_resources": (

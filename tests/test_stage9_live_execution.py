@@ -82,7 +82,7 @@ class EnvironmentBroker(FakeBroker):
         self.connection_epoch += 1
         return BrokerSession(self.environment, self.account, True)
 
-    async def account_state(self) -> BrokerAccountState:
+    async def account_state(self, *, fresh=False) -> BrokerAccountState:
         state = await super().account_state()
         return state.__class__(
             self.environment,
@@ -91,6 +91,8 @@ class EnvironmentBroker(FakeBroker):
             state.buying_power,
             state.connected,
             state.positions,
+            state.currency,
+            state.gross_position_value,
         )
 
 
@@ -99,7 +101,7 @@ class EquityExecutionBroker(FakeExecutionBroker):
         super().__init__(environment=environment, account=account)
         self.equity = equity
 
-    async def account_state(self) -> BrokerAccountState:
+    async def account_state(self, *, fresh=False) -> BrokerAccountState:
         state = await super().account_state()
         return replace(state, equity=self.equity)
 

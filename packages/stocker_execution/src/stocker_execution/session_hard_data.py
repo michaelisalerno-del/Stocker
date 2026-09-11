@@ -256,6 +256,7 @@ class IbkrSessionDataSource:
 
         assessments: dict[StrategyOpportunityKey, SessionHardAssessment] = {}
         risk_features: dict[StrategyOpportunityKey, dict[str, float]] = {}
+        required_history_ready: set[int] = set()
         for row in rows:
             if row.status is not Stage5Status.READY or row.con_id is None:
                 continue
@@ -361,6 +362,7 @@ class IbkrSessionDataSource:
                         "hv": row.historical_volatility,
                     }
                     risk_features[key] = {name: inputs[name] for name in columns}
+                required_history_ready.add(instrument.con_id)
 
             except (IbkrError, ValueError) as exc:
                 self._logger.warning(
@@ -377,11 +379,15 @@ class IbkrSessionDataSource:
             cohort_history=tuple(cohort_history),
             whipsaw_features=risk_features,
             available_at=self._clock(),
+            required_history_ready=frozenset(required_history_ready),
         )
 
     def prepare_trades(self, instrument: QualifiedInstrument) -> None:
         self._broker.prepare_trade_events(instrument)
         self._prepared_trades.add(instrument.con_id)
+
+    def trade_stream_status(self, instrument: QualifiedInstrument, *, t0: datetime) -> str:
+        return self._broker.trade_stream_status(instrument, t0=t0)
 
     def release_trades(self, con_id: int) -> None:
         self._broker.release_trade_events(con_id)

@@ -72,6 +72,8 @@ class OrderPlan:
     method_spec_hash: str | None = None
     method_stop_price: float | None = None
     method_target_price: float | None = None
+    risk_derived_quantity: int | None = None
+    sizing_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,3 +143,5 @@ class BrokerAccountState:
     buying_power: float | None
     connected: bool
     positions: tuple[BrokerPosition, ...] = ()
+    currency: str | None = None
+    gross_position_value: float | None = None

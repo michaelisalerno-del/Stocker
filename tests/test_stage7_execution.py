@@ -61,7 +61,7 @@ class FakeExecutionBroker:
         self.submitted = []
         self.account_reads = 0
 
-    async def account_state(self) -> BrokerAccountState:
+    async def account_state(self, *, fresh=False) -> BrokerAccountState:
         self.account_reads += 1
         if self.account_state_error is not None:
             raise self.account_state_error
@@ -72,7 +72,12 @@ class FakeExecutionBroker:
             200_000.0,
             self.is_connected,
             self._positions,
+            currency="USD",
+            gross_position_value=sum(abs(p.quantity * p.average_price) for p in self._positions),
         )
+
+    async def check_order_capacity(self, plan, instrument):
+        return None
 
     async def minimum_tick(self, instrument: QualifiedInstrument) -> float:
         if self.minimum_tick_error is not None:
@@ -123,7 +128,9 @@ def _run(environment: Environment = Environment.PAPER) -> RunConfig:
         universe="NASDAQ",
         strategy="TEST_EXECUTION",
         environment=environment,
-        risk=RunRiskConfig(risk_per_trade=0.001, max_concurrent_positions=5),
+        risk=RunRiskConfig(
+            max_gross_notional=1000000, risk_per_trade=0.001, max_concurrent_positions=5
+        ),
     )
 
 
@@ -464,7 +471,7 @@ def test_reconnect_recovers_parent_that_filled_before_ids_were_persisted(
     assert record.filled_quantity == 100
 
 
-def test_broker_rejection_is_recorded_without_position(tmp_path: Path) -> None:
+def test_submission_exception_retains_uncertain_commitment(tmp_path: Path) -> None:
     path = tmp_path / "ledger.sqlite3"
     broker = FakeExecutionBroker(reject=True)
     service = _service(path, broker)
@@ -472,11 +479,18 @@ def test_broker_rejection_is_recorded_without_position(tmp_path: Path) -> None:
 
     result = asyncio.run(service.execute(_intent(), _instrument()))
 
-    assert result.code is ExecutionResultCode.BROKER_REJECTED
+    assert result.code is ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED
     record = ExecutionLedger(path).get(result.order_plan.order_plan_id)  # type: ignore[union-attr]
     assert record is not None
-    assert record.status is OrderLifecycle.REJECTED
+    assert record.status is OrderLifecycle.SUBMITTING
     assert ExecutionLedger(path).positions(Environment.PAPER, "DU123456") == ()
+
+    restarted = _service(path, FakeExecutionBroker())
+    assert not asyncio.run(restarted.reconcile()).ok
+    assert (
+        asyncio.run(restarted.execute(_intent(), _instrument())).code
+        is ExecutionResultCode.DUPLICATE_ORDER_BLOCKED
+    )
 
 
 def test_reconnect_ingests_completed_entry_rejection_and_reconciles(tmp_path: Path) -> None:
@@ -681,3 +695,68 @@ def test_missing_instrument_attempt_preserves_known_connected_account(tmp_path: 
 
     assert results[0].code is ExecutionResultCode.ORDER_PLAN_UNAVAILABLE
     assert results[0].actual_account == "DU123456"
+
+
+def test_explicit_exposure_policy_caps_narrow_stop_and_records_quantity(tmp_path):
+    class Broker(FakeExecutionBroker):
+        async def entry_quote(self, instrument):
+            return replace(await super().entry_quote(instrument), ask=100.005)
+
+    broker = Broker()
+    run = _run().model_copy(
+        update={"risk": RunRiskConfig(risk_per_trade=0.001, max_gross_notional=2500)}
+    )
+    service = _service(tmp_path / "ledger.sqlite3", broker, run=run)
+    assert asyncio.run(service.reconcile()).ok
+    result = asyncio.run(service.execute(replace(_intent(), m_price=0.02), _instrument()))
+    assert result.code is ExecutionResultCode.SUBMITTED
+    assert result.order_plan.risk_derived_quantity >= 9999
+    assert result.order_plan.quantity == 25
+    assert result.order_plan.sizing_reason == "GROSS_NOTIONAL_LIMIT"
+    assert result.order_plan.initial_risk_budget == 100
+
+
+def test_required_exposure_inputs_and_broker_credit_reject_without_submission(tmp_path):
+    for name, currency, gross, cap, credit_error in (
+        ("missing_policy", "USD", 0, None, False),
+        ("currency", "GBP", 0, 100000, False),
+        ("missing_gross", "USD", None, 100000, False),
+        ("invalid_gross", "USD", float("nan"), 100000, False),
+        ("no_capacity", "USD", 100000, 100000, False),
+        ("broker_credit", "USD", 0, 100000, True),
+    ):
+
+        class Broker(FakeExecutionBroker):
+            async def account_state(self, *, fresh=False, currency=currency, gross=gross):
+                return replace(
+                    await super().account_state(), currency=currency, gross_position_value=gross
+                )
+
+            async def check_order_capacity(self, plan, instrument, credit_error=credit_error):
+                if credit_error:
+                    raise ValueError("insufficient broker capacity")
+
+        broker = Broker()
+        run = _run().model_copy(
+            update={"risk": RunRiskConfig(risk_per_trade=0.001, max_gross_notional=cap)}
+        )
+        path = tmp_path / (name + ".sqlite3")
+        service = _service(path, broker, run=run)
+        assert asyncio.run(service.reconcile()).ok
+        result = asyncio.run(service.execute(_intent(), _instrument()))
+        assert result.code is not ExecutionResultCode.SUBMITTED, name
+        assert not broker.submitted
+        assert not ExecutionLedger(path).active_records(Environment.PAPER, broker.account)
+
+
+def test_destination_change_during_credit_preview_never_submits(tmp_path):
+    class Broker(FakeExecutionBroker):
+        async def check_order_capacity(self, plan, instrument):
+            self.connection_epoch += 1
+
+    broker = Broker()
+    service = _service(tmp_path / "ledger.sqlite3", broker)
+    assert asyncio.run(service.reconcile()).ok
+    result = asyncio.run(service.execute(_intent(), _instrument()))
+    assert result.code is ExecutionResultCode.ACCOUNT_STATE_UNAVAILABLE
+    assert not broker.submitted

@@ -11,7 +11,7 @@ from math import floor, isfinite
 from typing import Protocol
 
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig
-from stocker_execution.execution_ledger import ExecutionLedger
+from stocker_execution.execution_ledger import AdmissionRejected, ExecutionLedger
 from stocker_execution.execution_models import (
     BrokerAccountState,
     BrokerFill,
@@ -48,6 +48,8 @@ class RiskRejection(StrEnum):
 
 
 class ExecutionResultCode(StrEnum):
+    PENDING_ENTRY_CAPACITY_UNVERIFIED = "PENDING_ENTRY_CAPACITY_UNVERIFIED"
+    EXPOSURE_POLICY_REQUIRED = "EXPOSURE_POLICY_REQUIRED"
     SUBMITTED = "SUBMITTED"
     STALE_SIGNAL = "STALE_SIGNAL"
     ENTRY_QUOTE_UNAVAILABLE = "ENTRY_QUOTE_UNAVAILABLE"
@@ -116,13 +118,17 @@ class ExecutionBroker(Protocol):
 
     def disconnect(self) -> None: ...
 
-    async def account_state(self) -> BrokerAccountState: ...
+    async def account_state(self, *, fresh: bool = False) -> BrokerAccountState: ...
 
     async def minimum_tick(self, instrument: QualifiedInstrument) -> float: ...
 
     async def entry_quote(self, instrument: QualifiedInstrument) -> CurrentQuote: ...
 
     async def shortable_quantity(self, instrument: QualifiedInstrument) -> float: ...
+
+    async def check_order_capacity(
+        self, plan: OrderPlan, instrument: QualifiedInstrument
+    ) -> None: ...
 
     async def submit_protected_order(
         self, plan: OrderPlan, instrument: QualifiedInstrument
@@ -311,6 +317,15 @@ class Stage7ExecutionService:
         return self._run
 
     @property
+    def is_reconciled(self) -> bool:
+        return (
+            self._broker.is_connected
+            and self._broker.account == self._expected_account
+            and self._broker.environment is self._run.environment
+            and self._reconciled_epoch == self._broker.connection_epoch
+        )
+
+    @property
     def last_account_state(self) -> BrokerAccountState | None:
         """Return the authoritative account state read during reconciliation."""
 
@@ -481,8 +496,11 @@ class Stage7ExecutionService:
         if not self._broker.is_connected:
             self._reconciled_epoch = None
             return self._outcome(order_intent.signal_id, ExecutionResultCode.BROKER_DISCONNECTED)
+        account_revision = self._ledger.exposure_revision(
+            self._run.environment, self._expected_account
+        )
         try:
-            account_state = await self._broker.account_state()
+            account_state = await self._broker.account_state(fresh=True)
         except Exception as exc:
             self._reconciled_epoch = None
             return self._outcome(
@@ -569,22 +587,6 @@ class Stage7ExecutionService:
                 str(exc),
                 actual_account=account_state.account,
             )
-        if (
-            order_intent.side == "SHORT"
-            and self._run.method_spec is not None
-            and self._run.method_spec["execution"].get("shortability") == "Required for SHORT"
-        ):
-            try:
-                available = await self._broker.shortable_quantity(instrument)
-                if not isfinite(available) or available < plan.quantity:
-                    raise ValueError("available borrow is below the intended quantity")
-            except Exception as exc:
-                return self._outcome(
-                    order_intent.signal_id,
-                    ExecutionResultCode.BROKER_REJECTED,
-                    f"METHOD_SHORTABILITY_UNAVAILABLE: {exc}",
-                    actual_account=account_state.account,
-                )
         # A historical intrabar touch does not establish a currently executable price.
         if not _fresh_entry_signal(order_intent, self._clock()):
             return self._outcome(
@@ -603,6 +605,13 @@ class Stage7ExecutionService:
                 actual_account=account_state.account,
             )
         checked_at = self._clock()
+        if not self._run.enabled:
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED,
+                "new entries paused",
+                actual_account=account_state.account,
+            )
         if not self._broker.is_connected:
             return self._outcome(
                 order_intent.signal_id,
@@ -667,22 +676,102 @@ class Stage7ExecutionService:
                 order_intent.t0 + timedelta(minutes=5),
             ),
         )
-        if not self._ledger.reserve(plan, expected_account=self._expected_account):
+        exposure_limit = self._run.risk.max_gross_notional if self._run.risk else None
+        if exposure_limit is None:
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.EXPOSURE_POLICY_REQUIRED,
+                "Set risk.max_gross_notional in the verified account currency before new entries",
+                actual_account=account_state.account,
+            )
+        if (
+            account_state.currency != instrument.currency
+            or account_state.gross_position_value is None
+            or not isfinite(account_state.gross_position_value)
+            or account_state.gross_position_value < 0
+        ):
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.ACCOUNT_STATE_UNAVAILABLE,
+                "Verified matching account/instrument currency and gross position value required",
+                actual_account=account_state.account,
+            )
+        try:
+            reserved = self._ledger.reserve(
+                plan,
+                expected_account=self._expected_account,
+                positions=account_state.positions,
+                max_positions=self._run.risk.max_concurrent_positions if self._run.risk else None,
+                max_gross_notional=exposure_limit,
+                broker_gross_notional=account_state.gross_position_value,
+                account_revision=account_revision,
+                require_settled_entries=True,
+            )
+        except AdmissionRejected as exc:
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode(str(exc)),
+                actual_account=account_state.account,
+            )
+        if not reserved:
             return self._outcome(
                 order_intent.signal_id,
                 ExecutionResultCode.DUPLICATE_ORDER_BLOCKED,
                 actual_account=account_state.account,
             )
+        admitted = self._ledger.get(plan.order_plan_id)
+        assert admitted is not None
+        plan = replace(
+            plan,
+            quantity=admitted.intended_quantity,
+            risk_derived_quantity=admitted.risk_derived_quantity,
+            sizing_reason=admitted.sizing_reason,
+        )
+        try:
+            if (
+                self._run.method_spec is not None
+                and plan.side is OrderAction.SELL
+                and self._run.method_spec["execution"].get("shortability") == "Required for SHORT"
+            ):
+                available = await self._broker.shortable_quantity(instrument)
+                if not isfinite(available) or available < plan.quantity:
+                    raise ValueError("METHOD_SHORTABILITY_UNAVAILABLE")
+            await self._broker.check_order_capacity(plan, instrument)
+            now = self._clock()
+            if (
+                not self._broker.is_connected
+                or self._broker.account != self._expected_account
+                or self._broker.environment is not self._run.environment
+                or self._reconciled_epoch != self._broker.connection_epoch
+            ):
+                raise ValueError("Execution destination changed during credit preview")
+            if not self._run.enabled or not _fresh_entry_signal(order_intent, now):
+                raise ValueError("Entry paused or signal expired during credit preview")
+            if plan.entry_expires_at is None or now >= plan.entry_expires_at:
+                raise ValueError("Entry expired during credit preview")
+            if not _valid_entry_quote(quote, instrument, now):
+                raise ValueError("Quote expired during credit preview")
+        except Exception as exc:
+            # No submission has begun: releasing this commitment is supported.
+            self._ledger.record_rejection(plan.order_plan_id, str(exc))
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.ACCOUNT_STATE_UNAVAILABLE,
+                "Broker capacity preview unavailable or entry expired",
+                actual_account=account_state.account,
+                order_plan=plan,
+            )
         self._ledger.mark_submitting(plan.order_plan_id)
         try:
             order_ids = await self._broker.submit_protected_order(plan, instrument)
         except Exception as exc:
-            reason = str(exc).strip() or "broker rejected protected order"
-            self._ledger.record_rejection(plan.order_plan_id, reason)
+            # An exception is not proof that nothing reached IBKR. Keep the
+            # durable SUBMITTING reservation until broker evidence settles it.
+            self._reconciled_epoch = None
             return self._outcome(
                 order_intent.signal_id,
-                ExecutionResultCode.BROKER_REJECTED,
-                reason,
+                ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED,
+                f"submission outcome unknown; reconciliation required: {exc}",
                 actual_account=account_state.account,
                 order_plan=plan,
             )

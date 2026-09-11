@@ -44,6 +44,7 @@ class RunRiskConfig(BaseModel):
 
     risk_per_trade: float
     max_concurrent_positions: int | None = None
+    max_gross_notional: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
 
 class CandidateScreen(StrEnum):
@@ -336,6 +337,17 @@ class RunManager:
         stopped = replace(current, state=RunState.STOPPED)
         self._runs[run_id] = stopped
         return stopped
+
+    def pause_run(self, run_id: str) -> RunInstance:
+        """Synchronous entry pause; preserve identity and its qualified universe."""
+        current = self.get_run(run_id)
+        paused = replace(
+            current,
+            config=current.config.model_copy(update={"enabled": False}),
+            state=RunState.STOPPED,
+        )
+        self._runs[run_id] = paused
+        return paused
 
     def get_run(self, run_id: str) -> RunInstance:
         """Return one managed run or reject an unknown identifier clearly."""

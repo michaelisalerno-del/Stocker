@@ -230,3 +230,96 @@ def test_entry_order_rejection_status_updates_ledger_without_position(tmp_path: 
     assert record.status is OrderLifecycle.REJECTED
     assert record.rejection_reason == "broker precaution rejected"
     assert ledger.positions(Environment.PAPER, "DU123456") == ()
+
+
+def test_pending_capacity_is_account_scoped(tmp_path):
+    from dataclasses import replace
+
+    from stocker_execution.execution_ledger import AdmissionRejected
+
+    ledger = ExecutionLedger(tmp_path / "pending.sqlite")
+    assert ledger.reserve(_plan(), expected_account="DU123456", max_positions=1)
+    other = replace(_plan(), order_plan_id="other", signal_id="other", con_id=999)
+    with pytest.raises(AdmissionRejected, match="CAPACITY_REACHED"):
+        ExecutionLedger(ledger.path).reserve(other, expected_account="DU123456", max_positions=1)
+
+
+def test_concurrent_cross_run_reservations_share_one_slot(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from dataclasses import replace
+    from threading import Barrier
+
+    from stocker_execution.execution_ledger import AdmissionRejected
+
+    path = tmp_path / "concurrent.sqlite"
+    ledgers = [ExecutionLedger(path), ExecutionLedger(path)]
+    barrier = Barrier(2)
+
+    def admit(index):
+        plan = replace(
+            _plan(),
+            order_plan_id=f"p{index}",
+            signal_id=f"s{index}",
+            run_id=f"r{index}",
+            con_id=index + 1,
+        )
+        barrier.wait()
+        try:
+            return ledgers[index].reserve(plan, expected_account="DU123456", max_positions=1)
+        except AdmissionRejected:
+            return False
+
+    with ThreadPoolExecutor(2) as pool:
+        assert sorted(pool.map(admit, (0, 1))) == [False, True]
+
+
+def test_same_instrument_and_partial_fill_remainder(tmp_path):
+    from dataclasses import replace
+
+    from stocker_execution.execution_ledger import AdmissionRejected
+    from stocker_execution.execution_models import BrokerPosition
+
+    ledger = _submitted_ledger(tmp_path)
+    ledger.record_fill(_fill("partial", 101, 40, 100, side=OrderAction.SELL, minute=32))
+    other = replace(_plan(), order_plan_id="second", signal_id="second", run_id="other")
+    position = (BrokerPosition("DU123456", 265598, "AAPL", -40, 100),)
+    with pytest.raises(AdmissionRejected, match="POSITION_ALREADY_OPEN"):
+        ledger.reserve(other, expected_account="DU123456", positions=position, max_positions=2)
+    # 4,000 filled + 6,000 pending leaves 5,000, hence 50 shares for a new stock.
+    assert ledger.reserve(
+        replace(other, con_id=999),
+        expected_account="DU123456",
+        positions=position,
+        max_positions=2,
+        max_gross_notional=15000,
+        broker_gross_notional=4000,
+    )
+    record = ledger.get("second")
+    assert record.intended_quantity == 50
+    assert record.risk_derived_quantity == 100
+    assert record.sizing_reason == "GROSS_NOTIONAL_LIMIT"
+
+
+def test_partial_cancellation_releases_remainder_not_position(tmp_path):
+    from dataclasses import replace
+
+    from stocker_execution.execution_models import BrokerPosition
+
+    ledger = _submitted_ledger(tmp_path)
+    ledger.record_fill(_fill("partial", 101, 40, 100, side=OrderAction.SELL, minute=32))
+    ledger.record_order_status(
+        BrokerOrderStatus(
+            101, "plan-1", "DU123456", Environment.PAPER, OrderLifecycle.CANCELLED, 40, 60
+        )
+    )
+    other = replace(_plan(), order_plan_id="second", signal_id="second", con_id=999)
+    assert ledger.reserve(
+        other,
+        expected_account="DU123456",
+        positions=(BrokerPosition("DU123456", 265598, "AAPL", -40, 100),),
+        max_positions=2,
+        max_gross_notional=15000,
+        broker_gross_notional=4000,
+    )
+    assert ledger.get("second").intended_quantity == 100
+    assert ledger.get("plan-1").filled_quantity == 40

@@ -8,7 +8,9 @@ def test_github_actions_ci_workflow_exists() -> None:
     assert workflow.exists()
     text = workflow.read_text(encoding="utf-8")
     assert "uv sync --all-groups" in text
-    assert "uv run pytest" in text
+    assert "fail-fast: false" in text
+    assert "bash scripts/check.sh" in text
+    assert "continue-on-error" not in text
     assert "EODHD_API_TOKEN" not in text
 
 

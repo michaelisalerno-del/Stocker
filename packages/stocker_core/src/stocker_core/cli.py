@@ -4899,7 +4899,7 @@ def stage10_dashboard(
         raise typer.BadParameter(f"Invalid Stage 10 dashboard configuration: {exc}") from exc
     console.print(f"Stocker dashboard: http://{host}:{port}")
     console.print("Standalone read/control mode; no broker order is transmitted.")
-    uvicorn.run(dashboard, host=host, port=port, log_level="info")
+    uvicorn.run(dashboard, host=host, port=port, log_level="info", proxy_headers=False)
 
 
 @app.command("stage10-run")
@@ -4934,10 +4934,14 @@ def stage10_run(
         async def serve_dashboard() -> None:
             while True:
                 server = uvicorn.Server(
-                    uvicorn.Config(dashboard, host=host, port=port, log_level="info")
+                    uvicorn.Config(
+                        dashboard, host=host, port=port, log_level="info", proxy_headers=False
+                    )
                 )
                 try:
                     await server.serve()
+                    if not getattr(server, "started", True):
+                        raise RuntimeError("Dashboard startup failed")
                 except SystemExit as exc:
                     if exc.code in (None, 0):
                         return

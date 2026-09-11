@@ -24,7 +24,20 @@ class FakeOrderClient:
         self.connected = False
         self.connect_kwargs = {}
         self.next_order_id = 100
-        self.client = SimpleNamespace(getReqId=self.get_req_id)
+        self.summary_futures = {}
+        self.summary_cancelled = []
+        self.wrapper = SimpleNamespace(
+            accountSummary=lambda *args: None,
+            startReq=lambda request_id: self.summary_futures.setdefault(
+                request_id, asyncio.get_running_loop().create_future()
+            ),
+            _endReq=lambda request_id: self.summary_futures.pop(request_id, None),
+        )
+        self.client = SimpleNamespace(
+            getReqId=self.get_req_id,
+            reqAccountSummary=self.request_summary,
+            cancelAccountSummary=self.summary_cancelled.append,
+        )
         self.placed = []
         self.cancelled = []
         self.account_values = [
@@ -38,6 +51,13 @@ class FakeOrderClient:
         self.completed_orders = []
         self.open_order_requests = 0
         self.completed_order_requests = 0
+
+    def request_summary(self, request_id, group, tags):
+        for value in self.account_values:
+            self.wrapper.accountSummary(
+                request_id, value.account, value.tag, value.value, value.currency
+            )
+        self.summary_futures[request_id].set_result(None)
 
     def get_req_id(self) -> int:
         self.next_order_id += 1
@@ -156,6 +176,75 @@ def test_contract_details_supply_the_required_minimum_tick() -> None:
         return await connection.minimum_tick(_instrument())
 
     assert asyncio.run(scenario()) == 0.05
+
+
+def test_fresh_account_summary_ignores_cache_and_cleans_up():
+    async def scenario():
+        client = FakeOrderClient()
+        connection = IbkrConnection(_config(), client=client, execution_enabled=True)
+        await connection.connect()
+        original = client.wrapper.accountSummary
+        client.account_values = [
+            SimpleNamespace(account="DU123456", tag=tag, value=value, currency="USD")
+            for tag, value in [("NetLiquidation", "123000"), ("GrossPositionValue", "2000")]
+        ]
+
+        async def stale(account):
+            raise AssertionError("admission must request a fresh summary")
+
+        client.accountSummaryAsync = stale
+        state = await connection.account_state(fresh=True)
+        assert state.equity == 123000 and state.gross_position_value == 2000
+        assert state.currency == "USD" and state.buying_power is None
+        assert len(client.summary_cancelled) == 1 and not client.summary_futures
+        assert client.wrapper.accountSummary is original
+
+    asyncio.run(scenario())
+
+
+def test_fresh_account_summary_cancellation_cleans_up():
+    async def scenario():
+        client = FakeOrderClient()
+        entered = asyncio.Event()
+        client.client.reqAccountSummary = lambda *args: entered.set()
+        connection = IbkrConnection(_config(), client=client, execution_enabled=True)
+        await connection.connect()
+        original = client.wrapper.accountSummary
+        pending = asyncio.create_task(connection.account_state(fresh=True))
+        await entered.wait()
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        assert len(client.summary_cancelled) == 1 and not client.summary_futures
+        assert client.wrapper.accountSummary is original
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "required,equity",
+    [("1.7976931348623157e308", "1.7976931348623157e308"), ("nan", "100"), ("200", "100")],
+)
+def test_invalid_or_insufficient_credit_preview_rejects(required, equity):
+    async def scenario():
+        client = FakeOrderClient()
+
+        async def preview(contract, order):
+            assert order.whatIf and not client.placed
+            return SimpleNamespace(
+                initMarginAfter=required, equityWithLoanAfter=equity, warningText=""
+            )
+
+        client.whatIfOrderAsync = preview
+        connection = IbkrConnection(_config(), client=client, execution_enabled=True)
+        await connection.connect()
+        with pytest.raises(IbkrError, match="sufficient capacity"):
+            await connection.check_order_capacity(
+                replace(_plan(), entry_limit_price=100), _instrument()
+            )
+        assert not client.placed
+
+    asyncio.run(scenario())
 
 
 def test_paper_submission_transmits_one_coherent_market_stop_limit_bracket() -> None:
@@ -486,3 +575,26 @@ def test_pending_cancel_remains_active_until_ibkr_confirms_cancellation() -> Non
         return await connection.read_open_orders()
 
     assert asyncio.run(scenario())[0].status is OrderLifecycle.SUBMITTED
+
+
+def test_minimum_tick_timeout_cancels_pending_request(tmp_path):
+    finished = asyncio.Event()
+
+    class Client(FakeOrderClient):
+        async def reqContractDetailsAsync(self, contract):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                finished.set()
+
+    async def scenario():
+        connection = IbkrConnection(
+            _config().model_copy(update={"request_timeout_seconds": 0.01}), client=Client()
+        )
+        await connection.connect()
+        with pytest.raises(IbkrError, match="minimum tick request timed out"):
+            await connection.minimum_tick(_instrument())
+        assert finished.is_set()
+        connection.disconnect()
+
+    asyncio.run(scenario())

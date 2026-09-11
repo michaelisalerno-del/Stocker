@@ -339,3 +339,21 @@ Acquisition timeouts persist ACQUISITION_DEADLINE_EXCEEDED and their actual boun
 an empty exception message. The observed failed session remains immutable and cannot be repaired
 with later data. Prospective complete opening-prefix throughput and oracle recall still need
 subsequent market sessions. Range250 -> RV50 -> RV30 and all Session HARD trading rules are unchanged.
+
+## Runtime coverage diagnostics (robustness release)
+
+The latest checkpoint reports requested/selected population, required-history readiness,
+timely valid causal streams, evaluated candidates and skipped reasons through run
+`feed_coverage`. Run cards show the compact counts; run details expose per-conId
+subscription/stream/skipped diagnostics. Pending/unavailable observations remain unknown.
+
+The adapter's configured tick-by-tick capacity is 5% of its quote-line budget
+(minimum one): a configured budget of 100 permits five simultaneous local streams.
+That setting neither proves broker entitlement nor changes the frozen TOP30 population.
+Subscription success, late subscriptions, missing valid prints and broker capacity/
+entitlement failures are observed separately. Evidence for a consumed valid stream is
+retained for the checkpoint after normal resource release.
+
+Incomplete per-instrument causal coverage follows the existing method's unavailable-prefix
+rules. No replacement candidates, delayed stream rotation, bar-derived entry or new global
+veto is introduced. Shared streams retain their existing ownership/release behavior.

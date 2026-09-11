@@ -2,300 +2,120 @@
 
 ![CI](https://github.com/michaelisalerno-del/Stocker/actions/workflows/ci.yml/badge.svg)
 
-Stocker is a modular trading research and execution application. The operational workflow is
-**Market → Method → Run**. A Method owns how it finds, qualifies, vetoes, enters, manages and exits
-trades. The sole installed method is **Session HARD**, with a frozen prospective FIT-derived
-MODEL_T0 cutoff and causal first-break entries. It remains PAPER-only.
+Stocker is one trading research and execution application. Its operational workflow is
+**Market → Method → Run**: choose a market, select **Session HARD**, then save a PAPER run.
+A run retains its identity, method version, frozen specification, universe and audit history.
+The current method, `SESSION_HARD_CAUSAL_Q1_ACQUISITION_V9`, is **PAPER-only**.
 
-See [the architecture guide](docs/ARCHITECTURE.md) for package boundaries, the Q1 reconciliation,
-provenance and historical compatibility.
+The existing market catalogue includes US All/NASDAQ/NYSE, Canada TSX, UK LSE,
+Germany Xetra, France Paris, Netherlands Amsterdam, Switzerland SIX, Australia ASX,
+Hong Kong HKEX, Japan TSE, South Korea KRX and South Africa JSE. Availability depends
+on listing data, calendars and observed IBKR permissions. Non-US method use is an
+**unvalidated cross-market PAPER test**. This release adds no markets or trading hours.
+US sessions continue to use exchange calendars and America/New_York, including DST.
 
-## Repo Split
+Session HARD preserves Range5 HIGH250 → RV10 HIGH50 → RV15 HIGH30, its frozen model,
+scores, causal tick entries and trade geometry. Production and PAPER PRE history is
+exclusively IBKR-originated. Research vendor data is separate. Shared execution
+admission applies account exposure and broker capacity checks; changed admission
+does **not** establish historical trade-count or performance parity.
 
-- `apps/desktop/`: macOS research workspace for notebooks, data audits, baseline
-  research, feature experiments, and backtest reports.
-- `apps/server/`: Linux execution workspace for dry runs, paper execution, future
-  broker adapters, state reconciliation, and monitoring hooks.
-- `packages/stocker_core/`: config, logging, time, shared types, and CLI entry points.
-- `packages/stocker_data/`: local dataset paths, Parquet storage, validators, and
-  exchange-calendar helpers.
-- `packages/stocker_research/`: written hypotheses, simple strategy templates,
-  baselines, walk-forward splits, leakage checks, regime labels, stability analysis,
-  and research reports.
-- `packages/stocker_backtest/`: cost models and transparent vectorized/event-driven
-  backtest interfaces.
-- `packages/stocker_execution/`: broker interface, orders, paper broker placeholder,
-  risk checks, and execution state.
+## Start locally
 
-## Python And Dependency Management
-
-Stocker targets Python 3.12 because it is the stable choice for the current quant
-Python stack. Python 3.13 is intentionally avoided for now until all research and
-backtesting dependencies are boring there.
-
-The repo uses `uv` with dependency groups:
-
-- Default project dependencies: core config, logging, CLI, and settings libraries.
-- `research`: heavy Mac research stack.
-- `server`: lightweight server execution stack.
-- `dev`: tests, linting, typing, and pre-commit.
-
-## Bootstrap On Mac
+Prerequisites: Git, Python **3.12**, `uv`; Node **22** and npm for browser tests.
+IB Gateway/TWS and verified account permissions are needed only for integrated
+execution, not normal tests or the standalone dashboard.
 
 ```bash
-bash scripts/bootstrap_mac.sh
-```
-
-The script checks for Homebrew, `uv`, and Python. It does not silently install global
-software. If `uv` is missing, it prints the install command and exits.
-
-After bootstrap:
-
-```bash
-uv run stocker check
-uv run stocker data import-csv \
-  --file tests/fixtures/market_data/clean_ohlcv.csv \
-  --symbol AAPL \
-  --source manual \
-  --timeframe 1d \
-  --instrument-type stock \
-  --timezone America/New_York \
-  --currency USD
-uv run stocker data audit --symbol AAPL --timeframe 1d
-uv run stocker research baseline --symbol AAPL --timeframe 1d
-uv run stocker research run \
-  --hypothesis research/hypotheses/examples/moving_average_momentum.yaml \
-  --symbol AAPL \
-  --timeframe 1d
-uv run pytest
-uv run jupyter lab apps/desktop/notebooks
-```
-
-## Bootstrap On Server
-
-On a Linux server:
-
-```bash
-bash scripts/bootstrap_server.sh
-```
-
-The server bootstrap installs only core and `server` dependency groups:
-
-```bash
-uv sync --no-default-groups --group server
-uv run --no-default-groups --group server stocker server dry-run --config configs/server.example.yaml
-```
-
-## Tests And Checks
-
-```bash
-bash scripts/test.sh
-bash scripts/check.sh
-```
-
-`check.sh` runs Ruff format checks, Ruff linting, mypy, and pytest through `uv`.
-
-## Stage 2 IBKR Diagnostic
-
-Stage 2 uses the maintained `ib_async` client through one read-only Stocker adapter. Start and
-authenticate IB Gateway or TWS yourself, enable its socket API, review
-`configs/ibkr.example.yaml`, then run:
-
-```bash
-uv run stocker ibkr-check \
-  --run-config configs/run.example.yaml \
-  --ibkr-config configs/ibkr.example.yaml \
-  --symbol AAPL \
-  --primary-exchange NASDAQ
-```
-
-The command masks the connected account in normal output and always disconnects. IB Gateway/TWS
-handles authentication; Stocker does not store or automate broker login credentials. If a session
-exposes multiple accounts, copy the example to the ignored `configs/ibkr.local.yaml` and set
-`expected_account` there so Stocker can select the intended account explicitly.
-
-## Markets and runs
-
-The dashboard offers US All, NASDAQ and NYSE, then Session HARD and Start PAPER run.
-The method builds its universe from authoritative listing membership and saves it with the run.
-There is no global cap-size selector. Suitability beyond eligibility and required data remains
-research-only. Account risk and capacity are separate settings.
-
-`configs/runs.example.yaml` loads the existing listing snapshot with no enabled runs.
-Refresh the snapshot explicitly before creating a new run:
-
-```bash
-uv run stocker universe refresh-us-listings --output universes/us-listed.csv
-uv run stocker runs-status --config configs/runs.example.yaml
-```
-
-Historical methods, manual research universes and research templates remain readable; they cannot
-be selected for new execution runs. PAPER/LIVE account infrastructure remains separate, and the
-current method is not enabled for LIVE. Tests use fake broker clients and place no real orders.
-
-## Data Pipeline
-
-The data pipeline supports local CSV import and EODHD vendor ingestion. Both paths
-normalize to the same Stocker OHLCV schema, validate the result, write partitioned
-Parquet under
-`data/processed/source=.../instrument_type=.../symbol=.../timeframe=.../data.parquet`,
-update `data/catalog.json`, and can generate audit and baseline reports.
-
-EODHD fetch commands load `configs/research.example.yaml` by default. The config
-controls the data directory, default currency, vendor base URL, token environment
-variable, retry count, timeout, and default raw-response saving behavior. Dry-runs do
-not require a token. Live fetches require `data_vendors.eodhd.enabled: true` unless
-you explicitly pass `--enable-disabled-vendor`.
-
-EODHD credentials are read only from the configured environment variable, normally
-`EODHD_API_TOKEN`:
-
-```bash
-export EODHD_API_TOKEN="your_token_here"
-uv run stocker data fetch-eodhd-eod \
-  --config configs/research.example.yaml \
-  --symbol AAPL.US \
-  --from 2015-01-01 \
-  --to 2026-06-28 \
-  --period d \
-  --instrument-type stock \
-  --merge \
-  --save-raw \
-  --audit
-```
-
-See [docs/data_pipeline.md](docs/data_pipeline.md) before researching any edge.
-See [docs/vendors/eodhd.md](docs/vendors/eodhd.md) for EODHD-specific commands.
-See [docs/universes.md](docs/universes.md) for universe generation, batch fetch, and
-research-ready exports.
-
-Local EODHD smoke test:
-
-```bash
-bash scripts/smoke_eodhd_local.sh
-```
-
-Without `EODHD_API_TOKEN`, the script runs safe dry-runs and skips the live fetch.
-With a token, it fetches a tiny EOD sample into `data_smoke/`, then runs catalog,
-audit, vendor QA, and baseline checks.
-
-Local Stage 3 research smoke:
-
-```bash
-bash scripts/research_smoke_local.sh
-```
-
-Without `EODHD_API_TOKEN`, the script skips live fetch and explains how to provide
-existing local data. With a token, it fetches a bounded `us_test_5` sample, qualifies
-a tiny research-ready universe, runs one moving-average momentum universe report, and
-prints the qualified universe path plus Markdown/JSON report paths. Rejections are
-expected and are not smoke failures.
-
-## Continuous Integration
-
-GitHub Actions runs on push and pull request with Python 3.12:
-
-```bash
-uv sync --all-groups
-uv run ruff format --check .
-uv run ruff check .
-uv run mypy packages apps
-uv run pytest
-```
-
-CI does not require an EODHD token. Vendor tests use mocked HTTP only.
-
-## Stage 3 Research Readiness
-
-- `bash scripts/check.sh` passes locally.
-- GitHub Actions passes.
-- EODHD dry-runs work without a token.
-- One small real EODHD EOD fetch works with `EODHD_API_TOKEN`.
-- `uv run stocker data catalog` sees the fetched dataset.
-- Audit and EODHD QA reports are generated.
-- Baseline reports can consume the EODHD dataset.
-- Re-running the fetch with `--merge` does not duplicate rows.
-- A research-ready universe export exists for the symbols under test.
-
-## Research Harness
-
-Stage 3 adds a hypothesis-first research harness. Each experiment starts from a YAML
-hypothesis, loads an audited local Parquet dataset, builds chronological walk-forward
-splits, evaluates a small guarded parameter grid, warms rolling indicators with
-pre-window historical context while scoring only actual train/test rows, applies
-explicit costs, checks train-side parameter selection, keeps the best test-return row
-as diagnostic only, runs leakage checks, compares against cash and same-window long
-buy-and-hold, applies a same-window deterministic null timing test, separates
-preferred intraday/session-flat evidence from stricter swing evidence, reports
-overnight/weekend/gap contribution where measurable, summarizes performance by simple
-historical regimes, and writes Markdown/JSON reports under `data/reports/research/`.
-
-The initial templates are deliberately basic: moving-average momentum, pullback in
-uptrend, mean reversion after a large down day, and volatility breakout. They are test
-vehicles for the harness, not claims of edge.
-
-Most research results should still be rejected. This stage is not paper trading, live
-trading, broker integration, dashboard work, ML, or automatic strategy mining.
-Daily-bar results are useful for context and universe research, but they do not prove
-session-flat tradability; swing candidates need exceptional evidence.
-
-Example:
-
-```bash
-uv run stocker research run \
-  --hypothesis research/hypotheses/examples/moving_average_momentum.yaml \
-  --symbol AAPL.US \
-  --timeframe 1d \
-  --source eodhd \
-  --config configs/research.example.yaml
-```
-
-Universe example:
-
-```bash
-uv run stocker research run-universe \
-  --hypothesis research/hypotheses/examples/moving_average_momentum.yaml \
-  --qualified-universe data/universes/research_ready/us_test_5_1d.json \
-  --config configs/research.example.yaml \
-  --max-symbols 5
-```
-
-See [docs/research_harness.md](docs/research_harness.md) for the full workflow and
-classification rules.
-
-## Universe Workflow
-
-Stage 2.7 adds a stock-universe data manager so research starts from a reproducible
-symbol set instead of ad hoc tickers:
-
-```bash
-uv run stocker universe validate --universe universes/manual/us_test_5.yaml
-uv run stocker universe fetch \
-  --universe universes/manual/us_test_5.yaml \
-  --from 2024-01-01 \
-  --to 2024-02-01 \
-  --timeframe 1d \
-  --source eodhd \
-  --dry-run \
-  --max-symbols 2
-```
-
-The intended research flow is EODHD screener or manual YAML, batch EODHD fetch, audit/QA for
-each dataset, local liquidity and history qualification, then a research-ready JSON
-export consumed by `stocker research run-universe`. FMP work remains deferred; the operational
-dashboard is available as described below.
-
-## Stage 10 Operational Dashboard
-
-Install the existing server dependency group, then start the dashboard in safe standalone mode:
-
-```bash
-uv sync --group server
-uv run stocker stage10-dashboard \
+uv sync --locked --all-groups
+npm ci
+npx playwright install chromium
+uv run --no-sync stocker stage10-dashboard \
   --runs-config configs/runs.example.yaml \
   --ibkr-config configs/ibkr.example.yaml \
   --database .stocker/stage8-runtime.sqlite3
 ```
 
-Open `http://127.0.0.1:8000`. This command reads persisted runtime state and edits validated backend
-run configuration. It does not connect IBKR, start the trading runtime, or transmit an order.
+Open [the local dashboard](http://127.0.0.1:8000). Standalone mode reads state and
+saves configuration; it does **not** connect IBKR or activate execution. Use copies
+of the example configuration for actual work. Local configs and databases belong
+outside version control.
+
+The integrated `stage10-run` command connects the existing engine and dashboard:
+enabled runs retain their algorithmic PAPER authority. Read the
+[dashboard guide](docs/STAGE10_DASHBOARD.md) and
+[deployment/recovery runbook](docs/UNATTENDED_RECOVERY.md) before using it.
+“Pause new entries” preserves current positions, history and broker-held protection.
+
+## Server installation
+
+Prepare a separate release directory; never test installation in the running environment.
+
+```bash
+uv sync --locked --no-default-groups --group server
+uv run --no-sync stocker stage10-dashboard \
+  --runs-config configs/runs.example.yaml \
+  --ibkr-config configs/ibkr.example.yaml \
+  --database .stocker/standalone.sqlite3
+```
+
+`bash scripts/bootstrap_server.sh` uses the same locked server selection.
+Service launch uses the prepared `.venv/bin/stocker` directly or `uv run --no-sync`;
+plain `uv run` can add the default research/dev groups. The server retains
+scikit-learn 1.8.0 and joblib because the frozen model requires them.
+
+Unauthenticated access is local-only. Remote use requires an explicitly protected
+HTTPS deployment. The [dashboard security modes](docs/STAGE10_DASHBOARD.md#security)
+cover every API and stream, including protection against backend/proxy bypass.
+
+## Configuration and admission
+
+- `configs/runs.example.yaml`: listing snapshot reference and saved runs.
+- `configs/ibkr.example.yaml`: separate PAPER/LIVE routing, expected accounts,
+  bounded request timeouts and configured data budget.
+- Each run's `risk.risk_per_trade` is a fraction; the dashboard displays percent
+  (0.001 is 0.1%). `risk.max_concurrent_positions` counts account/environment
+  exposure across runs, including unresolved entries.
+- `risk.max_gross_notional` is an explicit positive ceiling in the verified account
+  currency. Existing configurations still load without it, but new entry is blocked
+  with `EXPOSURE_POLICY_REQUIRED` until an operator sets it. No leverage default is invented.
+
+See [execution admission](docs/execution_safety.md#shared-entry-admission) for
+currency, pending exposure, broker credit preview and migration details.
+A configured market-data budget is not proof of IBKR entitlement or complete tick coverage.
+
+## Checks
+
+```bash
+bash scripts/check.sh
+```
+
+This independently reports format, lint, typing, Python, frontend and isolated
+server-install smoke results, then fails if any failed. Run one with
+`bash scripts/check.sh format` (or `lint`, `typing`, `python`, `frontend`, `server`).
+CI uses those same checks as separate required jobs; a failure does not hide the others.
+Normal tests use fake brokers, temporary databases and isolated configuration.
+
+Recommended main-branch protection: require all six CI checks and review before merge,
+block force pushes and deletion, and require checks against the proposed main revision.
+These are operator recommendations; repository administration settings are not changed by code.
+
+## Repository map
+
+- `packages/stocker_core`: market/method catalogue, configuration, CLI and run identities.
+- `packages/stocker_execution`: method composition, IBKR adapter, admission, ledger and runtime.
+- `packages/stocker_dashboard`: HTTP controls, reads, security and static frontend.
+- `packages/stocker_data`: history/cache, datasets and calendars.
+- `packages/stocker_research`, `packages/stocker_backtest`: separate research and replay tools.
+- `packages/stocker_mcp`: read-only research/diagnostic integration.
+- `apps/desktop`, `apps/server`: workspace instructions and launch helpers.
+- `configs`, `universes`: configuration examples and saved listing inputs.
+- `research`: retained research records and frozen source evidence.
+- `tests`, `scripts`, `docs`: regressions, release/restore tools and operational contracts.
+
+Read [architecture](docs/ARCHITECTURE.md), [candidate discovery](docs/candidate-discovery.md),
+[entry protection](docs/ENTRY_EXECUTION_PROTECTION.md) and
+[release evidence](docs/robustness-implementation.md).
+Earlier stage walkthroughs remain in the
+[research guide](docs/research_harness.md#historical-readme-walkthroughs-preserved-2026-09-11);
+historical deployment records remain in the recovery runbook.

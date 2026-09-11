@@ -46,3 +46,51 @@ method-owned checkpoints, run session windows and broker availability.
 
 Stage 7 reuses the concrete Stage 2 `IbkrConnection`; IBKR is the only broker. Strategy, risk, and
 research code receive normalized models and never call `ib_async` or submit orders directly.
+
+## Shared entry admission
+
+The unchanged starting quantity is floor(equity × risk fraction / stop distance).
+The admitted quantity is whole shares, at least one, and no larger than that risk
+quantity. Shared admission may reduce it against `risk.max_gross_notional`.
+The ledger records risk-derived quantity, admitted quantity and limiting reason;
+risk budget and method/broker price geometry are preserved.
+
+`max_gross_notional` is a positive amount in the verified account currency, not a
+leverage multiple. It is an account/environment ceiling shared across active runs;
+the stricter applicable active commitment limit wins. Set the same intended ceiling
+on runs sharing an account. Existing YAML without this field remains readable,
+but an entry receives `EXPOSURE_POLICY_REQUIRED` until configured. There is no
+default cap. This is an execution admission change; historical trade counts and
+performance have not been revalidated under this policy.
+
+Admission obtains a fresh request-specific IBKR NetLiquidation/GrossPositionValue
+snapshot and positions. Both monetary fields must identify the same concrete
+currency, and that currency must equal the qualified stock currency. BASE-only,
+mixed, missing, nonfinite and IBKR unset values cannot establish usable capacity.
+No FX rate is invented. BuyingPower is reported but is not treated as cash or
+universally usable margin. The final quantity requires a bounded IBKR what-if
+credit preview with valid initial-margin-after and equity-with-loan-after values;
+a warning or unavailable preview rejects the entry. No preview becomes a real order.
+
+An immediate SQLite transaction reserves account/environment exposure by conId,
+across run identities. It combines actual broker positions with unresolved local
+entry commitments. Stop/target/timeout children add no entry slot. A partial fill
+and its entry remainder occupy one instrument slot; the unfilled remainder still
+has notional exposure. Correlated broker orders are reconciled to the same plan
+and are not added a second time. Unknown broker exposure blocks reconciliation.
+
+The current IBKR preview does not attribute credit to individual working orders.
+Therefore admission permits **one unresolved entry commitment per account/environment**:
+another entry receives `PENDING_ENTRY_CAPACITY_UNVERIFIED` until the earlier parent
+is fully filled or conclusively cancelled/rejected. Filled, reconciled positions may
+coexist subject to configured limits. This explicit conservative policy avoids both
+double-debiting broker-held credit and pretending concurrent previews reserve funds.
+A ledger revision captured before account preparation is rechecked in the reservation
+transaction; changed fills/reservations or a broker/local position mismatch require
+reconciliation rather than using a stale funding snapshot.
+
+Confirmed parent cancellation/rejection releases only its unfilled commitment;
+filled exposure persists until broker-confirmed exits. Submission timeout/lost
+acknowledgement retains the plan, signal idempotency and capacity across restart.
+There is no arbitrary expiry or blind resubmission. Additive nullable ledger columns
+preserve earlier rows and audit identities; unavailable historical sizing remains unknown.

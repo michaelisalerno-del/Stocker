@@ -34,3 +34,6 @@ jobs:
       - name: Required check
         if: matrix.check != 'server'
         run: bash scripts/check.sh ${{ matrix.check }}
+      - name: Numerical runtime diagnostics
+        if: always() && matrix.check == 'python'
+        run: uv run --no-sync python -c 'import numpy; numpy.show_runtime(); print(numpy.lib.introspect.opt_func_info(func_name="log"))'

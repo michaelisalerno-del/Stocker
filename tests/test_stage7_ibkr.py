@@ -247,6 +247,33 @@ def test_invalid_or_insufficient_credit_preview_rejects(required, equity):
     asyncio.run(scenario())
 
 
+def test_credit_preview_does_not_depend_on_gateway_tif_presets() -> None:
+    async def scenario():
+        client = FakeOrderClient()
+
+        async def preview(contract, order):
+            assert order.whatIf and order.account == "DU123456"
+            assert order.totalQuantity == 10 and order.lmtPrice == 100
+            # Observed Gateway 10349 ends ib_async's request with an empty list
+            # when the request relies on the preset to supply its missing TIF.
+            if not order.tif:
+                return []
+            assert order.tif == "DAY"
+            return SimpleNamespace(
+                initMarginAfter="81.14", equityWithLoanAfter="254393.88", warningText=""
+            )
+
+        client.whatIfOrderAsync = preview
+        connection = IbkrConnection(_config(), client=client, execution_enabled=False)
+        await connection.connect()
+        await connection.check_order_capacity(
+            replace(_plan(), entry_limit_price=100), _instrument()
+        )
+        assert not client.placed
+
+    asyncio.run(scenario())
+
+
 def test_paper_submission_transmits_one_coherent_market_stop_limit_bracket() -> None:
     client = FakeOrderClient()
     connection = IbkrConnection(_config(), client=client, execution_enabled=True)

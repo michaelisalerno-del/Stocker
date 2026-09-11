@@ -857,6 +857,7 @@ class IbkrConnection:
             plan.entry_limit_price,
             account=self.account,
             whatIf=True,
+            tif="DAY",
         )
         state = await asyncio.wait_for(
             self._client.whatIfOrderAsync(_to_ib_contract(instrument), order),

@@ -71,6 +71,9 @@ No FX rate is invented. BuyingPower is reported but is not treated as cash or
 universally usable margin. The final quantity requires a bounded IBKR what-if
 credit preview with valid initial-margin-after and equity-with-loan-after values;
 a warning or unavailable preview rejects the entry. No preview becomes a real order.
+The non-executing preview specifies DAY explicitly: an omitted TIF caused the
+observed Gateway preset warning 10349 to end the SDK request without margin values.
+This does not change the guarded entry's GTD expiry or protective-child lifetimes.
 
 An immediate SQLite transaction reserves account/environment exposure by conId,
 across run identities. It combines actual broker positions with unresolved local

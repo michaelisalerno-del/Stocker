@@ -43,14 +43,14 @@ const path = require("node:path");
     assert.equal(await input.inputValue(), "2026-09-11T14:00");
     assert.equal(await input.evaluate(node => document.activeElement === node), true);
     assert.match(await page.locator("#candidate-results").innerText(), /SECOND/);
-    const stalePanel = await page.locator("#candidate-results").innerHTML();
-    await page.evaluate(() => refreshHeader());
-    assert.equal(await page.locator("#candidate-results").innerHTML(), stalePanel,
-      "a successful header read must not make stale panel data fresh");
     fail = true;
     await page.evaluate(() => refreshCurrentPage());
     assert.match(await page.locator("#candidate-results").innerText(), /STALE.*Received/s);
     assert.match(await page.locator("#candidate-results").innerText(), /SECOND/);
+    const stalePanel = await page.locator("#candidate-results").innerHTML();
+    await page.evaluate(() => refreshHeader());
+    assert.equal(await page.locator("#candidate-results").innerHTML(), stalePanel,
+      "a successful header read must not make stale panel data fresh");
     fail = false;
     symbol = "RECOVERED";
     await page.evaluate(() => refreshCurrentPage());

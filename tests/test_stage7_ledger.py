@@ -323,3 +323,98 @@ def test_partial_cancellation_releases_remainder_not_position(tmp_path):
     )
     assert ledger.get("second").intended_quantity == 100
     assert ledger.get("plan-1").filled_quantity == 40
+
+
+@pytest.mark.parametrize(
+    "terminal,reported",
+    [
+        (OrderLifecycle.FILLED, 100),
+        (OrderLifecycle.CANCELLED, 40),
+        (OrderLifecycle.REJECTED, 40),
+    ],
+)
+@pytest.mark.parametrize("legacy_schema", [False, True])
+def test_terminal_status_before_execution_details_retains_exposure(
+    tmp_path, terminal, reported, legacy_schema
+):
+    import sqlite3
+    from dataclasses import replace
+
+    from stocker_execution.execution_ledger import AdmissionRejected
+    from stocker_execution.execution_models import BrokerPosition
+
+    ledger = _submitted_ledger(tmp_path)
+    assert ledger.record_order_status(
+        BrokerOrderStatus(
+            101,
+            "plan-1",
+            "DU123456",
+            Environment.PAPER,
+            terminal,
+            reported,
+            100 - reported,
+        )
+    )
+    if legacy_schema:
+        with sqlite3.connect(ledger.path) as connection:
+            connection.execute(
+                "ALTER TABLE execution_plans DROP COLUMN broker_reported_entry_filled"
+            )
+    ledger = ExecutionLedger(ledger.path)  # Restart before execution callback.
+    assert len(ledger.active_records(Environment.PAPER, "DU123456")) == 1
+    assert ledger.positions(Environment.PAPER, "DU123456") == ()  # Never invent a broker fill.
+    second = replace(_plan(), order_plan_id="second", signal_id="second", con_id=999)
+    with pytest.raises(AdmissionRejected, match="CAPACITY_REACHED"):
+        ledger.reserve(second, expected_account="DU123456", max_positions=1)
+    with pytest.raises(AdmissionRejected, match="PENDING_ENTRY_CAPACITY_UNVERIFIED"):
+        ledger.reserve(second, expected_account="DU123456", require_settled_entries=True)
+    # Reconciliation obtains the cumulative report; an older zero report must
+    # never undo positive evidence while the execution callback is still missing.
+    ledger.record_order_status(
+        BrokerOrderStatus(
+            101,
+            "plan-1",
+            "DU123456",
+            Environment.PAPER,
+            terminal,
+            reported,
+            100 - reported,
+        )
+    )
+    ledger.record_order_status(
+        BrokerOrderStatus(
+            101,
+            "plan-1",
+            "DU123456",
+            Environment.PAPER,
+            terminal,
+            0,
+            100,
+        )
+    )
+    assert len(ledger.active_records(Environment.PAPER, "DU123456")) == 1
+    ledger.record_fill(_fill("late", 101, reported, 100, side=OrderAction.SELL, minute=32))
+    assert ledger.reserve(
+        second,
+        expected_account="DU123456",
+        max_positions=2,
+        max_gross_notional=15000,
+        positions=(BrokerPosition("DU123456", 265598, "AAPL", -reported, 100),),
+        broker_gross_notional=reported * 100,
+        require_settled_entries=True,
+    )
+    assert ledger.get("second").intended_quantity == (50 if reported == 100 else 100)
+
+
+def test_upgrade_preserves_conclusive_local_pre_submission_rejection(tmp_path):
+    import sqlite3
+
+    ledger = ExecutionLedger(tmp_path / "old-rejection.sqlite")
+    plan = _plan()
+    ledger.reserve(plan, expected_account="DU123456")
+    ledger.record_rejection(plan.order_plan_id, "credit preview rejected before submission")
+    with sqlite3.connect(ledger.path) as connection:
+        connection.execute("ALTER TABLE execution_plans DROP COLUMN broker_reported_entry_filled")
+    restored = ExecutionLedger(ledger.path)
+    assert restored.has_signal(plan.signal_id)
+    assert restored.active_records(Environment.PAPER, "DU123456") == ()

@@ -449,6 +449,9 @@ class Stage7ExecutionService:
 
         open_ids = {order.order_id for order in open_orders}
         for record in self._ledger.active_records(self._run.environment, self._expected_account):
+            reported = record.broker_reported_entry_filled
+            if reported is None or reported > record.filled_quantity:
+                problems.append(f"entry execution details unresolved for {record.order_plan_id}")
             ids = {
                 value
                 for value in (
@@ -493,6 +496,7 @@ class Stage7ExecutionService:
     ) -> ExecutionAttempt:
         """Submit one selected intent, returning a candidate-local outcome."""
 
+        admission_run = self._run
         if not self._broker.is_connected:
             self._reconciled_epoch = None
             return self._outcome(order_intent.signal_id, ExecutionResultCode.BROKER_DISCONNECTED)
@@ -605,6 +609,13 @@ class Stage7ExecutionService:
                 actual_account=account_state.account,
             )
         checked_at = self._clock()
+        if self._run is not admission_run:
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.EXECUTION_RECONCILIATION_REQUIRED,
+                "Run configuration changed during entry preparation",
+                actual_account=account_state.account,
+            )
         if not self._run.enabled:
             return self._outcome(
                 order_intent.signal_id,
@@ -738,6 +749,8 @@ class Stage7ExecutionService:
                     raise ValueError("METHOD_SHORTABILITY_UNAVAILABLE")
             await self._broker.check_order_capacity(plan, instrument)
             now = self._clock()
+            if self._run is not admission_run:
+                raise ValueError("Run configuration changed during credit preview")
             if (
                 not self._broker.is_connected
                 or self._broker.account != self._expected_account

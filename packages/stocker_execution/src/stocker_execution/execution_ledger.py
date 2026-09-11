@@ -40,6 +40,20 @@ CREATE TABLE execution_fills (
 );
 """
 
+# A terminal status settles only the unfilled remainder. Its cumulative fill
+# report can precede execution details; those shares remain unresolved exposure.
+# NULL is an older row whose terminal quantity must be refreshed from the broker.
+_ENTRY_COMMITMENT = """
+MAX(0, CASE
+  WHEN p.status IN ('REJECTED', 'CANCELLED') AND e.order_id IS NULL
+  THEN COALESCE(p.broker_reported_entry_filled, 0)
+  WHEN p.status IN ('REJECTED', 'CANCELLED')
+    OR e.status IN ('REJECTED', 'CANCELLED', 'FILLED')
+  THEN COALESCE(p.broker_reported_entry_filled, p.intended_quantity)
+  ELSE MAX(p.intended_quantity, COALESCE(p.broker_reported_entry_filled, 0))
+END - p.filled_quantity)
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class ExecutionRecord:
@@ -87,6 +101,7 @@ class ExecutionRecord:
     commissions_complete: bool = False
     risk_derived_quantity: int | None = None
     sizing_reason: str | None = None
+    broker_reported_entry_filled: float | None = None
 
     @property
     def fill_relative_risk(self) -> float | None:
@@ -314,6 +329,9 @@ class ExecutionLedger:
             self._ensure_column(connection, "execution_plans", "position_limit", "INTEGER")
             self._ensure_column(connection, "execution_plans", "gross_notional_limit", "REAL")
             self._ensure_column(
+                connection, "execution_plans", "broker_reported_entry_filled", "REAL"
+            )
+            self._ensure_column(
                 connection, "execution_plans", "commissions_complete", "INTEGER NOT NULL DEFAULT 0"
             )
 
@@ -383,20 +401,13 @@ class ExecutionLedger:
                 ):
                     raise AdmissionRejected("ACCOUNT_STATE_UNAVAILABLE")
                 rows = connection.execute(
-                    """
-                    SELECT p.*, CASE
-                      WHEN p.status IN ('REJECTED', 'CANCELLED')
-                        OR e.status IN ('REJECTED', 'CANCELLED', 'FILLED')
-                      THEN 0 ELSE MAX(0, p.intended_quantity - p.filled_quantity)
-                    END AS remaining
+                    f"""
+                    SELECT p.*, {_ENTRY_COMMITMENT} AS remaining
                     FROM execution_plans p
                     LEFT JOIN execution_broker_orders e
                       ON e.order_plan_id = p.order_plan_id AND e.role = 'ENTRY'
                     WHERE p.environment = ? AND p.expected_account = ?
-                      AND (p.filled_quantity > p.closed_quantity
-                           OR (p.status NOT IN ('REJECTED', 'CANCELLED')
-                               AND p.intended_quantity > p.filled_quantity
-                               AND COALESCE(e.status, '') NOT IN ('REJECTED','CANCELLED','FILLED')))
+                      AND (p.filled_quantity > p.closed_quantity OR {_ENTRY_COMMITMENT} > 0)
                     """,
                     (plan.environment.value, expected_account),
                 ).fetchall()
@@ -498,7 +509,8 @@ class ExecutionLedger:
                 )
                 connection.execute(
                     "UPDATE execution_plans SET risk_derived_quantity = ?, sizing_reason = ?, "
-                    "position_limit = ?, gross_notional_limit = ? WHERE order_plan_id = ?",
+                    "position_limit = ?, gross_notional_limit = ?, "
+                    "broker_reported_entry_filled = 0 WHERE order_plan_id = ?",
                     (
                         plan.risk_derived_quantity,
                         plan.sizing_reason,
@@ -522,7 +534,8 @@ class ExecutionLedger:
             for row in connection.execute(
                 "SELECT p.order_plan_id, p.intended_quantity, "
                 "p.filled_quantity, p.closed_quantity, "
-                "p.status, e.status FROM execution_plans p LEFT JOIN execution_broker_orders e "
+                "p.status, e.status, p.broker_reported_entry_filled "
+                "FROM execution_plans p LEFT JOIN execution_broker_orders e "
                 "ON e.order_plan_id=p.order_plan_id AND e.role='ENTRY' "
                 "WHERE p.environment=? AND p.expected_account=? ORDER BY p.order_plan_id",
                 (environment.value, account),
@@ -845,6 +858,8 @@ class ExecutionLedger:
     def record_order_status(self, status: BrokerOrderStatus) -> bool:
         """Persist one normalized status without treating submission as exposure."""
 
+        if not isfinite(status.filled_quantity) or status.filled_quantity < 0:
+            return False
         with self._connect() as connection:
             order = connection.execute(
                 """
@@ -856,6 +871,14 @@ class ExecutionLedger:
             if order is None:
                 return False
             plan_id = str(order["order_plan_id"])
+            if str(order["role"]) == OrderRole.ENTRY.value:
+                connection.execute(
+                    "UPDATE execution_plans SET broker_reported_entry_filled = "
+                    "MAX(COALESCE(broker_reported_entry_filled, 0), ?, "
+                    "CASE WHEN ? = 'FILLED' THEN intended_quantity ELSE 0 END) "
+                    "WHERE order_plan_id = ?",
+                    (status.filled_quantity, status.status.value, plan_id),
+                )
             connection.execute(
                 """
                 UPDATE execution_broker_orders SET status = ?
@@ -919,15 +942,12 @@ class ExecutionLedger:
     def active_records(self, environment: Environment, account: str) -> tuple[ExecutionRecord, ...]:
         with self._connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT p.* FROM execution_plans p
                 LEFT JOIN execution_broker_orders e
                   ON e.order_plan_id = p.order_plan_id AND e.role = 'ENTRY'
                 WHERE p.environment = ? AND p.expected_account = ?
-                  AND (p.filled_quantity > p.closed_quantity
-                    OR (p.status NOT IN ('REJECTED', 'CANCELLED')
-                      AND p.intended_quantity > p.filled_quantity
-                      AND COALESCE(e.status, '') NOT IN ('REJECTED', 'CANCELLED', 'FILLED')))
+                  AND (p.filled_quantity > p.closed_quantity OR {_ENTRY_COMMITMENT} > 0)
                 ORDER BY p.created_at, p.order_plan_id
                 """,
                 (
@@ -1427,6 +1447,7 @@ def _record_from_row(row: sqlite3.Row) -> ExecutionRecord:
         commissions_complete=bool(row["commissions_complete"]),
         risk_derived_quantity=row["risk_derived_quantity"],
         sizing_reason=row["sizing_reason"],
+        broker_reported_entry_filled=_optional_float(row["broker_reported_entry_filled"]),
         filled_quantity=float(row["filled_quantity"]),
         average_fill_price=_optional_float(row["average_fill_price"]),
         closed_quantity=float(row["closed_quantity"]),

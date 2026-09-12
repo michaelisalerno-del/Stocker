@@ -8,6 +8,7 @@ from math import isfinite
 from typing import Protocol
 
 from stocker_execution.discovery import DiscoveryFx
+from stocker_execution.execution_models import StockExecutionRules
 from stocker_execution.ibkr import QualifiedInstrument
 
 MAX_FX_AGE = timedelta(seconds=5)
@@ -16,7 +17,9 @@ MAX_FX_AGE = timedelta(seconds=5)
 class CurrencySource(Protocol):
     async def discovery_fx(self, currency: str) -> DiscoveryFx: ...
 
-    async def price_unit(self, instrument: QualifiedInstrument) -> float: ...
+    async def stock_execution_rules(
+        self, instrument: QualifiedInstrument
+    ) -> StockExecutionRules: ...
 
 
 @dataclass(frozen=True)
@@ -27,8 +30,14 @@ class ExecutionValuation:
     account_per_price_unit: float
     fx_observed_at: datetime | None
     fx_evidence: str
+    minimum_quantity: int
+    quantity_increment: int
 
     def validate(self, now: datetime) -> None:
+        if not all(
+            type(x) is int and x > 0 for x in (self.minimum_quantity, self.quantity_increment)
+        ):
+            raise ValueError("EXECUTION_CURRENCY_UNAVAILABLE: invalid order quantity rules")
         if not all(isfinite(x) and x > 0 for x in (self.price_unit, self.account_per_price_unit)):
             raise ValueError("EXECUTION_CURRENCY_UNAVAILABLE: invalid conversion")
         if self.fx_observed_at is not None and (
@@ -53,9 +62,10 @@ async def execution_valuation(
             "EXECUTION_CURRENCY_UNAVAILABLE: concrete stock/account currencies required"
         )
     assert account_currency is not None
-    # GBP-labelled IBKR stocks may quote in pence. Use their contract metadata,
-    # never infer a 100x scale from exchange, symbol or apparent share price.
-    unit = await source.price_unit(instrument) if price_currency == "GBP" else 1.0
+    # Currency labels alone do not establish quotation units or permitted lots.
+    # Require matching broker metadata for every stock, including same-currency stocks.
+    rules = await source.stock_execution_rules(instrument)
+    unit = rules.price_unit
     evidence: list[DiscoveryFx] = []
 
     async def usd_sides(currency: str) -> tuple[float, float]:
@@ -92,6 +102,8 @@ async def execution_valuation(
         unit * rate,
         min((datetime.fromisoformat(q.observed_at) for q in evidence), default=None),
         json.dumps([asdict(q) for q in evidence], sort_keys=True, allow_nan=False),
+        rules.minimum_quantity,
+        rules.quantity_increment,
     )
     valuation.validate(clock())
     return valuation

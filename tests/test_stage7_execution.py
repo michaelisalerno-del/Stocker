@@ -17,6 +17,7 @@ from stocker_execution.execution_models import (
     OrderLifecycle,
     OrderPlan,
     OrderRole,
+    StockExecutionRules,
 )
 from stocker_execution.ibkr import CurrentQuote, QualifiedInstrument
 from stocker_execution.session_hard_structure_d import (
@@ -83,6 +84,9 @@ class FakeExecutionBroker:
         if self.minimum_tick_error is not None:
             raise self.minimum_tick_error
         return 0.01
+
+    async def stock_execution_rules(self, instrument: QualifiedInstrument) -> StockExecutionRules:
+        return StockExecutionRules(1.0, 1, 1)
 
     async def entry_quote(self, instrument: QualifiedInstrument) -> CurrentQuote:
         return CurrentQuote(

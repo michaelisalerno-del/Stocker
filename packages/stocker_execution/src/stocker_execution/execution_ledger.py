@@ -108,6 +108,8 @@ class ExecutionRecord:
     account_per_price_unit: float = 1.0
     fx_observed_at: datetime | None = None
     fx_evidence: str | None = None
+    minimum_quantity: int = 1
+    quantity_increment: int = 1
 
     @property
     def fill_relative_risk(self) -> float | None:
@@ -138,6 +140,8 @@ class ExecutionRecord:
             "account_currency": self.account_currency,
             "price_currency": self.price_currency,
             "price_unit": self.price_unit,
+            "minimum_quantity": self.minimum_quantity,
+            "quantity_increment": self.quantity_increment,
             "account_per_price_unit": self.account_per_price_unit,
             "fx_observed_at": self.fx_observed_at.isoformat() if self.fx_observed_at else None,
             "fx_evidence": self.fx_evidence,
@@ -347,6 +351,10 @@ class ExecutionLedger:
                 self._ensure_column(
                     connection, "execution_plans", column, "REAL NOT NULL DEFAULT 1"
                 )
+            for column in ("minimum_quantity", "quantity_increment"):
+                self._ensure_column(
+                    connection, "execution_plans", column, "INTEGER NOT NULL DEFAULT 1"
+                )
             self._ensure_column(connection, "execution_plans", "sizing_reason", "TEXT")
             self._ensure_column(connection, "execution_plans", "position_limit", "INTEGER")
             self._ensure_column(connection, "execution_plans", "gross_notional_limit", "REAL")
@@ -471,6 +479,12 @@ class ExecutionLedger:
                         for key in local.keys() | broker.keys()
                     ):
                         raise AdmissionRejected("EXECUTION_RECONCILIATION_REQUIRED")
+                if not all(
+                    type(value) is int and value > 0
+                    for value in (plan.minimum_quantity, plan.quantity_increment)
+                ):
+                    raise AdmissionRejected("ACCOUNT_STATE_UNAVAILABLE")
+                quantity = plan.quantity
                 if max_gross_notional is not None:
                     limits_notional = [
                         float(row["gross_notional_limit"])
@@ -501,16 +515,21 @@ class ExecutionLedger:
                             max(0, available) / (plan.entry_reference * plan.account_per_price_unit)
                         ),
                     )
-                    if quantity < 1:
-                        raise AdmissionRejected("CAPACITY_REACHED")
-                    plan = replace(
-                        plan,
-                        risk_derived_quantity=plan.quantity,
-                        quantity=quantity,
-                        sizing_reason="GROSS_NOTIONAL_LIMIT"
-                        if quantity < plan.quantity
-                        else "RISK",
-                    )
+                capped_quantity = quantity
+                quantity = (quantity // plan.quantity_increment) * plan.quantity_increment
+                if quantity < plan.minimum_quantity:
+                    raise AdmissionRejected("CAPACITY_REACHED")
+                reasons = []
+                if capped_quantity < plan.quantity:
+                    reasons.append("GROSS_NOTIONAL_LIMIT")
+                if quantity < capped_quantity:
+                    reasons.append("BROKER_QUANTITY_INCREMENT")
+                plan = replace(
+                    plan,
+                    risk_derived_quantity=plan.quantity,
+                    quantity=quantity,
+                    sizing_reason="+".join(reasons) or "RISK",
+                )
                 connection.execute(
                     """
                     INSERT INTO execution_plans (
@@ -558,6 +577,7 @@ class ExecutionLedger:
                     "position_limit = ?, gross_notional_limit = ?, "
                     "account_currency = ?, price_currency = ?, price_unit = ?, "
                     "account_per_price_unit = ?, fx_observed_at = ?, fx_evidence = ?, "
+                    "minimum_quantity = ?, quantity_increment = ?, "
                     "broker_reported_entry_filled = 0 WHERE order_plan_id = ?",
                     (
                         plan.risk_derived_quantity,
@@ -570,6 +590,8 @@ class ExecutionLedger:
                         plan.account_per_price_unit,
                         plan.fx_observed_at.isoformat() if plan.fx_observed_at else None,
                         plan.fx_evidence,
+                        plan.minimum_quantity,
+                        plan.quantity_increment,
                         plan.order_plan_id,
                     ),
                 )
@@ -1511,6 +1533,8 @@ def _record_from_row(row: sqlite3.Row) -> ExecutionRecord:
         if row["fx_observed_at"]
         else None,
         fx_evidence=row["fx_evidence"],
+        minimum_quantity=int(row["minimum_quantity"]),
+        quantity_increment=int(row["quantity_increment"]),
         sizing_reason=row["sizing_reason"],
         broker_reported_entry_filled=_optional_float(row["broker_reported_entry_filled"]),
         filled_quantity=float(row["filled_quantity"]),

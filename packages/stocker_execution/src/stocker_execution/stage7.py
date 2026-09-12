@@ -25,6 +25,7 @@ from stocker_execution.execution_models import (
     OrderAction,
     OrderLifecycle,
     OrderPlan,
+    StockExecutionRules,
 )
 from stocker_execution.ibkr import BrokerSession, CurrentQuote, QualifiedInstrument
 from stocker_execution.session_hard_structure_d import (
@@ -128,7 +129,9 @@ class ExecutionBroker(Protocol):
 
     async def discovery_fx(self, currency: str) -> DiscoveryFx: ...
 
-    async def price_unit(self, instrument: QualifiedInstrument) -> float: ...
+    async def stock_execution_rules(
+        self, instrument: QualifiedInstrument
+    ) -> StockExecutionRules: ...
 
     async def shortable_quantity(self, instrument: QualifiedInstrument) -> float: ...
 
@@ -707,6 +710,8 @@ class Stage7ExecutionService:
             account_per_price_unit=valuation.account_per_price_unit,
             fx_observed_at=valuation.fx_observed_at,
             fx_evidence=valuation.fx_evidence,
+            minimum_quantity=valuation.minimum_quantity,
+            quantity_increment=valuation.quantity_increment,
             entry_order_type=EntryOrderType.LIMIT,
             entry_limit_price=limit,
             entry_expires_at=min(

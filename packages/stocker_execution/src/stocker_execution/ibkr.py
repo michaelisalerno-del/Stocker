@@ -10,7 +10,7 @@ from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 from itertools import pairwise
 from math import isfinite
 from time import perf_counter
@@ -38,6 +38,7 @@ from stocker_execution.execution_models import (
     OrderLifecycle,
     OrderPlan,
     OrderRole,
+    StockExecutionRules,
 )
 
 
@@ -1530,8 +1531,8 @@ class IbkrConnection:
         self._scanner_stock_type_cache[con_id] = stock_type
         return stock_type
 
-    async def price_unit(self, instrument: QualifiedInstrument) -> float:
-        """Currency units per API stock price unit; prices themselves stay native."""
+    async def stock_execution_rules(self, instrument: QualifiedInstrument) -> StockExecutionRules:
+        """Require broker stock quotation and quantity units; never infer from currency."""
         self._require_connected()
         request = self._client.reqContractDetailsAsync(_to_ib_contract(instrument))
         try:
@@ -1554,7 +1555,20 @@ class IbkrConnection:
             or getattr(detail, "priceMagnifier", None) not in (1, 100)
         ):
             raise IbkrError("EXECUTION_PRICE_UNIT_UNAVAILABLE: unverified stock quotation unit")
-        return 1.0 / float(detail.priceMagnifier)
+        sizes = [getattr(detail, name, None) for name in ("minSize", "sizeIncrement")]
+        if any((number := _optional_number(value)) is None or number <= 0 for value in sizes):
+            raise IbkrError(
+                "EXECUTION_ORDER_SIZE_UNAVAILABLE: missing or invalid broker quantity rules"
+            )
+        minimum, increment = (Decimal(str(value)) for value in sizes)
+        # A reduced rational p/q intersects whole-share quantities at multiples
+        # of p. E.g. 0.0001 -> 1 share, 2.5 -> 5 shares, 100 -> 100 shares.
+        # This never enables fractional execution or rounds a risk quantity up.
+        return StockExecutionRules(
+            price_unit=1.0 / float(detail.priceMagnifier),
+            minimum_quantity=int(minimum.to_integral_value(rounding=ROUND_CEILING)),
+            quantity_increment=increment.as_integer_ratio()[0],
+        )
 
     async def discovery_fx(self, currency: str) -> DiscoveryFx:
         """One audited FX snapshot per discovery, on the existing broker connection."""

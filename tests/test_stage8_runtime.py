@@ -146,6 +146,11 @@ class FakeBroker:
     async def minimum_tick(self, instrument: QualifiedInstrument) -> float:
         return 0.01
 
+    async def stock_execution_rules(self, instrument):
+        from stocker_execution.execution_models import StockExecutionRules
+
+        return StockExecutionRules(1.0, 1, 1)
+
     async def shortable_quantity(self, instrument: QualifiedInstrument) -> float:
         return 1000000
 

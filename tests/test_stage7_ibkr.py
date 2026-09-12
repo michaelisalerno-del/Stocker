@@ -44,7 +44,17 @@ class FakeOrderClient:
             SimpleNamespace(account=account, tag="NetLiquidation", value="100000", currency="BASE"),
             SimpleNamespace(account=account, tag="BuyingPower", value="250000", currency="BASE"),
         ]
-        self.contract_details = [SimpleNamespace(minTick=0.05)]
+        self.contract_details = [
+            SimpleNamespace(
+                contract=SimpleNamespace(
+                    conId=265598, secType="STK", currency="USD", multiplier=""
+                ),
+                minTick=0.05,
+                priceMagnifier=1,
+                minSize=Decimal("0.0001"),
+                sizeIncrement=Decimal("0.0001"),
+            )
+        ]
         self.open_orders = []
         self.position_values = []
         self.execution_values = []
@@ -634,15 +644,19 @@ def test_stock_price_unit_uses_verified_contract_metadata(magnifier, expected):
         SimpleNamespace(
             contract=SimpleNamespace(conId=265598, secType="STK", currency="GBP", multiplier=""),
             priceMagnifier=magnifier,
+            minSize=Decimal("0.0001"),
+            sizeIncrement=Decimal("0.0001"),
         )
     ]
 
     async def scenario():
         connection = IbkrConnection(_config(), client=client)
         await connection.connect()
-        return await connection.price_unit(replace(_instrument(), currency="GBP"))
+        return await connection.stock_execution_rules(replace(_instrument(), currency="GBP"))
 
-    assert asyncio.run(scenario()) == expected
+    rules = asyncio.run(scenario())
+    assert rules.price_unit == expected
+    assert rules.minimum_quantity == rules.quantity_increment == 1
 
 
 @pytest.mark.parametrize(
@@ -668,7 +682,7 @@ def test_stock_price_unit_rejects_unverified_metadata(field, value):
         connection = IbkrConnection(_config(), client=client)
         await connection.connect()
         with pytest.raises(IbkrError, match="EXECUTION_PRICE_UNIT_UNAVAILABLE"):
-            await connection.price_unit(replace(_instrument(), currency="GBP"))
+            await connection.stock_execution_rules(replace(_instrument(), currency="GBP"))
 
     asyncio.run(scenario())
 
@@ -688,12 +702,75 @@ def test_cancelled_price_unit_lookup_drops_sdk_waiter():
         client = Client()
         connection = IbkrConnection(_config(), client=client)
         await connection.connect()
-        task = asyncio.create_task(connection.price_unit(replace(_instrument(), currency="GBP")))
+        task = asyncio.create_task(
+            connection.stock_execution_rules(replace(_instrument(), currency="GBP"))
+        )
         await entered.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
         assert client.wrapper._futures == {}
+        assert not client.placed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "minimum,increment,expected",
+    [
+        ("100", "100", (100, 100)),
+        ("0.0001", "0.0001", (1, 1)),
+        ("2.1", "2.5", (3, 5)),
+    ],
+)
+def test_broker_quantity_rules_intersect_whole_shares(minimum, increment, expected):
+    client = FakeOrderClient()
+    client.contract_details = [
+        SimpleNamespace(
+            contract=SimpleNamespace(conId=265598, secType="STK", currency="USD", multiplier=""),
+            priceMagnifier=1,
+            minSize=Decimal(minimum),
+            sizeIncrement=Decimal(increment),
+        )
+    ]
+
+    async def scenario():
+        connection = IbkrConnection(_config(), client=client)
+        await connection.connect()
+        return await connection.stock_execution_rules(_instrument())
+
+    rules = asyncio.run(scenario())
+    assert (rules.minimum_quantity, rules.quantity_increment) == expected
+    assert rules.price_unit == 1
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("minSize", None),
+        ("minSize", 0),
+        ("sizeIncrement", 0),
+        ("sizeIncrement", float("nan")),
+        ("sizeIncrement", -1),
+        ("minSize", float.fromhex("0x1.fffffffffffffp+1023")),
+    ],
+)
+def test_missing_or_invalid_broker_sizes_fail_closed(field, value):
+    client = FakeOrderClient()
+    detail = SimpleNamespace(
+        contract=SimpleNamespace(conId=265598, secType="STK", currency="USD", multiplier=""),
+        priceMagnifier=1,
+        minSize=1,
+        sizeIncrement=1,
+    )
+    setattr(detail, field, value)
+    client.contract_details = [detail]
+
+    async def scenario():
+        connection = IbkrConnection(_config(), client=client)
+        await connection.connect()
+        with pytest.raises(IbkrError, match="EXECUTION_ORDER_SIZE_UNAVAILABLE"):
+            await connection.stock_execution_rules(_instrument())
         assert not client.placed
 
     asyncio.run(scenario())

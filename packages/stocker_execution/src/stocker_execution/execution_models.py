@@ -44,6 +44,15 @@ class BrokerOrderIds:
 
 
 @dataclass(frozen=True, slots=True)
+class StockExecutionRules:
+    """Verified broker contract units, restricted to whole-share execution."""
+
+    price_unit: float
+    minimum_quantity: int
+    quantity_increment: int
+
+
+@dataclass(frozen=True, slots=True)
 class OrderPlan:
     """One broker-independent protected execution plan."""
 
@@ -80,6 +89,8 @@ class OrderPlan:
     account_per_price_unit: float = 1.0
     fx_observed_at: datetime | None = None
     fx_evidence: str | None = None
+    minimum_quantity: int = 1
+    quantity_increment: int = 1
 
 
 @dataclass(frozen=True, slots=True)

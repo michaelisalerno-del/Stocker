@@ -29,8 +29,10 @@ class CurrencyBroker(FakeExecutionBroker):
             datetime(2026, 9, 2, 14, 31, 1, tzinfo=UTC).isoformat(),
         )
 
-    async def price_unit(self, instrument):
-        return 0.01 if instrument.currency == "GBP" else 1.0
+    async def stock_execution_rules(self, instrument):
+        from stocker_execution.execution_models import StockExecutionRules
+
+        return StockExecutionRules(0.01 if instrument.currency == "GBP" else 1.0, 1, 1)
 
 
 @pytest.mark.parametrize(

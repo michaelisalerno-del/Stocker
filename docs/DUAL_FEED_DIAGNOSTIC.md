@@ -347,4 +347,44 @@ rtk uv run --no-sync pytest tests/test_dual_feed.py tests/test_method_package.py
 ```
 
 Result: **93 passed**, one existing Starlette deprecation warning. Changed-file Ruff and
-mypy checks also passed. Final canonical and production-boundary results follow below.
+mypy checks also passed.
+
+Correction commit: `e8cf4faeb9dba5ec9d330ae2726461d3673ddabc`.
+The canonical command was run again after this correction (exit 0):
+
+```bash
+rtk proxy env PATH="/Users/michaelsalerno/Documents/Codex/2026-09-12-task-add-a-minimal-research-diagnostic/.stocker/test-tools/node_modules/.bin:/Users/michaelsalerno/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH" bash scripts/check.sh
+```
+
+| Canonical check | V2 result |
+|---|---|
+| Ruff format | PASS, 280 files already formatted |
+| Ruff lint | PASS |
+| mypy packages/apps | PASS, 146 source files |
+| Python | PASS, 1,202 passed, 14 skipped, 10 existing warnings, 111.48 seconds |
+| Frontend | PASS, all three existing suites |
+| Isolated server install | PASS, server-only imports, frozen model, offline dashboard/assets |
+
+Boundary commands all exited 0 with no diff. The broad production check excludes only
+the three diagnostic modules added by the original task; every other execution/core
+file and configuration is compared against the original production baseline:
+
+```bash
+rtk git diff --exit-code ec1c926e3aaffcaf42c1bf1000fbe56c81ce1d31 -- packages/stocker_execution/src/stocker_execution/dual_feed.py
+rtk git diff --exit-code 4282ee339a6f0c92c56e157edb655c0c50e10b2d -- packages/stocker_execution packages/stocker_core configs ':(exclude)packages/stocker_execution/src/stocker_execution/dual_feed.py' ':(exclude)packages/stocker_execution/src/stocker_execution/dual_feed_comparison.py' ':(exclude)packages/stocker_execution/src/stocker_execution/dual_feed_operator.py'
+rtk git diff --check ec1c926e3aaffcaf42c1bf1000fbe56c81ce1d31...HEAD
+```
+
+This includes unchanged `ibkr.py`, `runtime.py`, `session_hard_method.py`,
+`session_hard_structure_d.py`, method artifacts, strategy configuration and all
+production risk/execution code. The focused isolation regression also passes.
+Independent standards and specification reviews found no remaining issues.
+
+Exact next operator action: at a separately operated open session, use the command in
+the operator procedure above with the actual saved checkpoint, current frozen selection,
+dedicated read-only PAPER Gateway and all trading runs paused. Confirm the exported
+criteria version is `DUAL_FEED_V2_LOCAL_RECEIPT` and its hash is the V2 hash above before
+interpreting any results. Deployment, if needed, still requires separate authorization.
+This correction task did not run that command or inspect real-market outcomes.
+
+DUAL_FEED_DIAGNOSTIC_READY_FOR_OBSERVATION

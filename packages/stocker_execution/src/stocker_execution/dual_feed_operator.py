@@ -22,7 +22,13 @@ from stocker_core.methods import SESSION_HARD
 from stocker_core.runs import Environment, RunConfig
 from stocker_execution.acquisition_store import encoded
 from stocker_execution.candidate_pipeline import instrument
-from stocker_execution.dual_feed import ORDINARY, REFERENCE, DualFeedRecorder, StreamEvidence
+from stocker_execution.dual_feed import (
+    ORDINARY,
+    REFERENCE,
+    DualFeedConnection,
+    DualFeedRecorder,
+    StreamEvidence,
+)
 from stocker_execution.dual_feed_comparison import CRITERIA, compare_pair, verdict
 from stocker_execution.history import IbkrHistoryCache
 from stocker_execution.ibkr import IbkrConnection, QualifiedInstrument, mask_ibkr_account
@@ -301,7 +307,7 @@ async def observe(args: argparse.Namespace) -> Path:
         "pairs": [],
         "verdict": "DUAL_FEED_DIAGNOSTIC_NOT_RUN",
     }
-    broker = IbkrConnection(config, execution_enabled=False)
+    broker = DualFeedConnection(config, execution_enabled=False)
     order_attempts: list[str] = []
     block_order_methods(broker, order_attempts)
     recorder = None

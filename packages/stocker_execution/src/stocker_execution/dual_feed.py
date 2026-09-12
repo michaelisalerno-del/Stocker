@@ -22,6 +22,33 @@ ORDINARY = "ORDINARY_TRADE_STREAM"
 GENERIC_TICKS = "375"
 
 
+class DualFeedConnection(IbkrConnection):
+    """Diagnostic-only request error routing; all production feed methods inherited.
+
+    The ordinary request's rejection must not invalidate a separately owned TBT
+    prefix. Preserve normal resource/error counters, omitting conId only for our
+    known ordinary requests. All TBT and non-diagnostic errors retain base behavior.
+    IDs remain known until the connection epoch changes, including after release,
+    because IBKR can deliver a late rejection for an already cancelled request.
+    """
+
+    _diagnostic_ordinary_requests: set[tuple[int, int]]
+
+    def _record_resource_error(
+        self, request_id: int, code: int, message: str, contract: object, *extra: object
+    ) -> None:
+        ordinary = (self.connection_epoch, request_id) in getattr(
+            self, "_diagnostic_ordinary_requests", ()
+        )
+        super()._record_resource_error(
+            request_id,
+            code,
+            message,
+            None if ordinary else contract,
+            *extra,
+        )
+
+
 @dataclass(frozen=True)
 class TapeEvent:
     con_id: int
@@ -95,11 +122,13 @@ class DualFeedRecorder:
 
     def __init__(
         self,
-        broker: IbkrConnection,
+        broker: DualFeedConnection,
         *,
         max_events: int = 250_000,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
+        if not isinstance(broker, DualFeedConnection):
+            raise ValueError("Recorder requires its dedicated diagnostic connection")
         if broker.environment is not Environment.PAPER or broker._execution_enabled:
             raise ValueError("Diagnostic requires read-only PAPER; execution must be disabled")
         broker._require_connected()
@@ -108,6 +137,11 @@ class DualFeedRecorder:
         self.broker = broker
         self.clock = clock
         self.epoch = broker.connection_epoch
+        broker._diagnostic_ordinary_requests = {
+            key
+            for key in getattr(broker, "_diagnostic_ordinary_requests", ())
+            if key[0] == self.epoch
+        }
         self.max_events = max_events
         self.events: list[TapeEvent] = []
         self.streams: dict[tuple[int, str], StreamEvidence] = {}
@@ -238,6 +272,8 @@ class DualFeedRecorder:
         evidence.request_id = self._wrapper.ticker2ReqId["mktData"].get(ticker)
         if evidence.request_id is None:
             evidence.errors.append("ORDINARY_REQUEST_ID_UNAVAILABLE")
+        else:
+            self.broker._diagnostic_ordinary_requests.add((self.epoch, evidence.request_id))
         return evidence
 
     def _receive_string(self, request_id: int, tick_type: int, value: str) -> Any:

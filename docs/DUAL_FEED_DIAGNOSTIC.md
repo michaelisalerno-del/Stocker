@@ -7,7 +7,9 @@ observation is performed by adding this facility. Production never imports these
 
 Inspected current origin/main **4282ee339a6f0c92c56e157edb655c0c50e10b2d** on
 2026-09-12. Read-only SSH `readlink -f /opt/stocker/current` identified the identical
-release directory. No service, run configuration, account subscription or broker setting
+release directory. Later read-only SHA-256 checks matched all four deployed causal files
+(ibkr, runtime, session_hard_method and session_hard_structure_d) against this checkout.
+No service, run configuration, account subscription or broker setting
 was changed. The generic `stocker` systemd unit reported inactive; that alone is not an
 inventory of active deployment units or proof that every run is paused.
 
@@ -86,7 +88,14 @@ Global sequence gives callback observation order; TBT's per-feed order is unchan
 
 ## Isolation and ownership
 
-`DualFeedRecorder` only accepts a connected, non-executable PAPER adapter. It attaches
+`DualFeedRecorder` only accepts a connected, non-executable PAPER `DualFeedConnection`.
+This diagnostic-only subclass inherits every production feed/order method unchanged.
+Its one override routes known ordinary-request errors to normal resource counters without
+letting the base adapter's conId-wide entitlement rejection cancel a separate TBT owner.
+Reference request errors retain the existing invalidation behavior. Ordinary request IDs
+remain known for the connection epoch after cancellation to handle late broker errors.
+There is no change to the production adapter's error handler.
+It attaches
 to caller-prepared reference streams; closing it removes observers but **never cancels
 caller-owned TBT**. The operator owns an otherwise unused connection, prepares at most
 five references, then disconnects that connection to release its physical TBT requests.
@@ -137,7 +146,9 @@ Initial state already containing a consumed cursor/entry or wrong spec is reject
 Reports include qualifying break, first crossing, direction, triggering source event,
 signal timestamp/minute, local decision receipt time, entry side/reference, no-signal
 reason and classification. All seven requested classifications are supported. Incomplete
-pairs keep descriptive results but are labelled INSUFFICIENT_DATA. A verdict never hides
+pairs keep descriptive results but are labelled INSUFFICIENT_DATA. With no sufficient
+paired replay, the verdict is DUAL_FEED_DIAGNOSTIC_NOT_RUN (collection may have been
+attempted; the equivalence comparison could not be completed). A verdict never hides
 those cases or treats non-paired TOP30 observations as equivalence evidence.
 
 ## Operator procedure (separate open-session operation)

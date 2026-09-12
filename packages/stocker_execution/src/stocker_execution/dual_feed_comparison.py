@@ -32,6 +32,7 @@ CRITERIA = {
     "sufficient": "Both recorders active by T0 through T0+5m, one connection epoch, live data, "
     "valid prints on both feeds, no loss/errors, prospectively frozen method context available",
     "verdict_policy": "No production substitution claim. Incomplete pairs are always disclosed. "
+    "No sufficient pairs => DIAGNOSTIC_NOT_RUN. "
     "Any sufficient strict failure => NOT_SUITABLE; all planned pairs sufficient and strict => "
     "METHOD_EQUIVALENT_IN_OBSERVED_SAMPLE; otherwise PROMISING_MORE_EVIDENCE_REQUIRED.",
 }
@@ -87,8 +88,10 @@ def replay_method(
     Both replays use restore_signals/observe_trades/expire_waiting_before unchanged.
     A prefix received before arming is buffered until that same arming instant.
     """
+    if initial.market_id is None:
+        raise ValueError("METHOD_MARKET_UNAVAILABLE")
     method = SessionHardMethod(
-        MarketId(initial.market_id) if initial.market_id else MarketId.US_ALL,
+        MarketId(initial.market_id),
         method_version=initial.strategy_version,
     )
     if initial.method_spec_hash != method.spec_hash:
@@ -292,6 +295,8 @@ def compare_pair(
 
 def verdict(pairs: Sequence[dict[str, Any]]) -> str:
     sufficient = [p for p in pairs if p["classification"] != "INSUFFICIENT_DATA"]
+    if not sufficient:
+        return "DUAL_FEED_DIAGNOSTIC_NOT_RUN"
     if any(not p["strict_pass"] for p in sufficient):
         return "ORDINARY_FEED_NOT_SUITABLE"
     if sufficient and len(sufficient) == len(pairs):

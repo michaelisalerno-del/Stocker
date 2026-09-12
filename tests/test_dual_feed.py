@@ -8,7 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from stocker_execution.dual_feed import ORDINARY, DualFeedRecorder, ordinary_fields
+from stocker_execution.dual_feed import (
+    ORDINARY,
+    DualFeedConnection,
+    DualFeedRecorder,
+    ordinary_fields,
+)
 from stocker_execution.dual_feed_comparison import compare_pair, verdict
 from stocker_execution.dual_feed_operator import export_report
 from stocker_execution.ibkr import IbkrConnection, IbkrError, _to_ib_contract
@@ -44,7 +49,7 @@ def harness(monkeypatch):
     orders = []
     for name in ("placeOrder", "whatIfOrderAsync"):
         monkeypatch.setattr(ib, name, lambda *a, _name=name, **k: orders.append(_name))
-    broker = IbkrConnection(config(), client=ib)
+    broker = DualFeedConnection(config(), client=ib)
     broker._account_id = "DU123456"
     instrument = replace(stock(initial.underlying_con_id), symbol=initial.symbol)
     broker.prepare_trade_events(instrument)
@@ -424,6 +429,51 @@ def test_context_json_retains_missing_nonfinite_without_imputation():
     assert encoded(context_json({"feature": float("nan")})) == '{"feature": {"nonfinite": "nan"}}'
 
 
+def test_ordinary_entitlement_error_and_late_error_preserve_reference_owner(harness):
+    h = harness
+    at = h.initial.t0 + timedelta(seconds=1)
+    h.emit([(at, h.initial.up_trigger, 1)], [(at, h.initial.down_trigger, 1)])
+    before = h.broker.trade_events(h.instrument, t0=h.initial.t0)
+    ready = h.broker.trade_stream_status(h.instrument, t0=h.initial.t0)
+    h.ib.errorEvent.emit(h.ordinary_id, 354, "Not subscribed", _to_ib_contract(h.instrument))
+    assert h.broker.trade_events(h.instrument, t0=h.initial.t0) == before
+    assert h.broker.trade_stream_status(h.instrument, t0=h.initial.t0) == ready
+    assert h.method.observe_trades({h.instrument.con_id: before})[0].side == "LONG"
+    assert not any(c[0] == "cancelTickByTickData" for c in h.calls)
+    assert not h.orders
+    h.recorder.close()
+    h.ib.errorEvent.emit(h.ordinary_id, 354, "Late rejection", _to_ib_contract(h.instrument))
+    assert h.broker.trade_events(h.instrument, t0=h.initial.t0) == before
+    # Actual reference errors still invalidate the causal prefix exactly as before.
+    h.ib.errorEvent.emit(h.reference_id, 354, "Not subscribed", _to_ib_contract(h.instrument))
+    with pytest.raises(IbkrError, match="PREFIX_UNAVAILABLE"):
+        h.broker.trade_events(h.instrument, t0=h.initial.t0)
+
+
+def test_production_feed_methods_are_inherited_unchanged_and_empty_is_not_promising(harness):
+    for method in (
+        "prepare_trade_events",
+        "trade_events",
+        "trade_stream_status",
+        "release_trade_events",
+        "submit_protected_order",
+    ):
+        assert getattr(DualFeedConnection, method) is getattr(IbkrConnection, method)
+    assert verdict([]) == "DUAL_FEED_DIAGNOSTIC_NOT_RUN"
+    assert verdict([harness.compare()]) == "DUAL_FEED_DIAGNOSTIC_NOT_RUN"
+
+
+def test_missing_market_is_insufficient_not_us_default(harness):
+    from stocker_execution.dual_feed_comparison import replay_method
+
+    with pytest.raises(ValueError, match="METHOD_MARKET_UNAVAILABLE"):
+        replay_method(
+            replace(harness.initial, market_id=None),
+            [],
+            end=harness.initial.t0 + timedelta(minutes=5),
+        )
+
+
 def test_complete_operator_fake_session_exports_and_releases_all_lines(
     harness, monkeypatch, tmp_path
 ):
@@ -450,7 +500,7 @@ def test_complete_operator_fake_session_exports_and_releases_all_lines(
     )
     monkeypatch.setattr(operator, "frozen_selection", lambda *a, **k: (selected, ()))
     monkeypatch.setattr(operator, "load_runs_config", lambda *a: SimpleNamespace(runs=(run,)))
-    monkeypatch.setattr(operator, "IbkrConnection", lambda *a, **k: h.broker)
+    monkeypatch.setattr(operator, "DualFeedConnection", lambda *a, **k: h.broker)
     monkeypatch.setattr(
         operator,
         "DualFeedRecorder",

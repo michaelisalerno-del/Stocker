@@ -89,7 +89,10 @@ cover every API and stream, including protection against backend/proxy bypass.
   with `EXPOSURE_POLICY_REQUIRED` until an operator sets it. No leverage default is invented.
 
 See [execution admission](docs/execution_safety.md#shared-entry-admission) for
-currency, pending exposure, broker credit preview and migration details.
+currency, pending exposure, broker credit preview and migration details. The IBKR account
+may keep its default base currency: shared execution converts foreign stock risk and
+notional using fresh broker FX, with verified GBP quotation units. Missing conversion
+evidence blocks entry; this does not convert cash or change method prices.
 A configured market-data budget is not proof of IBKR entitlement or complete tick coverage.
 
 An admission prepared under an older run configuration is rejected before submission.

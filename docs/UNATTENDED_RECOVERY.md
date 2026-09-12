@@ -177,6 +177,15 @@ Inspect `numpy.show_runtime()` and `numpy.lib.introspect.opt_func_info(func_name
 after calling `stocker_launcher.configure_numeric_runtime()` when diagnosing this.
 Do not loosen score assertions, regenerate fixtures or change selection to mask it.
 
+The account-currency sizing migration adds valuation/currency evidence and price-unit
+columns to the ledger. It does not infer units for old records. Before enabling a
+foreign-currency run, verify fresh broker FX, actual GBP contract quotation units if
+applicable, account-currency risk/notional settings and the non-executing credit preview.
+An active legacy record with unknown currency blocks new entries until settled.
+Rollback to a pre-conversion release must keep new entries paused: that release cannot
+apply the new cross-currency admission policy, even though additive columns are readable.
+Keep the current database, valuation evidence and broker protection through recovery.
+
 Code rollback switches to a retained release; it is **not** permission to restore an older
 database or configuration over newer history. This release adds nullable ledger columns
 and an optional YAML exposure setting; earlier binaries may reject newer configuration

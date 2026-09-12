@@ -49,7 +49,9 @@ research code receive normalized models and never call `ib_async` or submit orde
 
 ## Shared entry admission
 
-The unchanged starting quantity is floor(equity × risk fraction / stop distance).
+The starting quantity is floor(account equity × risk fraction / (native stop distance ×
+account-currency value of one native price unit)). For a stock quoted in the account's
+major currency this is the original floor(equity × risk fraction / stop distance).
 The admitted quantity is whole shares, at least one, and no larger than that risk
 quantity. Shared admission may reduce it against `risk.max_gross_notional`.
 The ledger records risk-derived quantity, admitted quantity and limiting reason;
@@ -65,9 +67,25 @@ performance have not been revalidated under this policy.
 
 Admission obtains a fresh request-specific IBKR NetLiquidation/GrossPositionValue
 snapshot and positions. Both monetary fields must identify the same concrete
-currency, and that currency must equal the qualified stock currency. BASE-only,
-mixed, missing, nonfinite and IBKR unset values cannot establish usable capacity.
-No FX rate is invented. BuyingPower is reported but is not treated as cash or
+currency. BASE-only, mixed account fields, missing, nonfinite and IBKR unset values
+cannot establish usable capacity. The account may retain its IBKR base currency while
+trading a stock in another currency. Entry valuation uses verified IBKR CASH contracts
+and live two-sided FX quotes, at most five seconds old, with the source-currency USD
+ask divided by the account-currency USD bid. Inverse pairs are inverted before this
+calculation. This conservative conversion values risk and gross notional in account
+currency; it does not exchange cash or change any method/order price. Same-currency
+stocks require no FX quote. GBP-labelled stocks additionally require matching IBKR
+contract details with a supported price magnifier (1 or 100); the reciprocal converts
+native price units into major currency units. Missing or ambiguous units block entry.
+Verify actual LSE contract quotation units against broker quotes/what-if before a
+supervised LSE session; local fixtures do not establish that broker evidence.
+
+FX acquisition is bounded by four seconds and valuation freshness is checked again
+before reservation and after credit preview. Invalid, crossed, future, stale or missing
+quotes reject admission. Conversion, source quotes, timestamps and both currencies are
+persisted with the reservation. Pending notional uses that recorded conversion; a
+partially filled parent contributes only its unfilled remainder in addition to broker
+gross position value. No FX rate is invented. BuyingPower is reported but is not treated as cash or
 universally usable margin. The final quantity requires a bounded IBKR what-if
 credit preview with valid initial-margin-after and equity-with-loan-after values;
 a warning or unavailable preview rejects the entry. No preview becomes a real order.
@@ -97,6 +115,13 @@ filled exposure persists until broker-confirmed exits. Submission timeout/lost
 acknowledgement retains the plan, signal idempotency and capacity across restart.
 There is no arbitrary expiry or blind resubmission. Additive nullable ledger columns
 preserve earlier rows and audit identities; unavailable historical sizing remains unknown.
+Active legacy rows without a recorded account currency, or active rows labelled with
+a different account base currency, block new admission. Reconcile and settle them;
+never guess their units or relabel historical limits. Existing history is not backfilled.
+Realized stock PnL remains in the stock's major currency, with its native price-unit
+scale applied; the dashboard does not sum incompatible currencies into an account PnL.
+FX moves after reservation can change marked exposure; this is an admission valuation,
+not a currency hedge or guarantee against later mark-to-market changes.
 
 Broker status and execution-detail callbacks may arrive in either order. The ledger
 retains the highest reported cumulative parent fill separately from actual execution

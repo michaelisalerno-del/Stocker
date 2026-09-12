@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import datetime, timedelta
@@ -15,11 +15,28 @@ from stocker_execution.dual_feed import ORDINARY, REFERENCE, StreamEvidence, Tap
 from stocker_execution.session_hard_method import SessionHardMethod, TradeEvent
 from stocker_execution.session_hard_structure_d import SignalStatus, StrategySignal
 
-# Freeze before collection. No outcome-dependent tolerance or price/size transforms.
+TIME_DOMAINS = {
+    "METHOD_TIME": "Local packet receipt time: REFERENCE_TBT keeps its production event_at; "
+    "ORDINARY_TRADE_STREAM uses received_at. Current production behavior is reproduced "
+    "as-is for equivalence testing, not endorsed or changed.",
+    "BROKER_EVENT_TIME": "broker_at retains the feed's broker timestamp; ordinary raw "
+    "event_at also retains broker milliseconds. Descriptive metadata only, not replay time.",
+    "MONOTONIC_RECEIPT_TIME": "received_monotonic_ns is local callback observation time. "
+    "Used descriptively for latency/order, never for method timestamps. TBT is observed "
+    "at packet update dispatch and ordinary at tickString dispatch, so callback lag "
+    "includes that dispatch difference.",
+}
+
+# Corrected before any market observation. Never tune using observed outcomes.
 CRITERIA = {
-    "version": "DUAL_FEED_V1",
-    "conversion": "One valid tickString 77 callback -> one TradeEvent; broker milliseconds; "
-    "raw price; local receipt sequence; no deduplication, expansion, rounding or interpolation",
+    "version": "DUAL_FEED_V2_LOCAL_RECEIPT",
+    "conversion": "REFERENCE_TBT REPLAY: existing production TradeEvents exactly as received. "
+    "ORDINARY REPLAY: one TradeEvent per valid RT Trade Volume tick-77 payload, timestamped "
+    "using that payload's LOCAL PACKET RECEIPT time; raw price unchanged; sequence in "
+    "callback receipt order. Broker milliseconds remain descriptive metadata only. "
+    "No rounding, shifting, bucketing, resampling, deduplication, expansion, interpolation "
+    "or later outcome-based adjustment of replay inputs.",
+    "time_domains": TIME_DOMAINS,
     "alignment": "Broker UTC second buckets, occurrence order within each bucket; zip only "
     "existing observations; excess observations remain unmatched. Price is not a match key.",
     "reference_timestamp": "Unchanged production TradeEvent timestamp is ib_async 2.1.0 "
@@ -36,6 +53,15 @@ CRITERIA = {
     "Any sufficient strict failure => NOT_SUITABLE; all planned pairs sufficient and strict => "
     "METHOD_EQUIVALENT_IN_OBSERVED_SAMPLE; otherwise PROMISING_MORE_EVIDENCE_REQUIRED.",
 }
+
+
+def method_time(event: TapeEvent) -> datetime | None:
+    """Select replay time without altering the recorded evidence or production TBT."""
+    if event.feed == ORDINARY:
+        return event.received_at
+    if event.feed == REFERENCE:
+        return event.event_at
+    raise ValueError(f"Unknown diagnostic feed: {event.feed}")
 
 
 def distribution(values: Sequence[float]) -> dict[str, float | int | None]:
@@ -57,6 +83,8 @@ def coverage(events: Sequence[TapeEvent]) -> dict[str, Any]:
     times = [e.event_at for e in events if e.event_at is not None]
     broker_times = [e.broker_at for e in events if e.broker_at is not None]
     pairs = list(zip(events, events[1:], strict=False))
+    receipt_counts = Counter(e.received_at for e in events)
+    method_times = [at for e in events if (at := method_time(e)) is not None]
     return {
         "event_count": len(events),
         "unique_price_levels": len({e.price for e in events}),
@@ -69,6 +97,16 @@ def coverage(events: Sequence[TapeEvent]) -> dict[str, Any]:
             a > b for a, b in zip(broker_times, broker_times[1:], strict=False)
         ),
         "broker_timestamp_ties": len(broker_times) - len(set(broker_times)),
+        "first_broker_event_timestamp": broker_times[0] if broker_times else None,
+        "last_broker_event_timestamp": broker_times[-1] if broker_times else None,
+        "first_method_timestamp": method_times[0] if method_times else None,
+        "last_method_timestamp": method_times[-1] if method_times else None,
+        "receipt_order_inversions": sum(a.received_at > b.received_at for a, b in pairs),
+        "monotonic_receipt_order_inversions": sum(
+            a.received_monotonic_ns > b.received_monotonic_ns for a, b in pairs
+        ),
+        "packet_receipt_timestamp_ties": len(events) - len(receipt_counts),
+        "max_events_per_receipt_timestamp": max(receipt_counts.values(), default=0),
         "timestamp_ties": len(times) - len(set(times)),
         "first_event_timestamp": times[0] if times else None,
         "last_event_timestamp": times[-1] if times else None,
@@ -106,7 +144,9 @@ def replay_method(
     ordered = sorted(events, key=lambda e: e.sequence)
     for event in ordered:
         assert event.event_at is not None and event.price is not None
-        if not initial.t0 <= event.event_at < initial.t0 + timedelta(minutes=5):
+        timestamp = method_time(event)
+        assert timestamp is not None
+        if not initial.t0 <= timestamp < initial.t0 + timedelta(minutes=5):
             continue
         if (
             first_crossing is None
@@ -121,7 +161,7 @@ def replay_method(
         method.expire_waiting_before(now)
         before = method.signals[0]
         method.observe_trades(
-            {initial.underlying_con_id: (TradeEvent(event.event_at, event.price, event.sequence),)}
+            {initial.underlying_con_id: (TradeEvent(timestamp, event.price, event.sequence),)}
         )
         after = method.signals[0]
         if before.status is SignalStatus.WAITING_FOR_ENTRY and after.status is not before.status:
@@ -133,6 +173,7 @@ def replay_method(
         "qualifying_break": signal,
         "first_break_direction": result.direction if signal else None,
         "first_qualifying_event_timestamp": result.entry_timestamp,
+        "replay_timestamp_domain": "METHOD_TIME",
         "method_decision_timestamp": result.signal_timestamp,
         "method_decision_minute": result.signal_timestamp.replace(second=0, microsecond=0)
         if result.signal_timestamp
@@ -181,8 +222,8 @@ def compare_pair(
             for e in raw
             if e.feed == feed
             and _valid(e)
-            and e.event_at is not None
-            and t0 <= e.event_at < window_end
+            and (timestamp := method_time(e)) is not None
+            and t0 <= timestamp < window_end
         ]
         for feed in (REFERENCE, ORDINARY)
     }
@@ -234,6 +275,8 @@ def compare_pair(
         "con_id": con_id,
         "t0": t0,
         "window_end": window_end,
+        "time_domains": TIME_DOMAINS,
+        "coverage_window_domain": "METHOD_TIME",
         "reference": coverage(ref),
         "ordinary": coverage(alt),
         "invalid_observations": sum(bool(e.invalid_reason) for e in raw),
@@ -255,6 +298,16 @@ def compare_pair(
         ),
         "receive_lag_seconds_equal_price_aligned": distribution(
             [(b.received_at - a.received_at).total_seconds() for a, b in equal]
+        ),
+        "broker_event_lag_seconds_equal_price_aligned": distribution(
+            [
+                (b.broker_at - a.broker_at).total_seconds()
+                for a, b in equal
+                if a.broker_at is not None and b.broker_at is not None
+            ]
+        ),
+        "monotonic_receipt_lag_seconds_equal_price_aligned": distribution(
+            [(b.received_monotonic_ns - a.received_monotonic_ns) / 1_000_000_000 for a, b in equal]
         ),
         "missing_reference_price_levels": sorted({e.price for e in ref} - {e.price for e in alt}),
         "unmatched_semantics": "Occurrence alignment only; unequal bucket counts can reflect "
@@ -279,7 +332,11 @@ def compare_pair(
             e.price for e in alt if aseq is None or e.sequence <= aseq
         ]
         when = reference_replay["decision_received_at"]
-        late = sum(e.received_at > when for e in alt) if when else None
+        late = (
+            sum(e.feed == ORDINARY and _valid(e) and when < e.received_at < end for e in raw)
+            if when
+            else None
+        )
     result.update(
         reference_replay=reference_replay,
         ordinary_replay=ordinary_replay,
@@ -288,6 +345,9 @@ def compare_pair(
         insufficient_reasons=sorted(set(errors)),
         decision_relevant_price_order_preserved=preserved,
         ordinary_events_received_after_reference_decision=late,
+        ordinary_events_received_at_or_after_expiry=sum(
+            e.feed == ORDINARY and _valid(e) and window_end <= e.received_at < end for e in raw
+        ),
         strict_pass=not errors and classification == "EXACT_METHOD_MATCH" and preserved,
     )
     return result

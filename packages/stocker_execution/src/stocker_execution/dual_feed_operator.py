@@ -29,7 +29,13 @@ from stocker_execution.dual_feed import (
     DualFeedRecorder,
     StreamEvidence,
 )
-from stocker_execution.dual_feed_comparison import CRITERIA, compare_pair, verdict
+from stocker_execution.dual_feed_comparison import (
+    CRITERIA,
+    TIME_DOMAINS,
+    compare_pair,
+    method_time,
+    verdict,
+)
 from stocker_execution.history import IbkrHistoryCache
 from stocker_execution.ibkr import IbkrConnection, QualifiedInstrument, mask_ibkr_account
 from stocker_execution.runtime import ExchangeSessionResolver, _signal_payload
@@ -225,6 +231,10 @@ def export_report(output: Path, report: dict[str, Any], recorder: DualFeedRecord
         "Ordinary TOP30 simultaneously observed: "
         f"**{report.get('ordinary_top30_observed', False)}**.",
         "",
+        TIME_DOMAINS["METHOD_TIME"],
+        TIME_DOMAINS["BROKER_EVENT_TIME"],
+        TIME_DOMAINS["MONOTONIC_RECEIPT_TIME"],
+        "",
         "| conId | TBT prints | ordinary prints | replay | strict |",
         "|---|---:|---:|---|---|",
     ]
@@ -298,6 +308,7 @@ async def observe(args: argparse.Namespace) -> Path:
         "session": str(market.session),
         "t0": t0,
         "criteria_sha256": hashlib.sha256(criteria_bytes).hexdigest(),
+        "time_domains": TIME_DOMAINS,
         "reference_instruments": [asdict(i) for i in paired],
         "frozen_selected": [asdict(i) for i in selected],
         "ordinary_top30_requested": len(ordinary),
@@ -418,8 +429,8 @@ async def observe(args: argparse.Namespace) -> Path:
                             e.feed == feed
                             and e.con_id == s.con_id
                             and not e.invalid_reason
-                            and e.event_at is not None
-                            and t0 <= e.event_at < t0 + timedelta(minutes=5)
+                            and (at := method_time(e)) is not None
+                            and t0 <= at < t0 + timedelta(minutes=5)
                             for e in recorder.events
                         )
                         for s in streams
@@ -446,8 +457,8 @@ async def observe(args: argparse.Namespace) -> Path:
                         and e.feed == ORDINARY
                         and not e.invalid_reason
                         and e.market_data_type == 1
-                        and e.event_at is not None
-                        and t0 <= e.event_at < t0 + timedelta(minutes=5)
+                        and (at := method_time(e)) is not None
+                        and t0 <= at < t0 + timedelta(minutes=5)
                         for e in recorder.events
                     )
                     for s in ordinary_streams

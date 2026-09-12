@@ -152,13 +152,14 @@ def test_replay_cases(harness, case, expected):
         reference = [quiet]
     elif case == "opposite":
         reference, alternative = [up, down], [down]
-    elif case == "timing":
-        alternative = [quiet, (at + timedelta(milliseconds=100), up[1], 1)]
     elif case == "different_price":
         alternative = [quiet, (at, up[1] + 0.01, 1)]
     if case == "late":
         h.emit(reference, [quiet])
         h.emit([], [up], received=h.initial.t0 + timedelta(minutes=5, seconds=1))
+    elif case == "timing":
+        h.emit(reference, [quiet])
+        h.emit([], [up], received=at + timedelta(milliseconds=100))
     else:
         h.emit(reference, alternative)
     result = h.compare()
@@ -170,6 +171,9 @@ def test_replay_cases(harness, case, expected):
         assert not result["decision_relevant_price_order_preserved"]
     if case == "opposite":
         assert result["ordinary_replay"]["entry_side"] == "SHORT"
+    if case == "late":
+        assert result["ordinary_events_received_at_or_after_expiry"] == 1
+        assert result["ordinary_events_received_after_reference_decision"] == 1
 
 
 def test_ordinary_only_opposite_print_does_not_reach_production(harness):
@@ -299,7 +303,135 @@ def test_broker_and_production_receive_timestamp_are_distinct(harness):
     assert reference.broker_at == broker_at
     assert reference.event_at == received
     assert h.broker.trade_events(h.instrument, t0=h.initial.t0)[0].timestamp == received
-    assert h.compare()["classification"] == "SAME_METHOD_DECISION_DIFFERENT_EVENT_TIMING"
+    result = h.compare()
+    assert result["classification"] == "EXACT_METHOD_MATCH"
+    assert result["strict_pass"]
+    assert result["ordinary_replay"]["method_decision_timestamp"] == received
+    assert result["ordinary"]["first_broker_event_timestamp"] == broker_at
+
+
+@pytest.mark.parametrize("broker_offset", [-86400, 86400])
+def test_same_receipt_content_matches_despite_very_different_broker_time(harness, broker_offset):
+    h = harness
+    received = h.initial.t0 + timedelta(seconds=1)
+    broker_at = received + timedelta(seconds=broker_offset)
+    h.emit(
+        [(received, h.initial.up_trigger, 1)],
+        [(broker_at, h.initial.up_trigger, 1)],
+        received=received,
+    )
+    evidence_before = tuple(h.recorder.events)
+    result = h.compare()
+    assert result["classification"] == "EXACT_METHOD_MATCH"
+    assert result["strict_pass"]
+    assert result["ordinary_replay"]["method_decision_timestamp"] == received
+    assert result["ordinary"]["first_broker_event_timestamp"] == broker_at
+    assert result["ordinary"]["first_method_timestamp"] == received
+    # Broker-second alignment cannot identify these observations as one trade.
+    assert not result["alignment_pairs"]
+    assert len(result["events_only_in_tbt"]) == len(result["events_only_in_ordinary"]) == 1
+    assert tuple(h.recorder.events) == evidence_before
+
+
+@pytest.mark.parametrize(
+    "broker_seconds,receipt_seconds,signal",
+    [
+        (1, -0.5, False),  # Broker crossed T0; local receipt did not.
+        (-60, 1, True),  # Broker before window, packet inside.
+        (301, 1, True),  # Broker after window, packet inside.
+        (1, 301, False),  # Broker inside, packet after expiry cannot rescue entry.
+    ],
+)
+def test_both_replays_follow_receipt_window_boundaries(
+    harness,
+    broker_seconds,
+    receipt_seconds,
+    signal,
+):
+    from stocker_execution.dual_feed_comparison import replay_method
+
+    h = harness
+    broker_at = h.initial.t0 + timedelta(seconds=broker_seconds)
+    received = h.initial.t0 + timedelta(seconds=receipt_seconds)
+    h.emit(
+        [(broker_at, h.initial.up_trigger, 1)],
+        [(broker_at, h.initial.up_trigger, 1)],
+        received=received,
+    )
+    end = h.initial.t0 + timedelta(minutes=5, seconds=2)
+    results = [
+        replay_method(h.initial, [e for e in h.recorder.events if e.feed == feed], end=end)
+        for feed in ("REFERENCE_TBT", ORDINARY)
+    ]
+    assert all(r["signal"] is signal for r in results)
+    assert results[0]["method_decision_timestamp"] == results[1]["method_decision_timestamp"]
+    if signal:
+        assert results[1]["method_decision_timestamp"] == received
+
+
+def test_repeated_packet_prints_replay_in_callback_order_not_broker_time(harness):
+    h = harness
+    at = h.initial.t0 + timedelta(seconds=1)
+    prices = [h.initial.p0, h.initial.p0, h.initial.down_trigger, h.initial.up_trigger]
+    ref = [(at, price, 1) for price in prices]
+    alt = [(at + timedelta(milliseconds=300 - i * 100), price, 1) for i, price in enumerate(prices)]
+    h.emit(ref, alt)
+    result = h.compare()
+    assert result["strict_pass"]
+    assert result["ordinary_replay"]["entry_side"] == "SHORT"
+    assert result["ordinary"]["repeated_adjacent_prices"] == 1
+    assert result["ordinary"]["out_of_order_broker_times"] == 3
+    assert result["ordinary"]["packet_receipt_timestamp_ties"] == 3
+    assert result["ordinary"]["max_events_per_receipt_timestamp"] == 4
+    assert result["ordinary"]["receipt_order_inversions"] == 0
+
+
+def test_descriptive_broker_receipt_and_monotonic_metrics_remain_separate(harness):
+    h = harness
+    at = h.initial.t0 + timedelta(seconds=1)
+    h.emit([(at, h.initial.up_trigger, 1)], [], received=at + timedelta(milliseconds=100))
+    h.emit(
+        [],
+        [(at + timedelta(milliseconds=125), h.initial.up_trigger, 1)],
+        received=at + timedelta(milliseconds=350),
+    )
+    ordinary = next(e for e in h.recorder.events if e.feed == ORDINARY)
+    reference = next(e for e in h.recorder.events if e.feed != ORDINARY)
+    result = h.compare()
+    assert result["classification"] == "SAME_METHOD_DECISION_DIFFERENT_EVENT_TIMING"
+    for stat in ("median", "p95", "maximum"):
+        assert result["broker_event_lag_seconds_equal_price_aligned"][stat] == pytest.approx(0.125)
+        assert result["receive_lag_seconds_equal_price_aligned"][stat] == pytest.approx(0.25)
+        assert (
+            result["monotonic_receipt_lag_seconds_equal_price_aligned"][stat]
+            == (ordinary.received_monotonic_ns - reference.received_monotonic_ns) / 1_000_000_000
+        )
+    assert ordinary.event_at == ordinary.broker_at == at + timedelta(milliseconds=125)
+    assert ordinary.raw["payload"].split(";")[2] == str(int(ordinary.broker_at.timestamp() * 1000))
+    assert set(result["time_domains"]) == {
+        "METHOD_TIME",
+        "BROKER_EVENT_TIME",
+        "MONOTONIC_RECEIPT_TIME",
+    }
+
+
+def test_criteria_hash_changes_with_timestamp_semantics():
+    import hashlib
+
+    from stocker_execution.acquisition_store import encoded
+    from stocker_execution.dual_feed_comparison import CRITERIA
+
+    digest = hashlib.sha256(encoded(CRITERIA).encode()).hexdigest()
+    assert digest != "8a35d0fa4dd1628db0a6b75580aa5a7c4d62860084f212ccd0844cf7a55f5dff"
+    old_conversion = dict(
+        CRITERIA,
+        conversion="One valid tickString 77 callback -> one TradeEvent; "
+        "broker milliseconds; raw price; local receipt sequence; "
+        "no deduplication, expansion, rounding or interpolation",
+    )
+    assert digest != hashlib.sha256(encoded(old_conversion).encode()).hexdigest()
+    assert CRITERIA["version"] == "DUAL_FEED_V2_LOCAL_RECEIPT"
+    assert "LOCAL PACKET RECEIPT" in CRITERIA["conversion"]
 
 
 def test_out_of_order_broker_messages_and_raw_batch_values_retained(harness):
@@ -570,3 +702,16 @@ def test_complete_operator_fake_session_exports_and_releases_all_lines(
     assert not report["errors"]
     assert not run.enabled
     assert (output / "acceptance-criteria.json").exists()
+    import hashlib
+
+    from stocker_execution.acquisition_store import encoded
+    from stocker_execution.dual_feed_comparison import CRITERIA
+
+    criteria_bytes = (output / "acceptance-criteria.json").read_bytes()
+    assert criteria_bytes == encoded(CRITERIA).encode()
+    assert report["criteria_sha256"] == hashlib.sha256(criteria_bytes).hexdigest()
+    assert set(report["time_domains"]) == {
+        "METHOD_TIME",
+        "BROKER_EVENT_TIME",
+        "MONOTONIC_RECEIPT_TIME",
+    }

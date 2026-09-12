@@ -71,13 +71,40 @@ of a batch; the SDK discards the single-trade flag. Temporary wrapper observers 
 every raw payload, including repeated price/size/time combinations, before that loss.
 The real SDK decoder looks up wrapper methods at dispatch time; tests exercise it.
 
-The alternative conversion is frozen in `dual_feed_comparison.CRITERIA`: each valid
-77 payload becomes one `TradeEvent(broker_millisecond_timestamp,raw_price,local_sequence)`.
-Do not round its timestamp to match TBT, substitute receipt time, rescale size, remove
-repeats, expand aggregates or tune conversion after outcomes. Missing timestamp/price
-prevents conversion; missing size stays null. Source timestamps have **different
-semantics** in the two tapes and are explicitly reported. Broker timestamps on both
-sides are separately retained for descriptive alignment. There is no exchange trade ID.
+The corrected conversion is frozen in `dual_feed_comparison.CRITERIA`, version
+`DUAL_FEED_V2_LOCAL_RECEIPT`, before any real-market observation:
+
+- REFERENCE_TBT REPLAY: existing production TradeEvents exactly as received.
+- ORDINARY REPLAY: one TradeEvent per valid RT Trade Volume tick-77 payload,
+  `TradeEvent(local_packet_receipt_timestamp, raw_price, callback_receipt_sequence)`.
+  Broker milliseconds remain descriptive metadata only.
+
+No rounding, shifting, bucketing, resampling, deduplication, expansion, interpolation
+or later outcome-based adjustment of replay inputs is permitted. Payload validation
+is unchanged; missing broker timestamp/price still marks raw evidence invalid and
+missing size stays null. There is no exchange trade ID.
+
+The code and reports explicitly distinguish three domains:
+
+| Domain | Meaning |
+|---|---|
+| METHOD_TIME | Local packet receipt time used by both replays; existing TBT `event_at`, ordinary `received_at` |
+| BROKER_EVENT_TIME | Retained `broker_at`; ordinary raw `event_at` also remains broker milliseconds; descriptive only |
+| MONOTONIC_RECEIPT_TIME | `received_monotonic_ns`, for descriptive callback latency/order, never method time |
+
+Both causal-window filtering and alternative TradeEvent conversion use METHOD_TIME.
+Raw evidence is not rewritten. Broker-second descriptive alignment still uses broker
+time and never forces a common trade identity. Receive lag and broker-time lag are
+reported separately. Monotonic lag includes the existing difference between ordinary
+tickString dispatch and the later TBT packet-update observer; it is not a pure network
+latency measurement. Timestamp ties and counts of observations sharing receipt timestamps
+describe packet grouping without expanding payloads into inferred trades.
+
+The production TBT timestamp behavior was discovered during the diagnostic audit.
+Changing production from local packet receipt time to broker event time would alter
+the effective method/data semantics and requires separate validation. This correction
+reproduces current production behavior as-is for equivalence testing; it does not endorse
+or change it. No production-fix branch or production-file modification is part of this task.
 
 Each TapeEvent records conId/symbol, feed, source timestamp, broker timestamp, local
 packet receipt time, monotonic callback clock and sequence, price/size, raw provenance,
@@ -122,6 +149,12 @@ This task has **not observed thirty ordinary streams in a real open session**.
 ## Acceptance criteria fixed before observation
 
 The operator writes acceptance-criteria.json and its SHA-256 before connecting.
+V1 used mismatched replay clocks and is superseded before any observation by V2.
+The hash changes from
+`8a35d0fa4dd1628db0a6b75580aa5a7c4d62860084f212ccd0844cf7a55f5dff` to
+`003143a335d883f3855c9a46c84e1a41a3437a7e2f1089707402d850d8d2d041`.
+Future operator runs serialize the corrected CRITERIA directly and hash those exact bytes;
+the deterministic fake-session test verifies the written file and reported hash.
 Code/specification changes require a new preregistration; no outcome-based retuning.
 
 - Sufficient evidence: same full method interval, recording on both sides by T0,
@@ -198,8 +231,9 @@ TOP30 simultaneous-observation status. Actual print receipt is stronger evidence
 ## Interpretation and handover
 
 No real broker observation was run during implementation. No empirical equivalence or
-thirty-symbol entitlement claim is available. The timestamp-semantic difference and
-documented feed granularity make this a useful diagnostic, not a presumed replacement.
+thirty-symbol entitlement claim is available. Broker and receipt clocks remain separately
+available for analysis, but replay now compares matching local receipt semantics.
+Documented feed granularity still requires observed validation.
 
 If strict comparison fails, keep true TBT capacity for the current frozen method. If
 the sample agrees, keep production unchanged and design a larger preregistered validation
@@ -207,7 +241,7 @@ across sessions/stocks before any separate data-source decision. Never emit
 PRODUCTION_REPLACEMENT_VALIDATED. No buying capacity, subscription changes or deployment
 is authorized by this facility.
 
-## Implementation handover and exact validation
+## Initial implementation handover and validation (before V2 correction)
 
 Implemented on `research/dual-feed-diagnostic-20260912`, based on main/deployed
 `4282ee339a6f0c92c56e157edb655c0c50e10b2d`. Implementation commits:
@@ -284,3 +318,33 @@ Keep the production Last TBT source. A successful small sample would justify des
 larger preregistered multi-session validation, not switching feeds.
 
 DUAL_FEED_DIAGNOSTIC_NOT_RUN
+
+## V2 timestamp correction handover
+
+This narrow correction starts from `ec1c926e3aaffcaf42c1bf1000fbe56c81ce1d31` on the
+existing diagnostic branch. Only `dual_feed_comparison.py`, `dual_feed_operator.py`,
+`tests/test_dual_feed.py` and this document change. The raw recorder `dual_feed.py`
+is unchanged, as are all production, configuration, risk and execution files.
+
+`method_time` selects the unchanged reference timestamp or ordinary local packet receipt
+time. `replay_method` and `compare_pair` use it for method-window filtering and replay;
+operator coverage counts use the same domain. `coverage` and comparison results retain
+broker-time relationships and add explicit method/receipt/monotonic timing, packet
+grouping and receipt-order diagnostics. Late observations in the collection grace period
+remain visible even though they cannot enter the method's expired window.
+
+Existing timing-disagreement coverage now delays the actual ordinary receipt instead of
+only changing its broker clock. New fixtures cover both T0 boundaries, broker times a day
+apart, after-expiry receipt, repeated packet order, unchanged raw broker provenance,
+independent timing metrics and criteria hashing. These are fake-broker fixtures only.
+No real-market data was inspected before this correction, and no broker connection,
+market experiment, deployment, configuration or broker-setting change was performed.
+
+Focused command:
+
+```bash
+rtk uv run --no-sync pytest tests/test_dual_feed.py tests/test_method_package.py tests/test_session_hard_exit_contract.py
+```
+
+Result: **93 passed**, one existing Starlette deprecation warning. Changed-file Ruff and
+mypy checks also passed. Final canonical and production-boundary results follow below.

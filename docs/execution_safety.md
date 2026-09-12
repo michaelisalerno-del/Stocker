@@ -53,7 +53,9 @@ The starting quantity is floor(account equity × risk fraction / (native stop di
 account-currency value of one native price unit)). For a stock quoted in the account's
 major currency this is the original floor(equity × risk fraction / stop distance).
 The admitted quantity is whole shares, at least one, and no larger than that risk
-quantity. Shared admission may reduce it against `risk.max_gross_notional`.
+quantity. Shared admission may reduce it against `risk.max_gross_notional` and
+the verified broker quantity increment. The final quantity must meet the broker minimum;
+otherwise admission rejects it. It never rounds upward to purchase a minimum lot.
 The ledger records risk-derived quantity, admitted quantity and limiting reason;
 risk budget and method/broker price geometry are preserved.
 
@@ -74,13 +76,28 @@ and live two-sided FX quotes, at most five seconds old, with the source-currency
 ask divided by the account-currency USD bid. Inverse pairs are inverted before this
 calculation. This conservative conversion values risk and gross notional in account
 currency; it does not exchange cash or change any method/order price. Same-currency
-stocks require no FX quote. GBP-labelled stocks additionally require matching IBKR
+stocks require no FX quote. Every stock, regardless of market or currency, requires matching IBKR
 contract details with a supported price magnifier (1 or 100); the reciprocal converts
 native price units into major currency units. Missing or ambiguous units block entry.
-Verify actual LSE contract quotation units against broker quotes/what-if before a
-supervised LSE session; local fixtures do not establish that broker evidence.
+There is no implicit 1:1 unit assumption for non-GBP stocks. The same check handles
+broker-confirmed subunits such as pence or cents without guessing from the currency label.
 
-FX acquisition is bounded by four seconds and valuation freshness is checked again
+The same contract response must supply positive, finite `minSize` and `sizeIncrement`.
+Execution remains restricted to whole shares. The exact decimal increment is intersected
+with whole shares (0.0001 permits whole shares, 2.5 permits multiples of five, 100 permits
+multiples of 100). After the risk/notional ceilings are applied, the ledger rounds down
+to the permitted increment and checks the minimum within its reservation transaction.
+The normalized minimum/increment, risk-derived quantity and limiting reason persist
+across restart. The broker credit preview receives this final quantity. Existing fills
+and protective children are not resized by these new-entry rules.
+
+Verify actual contract quotation/quantity units and order support through broker metadata
+and what-if before a supervised session in each market. A market appearing in the run
+builder does not establish entitlement, FX availability, venue order support or method
+validation. Unsupported metadata or unavailable FX rejects entry; no guessed defaults
+or alternate feed are substituted. Local fixtures do not establish broker evidence.
+
+Contract-unit/FX acquisition is bounded by four seconds and valuation freshness is checked again
 before reservation and after credit preview. Invalid, crossed, future, stale or missing
 quotes reject admission. Conversion, source quotes, timestamps and both currencies are
 persisted with the reservation. Pending notional uses that recorded conversion; a

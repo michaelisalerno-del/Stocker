@@ -178,12 +178,14 @@ after calling `stocker_launcher.configure_numeric_runtime()` when diagnosing thi
 Do not loosen score assertions, regenerate fixtures or change selection to mask it.
 
 The account-currency sizing migration adds valuation/currency evidence and price-unit
-columns to the ledger. It does not infer units for old records. Before enabling a
-foreign-currency run, verify fresh broker FX, actual GBP contract quotation units if
-applicable, account-currency risk/notional settings and the non-executing credit preview.
+and normalized minimum-quantity/increment columns to the ledger. It does not infer units
+for old records. Before enabling any market, verify broker contract quotation/quantity
+units, fresh broker FX where required, account-currency risk/notional settings and the
+non-executing credit preview. Missing broker size metadata blocks entry; it is not
+permission to substitute one-share lots. Fractional execution remains unsupported.
 An active legacy record with unknown currency blocks new entries until settled.
-Rollback to a pre-conversion release must keep new entries paused: that release cannot
-apply the new cross-currency admission policy, even though additive columns are readable.
+Rollback to a release without these unit/quantity controls must keep new entries paused:
+it cannot apply the complete admission policy, even though additive columns are readable.
 Keep the current database, valuation evidence and broker protection through recovery.
 
 Code rollback switches to a retained release; it is **not** permission to restore an older

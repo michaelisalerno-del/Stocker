@@ -366,7 +366,9 @@ ledger reservation prevents cross-run capacity races and retains uncertain submi
 across restart. Explicit currency-compatible exposure limits and broker credit preview
 can reduce/reject risk-derived quantities without changing method calculations.
 Shared execution values native stock risk/notional in the verified IBKR account base
-currency using fresh broker FX and explicit quotation units. The ledger retains this
+currency using fresh broker FX and explicit quotation units for every stock. Broker
+minimum quantities and increments constrain the final size inside the atomic reservation.
+The ledger retains this
 valuation evidence across restart; method entry/stop/target prices remain native.
 See [execution safety](execution_safety.md#shared-entry-admission) for the policy.
 

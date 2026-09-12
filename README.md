@@ -103,6 +103,10 @@ until reconciled, including across restart. See the
 
 ## Checks
 
+The opt-in [dual-feed equivalence diagnostic](docs/DUAL_FEED_DIAGNOSTIC.md) compares
+the existing TBT tape with ordinary IBKR trade-volume observations on a dedicated
+read-only PAPER session. It cannot enable runs or replace the production feed.
+
 ```bash
 bash scripts/check.sh
 ```

@@ -74,6 +74,12 @@ class OrderPlan:
     method_target_price: float | None = None
     risk_derived_quantity: int | None = None
     sizing_reason: str | None = None
+    account_currency: str | None = None
+    price_currency: str | None = None
+    price_unit: float = 1.0
+    account_per_price_unit: float = 1.0
+    fx_observed_at: datetime | None = None
+    fx_evidence: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

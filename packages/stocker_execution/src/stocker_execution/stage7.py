@@ -11,6 +11,8 @@ from math import floor, isfinite
 from typing import Protocol
 
 from stocker_core.runs import Environment, RunConfig, RunRiskConfig
+from stocker_execution.discovery import DiscoveryFx
+from stocker_execution.execution_currency import execution_valuation
 from stocker_execution.execution_ledger import AdmissionRejected, ExecutionLedger
 from stocker_execution.execution_models import (
     BrokerAccountState,
@@ -124,6 +126,10 @@ class ExecutionBroker(Protocol):
 
     async def entry_quote(self, instrument: QualifiedInstrument) -> CurrentQuote: ...
 
+    async def discovery_fx(self, currency: str) -> DiscoveryFx: ...
+
+    async def price_unit(self, instrument: QualifiedInstrument) -> float: ...
+
     async def shortable_quantity(self, instrument: QualifiedInstrument) -> float: ...
 
     async def check_order_capacity(
@@ -206,6 +212,7 @@ class Stage7RiskEngine:
         order_intent: StrategySignal,
         account_state: BrokerAccountState,
         risk_config: RunRiskConfig | None,
+        account_per_price_unit: float = 1.0,
     ) -> Stage7RiskDecision:
         if risk_config is None:
             return _rejected(RiskRejection.INVALID_RISK_CONFIG)
@@ -271,7 +278,9 @@ class Stage7RiskEngine:
             return _rejected(RiskRejection.INVALID_STOP_DISTANCE)
 
         risk_budget = equity * risk_fraction
-        quantity = floor(risk_budget / per_share_risk)
+        if not isfinite(account_per_price_unit) or account_per_price_unit <= 0:
+            return _rejected(RiskRejection.ACCOUNT_STATE_UNAVAILABLE)
+        quantity = floor(risk_budget / (per_share_risk * account_per_price_unit))
         if quantity <= 0:
             return _rejected(RiskRejection.ZERO_QUANTITY)
         return Stage7RiskDecision(
@@ -542,10 +551,23 @@ class Stage7ExecutionService:
                 "run or qualified instrument does not match the Stage 6 intent",
                 actual_account=account_state.account,
             )
+        try:
+            valuation = await asyncio.wait_for(
+                execution_valuation(self._broker, instrument, account_state.currency, self._clock),
+                timeout=4.0,
+            )
+        except Exception as exc:
+            return self._outcome(
+                order_intent.signal_id,
+                ExecutionResultCode.ACCOUNT_STATE_UNAVAILABLE,
+                f"Execution currency valuation unavailable: {exc}",
+                actual_account=account_state.account,
+            )
         risk = Stage7RiskEngine().evaluate(
             order_intent=order_intent,
             account_state=account_state,
             risk_config=self._run.risk,
+            account_per_price_unit=valuation.account_per_price_unit,
         )
         if self._run.method_spec_hash is not None and (
             order_intent.method_spec_hash != self._run.method_spec_hash
@@ -679,6 +701,12 @@ class Stage7ExecutionService:
         plan = replace(
             plan,
             created_at=checked_at,
+            account_currency=valuation.account_currency,
+            price_currency=valuation.price_currency,
+            price_unit=valuation.price_unit,
+            account_per_price_unit=valuation.account_per_price_unit,
+            fx_observed_at=valuation.fx_observed_at,
+            fx_evidence=valuation.fx_evidence,
             entry_order_type=EntryOrderType.LIMIT,
             entry_limit_price=limit,
             entry_expires_at=min(
@@ -696,18 +724,18 @@ class Stage7ExecutionService:
                 actual_account=account_state.account,
             )
         if (
-            account_state.currency != instrument.currency
-            or account_state.gross_position_value is None
+            account_state.gross_position_value is None
             or not isfinite(account_state.gross_position_value)
             or account_state.gross_position_value < 0
         ):
             return self._outcome(
                 order_intent.signal_id,
                 ExecutionResultCode.ACCOUNT_STATE_UNAVAILABLE,
-                "Verified matching account/instrument currency and gross position value required",
+                "Verified account-currency gross position value required",
                 actual_account=account_state.account,
             )
         try:
+            valuation.validate(self._clock())
             reserved = self._ledger.reserve(
                 plan,
                 expected_account=self._expected_account,
@@ -718,10 +746,13 @@ class Stage7ExecutionService:
                 account_revision=account_revision,
                 require_settled_entries=True,
             )
-        except AdmissionRejected as exc:
+        except (AdmissionRejected, ValueError) as exc:
             return self._outcome(
                 order_intent.signal_id,
-                ExecutionResultCode(str(exc)),
+                ExecutionResultCode(str(exc))
+                if isinstance(exc, AdmissionRejected)
+                else ExecutionResultCode.ACCOUNT_STATE_UNAVAILABLE,
+                str(exc),
                 actual_account=account_state.account,
             )
         if not reserved:
@@ -749,6 +780,7 @@ class Stage7ExecutionService:
                     raise ValueError("METHOD_SHORTABILITY_UNAVAILABLE")
             await self._broker.check_order_capacity(plan, instrument)
             now = self._clock()
+            valuation.validate(now)
             if self._run is not admission_run:
                 raise ValueError("Run configuration changed during credit preview")
             if (

@@ -1530,6 +1530,32 @@ class IbkrConnection:
         self._scanner_stock_type_cache[con_id] = stock_type
         return stock_type
 
+    async def price_unit(self, instrument: QualifiedInstrument) -> float:
+        """Currency units per API stock price unit; prices themselves stay native."""
+        self._require_connected()
+        request = self._client.reqContractDetailsAsync(_to_ib_contract(instrument))
+        try:
+            details = await asyncio.wait_for(request, timeout=self.config.request_timeout_seconds)
+        finally:
+            if isinstance(request, asyncio.Future) and request.cancelled():
+                wrapper = cast(Any, self._client).wrapper
+                for request_id, future in tuple(wrapper._futures.items()):
+                    if future is request:
+                        wrapper._endReq(request_id)
+        if len(details) != 1:
+            raise IbkrError("EXECUTION_PRICE_UNIT_UNAVAILABLE: ambiguous contract")
+        detail = cast(Any, details[0])
+        contract = detail.contract
+        if (
+            contract.conId != instrument.con_id
+            or contract.secType != "STK"
+            or contract.currency != instrument.currency
+            or getattr(contract, "multiplier", "") not in ("", "1")
+            or getattr(detail, "priceMagnifier", None) not in (1, 100)
+        ):
+            raise IbkrError("EXECUTION_PRICE_UNIT_UNAVAILABLE: unverified stock quotation unit")
+        return 1.0 / float(detail.priceMagnifier)
+
     async def discovery_fx(self, currency: str) -> DiscoveryFx:
         """One audited FX snapshot per discovery, on the existing broker connection."""
         from ib_async import Forex

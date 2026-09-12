@@ -102,6 +102,12 @@ class ExecutionRecord:
     risk_derived_quantity: int | None = None
     sizing_reason: str | None = None
     broker_reported_entry_filled: float | None = None
+    account_currency: str | None = None
+    price_currency: str | None = None
+    price_unit: float = 1.0
+    account_per_price_unit: float = 1.0
+    fx_observed_at: datetime | None = None
+    fx_evidence: str | None = None
 
     @property
     def fill_relative_risk(self) -> float | None:
@@ -129,6 +135,15 @@ class ExecutionRecord:
             else None
         )
         return {
+            "account_currency": self.account_currency,
+            "price_currency": self.price_currency,
+            "price_unit": self.price_unit,
+            "account_per_price_unit": self.account_per_price_unit,
+            "fx_observed_at": self.fx_observed_at.isoformat() if self.fx_observed_at else None,
+            "fx_evidence": self.fx_evidence,
+            "account_per_share_initial_risk": risk * self.account_per_price_unit
+            if risk is not None
+            else None,
             "risk_derived_quantity": self.risk_derived_quantity,
             "admitted_quantity": self.intended_quantity,
             "sizing_reason": self.sizing_reason,
@@ -152,7 +167,8 @@ class ExecutionRecord:
                 if self.average_exit_price is not None and risk is not None
                 else None
             ),
-            "realized_execution_r": self.realized_pnl / (self.filled_quantity * risk)
+            "realized_execution_r": self.realized_pnl
+            / (self.filled_quantity * risk * self.price_unit)
             if self.realized_pnl is not None and self.filled_quantity > 0 and risk is not None
             else None,
             "exit_reason": self.exit_reason,
@@ -325,6 +341,12 @@ class ExecutionLedger:
                 self._ensure_column(connection, "execution_plans", column, "REAL")
             self._ensure_column(connection, "execution_plans", "exit_reason", "TEXT")
             self._ensure_column(connection, "execution_plans", "risk_derived_quantity", "INTEGER")
+            for column in ("account_currency", "price_currency", "fx_observed_at", "fx_evidence"):
+                self._ensure_column(connection, "execution_plans", column, "TEXT")
+            for column in ("price_unit", "account_per_price_unit"):
+                self._ensure_column(
+                    connection, "execution_plans", column, "REAL NOT NULL DEFAULT 1"
+                )
             self._ensure_column(connection, "execution_plans", "sizing_reason", "TEXT")
             self._ensure_column(connection, "execution_plans", "position_limit", "INTEGER")
             self._ensure_column(connection, "execution_plans", "gross_notional_limit", "REAL")
@@ -428,6 +450,12 @@ class ExecutionLedger:
                     # IBKR's preview has no attribution proving whether another
                     # unfilled entry is included. Never estimate or double-debit margin.
                     raise AdmissionRejected("PENDING_ENTRY_CAPACITY_UNVERIFIED")
+                if plan.account_currency is not None and any(
+                    row["account_currency"] != plan.account_currency for row in rows
+                ):
+                    # An account-base change (or legacy unlabelled exposure) cannot
+                    # relabel an existing monetary ceiling into a different unit.
+                    raise AdmissionRejected("ACCOUNT_STATE_UNAVAILABLE")
                 if account_revision is not None:
                     local: dict[int, float] = {}
                     for row in rows:
@@ -450,11 +478,29 @@ class ExecutionLedger:
                         if row["gross_notional_limit"] is not None
                     ]
                     max_gross_notional = min([max_gross_notional, *limits_notional])
-                    pending = sum(row["remaining"] * row["entry_reference"] for row in rows)
+                    if not all(
+                        isfinite(value) and value > 0
+                        for value in (
+                            max_gross_notional,
+                            plan.entry_reference,
+                            plan.account_per_price_unit,
+                            *(row["account_per_price_unit"] for row in rows),
+                        )
+                    ):
+                        raise AdmissionRejected("ACCOUNT_STATE_UNAVAILABLE")
+                    pending = sum(
+                        row["remaining"] * row["entry_reference"] * row["account_per_price_unit"]
+                        for row in rows
+                    )
                     if not isfinite(broker_gross_notional) or broker_gross_notional < 0:
                         raise AdmissionRejected("ACCOUNT_STATE_UNAVAILABLE")
                     available = max_gross_notional - broker_gross_notional - pending
-                    quantity = min(plan.quantity, floor(max(0, available) / plan.entry_reference))
+                    quantity = min(
+                        plan.quantity,
+                        floor(
+                            max(0, available) / (plan.entry_reference * plan.account_per_price_unit)
+                        ),
+                    )
                     if quantity < 1:
                         raise AdmissionRejected("CAPACITY_REACHED")
                     plan = replace(
@@ -510,12 +556,20 @@ class ExecutionLedger:
                 connection.execute(
                     "UPDATE execution_plans SET risk_derived_quantity = ?, sizing_reason = ?, "
                     "position_limit = ?, gross_notional_limit = ?, "
+                    "account_currency = ?, price_currency = ?, price_unit = ?, "
+                    "account_per_price_unit = ?, fx_observed_at = ?, fx_evidence = ?, "
                     "broker_reported_entry_filled = 0 WHERE order_plan_id = ?",
                     (
                         plan.risk_derived_quantity,
                         plan.sizing_reason,
                         max_positions,
                         max_gross_notional,
+                        plan.account_currency,
+                        plan.price_currency,
+                        plan.price_unit,
+                        plan.account_per_price_unit,
+                        plan.fx_observed_at.isoformat() if plan.fx_observed_at else None,
+                        plan.fx_evidence,
                         plan.order_plan_id,
                     ),
                 )
@@ -1323,7 +1377,8 @@ class ExecutionLedger:
             (plan_id,),
         ).fetchall()
         plan = connection.execute(
-            "SELECT intended_quantity, side FROM execution_plans WHERE order_plan_id = ?",
+            "SELECT intended_quantity, side, price_unit FROM execution_plans "
+            "WHERE order_plan_id = ?",
             (plan_id,),
         ).fetchone()
         if plan is None:
@@ -1363,7 +1418,9 @@ class ExecutionLedger:
         if closed and entry_average is not None and exit_average is not None:
             closed_quantity = min(entry_quantity, exit_quantity)
             direction = 1 if plan["side"] == OrderAction.BUY.value else -1
-            gross = direction * (exit_average - entry_average) * closed_quantity
+            gross = (
+                direction * (exit_average - entry_average) * closed_quantity * plan["price_unit"]
+            )
             realized_pnl = gross - (commission_total or 0.0)
         connection.execute(
             """
@@ -1446,6 +1503,14 @@ def _record_from_row(row: sqlite3.Row) -> ExecutionRecord:
         commission_total=_optional_float(row["commission_total"]),
         commissions_complete=bool(row["commissions_complete"]),
         risk_derived_quantity=row["risk_derived_quantity"],
+        account_currency=row["account_currency"],
+        price_currency=row["price_currency"],
+        price_unit=float(row["price_unit"]),
+        account_per_price_unit=float(row["account_per_price_unit"]),
+        fx_observed_at=datetime.fromisoformat(row["fx_observed_at"])
+        if row["fx_observed_at"]
+        else None,
+        fx_evidence=row["fx_evidence"],
         sizing_reason=row["sizing_reason"],
         broker_reported_entry_filled=_optional_float(row["broker_reported_entry_filled"]),
         filled_quantity=float(row["filled_quantity"]),

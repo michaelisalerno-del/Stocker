@@ -625,3 +625,75 @@ def test_minimum_tick_timeout_cancels_pending_request(tmp_path):
         connection.disconnect()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("magnifier,expected", [(1, 1.0), (100, 0.01)])
+def test_stock_price_unit_uses_verified_contract_metadata(magnifier, expected):
+    client = FakeOrderClient()
+    client.contract_details = [
+        SimpleNamespace(
+            contract=SimpleNamespace(conId=265598, secType="STK", currency="GBP", multiplier=""),
+            priceMagnifier=magnifier,
+        )
+    ]
+
+    async def scenario():
+        connection = IbkrConnection(_config(), client=client)
+        await connection.connect()
+        return await connection.price_unit(replace(_instrument(), currency="GBP"))
+
+    assert asyncio.run(scenario()) == expected
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("priceMagnifier", None),
+        ("priceMagnifier", 0),
+        ("priceMagnifier", 1000),
+        ("currency", "USD"),
+        ("conId", 1),
+        ("secType", "OPT"),
+        ("multiplier", "100"),
+    ],
+)
+def test_stock_price_unit_rejects_unverified_metadata(field, value):
+    client = FakeOrderClient()
+    contract = SimpleNamespace(conId=265598, secType="STK", currency="GBP", multiplier="")
+    detail = SimpleNamespace(contract=contract, priceMagnifier=100)
+    setattr(detail if field == "priceMagnifier" else contract, field, value)
+    client.contract_details = [detail]
+
+    async def scenario():
+        connection = IbkrConnection(_config(), client=client)
+        await connection.connect()
+        with pytest.raises(IbkrError, match="EXECUTION_PRICE_UNIT_UNAVAILABLE"):
+            await connection.price_unit(replace(_instrument(), currency="GBP"))
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_price_unit_lookup_drops_sdk_waiter():
+    async def scenario():
+        entered = asyncio.Event()
+
+        class Client(FakeOrderClient):
+            def reqContractDetailsAsync(self, contract):
+                request = asyncio.get_running_loop().create_future()
+                self.wrapper._futures = {321: request}
+                self.wrapper._endReq = lambda key: self.wrapper._futures.pop(key)
+                entered.set()
+                return request
+
+        client = Client()
+        connection = IbkrConnection(_config(), client=client)
+        await connection.connect()
+        task = asyncio.create_task(connection.price_unit(replace(_instrument(), currency="GBP")))
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert client.wrapper._futures == {}
+        assert not client.placed
+
+    asyncio.run(scenario())

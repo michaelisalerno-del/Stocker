@@ -14,6 +14,7 @@ from stocker_core.markets import MarketDefinition, get_market
 from stocker_core.runs import RunInstance
 from stocker_execution.acquisition_store import AcquisitionStore
 from stocker_execution.activity_shortlist import ScannerCapabilities
+from stocker_execution.candidate_pipeline import PreOpenAcquisitionPaused
 from stocker_execution.discovery import DiscoveryFx, DiscoveryRow
 from stocker_execution.ibkr import IbkrConnection, IbkrInstrumentUnavailable
 
@@ -151,12 +152,35 @@ class ScannerAcquisition:
             ),
         }
         key = run.run_id, session.session
-        await asyncio.to_thread(self.store.begin, *key, metadata, instance.universe.members)
+        beginning = asyncio.create_task(
+            asyncio.to_thread(self.store.begin, *key, metadata, instance.universe.members)
+        )
+        try:
+            await asyncio.shield(beginning)
+        except asyncio.CancelledError as exc:
+            # Cancelling to_thread does not stop its SQLite transaction. Drain it
+            # before deciding whether this session can be resumed or must be sealed.
+            await beginning
+            if self.clock() < prefix[0] and await asyncio.to_thread(
+                self.store.pending_without_observations, *key
+            ):
+                raise PreOpenAcquisitionPaused() from exc
+            await asyncio.to_thread(
+                self.store.seal,
+                *key,
+                capacity=recipe.pool_capacity,
+                allow_partial=recipe.allow_partial_components,
+                reason="SCANNER_ACQUISITION_INTERRUPTED",
+            )
+            raise
         saved = self.store.session(*key)
         assert saved is not None
         if saved["sealed"]:
             return self._result(*key, recipe=recipe)
         fatal = ""
+        cancellation: asyncio.CancelledError | None = None
+        resumable = False
+        scanner_tasks: list[asyncio.Task[None]] = []
         qualification_tasks: list[asyncio.Task[None]] = []
         try:
             capabilities = await self.broker.scanner_capabilities()
@@ -378,26 +402,42 @@ class ScannerAcquisition:
                                 audit | {"error": str(exc)},
                             )
 
-                await asyncio.gather(*(component(plan) for plan in plans))
+                scanner_tasks = [asyncio.create_task(component(plan)) for plan in plans]
+                await asyncio.gather(*scanner_tasks)
             await asyncio.gather(*qualification_tasks)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
             fatal = "SCANNER_ACQUISITION_INTERRUPTED"
-            raise
+            cancellation = exc
         except Exception as exc:
             fatal = str(exc)
         finally:
+            # Drain scanner callers before eligibility: they may spawn eligibility work.
+            for task in scanner_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*scanner_tasks, return_exceptions=True)
             # No eligibility worker may write into the pool after it is sealed.
             for task in qualification_tasks:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*qualification_tasks, return_exceptions=True)
-            await asyncio.to_thread(
-                self.store.seal,
-                *key,
-                capacity=recipe.pool_capacity,
-                allow_partial=recipe.allow_partial_components,
-                reason=fatal,
+            resumable = (
+                cancellation is not None
+                and self.clock() < prefix[0]
+                and await asyncio.to_thread(self.store.pending_without_observations, *key)
             )
+            if not resumable:
+                await asyncio.to_thread(
+                    self.store.seal,
+                    *key,
+                    capacity=recipe.pool_capacity,
+                    allow_partial=recipe.allow_partial_components,
+                    reason=fatal,
+                )
+        if cancellation is not None:
+            if resumable:
+                raise PreOpenAcquisitionPaused() from cancellation
+            raise cancellation
         return self._result(*key, recipe=recipe)
 
     def _result(

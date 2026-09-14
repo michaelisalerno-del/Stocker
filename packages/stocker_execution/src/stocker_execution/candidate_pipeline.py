@@ -52,6 +52,10 @@ STATES = ("BROAD_ELIGIBLE", "RANGE5_SELECTED", "RV10_SELECTED", "RV15_SELECTED")
 CAPACITY_REASON = "BROAD_OPENING_DATA_CAPACITY_UNRESOLVED"
 
 
+class PreOpenAcquisitionPaused(asyncio.CancelledError):
+    """The provider preserved an unobserved acquisition for a pre-open restart."""
+
+
 def instrument(identity: CandidateIdentity) -> QualifiedInstrument:
     return QualifiedInstrument(
         identity.symbol,
@@ -313,6 +317,37 @@ class CandidateStore:
             result["ready"] = result["state"] == "SESSION_HARD_ACTIVE"
             result["watchlist_size"] = counts.get(len(STAGES) - 1, 0)
             return result
+
+    def record_preopen_pause(self, run_id: str, session: date, now: datetime) -> bool:
+        """Audit a resumable cancellation without changing any selection evidence."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT state,completed_stages,metadata FROM opening_candidate_sessions "
+                "WHERE run_id=? AND session=?",
+                (run_id, str(session)),
+            ).fetchone()
+            if row is None or row["state"] != "DISCOVERY" or row["completed_stages"]:
+                return False
+            metadata = json.loads(row["metadata"])
+            opening = metadata.get("opens_at")
+            if not opening or require_aware(now) >= datetime.fromisoformat(opening):
+                return False
+            for table in ("opening_candidate_population", "opening_candidate_stages"):
+                if db.execute(
+                    f"SELECT 1 FROM {table} WHERE run_id=? AND session=? LIMIT 1",
+                    (run_id, str(session)),
+                ).fetchone():
+                    return False
+            metadata.setdefault("preopen_pauses", []).append(
+                {"at": now.isoformat(), "reason": "UNOBSERVED_ACQUISITION_PAUSED_BEFORE_OPEN"}
+            )
+            db.execute(
+                "UPDATE opening_candidate_sessions SET metadata=?,updated_at=? "
+                "WHERE run_id=? AND session=?",
+                (json.dumps(metadata), now.isoformat(), run_id, str(session)),
+            )
+            return True
 
     def begin(self, instance: RunInstance, market: MarketSession, now: datetime) -> None:
         run = instance.config
@@ -614,6 +649,10 @@ class CandidatePipeline:
             await asyncio.to_thread(
                 self.store.save_population, *key, identities, rejected, self.clock(), failure_reason
             )
+        except PreOpenAcquisitionPaused:
+            if not self.store.record_preopen_pause(*key, self.clock()):
+                self.store.fail(*key, "CANDIDATE_SELECTION_INTERRUPTED", self.clock())
+            raise
         except asyncio.CancelledError:
             self.store.fail(*key, "CANDIDATE_SELECTION_INTERRUPTED", self.clock())
             raise

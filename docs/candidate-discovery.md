@@ -86,6 +86,15 @@ stage boundary (final reduction before the first method checkpoint). A late star
 without a persisted stage whose deadline has passed, or missed cycle spanning the next stage
 reports `CANDIDATE_SELECTION_WINDOW_MISSED`; it never rebuilds a hypothetical earlier list.
 
+An orderly pause or shutdown before the market opens preserves a scanner acquisition only
+when it is still pending and unsealed, every component is pending, and there are no scanner
+hits, qualified pool rows, history observations or candidate-stage/population rows. The
+provider drains outstanding work before making this decision, including the initial SQLite
+transaction. The candidate session records `preopen_pauses` and remains DISCOVERY. Resume
+uses the same session and recipe; it does not erase failed observations. At/after the open,
+observed acquisition, genuine failures and missed stage windows keep their existing failure
+behavior. See [the September 14 investigation](market-readiness-20260914.md).
+
 State is DISCOVERY -> BROAD_ELIGIBLE -> RANGE5_SELECTED -> RV10_SELECTED -> RV15_SELECTED
 -> SESSION_HARD_ACTIVE. Every stage is an atomic immutable snapshot. Only survivors feed the
 next stage, including missing-last candidates when the population falls below capacity.

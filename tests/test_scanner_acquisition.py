@@ -452,6 +452,10 @@ def test_fx_resolution_changes_only_pending_filters_and_preserves_observed_reque
     assert json.loads(store.plan(*key, 1, fresh, resolve_fx=True)["request"]) == json.loads(
         json.dumps(asdict(missing))
     )
+    before = store.details(*key, "components", 200, 0)
+    with pytest.raises(ValueError, match="sealed"):
+        store.plan(*key, 2, fresh, resolve_fx=True)
+    assert store.details(*key, "components", 200, 0) == before
 
 
 @pytest.mark.parametrize("start_seconds", [50, 65, 81])
@@ -994,5 +998,183 @@ def test_acquisition_timeout_has_an_actionable_persisted_reason(tmp_path):
         assert summary["state"] == "DEGRADED"
         assert "ACQUISITION_DEADLINE_EXCEEDED" in summary["reason"]
         assert summary["completed_stages"] == 0
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("ending", "market"),
+    [
+        ("disable", MarketId.US_ALL),
+        ("stop", MarketId.US_ALL),
+        ("restart", MarketId.US_ALL),
+        ("restart", MarketId.AUSTRALIA_ASX),
+    ],
+)
+def test_preopen_pause_resumes_unobserved_acquisition_without_losing_the_session(
+    tmp_path, ending, market
+):
+    async def scenario():
+        _, instance, session = setup_run(market, count=10)
+        now = [session.opens_at - timedelta(minutes=2)]
+        waiting, release = asyncio.Event(), asyncio.Event()
+
+        async def wait(due):
+            waiting.set()
+            await release.wait()
+            now[0] = max(now[0], due)
+
+        broker = Broker(market)
+        path = tmp_path / "preopen-pause.sqlite"
+        acquisition = AcquisitionStore(path)
+        candidates = CandidateStore(path)
+        provider = ScannerAcquisition(broker, acquisition, lambda: now[0], wait)
+        pipeline = CandidatePipeline(candidates, provider, Source(), lambda: now[0])
+        await pipeline.advance(instance, session, now[0])
+        await asyncio.wait_for(waiting.wait(), 2)
+        if ending == "disable":
+            paused = replace(instance, config=instance.config.model_copy(update={"enabled": False}))
+            await pipeline.advance(paused, session, now[0])
+        else:
+            await pipeline.stop()
+        key = instance.config.run_id, session.session
+        assert broker.requests == []
+        assert acquisition.session(*key)["sealed"] == 0
+        assert candidates.summary(*key)["state"] == "DISCOVERY"
+        assert len(candidates.summary(*key)["preopen_pauses"]) == 1
+        if ending == "restart":
+            provider = ScannerAcquisition(broker, AcquisitionStore(path), lambda: now[0], wait)
+            pipeline = CandidatePipeline(CandidateStore(path), provider, Source(), lambda: now[0])
+        release.set()
+        await drain(pipeline, instance, session, now)
+        assert len(broker.requests) == 105
+        assert acquisition.session(*key)["state"] == "SCANNER_ACQUISITION_READY"
+        assert candidates.summary(*key)["state"] == "BROAD_ELIGIBLE"
+        assert len(candidates.summary(*key)["preopen_pauses"]) == 1
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("after_open", [False, True])
+def test_pause_during_initial_acquisition_persistence_finishes_before_recovery(
+    tmp_path, after_open
+):
+    import threading
+
+    async def scenario():
+        _, instance, session = setup_run(count=10)
+        now = [session.opens_at - timedelta(minutes=2)]
+        entered, release = threading.Event(), threading.Event()
+
+        class SlowStore(AcquisitionStore):
+            def begin(self, *args):
+                entered.set()
+                assert release.wait(3)
+                super().begin(*args)
+
+        acquisition = SlowStore(tmp_path / "initial-pause.sqlite")
+        candidates = CandidateStore(acquisition.path)
+        broker = Broker()
+        provider = ScannerAcquisition(broker, acquisition, lambda: now[0])
+        pipeline = CandidatePipeline(candidates, provider, Source(), lambda: now[0])
+        await pipeline.advance(instance, session, now[0])
+        assert await asyncio.to_thread(entered.wait, 2)
+        if after_open:
+            now[0] = session.opens_at
+        stopping = asyncio.create_task(pipeline.stop())
+        await asyncio.sleep(0)
+        release.set()
+        await stopping
+        key = instance.config.run_id, session.session
+        assert candidates.summary(*key)["state"] == ("DEGRADED" if after_open else "DISCOVERY")
+        assert acquisition.session(*key)["sealed"] == int(after_open)
+        if after_open:
+            assert candidates.summary(*key)["reason"] == "CANDIDATE_SELECTION_INTERRUPTED"
+        else:
+            assert len(candidates.summary(*key)["preopen_pauses"]) == 1
+        assert broker.requests == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("after_open", [False, True])
+def test_pause_never_reconstructs_a_missed_opening_window(tmp_path, after_open):
+    async def scenario():
+        _, instance, session = setup_run(count=10)
+        now = [session.opens_at - timedelta(minutes=2)]
+        waiting = asyncio.Event()
+
+        async def wait(due):
+            waiting.set()
+            await asyncio.Event().wait()
+
+        broker = Broker()
+        path = tmp_path / "missed-pause.sqlite"
+        acquisition = AcquisitionStore(path)
+        candidates = CandidateStore(path)
+        provider = ScannerAcquisition(broker, acquisition, lambda: now[0], wait)
+        pipeline = CandidatePipeline(candidates, provider, Source(), lambda: now[0])
+        await pipeline.advance(instance, session, now[0])
+        await asyncio.wait_for(waiting.wait(), 2)
+        if after_open:
+            now[0] = session.opens_at
+        await pipeline.stop()
+        key = instance.config.run_id, session.session
+        if after_open:
+            assert acquisition.session(*key)["sealed"] == 1
+            assert candidates.summary(*key)["reason"] == "CANDIDATE_SELECTION_INTERRUPTED"
+        now[0] = session.opens_at + timedelta(minutes=6)
+        resumed = CandidatePipeline(candidates, provider, Source(), lambda: now[0])
+        result = await resumed.advance(instance, session, now[0])
+        assert not result.requests
+        assert result.ineligible[0].reason == (
+            "CANDIDATE_SELECTION_INTERRUPTED" if after_open else "CANDIDATE_SELECTION_WINDOW_MISSED"
+        )
+        assert broker.requests == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("blocked_status", ["RUNNING", "DATA_RECEIVED"])
+def test_late_scanner_database_write_cannot_change_sealed_observations(tmp_path, blocked_status):
+    import threading
+
+    async def scenario():
+        _, instance, session = setup_run(count=10)
+        now = [session.opens_at]
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+        class SlowStore(AcquisitionStore):
+            def component(self, *args):
+                if args[4] == blocked_status and not entered.is_set():
+                    entered.set()
+                    try:
+                        assert release.wait(5)
+                        super().component(*args)
+                    finally:
+                        finished.set()
+                else:
+                    super().component(*args)
+
+        async def wait(due):
+            now[0] = max(now[0], due)
+
+        store = SlowStore(tmp_path / "late-scanner-write.sqlite")
+        recipe = ACQUISITION_EXPERIMENT_V1.model_copy(update={"sweep_active_seconds": (60,)})
+        provider = ScannerAcquisition(Broker(), store, lambda: now[0], wait, recipe)
+        task = asyncio.create_task(provider.acquire(instance))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            key = instance.config.run_id, session.session
+            assert store.session(*key)["sealed"] == 1
+            before = {kind: store.details(*key, kind, 1000, 0) for kind in ("components", "hits")}
+            release.set()
+            assert await asyncio.to_thread(finished.wait, 2)
+            assert {kind: store.details(*key, kind, 1000, 0) for kind in before} == before
+        finally:
+            release.set()
 
     asyncio.run(scenario())

@@ -140,15 +140,26 @@ class AcquisitionStore:
         request = encoded(asdict(component))
         with self.connect() as db:
             db.execute(
-                "INSERT OR IGNORE INTO acquisition_components VALUES (?,?,?,?,?,'PENDING','{}')",
-                (run_id, str(session), sweep, component.component_id, encoded(asdict(component))),
+                "INSERT OR IGNORE INTO acquisition_components "
+                "SELECT ?,?,?,?,?,'PENDING','{}' FROM acquisition_sessions "
+                "WHERE run_id=? AND session=? AND sealed=0",
+                (
+                    run_id,
+                    str(session),
+                    sweep,
+                    component.component_id,
+                    encoded(asdict(component)),
+                    run_id,
+                    str(session),
+                ),
             )
             row = db.execute(
                 "SELECT * FROM acquisition_components WHERE run_id=? AND session=? AND "
                 "sweep=? AND component=?",
                 (run_id, str(session), sweep, component.component_id),
             ).fetchone()
-            assert row is not None
+            if row is None:
+                raise ValueError("Acquisition union is sealed or unavailable")
             result = dict(row)
             if row["request"] != request:
                 old, new = json.loads(row["request"]), json.loads(request)
@@ -191,11 +202,25 @@ class AcquisitionStore:
         rows: Sequence[Any] = (),
     ) -> None:
         with self.connect() as db:
-            db.execute(
+            changed = db.execute(
                 "UPDATE acquisition_components SET status=?,audit=? "
-                "WHERE run_id=? AND session=? AND sweep=? AND component=?",
-                (status, encoded(audit), run_id, str(session), sweep, component),
-            )
+                "WHERE run_id=? AND session=? AND sweep=? AND component=? AND EXISTS "
+                "(SELECT 1 FROM acquisition_sessions WHERE run_id=? AND session=? AND sealed=0)",
+                (
+                    status,
+                    encoded(audit),
+                    run_id,
+                    str(session),
+                    sweep,
+                    component,
+                    run_id,
+                    str(session),
+                ),
+            ).rowcount
+            # The update and raw hits share a transaction with an atomic seal guard.
+            # Cancelled to_thread callers may still reach this point after sealing.
+            if not changed:
+                return
             db.executemany(
                 "INSERT INTO acquisition_hits VALUES (?,?,?,?,?,?,?,?,?)",
                 (
@@ -225,6 +250,7 @@ class AcquisitionStore:
         scanner_rank: int,
     ) -> None:
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             sealed = db.execute(
                 "SELECT sealed FROM acquisition_sessions WHERE run_id=? AND session=?",
                 (run_id, str(session)),
@@ -253,6 +279,29 @@ class AcquisitionStore:
                 "WHERE run_id=? AND session=? AND source_index=?",
                 (encoded(asdict(identity)), run_id, str(session), source_index),
             )
+
+    def pending_without_observations(self, run_id: str, session: date) -> bool:
+        """Only untouched pending acquisition may survive a pre-open cancellation."""
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT state,sealed FROM acquisition_sessions WHERE run_id=? AND session=?",
+                (run_id, str(session)),
+            ).fetchone()
+            if row is None or row["sealed"] or row["state"] != "SCANNER_ACQUISITION_PENDING":
+                return False
+            if db.execute(
+                "SELECT 1 FROM acquisition_components WHERE run_id=? AND session=? "
+                "AND status!='PENDING' LIMIT 1",
+                (run_id, str(session)),
+            ).fetchone():
+                return False
+            for table in ("acquisition_hits", "acquisition_pool", "acquisition_history_requests"):
+                if db.execute(
+                    f"SELECT 1 FROM {table} WHERE run_id=? AND session=? LIMIT 1",
+                    (run_id, str(session)),
+                ).fetchone():
+                    return False
+            return True
 
     def seal(
         self,

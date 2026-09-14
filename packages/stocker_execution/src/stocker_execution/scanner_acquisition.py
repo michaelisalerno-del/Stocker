@@ -14,7 +14,7 @@ from stocker_core.markets import MarketDefinition, get_market
 from stocker_core.runs import RunInstance
 from stocker_execution.acquisition_store import AcquisitionStore
 from stocker_execution.activity_shortlist import ScannerCapabilities
-from stocker_execution.discovery import DiscoveryRow
+from stocker_execution.discovery import DiscoveryFx, DiscoveryRow
 from stocker_execution.ibkr import IbkrConnection, IbkrInstrumentUnavailable
 
 
@@ -95,6 +95,31 @@ class ScannerAcquisition:
     async def _wait_until(self, due: datetime) -> None:
         await asyncio.sleep(max(0, (due - self.clock()).total_seconds()))
 
+    async def _sweep_fx(
+        self, currency: str, due: datetime, cutoff: datetime, lateness_seconds: int
+    ) -> tuple[DiscoveryFx | None, str]:
+        # Preparation may start hours before a market opens. Request FX only near
+        # this sweep, retrying transient failures within a bounded preflight window.
+        await self.wait_until(due - timedelta(seconds=30))
+        deadline = min(
+            cutoff,
+            due if self.clock() < due else due + timedelta(seconds=lateness_seconds),
+        )
+        error = "SCANNER_FX_WINDOW_MISSED"
+        while self.clock() < deadline:
+            try:
+                async with asyncio.timeout((deadline - self.clock()).total_seconds()):
+                    quote = await self.broker.discovery_fx(currency)
+                if self.clock() > deadline:
+                    return None, "SCANNER_FX_WINDOW_MISSED"
+                return quote, ""
+            except TimeoutError:
+                return None, "SCANNER_FX_TIMEOUT"
+            except Exception as exc:
+                error = str(exc) or type(exc).__name__
+            await self.wait_until(min(deadline, self.clock() + timedelta(seconds=1)))
+        return None, error
+
     async def acquire(
         self, instance: RunInstance
     ) -> tuple[tuple[CandidateIdentity, ...], list[dict[str, Any]]]:
@@ -138,15 +163,7 @@ class ScannerAcquisition:
             capability_id = await asyncio.to_thread(
                 self.store.save_capabilities, asdict(capabilities)
             )
-            fx = None
-            fx_error = ""
-            if market.currency != "USD":
-                try:
-                    observed_fx = await self.broker.discovery_fx(market.currency)
-                    fx = observed_fx.local_per_usd
-                except Exception as exc:
-                    fx_error = str(exc)
-            plans = acquisition_scans(recipe, market, capabilities, fx)
+            plans = acquisition_scans(recipe, market, capabilities)
             refs: dict[tuple[str, str], list[tuple[int, Any]]] = {}
             for i, reference in enumerate(instance.universe.members):
                 refs.setdefault((reference.symbol, reference.currency), []).append((i, reference))
@@ -222,28 +239,47 @@ class ScannerAcquisition:
             }
             for planned_sweep in range(len(recipe.sweep_active_seconds)):
                 for plan in plans:
-                    await asyncio.to_thread(self.store.plan, *key, planned_sweep, plan)
+                    await asyncio.to_thread(
+                        self.store.plan, *key, planned_sweep, plan, resolve_fx=True
+                    )
             for sweep, seconds in enumerate(recipe.sweep_active_seconds):
                 due = prefix[seconds // 60] + timedelta(seconds=seconds % 60)
+                observed_fx, fx_error = None, ""
+                if market.currency != "USD":
+                    observed_fx, fx_error = await self._sweep_fx(
+                        market.currency, due, cutoff, recipe.sweep_lateness_seconds
+                    )
+                fx = observed_fx.local_per_usd if observed_fx is not None else None
+                plans = acquisition_scans(recipe, market, capabilities, fx)
+                records = {
+                    plan.component_id: await asyncio.to_thread(
+                        self.store.plan, *key, sweep, plan, resolve_fx=True
+                    )
+                    for plan in plans
+                }
                 await self.wait_until(due)
                 semaphore = asyncio.Semaphore(recipe.scanner_concurrency)
+                sweep_audit = {
+                    "capability_id": capability_id,
+                    "fx_local_per_usd": fx,
+                    "fx_error": fx_error,
+                    "fx_quote": asdict(observed_fx) if observed_fx is not None else None,
+                    "scheduled_at": due.isoformat(),
+                }
 
                 async def component(
                     plan: AcquisitionScan,
                     sweep: int = sweep,
                     due: datetime = due,
                     semaphore: asyncio.Semaphore = semaphore,
+                    records: dict[str, dict[str, Any]] = records,
+                    sweep_audit: dict[str, Any] = sweep_audit,
                 ) -> None:
-                    record = self.store.plan(*key, sweep, plan)
-                    if record["status"] == "COMPLETE":
+                    record = records[plan.component_id]
+                    if record["status"] in {"COMPLETE", "FAILED"}:
                         return
                     # Never repeat an interrupted or missed causal scanner observation.
-                    audit: dict[str, Any] = {
-                        "capability_id": capability_id,
-                        "fx_local_per_usd": fx,
-                        "fx_error": fx_error,
-                        "scheduled_at": due.isoformat(),
-                    }
+                    audit = dict(sweep_audit)
                     if record["status"] != "PENDING":
                         await asyncio.to_thread(
                             self.store.component,

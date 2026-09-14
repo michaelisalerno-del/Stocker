@@ -86,6 +86,16 @@ and contributions. Benchmark diagnostics expose request latency distributions, c
 counts, errors, availability delay, component/sweep rows and actual Range/RV calculation times.
 
 Unsupported scans, late sweeps, failed qualification and incomplete acquisition are explicit.
+Non-USD cap filters obtain a fresh, validated IBKR FX quote for each sweep, starting
+30 seconds before it is due. An unavailable quote is retried at one-second intervals
+until the sweep is due; an already-late preparation is bounded by the existing sweep
+lateness allowance and opening cutoff. A hung request is cancelled at that boundary.
+Failed FX preflight does not delay the uncapped scans beyond the normal sweep time,
+and a later sweep makes a new FX request instead of reusing an earlier failure or rate.
+The exact quote and converted filters are saved with each component. Only pending
+requests can have their currency-dependent filters resolved; recorded observations
+and sealed sessions are not repaired or replayed. A failed earlier sweep still prevents
+the default recipe from accepting the session, even if FX recovers for later sweeps.
 The default recipe does not admit partially completed components. Missing exact live prefixes
 or history transport/deadline failures degrade PAPER selection; no legacy shortlist, fabricated
 score, same-day retrospective repair or stock resurrection is used. The delayed oracle can

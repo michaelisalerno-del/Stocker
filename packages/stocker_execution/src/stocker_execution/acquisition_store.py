@@ -134,7 +134,10 @@ class AcquisitionStore:
             )
         return digest
 
-    def plan(self, run_id: str, session: date, sweep: int, component: Any) -> dict[str, Any]:
+    def plan(
+        self, run_id: str, session: date, sweep: int, component: Any, *, resolve_fx: bool = False
+    ) -> dict[str, Any]:
+        request = encoded(asdict(component))
         with self.connect() as db:
             db.execute(
                 "INSERT OR IGNORE INTO acquisition_components VALUES (?,?,?,?,?,'PENDING','{}')",
@@ -145,10 +148,37 @@ class AcquisitionStore:
                 "sweep=? AND component=?",
                 (run_id, str(session), sweep, component.component_id),
             ).fetchone()
-        assert row is not None
-        if row["request"] != encoded(asdict(component)):
-            raise ValueError("Resolved acquisition component changed during the saved session")
-        return dict(row)
+            assert row is not None
+            result = dict(row)
+            if row["request"] != request:
+                old, new = json.loads(row["request"]), json.loads(request)
+                for field in ("filters", "unsupported_reason"):
+                    old.pop(field)
+                    new.pop(field)
+                if not resolve_fx or old != new:
+                    raise ValueError(
+                        "Resolved acquisition component changed during the saved session"
+                    )
+                # Resolve currency-dependent filters only before an observation starts.
+                # Completed/failed/interrupted observations and sealed sessions are immutable.
+                changed = db.execute(
+                    "UPDATE acquisition_components SET request=? WHERE run_id=? AND session=? "
+                    "AND sweep=? AND component=? AND status='PENDING' AND EXISTS "
+                    "(SELECT 1 FROM acquisition_sessions "
+                    "WHERE run_id=? AND session=? AND sealed=0)",
+                    (
+                        request,
+                        run_id,
+                        str(session),
+                        sweep,
+                        component.component_id,
+                        run_id,
+                        str(session),
+                    ),
+                ).rowcount
+                if changed:
+                    result["request"] = request
+        return result
 
     def component(
         self,

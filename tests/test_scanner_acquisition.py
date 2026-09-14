@@ -23,7 +23,7 @@ from stocker_execution.candidate_oracle import (
     transport_parity,
 )
 from stocker_execution.candidate_pipeline import CandidatePipeline, CandidateStore
-from stocker_execution.discovery import DiscoveryRow
+from stocker_execution.discovery import DiscoveryFx, DiscoveryRow
 from stocker_execution.ibkr import HistoricalBar, QualifiedInstrument
 from stocker_execution.scanner_acquisition import ScannerAcquisition, acquisition_scans
 from test_candidate_pipeline import Source, drain, setup_run
@@ -53,6 +53,7 @@ class Broker:
         self.requests = []
         self.active = self.maximum = self.qualifications = 0
         self.failure = None
+        self.first_pair = None
         self.audit_history_lock = asyncio.Lock()
 
     def resource_status(self):
@@ -62,14 +63,19 @@ class Broker:
         return capabilities(self.market_id)
 
     async def discovery_fx(self, currency):
-        return SimpleNamespace(local_per_usd=0.75)
+        return DiscoveryFx(currency, 0.75, 1, currency + "USD", 1.3, 1.4, "test quote")
 
     async def acquisition_scan(self, request, audit):
         self.requests.append(request)
         self.active += 1
         self.maximum = max(self.maximum, self.active)
         try:
-            await asyncio.sleep(0)
+            if self.first_pair is not None:
+                if self.active == 2:
+                    self.first_pair.set()
+                await self.first_pair.wait()
+            else:
+                await asyncio.sleep(0)
             if self.failure == request.family:
                 raise RuntimeError("component entitlement error")
             market = get_market(self.market_id)
@@ -182,15 +188,22 @@ def test_union_persistence_deadlines_and_market_isolation(tmp_path, market_id):
 
         store = AcquisitionStore(tmp_path / "acquisition.sqlite")
         broker = Broker(market_id)
+        # Require actual overlap, independent of SQLite/thread scheduling speed.
+        broker.first_pair = asyncio.Event()
         provider = ScannerAcquisition(broker, store, lambda: now[0], wait)
-        pool, errors = await provider.acquire(instance)
+        pool, errors = await asyncio.wait_for(provider.acquire(instance), timeout=10)
         assert not errors
         assert len(pool) == 6
         assert {i.market for i in pool} == {market_id}
         assert broker.maximum == 2
         assert broker.qualifications == 6
         assert len(broker.requests) == 105
-        assert observed == [session.minute_prefix(15)[m] for m in (1, 3, 4)]
+        sweep_times = [session.minute_prefix(15)[m] for m in (1, 3, 4)]
+        assert observed == (
+            sweep_times
+            if market_id is MarketId.US_ALL
+            else [t for due in sweep_times for t in (due - timedelta(seconds=30), due)]
+        )
         summary = store.summary(instance.config.run_id, session.session)
         assert summary["raw_hits"] == 315 and summary["duplicate_hits"] == 309
         assert summary["acquisition_count"] == 6
@@ -211,6 +224,264 @@ def test_union_persistence_deadlines_and_market_isolation(tmp_path, market_id):
         hits = store.details(instance.config.run_id, session.session, "hits", 2, 1)
         assert len(hits) == 2 and hits[0]["scanner_rank"] == 1
         assert "range_5m_rank" not in hits[0]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("market_id", [MarketId.AUSTRALIA_ASX, MarketId.UK_LSE])
+def test_fx_is_obtained_near_each_sweep_not_during_early_preparation(tmp_path, market_id):
+    async def scenario():
+        _, instance, session = setup_run(market_id, 10)
+        now = [session.opens_at - timedelta(hours=1)]
+        attempts = []
+
+        class OpeningFxBroker(Broker):
+            async def discovery_fx(self, currency):
+                attempts.append(now[0])
+                if now[0] < session.opens_at:
+                    raise RuntimeError("no current bid, ask, or last")
+                return DiscoveryFx(
+                    currency,
+                    1 + len(attempts) / 10,
+                    1,
+                    currency + "USD",
+                    0.7,
+                    0.71,
+                    now[0].isoformat(),
+                )
+
+        async def wait(due):
+            now[0] = max(now[0], due)
+
+        store = AcquisitionStore(tmp_path / "fx-opening.sqlite")
+        broker = OpeningFxBroker(market_id)
+        provider = ScannerAcquisition(broker, store, lambda: now[0], wait)
+        _, errors = await provider.acquire(instance)
+        assert not errors
+        assert len(broker.requests) == 105
+        assert len(attempts) == 3
+        with store.connect() as db:
+            records = db.execute(
+                "SELECT sweep,request,audit FROM acquisition_components"
+            ).fetchall()
+        for sweep in range(3):
+            due = session.opens_at + timedelta(seconds=(60, 180, 240)[sweep])
+            assert due - timedelta(seconds=30) <= attempts[sweep] <= due
+            for record in (r for r in records if r["sweep"] == sweep):
+                audit = json.loads(record["audit"])
+                assert audit["fx_local_per_usd"] == 1 + (sweep + 1) / 10
+                assert audit["fx_quote"]["observed_at"] == attempts[sweep].isoformat()
+                request = json.loads(record["request"])
+                sent = next(
+                    r
+                    for r in broker.requests[sweep * 35 : (sweep + 1) * 35]
+                    if r.component_id == request["component_id"]
+                )
+                assert request == json.loads(json.dumps(asdict(sent)))
+        # A completed session remains immutable and never reacquires prices/scans.
+        before = [dict(r) for r in records]
+        await provider.acquire(instance)
+        assert len(attempts) == 3
+        with store.connect() as db:
+            assert [
+                dict(r)
+                for r in db.execute("SELECT sweep,request,audit FROM acquisition_components")
+            ] == before
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "recovery", ["before_first_sweep", "second_sweep", "never", "lost_after_first"]
+)
+def test_transient_fx_failure_recovers_before_deadline_without_replaying_sweeps(tmp_path, recovery):
+    async def scenario():
+        _, instance, session = setup_run(MarketId.AUSTRALIA_ASX, 10)
+        now = [session.opens_at - timedelta(hours=1)]
+        available = session.opens_at + timedelta(
+            seconds={
+                "before_first_sweep": 45,
+                "second_sweep": 120,
+                "never": 1000,
+                "lost_after_first": 0,
+            }[recovery]
+        )
+        attempts = []
+
+        class RecoveringFxBroker(Broker):
+            async def discovery_fx(self, currency):
+                attempts.append(now[0])
+                if now[0] < available or (
+                    recovery == "lost_after_first"
+                    and now[0] >= session.opens_at + timedelta(seconds=120)
+                ):
+                    raise RuntimeError("no current bid, ask, or last")
+                return DiscoveryFx(currency, 1.4, 1, "AUDUSD", 0.7, 0.71, now[0].isoformat())
+
+        async def wait(due):
+            now[0] = max(now[0], due)
+
+        store = AcquisitionStore(tmp_path / "fx-recovery.sqlite")
+        broker = RecoveringFxBroker(MarketId.AUSTRALIA_ASX)
+        _, errors = await ScannerAcquisition(broker, store, lambda: now[0], wait).acquire(instance)
+        expected_failures = {
+            "before_first_sweep": 0,
+            "second_sweep": 30,
+            "never": 90,
+            "lost_after_first": 60,
+        }[recovery]
+        with store.connect() as db:
+            failed = db.execute(
+                "SELECT sweep,audit FROM acquisition_components WHERE status='FAILED'"
+            ).fetchall()
+            complete = db.execute(
+                "SELECT COUNT(*) FROM acquisition_components WHERE status='COMPLETE'"
+            ).fetchone()[0]
+        assert len(failed) == expected_failures
+        assert complete == 105 - expected_failures
+        assert len(broker.requests) == complete
+        assert bool(errors) == bool(expected_failures)
+        assert all(json.loads(r["audit"])["error"] == "SCANNER_CAP_FX_UNAVAILABLE" for r in failed)
+        if recovery == "second_sweep":
+            assert {r["sweep"] for r in failed} == {0}
+        if recovery == "lost_after_first":
+            assert {r["sweep"] for r in failed} == {1, 2}
+            assert all(json.loads(r["audit"])["fx_local_per_usd"] is None for r in failed)
+        assert attempts[0] >= session.opens_at
+        assert now[0] == session.opens_at + timedelta(seconds=240)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("ending", ["timeout", "cancel"])
+def test_hung_fx_request_is_cancelled_without_holding_scanners_past_due(
+    tmp_path, monkeypatch, ending
+):
+    async def scenario():
+        _, instance, session = setup_run(MarketId.AUSTRALIA_ASX, 10)
+        now = [session.opens_at]
+        due = session.opens_at + timedelta(seconds=60)
+        entered, exited = asyncio.Event(), asyncio.Event()
+        timers = []
+        original_timeout = asyncio.timeout
+
+        def capture_timeout(delay):
+            timer = original_timeout(delay)
+            timers.append(timer)
+            return timer
+
+        monkeypatch.setattr(asyncio, "timeout", capture_timeout)
+
+        class HangingFxBroker(Broker):
+            async def discovery_fx(self, currency):
+                entered.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    exited.set()
+
+        async def wait(target):
+            now[0] = max(now[0], target)
+
+        store = AcquisitionStore(tmp_path / "fx-timeout.sqlite")
+        broker = HangingFxBroker(MarketId.AUSTRALIA_ASX)
+        recipe = ACQUISITION_EXPERIMENT_V1.model_copy(update={"sweep_active_seconds": (60,)})
+        task = asyncio.create_task(
+            ScannerAcquisition(broker, store, lambda: now[0], wait, recipe).acquire(instance)
+        )
+        await asyncio.wait_for(entered.wait(), timeout=10)
+        if ending == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not broker.requests
+        else:
+            # Trigger the real asyncio timeout deterministically without sleeping.
+            assert timers[0].when() - asyncio.get_running_loop().time() <= 30
+            now[0] = due
+            timers[0].reschedule(asyncio.get_running_loop().time())
+            _, errors = await asyncio.wait_for(task, timeout=10)
+            assert errors[0]["acquisition_failure"]
+            assert len(broker.requests) == 5
+            assert all(r.cap_slice == "UNCAPPED" for r in broker.requests)
+            with store.connect() as db:
+                failed = db.execute(
+                    "SELECT audit FROM acquisition_components WHERE status='FAILED'"
+                ).fetchall()
+            assert len(failed) == 30
+            assert all(json.loads(r[0])["fx_error"] == "SCANNER_FX_TIMEOUT" for r in failed)
+            assert now[0] == due
+        assert exited.is_set()
+        assert store.session(instance.config.run_id, session.session)["sealed"]
+
+    asyncio.run(scenario())
+
+
+def test_fx_resolution_changes_only_pending_filters_and_preserves_observed_requests(tmp_path):
+    _, instance, session = setup_run(MarketId.AUSTRALIA_ASX, 1)
+    store = AcquisitionStore(tmp_path / "fx-resolved-plan.sqlite")
+    store.begin(
+        instance.config.run_id,
+        session.session,
+        {"recipe": ACQUISITION_EXPERIMENT_V1.model_dump(mode="json")},
+        instance.universe.members,
+    )
+    plans = acquisition_scans(
+        ACQUISITION_EXPERIMENT_V1,
+        get_market(MarketId.AUSTRALIA_ASX),
+        capabilities(MarketId.AUSTRALIA_ASX),
+    )
+    missing = next(p for p in plans if p.cap_slice == "MICRO")
+    fresh = replace(missing, filters=(("marketCapAbove", "70"),), unsupported_reason="")
+    key = instance.config.run_id, session.session
+    store.plan(*key, 0, missing)
+    resolved = store.plan(*key, 0, fresh, resolve_fx=True)
+    assert json.loads(resolved["request"]) == json.loads(json.dumps(asdict(fresh)))
+    with pytest.raises(ValueError, match="changed"):
+        store.plan(*key, 0, replace(fresh, rows=5), resolve_fx=True)
+    with pytest.raises(ValueError, match="changed"):
+        store.plan(*key, 0, missing)
+    for status in ("RUNNING", "FAILED", "COMPLETE"):
+        audit = {"error": "original"}
+        store.component(*key, 0, fresh.component_id, status, audit)
+        record = store.plan(*key, 0, missing, resolve_fx=True)
+        assert record["request"] == resolved["request"]
+        assert json.loads(record["audit"]) == audit
+    store.plan(*key, 1, missing)
+    store.seal(*key, capacity=None, allow_partial=False, reason="interrupted")
+    assert json.loads(store.plan(*key, 1, fresh, resolve_fx=True)["request"]) == json.loads(
+        json.dumps(asdict(missing))
+    )
+
+
+@pytest.mark.parametrize("start_seconds", [50, 65, 81])
+def test_late_fx_preparation_respects_the_existing_sweep_window(tmp_path, start_seconds):
+    async def scenario():
+        _, instance, session = setup_run(MarketId.AUSTRALIA_ASX, 10)
+        now = [session.opens_at + timedelta(seconds=start_seconds)]
+        quotes = []
+
+        class LateBroker(Broker):
+            async def discovery_fx(self, currency):
+                quotes.append(now[0])
+                return await super().discovery_fx(currency)
+
+        async def wait(due):
+            now[0] = max(now[0], due)
+
+        broker = LateBroker(MarketId.AUSTRALIA_ASX)
+        store = AcquisitionStore(tmp_path / "fx-late.sqlite")
+        recipe = ACQUISITION_EXPERIMENT_V1.model_copy(update={"sweep_active_seconds": (60,)})
+        _, errors = await ScannerAcquisition(broker, store, lambda: now[0], wait, recipe).acquire(
+            instance
+        )
+        if start_seconds > 80:
+            assert errors[0]["acquisition_failure"]
+            assert not quotes and not broker.requests
+        else:
+            assert not errors
+            assert len(quotes) == 1 and len(broker.requests) == 35
+        assert now[0] == session.opens_at + timedelta(seconds=max(start_seconds, 60))
 
     asyncio.run(scenario())
 

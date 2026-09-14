@@ -189,6 +189,10 @@ async function universesPage(refreshing = false) {
 
   if (refreshing) { bindUniverseControls(); showRunStartStatus(); return; }
   const form = document.querySelector("#universe-builder");
+  form.addEventListener("invalid", (event) => {
+    const section = event.target.closest("details");
+    if (section) section.open = true;
+  }, true);
   const marketSelect = form.elements.market_id;
   const strategySelect = form.elements.strategy_id;
   const selectedStrategy = () => strategySelect.selectedOptions[0];

@@ -1,5 +1,7 @@
 # Candidate availability fix — 14 September 2026
 
+Later update: [fresh PAPER authentication resolved the LSE scanner warning](lse-session-refresh-20260914.md). The user has now authorized deployment of the prepared release and replacement runs. The preparation-time findings below are retained.
+
 ## Outcome
 
 The new selectable PAPER method is `SESSION_HARD_CAUSAL_Q1_AVAILABLE_V10`, with candidate

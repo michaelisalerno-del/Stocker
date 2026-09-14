@@ -1,5 +1,7 @@
 # Market readiness investigation — 14 September 2026
 
+Later update: [a fresh PAPER Gateway login resolved LSE scanner warning 492](lse-session-refresh-20260914.md). All five scanner families passed on recheck. The historical investigation below is retained.
+
 Follow-up: the user authorized the separate availability policy after this investigation.
 [V10 is implemented and prepared locally](candidate-availability-fix-20260914.md); the original
 investigation below records the earlier state. Neither the V10 release nor its replacement

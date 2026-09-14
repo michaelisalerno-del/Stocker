@@ -1,5 +1,7 @@
 # Market readiness investigation — 14 September 2026
 
+Deployed update: [the complete prepared release and replacement LSE/Korea runs were activated](market-readiness-deployment-20260914.md) at 11:19 UTC. Earlier deployment boundaries below describe the investigation at that time.
+
 Later update: [a fresh PAPER Gateway login resolved LSE scanner warning 492](lse-session-refresh-20260914.md). All five scanner families passed on recheck. The historical investigation below is retained.
 
 Follow-up: the user authorized the separate availability policy after this investigation.

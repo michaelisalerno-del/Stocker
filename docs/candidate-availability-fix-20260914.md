@@ -1,5 +1,7 @@
 # Candidate availability fix — 14 September 2026
 
+Deployed update: [all prepared fixes and the LSE/Korea V10 runs are now active](market-readiness-deployment-20260914.md), verified at 11:20 UTC. The preparation-time record below is retained.
+
 Later update: [fresh PAPER authentication resolved the LSE scanner warning](lse-session-refresh-20260914.md). The user has now authorized deployment of the prepared release and replacement runs. The preparation-time findings below are retained.
 
 ## Outcome

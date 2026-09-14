@@ -11,6 +11,7 @@ from stocker_core.markets import MarketId
 from stocker_core.methods import (
     LEGACY_SESSION_HARD,
     SESSION_HARD,
+    SESSION_HARD_ACQUISITION_V9,
     SESSION_HARD_CANDIDATES_V8,
     get_method,
 )
@@ -152,6 +153,10 @@ def acquired_session_hard_services(
 
 # Add a method's engine and data composition here; UI never branches on its name.
 _PACKAGES = {
+    (SESSION_HARD_ACQUISITION_V9.method_id, SESSION_HARD_ACQUISITION_V9.version): (
+        SessionHardMethod,
+        acquired_session_hard_services,
+    ),
     (SESSION_HARD.method_id, SESSION_HARD.version): (
         SessionHardMethod,
         acquired_session_hard_services,

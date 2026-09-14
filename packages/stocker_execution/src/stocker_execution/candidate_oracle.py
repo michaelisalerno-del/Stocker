@@ -15,6 +15,7 @@ import structlog
 from stocker_core.candidate_selection import (
     SESSION_HARD_CANDIDATE_RECIPE,
     CandidateIdentity,
+    CandidateMissingPolicy,
     CandidateRank,
     CandidateValue,
     candidate_value,
@@ -46,6 +47,7 @@ def reconstruct(
     bars: dict[int, tuple[HistoricalBar, ...]],
     prefix: tuple[datetime, ...],
     market: MarketId,
+    missing_policy: CandidateMissingPolicy = CandidateMissingPolicy.MISSING_LAST,
 ) -> list[tuple[CandidateRank, ...]]:
     active = tuple(population)
     rankings = []
@@ -60,7 +62,9 @@ def reconstruct(
             )
             for i in active
         }
-        ranked = rank_candidates(stage, active, values, market=market)
+        ranked = rank_candidates(
+            stage, active, values, market=market, missing_policy=missing_policy
+        )
         rankings.append(ranked)
         active = tuple(r.identity for r in ranked if r.selected)
     return rankings
@@ -379,7 +383,12 @@ class OracleAudit:
             if r["identity"]
         }
         prefix = tuple(datetime.fromisoformat(t) for t in metadata["prefix"])
-        rankings = reconstruct(population, bars, prefix, MarketId(metadata["market"]))
+        missing_policy = CandidateMissingPolicy(
+            metadata.get("candidate_missing_policy", CandidateMissingPolicy.MISSING_LAST)
+        )
+        rankings = reconstruct(
+            population, bars, prefix, MarketId(metadata["market"]), missing_policy
+        )
         with self.store.connect() as db:
             hits = [
                 dict(r)
@@ -413,6 +422,10 @@ class OracleAudit:
             datetime.fromisoformat(metadata["cutoff"]),
         )
         metrics["broad_references"] = len(rows)
+        metrics["candidate_missing_policy"] = missing_policy.value
+        metrics["candidate_recipe_id"] = metadata.get(
+            "candidate_recipe_id", SESSION_HARD_CANDIDATE_RECIPE.recipe_id
+        )
         metrics["eligible_population"] = len(population)
         metrics["ineligible_references"] = sum(r["eligibility"] == "INELIGIBLE" for r in rows)
         if metadata["recipe"].get("transport_parity"):

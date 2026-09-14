@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from stocker_core.candidate_selection import (
     SESSION_HARD_CANDIDATE_RECIPE,
     CandidateIdentity,
+    CandidateMissingPolicy,
     CandidateRank,
     candidate_value,
     rank_candidates,
@@ -296,26 +297,31 @@ class CandidateStore:
                 "SELECT COUNT(*) FROM opening_candidate_population WHERE run_id=? AND session=?",
                 (run_id, session.isoformat()),
             ).fetchone()[0]
-            counts = dict(
-                db.execute(
-                    "SELECT stage, SUM(selected) FROM opening_candidate_stages "
+            counts = {
+                r["stage"]: dict(r)
+                for r in db.execute(
+                    "SELECT stage, SUM(selected) AS selected, COUNT(*) AS input_count, "
+                    "SUM(feature_value IS NULL AND selected=0) AS unavailable_rejected "
+                    "FROM opening_candidate_stages "
                     "WHERE run_id=? AND session=? GROUP BY stage",
                     (run_id, session.isoformat()),
                 ).fetchall()
-            )
+            }
             result["stages"] = [
                 dict(
                     stage_id=s.stage_id,
                     score_name=s.score_name,
                     minutes=s.minutes,
                     capacity=s.capacity,
-                    selected=counts.get(i),
+                    selected=counts.get(i, {}).get("selected"),
+                    input_count=counts.get(i, {}).get("input_count"),
+                    unavailable_rejected=counts.get(i, {}).get("unavailable_rejected"),
                     state=STATES[i + 1],
                 )
                 for i, s in enumerate(STAGES)
             ]
             result["ready"] = result["state"] == "SESSION_HARD_ACTIVE"
-            result["watchlist_size"] = counts.get(len(STAGES) - 1, 0)
+            result["watchlist_size"] = counts.get(len(STAGES) - 1, {}).get("selected", 0)
             return result
 
     def record_preopen_pause(self, run_id: str, session: date, now: datetime) -> bool:
@@ -702,7 +708,21 @@ class CandidatePipeline:
                 for i in identities
             }
             assert instance.config.market_id is not None
-            ranked = rank_candidates(stage, identities, values, market=instance.config.market_id)
+            assert instance.config.method_spec is not None
+            missing_policy = CandidateMissingPolicy(
+                instance.config.method_spec["candidate_selection"]["missing_policy"]
+            )
+            ranked = rank_candidates(
+                stage,
+                identities,
+                values,
+                market=instance.config.market_id,
+                missing_policy=missing_policy,
+            )
+            if missing_policy is CandidateMissingPolicy.REJECT_UNAVAILABLE and not any(
+                r.selected for r in ranked
+            ):
+                failures.append("NO_VALID_OPENING_CANDIDATES")
             failure_reason = (
                 f"{CAPACITY_REASON}: " + ("; ".join(failures[:3]) or "stage deadline exceeded")
                 if failures or self.clock() >= limit

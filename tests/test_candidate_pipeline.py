@@ -211,7 +211,8 @@ def test_new_spec_changes_only_candidate_and_operational_fields():
         assert changed == {"method_version", "universe_search", "ranking_capacity"}
         assert content_hash(old) != content_hash(new)
         assert (
-            new["candidate_selection"]["recipe_id"] == "SESSION_HARD_RANGE5_250_RV10_50_RV15_30_V1"
+            new["candidate_selection"]["recipe_id"]
+            == "SESSION_HARD_RANGE5_250_RV10_50_RV15_30_AVAILABLE_V2"
         )
     config, instance, _ = setup_run()
     assert RunsConfig.model_validate(config.model_dump(mode="json")).runs[0] == instance.config

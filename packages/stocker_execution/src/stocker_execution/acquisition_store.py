@@ -84,6 +84,8 @@ class AcquisitionStore:
                 "SELECT run_id,session,recipe_hash,metadata,state,reason,sealed,audit_state,"
                 "json_object('label','AUDIT_ONLY','recipes',json_extract(oracle_metrics,'$.recipes'),"
                 "'range_rank_buckets',json_extract(oracle_metrics,'$.range_rank_buckets'),"
+                "'candidate_missing_policy',json_extract(oracle_metrics,'$.candidate_missing_policy'),"
+                "'candidate_recipe_id',json_extract(oracle_metrics,'$.candidate_recipe_id'),"
                 "'transport_parity',json_extract(oracle_metrics,'$.transport_parity')) AS"
                 " oracle_metrics "
                 "FROM acquisition_sessions WHERE run_id=? AND session=?",

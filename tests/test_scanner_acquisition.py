@@ -207,6 +207,12 @@ def test_union_persistence_deadlines_and_market_isolation(tmp_path, market_id):
         summary = store.summary(instance.config.run_id, session.session)
         assert summary["raw_hits"] == 315 and summary["duplicate_hits"] == 309
         assert summary["acquisition_count"] == 6
+        metadata = json.loads(store.session(instance.config.run_id, session.session)["metadata"])
+        assert metadata["candidate_missing_policy"] == "REJECT_UNAVAILABLE"
+        assert (
+            metadata["candidate_recipe_id"]
+            == instance.config.method_spec["candidate_selection"]["recipe_id"]
+        )
         assert summary["range5_broker_requests"] == 0
         assert summary["upstream_evidence"] == (
             "PROSPECTIVE_IBKR_TEST"

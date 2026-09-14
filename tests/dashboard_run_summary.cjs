@@ -113,6 +113,12 @@ const path = require("node:path");
     await page.evaluate(() => refreshCurrentPage());
     assert.match(await page.locator("main").innerText(), /UNVALIDATED_CROSS_MARKET_PAPER_TRANSFER/);
     assert.match(await page.locator("main").innerText(), /BROAD_OPENING_DATA_CAPACITY_UNRESOLVED/);
+    selection.recipe.missing_policy = "REJECT_UNAVAILABLE";
+    selection.stages[0].unavailable_rejected = 166;
+    selection.stages[1].unavailable_rejected = 3;
+    await page.evaluate(() => refreshCurrentPage());
+    assert.match(await page.locator("main").innerText(), /Stocks with incomplete or invalid opening bars are excluded/);
+    assert.match(await page.locator("main").innerText(), /5m: 166 excluded · 10m: 3 excluded/);
     assert.equal(auditDownloads, 1);
     acquisition = {
       state: "SCANNER_ACQUISITION_READY", upstream_evidence: "PROSPECTIVE_IBKR_TEST",

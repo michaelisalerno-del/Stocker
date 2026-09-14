@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from stocker_core.acquisition import SHADOW_RECIPES, AcquisitionRecipe, AcquisitionScan, cap_bounds
-from stocker_core.candidate_selection import CandidateIdentity
+from stocker_core.candidate_selection import CandidateIdentity, CandidateMissingPolicy
 from stocker_core.markets import MarketDefinition, get_market
 from stocker_core.runs import RunInstance
 from stocker_execution.acquisition_store import AcquisitionStore
@@ -151,6 +151,10 @@ class ScannerAcquisition:
                 else "UNVALIDATED_CROSS_MARKET_ACQUISITION_TRANSFER"
             ),
         }
+        candidate_recipe = run.method_spec["candidate_selection"]
+        if candidate_recipe["missing_policy"] == CandidateMissingPolicy.REJECT_UNAVAILABLE:
+            metadata["candidate_missing_policy"] = candidate_recipe["missing_policy"]
+            metadata["candidate_recipe_id"] = candidate_recipe["recipe_id"]
         key = run.run_id, session.session
         beginning = asyncio.create_task(
             asyncio.to_thread(self.store.begin, *key, metadata, instance.universe.members)

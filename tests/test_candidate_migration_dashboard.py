@@ -105,14 +105,21 @@ def test_original_v8_hashes_and_frozen_trading_spec_remain_unchanged():
     import json
 
     from stocker_core.markets import MarketId
-    from stocker_core.methods import SESSION_HARD_CANDIDATES_V8, content_hash
+    from stocker_core.methods import (
+        SESSION_HARD_ACQUISITION_V9,
+        SESSION_HARD_CANDIDATES_V8,
+        content_hash,
+    )
 
     path = Path(__file__).parent / "fixtures/session_hard_candidates/v8_spec_hashes.json"
     for market, digest in json.loads(path.read_text()).items():
         previous = SESSION_HARD_CANDIDATES_V8.specification(MarketId(market))
         assert content_hash(previous) == digest
         current = SESSION_HARD.specification(MarketId(market))
-        assert current["candidate_selection"] == previous["candidate_selection"]
-        for field in set(previous) - {"method_version", "universe_search"}:
+        assert (
+            SESSION_HARD_ACQUISITION_V9.specification(MarketId(market))["candidate_selection"]
+            == previous["candidate_selection"]
+        )
+        for field in set(previous) - {"method_version", "universe_search", "candidate_selection"}:
             assert current[field] == previous[field]
         assert content_hash(current) != digest

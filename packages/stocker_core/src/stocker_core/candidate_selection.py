@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from math import isfinite
@@ -23,6 +23,11 @@ from stocker_core.markets import MarketId, get_market
 class CandidateEvidenceStatus(StrEnum):
     VALIDATED_EXISTING_RESEARCH = "VALIDATED_EXISTING_RESEARCH"
     UNVALIDATED_TRANSFER = "UNVALIDATED_TRANSFER"
+
+
+class CandidateMissingPolicy(StrEnum):
+    MISSING_LAST = "MISSING_LAST"
+    REJECT_UNAVAILABLE = "REJECT_UNAVAILABLE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +62,12 @@ SESSION_HARD_CANDIDATE_RECIPE = SessionHardCandidateRecipe(
         "39f730eac22d5bc9a380a9dbf028c9c374716b1c2c51d1f1e1f80a482fc91aab",
         "aca8441a0190ca8d66d7668ad152e06c05a15d1859b696d089a67747d8eb0364",
     ),
+)
+
+SESSION_HARD_AVAILABLE_CANDIDATE_RECIPE = replace(
+    SESSION_HARD_CANDIDATE_RECIPE,
+    recipe_id="SESSION_HARD_RANGE5_250_RV10_50_RV15_30_AVAILABLE_V2",
+    market_scope="UNVALIDATED_AVAILABILITY_POLICY_PAPER_EXPERIMENT",
 )
 
 
@@ -209,6 +220,7 @@ def rank_candidates(
     values: Mapping[int, CandidateValue],
     *,
     market: MarketId,
+    missing_policy: CandidateMissingPolicy = CandidateMissingPolicy.MISSING_LAST,
 ) -> tuple[CandidateRank, ...]:
     """Global HIGH ranking; missing last; frozen ascending SHA256(symbol) ties.
 
@@ -216,6 +228,7 @@ def rank_candidates(
     a ticker never replaces broker identity. Previous stage survivors are the only
     identities a caller may supply to the next stage.
     """
+    missing_policy = CandidateMissingPolicy(missing_policy)
     if stage.direction != "HIGH" or not stage.enabled:
         raise ValueError("This frozen recipe requires enabled HIGH stages")
     if len({i.con_id for i in identities}) != len(identities):
@@ -248,7 +261,11 @@ def rank_candidates(
             scores[identity.con_id].value,
             scores[identity.con_id].missing_reason,
             rank,
-            rank <= stage.capacity,
+            rank <= stage.capacity
+            and (
+                missing_policy is CandidateMissingPolicy.MISSING_LAST
+                or scores[identity.con_id].value is not None
+            ),
         )
         for rank, identity in enumerate(sorted(identities, key=key), 1)
     )

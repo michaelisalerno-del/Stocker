@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from stocker_core.candidate_selection import (
+    SESSION_HARD_AVAILABLE_CANDIDATE_RECIPE,
     SESSION_HARD_CANDIDATE_RECIPE,
+    CandidateMissingPolicy,
     candidate_evidence_status,
 )
 from stocker_core.discovery import SESSION_HARD_DISCOVERY, DiscoveryProfile
@@ -318,7 +320,7 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
     from stocker_core.acquisition import ACQUISITION_EXPERIMENT_V1
 
     spec = session_hard_candidate_specification(selected)
-    spec["method_version"] = SESSION_HARD.version
+    spec["method_version"] = SESSION_HARD_ACQUISITION_V9.version
     spec["universe_acquisition"] = ACQUISITION_EXPERIMENT_V1.model_dump(mode="json")
     spec["universe_search"] = dict(
         spec["universe_search"],
@@ -328,16 +330,45 @@ def session_hard_specification(selected: MarketId) -> dict[str, Any]:
     return spec
 
 
-SESSION_HARD = replace(
+SESSION_HARD_ACQUISITION_V9 = replace(
     SESSION_HARD_CANDIDATES_V8,
     version="SESSION_HARD_CAUSAL_Q1_ACQUISITION_V9",
     specification_builder=session_hard_specification,
 )
 
 
+def session_hard_available_specification(selected: MarketId) -> dict[str, Any]:
+    spec = session_hard_specification(selected)
+    recipe = SESSION_HARD_AVAILABLE_CANDIDATE_RECIPE
+    spec["method_version"] = SESSION_HARD.version
+    spec["candidate_selection"] = dict(
+        spec["candidate_selection"],
+        recipe_id=recipe.recipe_id,
+        market_scope=recipe.market_scope,
+        missing_policy=CandidateMissingPolicy.REJECT_UNAVAILABLE.value,
+        mathematical_reference_recipe_id=SESSION_HARD_CANDIDATE_RECIPE.recipe_id,
+        evidence_status="UNVALIDATED_AVAILABILITY_POLICY",
+        transport_failure_policy="DEGRADE_SESSION",
+        empty_population_policy="NO_VALID_OPENING_CANDIDATES",
+    )
+    return spec
+
+
+SESSION_HARD = replace(
+    SESSION_HARD_ACQUISITION_V9,
+    version="SESSION_HARD_CAUSAL_Q1_AVAILABLE_V10",
+    specification_builder=session_hard_available_specification,
+)
+
+
 def runnable_methods() -> tuple[MethodDefinition, ...]:
-    """Existing V7/V8 runs retain their specifications; only V9 is selectable."""
-    return (SESSION_HARD, SESSION_HARD_CANDIDATES_V8, LEGACY_SESSION_HARD)
+    """Existing V7/V8/V9 runs retain their specifications; only V10 is selectable."""
+    return (
+        SESSION_HARD,
+        SESSION_HARD_ACQUISITION_V9,
+        SESSION_HARD_CANDIDATES_V8,
+        LEGACY_SESSION_HARD,
+    )
 
 
 def installed_methods() -> tuple[MethodDefinition, ...]:

@@ -1,5 +1,10 @@
 # Market readiness investigation — 14 September 2026
 
+Follow-up: the user authorized the separate availability policy after this investigation.
+[V10 is implemented and prepared locally](candidate-availability-fix-20260914.md); the original
+investigation below records the earlier state. Neither the V10 release nor its replacement
+run configurations has been deployed.
+
 ## Result and release boundary
 
 The required-risk-field form fix is deployed as `c8a3753`. It opens the collapsed risk

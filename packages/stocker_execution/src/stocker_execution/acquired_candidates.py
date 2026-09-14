@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from stocker_core.candidate_selection import CandidateIdentity
+from stocker_core.candidate_selection import CandidateIdentity, CandidateMissingPolicy
 from stocker_core.runs import RunInstance
 from stocker_execution.acquisition_store import AcquisitionStore
 from stocker_execution.candidate_oracle import OracleAudit
@@ -32,6 +32,8 @@ class RecordedOpeningSource(OpeningBarSource):
         run_id: str,
         clock: Callable[[], datetime],
         phase: str = "LIVE",
+        *,
+        require_complete: bool = True,
     ):
         self.shared, self.store, self.run_id, self.clock, self.phase = (
             shared,
@@ -41,6 +43,7 @@ class RecordedOpeningSource(OpeningBarSource):
             phase,
         )
         self.history = shared.history
+        self.require_complete = require_complete
 
     async def prefix(
         self,
@@ -72,7 +75,7 @@ class RecordedOpeningSource(OpeningBarSource):
                 payload["completed_before_next_stage"] = self.clock() < due + timedelta(
                     minutes=STAGES[1].minutes - STAGES[0].minutes
                 )
-            if self.phase == "LIVE" and not payload["prefix_ready"]:
+            if self.phase == "LIVE" and self.require_complete and not payload["prefix_ready"]:
                 raise IbkrError("MISSING_REQUIRED_OPENING_PREFIX")
             return bars
         except BaseException as exc:
@@ -109,7 +112,17 @@ class AcquiredCandidates:
     def pipeline(self, instance: RunInstance) -> CandidatePipeline:
         run_id = instance.config.run_id
         if run_id not in self.pipelines:
-            source = RecordedOpeningSource(self.shared_source, self.store, run_id, self.clock)
+            assert instance.config.method_spec is not None
+            missing_policy = CandidateMissingPolicy(
+                instance.config.method_spec["candidate_selection"]["missing_policy"]
+            )
+            source = RecordedOpeningSource(
+                self.shared_source,
+                self.store,
+                run_id,
+                self.clock,
+                require_complete=missing_policy is CandidateMissingPolicy.MISSING_LAST,
+            )
             self.pipelines[run_id] = CandidatePipeline(
                 self.candidate_store, self.provider, source, self.clock
             )

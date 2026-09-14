@@ -2,9 +2,20 @@
 
 ## Current: new PAPER runs
 
-Current method version: `SESSION_HARD_CAUSAL_Q1_ACQUISITION_V9`.
+Current method version: `SESSION_HARD_CAUSAL_Q1_AVAILABLE_V10`.
 Stable method identity: `SESSION_HARD_HV_HIGH_PRE_MOVE_DOWN_STRUCTURE_D`.
-Candidate recipe: `SESSION_HARD_RANGE5_250_RV10_50_RV15_30_V1`.
+Candidate recipe: `SESSION_HARD_RANGE5_250_RV10_50_RV15_30_AVAILABLE_V2`.
+
+V10 uses the same scanner acquisition, exact prefixes, Range/RV formulas, capacities and
+tie ordering. It rejects stock-local unavailable/invalid scores at every stage rather than
+selecting missing-score rows or failing the whole stage for a successful incomplete prefix.
+Each rejected row retains its missing reason and actual input bars. An empty valid population,
+broker request failure or deadline failure still degrades the session. Discarded stocks never
+return or replenish later stages. This availability policy is a new, unvalidated PAPER
+experiment; the original research hashes establish mathematical lineage, not its validation.
+The delayed oracle uses the saved run's policy and labels it in its output. Saved V9 runs
+retain the exact original specification and strict incomplete-prefix behavior.
+See [the fix and original LSE replay](candidate-availability-fix-20260914.md).
 
 ```
 Saved broad eligible market membership
@@ -40,7 +51,7 @@ and opening-history work move to the delayed oracle. Acquisition always carries
 ## Frozen recipe and evidence
 
 The method specification includes recipe/version, source policy, exchange calendar/timezone,
-formulas, offsets, capacities, HIGH orientation, missing-last handling, ascending SHA256(symbol)
+formulas, offsets, capacities, HIGH orientation, the availability policy, ascending SHA256(symbol)
 ties and all three frozen research recipe hashes. The canonical run-specification hash changes;
 trading specification fields and model artifacts do not.
 
@@ -97,11 +108,13 @@ behavior. See [the September 14 investigation](market-readiness-20260914.md).
 
 State is DISCOVERY -> BROAD_ELIGIBLE -> RANGE5_SELECTED -> RV10_SELECTED -> RV15_SELECTED
 -> SESSION_HARD_ACTIVE. Every stage is an atomic immutable snapshot. Only survivors feed the
-next stage, including missing-last candidates when the population falls below capacity.
+next stage. V8/V9 retain missing-last candidates when the population falls below capacity;
+V10 always excludes missing-score candidates.
 TOP capacities are maxima, never promises to fabricate identities. No discarded stock returns,
 and no Q1/qualification/no-trigger/no-entry failure replenishes the final watchlist.
 
-A successful incomplete prefix retains the identity with a missing score/reason. V9 marks
+A successful incomplete prefix retains the identity with a missing score/reason. V10 rejects
+that row from selection and continues with valid scores. V9 marks
 the PAPER stage incomplete if an acquired stock lacks its exact prefix; the delayed oracle
 and historical V8 retain missing-last ranking. No bar is interpolated or substituted. Data-request failures are distinct from zero
 movement and degrade the run. A disconnected or unentitled broker, insufficient throughput,
@@ -145,7 +158,7 @@ evidence and explicit capacity/readiness failures. Recipe values are not user co
 
 ## Legacy compatibility and migration
 
-Existing V8 `SESSION_HARD_CAUSAL_Q1_CANDIDATES_V8` and V7 `SESSION_HARD_CAUSAL_Q1_DISCOVERY_V7` runs retain their exact specifications,
+Existing V9 `SESSION_HARD_CAUSAL_Q1_ACQUISITION_V9`, V8 `SESSION_HARD_CAUSAL_Q1_CANDIDATES_V8` and V7 `SESSION_HARD_CAUSAL_Q1_DISCOVERY_V7` runs retain their exact specifications,
 hashes and original acquisition/selection behavior. They remain runnable if already saved.
 V6 and the older activity versions remain archived/readable according to existing policy.
 `ACTIVITY_LIQUIDITY_V2`, `ACTIVITY_SHORTLIST_V1`, `ACTIVITY_CAPACITY_V3_SCREEN50`,
@@ -157,7 +170,7 @@ monitoring budget describe only its original behavior. Historical scanner ranks 
 relabelled as Range/RV evidence. Its explicit rebuild action remains confined to that old path.
 
 `scripts/migrate_candidate_selection.py --runs-config OLD --output NEW` writes a separate
-configuration, archives previous PAPER runs, creates disabled V9 replacements and preserves
+configuration, archives previous PAPER runs, creates disabled V10 replacements and preserves
 risk settings and historical configurations. It never activates, deploys, submits an order,
 changes broker routing or deletes database records. Review missing broad populations before
 activation. Back up production state through the established procedure before any deployment.

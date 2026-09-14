@@ -336,6 +336,7 @@ async function runDetail(runId) {
   const selectionPanel = selection ? `<section class="section"><div class="section-head"><h2>Candidate selection</h2></div>
     <p role="status">${esc(selection.state)} · ${esc(selection.reason || "")}</p>
     <p>Range5 HIGH250 → RV10 HIGH50 → RV15 HIGH30</p>
+    ${selection.recipe.missing_policy === "REJECT_UNAVAILABLE" ? `<p>Stocks with incomplete or invalid opening bars are excluded. ${(selection.stages || []).filter(stage => stage.unavailable_rejected != null).map(stage => `${stage.minutes}m: ${number(stage.unavailable_rejected)} excluded`).join(" · ")}</p>` : ""}
     <p class="muted">${esc(selection.recipe.cross_market_evidence)} · ${esc(selection.recipe.evidence_status)}</p>
     <div class="metric-strip"><div><span>${acquisition ? "Acquisition input" : "Broad eligible"}</span><strong>${number(selection.broad_eligible)}</strong></div>
     ${(selection.stages || []).map(stage => `<div><span>${stage.minutes}m ${esc(stage.stage_id)}</span><strong>${stage.selected == null ? "Pending" : number(stage.selected)}</strong></div>`).join("")}

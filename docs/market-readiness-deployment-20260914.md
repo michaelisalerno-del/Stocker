@@ -1,5 +1,7 @@
 # Market readiness deployment — 14 September 2026
 
+Later configuration update: at 13:09:18 UTC, following the user’s request to enable the availability policy for all markets, US and ASX were also migrated to V10. See the final section below.
+
 Deployed `53b226c0525d07166d68ab0f5bbfe22c4a28cba3` at 11:19:28 UTC, replacing
 `c8a3753e46ec6329fe6e6573050c64458ad342f4`. Final checks completed at 11:20 UTC.
 The user authorized deployment of all prepared fixes and the replacement LSE/Korea runs.
@@ -68,3 +70,13 @@ backend requests. Broker positions and open orders remained zero.
 The earlier Gateway reauthentication had already cleared LSE permission warning 492;
 that broker session was preserved. No subscription or broker authentication change was
 needed for deployment.
+
+## V10 enabled as the policy for all four configured markets
+
+At 13:09:18 UTC the US V10 run `us_all-session_hard-paper-fcc1f1a23136` was verified enabled and READY. Its saved opening recipe uses `REJECT_UNAVAILABLE`, acquisition is pending/unsealed, and all 105 components are scheduled before the 13:30 UTC open. The original V9 run was archived/disabled with its history preserved.
+
+ASX was migrated to `australia_asx-session_hard-paper-857159ad937e` with V10 while preserving its disabled state. LSE and Korea retained their enabled V10 configurations. All original risk limits and listing memberships matched exactly; no LIVE run was added.
+
+This was a configuration-only migration on existing release 53b226c. Only Stocker restarted; the authenticated Gateway PID was unchanged. PAPER reconnected/reconciled with zero positions/open orders. The former US run had no observations before the restart, and the deployed pre-open pause fix handled its shutdown without manual database recovery.
+
+The consistent SQLite backup, original configuration, named-universe snapshot, mapping and pre/post system evidence are in `/var/lib/stocker/backups/all-markets-v10-20260914`. Database backup quick_check passed. All four non-archived configured market runs now use `SESSION_HARD_CAUSAL_Q1_AVAILABLE_V10`.

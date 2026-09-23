@@ -14,7 +14,7 @@ stocker_launcher._ensure_monorepo_src_paths()
 
 from ib_async import ComboLeg, Contract, Option, Stock  # noqa: E402
 
-from stocker_execution.first4_broker import PaperBroker, expiration_at, listed_expiry  # noqa: E402
+from stocker_execution.first4_broker import PaperBroker, expiration_at  # noqa: E402
 from stocker_execution.first4_config import PAPER_ACCOUNT, load  # noqa: E402
 from stocker_execution.first4_store import Store  # noqa: E402
 
@@ -59,7 +59,11 @@ async def check(config_path: Path) -> dict:
             and c.tradingClass == underlying.symbol
             and c.multiplier == "100"
         )
-        expiry = listed_expiry(chain.expirations, datetime.now(UTC))
+        target_day = (datetime.now(UTC) + timedelta(days=2)).date()
+        expiry = min(
+            (e for e in chain.expirations if e > datetime.now(UTC).strftime("%Y%m%d")),
+            key=lambda e: abs((datetime.strptime(e, "%Y%m%d").date() - target_day).days),
+        )
         # ATM contracts test OPRA access only, not the strategy's .98/1.02 mapping.
         strike = min(chain.strikes, key=lambda k: abs(k - reference))
         legs = []

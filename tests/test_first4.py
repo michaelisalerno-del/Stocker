@@ -166,7 +166,7 @@ def test_slots_duplicates_failures_restart_and_response_order(tmp_path):
 def armed_config():
     return First4Config(
         armed=True,
-        expiry_rule="NEAREST_CALENDAR_DAY_WITHIN_ONE_LATER_TIE",
+        expiry_rule="NEAREST_WITHIN_24H_LATER_TIE",
         strike_rule="NEAREST_STRICT_OTM_WITHIN_1PCT",
         premium_budget_usd=250,
         fee_reserve_per_package_usd=10,
@@ -269,10 +269,29 @@ def test_strict_otm_nearest_tolerance_ties_and_expiry_calendar_days():
     assert listed_strike([97, 99, 100], 100, "P") == 97
     with pytest.raises(ValueError):
         listed_strike([10, 11], 10, "C")
-    assert listed_expiry({"20250722", "20250724"}, OPEN) == "20250724"
-    assert listed_expiry({"20250721", "20250723", "20250724"}, OPEN) == "20250723"
+    target = OPEN + timedelta(days=2)
+    assert (
+        listed_expiry(
+            {"20250722": target - timedelta(days=1), "20250724": target + timedelta(days=1)}, OPEN
+        )
+        == "20250724"
+    )
+    # A later date label can exceed the allowed 24 hours at its actual 16:00 ET expiry.
+    assert (
+        listed_expiry(
+            {
+                "20250722": target - timedelta(hours=17.5),
+                "20250724": target + timedelta(hours=30.5),
+            },
+            OPEN,
+        )
+        == "20250722"
+    )
+    assert listed_expiry({"20250721": OPEN, "20250723": target}, OPEN) == "20250723"
     with pytest.raises(ValueError):
-        listed_expiry({"20250721", "20250725"}, OPEN)
+        listed_expiry(
+            {"20250721": OPEN, "20250724": target + timedelta(days=1, microseconds=1)}, OPEN
+        )
 
 
 def test_leg_fills_idempotent_and_combo_status_not_fills(tmp_path):
@@ -587,12 +606,14 @@ def test_contract_mapping_verifies_standard_roots_multiplier_and_expiry(tmp_path
 
     def qualified(c):
         c.conId = 101 if c.right == "P" else 102
-        c.localSymbol = f"ABC   250724{c.right}{round(c.strike * 1000):08d}"
+        c.localSymbol = (
+            f"ABC   {c.lastTradeDateOrContractMonth[2:]}{c.right}{round(c.strike * 1000):08d}"
+        )
         return [
             NS(
                 contract=c,
                 underConId=1,
-                realExpirationDate="20250724",
+                realExpirationDate=c.lastTradeDateOrContractMonth,
                 lastTradeTime="16:00:00",
                 timeZoneId="US/Eastern",
                 orderTypes="LMT,GTD",
@@ -605,7 +626,7 @@ def test_contract_mapping_verifies_standard_roots_multiplier_and_expiry(tmp_path
     assert (
         p.contract.lastTradeDateOrContractMonth
         == c.contract.lastTradeDateOrContractMonth
-        == "20250724"
+        == "20250722"
     )
     assert [leg.conId for leg in combo.comboLegs] == [101, 102]
 
@@ -769,3 +790,57 @@ def test_actual_fees_are_separate_from_reserve_and_unset_fee_is_not_real(tmp_pat
     assert b.store.rows("fills")[0]["commission"] is None
     b.commission(None, None, NS(currency="USD", commission=0.65, execId="101"))
     assert b.store.rows("fills")[0]["commission"] == 0.65
+
+
+def test_exit_rechecks_positions_after_async_quotes(tmp_path, monkeypatch):
+    b = broker(tmp_path)
+    prepare_exit(b)
+    monkeypatch.setattr(
+        "stocker_execution.first4_broker.now", lambda: CLOSE - timedelta(seconds=20)
+    )
+    quotes = b.quotes.return_value
+
+    async def changed(*args, **kwargs):
+        b.ib.positions.return_value = []
+        return quotes
+
+    b.quotes = changed
+    asyncio.run(b.close_due())
+    assert not b.ib.placeOrder.called
+    assert not b.reconciled
+    assert "EXIT_POSITION_CHANGED" in b.problem
+    assert b.store.rows("events")[0]["outcome"] != "CLOSED"
+
+
+def test_terminal_second_order_cannot_clear_first_pending_cancellation(tmp_path, monkeypatch):
+    b = broker(tmp_path)
+    event, payload = prepare_exit(b, (1, 0))
+    first_ref = b.store.rows("orders")[0]["reference"]
+    b.store.db.execute("UPDATE first4_orders SET status='PendingCancel'")
+    second = b.store.observe(
+        "2025-07-21", OPEN + timedelta(minutes=16), CLOSE, [candidate("B", 1)]
+    )[0]
+    second_ref = b.store.reserve_order(second, "ENTRY", 2, payload)
+    b.store.db.execute(
+        "UPDATE first4_orders SET status='Cancelled' WHERE reference=?", (second_ref,)
+    )
+    trade = Trade(
+        order=Order(account=PAPER_ACCOUNT, clientId=81, orderRef=first_ref, orderId=1),
+        orderStatus=OrderStatus(status="PendingCancel", permId=11),
+    )
+    b.ib.openTrades.return_value = [trade]
+    b.ib.reqAllOpenOrdersAsync.return_value = [trade]
+    b.ib.reqPositionsAsync.return_value = [
+        NS(account=PAPER_ACCOUNT, contract=Contract(conId=101), position=1, avgCost=100)
+    ]
+    monkeypatch.setattr("stocker_execution.first4_broker.now", lambda: OPEN + timedelta(minutes=25))
+    asyncio.run(b.cancel_due_entries())
+    assert (
+        b.entry_blocker
+        == b.deadline_blocker()
+        == "ENTRY_DEADLINE_AWAITING_CANCEL_FILL_RECONCILIATION"
+    )
+    second_payload = json.loads(
+        next(o for o in b.store.rows("orders") if o["reference"] == second_ref)["payload"]
+    )
+    assert second_payload["deadline_reconciled"]

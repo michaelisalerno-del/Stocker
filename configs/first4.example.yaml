@@ -6,7 +6,7 @@ port: 4003
 client_id: 81
 armed: false
 # User-specified PAPER conventions, not synthetic-research validation.
-expiry_rule: NEAREST_CALENDAR_DAY_WITHIN_ONE_LATER_TIE
+expiry_rule: NEAREST_WITHIN_24H_LATER_TIE
 strike_rule: NEAREST_STRICT_OTM_WITHIN_1PCT
 packages_per_candidate: 1
 premium_budget_usd: 250

@@ -19,7 +19,7 @@ class First4Config(BaseModel):
     client_id: Literal[81] = 81
     armed: bool = False
     # No production defaults are inferred from synthetic economics.
-    expiry_rule: Literal["NEAREST_CALENDAR_DAY_WITHIN_ONE_LATER_TIE"] | None = None
+    expiry_rule: Literal["NEAREST_WITHIN_24H_LATER_TIE"] | None = None
     strike_rule: Literal["NEAREST_STRICT_OTM_WITHIN_1PCT"] | None = None
     premium_budget_usd: Literal[250] | None = None
     fee_reserve_per_package_usd: Literal[10] | None = None

@@ -18,7 +18,7 @@ These conventions were specified by the user after the initial deployment. They 
 
 | Configuration | Value / units |
 |---|---|
-| `expiry_rule` | `NEAREST_CALENDAR_DAY_WITHIN_ONE_LATER_TIE` |
+| `expiry_rule` | `NEAREST_WITHIN_24H_LATER_TIE` |
 | `strike_rule` | `NEAREST_STRICT_OTM_WITHIN_1PCT` |
 | `packages_per_candidate` | 1 put + 1 call |
 | `premium_budget_usd` | 250 USD maximum combined premium |
@@ -30,9 +30,9 @@ These conventions were specified by the user after the initial deployment. They 
 | `exit_seconds_before_close` | 120 seconds before scheduled stock-session close |
 | `exit_order` | `MARKET`, the existing close-out route, after executable quote checks |
 
-`execution_delay_v0/run_delay.py` fixes expiry to baseline + 2,880 calendar minutes; `options_replay.py` and the original model confirm `YEAR=365*1440`. Listed expiry dates are compared to that target's New York calendar date, restricted to ±1 calendar day; ties choose the later date and same-day expiries are excluded. The selected put and call share the date and actual broker expiry time. The broker's `realExpirationDate`, `lastTradeTime` and `timeZoneId` supply the actual timestamp and remaining seconds. No expiry-time substitute or wider search is used.
+`execution_delay_v0/run_delay.py` fixes expiry to baseline + 2,880 calendar minutes; `options_replay.py` and the original model confirm `YEAR=365*1440`. Actual listed expiry timestamps must be within ±1,440 calendar minutes of that target, with the nearest selected and exact ties preferring later expiry. Same-day New York expiries are excluded. The selected put and call share the date and actual broker expiry time. The broker's `realExpirationDate`, `lastTradeTime` and `timeZoneId` supply the actual timestamp and remaining seconds. At most three specific expiry contracts are checked; no expiry-time substitute or wider search is used.
 
-Strikes retain the baseline first trade in the original open(j+2) minute as their reference, never a later quote. Each nearest strictly OTM listed strike must be within .01 times that reference of its .98/.1.02 target; exact ties prefer further OTM. The contract must have the same underlying, USD currency, multiplier 100, standard underlying trading class, and exact unadjusted OSI symbol; inconsistent/adjusted metadata rejects. Actual expiry, strikes and mapping differences are recorded.
+Strikes retain the baseline first trade in the original open(j+2) minute as their reference, never a later quote. Each nearest strictly OTM listed strike must be within .01 times that reference of its .98/1.02 target; exact ties prefer further OTM. The contract must have the same underlying, USD currency, multiplier 100, standard underlying trading class, and exact unadjusted OSI symbol; inconsistent/adjusted metadata rejects. Actual expiry, strikes and mapping differences are recorded.
 
 Exactly one pair is attempted. A durable full $260 allocation is reserved before socket submission and never recycled that session, including cancellation or partial fill. Broker quantity increments must permit one. A fifth admission cannot be manufactured by an execution failure. Actual commissions are recorded separately from the $10 allowance; unknown commissions are not represented as zero final fees.
 

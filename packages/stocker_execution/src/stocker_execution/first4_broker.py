@@ -29,18 +29,18 @@ def listed_strike(strikes: list[float], anchor: float, right: str) -> float:
     return float(min(values, key=lambda x: (abs(x - target), x if right == "P" else -x)))
 
 
-def listed_expiry(expiries: set[str], baseline: datetime) -> str:
+def listed_expiry(expiries: dict[str, datetime], baseline: datetime) -> str:
     local_day = baseline.astimezone(ZoneInfo("America/New_York")).date()
-    target_day = (
-        (baseline + timedelta(minutes=2880)).astimezone(ZoneInfo("America/New_York")).date()
-    )
-    eligible = [datetime.strptime(e, "%Y%m%d").date() for e in expiries]
-    eligible = [e for e in eligible if e > local_day and abs((e - target_day).days) <= 1]
+    target = baseline + timedelta(minutes=2880)
+    eligible = [
+        e
+        for e, stamp in expiries.items()
+        if stamp.astimezone(ZoneInfo("America/New_York")).date() > local_day
+        and abs(stamp - target) <= timedelta(days=1)
+    ]
     if not eligible:
         raise ValueError("EXPIRY_UNAVAILABLE_WITHIN_ONE_CALENDAR_DAY")
-    return min(eligible, key=lambda e: (abs((e - target_day).days), -e.toordinal())).strftime(
-        "%Y%m%d"
-    )
+    return min(eligible, key=lambda e: (abs(expiries[e] - target), -expiries[e].timestamp()))
 
 
 def expiration_at(details: Any) -> datetime:
@@ -200,6 +200,20 @@ class PaperBroker:
             )
         return result
 
+    def deadline_blocker(self) -> str:
+        for order in self.store.rows("orders"):
+            if order["role"] != "ENTRY":
+                continue
+            payload = json.loads(order["payload"])
+            deadline = payload.get("entry_deadline_at")
+            if (
+                deadline
+                and now() >= datetime.fromisoformat(deadline)
+                and not payload.get("deadline_reconciled")
+            ):
+                return "ENTRY_DEADLINE_AWAITING_CANCEL_FILL_RECONCILIATION"
+        return ""
+
     async def reconcile(self) -> None:
         self.reconciled = False
         if not self.ib.isConnected() or self.ib.managedAccounts() != [PAPER_ACCOUNT]:
@@ -271,7 +285,9 @@ class PaperBroker:
         }
         owned = self.owned_quantities()
         unknown = sorted(set(actual) - set(owned))
-        self.entry_blocker = f"UNOWNED_BROKER_POSITIONS:{unknown}" if unknown else ""
+        self.entry_blocker = (
+            f"UNOWNED_BROKER_POSITIONS:{unknown}" if unknown else self.deadline_blocker()
+        )
         with self.store.db:
             self.store.db.execute("DELETE FROM first4_positions")
             for con_id, quantity in owned.items():
@@ -318,9 +334,8 @@ class PaperBroker:
         if len(chains) != 1:
             raise ValueError("AMBIGUOUS_OPTION_TRADING_CLASS_OR_MULTIPLIER")
         chain = chains[0]
-        expiry = listed_expiry(chain.expirations, baseline)
-        legs = []
-        for right in ("P", "C"):
+
+        async def qualify(expiry: str, right: str) -> Any:
             strike = listed_strike(list(chain.strikes), anchor, right)
             details = await self.ib.reqContractDetailsAsync(
                 Option(
@@ -354,7 +369,24 @@ class PaperBroker:
             ):
                 raise ValueError("NONSTANDARD_OR_UNVERIFIED_OPTION_CONTRACT")
             expiration_at(d)
-            legs.append(details[0])
+            return d
+
+        target_day = (
+            (baseline + timedelta(minutes=2880)).astimezone(ZoneInfo("America/New_York")).date()
+        )
+        local_day = baseline.astimezone(ZoneInfo("America/New_York")).date()
+        dates = sorted(
+            e
+            for e in chain.expirations
+            if datetime.strptime(e, "%Y%m%d").date() > local_day
+            and abs((datetime.strptime(e, "%Y%m%d").date() - target_day).days) <= 1
+        )
+        # At most three specific contracts, not full option-chain downloads. Unknown
+        # expiry metadata rejects the candidate rather than widening the search.
+        puts = await asyncio.gather(*(qualify(e, "P") for e in dates))
+        by_expiry = dict(zip(dates, puts, strict=True))
+        expiry = listed_expiry({e: expiration_at(d) for e, d in by_expiry.items()}, baseline)
+        legs = [by_expiry[expiry], await qualify(expiry, "C")]
         if expiration_at(legs[0]) != expiration_at(legs[1]):
             raise ValueError("OPTION_EXPIRY_TIME_MISMATCH")
         combo = Contract(
@@ -433,8 +465,9 @@ class PaperBroker:
         self.guard()
         if role == "ENTRY":
             self.config.require_execution()
-            if self.store.get_meta("paused", False) or self.entry_blocker:
-                raise ValueError(self.entry_blocker or "ENTRIES_PAUSED")
+            blocker = self.entry_blocker or self.deadline_blocker()
+            if self.store.get_meta("paused", False) or blocker:
+                raise ValueError(blocker or "ENTRIES_PAUSED")
             actual = {
                 p.contract.conId: float(p.position)
                 for p in self.ib.positions(PAPER_ACCOUNT)
@@ -471,6 +504,24 @@ class PaperBroker:
             ) * 100 <= self.config.number("premium_budget_usd"):
                 raise ValueError("PREMIUM_BUDGET_EXCEEDED")
             payload = {**payload, "allocation_usd": 260, "fee_reserve_usd": 10}
+        elif role == "EXIT":
+            # Quote retrieval awaited broker events. Recheck the actual remaining legs
+            # at the socket boundary so a stale close can never open a short option.
+            actual = {p.contract.conId: float(p.position) for p in self.ib.positions(PAPER_ACCOUNT)}
+            owned = self.owned_quantities()
+            allocated = self.owned_quantities(f"F4:{event['session']}:{event['slot']}:")
+            ids = (
+                [leg.conId for leg in contract.comboLegs]
+                if contract.secType == "BAG"
+                else [contract.conId]
+            )
+            if order.action != "SELL" or any(
+                actual.get(con_id, 0) != owned.get(con_id, 0)
+                or not 0 < order.totalQuantity <= allocated.get(con_id, 0)
+                for con_id in ids
+            ):
+                self.reconciled = False
+                raise ValueError("EXIT_POSITION_CHANGED_DURING_PREPARATION")
         order.account = PAPER_ACCOUNT
         order.orderId = self.ib.client.getReqId()
         payload = {**payload, "submitted_at": now().isoformat()}
@@ -503,7 +554,7 @@ class PaperBroker:
         # Exactly one pair, with both qualified contracts permitting a quantity of one.
         if minimum > 1 or Decimal(1) % Decimal(str(increment)):
             raise ValueError("ONE_PACKAGE_QUANTITY_UNSUPPORTED")
-        ask = sum(q["ask"] for q in quotes)
+        ask = float(sum(Decimal(str(q["ask"])) for q in quotes))
         limit = limit_price(ask, tick)
         multiplier = float(p.contract.multiplier)
         if multiplier != 100 or c.contract.multiplier != p.contract.multiplier:
@@ -516,8 +567,9 @@ class PaperBroker:
         ):
             raise ValueError("PREMIUM_BUDGET_EXCEEDED")
         if any(
-            (now() - datetime.fromisoformat(q[k])).total_seconds()
-            > self.config.number("quote_max_age_seconds")
+            not 0
+            <= (now() - datetime.fromisoformat(q[k])).total_seconds()
+            <= self.config.number("quote_max_age_seconds")
             for q in quotes
             for k in ("bid_at", "ask_at")
         ):
@@ -534,6 +586,9 @@ class PaperBroker:
             "entry_deadline_at": deadline.isoformat(),
             "target_expiry_at": (baseline + timedelta(minutes=2880)).isoformat(),
             "actual_expiry_at": expiration_at(p).isoformat(),
+            "expiry_target_difference_seconds": (
+                expiration_at(p) - baseline - timedelta(minutes=2880)
+            ).total_seconds(),
             "remaining_expiry_seconds_at_submission": (expiration_at(p) - now()).total_seconds(),
             "target_put_strike": anchor * 0.98,
             "target_call_strike": anchor * 1.02,
@@ -601,6 +656,8 @@ class PaperBroker:
                 "ENTRY_RECONCILED_HELD" if any(quantity.values()) else "ENTRY_UNFILLED",
                 {"entry_status": entry["status"]},
             )
+        if not self.entry_blocker.startswith("UNOWNED_BROKER_POSITIONS"):
+            self.entry_blocker = self.deadline_blocker()
 
     async def combo_tick(self, combo: Any, deadline: datetime) -> float:
         ticker = self.ib.reqMktData(combo, "", False, False)
@@ -636,7 +693,13 @@ class PaperBroker:
             # Cancel only this manager's pending entry; require terminal acknowledgement.
             for trade in self.ib.openTrades():
                 if trade.order.orderRef == entry["reference"] and not trade.isDone():
-                    self.ib.cancelOrder(trade.order)
+                    if (
+                        trade.order.account != PAPER_ACCOUNT
+                        or trade.order.clientId != self.config.client_id
+                    ):
+                        raise ValueError("Cancellation account/client mismatch")
+                    if trade.orderStatus.status != "PendingCancel":
+                        self.ib.cancelOrder(trade.order)
                     return
             if entry["status"] not in {"Filled", "Cancelled", "ApiCancelled", "Inactive"}:
                 self.problem = "EXIT_WAITING_FOR_ENTRY_CANCELLATION_OR_RECONCILIATION"

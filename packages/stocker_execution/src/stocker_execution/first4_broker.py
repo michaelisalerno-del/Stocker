@@ -73,6 +73,8 @@ class PaperBroker:
         self.problem = "NOT_CONNECTED"
         self.entry_blocker = "NOT_RECONCILED"
         self.chains: dict[int, Any] = {}
+        self.opening_verified_session: str | None = None
+        self.reconciliation_lock = asyncio.Lock()
         self.ib.disconnectedEvent += self.disconnected
         self.ib.execDetailsEvent += self.fill
         self.ib.commissionReportEvent += self.commission
@@ -81,8 +83,29 @@ class PaperBroker:
         self.ib.positionEvent += self.position
 
     def disconnected(self, *args: Any) -> None:
+        self.opening_verified_session = None
         self.reconciled = False
         self.problem = "DISCONNECTED_RECONCILIATION_REQUIRED"
+
+    def entries_armed(self) -> bool:
+        if self.config.armed:
+            return True
+        day = now().astimezone(ZoneInfo("America/New_York")).date()
+        if (
+            self.config.arm_after_quote_check_on != day
+            or self.opening_verified_session != day.isoformat()
+            or not self.reconciled
+        ):
+            return False
+        state = self.store.db.execute(
+            "SELECT blocked FROM first4_sessions WHERE session=?", (day.isoformat(),)
+        ).fetchone()
+        return not (state and state["blocked"])
+
+    def require_entries(self) -> None:
+        self.config.require_settings()
+        if not self.entries_armed():
+            raise ValueError("PAPER entries are unarmed")
 
     def position(self, position: Any) -> None:
         if position.account != PAPER_ACCOUNT:
@@ -214,7 +237,13 @@ class PaperBroker:
                 return "ENTRY_DEADLINE_AWAITING_CANCEL_FILL_RECONCILIATION"
         return ""
 
-    async def reconcile(self) -> None:
+    async def reconcile(self, require_flat: bool = False) -> None:
+        # IB uses fixed request keys for positions/open/completed orders.
+        # Two consumers on this connection must never overwrite those futures.
+        async with self.reconciliation_lock:
+            await self._reconcile(require_flat)
+
+    async def _reconcile(self, require_flat: bool) -> None:
         self.reconciled = False
         if not self.ib.isConnected() or self.ib.managedAccounts() != [PAPER_ACCOUNT]:
             raise ValueError("PAPER identity mismatch during reconciliation")
@@ -310,6 +339,8 @@ class PaperBroker:
         if uncertain:
             self.problem = "; ".join(uncertain)
             raise ValueError(self.problem)
+        if require_flat and (opens or actual):
+            raise ValueError("OPENING_CHECK_REQUIRES_FLAT_ACCOUNT_AND_NO_OPEN_ORDERS")
         # Unrelated contracts/orders are never cancelled or managed by FIRST4.
         self.reconciled, self.problem = True, ""
         self.store.set_meta("reconciled_at", now().isoformat())
@@ -464,7 +495,7 @@ class PaperBroker:
     ) -> Any:
         self.guard()
         if role == "ENTRY":
-            self.config.require_execution()
+            self.require_entries()
             blocker = self.entry_blocker or self.deadline_blocker()
             if self.store.get_meta("paused", False) or blocker:
                 raise ValueError(blocker or "ENTRIES_PAUSED")
@@ -534,7 +565,7 @@ class PaperBroker:
         return trade
 
     async def enter(self, event: dict[str, Any], underlying: Any, anchor: float) -> None:
-        self.config.require_execution()
+        self.require_entries()
         baseline = datetime.fromisoformat(event["entry_at"])
         deadline = baseline + timedelta(seconds=self.config.number("entry_deadline_seconds"))
         p, c, combo = await self.contracts(underlying, anchor, baseline)

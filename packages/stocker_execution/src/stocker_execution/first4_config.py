@@ -1,5 +1,6 @@
 """One PAPER account and the explicit research-to-listed-contract choices."""
 
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -18,6 +19,8 @@ class First4Config(BaseModel):
     port: int = Field(default=4003, ge=1, le=65535)
     client_id: Literal[81] = 81
     armed: bool = False
+    # Explicit, single-session permission to arm only after the opening check.
+    arm_after_quote_check_on: date | None = None
     # No production defaults are inferred from synthetic economics.
     expiry_rule: Literal["NEAREST_WITHIN_24H_LATER_TIE"] | None = None
     strike_rule: Literal["NEAREST_STRICT_OTM_WITHIN_1PCT"] | None = None
@@ -48,9 +51,12 @@ class First4Config(BaseModel):
             if getattr(self, name) is None
         ]
 
-    def require_execution(self) -> None:
+    def require_settings(self) -> None:
         if self.missing():
             raise ValueError("Missing execution settings: " + ", ".join(self.missing()))
+
+    def require_execution(self) -> None:
+        self.require_settings()
         if not self.armed:
             raise ValueError("PAPER entries are unarmed")
 
@@ -63,6 +69,10 @@ class First4Config(BaseModel):
 
 def load(path: Path) -> First4Config:
     config = First4Config.model_validate(yaml.safe_load(path.read_text()))
+    if config.arm_after_quote_check_on:
+        config.require_settings()
+        if config.armed:
+            raise ValueError("Opening verification requires armed: false")
     if config.armed:
         config.require_execution()
     return config

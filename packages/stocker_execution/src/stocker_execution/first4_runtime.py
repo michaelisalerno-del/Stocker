@@ -12,6 +12,7 @@ from stocker_data.calendars import get_market_calendar
 from stocker_execution.first4 import METHOD, Bar, prior15
 from stocker_execution.first4_broker import PaperBroker, now
 from stocker_execution.first4_config import First4Config
+from stocker_execution.first4_readiness import option_access
 from stocker_execution.first4_store import Store
 
 log = logging.getLogger(__name__)
@@ -37,18 +38,21 @@ class Runtime:
             "account": self.config.expected_account,
             "connected": self.broker.ib.isConnected(),
             "reconciled": self.broker.reconciled,
-            "armed": self.config.armed
+            "armed": self.broker.entries_armed()
             and not self.pause
             and not self.config.missing()
             and self.broker.reconciled
             and not self.problem
             and not self.broker.entry_blocker,
             "configured_armed": self.config.armed,
+            "opening_check": self.store.get_meta(
+                "opening_check:" + str(self.config.arm_after_quote_check_on), {}
+            ),
             "missing_settings": self.config.missing(),
             "problem": self.problem or self.broker.problem or self.broker.entry_blocker,
             "session": self.session,
             "live_enabled": False,
-            "settings": self.config.model_dump(),
+            "settings": self.config.model_dump(mode="json"),
         }
 
     async def history(self, contract: Any, end: datetime, duration: str) -> list[Any]:
@@ -106,7 +110,7 @@ class Runtime:
         return result
 
     async def execute(self, event: dict[str, Any], underlying: Any) -> None:
-        if not self.config.armed or self.config.missing() or self.pause:
+        if not self.broker.entries_armed() or self.config.missing() or self.pause:
             self.store.outcome(event, "UNARMED", {"missing_settings": self.config.missing()})
             return
         ticker = None
@@ -190,11 +194,98 @@ class Runtime:
 
     async def run(self) -> None:
         manager = asyncio.create_task(self.maintain_broker())
+        opening = asyncio.create_task(self.arm_at_open())
         try:
             await self.scan_sessions()
         finally:
             manager.cancel()
-            await asyncio.gather(manager, return_exceptions=True)
+            opening.cancel()
+            await asyncio.gather(manager, opening, return_exceptions=True)
+
+    async def arm_at_open(self) -> None:
+        target = self.config.arm_after_quote_check_on
+        if target is None:
+            return
+        key = "opening_check:" + target.isoformat()
+        # Durable audit is not an authorization token after a process restart.
+        if self.store.get_meta(key, {}).get("status") in {"CHECKING", "ARMED", "FAILED"}:
+            return
+        self.store.set_meta(key, {"status": "WAITING_FOR_OPEN", "session": target.isoformat()})
+        while self.running:
+            current = now()
+            if current.astimezone(ZoneInfo("America/New_York")).date() > target:
+                self.store.set_meta(key, {"status": "EXPIRED", "session": target.isoformat()})
+                return
+            session = next((r for r in self.schedule if r[0] == target.isoformat()), None)
+            if session and current >= session[1]:
+                await self.check_opening(session[0], session[1])
+                return
+            await asyncio.sleep(0.5)
+
+    def opening_guard(self, day: str, opened: datetime) -> None:
+        self.broker.guard()
+        self.config.require_settings()
+        if self.config.armed or str(self.config.arm_after_quote_check_on) != day:
+            raise ValueError("OPENING_ARM_DATE_NOT_AUTHORIZED")
+        # Finish before the first possible Q5 admission at open + 15 minutes.
+        if not opened <= now() < opened + timedelta(minutes=14):
+            raise ValueError("OPENING_VERIFICATION_WINDOW_EXPIRED")
+        if self.pause or self.store.get_meta("paused", False):
+            raise ValueError("ENTRIES_PAUSED")
+        if self.session != day or self.problem or self.broker.entry_blocker:
+            raise ValueError(self.problem or self.broker.entry_blocker or "SESSION_NOT_READY")
+        state = self.store.db.execute(
+            "SELECT blocked FROM first4_sessions WHERE session=?", (day,)
+        ).fetchone()
+        if state and state["blocked"]:
+            raise ValueError(state["blocked"])
+        if any(p.position for p in self.broker.ib.positions(self.config.expected_account)):
+            raise ValueError("OPENING_CHECK_REQUIRES_RECONCILED_FLAT_ACCOUNT")
+
+    async def check_opening(self, day: str, opened: datetime) -> None:
+        key = "opening_check:" + day
+        report: dict[str, Any] = {
+            "session": day,
+            "status": "CHECKING",
+            "started_at": now().isoformat(),
+            "deadline": (opened + timedelta(minutes=14)).isoformat(),
+            "purpose": "READ_ONLY_DATA_CHECK_NOT_FIRST4_SIGNAL",
+            "transmitted_orders": 0,
+        }
+        self.store.set_meta(key, report)
+        try:
+            self.opening_guard(day, opened)
+            async with asyncio.timeout(15):
+                await self.broker.reconcile(require_flat=True)
+            self.opening_guard(day, opened)
+            deadline = opened + timedelta(minutes=14)
+            async with asyncio.timeout(max(0, (deadline - now()).total_seconds())):
+                report.update(await option_access(self.broker, deadline))
+            self.opening_guard(day, opened)
+            if report.get("blockers") or not all(
+                report.get("checks", {}).get(name) is True
+                for name in (
+                    "qualified_usd_standard_multiplier",
+                    "fresh_realtime_option_quotes",
+                    "combo_price_increment",
+                )
+            ):
+                raise ValueError("OPENING_CHECK_INCOMPLETE")
+            report["status"] = "ARMED"
+            report["armed_at"] = now().isoformat()
+            self.store.set_meta(key, report)
+            self.broker.opening_verified_session = day
+            log.info("FIRST4 PAPER opening verification passed for %s; entries enabled", day)
+        except asyncio.CancelledError:
+            self.broker.opening_verified_session = None
+            report.update(status="FAILED", error="OPENING_CHECK_INTERRUPTED")
+            self.store.set_meta(key, report)
+            raise
+        except Exception as exc:
+            self.broker.opening_verified_session = None
+            report.update(status="FAILED", error=str(exc) or type(exc).__name__)
+            self.store.set_meta(key, report)
+            log.warning("FIRST4 opening verification failed: %s", report["error"])
 
     async def maintain_broker(self) -> None:
         """Exit obligations never wait for scanner history or option qualification."""
@@ -206,7 +297,7 @@ class Runtime:
                     if self.session:
                         self.store.block(self.session, "SCANNER_CONTINUITY_LOST_AFTER_DISCONNECT")
                         self.problem = "SCANNER_CONTINUITY_LOST_AFTER_DISCONNECT"
-                elif not self.broker.reconciled:
+                elif not self.broker.reconciled and not self.broker.reconciliation_lock.locked():
                     async with asyncio.timeout(15):
                         await self.broker.reconcile()
                 try:

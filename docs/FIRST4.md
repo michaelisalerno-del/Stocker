@@ -46,6 +46,34 @@ The account identity is fixed to PAPER DUP655399 and API execution client 81, ch
 
 ## Persistence and recovery
 
+For the explicitly requested opening cutover, set `armed: false` and
+`arm_after_quote_check_on: 2026-09-24` in the existing configuration. This permits
+automatic activation only for that dated US session; it is not a recurring arm
+switch. The same service continues to record every scanner first appearance
+while a separate asynchronous check verifies the exact PAPER account, fresh
+reconciliation with no exposure/open orders, qualified standard Ford diagnostic
+options, BAG tick size and fresh real-time two-sided option quotes. Ford's ATM
+contracts are only data-access probes and never enter the candidate ledger.
+No orders, including what-if orders, are sent by the check.
+
+Qualification has a 30-second bound and BAG metadata an 8-second bound. The two
+leg subscriptions then wait for valid quotes until stock open + 14 minutes
+(14:44 UK on September 24), ahead of the first possible frozen Q5 admission at
+open + 15 minutes and baseline entry at open + 16. There is one check, no new
+scanner, no repeated chain downloads, and no scheduled agent needed. A pass
+enables the existing broker entry path in memory without restarting; the YAML
+retains `armed: false` and the dashboard distinguishes configured and effective
+arming. Every actual candidate still undergoes its own contract, quote, budget
+and account checks. The check cannot replay or replace an admission.
+
+The dated check and result persist in `opening_check:<date>`. A failure, pause,
+missed scanner minute or deadline expiry leaves entries disabled. A disconnect
+revokes the in-memory authorization. A process restart never restores authority
+from the audit record and never repeats an interrupted or completed check.
+The authorization expires on date change. Closing obligations continue
+independently of arming and readiness. Remove/change the dated setting explicitly
+to authorize another session; do not set `armed: true` to bypass a failed check.
+
 SQLite stores first appearances, allocations, order reservations/IDs, actual leg executions/fees, positions and close obligations. Reservations commit before socket submission. An ambiguous acknowledgement cannot cause automatic entry resubmission. Reconnect retrieves open/completed orders, executions and broker positions before entry authority returns. BAG status does not manufacture leg fills. Exit quantities belong to their original allocation; partial leg exits have separate remaining obligations. Pause survives restart and is checked at submission.
 
 The scanner and broker/exit manager use separate asynchronous tasks in the same process so history requests do not defer close-out. Contract chains are cached per underlying/session. No universe history download, research calculation, model load, observer dependency or extra candidate scanner is on the path.

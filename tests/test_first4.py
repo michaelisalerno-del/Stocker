@@ -242,6 +242,227 @@ def test_paper_boundary_reconnect_and_required_settings(tmp_path):
     assert b.ib.placeOrder.call_count == 0
 
 
+def opening_runtime(tmp_path, monkeypatch):
+    from datetime import date
+
+    config = armed_config().model_copy(
+        update={"armed": False, "arm_after_quote_check_on": date(2025, 7, 21)}
+    )
+    runtime = Runtime(config, Store(tmp_path / "opening.sqlite"))
+    runtime.broker = PaperBroker(config, runtime.store, fake_ib())
+    runtime.broker.reconciled = True
+    runtime.broker.entry_blocker = ""
+    runtime.session, runtime.problem = "2025-07-21", ""
+    runtime.schedule = [(runtime.session, OPEN, CLOSE)]
+    monkeypatch.setattr("stocker_execution.first4_runtime.now", lambda: OPEN)
+    monkeypatch.setattr("stocker_execution.first4_broker.now", lambda: OPEN)
+    return runtime
+
+
+def test_opening_check_arms_same_runtime_without_replay(tmp_path, monkeypatch):
+    runtime = opening_runtime(tmp_path, monkeypatch)
+    report = {
+        "checks": {
+            "fresh_realtime_option_quotes": True,
+            "qualified_usd_standard_multiplier": True,
+            "combo_price_increment": True,
+        },
+        "blockers": [],
+    }
+
+    async def probe(*args):
+        # Scanner continues to freeze observations while the diagnostic awaits data.
+        runtime.store.observe("2025-07-21", OPEN + timedelta(minutes=1), CLOSE, [])
+        return report
+
+    monkeypatch.setattr("stocker_execution.first4_runtime.option_access", probe)
+    assert not runtime.status()["armed"]
+    asyncio.run(runtime.check_opening("2025-07-21", OPEN))
+    assert runtime.status()["armed"]
+    assert runtime.config.armed is False
+    assert runtime.store.rows("sessions")[0]["last_clock"]
+    assert not runtime.store.rows("events")
+    assert not runtime.store.rows("orders")
+    runtime.broker.ib.placeOrder.assert_not_called()
+    runtime.broker.disconnected()
+    assert not runtime.broker.entries_armed()
+    runtime.broker.reconciled = True
+    assert not runtime.broker.entries_armed()
+    # An audit record is not authority to resume entries in a restarted process.
+    restarted = PaperBroker(runtime.config, runtime.store, fake_ib())
+    restarted.reconciled = True
+    assert not restarted.entries_armed()
+
+
+@pytest.mark.parametrize("failure", ["quote", "pause", "continuity", "account", "deadline"])
+def test_opening_check_failure_cannot_arm(tmp_path, monkeypatch, failure):
+    runtime = opening_runtime(tmp_path, monkeypatch)
+
+    async def probe(*args):
+        if failure == "quote":
+            raise ValueError("OPTION_QUOTES_INVALID_STALE_OR_UNAVAILABLE")
+        if failure == "pause":
+            runtime.pause = True
+        if failure == "continuity":
+            runtime.store.block(runtime.session, "SCANNER_MINUTE_MISSED")
+        if failure == "account":
+            runtime.broker.ib.managedAccounts.return_value = ["U12345"]
+        if failure == "deadline":
+            monkeypatch.setattr(
+                "stocker_execution.first4_runtime.now", lambda: OPEN + timedelta(minutes=14)
+            )
+        return {
+            "checks": {
+                "fresh_realtime_option_quotes": True,
+                "qualified_usd_standard_multiplier": True,
+                "combo_price_increment": True,
+            },
+            "blockers": [],
+        }
+
+    monkeypatch.setattr("stocker_execution.first4_runtime.option_access", probe)
+    asyncio.run(runtime.check_opening("2025-07-21", OPEN))
+    assert not runtime.status()["armed"]
+    assert runtime.store.get_meta("opening_check:2025-07-21")["status"] == "FAILED"
+    runtime.broker.ib.placeOrder.assert_not_called()
+
+
+def test_opening_authority_expires_and_blocked_session_cannot_submit(tmp_path, monkeypatch):
+    runtime = opening_runtime(tmp_path, monkeypatch)
+    runtime.broker.opening_verified_session = "2025-07-21"
+    assert runtime.broker.entries_armed()
+    runtime.store.block("2025-07-21", "SCANNER_MINUTE_MISSED")
+    assert not runtime.broker.entries_armed()
+    monkeypatch.setattr("stocker_execution.first4_broker.now", lambda: OPEN + timedelta(days=1))
+    assert not runtime.broker.entries_armed()
+
+
+def test_opening_check_and_manager_do_not_overlap_ib_request_keys(tmp_path, monkeypatch):
+    runtime = opening_runtime(tmp_path, monkeypatch)
+    active = 0
+
+    async def open_orders():
+        nonlocal active
+        active += 1
+        assert active == 1, "IB fixed request key overwritten by concurrent reconciliation"
+        await asyncio.sleep(0.15)
+        active -= 1
+        return []
+
+    runtime.broker.ib.reqAllOpenOrdersAsync = AsyncMock(side_effect=open_orders)
+    monkeypatch.setattr(
+        "stocker_execution.first4_runtime.option_access",
+        AsyncMock(
+            return_value={
+                "checks": {
+                    "fresh_realtime_option_quotes": True,
+                    "qualified_usd_standard_multiplier": True,
+                    "combo_price_increment": True,
+                },
+                "blockers": [],
+            }
+        ),
+    )
+
+    async def run():
+        opening = asyncio.create_task(runtime.check_opening("2025-07-21", OPEN))
+        await asyncio.sleep(0)
+        manager = asyncio.create_task(runtime.maintain_broker())
+        await asyncio.wait_for(opening, 2)
+        manager.cancel()
+        await asyncio.gather(manager, return_exceptions=True)
+        assert runtime.status()["armed"]
+        # Other callers are serialized as well, not just the maintenance loop.
+        await asyncio.gather(runtime.broker.reconcile(), runtime.broker.reconcile())
+
+    asyncio.run(run())
+    assert runtime.broker.ib.reqAllOpenOrdersAsync.await_count == 3
+
+
+def test_opening_enabled_path_submits_only_persisted_paper_entry(tmp_path, monkeypatch):
+    runtime = opening_runtime(tmp_path, monkeypatch)
+    b = runtime.broker
+    b.opening_verified_session = "2025-07-21"
+    event = b.store.observe("2025-07-21", OPEN + timedelta(minutes=15), CLOSE, [candidate("A", 1)])[
+        0
+    ]
+    monkeypatch.setattr(
+        "stocker_execution.first4_broker.now", lambda: datetime.fromisoformat(event["entry_at"])
+    )
+    combo = Contract(secType="BAG", symbol="A", currency="USD", exchange="SMART")
+    b.ib.placeOrder.side_effect = lambda c, o: Trade(
+        contract=c, order=o, orderStatus=OrderStatus(status="Submitted", permId=22)
+    )
+    b.submit(event, combo, LimitOrder("BUY", 1, 0.7), {}, "ENTRY")
+    assert b.ib.placeOrder.call_args.args[1].account == PAPER_ACCOUNT
+    assert b.store.rows("orders")[0]["status"] == "Submitted"
+    with pytest.raises(sqlite3.IntegrityError):
+        b.submit(event, combo, LimitOrder("BUY", 1, 0.7), {}, "ENTRY")
+    assert b.ib.placeOrder.call_count == 1
+    b.disconnected()
+    b.reconciled = True
+    with pytest.raises(ValueError, match="unarmed"):
+        b.submit(event, combo, LimitOrder("BUY", 1, 0.7), {}, "ENTRY")
+
+
+def test_shared_option_access_checks_quotes_after_metadata_without_orders(tmp_path, monkeypatch):
+    from stocker_execution.first4_readiness import option_access
+
+    b = broker(tmp_path)
+    monkeypatch.setattr("stocker_execution.first4_readiness.now", lambda: OPEN)
+    b.ib.reqMarketDataType = Mock()
+    b.ib.qualifyContractsAsync = AsyncMock(return_value=[Contract(conId=42, symbol="F")])
+    b.ib.reqTickersAsync = AsyncMock(return_value=[NS(marketPrice=lambda: 13)])
+    b.chain = AsyncMock(
+        return_value=[
+            NS(
+                exchange="SMART",
+                tradingClass="F",
+                multiplier="100",
+                expirations={"20250723"},
+                strikes={13},
+            )
+        ]
+    )
+
+    def details(c):
+        c.conId = 101 if c.right == "P" else 102
+        c.localSymbol = f"F     250723{c.right}00013000"
+        return [
+            NS(
+                contract=c,
+                underConId=42,
+                minSize=1,
+                sizeIncrement=1,
+                minTick=0.01,
+                realExpirationDate="20250723",
+                lastTradeTime="16:00:00",
+                timeZoneId="US/Eastern",
+                orderTypes="LMT,GTD",
+            )
+        ]
+
+    b.ib.reqContractDetailsAsync = AsyncMock(side_effect=details)
+    calls = []
+
+    async def tick(*args):
+        calls.append("metadata")
+        return 0.01
+
+    async def quotes(*args):
+        calls.append("quotes")
+        return [
+            {"bid": 0.1, "ask": 0.2, "bid_at": OPEN.isoformat(), "ask_at": OPEN.isoformat()}
+        ] * 2
+
+    b.combo_tick, b.quotes = tick, quotes
+    result = asyncio.run(option_access(b, OPEN + timedelta(minutes=14)))
+    assert all(result["checks"].values())
+    assert calls == ["metadata", "quotes"]
+    b.ib.placeOrder.assert_not_called()
+    assert not b.store.rows("events") and not b.store.rows("orders")
+
+
 def test_pause_persists_and_is_enforced_after_async_preparation(tmp_path, monkeypatch):
     b = broker(tmp_path)
     entry = datetime.now(UTC)

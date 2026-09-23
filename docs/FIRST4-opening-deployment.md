@@ -52,3 +52,25 @@ real-time option quotes and a broker-supplied combo increment with all PAPER,
 reconciliation and scanner-continuity checks passing. If error 10197 persists,
 the conflicting/stale IBKR market-data session must be cleared; do not bypass
 the check or substitute another data source or price increment.
+
+## Update after disconnecting OpenAI and signing into PAPER again
+
+The user disconnected the direct IBKR/OpenAI integration. Immediate checks still
+returned 10197. Gateway's authenticated restart at 22:59 UTC stopped at login;
+the user then requested a full close/reopen and manually signed into PAPER.
+The full service restart occurred at 23:06:17 UTC. Stocker subsequently confirmed
+PAPER DUP655399 connected and reconciled, with no orders, fills or positions,
+LIVE disabled and the September 24 opening check still waiting.
+
+Non-transmitting checks at 23:07:55 and 23:09:16 UTC did not reproduce 10197.
+The latter explicitly returned the BAG price increment 0.01 and verified standard
+contracts. Fresh real-time two-sided option quotes remained unavailable; entry
+authority stays conditional on the opening check. This improves the observed
+status but does not prove the original cause or guarantee continuing access.
+The latest result is [recorded here](first4-openai-disconnect-verification.json)
+and in the runtime's `paper_execution_verification` audit record.
+
+Restoring the usual 23:45 UTC Gateway restart time is pending. The temporary
+authenticated-restart setting was 22:59 UTC. Reopening the stale Screen Sharing
+view requested VNC authentication; no further Gateway setting was changed while
+that authentication was unavailable.

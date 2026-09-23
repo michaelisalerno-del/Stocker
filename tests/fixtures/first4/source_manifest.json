@@ -1,0 +1,16 @@
+{
+  "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-prior-range-reverse-iron-condor/scanner_filter_v0/historical.py": "5855996b8828a816ef95e8196bf00a1b8aef515532d04ec8c62f7ab18b607762",
+  "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-four-trade-chronological-selection-test/run_test.py": "2e34c5ee400c8f941704d5bac147c8be8f947e631a2e4933c1686766275dead9",
+  "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/expanded/coverage_ledger.parquet": "eb76cbf024b3e8e09e3c91669c1b8a7ac7038523c7a4cbd5b47aa45996fec686",
+  "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/expanded/selected_event_OHLC.npy": "c065e3d6d82d74f38b9e33f10a82f6477cc6874646da072ada472db16cbeb2da",
+  "fixture_hashes": {
+    "prior_windows.npy": "1d0d312b300aa722d797a865b33e2d59e5d1b5fd9173d5891b94d2641a57a7ec",
+    "original_functions.py": "97b8d8319db538a0d123a4b77bd9c4c8a3d97221cf91458cebb9bf63012b30b0",
+    "first_appearances.parquet": "a888696a1675459e5be98ac1487c316ada66ba23efef400f42973b43bf55362e",
+    "artifact_manifest.json": "3cc03fffb222a08aa23ed97783ccb59f44b3fa3ccb06c1dfd802ca44ff5a791a",
+    "protocol.json": "d6273eba541ead89c16eced94376a260d22340e74a777b387f7176351618a6fd",
+    "verification.json": "623fce6073e929b147903da433d57afae04929c09a9e409a5edcad221156847e",
+    "q5_event_ledger.parquet": "b19317a5be43b017e9b81b7d92a88e0f78b6b326cf90f400fcbd5d69feee66f8",
+    "policy_decisions.parquet": "2e651ef04af5f32fcb311697590d44535b2e9ef298565e8cba37a9b59c17fcf2"
+  }
+}

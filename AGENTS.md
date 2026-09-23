@@ -38,21 +38,11 @@ in the runtime trading hot path.
 ## Architecture rules
 
 - One repository and one application/codebase with clear modules.
-- Multiple independent runs may execute concurrently. The user selects Market -> Method -> Run.
-  A run saves its method version/specification, method-produced universe, environment and state.
-- PAPER and LIVE execution are explicitly separated.
-- The future dashboard is not part of the trading engine; dashboard failure must not affect trading.
-- A Method owns how it finds, qualifies, vetoes, enters, manages and exits trades.
-  Method packages supply universe/search and data services plus pure decision logic.
-  New Session HARD candidate selection is Range5 HIGH250 -> RV10 HIGH50 -> RV15 HIGH30.
-  Universe acquisition is separate; use saved broad eligible populations and explicit capacity
-  diagnostics, never a silent legacy activity/scanner shortlist fallback. See docs/candidate-discovery.md.
-  Legacy discovery profiles and audits remain intact for original saved runs.
-  Candidate scores, scanner ranks and Session HARD trading scores must stay distinct.
-  Pure calculations receive data; shared IBKR execution submits method-produced intentions.
+- One direct US-only frozen FIRST4 PAPER pipeline. No strategy catalogue or legacy execution paths.
+- The existing authenticated dashboard is a consumer of runtime state; its failure must not stop position management.
+- Pure FIRST4 calculations receive completed IBKR bars and never request broker data.
+- Frozen synthetic research prices must never substitute for listed contracts, quotes or executions.
 - Account exposure, permissions, reconciliation and emergency controls remain shared.
-- Add a method through the catalogue and explicit composition seam described in docs/ARCHITECTURE.md;
-  do not scatter method-name conditionals across UI and runtime.
 - PRE calculations receive bars as input and do not communicate with IBKR.
 - Production and paper PRE history originates exclusively from IBKR. A local cache may store only
   IBKR-originated history and is not an alternative source.

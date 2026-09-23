@@ -16,8 +16,6 @@ from pydantic import (
     model_validator,
 )
 
-from stocker_core.markets import MarketUniverseSpec
-
 Identifier = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 NAMED_US_UNIVERSES = ("US_ALL", "NASDAQ", "NYSE")
@@ -62,12 +60,11 @@ class UniverseDefinition(BaseModel):
     universe_id: Identifier
     name: Identifier
     members: tuple[InstrumentReference, ...] = ()
-    market_spec: MarketUniverseSpec | None = None
 
     @model_validator(mode="after")
     def require_members_or_market_spec(self) -> "UniverseDefinition":
-        if not self.members and self.market_spec is None:
-            raise ValueError("universe requires static members or a market specification")
+        if not self.members:
+            raise ValueError("universe requires static members")
         return self
 
     @field_validator("members")

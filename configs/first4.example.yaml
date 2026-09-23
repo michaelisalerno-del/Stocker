@@ -1,0 +1,17 @@
+method: FIRST4_PRIOR15_Q5_98P_102C_20260923
+environment: PAPER
+expected_account: DUP655399
+host: 127.0.0.1
+port: 4003
+client_id: 81
+armed: false
+# Required execution choices. No synthetic benchmark assumptions become broker prices.
+expiry_rule: null
+strike_rule: null
+premium_budget_usd: null
+fee_reserve_per_package_usd: null
+entry_limit: null
+quote_max_age_seconds: null
+entry_deadline_seconds: null
+exit_seconds_before_close: null
+exit_order: null

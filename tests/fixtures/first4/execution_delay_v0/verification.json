@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "baseline_reproduced": true,
+  "source_hashes_unchanged": true,
+  "source_manifest_matched": true,
+  "trade_identities_and_ordinals_exact": true,
+  "scenarios": 6,
+  "rows": 480,
+  "priced_each_scenario": 80,
+  "contracts_and_expiry_fixed": true,
+  "scheduled_close_and_proceeds_fixed": true,
+  "independent_black_scholes_reconciliation": true,
+  "dollar_decay_equals_negative_entry_cost_change": true,
+  "full_daily_identity_preserved": true,
+  "no_network": true,
+  "no_reselection": true,
+  "source_hashes": {
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-four-trade-chronological-selection-test/policy_decisions.parquet": "2e651ef04af5f32fcb311697590d44535b2e9ef298565e8cba37a9b59c17fcf2",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-four-trade-chronological-selection-test/protocol.json": "d6273eba541ead89c16eced94376a260d22340e74a777b387f7176351618a6fd",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-four-trade-chronological-selection-test/verification.json": "623fce6073e929b147903da433d57afae04929c09a9e409a5edcad221156847e",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-four-trade-chronological-selection-test/population_comparison.csv": "3bf1050acad507b91739a6ae9a1385d142c4b568e9f9abfabb6b3d9c113b8877",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/expanded/selected_event_OHLC.npy": "c065e3d6d82d74f38b9e33f10a82f6477cc6874646da072ada472db16cbeb2da",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/options_replay.py": "ee022fb3eeea737bd330095b94d244c810d780ea66485afee4d612561f9026ad",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-22-side-symmetric-monetisation-quick-economic-test/synthetic_options_v0/model.py": "a80701de853f0afe6059d50f47d5676fa70bd2c505448e7b3443a4a336e98c1f"
+  },
+  "report_complete": true,
+  "clock_lifetimes_independently_reconciled": true,
+  "daily_aggregate_conservation": true,
+  "PALI_inherited_OHLC_consistent": true
+}

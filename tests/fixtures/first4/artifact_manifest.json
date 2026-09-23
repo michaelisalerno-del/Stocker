@@ -1,0 +1,194 @@
+{
+  "missed_opportunity_daily.csv": {
+    "bytes": 2328,
+    "sha256": "f54d74a4b022140142dcae622f2cc826b86944ae632d5cdbbaf0bde1e25c4ac8"
+  },
+  "finalize_report.py": {
+    "bytes": 30618,
+    "sha256": "4fb3464362e88db662711cda483eb91c28a3cb6b1a3e564a00c85e3b7172c7a6"
+  },
+  "deletions.csv": {
+    "bytes": 22258,
+    "sha256": "cb6ac2f8289d6e45255d17954e1ae4651054e271cb706292dde9c651c285b19f"
+  },
+  "arrival_timing.csv": {
+    "bytes": 2337,
+    "sha256": "b355b57a26f8d549df1980f4355bf32b226ad686707f527230b7c00003e0870d"
+  },
+  "timing_group_membership.csv": {
+    "bytes": 3566,
+    "sha256": "97214b1839c176f548010135be2868b0ef0d727c2f62e578667aa253543abdd8"
+  },
+  "TABLES.md": {
+    "bytes": 85992,
+    "sha256": "6ab05cebe206292caf691384bc643776c23d76021bf2e0ada2878cbf1dd7820a"
+  },
+  "population_comparison.csv": {
+    "bytes": 2667,
+    "sha256": "3bf1050acad507b91739a6ae9a1385d142c4b568e9f9abfabb6b3d9c113b8877"
+  },
+  "main_policy_table.csv": {
+    "bytes": 565,
+    "sha256": "0bea950b0a0775144201939de3792faaaba711c55423d4ae6162866fafbcf20e"
+  },
+  "timing_partial_correlations.csv": {
+    "bytes": 985,
+    "sha256": "f62eeca9705fdec47233a516cf886652584c7b8065c8621582f6f33428f327d7"
+  },
+  "result.json": {
+    "bytes": 585,
+    "sha256": "510b86360cba05682d747369d311e4853c49c9ec6b2f4f4b7883adc172b6ecd4"
+  },
+  "big_winners.csv": {
+    "bytes": 658,
+    "sha256": "e5f01edfdf8c1a652c05c6b28944fd9c61895d99a3dd570b3e83217df07c0134"
+  },
+  "policy_comparison_robustness.csv": {
+    "bytes": 1114,
+    "sha256": "2adbea5316b4f68bc4e5b4563a2e5e0832cef7ae10bbc5e5c1df473be94e7091"
+  },
+  "reservation_skipped_candidates.csv": {
+    "bytes": 169489,
+    "sha256": "da7e1c0f361200d7aca6ee57edbbb53879265721de4fbc7fc55880f3596c39fb"
+  },
+  "REPORT.md": {
+    "bytes": 38424,
+    "sha256": "82b016d2c17e488ad442ff1b570caf4ff24e260f9cd37676244b08ea4c3151bd"
+  },
+  "policy_delta_deletions_MAX2_BEFORE_NOON.csv": {
+    "bytes": 4692,
+    "sha256": "e8153694dbcb10718290c8476b71302963178937872df484e0efc32eaaba98ae"
+  },
+  "best_of_day_location.csv": {
+    "bytes": 344,
+    "sha256": "61de9c71697bcf38f18b5c40273c41836e61f19006958d5fe85ebb3447702296"
+  },
+  "daily_cash.csv": {
+    "bytes": 5155,
+    "sha256": "b0807f6e92d88eef0e7c55589448da5f377ce5071d161666b0954d05833e33a5"
+  },
+  "policy_decisions.csv": {
+    "bytes": 308170,
+    "sha256": "ee8067327fb50238acca5d20eca5b00330d151a8e85be497cefa1971767583c9"
+  },
+  "early_later.csv": {
+    "bytes": 1243,
+    "sha256": "baa49ce0ff547f495df09a227dc1b3a5e7303d96771c99104a5cbb058d219b1e"
+  },
+  "contributions.csv": {
+    "bytes": 17373,
+    "sha256": "5772d4f3dbedbc1e54fe39e9048a83e8baf00a3041b9549e66cf29a01345fee7"
+  },
+  "simultaneous_arrivals.csv": {
+    "bytes": 8299,
+    "sha256": "a5663e8ffe29bad93e30e879c6b68cb8ed5a75c38b900e32e7e0f76fbafb0d5c"
+  },
+  "capital_feasibility_USD.csv": {
+    "bytes": 1151,
+    "sha256": "d7fd16bf05bc532cccd9937477d5da5bdb2a08cf3d6c14cc4cd001aa0677522a"
+  },
+  "best_four_daily.csv": {
+    "bytes": 9043,
+    "sha256": "364da4f1cb23507507c33a3492a37183f087239c10c71b410a87586426b25b0f"
+  },
+  "prior15_distributions.csv": {
+    "bytes": 8050,
+    "sha256": "83d07c9d050bd4a419ffd3fd3d475cbc8f05c4bd6a45e19ac5cda5ac3a01cfa5"
+  },
+  "prior15_correlations.csv": {
+    "bytes": 553,
+    "sha256": "fd5e33b8500bd7af54c756ef02b5e7e6e4741dc9b35d3566a8f660d7ad740fc9"
+  },
+  "main_timing_table.csv": {
+    "bytes": 941,
+    "sha256": "5165df9db3d79bbc869572108abcfa3a27b4df711292e563c044b3faf38d9972"
+  },
+  "q5_event_ledger.csv": {
+    "bytes": 73725,
+    "sha256": "b5bb410110ca74ca7e6b089592e0f08f32d870c746e8f458a1d18abbc34719f2"
+  },
+  "slot_blocking.csv": {
+    "bytes": 2758,
+    "sha256": "ede1711d62291eef31bc94a435007461fc9b9c120d5639214ecba90cd56d7e43"
+  },
+  "accepted_cash_ledger.csv": {
+    "bytes": 24838,
+    "sha256": "8dfe54e2478400c13bb2bd56bca7a8feb68ec2ad889088a1377227ec06eac13c"
+  },
+  "complete.json": {
+    "bytes": 229,
+    "sha256": "1a52f11936361d224b5e4ccb0825c98e361fb4ae81f81827144c4d41b328c18f"
+  },
+  "early_later_paired.csv": {
+    "bytes": 1824,
+    "sha256": "b274e778c85c1fe83ab0d7c1fca1bcef41b9040bed1106569d4121304da7b86f"
+  },
+  "concentration.csv": {
+    "bytes": 1453,
+    "sha256": "3a0d7e5d3ea7d376cb0ef49fade8e1ce15e5a0bbecbf3becd0a9137c457762b4"
+  },
+  "policy_trade_ordinals.csv": {
+    "bytes": 4249,
+    "sha256": "d22266e73ec16d9227f1034d14b3ec71eb4a1aef0ca57b01fc75f794fc99ff5a"
+  },
+  "run_test.py": {
+    "bytes": 21901,
+    "sha256": "2e34c5ee400c8f941704d5bac147c8be8f947e631a2e4933c1686766275dead9"
+  },
+  "daily_results.csv": {
+    "bytes": 36788,
+    "sha256": "4313bbbf14abd1fd3f439b05cc2e4c8fe4580f6b72b36b7fa3260995fe864b2a"
+  },
+  "protocol.json": {
+    "bytes": 3282,
+    "sha256": "d6273eba541ead89c16eced94376a260d22340e74a777b387f7176351618a6fd"
+  },
+  "big_winner_distributions.csv": {
+    "bytes": 5415,
+    "sha256": "5a41f53a969ebe28683642e8a0e51494c12cc5a4643bd5b8383184bb12a84a9a"
+  },
+  "verification.json": {
+    "bytes": 2660,
+    "sha256": "623fce6073e929b147903da433d57afae04929c09a9e409a5edcad221156847e"
+  },
+  "best_of_day_any_session_location.csv": {
+    "bytes": 235,
+    "sha256": "8aa29c8d92438be3f13dc40c0417ec1b580ebce0445e97ef6fa6e48014b4ec52"
+  },
+  "q5_event_ledger.parquet": {
+    "bytes": 59818,
+    "sha256": "b19317a5be43b017e9b81b7d92a88e0f78b6b326cf90f400fcbd5d69feee66f8"
+  },
+  "policy_delta_deletions_MAX2_BEFORE_13.csv": {
+    "bytes": 4319,
+    "sha256": "4d322d84c4285f25e8ad3a4e5f02a995e900720745f4f63a2bee667c749be2a9"
+  },
+  "early_later_equal_session_distributions.csv": {
+    "bytes": 968,
+    "sha256": "1984d629cada5983cd4c2917c7b613597b917feca59f96bd2786d2fc747aad19"
+  },
+  "GBP100_sizing.csv": {
+    "bytes": 582,
+    "sha256": "5d31fe152d551c13adec11e62d5b9b03b620870854c3bfe012778125c96753bb"
+  },
+  "main_population_table.csv": {
+    "bytes": 779,
+    "sha256": "feda4c99e4c296483c9c0bbe2ac58a0d147343110df19b65d777d4d0938cc8f6"
+  },
+  "policy_delta_deletions_MAX1_BEFORE_NOON.csv": {
+    "bytes": 4672,
+    "sha256": "54fbd6f99da51bfa3660e77b6d3bc666e4fde42b66d92f12a0a79d995760e384"
+  },
+  "policy_decisions.parquet": {
+    "bytes": 64383,
+    "sha256": "2e651ef04af5f32fcb311697590d44535b2e9ef298565e8cba37a9b59c17fcf2"
+  },
+  "time_intervals.csv": {
+    "bytes": 1596,
+    "sha256": "e7b89c01adaeadf40d670b6bcf257c8e5014b632d477d9049d374dd760f8d6bb"
+  },
+  "policy_paired_daily_differences.csv": {
+    "bytes": 4154,
+    "sha256": "7a18a41c1ca004e265b1bd059fe14de7696f439939b45e5c34f26b97c0448147"
+  }
+}

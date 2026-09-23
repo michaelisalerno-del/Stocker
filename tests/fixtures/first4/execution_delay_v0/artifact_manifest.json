@@ -1,0 +1,142 @@
+{
+  "deletions.csv": {
+    "bytes": 24187,
+    "sha256": "858417e461e86c5c9b055a787b9ab3e61af138e7d6d6cec9c927784c3f337450"
+  },
+  "summary.csv": {
+    "bytes": 3473,
+    "sha256": "259b2b6433ae2d8b987870a520427ee1aca0e975dc342f2a3162b6929cd2f5d3"
+  },
+  "TABLES.md": {
+    "bytes": 63523,
+    "sha256": "a658c410d5307fb68da937ca2906e397378fa0da7f4ddf5d07c0e91804fc4cf6"
+  },
+  "report_delay.py": {
+    "bytes": 27781,
+    "sha256": "e21f39830428c2a6f7bd32c43a347c908ba138339262182b5fbda0fd9c9472a6"
+  },
+  "survivability_gates.csv": {
+    "bytes": 584,
+    "sha256": "ce4c555153a54c30d8ddf57b0ab1da88dc4cf3b9238bed43105ff85e424c2bd3"
+  },
+  "decay_distribution.csv": {
+    "bytes": 1329,
+    "sha256": "55e26d4d5b7d6b6765d47e2decb5aaa206596092e478314988eee070a8691157"
+  },
+  "result.json": {
+    "bytes": 509,
+    "sha256": "0394b9eb9a2dfd0a649e1934bcc3f77f893529bc80b818c0bb63dc27bcac17a5"
+  },
+  "frozen_first4_input.parquet": {
+    "bytes": 47751,
+    "sha256": "e4e22ca52d0872bffc7f7b085ff91e58800916da9852e819159ca048e7e8cec6"
+  },
+  "REPORT.md": {
+    "bytes": 56149,
+    "sha256": "461e4b42411b3686f26de51846edb105bf5e2d8c3dd453fb8778251be4df97c5"
+  },
+  "run_delay.py": {
+    "bytes": 20068,
+    "sha256": "6495e9951d235a8c749b8ce8af91461b64112fc7a89b173a1ba90513f9b9c1e0"
+  },
+  "trade_delay_ledger.csv": {
+    "bytes": 300729,
+    "sha256": "ff9ad169338ac16de7ead54218952b2649c0fd8c3d54da301cb6d98d3c7415e0"
+  },
+  "winner_retention.csv": {
+    "bytes": 4115,
+    "sha256": "9a3f6d65495b4fa5eb6e1732559e86c73bf82deffbc63df1b83ef6ab75ccb39b"
+  },
+  "main_winner_retention_500.csv": {
+    "bytes": 389,
+    "sha256": "c3f6ba996e6182e176b75eaf29d4ea4fd67cb7dda45366c00b3a45c06c514ea2"
+  },
+  "contributions.csv": {
+    "bytes": 34077,
+    "sha256": "cbd2db7fcf5da0b2f94520cc2215d5f0104ee4a735cb012bffea54fa98d80514"
+  },
+  "movement_groups.csv": {
+    "bytes": 5781,
+    "sha256": "fe09f63566cf67085bf6eddde97024737804e8c39f8c52c261b930fab15e6681"
+  },
+  "PALI_cached_path_audit.csv": {
+    "bytes": 323,
+    "sha256": "2abc60d37acaadefc11515b31309ce5ac3d05d0a68b479d99ab0df0c8fc39a0f"
+  },
+  "movement_correlations.csv": {
+    "bytes": 1962,
+    "sha256": "67eb2fed8792dfe626397a7cc75902dfb8adfcbd1d0cb83a83ae1191060467a4"
+  },
+  "main_trade_ordinal_table.csv": {
+    "bytes": 820,
+    "sha256": "8b5083b077bb9e2eabab52bfe63daf787d98082ad8b8c670ac9ee7ff2f983109"
+  },
+  "baseline_losers.csv": {
+    "bytes": 849,
+    "sha256": "e0354f43e1217ecb2d28c6cf96f839d61dee2c9f68c16c3e5235ebeac06fc72f"
+  },
+  "main_session_robustness.csv": {
+    "bytes": 533,
+    "sha256": "9932a8dc766d299be36754a534838e5772c46821f9fd52fd0a4bf7798ba66d4d"
+  },
+  "main_winner_retention_1000.csv": {
+    "bytes": 361,
+    "sha256": "4ae908988f957f02a9a5359131462374717b9734a52d6fb1b07bfae68b3bab37"
+  },
+  "largest_decay_events.csv": {
+    "bytes": 2236,
+    "sha256": "f6d9321106d1dfcdf7cde64db45c7f87d918d28e54a80336b4862dba3acee9f9"
+  },
+  "complete.json": {
+    "bytes": 232,
+    "sha256": "3116bff2d2bd849b5db8cdb8ace65d346edbae1f7bdf8323e58d1dd0383c1916"
+  },
+  "decay_attribution_shares.csv": {
+    "bytes": 1624,
+    "sha256": "74ab38cbba53bb58edff0392e0012194e42c2d7b6e1dc4035d19522c9f1d3c53"
+  },
+  "concentration.csv": {
+    "bytes": 1718,
+    "sha256": "a2b4dfedec695df38d115b2046c5143dd29d8a3e13bd9d4157270cf628fe9502"
+  },
+  "daily_results.csv": {
+    "bytes": 28629,
+    "sha256": "02be9cc8b74143d59cb569a13ae4cbdbcf993ef1cb4ae45d2f532ba3806b4f18"
+  },
+  "protocol.json": {
+    "bytes": 3089,
+    "sha256": "6579b354fec5a7224b00b1a5828ff0b4b788ccf4a18e7d0563e0f4d0a0b68c97"
+  },
+  "verification.json": {
+    "bytes": 2039,
+    "sha256": "8ab61df337e60391ce1a823640d32c7bf4da92d0c2d6a5e874515c2ad3e8ae18"
+  },
+  "main_economics_table.csv": {
+    "bytes": 831,
+    "sha256": "9ec162c1cde2bbe82e9e66e1b0c3ab0c089c1c21f02498fedd4297e591980dee"
+  },
+  "decay_attribution.csv": {
+    "bytes": 2580,
+    "sha256": "5b6f8713a12d778b2299cc8ec10faf1bc23ec1abca9d1c7375f6c325a5a4315e"
+  },
+  "trade_delay_ledger.parquet": {
+    "bytes": 105663,
+    "sha256": "d94f15241d40482592cb74572933b86548a855d13ebe5dd897b93d878e8bd7cb"
+  },
+  "underlying_delay_moves.csv": {
+    "bytes": 815,
+    "sha256": "678a6f86ae3f68df008178ed0518879ab6b38be7d5766538e5502ae6efc1a7e6"
+  },
+  "trade_ordinals.csv": {
+    "bytes": 6300,
+    "sha256": "6e4036bb8d437cc6982675624789de39f4c85c28d0a9ba7641b311dbed4ff987"
+  },
+  "main_decay_table.csv": {
+    "bytes": 652,
+    "sha256": "1d950150ef77de89aba78cc3ceb64488c0bf46c70f3ae4dec14b344edc7ebe23"
+  },
+  "time_intervals.csv": {
+    "bytes": 5245,
+    "sha256": "efc56e5cecc1bfbbae7a541f4a5d1603710753bc800a876dee392c2e84e65728"
+  }
+}

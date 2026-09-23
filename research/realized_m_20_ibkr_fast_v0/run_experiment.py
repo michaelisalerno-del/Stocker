@@ -18,16 +18,6 @@ import numpy as np
 import pandas as pd
 import pandas_market_calendars as mcal
 
-from stocker_core.config import load_ibkr_config
-from stocker_core.runs import Environment
-from stocker_execution.history import (
-    HistorySemantics,
-    HistoryStatus,
-    IbkrHistoryCache,
-    IbkrHistoryService,
-)
-from stocker_execution.ibkr import HistoricalBar, IbkrConnection
-
 RESEARCH_ONLY = True
 ORDER_PLACEMENT = "disabled"
 NEW_YORK = ZoneInfo("America/New_York")
@@ -93,7 +83,7 @@ def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _frame_from_bars(bars: tuple[HistoricalBar, ...]) -> pd.DataFrame:
+def _frame_from_bars(bars: tuple[Any, ...]) -> pd.DataFrame:
     frame = pd.DataFrame(
         {
             "timestamp": [item.timestamp for item in bars],
@@ -201,6 +191,17 @@ def _history_end(session: date) -> datetime:
 async def fetch_ibkr_history(args: argparse.Namespace) -> None:
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
+    from stocker_core.runs import Environment
+    from stocker_execution.history import (
+        HistorySemantics,
+        HistoryStatus,
+        IbkrHistoryCache,
+        IbkrHistoryService,
+    )
+    from stocker_execution.ibkr import IbkrConnection
+
+    from stocker_core.config import load_ibkr_config
+
     config = load_ibkr_config(args.ibkr_config, Environment.PAPER).model_copy(
         update={"client_id": args.client_id}
     )

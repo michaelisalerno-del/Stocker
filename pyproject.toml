@@ -91,6 +91,8 @@ pythonpath = [
 addopts = "-q"
 
 [tool.ruff]
+# Byte-for-byte extracted, hash-verified authoritative research functions.
+extend-exclude = ["tests/fixtures/first4/original_functions.py"]
 line-length = 100
 target-version = "py312"
 src = [

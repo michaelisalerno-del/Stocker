@@ -493,6 +493,7 @@ class PaperBroker:
             ).fetchone()
             if (
                 not admission
+                or admission["slot"] not in (1, 2, 3, 4)
                 or admission["slot"] != event["slot"]
                 or admission["entry_at"] != event["entry_at"]
             ):

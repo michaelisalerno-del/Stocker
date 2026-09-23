@@ -1,4 +1,20 @@
 "use strict";
+const menuButton = document.getElementById("menu-button");
+const sidebar = document.getElementById("sidebar");
+function setMenuOpen(open) {
+ sidebar.classList.toggle("open", open);
+ menuButton.setAttribute("aria-expanded", String(open));
+}
+menuButton.addEventListener("click", () => setMenuOpen(!sidebar.classList.contains("open")));
+sidebar.addEventListener("click", event => {
+ if (event.target.closest("a")) setMenuOpen(false);
+});
+document.addEventListener("keydown", event => {
+ if (event.key === "Escape" && sidebar.classList.contains("open")) {
+  setMenuOpen(false);
+  menuButton.focus();
+ }
+});
 const esc = value => String(value ?? "—").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function table(title, rows, keys) {
  return `<section class="panel"><h2>${esc(title)}</h2><div class="table-wrap"><table><thead><tr>${keys.map(k=>`<th>${esc(k)}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${keys.map(k=>`<td>${esc(typeof r[k] === "object" ? JSON.stringify(r[k]) : r[k])}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${keys.length}">No records</td></tr>`}</tbody></table></div></section>`;

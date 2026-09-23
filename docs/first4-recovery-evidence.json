@@ -1,0 +1,177 @@
+{
+  "check": {
+    "at": "2026-09-23T21:39:51.166983+00:00",
+    "purpose": "READ_ONLY_DATA_CHECK_NOT_FIRST4_SIGNAL",
+    "transmitted_orders": 0,
+    "settings": {
+      "method": "FIRST4_PRIOR15_Q5_98P_102C_20260923",
+      "environment": "PAPER",
+      "expected_account": "DUP655399",
+      "host": "127.0.0.1",
+      "port": 4003,
+      "client_id": 81,
+      "armed": false,
+      "expiry_rule": "NEAREST_WITHIN_24H_LATER_TIE",
+      "strike_rule": "NEAREST_STRICT_OTM_WITHIN_1PCT",
+      "premium_budget_usd": 250,
+      "fee_reserve_per_package_usd": 10,
+      "session_allocation_usd": 1040,
+      "packages_per_candidate": 1,
+      "entry_limit": "SUM_OF_ASKS",
+      "quote_max_age_seconds": 5,
+      "entry_deadline_seconds": 180,
+      "exit_seconds_before_close": 120,
+      "exit_order": "MARKET"
+    },
+    "checks": {
+      "paper_identity_and_reconciliation": true,
+      "zero_open_orders": true,
+      "qualified_usd_standard_multiplier": true,
+      "fresh_realtime_option_quotes": false,
+      "combo_price_increment": true
+    },
+    "blockers": [
+      "fresh_realtime_option_quotes: OPTION_QUOTES_INVALID_STALE_OR_UNAVAILABLE"
+    ],
+    "contracts": [
+      {
+        "contract": {
+          "secType": "OPT",
+          "conId": 908773206,
+          "symbol": "F",
+          "lastTradeDateOrContractMonth": "20260925",
+          "strike": 13.0,
+          "right": "P",
+          "multiplier": "100",
+          "exchange": "SMART",
+          "primaryExchange": "",
+          "currency": "USD",
+          "localSymbol": "F     260925P00013000",
+          "tradingClass": "F",
+          "includeExpired": false,
+          "secIdType": "",
+          "secId": "",
+          "description": "",
+          "issuerId": "",
+          "comboLegsDescrip": "",
+          "comboLegs": [],
+          "deltaNeutralContract": null
+        },
+        "expiration_at": "2026-09-25T20:00:00+00:00",
+        "min_tick": 0.01,
+        "min_size": 1.0,
+        "size_increment": 1.0,
+        "order_types": "ACTIVETIM,AD,ADJUST,ALERT,ALGO,ALLOC,AON,AVGCOST,BASKET,COND,CONDORDER,DAY,DEACT,DEACTDIS,DEACTEOD,DIS,FOK,GAT,GTC,GTD,GTT,HID,ICE,IOC,LIT,LMT,MIT,MKT,MTL,NGCOMB,NONALGO,OCA,OPENCLOSE,PAON,PEGMIDVOL,PEGMKTVOL,PEGPRMVOL,PEGSRFVOL,POSTONLY,PRICECHK,REL,RELPCTOFS,RELSTK,SCALE,SCALERST,SIZECHK,SNAPMID,SNAPMKT,SNAPREL,STP,STPLMT,TRAIL,TRAILLIT,TRAILLMT,TRAILMIT,VOLAT,WHATIF"
+      },
+      {
+        "contract": {
+          "secType": "OPT",
+          "conId": 908772420,
+          "symbol": "F",
+          "lastTradeDateOrContractMonth": "20260925",
+          "strike": 13.0,
+          "right": "C",
+          "multiplier": "100",
+          "exchange": "SMART",
+          "primaryExchange": "",
+          "currency": "USD",
+          "localSymbol": "F     260925C00013000",
+          "tradingClass": "F",
+          "includeExpired": false,
+          "secIdType": "",
+          "secId": "",
+          "description": "",
+          "issuerId": "",
+          "comboLegsDescrip": "",
+          "comboLegs": [],
+          "deltaNeutralContract": null
+        },
+        "expiration_at": "2026-09-25T20:00:00+00:00",
+        "min_tick": 0.01,
+        "min_size": 1.0,
+        "size_increment": 1.0,
+        "order_types": "ACTIVETIM,AD,ADJUST,ALERT,ALGO,ALLOC,AON,AVGCOST,BASKET,COND,CONDORDER,DAY,DEACT,DEACTDIS,DEACTEOD,DIS,FOK,GAT,GTC,GTD,GTT,HID,ICE,IOC,LIT,LMT,MIT,MKT,MTL,NGCOMB,NONALGO,OCA,OPENCLOSE,PAON,PEGMIDVOL,PEGMKTVOL,PEGPRMVOL,PEGSRFVOL,POSTONLY,PRICECHK,REL,RELPCTOFS,RELSTK,SCALE,SCALERST,SIZECHK,SNAPMID,SNAPMKT,SNAPREL,STP,STPLMT,TRAIL,TRAILLIT,TRAILLMT,TRAILMIT,VOLAT,WHATIF"
+      }
+    ],
+    "combo_price_increment": 0.01,
+    "broker_messages": [
+      {
+        "key": "reconciled_at",
+        "value": "\"2026-09-23T21:39:51.384054+00:00\""
+      }
+    ]
+  },
+  "overview": {
+    "system": {
+      "method": "FIRST4_PRIOR15_Q5_98P_102C_20260923",
+      "market": "US",
+      "environment": "PAPER",
+      "account": "DUP655399",
+      "connected": true,
+      "reconciled": true,
+      "armed": false,
+      "configured_armed": false,
+      "missing_settings": [],
+      "problem": "SCANNER_CONTINUITY_LOST_AFTER_DISCONNECT",
+      "session": "2026-09-23",
+      "live_enabled": false,
+      "settings": {
+        "method": "FIRST4_PRIOR15_Q5_98P_102C_20260923",
+        "environment": "PAPER",
+        "expected_account": "DUP655399",
+        "host": "127.0.0.1",
+        "port": 4003,
+        "client_id": 81,
+        "armed": false,
+        "expiry_rule": "NEAREST_WITHIN_24H_LATER_TIE",
+        "strike_rule": "NEAREST_STRICT_OTM_WITHIN_1PCT",
+        "premium_budget_usd": 250,
+        "fee_reserve_per_package_usd": 10,
+        "session_allocation_usd": 1040,
+        "packages_per_candidate": 1,
+        "entry_limit": "SUM_OF_ASKS",
+        "quote_max_age_seconds": 5,
+        "entry_deadline_seconds": 180,
+        "exit_seconds_before_close": 120,
+        "exit_order": "MARKET"
+      }
+    },
+    "candidates": [],
+    "orders": [],
+    "positions": [],
+    "fills": [],
+    "errors": [
+      {
+        "key": "broker_manager_error",
+        "value": "{\"time\": \"2026-09-23T21:37:10.661504+00:00\", \"error\": \"TimeoutError\"}"
+      },
+      {
+        "key": "reconciled_at",
+        "value": "\"2026-09-23T21:37:16.189476+00:00\""
+      },
+      {
+        "key": "broker_error",
+        "value": "{\"time\": \"2026-09-23T21:37:57.611026+00:00\", \"request_id\": -1, \"code\": 2119, \"message\": \"Market data farm is connecting:usopt\"}"
+      },
+      {
+        "key": "paper_execution_verification",
+        "value": "{\"at\": \"2026-09-23T21:39:51.166983+00:00\", \"checks\": {\"paper_identity_and_reconciliation\": true, \"zero_open_orders\": true, \"qualified_usd_standard_multiplier\": true, \"fresh_realtime_option_quotes\": false, \"combo_price_increment\": true}, \"blockers\": [\"fresh_realtime_option_quotes: OPTION_QUOTES_INVALID_STALE_OR_UNAVAILABLE\"], \"broker_messages\": [{\"key\": \"reconciled_at\", \"value\": \"\\\"2026-09-23T21:39:51.384054+00:00\\\"\"}], \"required_action\": \"Repeat non-transmitting check during regular US option hours. Fresh two-sided realtime quotes remain unverified. Error 10197 did not recur in two checks after PAPER Gateway restart. Keep entries disarmed until all checks pass; preserve scanner continuity when arming.\"}"
+      }
+    ],
+    "pnl": {
+      "basis": "IBKR_PAPER_SIMULATED_FILLS",
+      "currency": "USD",
+      "actual_fees_usd": 0,
+      "fees_complete": true,
+      "reserved_fee_allowance_usd": 0,
+      "session_allocation_usd": 0,
+      "net_cash_flow": 0,
+      "realised": 0,
+      "unrealised": null,
+      "status": "CLOSED_BROKER_FILLS"
+    },
+    "quote_comparisons": []
+  },
+  "gateway_restart_time_restored_utc": "23:45",
+  "focused_first4_tests_passed": 32
+}

@@ -12,17 +12,37 @@ For a bar stamped 09:44 (j=14), the completed information time is 09:45; baselin
 
 Research buys put at .98*S0 and call at 1.02*S0, with expiry=baseline entry+2,880 calendar minutes and scheduled session-close valuation. IV=100%, r=.04, q=0 and 1.05/.95 benchmark marks are absent from broker pricing/P&L.
 
-## Required execution settings
+## User-specified PAPER execution conventions
 
-The saved research explicitly does not approve listed expiry/strike mapping. The £100 illustration permits fractional packages and is not evidence of an agreed executable premium budget or FX convention. No defaults are inferred. `configs/first4.example.yaml` exposes these required choices:
+These conventions were specified by the user after the initial deployment. They are **not validated by the synthetic research**. The historical £100 fractional sizing example is not used. Exact configuration is in `configs/first4.example.yaml`; `armed` remains false until the required non-transmitting checks pass.
 
-- `expiry_rule`: EXACT_CALENDAR_DATE or FIRST_ON_OR_AFTER the synthetic expiry date. No fallback if exact expiry is unavailable; ambiguous trading classes/multipliers reject.
-- `strike_rule`: OUTWARD or NEAREST_TIES_OUTWARD from .98/1.02 references (the call reference is 1.02*S0).
-- `premium_budget_usd` and `fee_reserve_per_package_usd`: actual multiplier and broker quantity increment; floor quantity, never increase to minimum size. No FX rate is invented.
-- `entry_limit`: SUM_OF_ASKS, rounded down to broker combo tick; `quote_max_age_seconds` and `entry_deadline_seconds` (less than a minute). Both option quotes must be current real-time bid/ask data. GTD bounds the entry order lifetime. A supported SMART debit combo is used; missing combo execution rules reject visibly.
-- `exit_seconds_before_close` and `exit_order: MARKET`: explicit tradable pre-close difference from the synthetic closing mark. Broker leg fills determine proceeds. Unfilled/rejected exits remain visible obligations; an overdue close requires operator intervention, never a fictitious closing fill.
+| Configuration | Value / units |
+|---|---|
+| `expiry_rule` | `NEAREST_CALENDAR_DAY_WITHIN_ONE_LATER_TIE` |
+| `strike_rule` | `NEAREST_STRICT_OTM_WITHIN_1PCT` |
+| `packages_per_candidate` | 1 put + 1 call |
+| `premium_budget_usd` | 250 USD maximum combined premium |
+| `fee_reserve_per_package_usd` | 10 USD separate round-trip allowance |
+| `session_allocation_usd` | 1,040 USD, including pending orders and reserves |
+| `entry_limit` | `SUM_OF_ASKS`, rounded down to the broker combo increment |
+| `quote_max_age_seconds` | 5 seconds for each bid/ask price observation |
+| `entry_deadline_seconds` | 180 seconds after the original baseline entry |
+| `exit_seconds_before_close` | 120 seconds before scheduled stock-session close |
+| `exit_order` | `MARKET`, the existing close-out route, after executable quote checks |
 
-Set all fields before `armed: true`. The account identity is fixed to verified PAPER DUP655399 and checked at every submission and reconnect. Ports or environment labels cannot authorise another account. Unknown broker exposure blocks entries without cancelling unrelated orders. The application never sends account-wide cancellations.
+`execution_delay_v0/run_delay.py` fixes expiry to baseline + 2,880 calendar minutes; `options_replay.py` and the original model confirm `YEAR=365*1440`. Listed expiry dates are compared to that target's New York calendar date, restricted to ±1 calendar day; ties choose the later date and same-day expiries are excluded. The selected put and call share the date and actual broker expiry time. The broker's `realExpirationDate`, `lastTradeTime` and `timeZoneId` supply the actual timestamp and remaining seconds. No expiry-time substitute or wider search is used.
+
+Strikes retain the baseline first trade in the original open(j+2) minute as their reference, never a later quote. Each nearest strictly OTM listed strike must be within .01 times that reference of its .98/.1.02 target; exact ties prefer further OTM. The contract must have the same underlying, USD currency, multiplier 100, standard underlying trading class, and exact unadjusted OSI symbol; inconsistent/adjusted metadata rejects. Actual expiry, strikes and mapping differences are recorded.
+
+Exactly one pair is attempted. A durable full $260 allocation is reserved before socket submission and never recycled that session, including cancellation or partial fill. Broker quantity increments must permit one. A fifth admission cannot be manufactured by an execution failure. Actual commissions are recorded separately from the $10 allowance; unknown commissions are not represented as zero final fees.
+
+Both quotes must be real-time (type 1), strictly positive/non-crossed, with sufficient ask size for entry. Freshness comes from bid/ask price observations, not ticker heartbeat timestamps. A SMART debit-combination GTD order is submitted as soon as preparation permits at/after the original scheduled time, with no deliberate delay. The new 180-second deadline is an execution window, not a three-minute strategy delay. At the deadline, the manager explicitly cancels only its remainder and waits for cancellation/fill reconciliation; no separate-leg entry fallback exists.
+
+The existing market close-out begins 120 seconds before the calendar's scheduled close, including shortened sessions. Current two-sided quotes with sufficient bid size are captured for the actual remaining legs before submission. A balanced position closes through a combo; an unmatched partial entry has explicit individual leg exit obligations. Account checks always apply, but entry budgets, arming and entry-time restrictions do not block closing. A failed, unfilled or overdue exit is an explicit operator exception; the manager retains the obligation and never fabricates closure or submits after the stock-session close. There is no automatic overnight strategy or hidden retry of an ambiguously acknowledged order.
+
+The dashboard separates **IBKR PAPER simulated fills/P&L and actual fees** from **quoted ask-to-bid comparisons**, whose bid/ask timestamps are retained. Neither synthetic 1.05 entry nor .95 exit multipliers are applied. This two-minute pre-close execution convention differs from the research's scheduled closing valuation.
+
+The account identity is fixed to PAPER DUP655399 and API execution client 81, checked at every submission and reconnect. No LIVE account or alternate execution client can be configured. Unknown exposure blocks entries without cancelling unrelated orders. `scripts/first4_paper_check.py --config /etc/stocker/v1/first4.yaml` uses a separate read-only diagnostic connection with both order methods disabled. It does not allocate a FIRST4 slot, arm the service, or place a test trade.
 
 ## Persistence and recovery
 

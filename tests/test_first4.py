@@ -19,7 +19,7 @@ from typer.testing import CliRunner
 from stocker_core.cli import app
 from stocker_dashboard.app import create_dashboard_app
 from stocker_execution.first4 import Q5, Bar, eligible, prior15
-from stocker_execution.first4_broker import PaperBroker, listed_strike, size
+from stocker_execution.first4_broker import PaperBroker, listed_expiry, listed_strike
 from stocker_execution.first4_config import PAPER_ACCOUNT, First4Config
 from stocker_execution.first4_runtime import Runtime
 from stocker_execution.first4_store import Store
@@ -166,14 +166,14 @@ def test_slots_duplicates_failures_restart_and_response_order(tmp_path):
 def armed_config():
     return First4Config(
         armed=True,
-        expiry_rule="EXACT_CALENDAR_DATE",
-        strike_rule="OUTWARD",
-        premium_budget_usd=100,
-        fee_reserve_per_package_usd=2,
+        expiry_rule="NEAREST_CALENDAR_DAY_WITHIN_ONE_LATER_TIE",
+        strike_rule="NEAREST_STRICT_OTM_WITHIN_1PCT",
+        premium_budget_usd=250,
+        fee_reserve_per_package_usd=10,
         entry_limit="SUM_OF_ASKS",
-        quote_max_age_seconds=2,
-        entry_deadline_seconds=10,
-        exit_seconds_before_close=30,
+        quote_max_age_seconds=5,
+        entry_deadline_seconds=180,
+        exit_seconds_before_close=120,
         exit_order="MARKET",
     )
 
@@ -203,7 +203,7 @@ def fake_ib():
     ib.isConnected = Mock(return_value=True)
     ib.managedAccounts = Mock(return_value=[PAPER_ACCOUNT])
     ib.placeOrder = Mock()
-    ib.client = NS(getReqId=Mock(return_value=101))
+    ib.client = NS(getReqId=Mock(return_value=101), clientId=81)
     ib.reqAllOpenOrdersAsync = AsyncMock(return_value=[])
     ib.reqCompletedOrdersAsync = AsyncMock(return_value=[])
     ib.reqExecutionsAsync = AsyncMock(return_value=[])
@@ -264,19 +264,23 @@ def test_pause_persists_and_is_enforced_after_async_preparation(tmp_path, monkey
         b.submit(event, Contract(), LimitOrder("BUY", 1, 1), {}, "ENTRY")
 
 
-def test_sizing_uses_actual_multiplier_fee_and_increment():
-    assert size(100, 1, 100, 1, 1) == 0
-    assert size(203, 1, 100, 2, 1) == 1
-    assert size(600, 1, 150, 0, 2) == 4
-    assert size(599.99, 1, 150, 0, 2) == 2
-    assert listed_strike([9, 10, 11], 10.5, "C", "NEAREST_TIES_OUTWARD") == 11
-    assert listed_strike([9, 10, 11], 9.5, "P", "NEAREST_TIES_OUTWARD") == 9
+def test_strict_otm_nearest_tolerance_ties_and_expiry_calendar_days():
+    assert listed_strike([101, 103, 100], 100, "C") == 103
+    assert listed_strike([97, 99, 100], 100, "P") == 97
+    with pytest.raises(ValueError):
+        listed_strike([10, 11], 10, "C")
+    assert listed_expiry({"20250722", "20250724"}, OPEN) == "20250724"
+    assert listed_expiry({"20250721", "20250723", "20250724"}, OPEN) == "20250723"
+    with pytest.raises(ValueError):
+        listed_expiry({"20250721", "20250725"}, OPEN)
 
 
 def test_leg_fills_idempotent_and_combo_status_not_fills(tmp_path):
     b = broker(tmp_path)
     event = dict(session="2025-07-21", symbol="A", slot=1)
-    ref = b.store.reserve_order(event, "ENTRY", 1, {})
+    ref = b.store.reserve_order(
+        event, "ENTRY", 1, {"put": {"conId": 100}, "call": {"conId": 101}, "quantity": 1}
+    )
     b.order_status(
         NS(order=NS(orderRef=ref, orderId=1), orderStatus=NS(status="Filled", permId=22))
     )
@@ -336,7 +340,16 @@ def test_entry_uses_bag_market_tick_and_actual_leg_quantity_rules(tmp_path, monk
     baseline = datetime.fromisoformat(event["entry_at"])
     monkeypatch.setattr("stocker_execution.first4_broker.now", lambda: baseline)
     legs = [
-        NS(contract=Contract(secType="OPT", conId=i, multiplier="100"), sizeIncrement=1, minSize=1)
+        NS(
+            contract=Contract(
+                secType="OPT", conId=i, multiplier="100", strike=9.8 if i == 101 else 10.2
+            ),
+            sizeIncrement=1,
+            minSize=1,
+            realExpirationDate="20250723",
+            lastTradeTime="16:00:00",
+            timeZoneId="US/Eastern",
+        )
         for i in (101, 102)
     ]
     combo = Contract(secType="BAG", symbol="A", currency="USD", exchange="SMART")
@@ -366,14 +379,12 @@ def test_entry_uses_bag_market_tick_and_actual_leg_quantity_rules(tmp_path, monk
 
 def test_submission_routes_real_combo_identity_and_persists_before_send(tmp_path, monkeypatch):
     b = broker(tmp_path)
-    event = dict(
-        session="2025-07-21",
-        symbol="A",
-        slot=1,
-        entry_at=OPEN.isoformat(),
-        close_at=CLOSE.isoformat(),
+    event = b.store.observe("2025-07-21", OPEN + timedelta(minutes=15), CLOSE, [candidate("A", 1)])[
+        0
+    ]
+    monkeypatch.setattr(
+        "stocker_execution.first4_broker.now", lambda: datetime.fromisoformat(event["entry_at"])
     )
-    monkeypatch.setattr("stocker_execution.first4_broker.now", lambda: OPEN)
     combo = Contract(secType="BAG", symbol="A", currency="USD", exchange="SMART")
 
     def sent(contract, order):
@@ -402,7 +413,11 @@ def prepare_exit(b, quantities=(1, 1)):
     payload = {
         "put": legs[0].dict(),
         "call": legs[1].dict(),
-        "exit_at": (CLOSE - timedelta(seconds=30)).isoformat(),
+        "exit_at": (CLOSE - timedelta(seconds=120)).isoformat(),
+        "entry_deadline_at": (
+            datetime.fromisoformat(event["entry_at"]) + timedelta(seconds=180)
+        ).isoformat(),
+        "quotes": [{"ask": 1}, {"ask": 1}],
     }
     ref = b.store.reserve_order(event, "ENTRY", 1, payload)
     with b.store.db:
@@ -431,6 +446,22 @@ def prepare_exit(b, quantities=(1, 1)):
     b.ib.placeOrder.side_effect = lambda c, o: NS(
         order=o, orderStatus=NS(status="Submitted", permId=o.orderId)
     )
+    b.quotes = AsyncMock(
+        return_value=[
+            {
+                "bid": 0.8,
+                "ask": 1,
+                "bid_at": (CLOSE - timedelta(seconds=20)).isoformat(),
+                "ask_at": (CLOSE - timedelta(seconds=20)).isoformat(),
+            }
+        ]
+        * 2
+    )
+    b.combo_tick = AsyncMock(return_value=0.01)
+    b.ib.reqContractDetailsAsync = AsyncMock(
+        return_value=[NS(validExchanges="SMART", marketRuleIds="32")]
+    )
+    b.ib.reqMarketRuleAsync = AsyncMock(return_value=[NS(lowEdge=0, increment=0.01)])
     return event, payload
 
 
@@ -465,8 +496,17 @@ def test_partial_leg_exit_resumes_only_unsent_leg(tmp_path, monkeypatch):
         return submit(event, contract, order, payload, role, suffix)
 
     b.submit = interrupted
-    with pytest.raises(RuntimeError):
-        asyncio.run(b.close_due())
+    b.quotes = AsyncMock(
+        return_value=[
+            {
+                "bid": 0.8,
+                "ask": 1,
+                "bid_at": (CLOSE - timedelta(seconds=20)).isoformat(),
+                "ask_at": (CLOSE - timedelta(seconds=20)).isoformat(),
+            }
+        ]
+    )
+    asyncio.run(b.close_due())
     asyncio.run(b.close_due())
     assert [call.args[0].conId for call in b.ib.placeOrder.call_args_list] == [101, 102]
     assert [call.args[1].totalQuantity for call in b.ib.placeOrder.call_args_list] == [2, 1]
@@ -490,7 +530,7 @@ def test_old_unfilled_allocation_cannot_close_newer_position(tmp_path, monkeypat
     assert not b.ib.placeOrder.called
     assert (
         next(e for e in b.store.rows("events") if e["session"] == "2025-07-18")["outcome"]
-        == "CLOSED"
+        == "ENTRY_UNFILLED"
     )
 
 
@@ -528,3 +568,204 @@ def test_old_cli_and_api_routes_removed_and_dashboard_health(tmp_path):
             assert runtime.store.get_meta("paused")
 
     asyncio.run(check())
+
+
+def test_contract_mapping_verifies_standard_roots_multiplier_and_expiry(tmp_path):
+    b = broker(tmp_path)
+    underlying = Contract(secType="STK", conId=1, symbol="ABC")
+    b.chain = AsyncMock(
+        return_value=[
+            NS(
+                exchange="SMART",
+                tradingClass="ABC",
+                multiplier="100",
+                expirations={"20250722", "20250724"},
+                strikes=[97, 99, 100, 101, 103],
+            )
+        ]
+    )
+
+    def qualified(c):
+        c.conId = 101 if c.right == "P" else 102
+        c.localSymbol = f"ABC   250724{c.right}{round(c.strike * 1000):08d}"
+        return [
+            NS(
+                contract=c,
+                underConId=1,
+                realExpirationDate="20250724",
+                lastTradeTime="16:00:00",
+                timeZoneId="US/Eastern",
+                orderTypes="LMT,GTD",
+            )
+        ]
+
+    b.ib.reqContractDetailsAsync = AsyncMock(side_effect=qualified)
+    p, c, combo = asyncio.run(b.contracts(underlying, 100, OPEN))
+    assert (p.contract.strike, c.contract.strike) == (97, 103)
+    assert (
+        p.contract.lastTradeDateOrContractMonth
+        == c.contract.lastTradeDateOrContractMonth
+        == "20250724"
+    )
+    assert [leg.conId for leg in combo.comboLegs] == [101, 102]
+
+    def adjusted(c):
+        result = qualified(c)
+        c.localSymbol = "ABC1  250724P00097000"
+        return result
+
+    b.ib.reqContractDetailsAsync.side_effect = adjusted
+    with pytest.raises(ValueError, match="NONSTANDARD"):
+        asyncio.run(b.contracts(underlying, 100, OPEN))
+
+
+@pytest.mark.parametrize(
+    "change,allowed",
+    [
+        ({}, True),
+        ({"bid": 0}, False),
+        ({"bid": 2}, False),
+        ({"askSize": 0}, False),
+        ({"marketDataType": 2}, False),
+        ({"marketDataType": 3}, False),
+        ({"marketDataType": 4}, False),
+        ({"age": 6}, False),
+        ({"price_ticks": False}, False),
+    ],
+)
+def test_quote_freshness_uses_price_observations_and_rejects_bad_market_data(
+    tmp_path, change, allowed
+):
+    b = broker(tmp_path)
+
+    class Updates:
+        def __iadd__(self, callback):
+            asyncio.get_running_loop().call_soon(callback, ticker)
+            return self
+
+        def __isub__(self, callback):
+            return self
+
+    stamp = datetime.now(UTC) - timedelta(seconds=change.get("age", 0))
+    ticker = NS(
+        bid=1,
+        ask=1.1,
+        bidSize=1,
+        askSize=1,
+        marketDataType=1,
+        time=datetime.now(UTC),
+        ticks=[
+            NS(tickType=i, time=stamp)
+            for i in ([1, 2] if change.get("price_ticks", True) else [0, 3])
+        ],
+        updateEvent=Updates(),
+    )
+    for k, v in change.items():
+        setattr(ticker, k, v)
+    b.ib.reqMktData = Mock(return_value=ticker)
+    b.ib.cancelMktData = Mock()
+
+    async def check():
+        return await b.quotes([Contract(conId=101)], datetime.now(UTC) + timedelta(seconds=0.03))
+
+    if allowed:
+        assert asyncio.run(check())[0]["ask_size"] == 1
+    else:
+        with pytest.raises(ValueError, match="QUOTES"):
+            asyncio.run(check())
+    assert b.ib.cancelMktData.call_count == 1
+
+
+def test_budget_reserves_pending_and_filled_entries_and_never_scales(tmp_path, monkeypatch):
+    b = broker(tmp_path)
+    events = b.store.observe(
+        "2025-07-21",
+        OPEN + timedelta(minutes=15),
+        CLOSE,
+        [candidate(str(i), i) for i in range(1, 5)],
+    )
+    monkeypatch.setattr(
+        "stocker_execution.first4_broker.now", lambda: datetime.fromisoformat(events[0]["entry_at"])
+    )
+    b.ib.client.getReqId.side_effect = range(10, 20)
+    b.ib.placeOrder.side_effect = lambda c, o: Trade(
+        contract=c, order=o, orderStatus=OrderStatus(status="Submitted", permId=o.orderId)
+    )
+    combo = Contract(secType="BAG")
+    with pytest.raises(ValueError, match="PREMIUM"):
+        b.submit(events[0], combo, LimitOrder("BUY", 1, 2.51), {}, "ENTRY")
+    with pytest.raises(ValueError, match="ONE_DEBIT"):
+        b.submit(events[0], combo, LimitOrder("BUY", 2, 0.01), {}, "ENTRY")
+    for e in events:
+        b.submit(e, combo, LimitOrder("BUY", 1, 2.5), {}, "ENTRY")
+    assert sum(json.loads(o["payload"])["allocation_usd"] for o in b.store.rows("orders")) == 1040
+    b.store.db.execute("UPDATE first4_orders SET status='Filled'")
+    with pytest.raises(ValueError, match="SESSION_ALLOCATION"):
+        b.store.reserve_order(dict(session="2025-07-21", symbol="FIFTH", slot=5), "ENTRY", 99, {})
+    b.store.db.close()
+    reopened = Store(tmp_path / "s.sqlite")
+    assert len(reopened.rows("orders")) == 4
+
+
+def test_entry_deadline_cancel_waits_for_ack_and_reconciles_partial_legs(tmp_path, monkeypatch):
+    b = broker(tmp_path)
+    event, payload = prepare_exit(b, (1, 0))
+    reference = b.store.rows("orders")[0]["reference"]
+    b.store.db.execute("UPDATE first4_orders SET status='Submitted'")
+    trade = Trade(
+        order=Order(account=PAPER_ACCOUNT, clientId=81, orderRef=reference, orderId=1),
+        orderStatus=OrderStatus(status="Submitted", permId=11),
+    )
+    b.ib.openTrades.return_value = [trade]
+    b.ib.cancelOrder = Mock()
+    deadline = datetime.fromisoformat(payload["entry_deadline_at"])
+    monkeypatch.setattr(
+        "stocker_execution.first4_broker.now", lambda: deadline - timedelta(microseconds=1)
+    )
+    asyncio.run(b.cancel_due_entries())
+    assert not b.ib.cancelOrder.called
+    monkeypatch.setattr("stocker_execution.first4_broker.now", lambda: deadline)
+    asyncio.run(b.cancel_due_entries())
+    assert b.ib.cancelOrder.call_count == 1 and b.entry_blocker
+    trade.orderStatus.status = "PendingCancel"
+    asyncio.run(b.cancel_due_entries())
+    assert b.ib.cancelOrder.call_count == 1
+    trade.orderStatus.status = "Cancelled"
+    b.order_status(trade)
+    b.ib.openTrades.return_value = []
+    b.ib.reqPositionsAsync.return_value = [
+        NS(account=PAPER_ACCOUNT, contract=Contract(conId=101), position=1, avgCost=100)
+    ]
+    asyncio.run(b.cancel_due_entries())
+    assert b.reconciled and not b.entry_blocker
+    assert json.loads(b.store.rows("orders")[0]["payload"])["deadline_reconciled"]
+    assert b.store.rows("events")[0]["outcome"] == "ENTRY_RECONCILED_HELD"
+    assert not b.ib.placeOrder.called
+
+
+def test_exit_ignores_entry_budget_pause_and_arming_but_never_invents_fills(tmp_path, monkeypatch):
+    b = broker(tmp_path)
+    prepare_exit(b)
+    b.config = b.config.model_copy(update={"armed": False})
+    b.store.set_meta("paused", True)
+    b.entry_blocker = "ENTRY_BUDGET_REACHED"
+    monkeypatch.setattr(
+        "stocker_execution.first4_broker.now", lambda: CLOSE - timedelta(seconds=20)
+    )
+    asyncio.run(b.close_due())
+    order = b.ib.placeOrder.call_args.args[1]
+    assert order.orderType == "MKT"
+    assert b.store.rows("events")[0]["outcome"] == "EXIT_SUBMITTED"
+    assert len(b.store.rows("fills")) == 2
+    asyncio.run(b.close_due())
+    assert b.ib.placeOrder.call_count == 1
+    assert b.store.rows("events")[0]["outcome"] != "CLOSED"
+
+
+def test_actual_fees_are_separate_from_reserve_and_unset_fee_is_not_real(tmp_path):
+    b = broker(tmp_path)
+    prepare_exit(b)
+    b.commission(None, None, NS(currency="USD", commission=1.7976931348623157e308, execId="101"))
+    assert b.store.rows("fills")[0]["commission"] is None
+    b.commission(None, None, NS(currency="USD", commission=0.65, execId="101"))
+    assert b.store.rows("fills")[0]["commission"] == 0.65

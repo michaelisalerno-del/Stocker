@@ -6,6 +6,7 @@ import math
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_FLOOR, Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ib_async import IB, ComboLeg, Contract, ExecutionFilter, LimitOrder, MarketOrder, Option
 
@@ -17,28 +18,51 @@ def now() -> datetime:
     return datetime.now(UTC)
 
 
-def size(budget: float, debit: float, multiplier: float, fee: float, increment: float) -> float:
-    if (
-        not all(math.isfinite(x) for x in (budget, debit, multiplier, fee, increment))
-        or min(budget, debit, multiplier, increment) <= 0
-        or fee < 0
-    ):
-        raise ValueError("Invalid sizing inputs")
-    b, d, m, f, i = map(lambda x: Decimal(str(x)), (budget, debit, multiplier, fee, increment))
-    return float((b / ((d * m + f) * i)).to_integral_value(rounding=ROUND_FLOOR) * i)
-
-
-def listed_strike(strikes: list[float], target: float, right: str, rule: str) -> float:
-    values = sorted(x for x in strikes if math.isfinite(x) and x > 0)
-    if rule == "OUTWARD":
-        values = (
-            [x for x in values if x <= target]
-            if right == "P"
-            else [x for x in values if x >= target]
-        )
+def listed_strike(strikes: list[float], anchor: float, right: str) -> float:
+    reference = Decimal(str(anchor))
+    target = reference * Decimal(".98" if right == "P" else "1.02")
+    values = [Decimal(str(x)) for x in strikes if math.isfinite(x) and x > 0]
+    values = [x for x in values if (x < reference if right == "P" else x > reference)]
+    values = [x for x in values if abs(x - target) <= reference * Decimal(".01")]
     if not values:
         raise ValueError("No listed strike for configured mapping")
-    return min(values, key=lambda x: (abs(x - target), x if right == "P" else -x))
+    return float(min(values, key=lambda x: (abs(x - target), x if right == "P" else -x)))
+
+
+def listed_expiry(expiries: set[str], baseline: datetime) -> str:
+    local_day = baseline.astimezone(ZoneInfo("America/New_York")).date()
+    target_day = (
+        (baseline + timedelta(minutes=2880)).astimezone(ZoneInfo("America/New_York")).date()
+    )
+    eligible = [datetime.strptime(e, "%Y%m%d").date() for e in expiries]
+    eligible = [e for e in eligible if e > local_day and abs((e - target_day).days) <= 1]
+    if not eligible:
+        raise ValueError("EXPIRY_UNAVAILABLE_WITHIN_ONE_CALENDAR_DAY")
+    return min(eligible, key=lambda e: (abs((e - target_day).days), -e.toordinal())).strftime(
+        "%Y%m%d"
+    )
+
+
+def expiration_at(details: Any) -> datetime:
+    # Use the broker's actual contract time; never substitute the stock close.
+    if not details.realExpirationDate or not details.lastTradeTime or not details.timeZoneId:
+        raise ValueError("OPTION_EXPIRY_TIME_UNAVAILABLE")
+    return (
+        datetime.strptime(
+            details.realExpirationDate + " " + details.lastTradeTime, "%Y%m%d %H:%M:%S"
+        )
+        .replace(tzinfo=ZoneInfo(details.timeZoneId))
+        .astimezone(UTC)
+    )
+
+
+def limit_price(price: float, tick: float) -> float:
+    if not all(math.isfinite(x) and x > 0 for x in (price, tick)):
+        raise ValueError("INVALID_EXECUTABLE_PRICE_INCREMENT")
+    return float(
+        (Decimal(str(price)) / Decimal(str(tick))).to_integral_value(rounding=ROUND_FLOOR)
+        * Decimal(str(tick))
+    )
 
 
 class PaperBroker:
@@ -87,6 +111,8 @@ class PaperBroker:
         if not self.ib.isConnected() or self.ib.managedAccounts() != [PAPER_ACCOUNT]:
             self.reconciled = False
             raise ValueError("Verified PAPER account is not connected")
+        if self.ib.client.clientId != self.config.client_id:
+            raise ValueError("Unexpected FIRST4 execution client")
         if not self.reconciled:
             raise ValueError("Broker reconciliation required: " + self.problem)
 
@@ -132,7 +158,11 @@ class PaperBroker:
             )
 
     def commission(self, trade: Any, fill: Any, report: Any) -> None:
-        if report.currency != "USD" or not math.isfinite(report.commission):
+        if (
+            report.currency != "USD"
+            or not math.isfinite(report.commission)
+            or abs(report.commission) >= 1e100
+        ):
             return
         with self.store.db:
             self.store.db.execute(
@@ -218,6 +248,24 @@ class PaperBroker:
             for o in self.store.rows("orders")
             if o["status"] not in terminal and o["reference"] not in matched
         ]
+        for order in self.store.rows("orders"):
+            if order["status"] != "Filled":
+                continue
+            payload = json.loads(order["payload"])
+            ids = (
+                [payload[key]["conId"] for key in ("put", "call")]
+                if order["role"] == "ENTRY"
+                else payload["exit_con_ids"]
+            )
+            expected = payload["quantity"] if order["role"] == "ENTRY" else payload["exit_quantity"]
+            executions = [
+                f for f in self.store.rows("fills") if f["reference"] == order["reference"]
+            ]
+            if any(
+                sum(f["quantity"] for f in executions if f["con_id"] == con_id) != expected
+                for con_id in ids
+            ):
+                uncertain.append("FILLED_ORDER_MISSING_LEG_EXECUTIONS:" + order["reference"])
         actual = {
             p.contract.conId: p for p in positions if p.account == PAPER_ACCOUNT and p.position
         }
@@ -260,28 +308,20 @@ class PaperBroker:
     async def contracts(
         self, underlying: Any, anchor: float, baseline: datetime
     ) -> tuple[Any, Any, Any]:
-        c = self.config
-        target = (baseline + timedelta(minutes=2880)).date().strftime("%Y%m%d")
-        chains = [x for x in await self.chain(underlying) if x.exchange == "SMART"]
-        choices = []
-        for x in chains:
-            expiries = sorted(
-                e
-                for e in x.expirations
-                if e == target or (c.expiry_rule == "FIRST_ON_OR_AFTER" and e >= target)
-            )
-            if expiries:
-                choices.append((expiries[0], x))
-        if not choices:
-            raise ValueError("EXPIRY_UNAVAILABLE")
-        earliest = min(e for e, _ in choices)
-        choices = [(e, x) for e, x in choices if e == earliest]
-        if len(choices) != 1:
+        chains = [
+            x
+            for x in await self.chain(underlying)
+            if x.exchange == "SMART"
+            and x.tradingClass == underlying.symbol
+            and x.multiplier == "100"
+        ]
+        if len(chains) != 1:
             raise ValueError("AMBIGUOUS_OPTION_TRADING_CLASS_OR_MULTIPLIER")
-        expiry, chain = choices[0]
+        chain = chains[0]
+        expiry = listed_expiry(chain.expirations, baseline)
         legs = []
-        for right, ratio in (("P", 0.98), ("C", 1.02)):
-            strike = listed_strike(list(chain.strikes), anchor * ratio, right, str(c.strike_rule))
+        for right in ("P", "C"):
+            strike = listed_strike(list(chain.strikes), anchor, right)
             details = await self.ib.reqContractDetailsAsync(
                 Option(
                     underlying.symbol,
@@ -296,9 +336,27 @@ class PaperBroker:
             )
             if len(details) != 1 or details[0].underConId != underlying.conId:
                 raise ValueError("OPTION_CONTRACT_UNAVAILABLE_OR_AMBIGUOUS")
+            d = details[0]
+            actual = d.contract
+            osi = f"{underlying.symbol:<6}{expiry[2:]}{right}{round(strike * 1000):08d}"
+            if (
+                actual.secType != "OPT"
+                or actual.currency != "USD"
+                or actual.conId <= 0
+                or actual.multiplier != "100"
+                or actual.tradingClass != underlying.symbol
+                or actual.localSymbol != osi
+                or actual.strike != strike
+                or actual.right != right
+                or actual.lastTradeDateOrContractMonth != expiry
+                or d.realExpirationDate != expiry
+                or not {"LMT", "GTD"}.issubset(set(d.orderTypes.split(",")))
+            ):
+                raise ValueError("NONSTANDARD_OR_UNVERIFIED_OPTION_CONTRACT")
+            expiration_at(d)
             legs.append(details[0])
-        if legs[0].contract.multiplier != legs[1].contract.multiplier:
-            raise ValueError("OPTION_MULTIPLIER_MISMATCH")
+        if expiration_at(legs[0]) != expiration_at(legs[1]):
+            raise ValueError("OPTION_EXPIRY_TIME_MISMATCH")
         combo = Contract(
             secType="BAG",
             symbol=underlying.symbol,
@@ -311,7 +369,9 @@ class PaperBroker:
         )
         return legs[0], legs[1], combo
 
-    async def quotes(self, contracts: list[Any], deadline: datetime) -> list[dict[str, Any]]:
+    async def quotes(
+        self, contracts: list[Any], deadline: datetime, quantity: float = 1, side: str = "BUY"
+    ) -> list[dict[str, Any]]:
         subscriptions = []
         states: list[dict[str, Any]] = [{"bid_at": None, "ask_at": None} for _ in contracts]
         try:
@@ -337,15 +397,17 @@ class PaperBroker:
                     if (
                         not 0 <= age <= self.config.number("quote_max_age_seconds")
                         or not all(math.isfinite(x) for x in (t.bid, t.ask, t.bidSize, t.askSize))
-                        or not 0 <= t.bid <= t.ask
-                        or t.ask <= 0
+                        or not 0 < t.bid <= t.ask
                         or min(t.bidSize, t.askSize) <= 0
+                        or (t.askSize if side == "BUY" else t.bidSize) < quantity
                     ):
                         break
                     result.append(
                         {
                             "bid": t.bid,
                             "ask": t.ask,
+                            "bid_size": t.bidSize,
+                            "ask_size": t.askSize,
                             "bid_at": s["bid_at"].isoformat(),
                             "ask_at": s["ask_at"].isoformat(),
                         }
@@ -392,6 +454,23 @@ class PaperBroker:
                 < entry + timedelta(seconds=self.config.number("entry_deadline_seconds"))
             ):
                 raise ValueError("ENTRY_OUTSIDE_BASELINE_EXECUTION_WINDOW")
+            admission = self.store.db.execute(
+                "SELECT slot,entry_at FROM first4_events WHERE session=? AND symbol=?",
+                (event["session"], event["symbol"]),
+            ).fetchone()
+            if (
+                not admission
+                or admission["slot"] != event["slot"]
+                or admission["entry_at"] != event["entry_at"]
+            ):
+                raise ValueError("ENTRY_REQUIRES_PERSISTED_FIRST4_ADMISSION")
+            if contract.secType != "BAG" or order.action != "BUY" or order.totalQuantity != 1:
+                raise ValueError("ENTRY_REQUIRES_ONE_DEBIT_COMBINATION")
+            if not math.isfinite(order.lmtPrice) or not 0 < Decimal(
+                str(order.lmtPrice)
+            ) * 100 <= self.config.number("premium_budget_usd"):
+                raise ValueError("PREMIUM_BUDGET_EXCEEDED")
+            payload = {**payload, "allocation_usd": 260, "fee_reserve_usd": 10}
         order.account = PAPER_ACCOUNT
         order.orderId = self.ib.client.getReqId()
         payload = {**payload, "submitted_at": now().isoformat()}
@@ -421,22 +500,21 @@ class PaperBroker:
         minimum = max(float(p.minSize), float(c.minSize))
         if not all(math.isfinite(x) and x > 0 for x in (tick, increment, minimum)):
             raise ValueError("COMBO_EXECUTION_RULES_INVALID")
-        # Floor protects the configured debit. Broker determines whether it can fill.
+        # Exactly one pair, with both qualified contracts permitting a quantity of one.
+        if minimum > 1 or Decimal(1) % Decimal(str(increment)):
+            raise ValueError("ONE_PACKAGE_QUANTITY_UNSUPPORTED")
         ask = sum(q["ask"] for q in quotes)
-        limit = float(
-            (Decimal(str(ask)) / Decimal(str(tick))).to_integral_value(rounding=ROUND_FLOOR)
-            * Decimal(str(tick))
-        )
+        limit = limit_price(ask, tick)
         multiplier = float(p.contract.multiplier)
-        quantity = size(
-            self.config.number("premium_budget_usd"),
-            limit,
-            multiplier,
-            self.config.number("fee_reserve_per_package_usd"),
-            increment,
-        )
-        if quantity < minimum:
-            raise ValueError("PREMIUM_BUDGET_BELOW_ONE_PACKAGE")
+        if multiplier != 100 or c.contract.multiplier != p.contract.multiplier:
+            raise ValueError("STANDARD_MULTIPLIER_REQUIRED")
+        quantity = 1
+        if (
+            not 0
+            < Decimal(str(limit)) * Decimal(str(multiplier))
+            <= self.config.number("premium_budget_usd")
+        ):
+            raise ValueError("PREMIUM_BUDGET_EXCEEDED")
         if any(
             (now() - datetime.fromisoformat(q[k])).total_seconds()
             > self.config.number("quote_max_age_seconds")
@@ -453,6 +531,15 @@ class PaperBroker:
             "multiplier": multiplier,
             "limit": limit,
             "quotes": quotes,
+            "entry_deadline_at": deadline.isoformat(),
+            "target_expiry_at": (baseline + timedelta(minutes=2880)).isoformat(),
+            "actual_expiry_at": expiration_at(p).isoformat(),
+            "remaining_expiry_seconds_at_submission": (expiration_at(p) - now()).total_seconds(),
+            "target_put_strike": anchor * 0.98,
+            "target_call_strike": anchor * 1.02,
+            "put_strike_difference": p.contract.strike - anchor * 0.98,
+            "call_strike_difference": c.contract.strike - anchor * 1.02,
+            "quoted_entry_ask_usd": sum(q["ask"] for q in quotes) * multiplier,
             "exit_at": (
                 datetime.fromisoformat(event["close_at"])
                 - timedelta(seconds=self.config.number("exit_seconds_before_close"))
@@ -469,6 +556,52 @@ class PaperBroker:
         self.submit(event, combo, order, payload, "ENTRY")
         self.store.outcome(event, "ORDER_SUBMITTED", payload)
 
+    async def cancel_due_entries(self) -> None:
+        """GTD is backed by explicit owned-order cancellation and broker reconciliation."""
+        terminal = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
+        for entry in self.store.rows("orders"):
+            if entry["role"] != "ENTRY":
+                continue
+            payload = json.loads(entry["payload"])
+            deadline = datetime.fromisoformat(payload["entry_deadline_at"])
+            if now() < deadline or payload.get("deadline_reconciled"):
+                continue
+            self.guard()
+            if entry["status"] not in terminal:
+                trades = [t for t in self.ib.openTrades() if t.order.orderRef == entry["reference"]]
+                for trade in trades:
+                    if (
+                        trade.order.account != PAPER_ACCOUNT
+                        or trade.order.clientId != self.config.client_id
+                    ):
+                        raise ValueError("Cancellation account/client mismatch")
+                    if not trade.isDone() and trade.orderStatus.status != "PendingCancel":
+                        self.ib.cancelOrder(trade.order)
+                self.problem = "ENTRY_DEADLINE_AWAITING_CANCEL_FILL_RECONCILIATION"
+                self.entry_blocker = self.problem
+                if not trades:
+                    self.reconciled = False
+                continue
+            await self.reconcile()
+            payload["deadline_reconciled"] = True
+            with self.store.db:
+                self.store.db.execute(
+                    "UPDATE first4_orders SET payload=? WHERE reference=?",
+                    (json.dumps(payload), entry["reference"]),
+                )
+            event = next(
+                e
+                for e in self.store.rows("events")
+                if e["session"] == entry["session"] and e["symbol"] == entry["symbol"]
+            )
+            allocation = entry["reference"].rsplit(":", 1)[0] + ":"
+            quantity = self.owned_quantities(allocation)
+            self.store.outcome(
+                event,
+                "ENTRY_RECONCILED_HELD" if any(quantity.values()) else "ENTRY_UNFILLED",
+                {"entry_status": entry["status"]},
+            )
+
     async def combo_tick(self, combo: Any, deadline: datetime) -> float:
         ticker = self.ib.reqMktData(combo, "", False, False)
         try:
@@ -481,7 +614,20 @@ class PaperBroker:
             self.ib.cancelMktData(combo)
 
     async def close_due(self) -> None:
-        entries = [o for o in self.store.rows("orders") if o["role"] == "ENTRY"]
+        for entry in self.store.rows("orders"):
+            if entry["role"] != "ENTRY":
+                continue
+            try:
+                await self.close_one(entry["reference"])
+            except Exception as exc:
+                self.problem = str(exc) or type(exc).__name__
+                self.store.set_meta(
+                    "exit_exception:" + entry["reference"],
+                    {"time": now().isoformat(), "error": self.problem, "requires_operator": True},
+                )
+
+    async def close_one(self, reference: str) -> None:
+        entries = [o for o in self.store.rows("orders") if o["reference"] == reference]
         for entry in entries:
             payload = json.loads(entry["payload"])
             if now() < datetime.fromisoformat(payload["exit_at"]):
@@ -515,7 +661,14 @@ class PaperBroker:
             if min(q) < 0:
                 raise ValueError("UNEXPECTED_SHORT_OPTION_POSITION")
             if not any(q):
-                self.store.outcome(event, "CLOSED")
+                entry_fills = [
+                    f for f in self.store.rows("fills") if f["reference"] == entry["reference"]
+                ]
+                if entry["status"] == "Filled" and not entry_fills:
+                    self.problem = "FILLED_ENTRY_MISSING_LEG_EXECUTIONS"
+                    self.reconciled = False
+                    continue
+                self.store.outcome(event, "CLOSED" if entry_fills else "ENTRY_UNFILLED")
                 continue
             prior_exits = [
                 o
@@ -549,13 +702,7 @@ class PaperBroker:
                         for x in legs
                     ],
                 )
-                self.submit(
-                    event,
-                    combo,
-                    MarketOrder("SELL", q[0], tif="DAY", outsideRth=False),
-                    payload,
-                    "EXIT",
-                )
+                await self.close_order(event, combo, legs, q[0], payload)
             else:
                 # A non-atomic partial execution leaves explicit individual close obligations.
                 for leg, quantity in zip(legs, q, strict=True):
@@ -566,11 +713,60 @@ class PaperBroker:
                         ):
                             self.problem = "LEG_EXIT_PENDING_OR_INCOMPLETE_REQUIRES_OPERATOR"
                             continue
-                        self.submit(
-                            event,
-                            leg,
-                            MarketOrder("SELL", quantity, tif="DAY", outsideRth=False),
-                            payload,
-                            "EXIT",
-                            str(leg.conId),
-                        )
+                        await self.close_order(event, leg, [leg], quantity, payload, str(leg.conId))
+
+    async def close_order(
+        self,
+        event: dict[str, Any],
+        contract: Any,
+        legs: list[Any],
+        quantity: float,
+        payload: dict[str, Any],
+        suffix: str = "",
+    ) -> None:
+        close = datetime.fromisoformat(event["close_at"])
+        deadline = min(close, now() + timedelta(seconds=2))
+        async with asyncio.timeout(max(0, (deadline - now()).total_seconds())):
+            quotes = await self.quotes(legs, deadline, quantity=quantity, side="SELL")
+        if now() >= close:
+            raise ValueError("MISSED_SESSION_CLOSE_EXIT_REQUIRES_OPERATOR")
+        if any(
+            not 0 <= (now() - datetime.fromisoformat(q[k])).total_seconds() <= 5
+            for q in quotes
+            for k in ("bid_at", "ask_at")
+        ):
+            raise ValueError("EXIT_QUOTES_EXPIRED_DURING_PREPARATION")
+        original_asks = {
+            payload[key]["conId"]: payload["quotes"][i]["ask"]
+            for i, key in enumerate(("put", "call"))
+        }
+        quoted_exit = sum(
+            q["bid"] * float(leg.multiplier) * quantity for leg, q in zip(legs, quotes, strict=True)
+        )
+        quoted_entry = sum(
+            original_asks[leg.conId] * float(leg.multiplier) * quantity for leg in legs
+        )
+        closing = {
+            **payload,
+            "exit_quotes": quotes,
+            "exit_con_ids": [leg.conId for leg in legs],
+            "exit_quantity": quantity,
+            "exit_order_type": "MKT",
+            "quoted_exit_bid_usd": quoted_exit,
+            "quoted_entry_ask_for_exit_legs_usd": quoted_entry,
+            "quoted_ask_to_bid_gross_usd": quoted_exit - quoted_entry,
+        }
+        self.submit(
+            event,
+            contract,
+            MarketOrder(
+                "SELL",
+                quantity,
+                tif="DAY",
+                outsideRth=False,
+            ),
+            closing,
+            "EXIT",
+            suffix,
+        )
+        self.store.outcome(event, "EXIT_SUBMITTED", {"exit_quote_comparison": closing})

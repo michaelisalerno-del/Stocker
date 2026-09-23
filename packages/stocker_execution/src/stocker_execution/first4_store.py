@@ -134,6 +134,12 @@ class Store:
 
     def outcome(self, event: dict[str, Any], outcome: str, detail: Any = None) -> None:
         with self.db:
+            row = self.db.execute(
+                "SELECT detail FROM first4_events WHERE session=? AND symbol=?",
+                (event["session"], event["symbol"]),
+            ).fetchone()
+            previous = json.loads(row[0]) if row and row[0] else {}
+            detail = {**(previous or {}), **(detail or {})}
             self.db.execute(
                 "UPDATE first4_events SET outcome=?,detail=? WHERE session=? AND symbol=?",
                 (
@@ -154,6 +160,15 @@ class Store:
     ) -> str:
         reference = f"F4:{event['session']}:{event['slot']}:{role}{suffix}"
         with self.db:
+            if role == "ENTRY":
+                used = self.db.execute(
+                    "SELECT count(*) FROM first4_orders WHERE session=? AND role='ENTRY'",
+                    (event["session"],),
+                ).fetchone()[0]
+                # Reserve the full $250 cap plus $10 fees, including pending/unfilled orders.
+                # Reservations are never recycled during a session.
+                if (used + 1) * 260 > 1040:
+                    raise ValueError("SESSION_ALLOCATION_EXCEEDED")
             self.db.execute(
                 "INSERT INTO first4_orders VALUES (?,?,?,?,?,NULL,'RESERVED',?)",
                 (

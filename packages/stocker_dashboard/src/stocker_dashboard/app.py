@@ -1,5 +1,6 @@
 """Existing Stocker dashboard boundary for the single FIRST4 runtime."""
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,27 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
             "fills": runtime.store.rows("fills"),
             "errors": runtime.store.rows("meta"),
             "pnl": pnl(),
+            "quote_comparisons": [
+                {
+                    "reference": order["reference"],
+                    **{
+                        key: payload.get(key)
+                        for key in (
+                            "quoted_entry_ask_for_exit_legs_usd",
+                            "quoted_exit_bid_usd",
+                            "quoted_ask_to_bid_gross_usd",
+                            "quotes",
+                            "exit_quotes",
+                            "exit_quantity",
+                            "exit_con_ids",
+                        )
+                    },
+                    "basis": "QUOTE_COMPARISON_NOT_BROKER_FILLS",
+                }
+                for order in runtime.store.rows("orders")
+                if order["role"] == "EXIT"
+                for payload in [json.loads(order["payload"])]
+            ],
         }
 
     def pnl() -> dict[str, Any]:
@@ -44,7 +66,20 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         flat = not any(runtime.broker.owned_quantities().values())
         complete = all(f["commission"] is not None for f in fills)
         return {
+            "basis": "IBKR_PAPER_SIMULATED_FILLS",
             "currency": "USD",
+            "actual_fees_usd": fees,
+            "fees_complete": complete,
+            "reserved_fee_allowance_usd": sum(
+                json.loads(o["payload"]).get("fee_reserve_usd", 10)
+                for o in runtime.store.rows("orders")
+                if o["role"] == "ENTRY"
+            ),
+            "session_allocation_usd": sum(
+                json.loads(o["payload"]).get("allocation_usd", 260)
+                for o in runtime.store.rows("orders")
+                if o["role"] == "ENTRY" and o["session"] == runtime.session
+            ),
             "net_cash_flow": cash - fees,
             "realised": cash - fees if flat and complete else None,
             "unrealised": None,

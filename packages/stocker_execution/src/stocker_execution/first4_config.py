@@ -16,17 +16,19 @@ class First4Config(BaseModel):
     expected_account: Literal["DUP655399"] = "DUP655399"
     host: Literal["127.0.0.1"] = "127.0.0.1"
     port: int = Field(default=4003, ge=1, le=65535)
-    client_id: int = Field(default=81, ge=1)
+    client_id: Literal[81] = 81
     armed: bool = False
     # No production defaults are inferred from synthetic economics.
-    expiry_rule: Literal["EXACT_CALENDAR_DATE", "FIRST_ON_OR_AFTER"] | None = None
-    strike_rule: Literal["NEAREST_TIES_OUTWARD", "OUTWARD"] | None = None
-    premium_budget_usd: float | None = Field(default=None, gt=0)
-    fee_reserve_per_package_usd: float | None = Field(default=None, ge=0)
+    expiry_rule: Literal["NEAREST_CALENDAR_DAY_WITHIN_ONE_LATER_TIE"] | None = None
+    strike_rule: Literal["NEAREST_STRICT_OTM_WITHIN_1PCT"] | None = None
+    premium_budget_usd: Literal[250] | None = None
+    fee_reserve_per_package_usd: Literal[10] | None = None
+    session_allocation_usd: Literal[1040] = 1040
+    packages_per_candidate: Literal[1] = 1
     entry_limit: Literal["SUM_OF_ASKS"] | None = None
-    quote_max_age_seconds: float | None = Field(default=None, gt=0)
-    entry_deadline_seconds: float | None = Field(default=None, gt=0, lt=60)
-    exit_seconds_before_close: int | None = Field(default=None, ge=1, le=300)
+    quote_max_age_seconds: Literal[5] | None = None
+    entry_deadline_seconds: Literal[180] | None = None
+    exit_seconds_before_close: Literal[120] | None = None
     exit_order: Literal["MARKET"] | None = None
 
     def missing(self) -> list[str]:

@@ -5,13 +5,15 @@ host: 127.0.0.1
 port: 4003
 client_id: 81
 armed: false
-# Required execution choices. No synthetic benchmark assumptions become broker prices.
-expiry_rule: null
-strike_rule: null
-premium_budget_usd: null
-fee_reserve_per_package_usd: null
-entry_limit: null
-quote_max_age_seconds: null
-entry_deadline_seconds: null
-exit_seconds_before_close: null
-exit_order: null
+# User-specified PAPER conventions, not synthetic-research validation.
+expiry_rule: NEAREST_CALENDAR_DAY_WITHIN_ONE_LATER_TIE
+strike_rule: NEAREST_STRICT_OTM_WITHIN_1PCT
+packages_per_candidate: 1
+premium_budget_usd: 250
+fee_reserve_per_package_usd: 10
+session_allocation_usd: 1040
+entry_limit: SUM_OF_ASKS
+quote_max_age_seconds: 5
+entry_deadline_seconds: 180
+exit_seconds_before_close: 120
+exit_order: MARKET

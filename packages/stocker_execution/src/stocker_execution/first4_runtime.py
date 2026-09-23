@@ -122,15 +122,22 @@ class Runtime:
 
             def on_tick(t: Any) -> None:
                 for tick in t.tickByTicks:
-                    if tick.time >= baseline and tick.price > 0 and not anchor.done():
+                    if (
+                        baseline <= tick.time < baseline + timedelta(minutes=1)
+                        and tick.price > 0
+                        and not anchor.done()
+                    ):
                         anchor.set_result((tick.price, tick.time))
 
             callback = on_tick
             ticker.updateEvent += callback
-            await self.broker.chain(underlying)
             deadline = baseline + timedelta(seconds=self.config.number("entry_deadline_seconds"))
+            await asyncio.wait_for(
+                self.broker.chain(underlying), max(0, (deadline - now()).total_seconds())
+            )
             price, stamp = await asyncio.wait_for(
-                anchor, max(0, (deadline - now()).total_seconds())
+                anchor,
+                max(0, (min(deadline, baseline + timedelta(minutes=1)) - now()).total_seconds()),
             )
             self.store.outcome(
                 event, "ANCHOR_OBSERVED", {"price": price, "broker_trade_time": stamp.isoformat()}
@@ -202,6 +209,15 @@ class Runtime:
                 elif not self.broker.reconciled:
                     async with asyncio.timeout(15):
                         await self.broker.reconcile()
+                try:
+                    async with asyncio.timeout(10):
+                        await self.broker.cancel_due_entries()
+                except Exception as exc:
+                    self.broker.problem = str(exc) or type(exc).__name__
+                    self.store.set_meta(
+                        "entry_cancellation_error",
+                        {"time": now().isoformat(), "error": self.broker.problem},
+                    )
                 await self.broker.close_due()
                 await asyncio.sleep(0.1)
             except asyncio.CancelledError:

@@ -31,7 +31,8 @@ async function refresh() {
   const path = location.pathname;
   let html = `<div class="page-header"><div><p class="eyebrow">US / IBKR PAPER</p><h1>Frozen FIRST4</h1><p>PRIOR15 &gt; 4.459368321659181% · first four opportunities · buy 98% put + 102% call</p></div><button id="pause">Pause entries</button></div>`;
   if (s.problem || s.missing_settings.length) html += `<section class="panel"><h2>Execution prerequisites</h2><p>${esc(s.problem)}</p><p>${esc(s.missing_settings.join(", "))}</p></section>`;
-  if (["/","/system","/settings"].includes(path)) html += table("PAPER status",[s],["account","connected","reconciled","armed","session","problem"])+table("Broker P&L",[data.pnl],["currency","net_cash_flow","realised","unrealised","status"]);
+  if (["/","/system","/settings"].includes(path)) html += table("PAPER status",[s],["account","connected","reconciled","armed","session","problem"])+table("IBKR PAPER simulated fills / P&L",[data.pnl],["basis","currency","net_cash_flow","realised","actual_fees_usd","fees_complete","reserved_fee_allowance_usd","session_allocation_usd","status"]);
+  if (["/","/trades"].includes(path)) html += table("Quoted ask-to-bid comparison (not fills)",data.quote_comparisons || [],["reference","quoted_entry_ask_for_exit_legs_usd","quoted_exit_bid_usd","quoted_ask_to_bid_gross_usd","quotes","exit_quotes"]);
   if (["/","/candidates"].includes(path)) html += table("Candidate decisions and permanent slots",data.candidates.slice(-150),["session","symbol","information_at","rank","prior15","decision","slot","entry_at","outcome","detail"]);
   if (["/","/orders"].includes(path)) html += table("Broker orders",data.orders.slice(-100),["reference","role","order_id","perm_id","status","payload"]);
   if (["/","/positions"].includes(path)) html += table("Actual option legs",data.positions,["con_id","quantity","payload"]);

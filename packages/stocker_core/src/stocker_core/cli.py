@@ -4340,7 +4340,8 @@ def first4_run(
     async def serve() -> None:
         runtime = Runtime(load(config), Store(database))
         app = create_dashboard_app(runtime)
-        server = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
+        # Security authenticates the actual loopback proxy peer, not X-Forwarded-For.
+        server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, proxy_headers=False))
         worker = asyncio.create_task(runtime.run())
         try:
             try:

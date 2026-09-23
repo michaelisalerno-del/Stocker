@@ -97,3 +97,49 @@ def test_websocket_boundary_rejects_before_application(monkeypatch):
         assert messages == [{"type": "websocket.close", "code": 1008}]
 
     asyncio.run(scenario())
+
+
+def test_first4_server_preserves_authenticated_proxy_socket_peer(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+
+    import httpx
+    import uvicorn
+    from typer.testing import CliRunner
+
+    from stocker_core.cli import app as cli
+    from stocker_execution.first4_runtime import Runtime
+
+    token = "isolated-proxy-credential-123456789"
+    monkeypatch.delenv("STOCKER_DASHBOARD_PASSWORD", raising=False)
+    monkeypatch.setenv("STOCKER_DASHBOARD_PROXY_TOKEN", token)
+    monkeypatch.setenv("STOCKER_DASHBOARD_ORIGIN", "https://stocker.example")
+    monkeypatch.setattr(Runtime, "run", AsyncMock())
+    monkeypatch.setattr(Runtime, "stop", AsyncMock())
+    statuses = []
+
+    class Server:
+        def __init__(self, config):
+            self.config = config
+
+        async def serve(self):
+            self.config.load()
+            transport = httpx.ASGITransport(self.config.loaded_app, client=("127.0.0.1", 123))
+            async with httpx.AsyncClient(
+                transport=transport, base_url="https://stocker.example"
+            ) as client:
+                forwarded = {"X-Forwarded-For": "198.51.100.17", "X-Forwarded-Proto": "https"}
+                for headers in [
+                    {"X-Stocker-Proxy-Token": token},
+                    {**forwarded, "X-Stocker-Proxy-Token": token},
+                    forwarded,
+                ]:
+                    statuses.append((await client.get("/api/system", headers=headers)).status_code)
+
+    monkeypatch.setattr(uvicorn, "Server", Server)
+    config = tmp_path / "first4.yaml"
+    config.write_text("armed: false\n")
+    result = CliRunner().invoke(
+        cli, ["first4-run", "--config", str(config), "--database", str(tmp_path / "state.sqlite")]
+    )
+    assert result.exit_code == 0, result.output
+    assert statuses == [200, 200, 403]

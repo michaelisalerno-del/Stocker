@@ -39,7 +39,7 @@
   "positions": 0,
   "observer_unchanged": true,
   "probe": {
-    "at": "2026-09-23T21:05:23.835754+00:00",
+    "at": "2026-09-23T21:08:23.139879+00:00",
     "purpose": "READ_ONLY_DATA_CHECK_NOT_FIRST4_SIGNAL",
     "transmitted_orders": 0,
     "settings": {
@@ -67,10 +67,11 @@
       "zero_open_orders": true,
       "qualified_usd_standard_multiplier": true,
       "fresh_realtime_option_quotes": false,
-      "combo_price_increment": true
+      "combo_price_increment": false
     },
     "blockers": [
-      "fresh_realtime_option_quotes: OPTION_QUOTES_INVALID_STALE_OR_UNAVAILABLE"
+      "fresh_realtime_option_quotes: OPTION_QUOTES_INVALID_STALE_OR_UNAVAILABLE",
+      "combo_price_increment: COMBO_PRICE_INCREMENT_UNAVAILABLE"
     ],
     "contracts": [
       {
@@ -132,15 +133,14 @@
         "order_types": "ACTIVETIM,AD,ADJUST,ALERT,ALGO,ALLOC,AON,AVGCOST,BASKET,COND,CONDORDER,DAY,DEACT,DEACTDIS,DEACTEOD,DIS,FOK,GAT,GTC,GTD,GTT,HID,ICE,IOC,LIT,LMT,MIT,MKT,MTL,NGCOMB,NONALGO,OCA,OPENCLOSE,PAON,PEGMIDVOL,PEGMKTVOL,PEGPRMVOL,PEGSRFVOL,POSTONLY,PRICECHK,REL,RELPCTOFS,RELSTK,SCALE,SCALERST,SIZECHK,SNAPMID,SNAPMKT,SNAPREL,STP,STPLMT,TRAIL,TRAILLIT,TRAILLMT,TRAILMIT,VOLAT,WHATIF"
       }
     ],
-    "combo_price_increment": 0.01,
     "broker_messages": [
       {
         "key": "reconciled_at",
-        "value": "\"2026-09-23T21:05:23.949368+00:00\""
+        "value": "\"2026-09-23T21:08:23.393002+00:00\""
       },
       {
         "key": "broker_error",
-        "value": "{\"time\": \"2026-09-23T21:05:26.296103+00:00\", \"request_id\": -1, \"code\": 2119, \"message\": \"Market data farm is connecting:usopt\"}"
+        "value": "{\"time\": \"2026-09-23T21:08:30.941178+00:00\", \"request_id\": 11, \"code\": 10197, \"message\": \"No market data during competing live session\"}"
       }
     ]
   },

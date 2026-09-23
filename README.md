@@ -10,7 +10,7 @@ stocker first4-run --config configs/first4.example.yaml --database .stocker/firs
 ```
 
 The existing dashboard is served on loopback port 8765. Its authenticated reverse-proxy boundary is unchanged.
-The example config is deliberately unarmed: fill every required listed-option execution setting before setting `armed: true`.
+The example config contains the user's PAPER execution settings and remains unarmed until the non-transmitting broker checks pass, including fresh real-time option quotes.
 See [FIRST4 protocol and execution](docs/FIRST4.md) for exact sources, differences and recovery.
 
 Data and research CLI commands remain available via `stocker data --help` and `stocker research --help`.

@@ -1,0 +1,56 @@
+{
+  "system": {
+    "method": "FIRST4_PRIOR15_Q5_98P_102C_20260923",
+    "market": "US",
+    "environment": "PAPER",
+    "account": "DUP655399",
+    "connected": true,
+    "reconciled": true,
+    "armed": false,
+    "configured_armed": false,
+    "missing_settings": [
+      "expiry_rule",
+      "strike_rule",
+      "premium_budget_usd",
+      "fee_reserve_per_package_usd",
+      "entry_limit",
+      "quote_max_age_seconds",
+      "entry_deadline_seconds",
+      "exit_seconds_before_close",
+      "exit_order"
+    ],
+    "problem": "SESSION_START_OR_SCANNER_HISTORY_MISSED",
+    "session": "2026-09-23",
+    "live_enabled": false,
+    "settings": {
+      "method": "FIRST4_PRIOR15_Q5_98P_102C_20260923",
+      "environment": "PAPER",
+      "expected_account": "DUP655399",
+      "host": "127.0.0.1",
+      "port": 4003,
+      "client_id": 81,
+      "armed": false,
+      "expiry_rule": null,
+      "strike_rule": null,
+      "premium_budget_usd": null,
+      "fee_reserve_per_package_usd": null,
+      "entry_limit": null,
+      "quote_max_age_seconds": null,
+      "entry_deadline_seconds": null,
+      "exit_seconds_before_close": null,
+      "exit_order": null
+    }
+  },
+  "orders": 0,
+  "positions": 0,
+  "fills": 0,
+  "old_routes": {
+    "/api/runs": 404,
+    "/api/universe-builder/options": 404,
+    "/api/runs/old/enable": 404
+  },
+  "legacy_cli_rejected": true,
+  "active_legacy_configs_absent": true,
+  "observer_hashes_unchanged": true,
+  "release": "/opt/stocker/releases/45bb4d85862241aafb7220d2f6b47b07e8c20f41"
+}

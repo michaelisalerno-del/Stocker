@@ -1,6 +1,8 @@
 # SLRNO implementation and verification
 
-Local implementation; not deployed. All screenshots use synthetic fixtures.
+Implementation-phase report, completed before deployment. All screenshots use synthetic
+fixtures. The subsequent user-authorized activation of `92393ff` is recorded in
+[the current deployment record](CURRENT-DEPLOYMENT.md).
 
 ## A. Starting identity
 

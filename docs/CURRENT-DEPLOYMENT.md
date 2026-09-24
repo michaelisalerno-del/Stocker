@@ -1,5 +1,57 @@
 # SLRNO — current server deployment
 
+Verified on September 24, 2026 at 17:16:44 UTC (18:16 UK).
+
+The active release is **`92393ff7c62ca7c0d7c612252797d684aa792732`**, published to
+GitHub `main` and activated at **17:14:23 UTC** after the user explicitly requested
+push, deployment and restart. It adds the SLRNO interface, compact page-specific
+reads, permanent allocation cards and stable browser refresh. Frozen FIRST4 strategy,
+execution and safety semantics are unchanged; LIVE remains disabled.
+
+All 368 tracked release files matched their SHA-256 manifest before activation.
+All six [CI checks](https://github.com/michaelisalerno-del/Stocker/actions/runs/36031473141)
+passed for this exact commit. The locked server-only install contains 56 distributions
+including Stocker; the service-user offline smoke passed with network connections
+forbidden. The initial staged install could not write the service user's default uv
+cache; using a cache inside the new release resolved this before touching the running
+service. No existing cache permissions were changed.
+
+`stocker-v1.service` stopped cleanly and started once, **PID 1307977**, with **zero
+automatic restarts**. Worker, manager and web health are RUNNING. PAPER is connected
+and reconciled; the ledger is available. Authenticated health, Overview, Opportunities,
+Execution, System, allocation detail and static assets returned HTTP 200. Served
+JavaScript/CSS hashes match the release. The real current-session Overview response
+was 6,409 bytes. Existing browser tabs should reload to load the new UI/API contract.
+
+**Execution configuration was not changed.** Its SHA-256 remains
+`5dfd04751b08394d8e7f47a0f84442c2b1e5861cfe6e8e1a343d3bbd79a53818`.
+`armed` remains false; the existing `arm_after_quote_check_on: 2026-09-25` permission
+and **WAITING_FOR_OPEN** state remain intact. September 24 retains the existing
+`SESSION_START_OR_SCANNER_HISTORY_MISSED` entry block. No date change, rearming,
+opening-check replay, pause mutation or slot reset was performed.
+
+All 51 candidate events remain. Today's four permanent slots are still GCDT, MMTIF,
+SOS and PMAX, with their existing EXECUTION_FAILED outcomes, correctly displayed as
+BLOCKED / FAILED. Orders, fills, positions and exit obligations remain zero.
+Both the consistent backup and runtime ledger passed SQLite `quick_check`.
+
+Root-only pre-activation ledger/configuration backups and verification records are in
+`/var/lib/stocker/backups/first4-92393ff7c62c/`. The former release remains available
+at `/opt/stocker/releases/b5d6962cbd2d13eb39129ed0a116d9f4c87a9cac`.
+Do not restore the ledger snapshot over subsequent trading activity.
+
+Gateway **PID 1274679** and independent scanner observer **PID 1297975** stayed active
+and unchanged. Observer collector/service/timer hashes were unchanged. Only the existing
+FIRST4 service reconnected through its normal startup; no extra broker client or test
+order was used. Credentials are excluded from the
+[verification record](slrno-deployment-20260924.json).
+
+See [implementation and local measurements](SLRNO-implementation.md).
+
+## Previous 15:32 UTC deployment record (superseded)
+
+The following is the prior release and permission record, retained as historical evidence.
+
 Verified on September 24, 2026 at 15:32 UTC (16:32 UK).
 
 The active release is `b5d6962cbd2d13eb39129ed0a116d9f4c87a9cac`, published to

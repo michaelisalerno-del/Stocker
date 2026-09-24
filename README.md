@@ -32,4 +32,5 @@ Research workstations keep the default dev/research groups; production must use
 database names and service paths are intentionally unchanged.
 
 See [SLRNO implementation and verification](docs/SLRNO-implementation.md) for local
-changes, synthetic screenshots and measured performance. These changes are not deployed.
+changes, synthetic screenshots and measured performance. See the current deployment record
+for the active release and operational state.

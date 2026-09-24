@@ -1,0 +1,87 @@
+{
+  "verified_at": "2026-09-24T17:16:44.744454+00:00",
+  "revision": "92393ff7c62ca7c0d7c612252797d684aa792732",
+  "http_status": {
+    "/api/health": 200,
+    "/api/system": 200,
+    "/api/overview": 200,
+    "/api/opportunities": 200,
+    "/api/execution": 200,
+    "/api/detail?session=2026-09-24&symbol=GCDT": 200,
+    "/": 200,
+    "/opportunities": 200,
+    "/execution": 200,
+    "/system": 200,
+    "/static/dashboard.js": 200,
+    "/static/dashboard.css": 200
+  },
+  "payload_bytes": {
+    "/api/health": 1400,
+    "/api/system": 1498,
+    "/api/overview": 6409,
+    "/api/opportunities": 13935,
+    "/api/execution": 4751,
+    "/api/detail?session=2026-09-24&symbol=GCDT": 667,
+    "/": 2634,
+    "/opportunities": 2634,
+    "/execution": 2634,
+    "/system": 2634,
+    "/static/dashboard.js": 31294,
+    "/static/dashboard.css": 9601
+  },
+  "services": {
+    "stocker-v1.service": "MainPID=1307977\nNRestarts=0\nActiveState=active",
+    "stocker-ibgateway.service": "MainPID=1274679\nNRestarts=0\nActiveState=active",
+    "stocker-frozen-scanner-observation-20260923.service": "MainPID=1297975\nNRestarts=0\nActiveState=active"
+  },
+  "config_sha256": "5dfd04751b08394d8e7f47a0f84442c2b1e5861cfe6e8e1a343d3bbd79a53818",
+  "ledger_counts": {
+    "orders": 0,
+    "fills": 0,
+    "positions": 0,
+    "events": 51
+  },
+  "slots": [
+    {
+      "slot": 1,
+      "symbol": "GCDT",
+      "state": "BLOCKED / FAILED"
+    },
+    {
+      "slot": 2,
+      "symbol": "MMTIF",
+      "state": "BLOCKED / FAILED"
+    },
+    {
+      "slot": 3,
+      "symbol": "SOS",
+      "state": "BLOCKED / FAILED"
+    },
+    {
+      "slot": 4,
+      "symbol": "PMAX",
+      "state": "BLOCKED / FAILED"
+    }
+  ],
+  "system": {
+    "connected": true,
+    "reconciled": true,
+    "armed": false,
+    "configured_armed": false,
+    "paused": false,
+    "worker_health": "RUNNING",
+    "manager_health": "RUNNING",
+    "web_health": "RUNNING",
+    "ledger_available": true,
+    "live_enabled": false,
+    "entry_block_reason": "SESSION_START_OR_SCANNER_HISTORY_MISSED",
+    "opening_check": {
+      "status": "WAITING_FOR_OPEN",
+      "session": "2026-09-25"
+    },
+    "outstanding_obligations": 0
+  },
+  "observer_hashes_unchanged": true,
+  "backup_quick_check": "ok",
+  "runtime_ledger_quick_check": "ok"
+}

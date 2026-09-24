@@ -3,6 +3,10 @@
 Stocker runs one US-only frozen FIRST4 method against IBKR PAPER account `DUP655399`.
 LIVE execution is unavailable. Research and raw data remain separate from trading.
 
+The server runs release `0080a786d78660e04d9a17d310b8322c4eecb3c8`.
+See [current deployment and effective configuration](docs/CURRENT-DEPLOYMENT.md).
+Older cutover reports describe their recorded deployment, not current settings.
+
 Run `uv sync --locked --group server`, then:
 
 ```sh

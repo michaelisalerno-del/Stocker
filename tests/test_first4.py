@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -210,6 +211,22 @@ def fake_ib():
     ib.reqPositionsAsync = AsyncMock(return_value=[])
     ib.positions = Mock(return_value=[])
     ib.openTrades = Mock(return_value=[])
+
+    @contextmanager
+    def market_data(contract, update=None):
+        ticker = ib.reqMktData(contract, "", False, False)
+        future = asyncio.get_running_loop().create_future()
+        if update:
+            ticker.updateEvent += update
+        try:
+            yield ticker, future
+        finally:
+            if update:
+                ticker.updateEvent -= update
+            future.cancel()
+            ib.cancelMktData(contract)
+
+    ib.market_data = market_data
     return ib
 
 
@@ -302,6 +319,9 @@ def test_opening_check_failure_cannot_arm(tmp_path, monkeypatch, failure):
 
     async def probe(*args):
         if failure == "quote":
+            monkeypatch.setattr(
+                "stocker_execution.first4_runtime.now", lambda: OPEN + timedelta(minutes=14)
+            )
             raise ValueError("OPTION_QUOTES_INVALID_STALE_OR_UNAVAILABLE")
         if failure == "pause":
             runtime.pause = True
@@ -414,9 +434,7 @@ def test_shared_option_access_checks_quotes_after_metadata_without_orders(tmp_pa
     monkeypatch.setattr("stocker_execution.first4_readiness.now", lambda: OPEN)
     b.ib.reqMarketDataType = Mock()
     b.ib.qualifyContractsAsync = AsyncMock(return_value=[Contract(conId=42, symbol="F")])
-    b.ib.reqTickersAsync = AsyncMock(
-        return_value=[NS(marketPrice=lambda: 13, marketDataType=1, time=OPEN)]
-    )
+    b.stock_reference = AsyncMock(return_value=13)
     b.chain = AsyncMock(
         return_value=[
             NS(

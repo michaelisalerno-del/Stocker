@@ -2,7 +2,9 @@
 
 import json
 import math
+from datetime import datetime, time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from stocker_execution.first4 import Q5
 from stocker_execution.first4_store import Store
@@ -38,6 +40,20 @@ def opportunities(
         if value is not None and not math.isfinite(value):
             row["prior15"] = None
         row["basis"] = "FIRST_APPEARANCE_SNAPSHOT_FINAL_DECISION"
+        seen = datetime.fromisoformat(row["information_at"]).astimezone(
+            ZoneInfo("America/New_York")
+        )
+        early = seen.date().isoformat() == session and time(9, 30) <= seen.time() < time(9, 45)
+        row["prior15_explanation"] = (
+            "PRIOR15 unavailable at first appearance — fewer than 15 session minutes"
+            if row["prior15"] is None and early
+            else "PRIOR15 unavailable"
+            if row["prior15"] is None
+            else ""
+        )
+        row["decision_explanation"] = (
+            "Rejected for this session — not reconsidered" if row["slot"] is None else ""
+        )
     return rows
 
 
@@ -145,6 +161,9 @@ def allocations(store: Store, session: str) -> list[dict[str, Any]]:
                 "complete": complete,
                 "closed": closed,
                 "has_exposure": exposure,
+                "position_explanation": "No position opened"
+                if not held and state in {"BLOCKED / FAILED", "UNFILLED"}
+                else "",
                 "gross": proceeds - paid if closed else None,
                 "realised": net if closed and not pending else None,
                 "provisional_result": net if closed else None,

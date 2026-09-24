@@ -52,7 +52,7 @@ def execution(monkeypatch):
     runtime = module.Runtime.__new__(module.Runtime)
     runtime.pause = False
     runtime.config = SimpleNamespace(missing=lambda: [], number=lambda key: 180)
-    runtime.store = SimpleNamespace(outcome=Mock())
+    runtime.store = SimpleNamespace(outcome=Mock(), execution_evidence=Mock(return_value={}))
     runtime.broker = SimpleNamespace(
         ib=ib,
         entries_armed=lambda: True,
@@ -220,5 +220,35 @@ def test_unrelated_request_error_and_informational_notice_do_not_reject_anchor(m
         runtime.broker.enter.assert_awaited_once_with(event, underlying, 1.25)
         assert not ib.wrapper._futures and not ib.wrapper._results
         assert not ib.wrapper.reqId2Ticker
+
+    asyncio.run(check())
+
+
+def test_tick_error_interrupts_pending_metadata_and_drains_it(monkeypatch):
+    async def check():
+        runtime, ib, clock, event, underlying = execution(monkeypatch)
+        started, cleaned = asyncio.Event(), asyncio.Event()
+
+        async def chain(*args):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaned.set()
+
+        runtime.broker.chain.side_effect = chain
+        task = asyncio.create_task(runtime.execute(event, underlying))
+        await started.wait()
+        ib.wrapper.error(42, 354, "Synthetic rejection", "")
+        for _ in range(20):
+            await asyncio.sleep(0)
+        finished = task.done()
+        if not finished:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        assert finished, "Subscription failure waited for unrelated metadata"
+        assert cleaned.is_set()
+        assert runtime.store.outcome.call_args.args[2]["stage"] == "BASELINE_SUBSCRIPTION"
+        assert not ib.wrapper._futures and not ib.wrapper.reqId2Ticker
 
     asyncio.run(check())

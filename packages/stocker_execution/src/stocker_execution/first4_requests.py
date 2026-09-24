@@ -5,6 +5,8 @@ cancels on success. Keep the same wire requests, but always release their state.
 """
 
 import asyncio
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -50,6 +52,41 @@ class First4IB(IB):
         self.wrapper._endReq(request_id)
         # RequestError completes with an explicit result in 2.1, leaving this map.
         self.wrapper._results.pop(request_id, None)
+
+    @contextmanager
+    def market_data(
+        self, contract: Any, update: Callable[[Any], None] | None = None
+    ) -> Iterator[tuple[Ticker, asyncio.Future[Any]]]:
+        """One temporary stream, using the wrapper's request/error lifecycle.
+
+        startTicker reuses a ticker by contract hash, including cached prices and
+        concurrent tick-by-tick updates. Give this request its own ticker so only
+        this wire request can supply its evidence. Never replace a strategy ticker.
+        """
+        request_id = self.client.getReqId()
+        future = self.wrapper.startReq(request_id, contract)
+        ticker = Ticker(contract=contract, defaults=self.wrapper.defaults)
+        ticker.marketDataType = 0  # Require a type response on this request.
+        self.wrapper.reqId2Ticker[request_id] = ticker
+        self.wrapper.ticker2ReqId["mktData"][ticker] = request_id
+        if update is not None:
+            ticker.updateEvent += update
+        try:
+            self.client.reqMktData(request_id, contract, "", False, False, [])
+            yield ticker, future
+        finally:
+            if update is not None:
+                ticker.updateEvent -= update
+            try:
+                if self.isConnected():
+                    self.client.cancelMktData(request_id)
+            finally:
+                self.wrapper.endTicker(ticker, "mktData")
+                self.wrapper.reqId2Ticker.pop(request_id, None)
+                future.cancel()
+                if not future.cancelled():
+                    future.exception()
+                self.finish_request(request_id)
 
     async def reqTickersAsync(
         self, *contracts: Any, regulatorySnapshot: bool = False

@@ -203,12 +203,8 @@ const detail = () => ({
     await page.locator("#snapshots").textContent(),
     /not re-evaluated/,
   );
-  assert.deepEqual(
-    await page
-      .locator("progress")
-      .evaluateAll((nodes) => nodes.map((n) => n.value)),
-    [4.21 / q5, 1, 0, 0, 1],
-  );
+  assert.equal(await page.locator("#snapshots progress").count(), 0);
+  assert.match(await page.locator("#snapshots").textContent(), /Rejected for this session — not reconsidered/);
   assert.match(
     await page.locator('[data-slot="3"]').textContent(),
     /Unrealised P&L unavailable/i,
@@ -251,7 +247,7 @@ const detail = () => ({
   }
   slots[0] = allocation(1, "SELECTED");
   await page.evaluate(() => refresh());
-  const screenshotDir = path.join(__dirname, "../docs/slrno-screenshots");
+  const screenshotDir = process.env.STOCKER_SCREENSHOT_DIR || path.join(__dirname, "../docs/slrno-screenshots");
   fs.mkdirSync(screenshotDir, { recursive: true });
   async function screenshot(name) {
     await page.evaluate(() => {
@@ -631,6 +627,22 @@ const detail = () => ({
   await ready("/execution");
   await screenshot("execution-desktop.png");
   await ready("/system");
+  await page.evaluate(() => {
+    window.savedData = structuredClone(lastData);
+    savedData.armed = false;
+    savedData.opening_check_active = false;
+    savedData.opening_check = {status: "ARMED", attempt: 5};
+    render(savedData);
+  });
+  assert.match(await page.locator("#opening").textContent(), /Current readiness: Unarmed/);
+  assert.match(await page.locator("#opening").textContent(), /Historical opening result: ARMED · 5 attempts/);
+  await page.evaluate(() => {
+    savedData.opening_check_active = true;
+    savedData.opening_remaining_seconds = 740;
+    savedData.opening_check = {status: "CHECKING", attempt: 4};
+    render(savedData);
+  });
+  assert.match(await page.locator("#opening").textContent(), /Verification active · 4 attempts · 740s remaining/);
   await screenshot("system-desktop.png");
   const requestsPerMinute = {};
   for (const [url, endpoint, period] of [

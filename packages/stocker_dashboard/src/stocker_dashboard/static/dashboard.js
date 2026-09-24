@@ -311,7 +311,7 @@ function renderSlots(items) {
     field(
       card,
       "next",
-      allocated ? item.next_step : "Awaiting a qualifying first appearance.",
+      allocated ? [item.position_explanation, item.next_step].filter(Boolean).join(" · ") : "Awaiting a qualifying first appearance.",
     );
     field(
       card,
@@ -370,17 +370,13 @@ function renderSnapshots(items, q5) {
     if (!card) {
       card = document.createElement("article");
       card.className = "snapshot";
-      card.innerHTML = `<div class="section-head"><h3 data-field="symbol"></h3><span class="label" data-field="rank"></span></div><span class="label">Q5 proximity</span><p class="value" data-field="prior"></p><progress value="0" max="1" aria-label="Q5 proximity"></progress><p data-field="distance"></p><small data-field="decision"></small><p class="muted" data-field="seen"></p>`;
+      card.innerHTML = `<div class="section-head"><h3 data-field="symbol"></h3><span class="label" data-field="rank"></span></div><span class="label">Rejected first appearance</span><p class="value" data-field="prior"></p><p data-field="distance"></p><small data-field="decision"></small><p class="muted" data-field="seen"></p>`;
       container.append(card);
     }
     const valid = number(item.prior15) && number(q5) && q5 > 0;
-    const ratio = valid ? Math.min(1, Math.max(0, item.prior15 / q5)) : 0;
     field(card, "symbol", item.symbol);
     field(card, "rank", `RANK ${item.rank ?? "—"}`);
     field(card, "prior", `${percent(item.prior15)} / ${percent(q5)}`);
-    const bar = card.querySelector("progress");
-    if (bar.value !== ratio) bar.value = ratio;
-    show(bar, valid);
     const distance = !valid
       ? "PRIOR15 unavailable"
       : item.prior15 === q5
@@ -390,7 +386,7 @@ function renderSnapshots(items, q5) {
     field(
       card,
       "decision",
-      `${item.decision} · ${item.outcome} · not allocated`,
+      `${item.decision} · ${item.outcome} · Rejected for this session — not reconsidered`,
     );
     field(
       card,
@@ -454,7 +450,11 @@ function render(data) {
     field($("#main"), "missing", data.missing_settings?.join(", ") || "None");
     for (const key of ["last_scanner_observation", "last_option_quote_check"])
       field($("#main"), key, stamp(data[key]));
-    text($("#opening"), JSON.stringify(data.opening_check || {}, null, 2));
+    const check = data.opening_check || {};
+    const verification = data.opening_check_active
+      ? `Verification active · ${check.attempt || 0} attempts · ${Math.ceil(data.opening_remaining_seconds || 0)}s remaining`
+      : `Historical opening result: ${check.status || "None"} · ${check.attempt || 0} attempts (not current authorisation)`;
+    text($("#opening"), `Current readiness: ${data.armed ? "Armed" : "Unarmed"}\n${verification}\n\n${JSON.stringify(check, null, 2)}`);
     text($("#configuration"), JSON.stringify(data.settings || {}, null, 2));
     const { settings, opening_check, ...diagnostics } = data;
     text($("#diagnostics"), JSON.stringify(diagnostics, null, 2));
@@ -483,8 +483,8 @@ function render(data) {
           `${r.symbol}${r.slot ? ` / SLOT ${r.slot}` : ""}`,
           stamp(r.information_at),
           r.rank,
-          percent(r.prior15),
-          r.decision,
+          r.prior15_explanation || percent(r.prior15),
+          [r.decision, r.decision_explanation].filter(Boolean).join(" · "),
           r.outcome,
           stamp(r.entry_at),
           { session: r.session, symbol: r.symbol },

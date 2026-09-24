@@ -254,6 +254,16 @@ class Store:
                 ),
             )
 
+    def execution_evidence(self, event: dict[str, Any]) -> dict[str, Any]:
+        orders = self.allocation_orders(event["session"], event["symbol"])
+        return {
+            "order_reserved": bool(orders),
+            "submitted_order_observed": any(o["status"] != "RESERVED" for o in orders),
+            "fill_observed": any(self.order_fills(o["reference"]) for o in orders),
+            "order_statuses": [o["status"] for o in orders],
+            "submission_unresolved": any(o["status"] == "RESERVED" for o in orders),
+        }
+
     def reserve_order(
         self,
         event: dict[str, Any],

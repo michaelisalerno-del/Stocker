@@ -50,14 +50,22 @@ def test_transient_check_retries_and_arms_only_after_success(tmp_path, monkeypat
     asyncio.run(runtime.check_opening("2025-07-21", OPEN))
     report = runtime.store.get_meta("opening_check:2025-07-21")
     assert report["status"] == "ARMED" and report["attempt"] == calls == 2
-    assert report["last_attempt_error"] and "next_attempt_at" not in report
+    assert report["attempts"][0]["exception"] and "last_attempt_error" not in report
+    assert "next_attempt_at" not in report
     runtime.broker.ib.placeOrder.assert_not_called()
 
 
-def test_retry_limit_is_terminal_and_not_replayed(tmp_path, monkeypatch):
+def test_retry_cutoff_is_terminal_and_not_replayed(tmp_path, monkeypatch):
     runtime = opening_runtime(tmp_path, monkeypatch)
     monkeypatch.setattr(module, "OPENING_RETRY_SECONDS", 0)
-    probe = AsyncMock(side_effect=TimeoutError())
+    clock = [OPEN]
+    monkeypatch.setattr(module, "now", lambda: clock[0])
+
+    async def fail(*args):
+        clock[0] += timedelta(seconds=60)
+        raise TimeoutError()
+
+    probe = AsyncMock(side_effect=fail)
     monkeypatch.setattr(module, "option_access", probe)
 
     async def check():
@@ -65,12 +73,12 @@ def test_retry_limit_is_terminal_and_not_replayed(tmp_path, monkeypatch):
         await runtime.arm_at_open()
 
     asyncio.run(check())
-    assert probe.await_count == 3
+    assert probe.await_count == 14
     assert runtime.store.get_meta("opening_check:2025-07-21")["status"] == "FAILED"
     assert not runtime.broker.opening_verified_session
 
 
-def test_final_attempt_preserves_original_quote_window(tmp_path, monkeypatch):
+def test_every_attempt_uses_clipped_sixty_second_budget(tmp_path, monkeypatch):
     runtime = opening_runtime(tmp_path, monkeypatch)
     monkeypatch.setattr(module, "OPENING_RETRY_SECONDS", 0)
     deadlines = []
@@ -83,7 +91,7 @@ def test_final_attempt_preserves_original_quote_window(tmp_path, monkeypatch):
 
     monkeypatch.setattr(module, "option_access", probe)
     asyncio.run(runtime.check_opening("2025-07-21", OPEN))
-    assert deadlines == [OPEN + timedelta(seconds=60)] * 2 + [OPEN + timedelta(minutes=14)]
+    assert deadlines == [OPEN + timedelta(seconds=60)] * 3
     assert runtime.broker.opening_verified_session == "2025-07-21"
 
 
@@ -102,7 +110,7 @@ def test_retry_cannot_cross_a_safety_block(tmp_path, monkeypatch, change):
         elif change == "account":
             runtime.broker.ib.managedAccounts.return_value = ["wrong"]
         elif change == "permission":
-            runtime.config.arm_after_quote_check_on = None
+            runtime.config = runtime.config.model_copy(update={"arm_after_quote_check_on": None})
         elif change == "disconnect":
             runtime.broker.disconnected()
             await runtime.broker.reconcile()
@@ -148,10 +156,11 @@ def test_timed_out_attempt_is_drained_before_retry(tmp_path, monkeypatch):
         finally:
             active -= 1
             cleaned += 1
+            monkeypatch.setattr(module, "now", lambda: OPEN + timedelta(minutes=14))
 
     monkeypatch.setattr(module, "option_access", slow)
     asyncio.run(runtime.check_opening("2025-07-21", OPEN))
-    assert attempts == cleaned == 3 and active == 0
+    assert attempts == cleaned == 1 and active == 0
 
 
 def test_cancel_during_retry_backoff_stays_failed(tmp_path, monkeypatch):

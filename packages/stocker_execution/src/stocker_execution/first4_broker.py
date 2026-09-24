@@ -5,7 +5,8 @@ import json
 import logging
 import math
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import ExitStack, contextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_FLOOR, Decimal
 from typing import Any
@@ -26,6 +27,23 @@ from stocker_execution.first4_requests import First4IB
 from stocker_execution.first4_store import Store
 
 log = logging.getLogger(__name__)
+
+
+async def entry_work(stage: str, work: Awaitable[Any]) -> Any:
+    try:
+        return await work
+    except BaseException as exc:
+        exc.entry_stage = stage  # type: ignore[attr-defined]
+        raise
+
+
+@contextmanager
+def entry_stage(stage: str) -> Iterator[None]:
+    try:
+        yield
+    except BaseException as exc:
+        exc.entry_stage = stage  # type: ignore[attr-defined]
+        raise
 
 
 class OptionChainError(ValueError):
@@ -110,6 +128,7 @@ class PaperBroker:
         self.fatal_error = ""
         self.persistence_failed = False
         self.operator_exceptions: dict[str, str] = {}
+        self.opening_diagnostic: dict[str, Any] = {}
         self.ib.disconnectedEvent += self.disconnected
         self.ib.execDetailsEvent += self.persist_event(self.fill)
         self.ib.commissionReportEvent += self.persist_event(self.commission)
@@ -199,7 +218,7 @@ class PaperBroker:
                     ),
                 )
 
-    def guard(self) -> None:
+    def guard(self, *, require_reconciled: bool = True) -> None:
         if self.config.environment != "PAPER" or self.config.expected_account != PAPER_ACCOUNT:
             raise ValueError("PAPER account identity mismatch")
         if not self.ib.isConnected() or self.ib.managedAccounts() != [PAPER_ACCOUNT]:
@@ -211,7 +230,7 @@ class PaperBroker:
             raise ValueError("UPSTREAM_UNAVAILABLE")
         if self.fatal_error:
             raise ValueError(self.fatal_error)
-        if not self.reconciled:
+        if require_reconciled and not self.reconciled:
             raise ValueError("Broker reconciliation required: " + self.problem)
 
     async def connect(self) -> None:
@@ -764,15 +783,88 @@ class PaperBroker:
         )
         return legs[0], legs[1], combo
 
+    async def stock_reference(
+        self, underlying: Any, deadline: datetime, audit: dict[str, Any]
+    ) -> float:
+        """Consume a fresh marketPrice from one request, never snapshot completion."""
+        generation = self.data_generation
+        stamps: dict[int, datetime] = {}
+        changed = asyncio.Event()
+
+        def update(ticker: Any) -> None:
+            for tick in ticker.ticks:
+                if tick.tickType in {1, 2, 4}:
+                    stamps[tick.tickType] = tick.time
+            changed.set()
+
+        with self.ib.market_data(underlying, update) as (ticker, error):
+            while True:
+                self.guard()
+                self.check_data_generation(generation)
+                if 2103 in self.unavailable_farms or self.data_problem:
+                    raise ValueError("QUOTE_DATA_INTERRUPTED")
+                if error.done():
+                    error.result()
+                consumed_at = now()
+                reference = ticker.marketPrice()
+                # marketPrice uses bid/ask to choose last versus midpoint. Validate
+                # every price involved in that choice, including an observed last.
+                required = [1, 2] if ticker.hasBidAsk() else [4]
+                if ticker.hasBidAsk() and ticker.bid <= ticker.last <= ticker.ask:
+                    required.append(4)
+                ages = [(consumed_at - stamps[k]).total_seconds() for k in required if k in stamps]
+                predicate = (
+                    "DATA_TYPE"
+                    if ticker.marketDataType != 1
+                    else "PRICE_INVALID"
+                    if not math.isfinite(reference) or reference <= 0
+                    else "PRICE_OBSERVATION_MISSING"
+                    if any(k not in stamps for k in required)
+                    else "PRICE_STALE_OR_FUTURE"
+                    if any(
+                        not 0 <= age <= self.config.number("quote_max_age_seconds") for age in ages
+                    )
+                    else "DEADLINE"
+                    if consumed_at >= deadline
+                    else None
+                )
+                audit["stock_quote"] = {
+                    "data_type": ticker.marketDataType,
+                    "consumed_at": consumed_at.isoformat(),
+                    "ticker_at": ticker.time.isoformat() if ticker.time else None,
+                    "price_timestamps": {
+                        str(k): stamps[k].isoformat() for k in required if k in stamps
+                    },
+                    "ages_seconds": ages,
+                    "reference_price": reference if math.isfinite(reference) else None,
+                    "failed_predicate": predicate,
+                }
+                if predicate is None:
+                    return float(reference)
+                if consumed_at >= deadline:
+                    raise ValueError("PROBE_STOCK_QUOTE_UNAVAILABLE")
+                changed.clear()
+                # Event wakes immediately on price receipt; bounded polling also
+                # detects safety revocation without waiting for another price.
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(
+                        changed.wait(), min(0.02, (deadline - consumed_at).total_seconds())
+                    )
+
     async def quotes(
-        self, contracts: list[Any], deadline: datetime, quantity: float = 1, side: str = "BUY"
+        self,
+        contracts: list[Any],
+        deadline: datetime,
+        quantity: float = 1,
+        side: str = "BUY",
+        *,
+        ready: asyncio.Future[Any] | None = None,
     ) -> list[dict[str, Any]]:
         generation = self.data_generation
         subscriptions = []
         states: list[dict[str, Any]] = [{"bid_at": None, "ask_at": None} for _ in contracts]
-        try:
+        with ExitStack() as cleanup:
             for contract, state in zip(contracts, states, strict=True):
-                t = self.ib.reqMktData(contract, "", False, False)
 
                 def update(ticker: Any, state: dict[str, Any] = state) -> None:
                     for tick in ticker.ticks:
@@ -781,20 +873,27 @@ class PaperBroker:
                         elif tick.tickType == 2:
                             state["ask_at"] = tick.time
 
-                t.updateEvent += update
-                subscriptions.append((contract, t, update))
-            while now() < deadline:
+                t, error = cleanup.enter_context(self.ib.market_data(contract, update))
+                subscriptions.append((t, error))
+            while True:
                 self.guard()
                 if generation != self.data_generation or 2103 in self.unavailable_farms:
                     raise ValueError("QUOTE_DATA_INTERRUPTED")
+                for _, error in subscriptions:
+                    if error.done():
+                        error.result()
+                if now() >= deadline:
+                    raise ValueError("OPTION_QUOTES_INVALID_STALE_OR_UNAVAILABLE")
                 result = []
-                for (_, t, _), s in zip(subscriptions, states, strict=True):
+                for (t, _), s in zip(subscriptions, states, strict=True):
                     stamps = [s["bid_at"], s["ask_at"]]
                     if t.marketDataType != 1 or any(x is None for x in stamps):
                         break
-                    age = max((now() - x).total_seconds() for x in stamps)
+                    ages = [(now() - x).total_seconds() for x in stamps]
                     if (
-                        not 0 <= age <= self.config.number("quote_max_age_seconds")
+                        not all(
+                            0 <= age <= self.config.number("quote_max_age_seconds") for age in ages
+                        )
                         or not all(math.isfinite(x) for x in (t.bid, t.ask, t.bidSize, t.askSize))
                         or not 0 < t.bid <= t.ask
                         or min(t.bidSize, t.askSize) <= 0
@@ -811,15 +910,10 @@ class PaperBroker:
                             "ask_at": s["ask_at"].isoformat(),
                         }
                     )
-                if len(result) == len(contracts):
+                if len(result) == len(contracts) and (ready is None or ready.done()):
                     self.last_quote_at = now()
                     return result
                 await asyncio.sleep(0.02)
-            raise ValueError("OPTION_QUOTES_INVALID_STALE_OR_UNAVAILABLE")
-        finally:
-            for contract, t, callback in subscriptions:
-                t.updateEvent -= callback
-                self.ib.cancelMktData(contract)
 
     def submit(
         self,
@@ -929,10 +1023,19 @@ class PaperBroker:
         generation = self.data_generation
         baseline = datetime.fromisoformat(event["entry_at"])
         deadline = baseline + timedelta(seconds=self.config.number("entry_deadline_seconds"))
-        p, c, combo = await self.contracts(underlying, anchor, baseline)
+        p, c, combo = await entry_work(
+            "CONTRACT_QUALIFICATION", self.contracts(underlying, anchor, baseline)
+        )
         async with asyncio.TaskGroup() as group:
-            quote_task = group.create_task(self.quotes([p.contract, c.contract], deadline))
-            tick_task = group.create_task(self.combo_tick(combo, deadline))
+            tick_task = group.create_task(
+                entry_work("COMBO_METADATA", self.combo_tick(combo, deadline))
+            )
+            quote_task = group.create_task(
+                entry_work(
+                    "OPTION_QUOTES",
+                    self.quotes([p.contract, c.contract], deadline, ready=tick_task),
+                )
+            )
         quotes, tick = quote_task.result(), tick_task.result()
         # reqContractDetails does not encode BAG legs. Use actual qualified leg
         # size constraints and the BAG market-data tickReqParams price increment.
@@ -1002,7 +1105,8 @@ class PaperBroker:
             outsideRth=False,
         )
         self.check_data_generation(generation)
-        self.submit(event, combo, order, payload, "ENTRY")
+        with entry_stage("ORDER_SUBMISSION"):
+            self.submit(event, combo, order, payload, "ENTRY")
         self.store.outcome(event, "ORDER_SUBMITTED", payload)
 
     async def cancel_due_entries(self) -> None:
@@ -1058,16 +1162,17 @@ class PaperBroker:
 
     async def combo_tick(self, combo: Any, deadline: datetime) -> float:
         generation = self.data_generation
-        ticker = self.ib.reqMktData(combo, "", False, False)
-        try:
-            while now() < deadline:
+        with self.ib.market_data(combo) as (ticker, error):
+            while True:
+                self.guard()
                 self.check_data_generation(generation)
+                if error.done():
+                    error.result()
+                if now() >= deadline:
+                    raise ValueError("COMBO_PRICE_INCREMENT_UNAVAILABLE")
                 if math.isfinite(ticker.minTick) and ticker.minTick > 0:
                     return float(ticker.minTick)
                 await asyncio.sleep(0.02)
-            raise ValueError("COMBO_PRICE_INCREMENT_UNAVAILABLE")
-        finally:
-            self.ib.cancelMktData(combo)
 
     def exit_exception(self, reference: str, reason: str) -> None:
         self.problem = reason

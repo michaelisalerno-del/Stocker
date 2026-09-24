@@ -19,6 +19,35 @@ DAY = "2026-09-24"
 CLOCK = datetime(2026, 9, 24, 14, tzinfo=UTC)
 
 
+def test_prior15_explanation_is_only_for_early_first_appearance(runtime):
+    early = CLOCK.replace(hour=13, minute=31)
+    event(runtime, "EARLY", prior=None, clock=early)
+    event(runtime, "LATE", prior=None, clock=CLOCK)
+    rows = {r["symbol"]: r for r in opportunities(runtime.store, DAY, 50, 0, "all")}
+    assert (
+        rows["EARLY"]["prior15_explanation"]
+        == "PRIOR15 unavailable at first appearance — fewer than 15 session minutes"
+    )
+    assert rows["LATE"]["prior15_explanation"] == "PRIOR15 unavailable"
+    assert rows["EARLY"]["decision_explanation"] == "Rejected for this session — not reconsidered"
+    with runtime.store.db:
+        runtime.store.db.execute(
+            "UPDATE first4_events SET decision='CHANGE_BELOW_5_5' WHERE symbol='EARLY'"
+        )
+    row = next(r for r in opportunities(runtime.store, DAY, 50, 0, "all") if r["symbol"] == "EARLY")
+    assert row["decision"] == "CHANGE_BELOW_5_5"
+
+
+def test_execution_failure_without_fill_has_no_position_label(runtime):
+    selected = event(runtime)
+    runtime.store.outcome(
+        selected, "EXECUTION_FAILED", {"error": "OPTION_QUOTES_INVALID_STALE_OR_UNAVAILABLE"}
+    )
+    row = allocations(runtime.store, DAY)[0]
+    assert row["position_explanation"] == "No position opened"
+    assert not row["has_exposure"] and row["state"] == "BLOCKED / FAILED"
+
+
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
     def no_network(*args, **kwargs):

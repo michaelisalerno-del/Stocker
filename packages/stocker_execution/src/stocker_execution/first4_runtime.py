@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import math
+import re
 import sqlite3
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
@@ -19,9 +21,17 @@ from stocker_execution.first4_store import Store
 
 log = logging.getLogger(__name__)
 Health = Literal["STARTING", "RUNNING", "DEGRADED", "FAILED", "STOPPED"]
-OPENING_MAX_ATTEMPTS = 3
 OPENING_ATTEMPT_SECONDS = 60
 OPENING_RETRY_SECONDS = 5
+
+
+async def opening_pause(seconds: float) -> None:
+    await asyncio.sleep(seconds)
+
+
+def exception_info(exc: BaseException) -> dict[str, Any]:
+    message = re.sub(r"\b(?:D[UF]|[UF])\d+\b", "[account]", str(exc))
+    return {"type": type(exc).__name__, "message": " ".join(message.split())[:300]}
 
 
 class Runtime:
@@ -44,6 +54,7 @@ class Runtime:
         self.scan_metrics: dict[str, Any] = {}
         self.critical_tasks: set[asyncio.Task[None]] = set()
         self.stopping = False
+        self.opening_active = False
 
     def status(self) -> dict[str, Any]:
         available = True
@@ -88,6 +99,12 @@ class Runtime:
             and self.manager_health == "RUNNING",
             "configured_armed": self.config.armed,
             "opening_check": opening,
+            "opening_check_active": self.opening_active,
+            "opening_remaining_seconds": max(
+                0, (datetime.fromisoformat(opening["deadline"]) - now()).total_seconds()
+            )
+            if self.opening_active and opening.get("deadline")
+            else None,
             "worker_health": self.worker_health,
             "manager_health": self.manager_health,
             "web_health": self.web_health,
@@ -194,6 +211,8 @@ class Runtime:
         stage = "ENTRY_GUARD"
         ticks_received = 0
         last_trade_at: str | None = None
+        chain_task: asyncio.Task[Any] | None = None
+        anchor_received: tuple[float, str] | None = None
         try:
             self.broker.guard()
             generation = self.broker.data_generation
@@ -209,7 +228,7 @@ class Runtime:
             anchor = self.broker.ib.wrapper.startReq(request_id, underlying)
 
             def on_tick(t: Any) -> None:
-                nonlocal ticks_received, last_trade_at
+                nonlocal ticks_received, last_trade_at, anchor_received
                 for tick in t.tickByTicks:
                     ticks_received += 1
                     last_trade_at = tick.time.isoformat()
@@ -218,18 +237,30 @@ class Runtime:
                         and not self.broker.market_data_block
                         and baseline <= tick.time < baseline + timedelta(minutes=1)
                         and tick.price > 0
+                        and math.isfinite(tick.price)
                         and anchor is not None
                         and not anchor.done()
                     ):
+                        anchor_received = (tick.price, tick.time.isoformat())
                         anchor.set_result((tick.price, tick.time))
 
             callback = on_tick
             ticker.updateEvent += callback
             deadline = baseline + timedelta(seconds=self.config.number("entry_deadline_seconds"))
             stage = "OPTION_CHAIN"
-            await asyncio.wait_for(
-                self.broker.standard_chain(underlying), max(0, (deadline - now()).total_seconds())
+            chain_task = asyncio.create_task(self.broker.standard_chain(underlying))
+            done, _ = await asyncio.wait(
+                {chain_task, anchor},
+                timeout=max(0, (deadline - now()).total_seconds()),
+                return_when=asyncio.FIRST_COMPLETED,
             )
+            if chain_task in done:
+                chain_task.result()
+            elif anchor in done:
+                anchor.result()  # Subscription failure interrupts pending metadata.
+                await asyncio.wait_for(chain_task, max(0, (deadline - now()).total_seconds()))
+            else:
+                raise TimeoutError()
             stage = "BASELINE_ANCHOR"
             price, stamp = await asyncio.wait_for(
                 anchor,
@@ -246,6 +277,9 @@ class Runtime:
             async with asyncio.timeout(max(0, (deadline - now()).total_seconds())):
                 await self.broker.enter(event, underlying, price)
         except Exception as exc:
+            failures = list(exc.exceptions) if isinstance(exc, ExceptionGroup) else [exc]
+            exc = next((e for e in failures if not isinstance(e, TimeoutError)), failures[0])
+            stage = getattr(exc, "entry_stage", getattr(exc.__cause__, "entry_stage", stage))
             reason = str(exc) or type(exc).__name__
             detail: dict[str, Any] = {}
             if isinstance(exc, OptionChainError):
@@ -283,11 +317,22 @@ class Runtime:
                     "ticks_received": ticks_received,
                     "last_trade_at": last_trade_at,
                     "tick_request_id": request_id,
+                    "anchor_received": anchor_received is not None,
+                    "anchor_evidence": anchor_received,
+                    **self.store.execution_evidence(event),
+                    "stage_errors": [
+                        {"stage": getattr(e, "entry_stage", stage), **exception_info(e)}
+                        for e in failures
+                    ],
                     **detail,
                 },
             )
             log.warning("FIRST4 execution failed %s at %s: %s", event["symbol"], stage, reason)
         finally:
+            if chain_task is not None:
+                if not chain_task.done():
+                    chain_task.cancel()
+                await asyncio.gather(chain_task, return_exceptions=True)
             if ticker is not None:
                 ticker.updateEvent -= callback
                 try:
@@ -445,8 +490,8 @@ class Runtime:
                 return
             await asyncio.sleep(0.5)
 
-    def opening_guard(self, day: str, opened: datetime) -> None:
-        self.broker.guard()
+    def opening_guard(self, day: str, opened: datetime, *, reconciling: bool = False) -> None:
+        self.broker.guard(require_reconciled=not reconciling)
         self.config.require_settings()
         if self.config.armed or str(self.config.arm_after_quote_check_on) != day:
             raise ValueError("OPENING_ARM_DATE_NOT_AUTHORIZED")
@@ -455,6 +500,10 @@ class Runtime:
             raise ValueError("OPENING_VERIFICATION_WINDOW_EXPIRED")
         if self.pause or self.store.get_meta("paused", False):
             raise ValueError("ENTRIES_PAUSED")
+        if self.broker.market_data_block or self.broker.data_problem:
+            raise ValueError(self.broker.data_problem or "MARKET_DATA_COMPETING_SESSION_10197")
+        if self.broker.management_block:
+            raise ValueError(self.broker.management_block)
         if self.session != day or self.problem or self.broker.entry_blocker:
             raise ValueError(self.problem or self.broker.entry_blocker or "SESSION_NOT_READY")
         state = self.store.db.execute(
@@ -465,7 +514,46 @@ class Runtime:
         if any(p.position for p in self.broker.ib.positions(self.config.expected_account)):
             raise ValueError("OPENING_CHECK_REQUIRES_RECONCILED_FLAT_ACCOUNT")
 
+    async def opening_wait(
+        self,
+        work: Awaitable[Any],
+        day: str,
+        opened: datetime,
+        generation: int,
+        deadline: datetime,
+        *,
+        reconciling: bool = False,
+    ) -> Any:
+        task = asyncio.ensure_future(work)
+        stop = asyncio.get_running_loop().time() + max(0, (deadline - now()).total_seconds())
+        try:
+            while True:
+                # Even a simultaneous timeout must not mask a completed fatal error.
+                if task.done():
+                    result = task.result()
+                    if now() >= deadline or asyncio.get_running_loop().time() >= stop:
+                        raise TimeoutError()
+                    return result
+                if generation != self.broker.data_generation:
+                    raise ValueError("OPENING_CHECK_INTERRUPTED")
+                # Reconciliation temporarily clears its own completion flag.
+                self.opening_guard(day, opened, reconciling=reconciling)
+                remaining = min(
+                    (deadline - now()).total_seconds(), stop - asyncio.get_running_loop().time()
+                )
+                if remaining <= 0:
+                    raise TimeoutError()
+                await asyncio.wait({task}, timeout=min(0.05, remaining))
+        finally:
+            if not task.done():
+                task.cancel()
+            result = (await asyncio.gather(task, return_exceptions=True))[0]
+            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                raise result
+
     async def check_opening(self, day: str, opened: datetime) -> None:
+        if self.opening_active:
+            return
         key = "opening_check:" + day
         report: dict[str, Any] = {
             "session": day,
@@ -474,30 +562,53 @@ class Runtime:
             "deadline": (opened + timedelta(minutes=14)).isoformat(),
             "purpose": "READ_ONLY_DATA_CHECK_NOT_FIRST4_SIGNAL",
             "transmitted_orders": 0,
+            "attempts": [],
+            "policy": "DEADLINE_RETRIES_60S_ATTEMPT_5S_PAUSE",
         }
         self.store.set_meta(key, report)
+        self.opening_active = True
         try:
             generation = self.broker.data_generation
             deadline = opened + timedelta(minutes=14)
-            for attempt in range(1, OPENING_MAX_ATTEMPTS + 1):
+            attempt = 0
+            while True:
                 if generation != self.broker.data_generation:
                     raise ValueError("OPENING_CHECK_INTERRUPTED")
                 self.opening_guard(day, opened)
-                report.update(attempt=attempt, max_attempts=OPENING_MAX_ATTEMPTS)
+                attempt += 1
+                report.update(attempt=attempt)
                 report.pop("next_attempt_at", None)
                 self.store.set_meta(key, report)
-                # The last attempt retains the original quote-wait window.
-                attempt_deadline = (
-                    deadline
-                    if attempt == OPENING_MAX_ATTEMPTS
-                    else min(deadline, now() + timedelta(seconds=OPENING_ATTEMPT_SECONDS))
-                )
+                attempt_deadline = min(deadline, now() + timedelta(seconds=OPENING_ATTEMPT_SECONDS))
+                audit: dict[str, Any] = {
+                    "attempt": attempt,
+                    "stage": "RECONCILIATION",
+                    "started_at": now().isoformat(),
+                    "deadline": attempt_deadline.isoformat(),
+                    "start_margin_seconds": (deadline - now()).total_seconds(),
+                    "stock_quote": None,
+                }
+                self.broker.opening_diagnostic = audit
+                report["attempts"].append(audit)
+                self.store.set_meta(key, report)
                 try:
-                    async with asyncio.timeout(max(0, (attempt_deadline - now()).total_seconds())):
-                        async with asyncio.timeout(15):
-                            await self.broker.reconcile(require_flat=True)
-                        self.opening_guard(day, opened)
-                        evidence = await option_access(self.broker, attempt_deadline)
+                    await self.opening_wait(
+                        self.broker.reconcile(require_flat=True),
+                        day,
+                        opened,
+                        generation,
+                        min(attempt_deadline, now() + timedelta(seconds=15)),
+                        reconciling=True,
+                    )
+                    self.opening_guard(day, opened)
+                    audit["stage"] = "OPTION_ACCESS"
+                    evidence = await self.opening_wait(
+                        option_access(self.broker, attempt_deadline),
+                        day,
+                        opened,
+                        generation,
+                        attempt_deadline,
+                    )
                     if generation != self.broker.data_generation:
                         raise ValueError("OPENING_CHECK_INTERRUPTED")
                     self.opening_guard(day, opened)
@@ -511,23 +622,54 @@ class Runtime:
                     ):
                         raise ValueError("OPENING_CHECK_INCOMPLETE")
                     report.update(evidence)
+                    audit["outcome"] = "PASSED"
+                    report.pop("last_attempt_error", None)
                     break
-                except (TimeoutError, ValueError) as exc:
+                except BaseException as exc:
+                    audit.update(
+                        outcome="CANCELLED"
+                        if isinstance(exc, asyncio.CancelledError)
+                        else "FAILED",
+                        exception=exception_info(exc),
+                    )
+                    audit.update(
+                        ended_at=now().isoformat(),
+                        end_margin_seconds=(deadline - now()).total_seconds(),
+                    )
+                    if isinstance(exc, asyncio.CancelledError):
+                        raise
                     if generation != self.broker.data_generation:
                         raise ValueError("OPENING_CHECK_INTERRUPTED") from exc
+                    self.opening_guard(day, opened)
                     # Only transient read-only failures retry. Identity, ownership,
                     # metadata ambiguity, missing observations and revocation do not.
-                    retryable = isinstance(exc, TimeoutError) or str(exc) in {
-                        "PROBE_STOCK_QUOTE_UNAVAILABLE",
-                        "OPTION_QUOTES_INVALID_STALE_OR_UNAVAILABLE",
-                        "COMBO_PRICE_INCREMENT_UNAVAILABLE",
-                    }
-                    if not retryable or attempt == OPENING_MAX_ATTEMPTS:
+                    retryable = (
+                        isinstance(exc, TimeoutError)
+                        and audit["stage"]
+                        in {
+                            "OPTION_ACCESS",
+                            "STOCK_QUALIFICATION",
+                            "OPTION_CHAIN",
+                            "STOCK_QUOTE",
+                            "CONTRACT_QUALIFICATION",
+                            "COMBO_METADATA",
+                            "OPTION_QUOTES",
+                        }
+                    ) or (
+                        isinstance(exc, ValueError)
+                        and str(exc)
+                        in {
+                            "PROBE_STOCK_QUOTE_UNAVAILABLE",
+                            "OPTION_QUOTES_INVALID_STALE_OR_UNAVAILABLE",
+                            "COMBO_PRICE_INCREMENT_UNAVAILABLE",
+                        }
+                    )
+                    if not retryable:
                         raise
                     if now() + timedelta(seconds=OPENING_RETRY_SECONDS) >= deadline:
                         raise ValueError("OPENING_VERIFICATION_WINDOW_EXPIRED") from exc
                     report.update(
-                        last_attempt_error=str(exc) or type(exc).__name__,
+                        last_attempt_error=exception_info(exc)["message"] or type(exc).__name__,
                         next_attempt_at=(
                             now() + timedelta(seconds=OPENING_RETRY_SECONDS)
                         ).isoformat(),
@@ -535,8 +677,26 @@ class Runtime:
                     # Keep CHECKING durable throughout retries: restart must never
                     # replay a completed or interrupted dated opening check.
                     self.store.set_meta(key, report)
-                    log.warning("FIRST4 opening attempt %s failed; retrying: %s", attempt, exc)
-                    await asyncio.sleep(OPENING_RETRY_SECONDS)
+                    log.warning(
+                        "FIRST4 opening attempt %s failed; retrying: %s",
+                        attempt,
+                        report["last_attempt_error"],
+                    )
+                    await self.opening_wait(
+                        opening_pause(OPENING_RETRY_SECONDS),
+                        day,
+                        opened,
+                        generation,
+                        deadline,
+                    )
+                finally:
+                    if "ended_at" not in audit:
+                        audit.update(
+                            ended_at=now().isoformat(),
+                            end_margin_seconds=(deadline - now()).total_seconds(),
+                        )
+                    self.store.set_meta(key, report)
+            self.opening_guard(day, opened)
             report["status"] = "ARMED"
             report["armed_at"] = now().isoformat()
             self.store.set_meta(key, report)
@@ -549,9 +709,13 @@ class Runtime:
             raise
         except Exception as exc:
             self.broker.opening_verified_session = None
-            report.update(status="FAILED", error=str(exc) or type(exc).__name__)
+            report.update(
+                status="FAILED", error=exception_info(exc)["message"] or type(exc).__name__
+            )
             self.broker.report_error(key, report)
             log.warning("FIRST4 opening verification failed: %s", report["error"])
+        finally:
+            self.opening_active = False
 
     async def maintain_broker(self) -> None:
         """Exit obligations never wait for scanner history or option qualification."""

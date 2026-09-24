@@ -13,27 +13,20 @@ from stocker_execution.first4_config import PAPER_ACCOUNT
 
 async def option_access(broker: PaperBroker, deadline: datetime) -> dict[str, Any]:
     """Check actual data; Ford ATM legs are diagnostic contracts, never candidates."""
+    audit = broker.opening_diagnostic
+    audit["stage"] = "IDENTITY"
     generation = broker.data_generation
     ib = broker.ib
     if ib.managedAccounts() != [PAPER_ACCOUNT]:
         raise ValueError("PAPER_IDENTITY_MISMATCH")
     broker.config.require_settings()
     ib.reqMarketDataType(1)
-    # Qualification is bounded separately; only quote subscriptions wait for opening.
-    async with asyncio.timeout(30):
+    # Metadata precedes reference consumption. The outer caller clips all work
+    # to its attempt deadline; direct CLI calls are bounded here too.
+    async with asyncio.timeout(max(0, min(60, (deadline - now()).total_seconds()))):
+        audit["stage"] = "STOCK_QUALIFICATION"
         underlying = (await ib.qualifyContractsAsync(Stock("F", "SMART", "USD")))[0]
-        ticker = (await ib.reqTickersAsync(underlying))[0]
-        reference = ticker.marketPrice()
-        if (
-            ticker.marketDataType != 1
-            or ticker.time is None
-            or not 0
-            <= (now() - ticker.time).total_seconds()
-            <= broker.config.number("quote_max_age_seconds")
-            or not math.isfinite(reference)
-            or reference <= 0
-        ):
-            raise ValueError("PROBE_STOCK_QUOTE_UNAVAILABLE")
+        audit["stage"] = "OPTION_CHAIN"
         chain = next(
             c
             for c in await broker.chain(underlying)
@@ -44,7 +37,10 @@ async def option_access(broker: PaperBroker, deadline: datetime) -> dict[str, An
             (e for e in chain.expirations if e > now().strftime("%Y%m%d")),
             key=lambda e: (abs((datetime.strptime(e, "%Y%m%d").date() - target_day).days), -int(e)),
         )
+        audit["stage"] = "STOCK_QUOTE"
+        reference = await broker.stock_reference(underlying, deadline, audit)
         strike = min(chain.strikes, key=lambda k: (abs(k - reference), k))
+        audit["stage"] = "CONTRACT_QUALIFICATION"
         legs, metadata = [], []
         for right in ("P", "C"):
             details = await ib.reqContractDetailsAsync(
@@ -96,7 +92,9 @@ async def option_access(broker: PaperBroker, deadline: datetime) -> dict[str, An
     )
     # Resolve metadata before checking freshness, so a slow BAG response cannot
     # turn previously fresh leg quotes into evidence for arming minutes later.
+    audit["stage"] = "COMBO_METADATA"
     tick = await broker.combo_tick(combo, min(deadline, now() + timedelta(seconds=8)))
+    audit["stage"] = "OPTION_QUOTES"
     quotes = await broker.quotes(legs, deadline)
     report = {
         "at": now().isoformat(),
@@ -112,5 +110,8 @@ async def option_access(broker: PaperBroker, deadline: datetime) -> dict[str, An
         "combo_price_increment": tick,
         "blockers": [],
     }
+    audit["stage"] = "FINAL_VALIDATION"
+    if now() >= deadline:
+        raise TimeoutError("OPTION_ACCESS_DEADLINE")
     broker.confirm_market_data(generation, report)
     return report

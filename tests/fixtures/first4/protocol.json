@@ -1,0 +1,57 @@
+{
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "experiment_count": 1,
+  "period": [
+    "2025-07-21",
+    "2025-08-15"
+  ],
+  "sessions": 20,
+  "population": "Completed expanded native TOP25 Q5 only",
+  "q5": "PRIOR15 > 4.459368321659181%",
+  "ordering": "scanner_time then frozen native scanner_rank; native rank already contains stable cumulative-volume tie-break. No new alphabetical ordering.",
+  "decision_clock": "scanner event information time; option entry one minute later at open(j+2). No Q5 events at cutoff-adjacent minutes; either clock yields identical policies.",
+  "policies": {
+    "FIRST4": [
+      0,
+      4
+    ],
+    "MAX2_BEFORE_NOON": [
+      150,
+      2
+    ],
+    "MAX1_BEFORE_NOON": [
+      150,
+      1
+    ],
+    "MAX2_BEFORE_13": [
+      210,
+      2
+    ]
+  },
+  "options": "BUY98P+BUY102C; 2 calendar DTE; IV1;r.04;q0;365 days;open(j+2);scheduled close;residual time;1.05 entry/.95 close",
+  "maximum_daily_entries": 4,
+  "capital_recycling": false,
+  "early_exit": false,
+  "reservation_skips_permanent": true,
+  "no_downloads": true,
+  "no_broker_calls": true,
+  "no_real_quotes": true,
+  "no_production_changes": true,
+  "no_refit": true,
+  "no_new_policy": true,
+  "winner_threshold_comparison": "strict > for fixed 100/250/500/1000 bps levels; exact boundary counts reported",
+  "fx": "No contemporaneous FX in supplied replay artifacts. USD cash only; GBP100 appendix uses dimensionless debit returns.",
+  "source_hashes": {
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/frozen_options_expanded_v0/event_ledger.parquet": "0d4dc9ce4ad74f62064f5094e2c8613f4ed21719b762587eed33b10693ca0856",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/frozen_options_expanded_v0/protocol.json": "6568d5e2d303fcb45fb7e15581015c795c33a6260530a5c26900e151ca642ef3",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/frozen_options_expanded_v0/verification.json": "50770db7693e646f103fbe3274e266d046a64e496eae617159db8b23e21c5ac4",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/expanded/selected_event_OHLC.npy": "c065e3d6d82d74f38b9e33f10a82f6477cc6874646da072ada472db16cbeb2da",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/expanded/coverage_ledger.parquet": "eb76cbf024b3e8e09e3c91669c1b8a7ac7038523c7a4cbd5b47aa45996fec686",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/expanded/daily_coverage.csv": "b8c4ae0228a8a096c265958d893f295cb81ad89194f0e3cdf5605a746a82e9ac",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-22-side-symmetric-monetisation-quick-economic-test/synthetic_options_v0/model.py": "a80701de853f0afe6059d50f47d5676fa70bd2c505448e7b3443a4a336e98c1f",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/expanded.py": "7ee3ec21a83440984dd7d72fb583ee7aa950b9593057f41441b583c948bdba15",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/options_replay.py": "ee022fb3eeea737bd330095b94d244c810d780ea66485afee4d612561f9026ad"
+  }
+}

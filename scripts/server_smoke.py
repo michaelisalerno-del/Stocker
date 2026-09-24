@@ -19,9 +19,10 @@ def smoke() -> None:
     stocker_launcher._ensure_monorepo_src_paths()
     import httpx
 
-    from stocker_core.methods import verified_q1_spec
-    from stocker_dashboard.factory import build_dashboard_app
-    from stocker_execution.session_hard_method import FrozenWhipsawModel
+    from stocker_dashboard.app import create_dashboard_app
+    from stocker_execution.first4_config import First4Config
+    from stocker_execution.first4_runtime import Runtime
+    from stocker_execution.first4_store import Store
 
     def disconnected(*args: object, **kwargs: object) -> None:
         raise AssertionError("Server smoke must never contact a network")
@@ -29,18 +30,10 @@ def smoke() -> None:
     socket.socket.connect = disconnected
     assert importlib.util.find_spec("pytest") is None
     assert importlib.util.find_spec("jupyterlab") is None
-    verified_q1_spec()
-    model = FrozenWhipsawModel()
-    assert model.columns
     with tempfile.TemporaryDirectory(prefix="stocker-smoke-state-") as directory:
         root = Path(directory)
-        runs = root / "runs.yaml"
-        runs.write_text("universes: []\nruns: []\n")
-        broker = root / "ibkr.yaml"
-        broker.write_text("{}\n")
-        app = build_dashboard_app(
-            runs_config_path=runs, ibkr_config_path=broker, database_path=root / "state.sqlite"
-        )
+        runtime = Runtime(First4Config(), Store(root / "state.sqlite"))
+        app = create_dashboard_app(runtime)
 
         async def check() -> None:
             async with (
@@ -54,7 +47,7 @@ def smoke() -> None:
                     assert response.status_code == 200, (path, response.text)
 
         asyncio.run(check())
-    print("PASS: server-only imports, frozen model and offline dashboard startup/assets")
+    print("PASS: server-only imports, FIRST4 and offline dashboard startup/assets")
 
 
 def main() -> None:

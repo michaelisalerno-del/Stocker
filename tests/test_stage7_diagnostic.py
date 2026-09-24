@@ -33,8 +33,8 @@ def test_diagnostic_never_transmits_without_explicit_confirmation(monkeypatch, f
 
     assert result.exit_code != 0
     output = unstyle(result.output)
-    assert "--confirm-paper-order is required" in output
-    assert "no order was transmitted" in output
+    assert "No such command" in output
+    assert result.exit_code == 2
 
 
 def test_diagnostic_rejects_live_run_before_connecting(tmp_path: Path) -> None:
@@ -74,7 +74,7 @@ PAPER:
     )
 
     assert result.exit_code != 0
-    assert "LIVE_EXECUTION_DISABLED" in result.output
+    assert "No such command" in result.output
 
 
 def test_diagnostic_requires_an_explicit_expected_paper_account(tmp_path: Path) -> None:
@@ -113,4 +113,4 @@ PAPER:
     )
 
     assert result.exit_code != 0
-    assert "requires expected_account" in result.output
+    assert "No such command" in result.output

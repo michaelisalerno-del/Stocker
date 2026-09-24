@@ -1,0 +1,22 @@
+method: FIRST4_PRIOR15_Q5_98P_102C_20260923
+environment: PAPER
+expected_account: DUP655399
+host: 127.0.0.1
+port: 4003
+client_id: 81
+armed: false
+# Optional explicit session date: verify quotes after its open, then enable
+# entries in this process only. A null date never automatically arms entries.
+arm_after_quote_check_on: null
+# User-specified PAPER conventions, not synthetic-research validation.
+expiry_rule: NEAREST_WITHIN_24H_LATER_TIE
+strike_rule: NEAREST_STRICT_OTM_WITHIN_1PCT
+packages_per_candidate: 1
+premium_budget_usd: 250
+fee_reserve_per_package_usd: 10
+session_allocation_usd: 1040
+entry_limit: SUM_OF_ASKS
+quote_max_age_seconds: 5
+entry_deadline_seconds: 180
+exit_seconds_before_close: 120
+exit_order: MARKET

@@ -1,0 +1,46 @@
+{
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "experiment_count": 1,
+  "period": [
+    "2025-07-21",
+    "2025-08-15"
+  ],
+  "sessions": 20,
+  "trade_selection": "Load existing Policy FIRST4, Status ACCEPT exactly; no scanner reconstruction or reselection",
+  "scenarios": {
+    "BASELINE": 0,
+    "PLUS_1_MIN": 1,
+    "PLUS_2_MIN": 2,
+    "PLUS_3_MIN": 3,
+    "PLUS_5_MIN": 5,
+    "PLUS_10_MIN": 10
+  },
+  "baseline": "signal close(j) observable at open+j+1; baseline open(j+2); baseline is 1 minute after signal information",
+  "contracts": "Fixed original Kput=.98*S0,Kcall=1.02*S0; expiry=baseline_entry+2880 calendar minutes; never reanchor strikes or expiry",
+  "model": "Existing frozen bs; IV1,r.04,q0,365 days;1.05 entry,.95 exit;scheduled-close residual value retained",
+  "primary_bps": "10000*package USD net / actual delayed entry spot; paired against original baseline",
+  "common_spot_bps": "10000*same package USD net / original baseline spot; secondary denominator-controlled economic decay",
+  "direction": "Sign of signal close(j)/reference close(j-15)-1; first session open reference at j=14. Signal-only diagnostic, no future information",
+  "little_move": "Fixed descriptive abs delay_move_pct <=0.10% inclusive; predeclared before pricing; no filter or optimization",
+  "missing": "Retain unpriced rows; no replacement. Daily full-four metrics unavailable for incomplete days; paired counts explicit",
+  "no_downloads": true,
+  "no_broker_calls": true,
+  "no_quotes": true,
+  "no_scanner_change": true,
+  "no_prior15_change": true,
+  "no_q5_change": true,
+  "no_option_structure_change": true,
+  "no_new_policy": true,
+  "no_production_changes": true,
+  "source_hashes": {
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-four-trade-chronological-selection-test/policy_decisions.parquet": "2e651ef04af5f32fcb311697590d44535b2e9ef298565e8cba37a9b59c17fcf2",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-four-trade-chronological-selection-test/protocol.json": "d6273eba541ead89c16eced94376a260d22340e74a777b387f7176351618a6fd",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-four-trade-chronological-selection-test/verification.json": "623fce6073e929b147903da433d57afae04929c09a9e409a5edcad221156847e",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-four-trade-chronological-selection-test/population_comparison.csv": "3bf1050acad507b91739a6ae9a1385d142c4b568e9f9abfabb6b3d9c113b8877",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/expanded/selected_event_OHLC.npy": "c065e3d6d82d74f38b9e33f10a82f6477cc6874646da072ada472db16cbeb2da",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-23-fast-broad-universe-scanner-depth-test/options_replay.py": "ee022fb3eeea737bd330095b94d244c810d780ea66485afee4d612561f9026ad",
+    "/Users/michaelsalerno/Documents/Codex/2026-09-22-side-symmetric-monetisation-quick-economic-test/synthetic_options_v0/model.py": "a80701de853f0afe6059d50f47d5676fa70bd2c505448e7b3443a4a336e98c1f"
+  }
+}

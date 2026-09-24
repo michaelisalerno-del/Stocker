@@ -1,0 +1,48 @@
+{
+  "revision": "0080a786d78660e04d9a17d310b8322c4eecb3c8",
+  "effective_system": {
+    "method": "FIRST4_PRIOR15_Q5_98P_102C_20260923",
+    "market": "US",
+    "environment": "PAPER",
+    "account": "DUP655399",
+    "connected": true,
+    "reconciled": true,
+    "armed": false,
+    "configured_armed": false,
+    "opening_check": {
+      "status": "WAITING_FOR_OPEN",
+      "session": "2026-09-24"
+    },
+    "missing_settings": [],
+    "problem": "",
+    "session": "2026-09-24",
+    "live_enabled": false,
+    "settings": {
+      "method": "FIRST4_PRIOR15_Q5_98P_102C_20260923",
+      "environment": "PAPER",
+      "expected_account": "DUP655399",
+      "host": "127.0.0.1",
+      "port": 4003,
+      "client_id": 81,
+      "armed": false,
+      "arm_after_quote_check_on": "2026-09-24",
+      "expiry_rule": "NEAREST_WITHIN_24H_LATER_TIE",
+      "strike_rule": "NEAREST_STRICT_OTM_WITHIN_1PCT",
+      "premium_budget_usd": 250,
+      "fee_reserve_per_package_usd": 10,
+      "session_allocation_usd": 1040,
+      "packages_per_candidate": 1,
+      "entry_limit": "SUM_OF_ASKS",
+      "quote_max_age_seconds": 5,
+      "entry_deadline_seconds": 180,
+      "exit_seconds_before_close": 120,
+      "exit_order": "MARKET"
+    }
+  },
+  "orders": 0,
+  "fills": 0,
+  "positions": 0,
+  "observer_unchanged": true,
+  "served_assets_match": true,
+  "service": "active"
+}

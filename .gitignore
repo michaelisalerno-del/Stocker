@@ -36,6 +36,11 @@ data/reports/*
 !data/reports/.gitkeep
 
 *.parquet
+# Exact frozen FIRST4 verification fixtures are shipped; other Parquet stays local.
+!tests/fixtures/first4/first_appearances.parquet
+!tests/fixtures/first4/policy_decisions.parquet
+!tests/fixtures/first4/q5_event_ledger.parquet
+!tests/fixtures/first4/execution_delay_v0/frozen_first4_input.parquet
 *.feather
 *.duckdb
 *.db

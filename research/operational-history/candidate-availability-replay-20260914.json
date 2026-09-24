@@ -1,0 +1,12 @@
+{
+  "audit_only": true,
+  "source": "Persisted LSE first-stage inputs on 2026-09-14; no later bars used",
+  "population": 458,
+  "exact_score_matches": 458,
+  "old_selected_slots": 250,
+  "old_selected_missing": 48,
+  "new_selected_valid": 202,
+  "new_rejected_missing": 256,
+  "valid_order_unchanged": true,
+  "production_state_changed": false
+}

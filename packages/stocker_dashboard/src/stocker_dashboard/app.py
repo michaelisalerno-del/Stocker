@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -24,8 +24,17 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         return runtime.status()
 
     @app.get("/api/overview")
-    async def overview() -> dict[str, Any]:
-        orders_page = runtime.store.page("orders", 100)
+    async def overview(
+        view: Literal[
+            "all", "system", "settings", "candidates", "orders", "positions", "trades"
+        ] = "all",
+        offset: int = Query(0, ge=0),
+    ) -> dict[str, Any]:
+        orders_page = (
+            runtime.store.page("orders", 100, offset if view == "orders" else 0)
+            if view in {"all", "orders", "trades"}
+            else []
+        )
         return {
             "system": runtime.status(),
             "history": {
@@ -35,12 +44,14 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
                 "fills_limit": 100,
                 "pagination": "limit/offset on history endpoints",
             },
-            "candidates": runtime.store.page("events"),
+            "candidates": runtime.store.page("events", 150, offset)
+            if view in {"all", "candidates"}
+            else [],
             "orders": orders_page,
             "positions": runtime.store.rows("positions"),
-            "fills": runtime.store.page("fills", 100),
-            "errors": runtime.store.page("meta"),
-            "pnl": pnl(),
+            "fills": runtime.store.page("fills", 100, offset) if view in {"all", "trades"} else [],
+            "errors": runtime.store.page("meta") if view in {"all", "system"} else [],
+            "pnl": pnl() if view in {"all", "system", "settings"} else {"session": runtime.session},
             "quote_comparisons": [
                 {
                     "reference": order["reference"],

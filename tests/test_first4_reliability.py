@@ -271,6 +271,9 @@ def test_late_execution_reopens_verified_zero_allocation(tmp_path, monkeypatch):
     fill = NS(
         execution=NS(
             acctNumber=b.config.expected_account,
+            clientId=81,
+            orderId=1,
+            permId=22,
             orderRef="F4:2025-07-21:1:ENTRY",
             execId="late",
             shares=1,
@@ -330,6 +333,9 @@ def test_partial_exit_restart_and_final_reconciled_zero(tmp_path, monkeypatch):
         return NS(
             execution=NS(
                 acctNumber=b.config.expected_account,
+                clientId=81,
+                orderId=200,
+                permId=200,
                 orderRef=ref,
                 execId=f"sell-{con_id}",
                 shares=1,

@@ -13,6 +13,8 @@ from stocker_execution.first4_config import PAPER_ACCOUNT
 
 async def option_access(broker: PaperBroker, deadline: datetime) -> dict[str, Any]:
     """Check actual data; Ford ATM legs are diagnostic contracts, never candidates."""
+    generation = broker.market_data_generation
+    connection_generation = broker.connection_generation
     ib = broker.ib
     if ib.managedAccounts() != [PAPER_ACCOUNT]:
         raise ValueError("PAPER_IDENTITY_MISMATCH")
@@ -23,7 +25,15 @@ async def option_access(broker: PaperBroker, deadline: datetime) -> dict[str, An
         underlying = (await ib.qualifyContractsAsync(Stock("F", "SMART", "USD")))[0]
         ticker = (await ib.reqTickersAsync(underlying))[0]
         reference = ticker.marketPrice()
-        if not math.isfinite(reference) or reference <= 0:
+        if (
+            ticker.marketDataType != 1
+            or ticker.time is None
+            or not 0
+            <= (now() - ticker.time).total_seconds()
+            <= broker.config.number("quote_max_age_seconds")
+            or not math.isfinite(reference)
+            or reference <= 0
+        ):
             raise ValueError("PROBE_STOCK_QUOTE_UNAVAILABLE")
         chain = next(
             c
@@ -89,7 +99,9 @@ async def option_access(broker: PaperBroker, deadline: datetime) -> dict[str, An
     # turn previously fresh leg quotes into evidence for arming minutes later.
     tick = await broker.combo_tick(combo, min(deadline, now() + timedelta(seconds=8)))
     quotes = await broker.quotes(legs, deadline)
-    return {
+    if connection_generation != broker.connection_generation:
+        raise ValueError("CONNECTION_CHANGED_DURING_DATA_VERIFICATION")
+    report = {
         "at": now().isoformat(),
         "purpose": "READ_ONLY_DATA_CHECK_NOT_FIRST4_SIGNAL",
         "transmitted_orders": 0,
@@ -103,3 +115,6 @@ async def option_access(broker: PaperBroker, deadline: datetime) -> dict[str, An
         "combo_price_increment": tick,
         "blockers": [],
     }
+
+    broker.confirm_market_data(generation, report)
+    return report

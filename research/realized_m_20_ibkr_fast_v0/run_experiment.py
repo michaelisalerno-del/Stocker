@@ -1,22 +1,18 @@
-"""Research-only IBKR history and REALIZED_M_20 equivalence test."""
+"""Offline REALIZED_M_20 equivalence test using archived IBKR history."""
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import math
-import time
-from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime, timedelta
-from datetime import time as wall_time
+from dataclasses import dataclass
+from datetime import UTC
 from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
-import pandas_market_calendars as mcal
 
 RESEARCH_ONLY = True
 ORDER_PLACEMENT = "disabled"
@@ -25,19 +21,6 @@ LOOKBACK = 20
 MINIMUM_VALID = 10
 ENDPOINT_OFFSET = 14
 PRE_MOVE_THRESHOLD = 0.475764059845861
-HISTORY_DURATION = "40 D"
-BAR_SIZE = "1 min"
-WHAT_TO_SHOW = "TRADES"
-USE_RTH = True
-
-SYMBOLS: tuple[tuple[str, str, str, date], ...] = (
-    ("WULF", "NASDAQ", "USD", date(2025, 8, 14)),
-    ("CRWD", "NASDAQ", "USD", date(2025, 1, 28)),
-    ("TSLA", "NASDAQ", "USD", date(2025, 6, 25)),
-    ("AAPL", "NASDAQ", "USD", date(2026, 2, 24)),
-    ("OKLO", "NYSE", "USD", date(2025, 5, 23)),
-)
-
 CASE_SESSIONS = {
     "AAPL": "2026-02-24",
     "CRWD": "2025-01-28",
@@ -45,29 +28,6 @@ CASE_SESSIONS = {
     "TSLA": "2025-06-25",
     "WULF": "2025-08-14",
 }
-
-
-@dataclass(frozen=True, slots=True)
-class RetrievalMetric:
-    symbol: str
-    con_id: int
-    duration: str
-    bar_size: str
-    what_to_show: str
-    use_rth: bool
-    first_load_requests: int
-    second_load_requests: int
-    bars_received: int
-    completed_prior_sessions: int
-    oldest_timestamp: str
-    newest_timestamp: str
-    duplicate_bars: int
-    missing_rth_minutes: int
-    first_cache_status: str
-    second_cache_status: str
-    request_failures: int
-    retries: int
-    retrieval_seconds: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,20 +41,6 @@ class RealizedResult:
 def _write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _frame_from_bars(bars: tuple[Any, ...]) -> pd.DataFrame:
-    frame = pd.DataFrame(
-        {
-            "timestamp": [item.timestamp for item in bars],
-            "open": [item.open for item in bars],
-            "high": [item.high for item in bars],
-            "low": [item.low for item in bars],
-            "close": [item.close for item in bars],
-            "volume": [item.volume for item in bars],
-        }
-    )
-    return normalize_prices(frame)
 
 
 def normalize_prices(frame: pd.DataFrame) -> pd.DataFrame:
@@ -165,130 +111,6 @@ def calculate_realized_m_20(
     aligned_prior = source_prior * (current_p0 / source_p0)
     pre_move_m = abs(current_p0 - aligned_prior) / realized_price
     return RealizedResult(count, realized_return, realized_price, pre_move_m)
-
-
-def _expected_rth_minutes(start: datetime, end: datetime) -> tuple[datetime, ...]:
-    calendar = mcal.get_calendar("XNYS")
-    schedule = calendar.schedule(
-        start_date=(start.astimezone(NEW_YORK).date() - timedelta(days=1)),
-        end_date=end.astimezone(NEW_YORK).date(),
-    )
-    expected: list[datetime] = []
-    for row in schedule.itertuples():
-        cursor = pd.Timestamp(row.market_open).to_pydatetime().astimezone(UTC)
-        close = pd.Timestamp(row.market_close).to_pydatetime().astimezone(UTC)
-        while cursor < close:
-            if start <= cursor <= end:
-                expected.append(cursor)
-            cursor += timedelta(minutes=1)
-    return tuple(expected)
-
-
-def _history_end(session: date) -> datetime:
-    return datetime.combine(session, wall_time(16, 0), tzinfo=NEW_YORK).astimezone(UTC)
-
-
-async def fetch_ibkr_history(args: argparse.Namespace) -> None:
-    output = Path(args.output)
-    output.mkdir(parents=True, exist_ok=True)
-    from stocker_core.runs import Environment
-    from stocker_execution.history import (
-        HistorySemantics,
-        HistoryStatus,
-        IbkrHistoryCache,
-        IbkrHistoryService,
-    )
-    from stocker_execution.ibkr import IbkrConnection
-
-    from stocker_core.config import load_ibkr_config
-
-    config = load_ibkr_config(args.ibkr_config, Environment.PAPER).model_copy(
-        update={"client_id": args.client_id}
-    )
-    connection = IbkrConnection(config)
-    cache = IbkrHistoryCache(args.cache)
-    service = IbkrHistoryService(connection, cache)
-    semantics = HistorySemantics(BAR_SIZE, WHAT_TO_SHOW, USE_RTH)
-    metrics: list[RetrievalMetric] = []
-    try:
-        await connection.connect()
-        for symbol, primary_exchange, currency, session in SYMBOLS:
-            instrument = await connection.resolve_stock(
-                symbol,
-                exchange="SMART",
-                primary_exchange=primary_exchange,
-                currency=currency,
-            )
-            end = _history_end(session)
-            provisional_start = end - timedelta(days=40)
-            provisional_required = _expected_rth_minutes(provisional_start, end)
-            first = cache.get_required_history(
-                instrument, semantics, provisional_required, as_of=end
-            )
-            before_requests = connection.resource_status().historical_requests_today
-            started = time.perf_counter()
-            bars = await service.fetch_and_store(
-                instrument,
-                bar_size=BAR_SIZE,
-                duration=HISTORY_DURATION,
-                what_to_show=WHAT_TO_SHOW,
-                regular_trading_hours=USE_RTH,
-                end_time=end,
-                minimum_bars=MINIMUM_VALID * 15,
-            )
-            elapsed = time.perf_counter() - started
-            after_requests = connection.resource_status().historical_requests_today
-            frame = _frame_from_bars(bars)
-            raw_count = len(bars)
-            duplicate_count = raw_count - int(frame["timestamp"].nunique())
-            oldest = pd.Timestamp(frame.index.min()).to_pydatetime().astimezone(UTC)
-            newest = pd.Timestamp(frame.index.max()).to_pydatetime().astimezone(UTC)
-            expected = _expected_rth_minutes(oldest, newest)
-            expected_snapshot = cache.get_required_history(
-                instrument, semantics, expected, as_of=end
-            )
-            returned_snapshot = cache.get_required_history(
-                instrument,
-                semantics,
-                tuple(pd.Timestamp(item).to_pydatetime() for item in frame.index),
-                as_of=end,
-            )
-            second_before = connection.resource_status().historical_requests_today
-            if returned_snapshot.status is not HistoryStatus.READY:
-                raise ValueError(f"cached IBKR response is incomplete for {symbol}")
-            second_after = connection.resource_status().historical_requests_today
-            frame.reset_index(drop=True).to_csv(
-                output / f"{symbol}_ibkr_1m.csv", index=False, lineterminator="\n"
-            )
-            prior_sessions = int(
-                frame.loc[frame["session_date"].lt(session.isoformat()), "session_date"].nunique()
-            )
-            metrics.append(
-                RetrievalMetric(
-                    symbol=symbol,
-                    con_id=instrument.con_id,
-                    duration=HISTORY_DURATION,
-                    bar_size=BAR_SIZE,
-                    what_to_show=WHAT_TO_SHOW,
-                    use_rth=USE_RTH,
-                    first_load_requests=after_requests - before_requests,
-                    second_load_requests=second_after - second_before,
-                    bars_received=raw_count,
-                    completed_prior_sessions=prior_sessions,
-                    oldest_timestamp=oldest.isoformat(),
-                    newest_timestamp=newest.isoformat(),
-                    duplicate_bars=duplicate_count,
-                    missing_rth_minutes=len(expected_snapshot.missing_timestamps),
-                    first_cache_status=first.status.value,
-                    second_cache_status=returned_snapshot.status.value,
-                    request_failures=0,
-                    retries=0,
-                    retrieval_seconds=elapsed,
-                )
-            )
-    finally:
-        connection.disconnect()
-    _write_json(output / "retrieval_metrics.json", [asdict(item) for item in metrics])
 
 
 def _provider_paths(source_root: Path, stocker_local: Path, cohort: str, symbol: str) -> list[Path]:
@@ -490,13 +312,13 @@ def compare(args: argparse.Namespace) -> None:
 
 
 def parser() -> argparse.ArgumentParser:
-    value = argparse.ArgumentParser()
+    value = argparse.ArgumentParser(
+        description=(
+            "Offline cached-data comparison. The legacy IBKR network fetch is retired; "
+            "use archived *_ibkr_1m.csv files."
+        )
+    )
     commands = value.add_subparsers(dest="command", required=True)
-    fetch = commands.add_parser("fetch")
-    fetch.add_argument("--ibkr-config", required=True)
-    fetch.add_argument("--cache", required=True)
-    fetch.add_argument("--output", required=True)
-    fetch.add_argument("--client-id", type=int, default=9200)
     compare_parser = commands.add_parser("compare")
     compare_parser.add_argument("--ibkr-dir", required=True)
     compare_parser.add_argument("--output", required=True)
@@ -510,10 +332,7 @@ def main() -> None:
     if not RESEARCH_ONLY or ORDER_PLACEMENT != "disabled":
         raise RuntimeError("research/order lock failed")
     args = parser().parse_args()
-    if args.command == "fetch":
-        asyncio.run(fetch_ibkr_history(args))
-    else:
-        compare(args)
+    compare(args)
 
 
 if __name__ == "__main__":

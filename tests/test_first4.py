@@ -412,7 +412,9 @@ def test_shared_option_access_checks_quotes_after_metadata_without_orders(tmp_pa
     monkeypatch.setattr("stocker_execution.first4_readiness.now", lambda: OPEN)
     b.ib.reqMarketDataType = Mock()
     b.ib.qualifyContractsAsync = AsyncMock(return_value=[Contract(conId=42, symbol="F")])
-    b.ib.reqTickersAsync = AsyncMock(return_value=[NS(marketPrice=lambda: 13)])
+    b.ib.reqTickersAsync = AsyncMock(
+        return_value=[NS(marketPrice=lambda: 13, marketDataType=1, time=OPEN)]
+    )
     b.chain = AsyncMock(
         return_value=[
             NS(
@@ -522,11 +524,17 @@ def test_leg_fills_idempotent_and_combo_status_not_fills(tmp_path):
         event, "ENTRY", 1, {"put": {"conId": 100}, "call": {"conId": 101}, "quantity": 1}
     )
     b.order_status(
-        NS(order=NS(orderRef=ref, orderId=1), orderStatus=NS(status="Filled", permId=22))
+        NS(
+            order=Order(account=PAPER_ACCOUNT, clientId=81, orderRef=ref, orderId=1, permId=22),
+            orderStatus=NS(status="Filled", permId=22),
+        )
     )
     assert b.owned_quantities() == {}
     execution = NS(
         acctNumber=PAPER_ACCOUNT,
+        clientId=81,
+        orderId=1,
+        permId=22,
         orderRef=ref,
         execId="LEG1",
         shares=1,
@@ -558,6 +566,8 @@ def test_unknown_positions_block_entries_without_touching_orders(tmp_path):
 def test_completed_order_decoder_shape_recovers_by_permanent_identity(tmp_path):
     b = broker(tmp_path)
     ref = b.store.reserve_order(dict(session="2025-07-21", symbol="A", slot=1), "ENTRY", 101, {})
+    with b.store.db:
+        b.store.db.execute("UPDATE first4_orders SET perm_id=9001 WHERE reference=?", (ref,))
     completed = Trade(
         order=Order(account=PAPER_ACCOUNT, orderRef=ref, permId=9001),
         orderStatus=OrderStatus(status="Cancelled"),
@@ -669,6 +679,9 @@ def prepare_exit(b, quantities=(1, 1)):
                 NS(
                     execution=NS(
                         acctNumber=PAPER_ACCOUNT,
+                        clientId=81,
+                        orderId=1,
+                        permId=22,
                         orderRef=ref,
                         execId=str(leg.conId),
                         shares=quantity,
@@ -956,7 +969,7 @@ def test_entry_deadline_cancel_waits_for_ack_and_reconciles_partial_legs(tmp_pat
     b.store.db.execute("UPDATE first4_orders SET status='Submitted'")
     trade = Trade(
         order=Order(account=PAPER_ACCOUNT, clientId=81, orderRef=reference, orderId=1),
-        orderStatus=OrderStatus(status="Submitted", permId=11),
+        orderStatus=OrderStatus(status="Submitted", permId=22),
     )
     b.ib.openTrades.return_value = [trade]
     b.ib.cancelOrder = Mock()
@@ -1047,7 +1060,7 @@ def test_terminal_second_order_cannot_clear_first_pending_cancellation(tmp_path,
     )
     trade = Trade(
         order=Order(account=PAPER_ACCOUNT, clientId=81, orderRef=first_ref, orderId=1),
-        orderStatus=OrderStatus(status="PendingCancel", permId=11),
+        orderStatus=OrderStatus(status="PendingCancel", permId=22),
     )
     b.ib.openTrades.return_value = [trade]
     b.ib.reqAllOpenOrdersAsync.return_value = [trade]

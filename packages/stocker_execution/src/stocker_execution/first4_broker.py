@@ -73,6 +73,9 @@ class PaperBroker:
         self.reconciled = False
         self.problem = "NOT_CONNECTED"
         self.entry_blocker = "NOT_RECONCILED"
+        self.reconciliation_entry_blocker = ""
+        self.market_data_block: dict[str, Any] = store.get_meta("market_data_block", {})
+        self.market_data_generation = 0
         self.chains: dict[int, Any] = {}
         self.opening_verified_session: str | None = None
         self.reconciliation_lock = asyncio.Lock()
@@ -120,7 +123,13 @@ class PaperBroker:
         state = self.store.db.execute(
             "SELECT blocked FROM first4_sessions WHERE session=?", (day.isoformat(),)
         ).fetchone()
-        if self.upstream_lost or not self.reconciled or (state and state["blocked"]):
+        if (
+            self.upstream_lost
+            or not self.reconciled
+            or self.entry_blocker
+            or self.market_data_block
+            or (state and state["blocked"])
+        ):
             return False
         if self.config.armed:
             return True
@@ -137,6 +146,8 @@ class PaperBroker:
 
     def require_entries(self) -> None:
         self.config.require_settings()
+        if self.market_data_block:
+            raise ValueError("MARKET_DATA_COMPETING_SESSION_10197")
         if not self.entries_armed():
             raise ValueError("PAPER entries are unarmed")
 
@@ -151,7 +162,9 @@ class PaperBroker:
                     self.store.db.execute("DELETE FROM first4_positions WHERE con_id=?", (con_id,))
                     return
                 self.store.db.execute(
-                    "INSERT OR REPLACE INTO first4_positions VALUES (?,?,?)",
+                    "INSERT INTO first4_positions VALUES (?,?,?) ON CONFLICT(con_id) DO UPDATE "
+                    "SET quantity=excluded.quantity,payload=excluded.payload "
+                    "WHERE quantity IS NOT excluded.quantity OR payload IS NOT excluded.payload",
                     (
                         con_id,
                         float(position.position),
@@ -203,11 +216,27 @@ class PaperBroker:
         if e.acctNumber != PAPER_ACCOUNT or c.secType != "OPT":
             return  # BAG summaries are not leg executions.
         reference = e.orderRef
-        if not self.store.db.execute(
-            "SELECT 1 FROM first4_orders WHERE reference=?", (reference,)
-        ).fetchone():
+        row = self.store.order(reference)
+        if row is None:
+            return
+        if (
+            e.clientId != self.config.client_id
+            or e.orderId != row["order_id"]
+            or not e.permId
+            or (row["perm_id"] and row["perm_id"] != e.permId)
+        ):
+            self.order_observation_generation += 1
+            self.reconciled = False
+            self.problem = "EXECUTION_IDENTITY_MISMATCH"
+            self.store.set_meta(
+                "execution_identity_error", {"reference": reference, "exec_id": e.execId}
+            )
             return
         with self.store.db:
+            self.store.db.execute(
+                "UPDATE first4_orders SET perm_id=? WHERE reference=? AND perm_id IS NULL",
+                (e.permId, reference),
+            )
             inserted = self.store.db.execute(
                 "INSERT OR IGNORE INTO first4_fills VALUES (?,?,?,?,?,?,?,?,NULL)",
                 (
@@ -237,10 +266,26 @@ class PaperBroker:
                 (report.commission, report.execId, report.commission),
             )
 
+    def owns_order(self, order: Any, row: dict[str, Any], perm_id: int) -> bool:
+        return bool(
+            order.account == PAPER_ACCOUNT
+            and order.clientId == self.config.client_id
+            and order.orderRef == row["reference"]
+            and order.orderId == row["order_id"]
+            and (not row["perm_id"] or row["perm_id"] == perm_id)
+            and (not order.permId or order.permId == perm_id)
+        )
+
     def order_status(self, trade: Any) -> None:
         with self.store.db:
             row = self.store.order(trade.order.orderRef)
-            if not row or row["order_id"] != trade.order.orderId:
+            if not row:
+                return
+            perm_id = trade.orderStatus.permId or trade.order.permId
+            if not self.owns_order(trade.order, row, perm_id):
+                self.order_observation_generation += 1
+                self.reconciled = False
+                self.problem = "OWNED_ORDER_IDENTITY_MISMATCH"
                 return
             status = trade.orderStatus.status
             terminal = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
@@ -267,6 +312,24 @@ class PaperBroker:
                 self.store.reopen(row["reference"])
 
     def error(self, request_id: int, code: int, message: str, contract: Any = None) -> None:
+        if code == 10197:
+            self.market_data_generation += 1
+            self.opening_verified_session = None
+            self.chains.clear()
+            self.market_data_block = {
+                "code": code,
+                "time": now().isoformat(),
+                "request_id": request_id,
+                "message": message,
+                "contract": {
+                    "con_id": getattr(contract, "conId", None),
+                    "symbol": getattr(contract, "symbol", None),
+                    "security_type": getattr(contract, "secType", None),
+                },
+            }
+            self.store.set_meta("market_data_block", self.market_data_block)
+            self.store.set_meta("market_data_10197", self.market_data_block)
+            self.block_scanner_gap()
         if code in {1100, 2110}:
             self.upstream_lost = True
             self.invalidate_connection("UPSTREAM_CONNECTION_LOST_RECONCILIATION_REQUIRED")
@@ -275,12 +338,25 @@ class PaperBroker:
             # subscriptions are scoped to a request and are recreated after recovery.
             self.invalidate_connection("UPSTREAM_RESTORED_RECONCILIATION_REQUIRED")
             self.upstream_lost = False
-        if code in {2104, 2106, 2158, 2108}:
+        if code in {2104, 2106, 2107, 2158, 2108}:
             return
         self.store.set_meta(
             "broker_error",
             {"time": now().isoformat(), "request_id": request_id, "code": code, "message": message},
         )
+
+    def check_data_generation(self, generation: int) -> None:
+        if generation != self.market_data_generation:
+            raise ValueError("MARKET_DATA_CHANGED_DURING_PREPARATION")
+
+    def confirm_market_data(self, generation: int, evidence: dict[str, Any]) -> None:
+        """Called only by the complete real-time option-access verification."""
+        self.check_data_generation(generation)
+        self.guard()
+        if self.market_data_block:
+            self.store.set_meta("market_data_recovery", evidence)
+            self.store.set_meta("market_data_block", {})
+            self.market_data_block = {}
 
     def owned_quantities(
         self, allocation: str | None = None, *, all_history: bool = False
@@ -344,15 +420,21 @@ class PaperBroker:
                 self.commission(None, f, f.commissionReport)
         positions = await self.ib.reqPositionsAsync()
         matched = set()
+        foreign = []
         for t in opens:
             row = self.store.db.execute(
                 "SELECT * FROM first4_orders WHERE reference=?", (t.order.orderRef,)
             ).fetchone()
-            if row:
-                if t.order.account != PAPER_ACCOUNT or t.order.clientId != self.config.client_id:
-                    raise ValueError("Owned order account/client mismatch")
+            perm_id = t.orderStatus.permId or t.order.permId
+            if row and self.owns_order(t.order, dict(row), perm_id):
                 self.order_status(t)
                 matched.add(row["reference"])
+            elif t.order.account == PAPER_ACCOUNT:
+                foreign.append(f"{t.order.clientId}/{t.order.orderId}/{perm_id}")
+        # Preserve a newly observed blocker even if later reconciliation fails.
+        if foreign:
+            self.reconciliation_entry_blocker = "UNOWNED_BROKER_OPEN_ORDERS:" + ",".join(foreign)
+            self.entry_blocker = self.reconciliation_entry_blocker
         for t in completed:
             row = self.store.db.execute(
                 "SELECT * FROM first4_orders WHERE reference=?", (t.order.orderRef,)
@@ -364,7 +446,8 @@ class PaperBroker:
                 if (
                     t.order.account != PAPER_ACCOUNT
                     or not permanent_id
-                    or (row["perm_id"] and row["perm_id"] != permanent_id)
+                    or not row["perm_id"]
+                    or row["perm_id"] != permanent_id
                 ):
                     raise ValueError("Completed order identity mismatch")
                 with self.store.db:
@@ -410,9 +493,13 @@ class PaperBroker:
         }
         owned = self.owned_quantities(all_history=True)
         unknown = sorted(set(actual) - set(owned))
-        self.entry_blocker = (
-            f"UNOWNED_BROKER_POSITIONS:{unknown}" if unknown else self.deadline_blocker()
+        ownership_blocker = "; ".join(
+            ([f"UNOWNED_BROKER_POSITIONS:{unknown}"] if unknown else [])
+            + (["UNOWNED_BROKER_OPEN_ORDERS:" + ",".join(foreign)] if foreign else [])
         )
+        if ownership_blocker:
+            self.reconciliation_entry_blocker = ownership_blocker
+            self.entry_blocker = ownership_blocker
         with self.store.db:
             self.store.db.execute("DELETE FROM first4_positions")
             for con_id, quantity in owned.items():
@@ -447,17 +534,21 @@ class PaperBroker:
         ):
             raise ValueError("CONNECTION_CHANGED_DURING_RECONCILIATION")
         # Unrelated contracts/orders are never cancelled or managed by FIRST4.
+        self.reconciliation_entry_blocker = ownership_blocker
+        self.entry_blocker = ownership_blocker or self.deadline_blocker()
         self.reconciled, self.problem = True, ""
         self.store.set_meta("reconciled_at", now().isoformat())
 
     async def chain(self, underlying: Any) -> Any:
         generation = self.connection_generation
+        data_generation = self.market_data_generation
         if underlying.conId not in self.chains:
             result = await self.ib.reqSecDefOptParamsAsync(
                 underlying.symbol, "", "STK", underlying.conId
             )
             if generation != self.connection_generation:
                 raise ValueError("CONNECTION_CHANGED_DURING_OPTION_CHAIN")
+            self.check_data_generation(data_generation)
             self.chains[underlying.conId] = result
         return self.chains[underlying.conId]
 
@@ -591,6 +682,7 @@ class PaperBroker:
         self, contracts: list[Any], deadline: datetime, quantity: float = 1, side: str = "BUY"
     ) -> list[dict[str, Any]]:
         generation = self.connection_generation
+        data_generation = self.market_data_generation
         subscriptions = []
         states: list[dict[str, Any]] = [{"bid_at": None, "ask_at": None} for _ in contracts]
         try:
@@ -609,6 +701,7 @@ class PaperBroker:
             while now() < deadline:
                 if generation != self.connection_generation or self.upstream_lost:
                     raise ValueError("CONNECTION_CHANGED_DURING_QUOTES")
+                self.check_data_generation(data_generation)
                 result = []
                 for (_, t, _), s in zip(subscriptions, states, strict=True):
                     stamps = [s["bid_at"], s["ask_at"]]
@@ -721,6 +814,7 @@ class PaperBroker:
                 self.reconciled = False
                 raise ValueError("EXIT_POSITION_CHANGED_DURING_PREPARATION")
         order.account = PAPER_ACCOUNT
+        order.clientId = self.config.client_id
         order.orderId = self.ib.client.getReqId()
         payload = {**payload, "submitted_at": now().isoformat()}
         order.orderRef = self.store.reserve_order(event, role, order.orderId, payload, suffix)
@@ -732,13 +826,15 @@ class PaperBroker:
 
     async def enter(self, event: dict[str, Any], underlying: Any, anchor: float) -> None:
         self.require_entries()
+        data_generation = self.market_data_generation
         baseline = datetime.fromisoformat(event["entry_at"])
         deadline = baseline + timedelta(seconds=self.config.number("entry_deadline_seconds"))
         p, c, combo = await self.contracts(underlying, anchor, baseline)
-        quotes, tick = await asyncio.gather(
-            self.quotes([p.contract, c.contract], deadline),
-            self.combo_tick(combo, deadline),
-        )
+        self.check_data_generation(data_generation)
+        async with asyncio.TaskGroup() as group:
+            quote_task = group.create_task(self.quotes([p.contract, c.contract], deadline))
+            tick_task = group.create_task(self.combo_tick(combo, deadline))
+        quotes, tick = quote_task.result(), tick_task.result()
         # reqContractDetails does not encode BAG legs. Use actual qualified leg
         # size constraints and the BAG market-data tickReqParams price increment.
         increments = [Decimal(str(d.sizeIncrement)) for d in (p, c)]
@@ -806,6 +902,7 @@ class PaperBroker:
             goodTillDate=deadline.strftime("%Y%m%d-%H:%M:%S"),
             outsideRth=False,
         )
+        self.check_data_generation(data_generation)
         self.submit(event, combo, order, payload, "ENTRY")
         self.store.outcome(event, "ORDER_SUBMITTED", payload)
 
@@ -823,15 +920,14 @@ class PaperBroker:
             if entry["status"] not in terminal:
                 trades = [t for t in self.ib.openTrades() if t.order.orderRef == entry["reference"]]
                 for trade in trades:
-                    if (
-                        trade.order.account != PAPER_ACCOUNT
-                        or trade.order.clientId != self.config.client_id
+                    if not self.owns_order(
+                        trade.order, entry, trade.orderStatus.permId or trade.order.permId
                     ):
-                        raise ValueError("Cancellation account/client mismatch")
+                        raise ValueError("Cancellation order identity mismatch")
                     if not trade.isDone() and trade.orderStatus.status != "PendingCancel":
                         self.ib.cancelOrder(trade.order)
                 self.problem = "ENTRY_DEADLINE_AWAITING_CANCEL_FILL_RECONCILIATION"
-                self.entry_blocker = self.problem
+                self.entry_blocker = self.reconciliation_entry_blocker or self.problem
                 if not trades:
                     self.reconciled = False
                 continue
@@ -850,13 +946,16 @@ class PaperBroker:
                 "ENTRY_RECONCILED_HELD" if any(quantity.values()) else "ENTRY_UNFILLED",
                 {"entry_status": entry["status"]},
             )
-        if not self.entry_blocker.startswith("UNOWNED_BROKER_POSITIONS"):
-            self.entry_blocker = self.deadline_blocker()
+        self.entry_blocker = self.reconciliation_entry_blocker or self.deadline_blocker()
 
     async def combo_tick(self, combo: Any, deadline: datetime) -> float:
+        generation, data_generation = self.connection_generation, self.market_data_generation
         ticker = self.ib.reqMktData(combo, "", False, False)
         try:
             while now() < deadline:
+                self.check_data_generation(data_generation)
+                if generation != self.connection_generation or self.upstream_lost:
+                    raise ValueError("CONNECTION_CHANGED_DURING_COMBO_METADATA")
                 if math.isfinite(ticker.minTick) and ticker.minTick > 0:
                     return float(ticker.minTick)
                 await asyncio.sleep(0.02)
@@ -888,11 +987,10 @@ class PaperBroker:
             # Cancel only this manager's pending entry; require terminal acknowledgement.
             for trade in self.ib.openTrades():
                 if trade.order.orderRef == entry["reference"] and not trade.isDone():
-                    if (
-                        trade.order.account != PAPER_ACCOUNT
-                        or trade.order.clientId != self.config.client_id
+                    if not self.owns_order(
+                        trade.order, entry, trade.orderStatus.permId or trade.order.permId
                     ):
-                        raise ValueError("Cancellation account/client mismatch")
+                        raise ValueError("Cancellation order identity mismatch")
                     if trade.orderStatus.status != "PendingCancel":
                         self.ib.cancelOrder(trade.order)
                     return

@@ -322,9 +322,93 @@ def measure_original_hot_loop_baseline(tmp_path):
         assert b.store.db.total_changes == writes + 1
 
 
+def measure_dashboard_before_after(tmp_path):
+    """Optional local comparison with the inspected commit; not a CI timing test."""
+    import statistics
+    from pathlib import Path
+
+    import httpx
+
+    from stocker_dashboard.app import create_dashboard_app
+    from stocker_execution.first4_runtime import Runtime
+
+    source = subprocess.check_output(
+        [
+            "rtk",
+            "proxy",
+            "git",
+            "show",
+            "0c55648d70d97804a741f0aa006632131a2e7b84:packages/stocker_dashboard/src/stocker_dashboard/app.py",
+        ],
+        text=True,
+    )
+    namespace = {
+        "__file__": str(
+            Path(__file__).parents[1] / "packages/stocker_dashboard/src/stocker_dashboard/app.py"
+        )
+    }
+    exec(compile(source, "baseline_dashboard.py", "exec"), namespace)
+    b = broker(tmp_path)
+    historical_fixture(b, 10000, 4)
+    runtime = Runtime(b.config, b.store)
+    runtime.broker = b
+    runtime.session = "2025-07-21"
+    for name, factory, paths in [
+        (
+            "before",
+            namespace["create_dashboard_app"],
+            ["/api/overview", "/api/orders?limit=100&offset=100"],
+        ),
+        ("after", create_dashboard_app, ["/api/overview?view=orders&offset=100"]),
+    ]:
+        app = factory(runtime)
+        queries = []
+        b.store.db.set_trace_callback(queries.append)
+        samples = []
+        writes = b.store.db.total_changes
+
+        async def run(app=app, queries=queries, paths=paths, samples=samples):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app), base_url="http://127.0.0.1"
+            ) as client:
+                for _ in range(5):
+                    queries.clear()
+                    size = 0
+                    start = time.perf_counter()
+                    for path in paths:
+                        response = await client.get(path)
+                        assert response.status_code == 200
+                        size += len(response.content)
+                    samples.append(time.perf_counter() - start)
+                return size
+
+        size = asyncio.run(run())
+        assert b.store.db.total_changes == writes
+        print(
+            json.dumps(
+                dict(
+                    dashboard=name,
+                    history=10000,
+                    active=4,
+                    requests=len(paths),
+                    queries=len(queries),
+                    payload_bytes=size,
+                    writes=0,
+                    median_seconds=statistics.median(samples),
+                    samples=5,
+                )
+            )
+        )
+
+
 if __name__ == "__main__":
     import tempfile
     from pathlib import Path
 
     with tempfile.TemporaryDirectory() as directory:
-        measure_original_hot_loop_baseline(Path(directory))
+        import sys
+
+        if "--dashboard" in sys.argv:
+            measure_dashboard_before_after(Path(directory))
+        else:
+            measure_original_hot_loop_baseline(Path(directory))

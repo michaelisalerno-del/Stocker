@@ -179,6 +179,23 @@ performed.
    backfill and incremental cache updates. The obvious constraint is cold retrieval latency, not data
    sufficiency or formula equivalence.
 
+## Offline reproduction
+
+The former `run_experiment.py fetch` command is retired: its network adapter was
+removed with the legacy execution stack. Do not restore that adapter or use this
+historical experiment as a live data collector. Existing raw data, retrieval
+metrics and provenance remain unchanged.
+
+Use the retained `compare` command with the archived `*_ibkr_1m.csv` files:
+
+```sh
+python research/realized_m_20_ibkr_fast_v0/run_experiment.py compare --help
+```
+
+Supply `--ibkr-dir`, `--ledger`, `--source-root`, `--stocker-local` and a separate
+`--output` directory pointing to the original cached inputs described below.
+The comparison reads those local inputs and makes no broker connection.
+
 ## Reproduction artifacts
 
 - `research/realized_m_20_ibkr_fast_v0/contract.json`

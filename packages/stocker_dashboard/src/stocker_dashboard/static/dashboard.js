@@ -20,24 +20,25 @@ function table(title, rows, keys) {
  return `<section class="panel"><h2>${esc(title)}</h2><div class="table-wrap"><table><thead><tr>${keys.map(k=>`<th>${esc(k)}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${keys.map(k=>`<td>${esc(typeof r[k] === "object" ? JSON.stringify(r[k]) : r[k])}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${keys.length}">No records</td></tr>`}</tbody></table></div></section>`;
 }
 let historyOffset = 0;
+let refreshing = false;
+let refreshPending = false;
 async function refresh() {
+ if (refreshing) { refreshPending = true; return; }
+ refreshing = true;
  try {
-  const response = await fetch("/api/overview",{cache:"no-store"});
+  const path = location.pathname;
+  const view = {"/system":"system","/settings":"settings","/candidates":"candidates","/orders":"orders","/positions":"positions","/trades":"trades"}[path] || "all";
+  const response = await fetch(`/api/overview?view=${view}&offset=${historyOffset}`,{cache:"no-store",signal:AbortSignal.timeout(10000)});
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json(), s = data.system;
   document.getElementById("paper-status").textContent = `${s.account} / ${s.connected ? "API CONNECTED" : "API DISCONNECTED"}`;
-  document.getElementById("system-status").textContent = s.armed ? "ARMED" : "UNARMED";
+  document.getElementById("system-status").textContent = s.market_data_block?.code === 10197 ? "DATA BLOCKED (10197)" : s.armed ? "ARMED" : "UNARMED";
   document.getElementById("active-runs").textContent = "FIRST4";
   document.getElementById("open-positions").textContent = data.positions.filter(p=>p.quantity).length;
-  const path = location.pathname;
   const historyRoute = {"/candidates":["candidates",150],"/orders":["orders",100],"/trades":["fills",100]}[path];
-  if (historyRoute && historyOffset) {
-   const endpoint = path === "/trades" ? "/api/trades" : `/api${path}`;
-   const page = await fetch(`${endpoint}?limit=${historyRoute[1]}&offset=${historyOffset}`,{cache:"no-store"});
-   if (!page.ok) throw new Error(`HTTP ${page.status}`);
-   data[historyRoute[0]] = await page.json();
-  }
   let html = `<div class="page-header"><div><p class="eyebrow">US / IBKR PAPER</p><h1>Frozen FIRST4</h1><p>PRIOR15 &gt; 4.459368321659181% · first four opportunities · buy 98% put + 102% call</p></div><button id="pause">Pause entries</button></div>`;
+  if (s.market_data_block?.code === 10197) html += table("Market data blocked — competing session (10197)",[s.market_data_block],["time","request_id","message","contract"]);
+  if (s.entry_blocker && s.entry_blocker !== s.problem) html += `<section class="panel"><h2>Entries blocked</h2><p>${esc(s.entry_blocker)}</p></section>`;
   if (s.problem || s.missing_settings.length) html += `<section class="panel"><h2>Execution prerequisites</h2><p>${esc(s.problem)}</p><p>${esc(s.missing_settings.join(", "))}</p></section>`;
   if (s.opening_check && Object.keys(s.opening_check).length) html += table("Opening PAPER verification",[s.opening_check],["session","status","started_at","deadline","armed_at","error"]);
   if (["/","/system","/settings"].includes(path)) html += table("PAPER status",[s],["account","connected","upstream_lost","reconciled","trading_ready","armed","session","problem"])+table("IBKR PAPER simulated fills / P&L",[data.pnl],["basis","session","currency","net_cash_flow","realised","actual_fees_usd","fees_complete","reserved_fee_allowance_usd","session_allocation_usd","status"]);
@@ -52,11 +53,15 @@ async function refresh() {
   if (historyRoute) html += `<div><button id="newer" ${historyOffset ? "" : "disabled"}>Newer</button> <span>Offset ${historyOffset}</span> <button id="older" ${data[historyRoute[0]].length < historyRoute[1] ? "disabled" : ""}>Older</button></div>`;
   document.getElementById("main").innerHTML = html;
   if (historyRoute) {
-   document.getElementById("newer").onclick=()=>{historyOffset=Math.max(0,historyOffset-historyRoute[1]);refresh();};
+   document.getElementById("newer").onclick=()=>{if(refreshing)return;historyOffset=Math.max(0,historyOffset-historyRoute[1]);refresh();};
    document.getElementById("older").onclick=()=>{historyOffset+=historyRoute[1];refresh();};
   }
   document.getElementById("pause").onclick=async()=>{await fetch("/api/first4/pause",{method:"POST"});await refresh();};
   document.getElementById("last-refresh").textContent = new Date().toLocaleTimeString();
  } catch (error) { document.getElementById("system-status").textContent = `UNAVAILABLE: ${error.message}`; }
+ finally {
+  refreshing = false;
+  if (refreshPending) { refreshPending = false; void refresh(); }
+ }
 }
 refresh();setInterval(refresh,3000);

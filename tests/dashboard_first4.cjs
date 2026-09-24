@@ -6,10 +6,15 @@ const path = require('node:path');
  const browser = await chromium.launch({headless:true});
  const page = await browser.newPage({viewport:{width:1280,height:850}});
  const root=process.env.STOCKER_DASHBOARD_ASSETS || path.join(__dirname,'../packages/stocker_dashboard/src/stocker_dashboard/static');
+ let hold=false, releases=[], active=0, peak=0, requests=0, blocked=false;
  await page.route('http://stocker.test/**', async route=>{
   const url=new URL(route.request().url());
-  if(url.pathname==='/api/overview') return route.fulfill({json:{system:{account:'DUP655399',connected:true,reconciled:true,armed:false,missing_settings:['premium_budget_usd'],settings:{},problem:'',session:'2026-09-23'},candidates:[{symbol:'<img src=x onerror=alert(1)>',decision:'SELECTED',slot:1,outcome:'UNARMED'}],orders:Array.from({length:100},(_,i)=>({reference:`recent-${i}`})),positions:[],fills:[],errors:[],pnl:{currency:'USD',session:'2026-09-23',realised:0}}});
-  if(url.pathname==='/api/orders') { assert.equal(url.searchParams.get('offset'),'100'); return route.fulfill({json:[{reference:'older-page-order'}]}); }
+  if(url.pathname==='/api/overview') {
+   requests++; active++; peak=Math.max(peak,active);
+   if(hold) await new Promise(resolve=>releases.push(resolve));
+   active--;
+   return route.fulfill({json:{system:{market_data_block:blocked?{code:10197,time:'2026-09-24T13:30:00Z',request_id:17,message:'No market data during competing session',contract:{symbol:'F'}}:{},account:'DUP655399',connected:true,reconciled:true,armed:false,missing_settings:['premium_budget_usd'],settings:{},problem:'',session:'2026-09-23'},candidates:[{symbol:'<img src=x onerror=alert(1)>',decision:'SELECTED',slot:1,outcome:'UNARMED'}],orders:url.searchParams.get('offset')==='100'?[{reference:'older-page-order'}]:Array.from({length:100},(_,i)=>({reference:`recent-${i}`})),positions:[],fills:[],errors:[],pnl:{currency:'USD',session:'2026-09-23',realised:0}}}); }
+  if(url.pathname==='/api/orders') throw new Error('Redundant history request');
   const file=url.pathname.startsWith('/static/')?url.pathname.slice(8):'index.html';
   return route.fulfill({body:fs.readFileSync(path.join(root,file)),contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html'});
  });
@@ -19,6 +24,17 @@ const path = require('node:path');
  assert.equal(await page.locator('#main img').count(),0);
  assert.equal(await page.getByText('Start run',{exact:true}).count(),0);
  assert.equal(await page.getByText('Session HARD',{exact:false}).count(),0);
+ hold=true; peak=0; requests=0;
+ await page.evaluate(()=>{void refresh();void refresh();void refresh();});
+ await page.waitForTimeout(100);
+ console.log(JSON.stringify({concurrent_refresh_peak:peak,requests_while_held:requests}));
+ assert.equal(peak,1,'refreshes must not overlap');
+ hold=false; releases.forEach(resolve=>resolve());
+ await page.waitForFunction(()=>!refreshing);
+ blocked=true;
+ await page.evaluate(()=>refresh());
+ await page.getByText('Market data blocked — competing session (10197)',{exact:true}).waitFor();
+ assert.equal(await page.locator('#system-status').textContent(),'DATA BLOCKED (10197)');
  await page.setViewportSize({width:390,height:844});
  assert.equal(await page.getByRole('button',{name:'Pause entries'}).count(),1);
  const menu=page.getByRole('button',{name:'Toggle navigation'});

@@ -43,12 +43,15 @@ class Runtime:
             "account": self.config.expected_account,
             "connected": self.broker.ib.isConnected(),
             "upstream_lost": self.broker.upstream_lost,
+            "market_data_block": self.broker.market_data_block,
+            "entry_blocker": self.broker.entry_blocker,
             "trading_ready": self.broker.ib.isConnected()
             and not self.broker.upstream_lost
             and self.broker.reconciled
             and not self.problem
             and not scanner_problem
-            and not self.broker.entry_blocker,
+            and not self.broker.entry_blocker
+            and not self.broker.market_data_block,
             "reconciled": self.broker.reconciled,
             "armed": self.broker.entries_armed()
             and not self.pause
@@ -159,6 +162,7 @@ class Runtime:
         if not self.broker.entries_armed() or self.config.missing() or self.pause:
             self.store.outcome(event, "UNARMED", {"missing_settings": self.config.missing()})
             return
+        data_generation = self.broker.market_data_generation
         ticker = None
         callback = None
         try:
@@ -173,7 +177,9 @@ class Runtime:
             def on_tick(t: Any) -> None:
                 for tick in t.tickByTicks:
                     if (
-                        baseline <= tick.time < baseline + timedelta(minutes=1)
+                        data_generation == self.broker.market_data_generation
+                        and not self.broker.market_data_block
+                        and baseline <= tick.time < baseline + timedelta(minutes=1)
                         and tick.price > 0
                         and not anchor.done()
                     ):
@@ -185,10 +191,12 @@ class Runtime:
             await asyncio.wait_for(
                 self.broker.chain(underlying), max(0, (deadline - now()).total_seconds())
             )
+            self.broker.check_data_generation(data_generation)
             price, stamp = await asyncio.wait_for(
                 anchor,
                 max(0, (min(deadline, baseline + timedelta(minutes=1)) - now()).total_seconds()),
             )
+            self.broker.check_data_generation(data_generation)
             self.store.outcome(
                 event, "ANCHOR_OBSERVED", {"price": price, "broker_trade_time": stamp.isoformat()}
             )
@@ -232,7 +240,9 @@ class Runtime:
                 done.set_result(list(data))
 
         def failed(request_id: int, code: int, message: str, *args: Any) -> None:
-            if (request_id == rows.reqId or code in {1100, 1101, 1102, 2110}) and not done.done():
+            if (
+                request_id == rows.reqId or code in {1100, 1101, 1102, 2110, 10197}
+            ) and not done.done():
                 done.set_exception(ValueError(f"SCANNER_REQUEST_FAILED:{code}:{message}"))
 
         rows.updateEvent += complete
@@ -256,6 +266,7 @@ class Runtime:
         clock: datetime,
     ) -> None:
         generation = self.broker.connection_generation
+        data_generation = self.broker.market_data_generation
         sub = ScannerSubscription(
             instrument="STK", locationCode="STK.US", scanCode="MOST_ACTIVE", numberOfRows=25
         )
@@ -272,6 +283,9 @@ class Runtime:
         candidates = await asyncio.gather(
             *(self.candidate(r, opened, clock, previous_close) for r in fresh)
         )
+        self.broker.check_data_generation(data_generation)
+        if self.broker.market_data_block:
+            raise ValueError("MARKET_DATA_COMPETING_SESSION_10197")
         if generation != self.broker.connection_generation or self.broker.upstream_lost:
             raise ValueError("SCANNER_CONNECTION_CHANGED")
         # Inputs complete as one batch; asynchronous response order cannot allocate slots.

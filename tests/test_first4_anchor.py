@@ -62,6 +62,8 @@ def execution(monkeypatch):
         chain=AsyncMock(return_value=[]),
         enter=AsyncMock(),
     )
+    # These tests isolate the tick wait; chain selection has separate broker tests.
+    runtime.broker.standard_chain = runtime.broker.chain
     clock = [BASELINE - timedelta(seconds=1)]
     monkeypatch.setattr(module, "now", lambda: clock[0])
     event = {"symbol": "TEST", "entry_at": BASELINE.isoformat()}
@@ -145,5 +147,78 @@ def test_anchor_wait_cancellation_propagates_and_releases_callback(monkeypatch):
         runtime.store.outcome.assert_not_called()
         ib.client.cancelTickByTickData.assert_called_once_with(42)
         assert len(ib.ticker(underlying).updateEvent) == 0
+        assert not ib.wrapper._futures and not ib.wrapper._results
+        assert not ib.wrapper.reqId2Ticker
+
+    asyncio.run(check())
+
+
+def test_simultaneous_chain_and_tick_failure_retrieves_pending_exception(monkeypatch):
+    async def check():
+        runtime, ib, clock, event, underlying = execution(monkeypatch)
+        errors = []
+        asyncio.get_running_loop().set_exception_handler(
+            lambda loop, context: errors.append(context)
+        )
+
+        async def chain(*args):
+            ib.wrapper.error(42, 10189, "No tick permissions", "")
+            raise TimeoutError()
+
+        runtime.broker.chain.side_effect = chain
+        await runtime.execute(event, underlying)
+        detail = runtime.store.outcome.call_args.args[2]
+        assert detail["error"] == "OPTION_CHAIN_TIMEOUT"
+        assert detail["tick_subscription_error"]["code"] == 10189
+        assert not errors
+        assert not ib.wrapper._futures and not ib.wrapper._results
+        assert not ib.wrapper.reqId2Ticker
+        runtime.broker.enter.assert_not_awaited()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("code", [200, 354, 10189, 10190])
+def test_tick_request_rejection_preserves_broker_error_instead_of_timeout(monkeypatch, code):
+    async def check():
+        runtime, ib, clock, event, underlying = execution(monkeypatch)
+
+        async def chain(*args):
+            ib.wrapper.error(42, code, "Synthetic tick request rejection", "")
+            clock[0] = BASELINE + timedelta(minutes=1)
+            return []
+
+        runtime.broker.chain.side_effect = chain
+        await runtime.execute(event, underlying)
+        detail = runtime.store.outcome.call_args.args[2]
+        assert detail["error"] == "BASELINE_SUBSCRIPTION_FAILED"
+        assert detail["broker_error"] == {
+            "request_id": 42,
+            "code": code,
+            "message": "Synthetic tick request rejection",
+        }
+        runtime.broker.enter.assert_not_awaited()
+        assert not ib.wrapper._futures and not ib.wrapper._results
+        assert not ib.wrapper._reqId2Contract and not ib.wrapper.reqId2Ticker
+        assert len(ib.ticker(underlying).updateEvent) == 0
+
+    asyncio.run(check())
+
+
+def test_unrelated_request_error_and_informational_notice_do_not_reject_anchor(monkeypatch):
+    async def check():
+        runtime, ib, clock, event, underlying = execution(monkeypatch)
+
+        async def chain(*args):
+            ib.wrapper.error(99, 10189, "Another request", "")
+            ib.wrapper.error(42, 2104, "Market data farm is OK", "")
+            deliver(ib, BASELINE, BASELINE)
+            return []
+
+        runtime.broker.chain.side_effect = chain
+        await runtime.execute(event, underlying)
+        runtime.broker.enter.assert_awaited_once_with(event, underlying, 1.25)
+        assert not ib.wrapper._futures and not ib.wrapper._results
+        assert not ib.wrapper.reqId2Ticker
 
     asyncio.run(check())

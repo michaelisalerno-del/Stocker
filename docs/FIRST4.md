@@ -18,6 +18,22 @@ exception, observed tick count and last trade timestamp. A baseline timeout is
 reported as `BASELINE_TRADE_NOT_RECEIVED`; this does not assert whether the market
 had no trade or the feed failed to deliver it. No later-price fallback is used.
 
+The already-requested option-chain metadata is checked before waiting for the
+baseline anchor. An empty broker response (`OPTION_CHAIN_EMPTY`), no matching
+standard chain (`NO_PERMITTED_STANDARD_OPTION_CHAIN`), and multiple matching
+chains (`AMBIGUOUS_STANDARD_OPTION_CHAIN`) are distinct failures. Rejection
+details include the required mapping and at most 20 returned chain summaries,
+without full strike/expiry lists. The same exact chain restrictions apply again
+during contract selection, reusing the cached response. This changes neither
+first-appearance admission nor the permanent slot consumed by a failed execution.
+
+The anchor wait participates in ib_async's request-error lifecycle, so a rejected
+tick subscription records `BASELINE_SUBSCRIPTION_FAILED` with the broker request
+ID, code and message. Informational notices and other request IDs do not fail
+that wait. Cleanup removes its callback, request future and subscription mapping
+on completion, failure or cancellation. No subscription retry or later anchor is
+introduced.
+
 Research buys put at .98*S0 and call at 1.02*S0, with expiry=baseline entry+2,880 calendar minutes and scheduled session-close valuation. IV=100%, r=.04, q=0 and 1.05/.95 benchmark marks are absent from broker pricing/P&L.
 
 ## User-specified PAPER execution conventions

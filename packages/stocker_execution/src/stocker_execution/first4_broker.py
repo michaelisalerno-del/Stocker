@@ -28,6 +28,14 @@ from stocker_execution.first4_store import Store
 log = logging.getLogger(__name__)
 
 
+class OptionChainError(ValueError):
+    """A failed standard-chain check with bounded broker metadata for diagnosis."""
+
+    def __init__(self, reason: str, detail: dict[str, Any]):
+        super().__init__(reason)
+        self.detail = detail
+
+
 def now() -> datetime:
     return datetime.now(UTC)
 
@@ -621,19 +629,51 @@ class PaperBroker:
             self.chains[underlying.conId] = result
         return self.chains[underlying.conId]
 
-    async def contracts(
-        self, underlying: Any, anchor: float, baseline: datetime
-    ) -> tuple[Any, Any, Any]:
+    async def standard_chain(self, underlying: Any) -> Any:
+        rows = await self.chain(underlying)
         chains = [
             x
-            for x in await self.chain(underlying)
+            for x in rows
             if x.exchange == "SMART"
             and x.tradingClass == underlying.symbol
             and x.multiplier == "100"
         ]
         if len(chains) != 1:
-            raise ValueError("AMBIGUOUS_OPTION_TRADING_CLASS_OR_MULTIPLIER")
-        chain = chains[0]
+            reason = "AMBIGUOUS_STANDARD_OPTION_CHAIN"
+            if not chains:
+                reason = "NO_PERMITTED_STANDARD_OPTION_CHAIN" if rows else "OPTION_CHAIN_EMPTY"
+            raise OptionChainError(
+                reason,
+                {
+                    "option_chain": {
+                        "returned": len(rows),
+                        "matching": len(chains),
+                        "required": {
+                            "exchange": "SMART",
+                            "trading_class": underlying.symbol,
+                            "multiplier": "100",
+                        },
+                        "rows": [
+                            {
+                                "exchange": row.exchange,
+                                "trading_class": row.tradingClass,
+                                "multiplier": row.multiplier,
+                                "underlying_con_id": getattr(row, "underlyingConId", None),
+                                "expiry_count": len(row.expirations),
+                                "strike_count": len(row.strikes),
+                            }
+                            for row in rows[:20]
+                        ],
+                        "truncated": len(rows) > 20,
+                    }
+                },
+            )
+        return chains[0]
+
+    async def contracts(
+        self, underlying: Any, anchor: float, baseline: datetime
+    ) -> tuple[Any, Any, Any]:
+        chain = await self.standard_chain(underlying)
 
         async def qualify(expiry: str, right: str) -> Any:
             strike = listed_strike(list(chain.strikes), anchor, right)

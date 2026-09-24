@@ -19,6 +19,12 @@ Frozen fixtures, calculation code, execution configuration and lockfiles were
 unchanged. These checks do not establish why MMTIF's live stream supplied no
 anchor, nor do they make the patch active in the running process.
 
+The pending follow-up also distinguishes chain-response failures and propagates
+tick-subscription request errors to the anchor wait. See the dated
+[entry failure investigation](FIRST4-entry-failures-20260924.md) for evidence,
+remaining uncertainty and activation constraints. None of these source changes
+has replaced the active release identified above.
+
 All 349 tracked release files matched the published commit. The six GitHub CI
 checks passed before activation, and the server's locked server-only installation
 and offline smoke passed. FIRST4 was restarted at 12:28:48 UTC after explicit

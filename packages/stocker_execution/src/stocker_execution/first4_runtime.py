@@ -8,11 +8,11 @@ from datetime import date, datetime, timedelta
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from ib_async import ScannerSubscription, TagValue
+from ib_async import RequestError, ScannerSubscription, TagValue
 
 from stocker_data.calendars import get_market_calendar
 from stocker_execution.first4 import METHOD, Bar, prior15
-from stocker_execution.first4_broker import PaperBroker, now
+from stocker_execution.first4_broker import OptionChainError, PaperBroker, now
 from stocker_execution.first4_config import First4Config
 from stocker_execution.first4_readiness import option_access
 from stocker_execution.first4_store import Store
@@ -189,6 +189,8 @@ class Runtime:
             return
         ticker = None
         callback = None
+        anchor: asyncio.Future[Any] | None = None
+        request_id: int | None = None
         stage = "ENTRY_GUARD"
         ticks_received = 0
         last_trade_at: str | None = None
@@ -199,9 +201,12 @@ class Runtime:
             if now() >= baseline:
                 raise ValueError("BASELINE_ANCHOR_MISSED")
             # Subscribe before the boundary. The first eligible trade supplies open(j+2).
-            anchor = asyncio.get_running_loop().create_future()
             stage = "BASELINE_SUBSCRIPTION"
             ticker = self.broker.ib.reqTickByTickData(underlying, "Last", 0, False)
+            request_id = self.broker.ib.wrapper.ticker2ReqId["Last"][ticker]
+            # Streaming subscriptions have no error future in ib_async. Register
+            # this wait so its existing RaiseRequestErrors handling reaches us.
+            anchor = self.broker.ib.wrapper.startReq(request_id, underlying)
 
             def on_tick(t: Any) -> None:
                 nonlocal ticks_received, last_trade_at
@@ -213,6 +218,7 @@ class Runtime:
                         and not self.broker.market_data_block
                         and baseline <= tick.time < baseline + timedelta(minutes=1)
                         and tick.price > 0
+                        and anchor is not None
                         and not anchor.done()
                     ):
                         anchor.set_result((tick.price, tick.time))
@@ -222,7 +228,7 @@ class Runtime:
             deadline = baseline + timedelta(seconds=self.config.number("entry_deadline_seconds"))
             stage = "OPTION_CHAIN"
             await asyncio.wait_for(
-                self.broker.chain(underlying), max(0, (deadline - now()).total_seconds())
+                self.broker.standard_chain(underlying), max(0, (deadline - now()).total_seconds())
             )
             stage = "BASELINE_ANCHOR"
             price, stamp = await asyncio.wait_for(
@@ -241,6 +247,26 @@ class Runtime:
                 await self.broker.enter(event, underlying, price)
         except Exception as exc:
             reason = str(exc) or type(exc).__name__
+            detail: dict[str, Any] = {}
+            if isinstance(exc, OptionChainError):
+                detail.update(exc.detail)
+            if anchor is not None and anchor.done() and not anchor.cancelled():
+                tick_error = anchor.exception()
+                if isinstance(tick_error, RequestError) and tick_error is not exc:
+                    detail["tick_subscription_error"] = {
+                        "request_id": tick_error.reqId,
+                        "code": tick_error.code,
+                        "message": tick_error.message,
+                    }
+            if isinstance(exc, RequestError):
+                detail["broker_error"] = {
+                    "request_id": exc.reqId,
+                    "code": exc.code,
+                    "message": exc.message,
+                }
+                if exc.reqId == request_id:
+                    stage = "BASELINE_SUBSCRIPTION"
+                    reason = "BASELINE_SUBSCRIPTION_FAILED"
             if isinstance(exc, TimeoutError):
                 reason = (
                     "BASELINE_TRADE_NOT_RECEIVED"
@@ -256,13 +282,24 @@ class Runtime:
                     "stage": stage,
                     "ticks_received": ticks_received,
                     "last_trade_at": last_trade_at,
+                    "tick_request_id": request_id,
+                    **detail,
                 },
             )
             log.warning("FIRST4 execution failed %s at %s: %s", event["symbol"], stage, reason)
         finally:
             if ticker is not None:
                 ticker.updateEvent -= callback
-                self.broker.ib.cancelTickByTickData(underlying, "Last")
+                try:
+                    self.broker.ib.cancelTickByTickData(underlying, "Last")
+                finally:
+                    if anchor is not None:
+                        anchor.cancel()
+                        if not anchor.cancelled():
+                            anchor.exception()  # Retrieve errors even if chain lookup failed first.
+                    if request_id is not None:
+                        self.broker.ib.finish_request(request_id)
+                        self.broker.ib.wrapper.reqId2Ticker.pop(request_id, None)
 
     async def scan(
         self,

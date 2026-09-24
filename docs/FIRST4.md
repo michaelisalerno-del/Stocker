@@ -56,17 +56,26 @@ options, BAG tick size and fresh real-time two-sided option quotes. Ford's ATM
 contracts are only data-access probes and never enter the candidate ledger.
 No orders, including what-if orders, are sent by the check.
 
-Qualification has a 30-second bound and BAG metadata an 8-second bound. The two
-leg subscriptions then wait for valid quotes until stock open + 14 minutes
-(14:44 UK on September 24), ahead of the first possible frozen Q5 admission at
-open + 15 minutes and baseline entry at open + 16. There is one check, no new
-scanner, no repeated chain downloads, and no scheduled agent needed. A pass
+Qualification has a 30-second bound and BAG metadata an 8-second bound. The
+dated check permits at most three sequential attempts for timeouts or temporarily
+unavailable stock/option quotes or BAG pricing, with five seconds between attempts.
+The first two attempts are capped at 60 seconds including reconciliation. The
+final attempt retains the original quote-wait window, ending at stock open + 14
+minutes (14:44 UK on September 24), ahead of the first possible frozen Q5 admission
+at open + 15 minutes and baseline entry at open + 16. All attempts must finish
+before that deadline. Cancellation cleans up each attempt before another begins.
+Identity/ownership errors, ambiguous contracts, missing scanner observations,
+pause, disconnect/data interruption and revoked permission never permit retry
+or restored authority. There is one dated check, no new scanner, no repeated
+successful chain downloads, and no scheduled agent needed. A pass
 enables the existing broker entry path in memory without restarting; the YAML
 retains `armed: false` and the dashboard distinguishes configured and effective
 arming. Every actual candidate still undergoes its own contract, quote, budget
 and account checks. The check cannot replay or replace an admission.
 
-The dated check and result persist in `opening_check:<date>`. A failure, pause,
+The dated check and result persist in `opening_check:<date>`, including attempt
+count, last temporary error and next attempt time. Status remains CHECKING during
+backoff so restart cannot replay it. Exhausted/nonretryable failure, pause,
 missed scanner minute or deadline expiry leaves entries disabled. A disconnect
 revokes the in-memory authorization. A process restart never restores authority
 from the audit record and never repeats an interrupted or completed check.

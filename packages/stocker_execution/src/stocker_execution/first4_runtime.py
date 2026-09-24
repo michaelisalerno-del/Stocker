@@ -19,6 +19,9 @@ from stocker_execution.first4_store import Store
 
 log = logging.getLogger(__name__)
 Health = Literal["STARTING", "RUNNING", "DEGRADED", "FAILED", "STOPPED"]
+OPENING_MAX_ATTEMPTS = 3
+OPENING_ATTEMPT_SECONDS = 60
+OPENING_RETRY_SECONDS = 5
 
 
 class Runtime:
@@ -407,25 +410,65 @@ class Runtime:
         self.store.set_meta(key, report)
         try:
             generation = self.broker.data_generation
-            self.opening_guard(day, opened)
-            async with asyncio.timeout(15):
-                await self.broker.reconcile(require_flat=True)
-            self.opening_guard(day, opened)
             deadline = opened + timedelta(minutes=14)
-            async with asyncio.timeout(max(0, (deadline - now()).total_seconds())):
-                report.update(await option_access(self.broker, deadline))
-            if generation != self.broker.data_generation:
-                raise ValueError("OPENING_CHECK_INTERRUPTED")
-            self.opening_guard(day, opened)
-            if report.get("blockers") or not all(
-                report.get("checks", {}).get(name) is True
-                for name in (
-                    "qualified_usd_standard_multiplier",
-                    "fresh_realtime_option_quotes",
-                    "combo_price_increment",
+            for attempt in range(1, OPENING_MAX_ATTEMPTS + 1):
+                if generation != self.broker.data_generation:
+                    raise ValueError("OPENING_CHECK_INTERRUPTED")
+                self.opening_guard(day, opened)
+                report.update(attempt=attempt, max_attempts=OPENING_MAX_ATTEMPTS)
+                report.pop("next_attempt_at", None)
+                self.store.set_meta(key, report)
+                # The last attempt retains the original quote-wait window.
+                attempt_deadline = (
+                    deadline
+                    if attempt == OPENING_MAX_ATTEMPTS
+                    else min(deadline, now() + timedelta(seconds=OPENING_ATTEMPT_SECONDS))
                 )
-            ):
-                raise ValueError("OPENING_CHECK_INCOMPLETE")
+                try:
+                    async with asyncio.timeout(max(0, (attempt_deadline - now()).total_seconds())):
+                        async with asyncio.timeout(15):
+                            await self.broker.reconcile(require_flat=True)
+                        self.opening_guard(day, opened)
+                        evidence = await option_access(self.broker, attempt_deadline)
+                    if generation != self.broker.data_generation:
+                        raise ValueError("OPENING_CHECK_INTERRUPTED")
+                    self.opening_guard(day, opened)
+                    if evidence.get("blockers") or not all(
+                        evidence.get("checks", {}).get(name) is True
+                        for name in (
+                            "qualified_usd_standard_multiplier",
+                            "fresh_realtime_option_quotes",
+                            "combo_price_increment",
+                        )
+                    ):
+                        raise ValueError("OPENING_CHECK_INCOMPLETE")
+                    report.update(evidence)
+                    break
+                except (TimeoutError, ValueError) as exc:
+                    if generation != self.broker.data_generation:
+                        raise ValueError("OPENING_CHECK_INTERRUPTED") from exc
+                    # Only transient read-only failures retry. Identity, ownership,
+                    # metadata ambiguity, missing observations and revocation do not.
+                    retryable = isinstance(exc, TimeoutError) or str(exc) in {
+                        "PROBE_STOCK_QUOTE_UNAVAILABLE",
+                        "OPTION_QUOTES_INVALID_STALE_OR_UNAVAILABLE",
+                        "COMBO_PRICE_INCREMENT_UNAVAILABLE",
+                    }
+                    if not retryable or attempt == OPENING_MAX_ATTEMPTS:
+                        raise
+                    if now() + timedelta(seconds=OPENING_RETRY_SECONDS) >= deadline:
+                        raise ValueError("OPENING_VERIFICATION_WINDOW_EXPIRED") from exc
+                    report.update(
+                        last_attempt_error=str(exc) or type(exc).__name__,
+                        next_attempt_at=(
+                            now() + timedelta(seconds=OPENING_RETRY_SECONDS)
+                        ).isoformat(),
+                    )
+                    # Keep CHECKING durable throughout retries: restart must never
+                    # replay a completed or interrupted dated opening check.
+                    self.store.set_meta(key, report)
+                    log.warning("FIRST4 opening attempt %s failed; retrying: %s", attempt, exc)
+                    await asyncio.sleep(OPENING_RETRY_SECONDS)
             report["status"] = "ARMED"
             report["armed_at"] = now().isoformat()
             self.store.set_meta(key, report)

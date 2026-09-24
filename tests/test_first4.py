@@ -298,6 +298,7 @@ def test_opening_check_arms_same_runtime_without_replay(tmp_path, monkeypatch):
 @pytest.mark.parametrize("failure", ["quote", "pause", "continuity", "account", "deadline"])
 def test_opening_check_failure_cannot_arm(tmp_path, monkeypatch, failure):
     runtime = opening_runtime(tmp_path, monkeypatch)
+    monkeypatch.setattr("stocker_execution.first4_runtime.OPENING_RETRY_SECONDS", 0)
 
     async def probe(*args):
         if failure == "quote":

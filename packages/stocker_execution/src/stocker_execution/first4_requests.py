@@ -8,7 +8,7 @@ import asyncio
 from datetime import datetime
 from typing import Any, cast
 
-from ib_async import IB, ScanDataList, util
+from ib_async import IB, ScanDataList, Ticker, util
 
 
 class First4IB(IB):
@@ -21,6 +21,32 @@ class First4IB(IB):
         self.wrapper._endReq(request_id)
         # RequestError completes with an explicit result in 2.1, leaving this map.
         self.wrapper._results.pop(request_id, None)
+
+    async def reqTickersAsync(
+        self, *contracts: Any, regulatorySnapshot: bool = False
+    ) -> list[Ticker]:
+        requests = []
+        try:
+            for contract in contracts:
+                request_id = self.client.getReqId()
+                future = self.wrapper.startReq(request_id, contract)
+                ticker = self.wrapper.startTicker(request_id, contract, "snapshot")
+                requests.append((request_id, future, ticker))
+                self.client.reqMktData(request_id, contract, "", True, regulatorySnapshot, [])
+            await asyncio.gather(*(future for _, future, _ in requests))
+            return [ticker for _, _, ticker in requests]
+        finally:
+            for request_id, future, ticker in requests:
+                completed = future.done() and not future.cancelled() and future.exception() is None
+                future.cancel()
+                try:
+                    if not completed and self.isConnected():
+                        self.client.cancelMktData(request_id)
+                finally:
+                    self.wrapper.endTicker(ticker, "snapshot")
+                    self.wrapper.reqId2Ticker.pop(request_id, None)
+                    self.finish_request(request_id)
+            await asyncio.gather(*(future for _, future, _ in requests), return_exceptions=True)
 
     async def history(self, contract: Any, end: datetime, duration: str) -> list[Any]:
         request_id = self.client.getReqId()

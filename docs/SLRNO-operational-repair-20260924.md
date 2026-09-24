@@ -1,5 +1,11 @@
 # SLRNO operational reliability repair — local only
 
+**Subsequent authorized deployment:** release `2a31cde` was activated on September
+24 at 20:51:27 UTC and verified at 20:56:22 UTC. See
+[the current deployment record](CURRENT-DEPLOYMENT.md). The implementation report
+below describes the preceding local-only work; its statements about uncommitted
+changes and no deployment apply to that earlier phase.
+
 Baseline: `12e3993642ae7d75095bcd9211257084aea1cf7e`. The new task directory was
 empty, so the committed September 24 dashboard checkout was cloned locally into
 it. No remote fetch, broker connection, production configuration or arming change,

@@ -1,0 +1,107 @@
+{
+  "revision": "2a31cde8a31a09f350d197d03b4dee779485819a",
+  "activated_at": "2026-09-24T20:51:27.861918+00:00",
+  "verified_at": "2026-09-24T20:56:22.050649+00:00",
+  "ci_url": "https://github.com/michaelisalerno-del/Stocker/actions/runs/36054172363",
+  "backup": "/var/lib/stocker/backups/first4-2a31cde8a31a",
+  "services": {
+    "stocker-v1.service": {
+      "MainPID": "1314073",
+      "NRestarts": "0",
+      "ActiveState": "active"
+    },
+    "stocker-ibgateway.service": {
+      "MainPID": "1274679",
+      "NRestarts": "0",
+      "ActiveState": "active"
+    },
+    "stocker-frozen-scanner-observation-20260923.service": {
+      "MainPID": "0",
+      "NRestarts": "0",
+      "ActiveState": "inactive"
+    }
+  },
+  "http": {
+    "/api/health": {
+      "status": 200,
+      "bytes": 1462
+    },
+    "/api/system": {
+      "status": 200,
+      "bytes": 1560
+    },
+    "/api/overview": {
+      "status": 200,
+      "bytes": 7167
+    },
+    "/api/opportunities": {
+      "status": 200,
+      "bytes": 21156
+    },
+    "/api/execution": {
+      "status": 200,
+      "bytes": 4927
+    },
+    "/api/detail?session=2026-09-24&symbol=GCDT": {
+      "status": 200,
+      "bytes": 667
+    },
+    "/": {
+      "status": 200,
+      "bytes": 2634
+    },
+    "/opportunities": {
+      "status": 200,
+      "bytes": 2634
+    },
+    "/execution": {
+      "status": 200,
+      "bytes": 2634
+    },
+    "/system": {
+      "status": 200,
+      "bytes": 2634
+    },
+    "/static/dashboard.js": {
+      "status": 200,
+      "bytes": 31630
+    },
+    "/static/dashboard.css": {
+      "status": 200,
+      "bytes": 9601
+    }
+  },
+  "config_sha256": "5dfd04751b08394d8e7f47a0f84442c2b1e5861cfe6e8e1a343d3bbd79a53818",
+  "ledger_counts": {
+    "events": 51,
+    "orders": 0,
+    "fills": 0,
+    "positions": 0
+  },
+  "events_and_slots_unchanged": true,
+  "dated_checks_unchanged": true,
+  "sessions_and_pause_unchanged": true,
+  "observer_units_unchanged": true,
+  "manifest_files_verified": 371,
+  "served_assets_match": true,
+  "quick_check": "ok",
+  "system": {
+    "connected": true,
+    "reconciled": true,
+    "armed": false,
+    "configured_armed": false,
+    "paused": false,
+    "worker_health": "RUNNING",
+    "manager_health": "RUNNING",
+    "web_health": "RUNNING",
+    "ledger_available": true,
+    "live_enabled": false,
+    "entry_block_reason": "SESSION_START_OR_SCANNER_HISTORY_MISSED",
+    "opening_check": {
+      "status": "WAITING_FOR_OPEN",
+      "session": "2026-09-25"
+    },
+    "opening_check_active": false,
+    "outstanding_obligations": 0
+  }
+}

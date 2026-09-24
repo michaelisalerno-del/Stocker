@@ -1,5 +1,47 @@
 # SLRNO — current server deployment
 
+Verified September 24, 2026 at **20:56:22 UTC (21:56 UK)**.
+
+Active release: **`2a31cde8a31a09f350d197d03b4dee779485819a`**, published to
+GitHub `main` and activated at **20:51:27 UTC** after explicit user authorization
+to deploy. This release repairs fresh diagnostic-stock acquisition, replaces the
+three-attempt opening limit with deadline-driven retries, propagates streaming
+request errors, interrupts failed anchor requests during metadata work, and keeps
+option streams fresh while BAG metadata is pending. See the
+[repair report](SLRNO-operational-repair-20260924.md).
+
+All six [CI checks](https://github.com/michaelisalerno-del/Stocker/actions/runs/36054172363)
+passed for the exact release. Local full Python validation passed **581 tests**
+with five existing warnings. All 371 release files matched the SHA-256 manifest;
+the locked 56-package server installation and service-user offline smoke passed
+before activation. Served JavaScript/CSS match the release. All twelve checked
+authenticated health, data, page and asset endpoints returned HTTP 200.
+
+Only `stocker-v1.service` was stopped and started: **PID 1314073**, active with
+**zero automatic restarts**. Worker, manager and web health are RUNNING; PAPER is
+connected and reconciled. Gateway PID 1274679 remained unchanged. The observer
+was already inactive before deployment and remains inactive; its service/timer
+definitions were unchanged.
+
+Execution configuration SHA-256 remains
+`5dfd04751b08394d8e7f47a0f84442c2b1e5861cfe6e8e1a343d3bbd79a53818`.
+Configured and effective arming remain false; LIVE remains disabled. The existing
+September 25 permission and **WAITING_FOR_OPEN** record are preserved. No opening
+check was replayed. All 51 event records, four consumed slots, session blocks,
+dated checks and pause state matched the pre-activation snapshot. Orders, fills,
+positions and exit obligations remain zero. The ledger passed `quick_check`.
+
+Root-only consistent ledger/configuration backups and verification records are in
+`/var/lib/stocker/backups/first4-2a31cde8a31a/`. The previous release `92393ff` is
+retained. Never restore the ledger backup over subsequent trading activity.
+Only the normal service startup reconnected to IBKR; no additional broker probe,
+manual order, configuration change or arming change was performed. Live opening
+data delivery and real fills remain unverified by this deployment.
+
+See the [sanitised verification record](slrno-operational-deployment-20260924.json).
+
+## Previous 17:16 UTC deployment record (superseded)
+
 Verified on September 24, 2026 at 17:16:44 UTC (18:16 UK).
 
 The active release is **`92393ff7c62ca7c0d7c612252797d684aa792732`**, published to

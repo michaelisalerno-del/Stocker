@@ -1,4 +1,4 @@
-# Current server deployment
+# SLRNO — current server deployment
 
 Verified on September 24, 2026 at 15:32 UTC (16:32 UK).
 

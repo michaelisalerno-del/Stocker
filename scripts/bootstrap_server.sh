@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-echo "Stocker Linux server bootstrap"
+echo "SLRNO Linux server bootstrap"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "Warning: this script is intended for Linux servers."
@@ -22,5 +22,4 @@ uv sync --locked --no-default-groups --group server
 echo
 echo "Bootstrap complete."
 echo "Next steps:"
-echo "  uv run --no-sync stocker server dry-run --config configs/server.example.yaml"
-echo "  uv run --no-sync python apps/server/scripts/run_executor.py --config configs/server.example.yaml"
+echo "  uv run --no-sync stocker first4-run --config configs/first4.example.yaml --database .stocker/first4.sqlite3"

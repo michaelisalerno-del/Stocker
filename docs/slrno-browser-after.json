@@ -1,0 +1,28 @@
+{
+  "passed": "SLRNO browser acceptance",
+  "maximum_concurrent_refreshes": 1,
+  "hidden_60s_requests": 0,
+  "unchanged_main_child_text_mutations": 0,
+  "scroll_left_before": 260,
+  "scroll_left_after": 260,
+  "visible_schedule_seconds": {
+    "overview": 5,
+    "opportunities": 15,
+    "execution": 5,
+    "system": 30
+  },
+  "requestsPerMinute": {
+    "/": 12,
+    "/opportunities": 4,
+    "/execution": 12,
+    "/system": 2
+  },
+  "calls": {
+    "/api/overview": 20,
+    "/api/opportunities": 12,
+    "/api/detail": 1,
+    "/api/status": 1,
+    "/api/execution": 14,
+    "/api/system": 4
+  }
+}

@@ -11,7 +11,8 @@ import httpx
 import pytest
 from ib_async import Contract, Order, OrderStatus, RequestError, Trade
 
-from stocker_dashboard.app import create_dashboard_app, session_pnl
+from stocker_dashboard.app import create_dashboard_app
+from stocker_dashboard.views import allocations, economics
 from stocker_data.calendars import get_market_calendar
 from stocker_execution.first4_broker import PaperBroker
 from stocker_execution.first4_requests import First4IB
@@ -73,9 +74,9 @@ def test_dashboard_defaults_to_relevant_session(tmp_path):
             base_url="http://127.0.0.1",
         ) as client:
             data = (await client.get("/api/overview")).json()
-            assert {r["session"] for r in data["candidates"]} == {"2025-07-22"}
+            assert {r["session"] for r in data["slots"] if r["symbol"]} == {"2025-07-22"}
             old = (await client.get("/api/overview?session=2025-07-21")).json()
-            assert {r["session"] for r in old["candidates"]} == {"2025-07-21"}
+            assert {r["session"] for r in old["slots"] if r["symbol"]} == {"2025-07-21"}
 
     asyncio.run(check())
 
@@ -433,7 +434,7 @@ def test_completed_pnl_survives_open_allocation_and_late_fees(tmp_path, monkeypa
     assert not b.store.active_entries()
     runtime = Runtime(b.config, b.store)
     runtime.broker = b
-    result = session_pnl(runtime, event["session"])
+    result = economics(allocations(runtime.store, event["session"]))
     assert result["completed_gross_usd"] == pytest.approx(40)
     assert result["realised"] is None
     assert result["pending_fee_executions"] == 4
@@ -449,17 +450,17 @@ def test_completed_pnl_survives_open_allocation_and_late_fees(tmp_path, monkeypa
     other = b.store.reserve_order(second, "ENTRY", 3, payload)
     leg = Contract(secType="OPT", conId=201, multiplier="100")
     report_fill(b, other, leg, "other.01")
-    result = session_pnl(runtime, event["session"])
+    result = economics(allocations(runtime.store, event["session"]))
     assert result["realised"] == pytest.approx(37.4)
     assert not result["fees_complete"] and result["open_owned_legs"][0]["quantity"] == 1
     other_exit = b.store.reserve_order(second, "EXIT", 4, payload, "201")
     report_fill(b, other_exit, leg, "partial.01", "SLD", 0.5, 1.5)
-    result = session_pnl(runtime, event["session"])
+    result = economics(allocations(runtime.store, event["session"]))
     assert result["partial_close_gross_usd"] == 25
     assert result["realised"] == pytest.approx(37.4)
     reopened = Store(tmp_path / "s.sqlite")
     runtime.store = reopened
-    assert session_pnl(runtime, event["session"]) == result
+    assert economics(allocations(runtime.store, event["session"])) == result
 
 
 def test_late_fill_reopens_obligation_and_corrections_do_not_double_count(tmp_path, monkeypatch):
@@ -925,8 +926,8 @@ def test_management_and_dashboard_cost_independent_of_closed_history(tmp_path, m
             response = await client.get("/api/overview")
             assert response.status_code == 200
             sizes.append(len(response.content))
-            assert len(response.json()["orders"]) == 1
-            assert len(response.json()["fills"]) == 2
+            assert len(response.json()["slots"]) == 4
+            assert len(response.json()["slots"][0]["legs"]) == 2
 
     asyncio.run(measure())
     seed_closed_history(b.store, 1000)

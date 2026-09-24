@@ -1,43 +1,74 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Stocker — Operations</title>
-    <link rel="stylesheet" href="/static/dashboard.css">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SLRNO — FIRST4 / US PAPER</title>
+    <link rel="stylesheet" href="/static/dashboard.css" />
+    <script src="/static/dashboard.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to operational view</a>
     <header class="topbar">
-      <a class="brand" href="/" data-nav="overview" aria-label="Stocker overview">
-        <span class="brand-mark">S</span><span>STOCKER</span><small>FIRST4 / US</small>
-      </a>
-      <div class="top-status" aria-live="polite">
-        <div class="status-unit"><span>PAPER</span><strong id="paper-status">—</strong></div>
-        
-        <div class="status-unit"><span>SYSTEM</span><strong id="system-status">LOADING</strong></div>
-        <div class="status-unit compact"><span>RUNS</span><strong id="active-runs">—</strong></div>
-        <div class="status-unit compact"><span>POSITIONS</span><strong id="open-positions">—</strong></div>
+      <a class="brand" href="/" aria-label="SLRNO overview"
+        ><span class="brand-mark">S/</span
+        ><span>SLRNO<small>FIRST4 / US PAPER</small></span></a
+      >
+      <button
+        id="menu-button"
+        class="menu-button"
+        aria-label="Toggle navigation"
+        aria-controls="sidebar"
+        aria-expanded="false"
+      >
+        Menu
+      </button>
+      <div class="top-status" aria-label="Global operational status">
+        <div>
+          <span>PAPER connection</span><strong id="paper-status">—</strong>
+        </div>
+        <div>
+          <span>Reconciliation</span><strong id="reconciliation">—</strong>
+        </div>
+        <div>
+          <span>Entries</span><strong id="system-status">LOADING</strong>
+        </div>
+        <div>
+          <span>Current session</span><strong id="current-session">—</strong>
+        </div>
       </div>
-      <button class="menu-button" id="menu-button" type="button" aria-label="Toggle navigation" aria-controls="sidebar" aria-expanded="false">MENU</button>
+      <button id="pause" class="secondary">Pause entries</button>
     </header>
+    <div class="receipt" id="last-refresh" role="status">
+      Waiting for dashboard data
+    </div>
     <div class="shell">
       <aside class="sidebar" id="sidebar">
         <nav aria-label="Primary">
-          <a href="/" data-nav="overview">Overview</a>
-          
-          
-          <a href="/candidates" data-nav="candidates">Candidates</a>
-          <a href="/orders" data-nav="orders">Orders</a>
-          <a href="/positions" data-nav="positions">Positions</a>
-          <a href="/trades" data-nav="trades">Trades</a>
-          <a href="/system" data-nav="system">System</a>
-          <a href="/settings" data-nav="settings">Settings</a>
+          <a href="/">Overview</a><a href="/opportunities">Opportunities</a>
+          <a href="/execution">Execution</a><a href="/system">System</a>
         </nav>
-        <div class="sidebar-foot"><span class="pulse"></span>AUTO REFRESH <b id="last-refresh">—</b></div>
+        <div class="sidebar-foot">
+          PAPER EXECUTION<br />Four slots. One session.
+        </div>
       </aside>
-      <main id="main" tabindex="-1"><div class="loading">Loading operational state…</div></main>
+      <div class="workspace">
+        <p id="control-result" class="notice" role="status" hidden></p>
+        <p id="transport-error" class="warning" role="status" hidden></p>
+        <main id="main" tabindex="-1"></main>
+      </div>
     </div>
-    <script src="/static/dashboard.js?v=first4-menu" defer></script>
+    <dialog id="pause-dialog" aria-labelledby="pause-title">
+      <h2 id="pause-title">Pause new entries?</h2>
+      <p>
+        This persists across restarts. Existing positions, reconciliation and
+        exit management continue.
+      </p>
+      <p>This dashboard cannot resume or arm entries.</p>
+      <div class="dialog-actions">
+        <button id="cancel-pause" class="secondary">Cancel</button
+        ><button id="confirm-pause">Confirm pause</button>
+      </div>
+    </dialog>
   </body>
 </html>

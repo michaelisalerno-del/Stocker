@@ -135,24 +135,6 @@ class Store:
             raise ValueError("ORDER_WITHOUT_FIRST4_ADMISSION")
         return dict(row)
 
-    def page(
-        self, table: str, session: str, limit: int = 150, offset: int = 0
-    ) -> list[dict[str, Any]]:
-        limit, offset = min(200, max(1, limit)), max(0, offset)
-        if table == "fills":
-            query = (
-                "SELECT f.* FROM first4_orders o JOIN first4_fills f USING(reference) "
-                "WHERE o.session=? ORDER BY f.time DESC,f.exec_id DESC LIMIT ? OFFSET ?"
-            )
-        elif table in {"events", "orders"}:
-            ordering = "information_at DESC,rank,symbol" if table == "events" else "reference DESC"
-            query = (
-                f"SELECT * FROM first4_{table} WHERE session=? ORDER BY {ordering} LIMIT ? OFFSET ?"
-            )
-        else:
-            raise ValueError("Unknown paged ledger table")
-        return [dict(r) for r in self.db.execute(query, (session, limit, offset))]
-
     def rows(self, table: str) -> list[dict[str, Any]]:
         if table not in {"sessions", "events", "orders", "fills", "positions", "meta"}:
             raise ValueError("Unknown ledger table")

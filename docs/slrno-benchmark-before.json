@@ -1,0 +1,70 @@
+{
+  "small_500_events": {
+    "/api/overview": {
+      "bytes": 370905,
+      "median_ms": 2.238,
+      "p95_ms": 2.67,
+      "sql_statements": 11,
+      "sqlite_vm_steps": 13031,
+      "python_json_parses": 8
+    },
+    "/api/overview?view=candidates": {
+      "bytes": 358899,
+      "median_ms": 1.973,
+      "p95_ms": 2.307,
+      "sql_statements": 7,
+      "sqlite_vm_steps": 11823,
+      "python_json_parses": 0
+    },
+    "/api/overview?view=orders": {
+      "bytes": 11323,
+      "median_ms": 0.278,
+      "p95_ms": 0.358,
+      "sql_statements": 7,
+      "sqlite_vm_steps": 330,
+      "python_json_parses": 0
+    },
+    "/api/system": {
+      "bytes": 1361,
+      "median_ms": 0.183,
+      "p95_ms": 0.282,
+      "sql_statements": 3,
+      "sqlite_vm_steps": 41,
+      "python_json_parses": 0
+    }
+  },
+  "grown_50500_events": {
+    "/api/overview": {
+      "bytes": 370905,
+      "median_ms": 2.118,
+      "p95_ms": 2.56,
+      "sql_statements": 11,
+      "sqlite_vm_steps": 13031,
+      "python_json_parses": 8
+    },
+    "/api/overview?view=candidates": {
+      "bytes": 358899,
+      "median_ms": 1.917,
+      "p95_ms": 2.331,
+      "sql_statements": 7,
+      "sqlite_vm_steps": 11823,
+      "python_json_parses": 0
+    },
+    "/api/overview?view=orders": {
+      "bytes": 11323,
+      "median_ms": 0.276,
+      "p95_ms": 0.311,
+      "sql_statements": 7,
+      "sqlite_vm_steps": 330,
+      "python_json_parses": 0
+    },
+    "/api/system": {
+      "bytes": 1361,
+      "median_ms": 0.182,
+      "p95_ms": 0.273,
+      "sql_statements": 3,
+      "sqlite_vm_steps": 41,
+      "python_json_parses": 0
+    }
+  }
+}

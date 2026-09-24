@@ -74,7 +74,7 @@ class DashboardSecurity:
                 response = JSONResponse(
                     {"detail": denied[1]},
                     status_code=denied[0],
-                    headers={"WWW-Authenticate": 'Basic realm="Stocker", charset="UTF-8"'}
+                    headers={"WWW-Authenticate": 'Basic realm="SLRNO", charset="UTF-8"'}
                     if denied[0] == 401
                     else {},
                 )

@@ -1,0 +1,70 @@
+{
+  "small_500_events": {
+    "/api/overview": {
+      "bytes": 7983,
+      "median_ms": 0.775,
+      "p95_ms": 1.155,
+      "sql_statements": 8,
+      "sqlite_vm_steps": 9848,
+      "python_json_parses": 4
+    },
+    "/api/opportunities": {
+      "bytes": 13119,
+      "median_ms": 0.745,
+      "p95_ms": 0.841,
+      "sql_statements": 4,
+      "sqlite_vm_steps": 7089,
+      "python_json_parses": 0
+    },
+    "/api/execution": {
+      "bytes": 6433,
+      "median_ms": 0.324,
+      "p95_ms": 0.473,
+      "sql_statements": 7,
+      "sqlite_vm_steps": 1132,
+      "python_json_parses": 4
+    },
+    "/api/system": {
+      "bytes": 1842,
+      "median_ms": 0.201,
+      "p95_ms": 0.275,
+      "sql_statements": 5,
+      "sqlite_vm_steps": 156,
+      "python_json_parses": 0
+    }
+  },
+  "grown_50500_events": {
+    "/api/overview": {
+      "bytes": 7983,
+      "median_ms": 0.758,
+      "p95_ms": 1.12,
+      "sql_statements": 8,
+      "sqlite_vm_steps": 9848,
+      "python_json_parses": 4
+    },
+    "/api/opportunities": {
+      "bytes": 13119,
+      "median_ms": 0.729,
+      "p95_ms": 0.922,
+      "sql_statements": 4,
+      "sqlite_vm_steps": 7089,
+      "python_json_parses": 0
+    },
+    "/api/execution": {
+      "bytes": 6433,
+      "median_ms": 0.335,
+      "p95_ms": 0.492,
+      "sql_statements": 7,
+      "sqlite_vm_steps": 1132,
+      "python_json_parses": 4
+    },
+    "/api/system": {
+      "bytes": 1842,
+      "median_ms": 0.2,
+      "p95_ms": 0.275,
+      "sql_statements": 5,
+      "sqlite_vm_steps": 156,
+      "python_json_parses": 0
+    }
+  }
+}

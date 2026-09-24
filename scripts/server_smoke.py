@@ -30,6 +30,8 @@ def smoke() -> None:
     socket.socket.connect = disconnected
     assert importlib.util.find_spec("pytest") is None
     assert importlib.util.find_spec("jupyterlab") is None
+    assert importlib.util.find_spec("sklearn") is None
+    assert importlib.util.find_spec("joblib") is None
     with tempfile.TemporaryDirectory(prefix="stocker-smoke-state-") as directory:
         root = Path(directory)
         runtime = Runtime(First4Config(), Store(root / "state.sqlite"))

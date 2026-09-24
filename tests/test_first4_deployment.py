@@ -179,17 +179,18 @@ def test_position_write_and_view_queries_remain_bounded(tmp_path):
     runtime = Runtime(b.config, b.store)
     runtime.broker = b
     runtime.session = "2025-07-21"
-    b.store.page = Mock(wraps=b.store.page)
+    b.store.rows = Mock(wraps=b.store.rows)
 
     async def check():
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(create_dashboard_app(runtime)),
             base_url="http://127.0.0.1",
         ) as client:
-            response = await client.get("/api/overview?view=orders")
+            response = await client.get("/api/opportunities")
             assert response.status_code == 200
-            assert response.json()["pnl"] == {}
-            assert [c.args[0] for c in b.store.page.call_args_list] == ["orders"]
+            assert "pnl" not in response.json()
+            assert not b.store.rows.call_args_list
+            assert "payload" not in response.text
 
     asyncio.run(check())
 

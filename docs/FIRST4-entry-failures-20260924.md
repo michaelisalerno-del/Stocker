@@ -1,5 +1,10 @@
 # September 24 entry failure follow-up
 
+Subsequent activation: the tested repair was deployed at 14:59:57 UTC after
+explicit user authorization. See [the current deployment record](CURRENT-DEPLOYMENT.md)
+for restart verification. The investigation below describes the preceding work;
+today's consumed slots and dated opening record were retained without replay.
+
 The deployed release remained `b655d4b` throughout this investigation. The source
 repairs on `fix/first4-trade-timestamps` are not loaded in that process. No service
 restart, manual arming, slot reset, order action or fresh broker-data request was

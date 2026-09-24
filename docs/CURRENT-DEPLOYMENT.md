@@ -1,6 +1,53 @@
 # Current server deployment
 
-Verified on September 24, 2026 at 12:31 UTC.
+Verified on September 24, 2026 at 15:00 UTC (16:00 UK).
+
+The active release is `1fef5daa2c375466e82accaf787353e1b2820b1f`, published to
+GitHub `main` and activated with explicit user authorization at 14:59:57 UTC.
+All 352 tracked release files matched the commit. The locked server-only
+installation installed 60 packages; `scripts/server_smoke.py --installed` passed
+with broker/network connections prohibited by the smoke test. All six
+[CI checks](https://github.com/michaelisalerno-del/Stocker/actions/runs/36015646462)
+passed for this exact commit, including 528 Python tests (five warnings).
+
+The release preserves wire trade timestamps for baseline anchors, reports
+subscription errors without waiting for a generic timeout, and distinguishes
+empty, incompatible and ambiguous option chains with bounded diagnostics.
+See the [entry failure investigation](FIRST4-entry-failures-20260924.md).
+It does not establish the missing broker evidence behind today's four failures.
+
+FIRST4 stopped cleanly and started once, PID 1302657, with zero automatic
+restarts. The authenticated dashboard confirmed worker, manager and web health
+RUNNING, broker connected/reconciled, and zero positions or exit obligations.
+New entries are **unarmed**, with `SESSION_START_OR_SCANNER_HISTORY_MISSED`
+following the mid-session restart. The last recorded scanner observation is
+14:59 UTC. The opening check's persisted ARMED record is historical evidence;
+the new process has no effective dated opening authority and did not replay it.
+Option quote readiness is UNOBSERVED in the restarted process.
+
+Today's four permanent slots remain GCDT, MMTIF, SOS and PMAX, each with
+EXECUTION_FAILED outcome. Before activation the consistent ledger snapshot
+contained zero orders, fills and positions. No slots, blocks, permissions or
+opening-check state were reset. A fifth opportunity cannot replace those slots.
+Another session requires its own explicit dated authorization under the existing
+protocol; this deployment does not grant it.
+
+The root-only consistent backup passed SQLite `quick_check` and is stored at
+`/var/lib/stocker/backups/first4-1fef5daa2c37/first4-before.sqlite3`.
+Do not restore it after subsequent ledger activity without coordinated recovery.
+The execution configuration hash remains
+`e9e5c4200332b4cd22ac808ab2217d75581f154272497f3b4384106053a31c12`.
+Gateway PID 1274679 and independent observer PID 1297975 remained running.
+Observer collector/service/timer hashes were unchanged. No additional diagnostic
+broker client, manual order, configuration change or manual arming was used.
+
+## Previous release and investigation record (superseded)
+
+The following records the earlier release and the investigation before the
+14:59:57 UTC activation above. Statements about a pending patch or premarket
+readiness below describe that earlier state, not the current deployment.
+
+Earlier service verification: September 24, 2026 at 12:31 UTC.
 
 The active release is `b655d4b27cd4b86662f0c25f8111eb0a0b68988c`.
 The subsequent source fix preserving broker trade timestamps and adding

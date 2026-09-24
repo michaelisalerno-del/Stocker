@@ -3,6 +3,22 @@
 Verified on September 24, 2026 at 12:31 UTC.
 
 The active release is `b655d4b27cd4b86662f0c25f8111eb0a0b68988c`.
+The subsequent source fix preserving broker trade timestamps and adding
+stage-specific timeout diagnostics is **not deployed**. The running process has
+no supported code-reload mechanism and was left uninterrupted at the user's
+request. Loading the fix requires a planned restart; restarting during the dated
+session would revoke its in-memory entry authority, without permission to replay
+the opening check or recover missed scanner observations.
+
+Offline validation for that pending patch: eight focused wire-decoder/entry tests
+passed (six regressions failed against the prior implementation); the complete
+Python suite passed 513 tests with five existing warnings. Repository format,
+lint, typing and locked server-only smoke checks passed. The frontend test entry
+point passed using bundled Node directly because local `npm` is unavailable.
+Frozen fixtures, calculation code, execution configuration and lockfiles were
+unchanged. These checks do not establish why MMTIF's live stream supplied no
+anchor, nor do they make the patch active in the running process.
+
 All 349 tracked release files matched the published commit. The six GitHub CI
 checks passed before activation, and the server's locked server-only installation
 and offline smoke passed. FIRST4 was restarted at 12:28:48 UTC after explicit

@@ -10,6 +10,14 @@ Each stock/session's first native scanner appearance is frozen. Decisions for an
 
 For a bar stamped 09:44 (j=14), the completed information time is 09:45; baseline open(j+2) is 09:46. A live Last-trade stream starts before 09:46; its first eligible trade supplies the baseline strike anchor. Listed contract qualification/quote latency is recorded and never disguised as a historical opening fill. There is no deliberate extra minute or three-minute wait. Restart after missed scanner history blocks further admissions for that session; existing slots and exit obligations persist. Missing baseline anchors consume their slot without later retries.
 
+The FIRST4 broker adapter preserves the trade timestamp supplied on the wire;
+the pinned ib_async 2.1 wrapper otherwise substitutes packet receipt time.
+Quote receipt timestamps remain unchanged. A late-arriving trade from before the
+baseline minute cannot supply the anchor. Execution failures record their stage,
+exception, observed tick count and last trade timestamp. A baseline timeout is
+reported as `BASELINE_TRADE_NOT_RECEIVED`; this does not assert whether the market
+had no trade or the feed failed to deliver it. No later-price fallback is used.
+
 Research buys put at .98*S0 and call at 1.02*S0, with expiry=baseline entry+2,880 calendar minutes and scheduled session-close valuation. IV=100%, r=.04, q=0 and 1.05/.95 benchmark marks are absent from broker pricing/P&L.
 
 ## User-specified PAPER execution conventions

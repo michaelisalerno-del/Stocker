@@ -5,10 +5,10 @@ cancels on success. Keep the same wire requests, but always release their state.
 """
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
-from ib_async import IB, ScanDataList, Ticker, util
+from ib_async import IB, ScanDataList, TickAttribLast, Ticker, util
 
 
 class First4IB(IB):
@@ -16,6 +16,35 @@ class First4IB(IB):
     # ib_async's request plumbing is untyped; confine that boundary here.
     client: Any
     wrapper: Any
+
+    def __init__(self) -> None:
+        super().__init__()
+        # The pinned wrapper discards the wire trade timestamp in favour of
+        # packet receipt time. Adapt only this instance, before any connection.
+        self._original_trade_tick = self.wrapper.tickByTickAllLast
+        self.wrapper.tickByTickAllLast = self.trade_tick
+
+    def trade_tick(
+        self,
+        request_id: int,
+        tick_type: int,
+        timestamp: int,
+        price: float,
+        size: float,
+        attributes: TickAttribLast,
+        exchange: str,
+        conditions: str,
+    ) -> None:
+        self._original_trade_tick(
+            request_id, tick_type, timestamp, price, size, attributes, exchange, conditions
+        )
+        ticker = self.wrapper.reqId2Ticker.get(request_id)
+        if ticker is not None:
+            # Decoder dispatch is synchronous; updateEvent is emitted only after
+            # the packet. Keep ticker.time/lastTime as receipt times for quotes.
+            ticker.tickByTicks[-1] = ticker.tickByTicks[-1]._replace(
+                time=datetime.fromtimestamp(timestamp, UTC)
+            )
 
     def finish_request(self, request_id: int) -> None:
         self.wrapper._endReq(request_id)

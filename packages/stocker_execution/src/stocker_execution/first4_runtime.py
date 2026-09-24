@@ -189,6 +189,9 @@ class Runtime:
             return
         ticker = None
         callback = None
+        stage = "ENTRY_GUARD"
+        ticks_received = 0
+        last_trade_at: str | None = None
         try:
             self.broker.guard()
             generation = self.broker.data_generation
@@ -197,10 +200,14 @@ class Runtime:
                 raise ValueError("BASELINE_ANCHOR_MISSED")
             # Subscribe before the boundary. The first eligible trade supplies open(j+2).
             anchor = asyncio.get_running_loop().create_future()
+            stage = "BASELINE_SUBSCRIPTION"
             ticker = self.broker.ib.reqTickByTickData(underlying, "Last", 0, False)
 
             def on_tick(t: Any) -> None:
+                nonlocal ticks_received, last_trade_at
                 for tick in t.tickByTicks:
+                    ticks_received += 1
+                    last_trade_at = tick.time.isoformat()
                     if (
                         generation == self.broker.data_generation
                         and not self.broker.market_data_block
@@ -213,9 +220,11 @@ class Runtime:
             callback = on_tick
             ticker.updateEvent += callback
             deadline = baseline + timedelta(seconds=self.config.number("entry_deadline_seconds"))
+            stage = "OPTION_CHAIN"
             await asyncio.wait_for(
                 self.broker.chain(underlying), max(0, (deadline - now()).total_seconds())
             )
+            stage = "BASELINE_ANCHOR"
             price, stamp = await asyncio.wait_for(
                 anchor,
                 max(0, (min(deadline, baseline + timedelta(minutes=1)) - now()).total_seconds()),
@@ -227,11 +236,29 @@ class Runtime:
                 raise ValueError("ENTRIES_PAUSED")
             if generation != self.broker.data_generation:
                 raise ValueError("BASELINE_DATA_INTERRUPTED")
+            stage = "ENTRY_PREPARATION"
             async with asyncio.timeout(max(0, (deadline - now()).total_seconds())):
                 await self.broker.enter(event, underlying, price)
         except Exception as exc:
-            self.store.outcome(event, "EXECUTION_FAILED", {"error": repr(exc)})
-            log.warning("FIRST4 execution failed %s: %s", event["symbol"], exc)
+            reason = str(exc) or type(exc).__name__
+            if isinstance(exc, TimeoutError):
+                reason = (
+                    "BASELINE_TRADE_NOT_RECEIVED"
+                    if stage == "BASELINE_ANCHOR"
+                    else stage + "_TIMEOUT"
+                )
+            self.store.outcome(
+                event,
+                "EXECUTION_FAILED",
+                {
+                    "error": reason,
+                    "exception": repr(exc),
+                    "stage": stage,
+                    "ticks_received": ticks_received,
+                    "last_trade_at": last_trade_at,
+                },
+            )
+            log.warning("FIRST4 execution failed %s at %s: %s", event["symbol"], stage, reason)
         finally:
             if ticker is not None:
                 ticker.updateEvent -= callback

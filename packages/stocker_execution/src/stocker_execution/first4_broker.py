@@ -79,6 +79,7 @@ class PaperBroker:
         self.connection_generation = 0
         self.upstream_lost = False
         self.active_session: str | None = None
+        self.active_session_open: datetime | None = None
         self.order_observation_generation = 0
         self.ib.disconnectedEvent += self.disconnected
         self.ib.execDetailsEvent += self.fill
@@ -96,14 +97,23 @@ class PaperBroker:
         self.reconciled = False
         self.problem = reason
         self.chains.clear()
+        self.block_scanner_gap()
+
+    def block_scanner_gap(self) -> bool:
+        """A selected premarket date has no scanner coverage to lose yet."""
         day = (
             self.active_session or now().astimezone(ZoneInfo("America/New_York")).date().isoformat()
         )
         state = self.store.db.execute(
             "SELECT last_clock FROM first4_sessions WHERE session=?", (day,)
         ).fetchone()
-        if self.active_session or (state and state["last_clock"]):
+        started = self.active_session and (
+            self.active_session_open is None or now() >= self.active_session_open
+        )
+        if started or (state and state["last_clock"]):
             self.store.block(day, "SCANNER_CONTINUITY_LOST_AFTER_DISCONNECT")
+            return True
+        return False
 
     def entries_armed(self) -> bool:
         day = now().astimezone(ZoneInfo("America/New_York")).date()

@@ -84,7 +84,11 @@ that session's admissions without consuming slots. Local API connectivity is sho
 separately from readiness. Upstream loss revokes reconciliation and dated opening
 authority; restoration reconciles exposure but never erases a scanner gap or re-arms
 the dated opening check. Request-scoped data subscriptions are cancelled and recreated
-when needed; stale callbacks cannot restore readiness.
+when needed; stale callbacks cannot restore readiness. A selected date before its
+exchange open is not active scanner coverage: a premarket disconnect still revokes
+readiness and requires reconciliation, but does not create a coverage gap. An outage
+that persists into the open, or any existing observation/gap, remains fail-closed.
+This distinction neither replays the dated opening check nor clears stored blocks.
 
 Exit statuses distinguish working orders, unresolved acknowledgements, terminal orders
 with residual legs and overdue exposure. `CLOSED` requires terminal orders, attributable

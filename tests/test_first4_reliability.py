@@ -510,3 +510,96 @@ def test_repeated_restoration_with_unresolved_position_is_not_entry_ready(tmp_pa
     asyncio.run(b.reconcile())
     assert b.entry_blocker == "UNOWNED_BROKER_POSITIONS:[999]"
     assert not b.ib.placeOrder.called
+
+
+@pytest.mark.parametrize("minutes,blocked", [(-240, False), (0, True), (1, True)])
+@pytest.mark.parametrize("notification", [1100, 1101, 1102, "socket"])
+def test_selected_session_disconnect_respects_actual_open(
+    tmp_path, monkeypatch, minutes, blocked, notification
+):
+    from test_first4 import opening_runtime
+
+    runtime = opening_runtime(tmp_path, monkeypatch)
+    runtime.session = None
+    clock = OPEN + timedelta(minutes=minutes)
+    monkeypatch.setattr("stocker_execution.first4_runtime.now", lambda: clock)
+    monkeypatch.setattr("stocker_execution.first4_broker.now", lambda: clock)
+    runtime.refresh_calendar = AsyncMock()
+
+    async def interrupt_after_session_selection(delay):
+        runtime.running = False
+        assert runtime.session == "2025-07-21"
+        if notification == "socket":
+            runtime.broker.disconnected()
+        else:
+            runtime.broker.error(-1, notification, "connectivity changed")
+
+    monkeypatch.setattr(
+        "stocker_execution.first4_runtime.asyncio.sleep", interrupt_after_session_selection
+    )
+    asyncio.run(runtime.scan_sessions())
+    states = runtime.store.rows("sessions")
+    assert bool(states and states[0]["blocked"]) is blocked
+    assert not runtime.broker.reconciled
+    assert not runtime.broker.entries_armed()
+    runtime.broker.ib.placeOrder.assert_not_called()
+
+
+@pytest.mark.parametrize("minutes,blocked", [(-240, False), (0, True)])
+def test_manager_socket_reconnect_respects_actual_open(tmp_path, monkeypatch, minutes, blocked):
+    from test_first4 import opening_runtime
+
+    runtime = opening_runtime(tmp_path, monkeypatch)
+    runtime.broker.active_session = runtime.session
+    runtime.broker.active_session_open = OPEN
+    clock = OPEN + timedelta(minutes=minutes)
+    monkeypatch.setattr("stocker_execution.first4_broker.now", lambda: clock)
+    runtime.broker.ib.isConnected.return_value = False
+    runtime.broker.connect = AsyncMock()
+    runtime.broker.cancel_due_entries = AsyncMock()
+    runtime.broker.close_due = AsyncMock()
+
+    async def stop(delay):
+        runtime.running = False
+
+    monkeypatch.setattr("stocker_execution.first4_runtime.asyncio.sleep", stop)
+    asyncio.run(runtime.maintain_broker())
+    states = runtime.store.rows("sessions")
+    assert bool(states and states[0]["blocked"]) is blocked
+    assert bool(runtime.problem) is blocked
+    runtime.broker.close_due.assert_awaited_once()
+
+
+def test_premarket_recovery_never_erases_durable_gap(tmp_path, monkeypatch):
+    b = broker(tmp_path)
+    b.active_session = "2025-07-21"
+    b.active_session_open = OPEN
+    b.store.observe(b.active_session, OPEN, CLOSE, [])
+    monkeypatch.setattr("stocker_execution.first4_broker.now", lambda: OPEN - timedelta(hours=1))
+    b.error(-1, 1100, "lost")
+    b.error(-1, 1102, "restored")
+    assert b.store.rows("sessions")[0]["blocked"]
+    assert not b.reconciled
+
+
+@pytest.mark.parametrize("restored_after_open", [False, True])
+def test_premarket_outage_recovery_across_open(tmp_path, monkeypatch, restored_after_open):
+    from test_first4 import opening_runtime
+
+    runtime = opening_runtime(tmp_path, monkeypatch)
+    b = runtime.broker
+    b.active_session = runtime.session
+    b.active_session_open = OPEN
+    clock = OPEN - timedelta(hours=1)
+    monkeypatch.setattr("stocker_execution.first4_broker.now", lambda: clock)
+    b.error(-1, 1100, "lost")
+    assert not runtime.store.rows("sessions")
+    clock = OPEN + timedelta(seconds=1) if restored_after_open else clock + timedelta(minutes=1)
+    b.error(-1, 1102, "restored")
+    asyncio.run(b.reconcile())
+    assert b.reconciled
+    states = runtime.store.rows("sessions")
+    assert bool(states and states[0]["blocked"]) is restored_after_open
+    assert not b.entries_armed()
+    assert b.opening_verified_session is None
+    b.ib.placeOrder.assert_not_called()

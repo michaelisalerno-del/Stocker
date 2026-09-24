@@ -387,8 +387,7 @@ class Runtime:
                 if not self.broker.ib.isConnected():
                     async with asyncio.timeout(30):
                         await self.broker.connect()
-                    if self.session:
-                        self.store.block(self.session, "SCANNER_CONTINUITY_LOST_AFTER_DISCONNECT")
+                    if self.broker.block_scanner_gap():
                         self.problem = "SCANNER_CONTINUITY_LOST_AFTER_DISCONNECT"
                 elif self.broker.upstream_lost:
                     await asyncio.sleep(0.1)
@@ -450,6 +449,7 @@ class Runtime:
                     if self.session != day:
                         self.session = day
                         self.broker.active_session = day
+                        self.broker.active_session_open = opened
                         self.problem = ""
                         self.broker.chains.clear()
                         if now() >= opened + timedelta(minutes=1):

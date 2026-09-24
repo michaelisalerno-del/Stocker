@@ -4343,15 +4343,36 @@ def first4_run(
         # Security authenticates the actual loopback proxy peer, not X-Forwarded-For.
         server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, proxy_headers=False))
         worker = asyncio.create_task(runtime.run())
-        try:
+
+        async def dashboard() -> None:
+            runtime.web_health = "RUNNING"
             try:
                 await server.serve()
+                if not getattr(server, "started", True):
+                    raise RuntimeError("Dashboard stopped before startup completed")
+                if not getattr(server, "should_exit", True):
+                    raise RuntimeError("Dashboard stopped unexpectedly")
             except (Exception, SystemExit) as exc:
-                console.print(f"Dashboard unavailable; PAPER position management continues: {exc}")
-                await worker
+                runtime.web_health = "FAILED"
+                runtime.report_failure("dashboard", exc)
+                await asyncio.Event().wait()
+
+        web = asyncio.create_task(dashboard())
+        try:
+            done, _ = await asyncio.wait({worker, web}, return_when=asyncio.FIRST_COMPLETED)
+            worker_error = worker.exception() if worker in done and not worker.cancelled() else None
+            if worker in done and (worker_error is not None or web not in done):
+                runtime.worker_health = "FAILED"
+                runtime.broker.management_block = "EXECUTION_WORKER_TERMINATED"
+                error = worker_error or RuntimeError(
+                    "FIRST4 execution worker terminated unexpectedly"
+                )
+                runtime.report_failure("worker", error)
+                server.should_exit = True
+                raise error
+            await web
         finally:
             await runtime.stop()
-            worker.cancel()
-            await asyncio.gather(worker, return_exceptions=True)
+            await runtime.cancel_tasks({worker, web})
 
     asyncio.run(serve())

@@ -34,6 +34,124 @@ class Store:
             con_id INTEGER PRIMARY KEY, quantity REAL, payload TEXT);
         CREATE TABLE IF NOT EXISTS first4_meta (key TEXT PRIMARY KEY, value TEXT);
         """)
+        if "superseded" not in {
+            r["name"] for r in self.db.execute("PRAGMA table_info(first4_fills)")
+        }:
+            with self.db:
+                # Commit the marker and historical correction backfill together;
+                # interruption must not leave a marker that skips the backfill.
+                self.db.execute("BEGIN IMMEDIATE")
+                self.db.execute(
+                    "ALTER TABLE first4_fills ADD COLUMN superseded INTEGER NOT NULL DEFAULT 0"
+                )
+                revisions: dict[str, list[tuple[int, str]]] = {}
+                for row in self.db.execute("SELECT exec_id FROM first4_fills"):
+                    base, separator, suffix = row[0].rpartition(".")
+                    if separator and suffix.isdigit():
+                        revisions.setdefault(base, []).append((int(suffix), row[0]))
+                for group in revisions.values():
+                    latest = max(group)[0]
+                    for revision, exec_id in group:
+                        if revision < latest:
+                            self.db.execute(
+                                "UPDATE first4_fills SET superseded=1 WHERE exec_id=?", (exec_id,)
+                            )
+        # Existing ledgers start conservatively active; reconciliation/management
+        # proves completion. Order status or zero recorded quantity alone cannot.
+        if "obligation_done" not in {
+            r["name"] for r in self.db.execute("PRAGMA table_info(first4_orders)")
+        }:
+            self.db.execute(
+                "ALTER TABLE first4_orders ADD COLUMN obligation_done INTEGER NOT NULL DEFAULT 0"
+            )
+        self.db.executescript("""
+        CREATE VIEW IF NOT EXISTS first4_effective_fills AS
+            SELECT * FROM first4_fills WHERE superseded=0;
+        CREATE INDEX IF NOT EXISTS first4_active_entries
+            ON first4_orders(session,symbol) WHERE role='ENTRY' AND obligation_done=0;
+        CREATE INDEX IF NOT EXISTS first4_order_allocation ON first4_orders(session,symbol,role);
+        CREATE INDEX IF NOT EXISTS first4_fill_reference ON first4_fills(reference,con_id);
+        CREATE INDEX IF NOT EXISTS first4_event_page
+            ON first4_events(session,information_at,rank,symbol);
+        CREATE INDEX IF NOT EXISTS first4_deadlines ON first4_orders(session)
+            WHERE role='ENTRY' AND json_extract(payload,'$.deadline_reconciled') IS NOT 1;
+        CREATE TRIGGER IF NOT EXISTS first4_late_fill AFTER INSERT ON first4_fills BEGIN
+            UPDATE first4_orders SET obligation_done=0
+            WHERE role='ENTRY' AND obligation_done=1 AND (session,symbol) IN
+                (SELECT session,symbol FROM first4_orders WHERE reference=NEW.reference);
+        END;
+        CREATE TRIGGER IF NOT EXISTS first4_changed_fill
+            AFTER UPDATE OF quantity,side,con_id,price,superseded ON first4_fills BEGIN
+            UPDATE first4_orders SET obligation_done=0
+            WHERE role='ENTRY' AND obligation_done=1 AND (session,symbol) IN
+                (SELECT session,symbol FROM first4_orders WHERE reference=NEW.reference);
+        END;
+        CREATE TRIGGER IF NOT EXISTS first4_changed_order AFTER UPDATE OF status ON first4_orders
+            WHEN OLD.status IS NOT NEW.status BEGIN
+            UPDATE first4_orders SET obligation_done=0
+            WHERE role='ENTRY' AND obligation_done=1
+                AND session=NEW.session AND symbol=NEW.symbol;
+        END;
+        """)
+
+    def active_entries(self) -> list[dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT * FROM first4_orders WHERE role='ENTRY' AND obligation_done=0"
+            )
+        ]
+
+    def pending_deadlines(self) -> list[dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT * FROM first4_orders WHERE role='ENTRY' "
+                "AND json_extract(payload,'$.deadline_reconciled') IS NOT 1"
+            )
+        ]
+
+    def allocation_orders(self, session: str, symbol: str) -> list[dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT * FROM first4_orders WHERE session=? AND symbol=?", (session, symbol)
+            )
+        ]
+
+    def order_fills(self, reference: str) -> list[dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT * FROM first4_effective_fills WHERE reference=?", (reference,)
+            )
+        ]
+
+    def event(self, session: str, symbol: str) -> dict[str, Any]:
+        row = self.db.execute(
+            "SELECT * FROM first4_events WHERE session=? AND symbol=?", (session, symbol)
+        ).fetchone()
+        if row is None:
+            raise ValueError("ORDER_WITHOUT_FIRST4_ADMISSION")
+        return dict(row)
+
+    def page(
+        self, table: str, session: str, limit: int = 150, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        limit, offset = min(200, max(1, limit)), max(0, offset)
+        if table == "fills":
+            query = (
+                "SELECT f.* FROM first4_orders o JOIN first4_fills f USING(reference) "
+                "WHERE o.session=? ORDER BY f.time DESC,f.exec_id DESC LIMIT ? OFFSET ?"
+            )
+        elif table in {"events", "orders"}:
+            ordering = "information_at DESC,rank,symbol" if table == "events" else "reference DESC"
+            query = (
+                f"SELECT * FROM first4_{table} WHERE session=? ORDER BY {ordering} LIMIT ? OFFSET ?"
+            )
+        else:
+            raise ValueError("Unknown paged ledger table")
+        return [dict(r) for r in self.db.execute(query, (session, limit, offset))]
 
     def rows(self, table: str) -> list[dict[str, Any]]:
         if table not in {"sessions", "events", "orders", "fills", "positions", "meta"}:
@@ -43,7 +161,9 @@ class Store:
     def set_meta(self, key: str, value: Any) -> None:
         with self.db:
             self.db.execute(
-                "INSERT OR REPLACE INTO first4_meta VALUES (?,?)", (key, json.dumps(value))
+                "INSERT INTO first4_meta VALUES (?,?) ON CONFLICT(key) DO UPDATE "
+                "SET value=excluded.value WHERE value IS NOT excluded.value",
+                (key, json.dumps(value)),
             )
 
     def get_meta(self, key: str, default: Any = None) -> Any:
@@ -135,11 +255,13 @@ class Store:
     def outcome(self, event: dict[str, Any], outcome: str, detail: Any = None) -> None:
         with self.db:
             row = self.db.execute(
-                "SELECT detail FROM first4_events WHERE session=? AND symbol=?",
+                "SELECT detail,outcome FROM first4_events WHERE session=? AND symbol=?",
                 (event["session"], event["symbol"]),
             ).fetchone()
             previous = json.loads(row[0]) if row and row[0] else {}
             detail = {**(previous or {}), **(detail or {})}
+            if row and row["outcome"] == outcome and previous == detail:
+                return
             self.db.execute(
                 "UPDATE first4_events SET outcome=?,detail=? WHERE session=? AND symbol=?",
                 (
@@ -170,7 +292,9 @@ class Store:
                 if (used + 1) * 260 > 1040:
                     raise ValueError("SESSION_ALLOCATION_EXCEEDED")
             self.db.execute(
-                "INSERT INTO first4_orders VALUES (?,?,?,?,?,NULL,'RESERVED',?)",
+                "INSERT INTO first4_orders "
+                "(reference,session,symbol,role,order_id,perm_id,status,payload) "
+                "VALUES (?,?,?,?,?,NULL,'RESERVED',?)",
                 (
                     reference,
                     event["session"],

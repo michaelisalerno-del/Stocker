@@ -34,5 +34,45 @@ const path = require('node:path');
  await page.keyboard.press('Escape');
  assert.equal(await menu.getAttribute('aria-expanded'),'false');
  assert.equal(await menu.evaluate(el=>el===document.activeElement),true);
- await browser.close();console.log('PASS FIRST4 dashboard, mobile menu toggle/navigation/Escape, escaped broker data, removed legacy controls');
+ // Deterministic network faults: no real backend, timers controlled by Playwright.
+ await page.clock.install();
+ await page.evaluate(() => {
+  window.overviewCalls = 0;
+  window.controlFails = false;
+  window.fakeOverview = {system:{account:'DUP655399',connected:true,reconciled:true,
+   armed:false,ledger_available:true,missing_settings:[],settings:{},problem:'',
+   worker_health:'RUNNING',manager_health:'RUNNING',session:'2025-07-21'},
+   session:'2025-07-21',limit:150,offset:0,candidates:[],orders:[],positions:[],fills:[],errors:[],pnl:{}};
+  window.fetch = (url, options) => {
+   if (url === '/api/system') return Promise.resolve(new Response(JSON.stringify(fakeOverview.system)));
+   if (url === '/api/first4/pause') return Promise.resolve(new Response(
+    JSON.stringify(fakeOverview.system), {status:controlFails ? 503 : 200}));
+   overviewCalls++;
+   return new Promise((resolve,reject) => {
+    window.releaseOverview = () => resolve(new Response(JSON.stringify(fakeOverview)));
+    options.signal.addEventListener('abort', () => reject(new DOMException('Timed out','AbortError')));
+   });
+  };
+  void refresh();void refresh();void refresh();
+ });
+ assert.equal(await page.evaluate(()=>overviewCalls),1,'one refresh in flight');
+ await page.evaluate(()=>releaseOverview());
+ await page.waitForFunction(()=>!refreshing);
+ await page.evaluate(()=>{void refresh();});
+ await page.evaluate(()=>{controlFails=true;return pauseEntries();});
+ assert.match(await page.locator('#system-status').textContent(),/PAUSE FAILED: HTTP 503/);
+ await page.evaluate(()=>releaseOverview());
+ await page.waitForFunction(()=>!refreshing);
+ assert.match(await page.locator('#system-status').textContent(),/PAUSE FAILED/,'older refresh cannot overwrite control');
+ await page.evaluate(()=>{controlFails=false;return pauseEntries();});
+ assert.equal(await page.locator('#system-status').textContent(),'PAUSED');
+ await page.evaluate(()=>{void refresh();});
+ await page.clock.fastForward(8001);
+ await page.waitForFunction(()=>!refreshing);
+ assert.match(await page.locator('#last-refresh').textContent(),/STALE/);
+ await page.evaluate(()=>{void refresh();});
+ await page.evaluate(()=>releaseOverview());
+ await page.waitForFunction(()=>!refreshing);
+ assert.equal(await page.locator('#system-status').textContent(),'UNARMED');
+ await browser.close();console.log('PASS FIRST4 dashboard: security escaping, mobile menu, bounded refresh, stale response, timeout recovery and failed/successful pause');
 })().catch(error=>{console.error(error);process.exit(1);});

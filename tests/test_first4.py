@@ -253,6 +253,7 @@ def opening_runtime(tmp_path, monkeypatch):
     runtime.broker.reconciled = True
     runtime.broker.entry_blocker = ""
     runtime.session, runtime.problem = "2025-07-21", ""
+    runtime.worker_health = runtime.manager_health = "RUNNING"
     runtime.schedule = [(runtime.session, OPEN, CLOSE)]
     monkeypatch.setattr("stocker_execution.first4_runtime.now", lambda: OPEN)
     monkeypatch.setattr("stocker_execution.first4_broker.now", lambda: OPEN)
@@ -761,7 +762,11 @@ def test_old_unfilled_allocation_cannot_close_newer_position(tmp_path, monkeypat
         CLOSE - timedelta(days=3),
         [candidate("A", 1)],
     )[0]
-    old_payload = {**payload, "exit_at": (CLOSE - timedelta(days=3)).isoformat()}
+    old_payload = {
+        **payload,
+        "exit_at": (CLOSE - timedelta(days=3)).isoformat(),
+        "deadline_reconciled": True,
+    }
     ref = b.store.reserve_order(old_event, "ENTRY", 3, old_payload)
     with b.store.db:
         b.store.db.execute("UPDATE first4_orders SET status='Cancelled' WHERE reference=?", (ref,))

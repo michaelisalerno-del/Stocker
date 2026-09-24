@@ -7,7 +7,7 @@ The server runs release `0080a786d78660e04d9a17d310b8322c4eecb3c8`.
 See [current deployment and effective configuration](docs/CURRENT-DEPLOYMENT.md).
 Older cutover reports describe their recorded deployment, not current settings.
 
-Run `uv sync --locked --group server`, then:
+Run `uv sync --locked --no-default-groups --group server`, then:
 
 ```sh
 stocker first4-run --config configs/first4.example.yaml --database .stocker/first4.sqlite3

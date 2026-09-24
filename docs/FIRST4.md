@@ -82,4 +82,30 @@ Historical runtime databases/configuration are backed up before cutover and kept
 
 ## Verification
 
+The source repairs described in [FIRST4 repair verification](FIRST4-repair-verification.md)
+add supervised worker/manager health, conservative reconnect handling, bounded
+ledger/dashboard reads and cancellation cleanup. They are **not deployment
+evidence**. `/api/health` retains the dashboard's existing authentication and
+returns 503 when execution tasks or persistence are unhealthy; `/api/system`
+can still report in-memory failure state when normal ledger views fail.
+Task liveness is independent of exchange opening hours. Effective arming means
+permission to prepare an entry; every submission still requires its own fresh
+quotes, account/ownership checks and frozen execution window.
+
+Dashboard results default to the runtime session (or the latest recorded
+session before startup). A session date selector and `session`, `limit` (at most
+200), and `offset` query parameters retrieve historical pages. Outstanding
+obligations remain visible across sessions. Completed allocations with known
+fees contribute realised results even when another allocation remains open;
+completed gross results, partial-close gross results, pending fees and cash
+flow are separate fields.
+
+The same ledger receives additive indexes and completion/correction markers.
+Completion requires reconciled entry deadlines, terminal orders, complete
+reported leg executions where required, and matching zero owned/broker
+quantities. Late executions/corrections reactivate management; late fees update
+accounting without creating another exit. Rejected or ambiguously acknowledged
+exits remain operator exceptions under the existing exit policy. No new retry
+policy or overnight strategy is introduced.
+
 Run `pytest tests/test_first4.py tests/test_dashboard_security.py`, the remaining shared/research suite, type checks, `npm test`, and `python scripts/server_smoke.py`. Broker-boundary tests use test doubles only; they are not presented as broker trading. A real unarmed connection/reconciliation check is separately required at deployment. No arbitrary test order is permitted.

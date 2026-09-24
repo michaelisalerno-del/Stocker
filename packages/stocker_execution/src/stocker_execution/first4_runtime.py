@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Any
+import sqlite3
+from collections.abc import Awaitable, Callable
+from datetime import date, datetime, timedelta
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from ib_async import ScannerSubscription, TagValue
@@ -16,6 +18,7 @@ from stocker_execution.first4_readiness import option_access
 from stocker_execution.first4_store import Store
 
 log = logging.getLogger(__name__)
+Health = Literal["STARTING", "RUNNING", "DEGRADED", "FAILED", "STOPPED"]
 
 
 class Runtime:
@@ -29,8 +32,46 @@ class Runtime:
         self.tasks: set[asyncio.Task[None]] = set()
         self.pause = bool(store.get_meta("paused", False))
         self.problem = "STARTING"
+        self.worker_health: Health = "STARTING"
+        self.manager_health: Health = "STARTING"
+        self.web_health: Health = "STARTING"
+        self.calendar_date: date | None = None
+        self.next_clock: datetime | None = None
+        self.last_observation: str | None = None
+        self.scan_metrics: dict[str, Any] = {}
+        self.critical_tasks: set[asyncio.Task[None]] = set()
+        self.stopping = False
 
     def status(self) -> dict[str, Any]:
+        available = True
+        opening: dict[str, Any] = {}
+        last_clock = self.last_observation
+        obligations = None
+        try:
+            opening = self.store.get_meta(
+                "opening_check:" + str(self.config.arm_after_quote_check_on), {}
+            )
+            reason = self.broker.entry_reason(self.session)
+            state = self.store.db.execute(
+                "SELECT last_clock FROM first4_sessions WHERE session=?", (self.session,)
+            ).fetchone()
+            if state:
+                last_clock = state[0]
+            obligations = self.store.db.execute(
+                "SELECT count(*) FROM first4_orders WHERE role='ENTRY' AND obligation_done=0"
+            ).fetchone()[0]
+        except sqlite3.Error as exc:
+            available = False
+            reason = "LEDGER_UNAVAILABLE: " + str(exc)
+            self.broker.fatal_error = reason
+            self.broker.persistence_failed = True
+        reason = (
+            self.broker.fatal_error
+            or self.broker.management_block
+            or self.problem
+            or ("ENTRIES_PAUSED" if self.pause else "")
+            or reason
+        )
         return {
             "method": METHOD,
             "market": "US",
@@ -38,40 +79,63 @@ class Runtime:
             "account": self.config.expected_account,
             "connected": self.broker.ib.isConnected(),
             "reconciled": self.broker.reconciled,
-            "armed": self.broker.entries_armed()
-            and not self.pause
+            "armed": not reason
             and not self.config.missing()
-            and self.broker.reconciled
-            and not self.problem
-            and not self.broker.entry_blocker,
+            and self.worker_health == "RUNNING"
+            and self.manager_health == "RUNNING",
             "configured_armed": self.config.armed,
-            "opening_check": self.store.get_meta(
-                "opening_check:" + str(self.config.arm_after_quote_check_on), {}
+            "opening_check": opening,
+            "worker_health": self.worker_health,
+            "manager_health": self.manager_health,
+            "web_health": self.web_health,
+            "ledger_available": available and not self.broker.persistence_failed,
+            "upstream_available": self.broker.upstream_available,
+            "upstream_status": self.broker.upstream_status,
+            "last_option_quote_check": (
+                self.broker.last_quote_at.isoformat() if self.broker.last_quote_at else None
             ),
+            "option_quote_state": (
+                "UNOBSERVED"
+                if self.broker.last_quote_at is None
+                else "FRESH"
+                if 0 <= (now() - self.broker.last_quote_at).total_seconds() <= 5
+                else "STALE"
+            ),
+            "data_problem": self.broker.data_problem,
+            "last_scanner_observation": last_clock,
+            "entry_block_reason": reason,
+            "outstanding_obligations": obligations,
+            "operator_exceptions": self.broker.operator_exceptions,
+            "scan_metrics": self.scan_metrics,
             "missing_settings": self.config.missing(),
-            "problem": self.problem or self.broker.problem or self.broker.entry_blocker,
+            "problem": reason or self.broker.problem,
             "session": self.session,
             "live_enabled": False,
             "settings": self.config.model_dump(mode="json"),
         }
 
     async def history(self, contract: Any, end: datetime, duration: str) -> list[Any]:
+        queued = asyncio.get_running_loop().time()
         async with self.history_limit:
-            result = await self.broker.ib.reqHistoricalDataAsync(
-                contract,
-                endDateTime=end,
-                durationStr=duration,
-                barSizeSetting="1 min",
-                whatToShow="TRADES",
-                useRTH=True,
-                formatDate=2,
-                keepUpToDate=False,
-                timeout=15,
+            started = asyncio.get_running_loop().time()
+            self.scan_metrics["queue_seconds"] = max(
+                self.scan_metrics.get("queue_seconds", 0), started - queued
             )
-            return list(result)
+            try:
+                return list(await self.broker.ib.history(contract, end, duration))
+            finally:
+                self.scan_metrics["request_seconds"] = max(
+                    self.scan_metrics.get("request_seconds", 0),
+                    asyncio.get_running_loop().time() - started,
+                )
 
     async def candidate(
-        self, row: Any, opened: datetime, clock: datetime, previous_close: datetime
+        self,
+        row: Any,
+        opened: datetime,
+        clock: datetime,
+        previous_close: datetime,
+        deadline: float | None = None,
     ) -> dict[str, Any]:
         contract = row.contractDetails.contract
         result = {
@@ -83,10 +147,13 @@ class Runtime:
             "prior15": None,
         }
         try:
-            bars, previous = await asyncio.gather(
-                self.history(contract, clock, "960 S"),
-                self.history(contract, previous_close, "60 S"),
-            )
+            # The two end/duration identities differ; neither is redundant.
+            # TaskGroup drains the sibling request if either one fails.
+            async with asyncio.timeout_at(deadline):
+                async with asyncio.TaskGroup() as group:
+                    recent_task = group.create_task(self.history(contract, clock, "960 S"))
+                    prior_task = group.create_task(self.history(contract, previous_close, "60 S"))
+                bars, previous = recent_task.result(), prior_task.result()
             values = [
                 Bar(b.date, b.open, b.high, b.low, b.close)
                 for b in bars
@@ -106,7 +173,10 @@ class Runtime:
                 "previous_close_at": previous_close.isoformat(),
             }
         except Exception as exc:
-            result["detail"] = {"error": str(exc)}
+            result["detail"] = {
+                "error": repr(exc),
+                "request_status": "FAILED_OR_TIMED_OUT",
+            }
         return result
 
     async def execute(self, event: dict[str, Any], underlying: Any) -> None:
@@ -117,6 +187,7 @@ class Runtime:
         callback = None
         try:
             self.broker.guard()
+            generation = self.broker.data_generation
             baseline = datetime.fromisoformat(event["entry_at"])
             if now() >= baseline:
                 raise ValueError("BASELINE_ANCHOR_MISSED")
@@ -148,10 +219,12 @@ class Runtime:
             )
             if self.pause:
                 raise ValueError("ENTRIES_PAUSED")
+            if generation != self.broker.data_generation:
+                raise ValueError("BASELINE_DATA_INTERRUPTED")
             async with asyncio.timeout(max(0, (deadline - now()).total_seconds())):
                 await self.broker.enter(event, underlying, price)
         except Exception as exc:
-            self.store.outcome(event, "EXECUTION_FAILED", {"error": str(exc) or type(exc).__name__})
+            self.store.outcome(event, "EXECUTION_FAILED", {"error": repr(exc)})
             log.warning("FIRST4 execution failed %s: %s", event["symbol"], exc)
         finally:
             if ticker is not None:
@@ -169,9 +242,14 @@ class Runtime:
         sub = ScannerSubscription(
             instrument="STK", locationCode="STK.US", scanCode="MOST_ACTIVE", numberOfRows=25
         )
-        rows = await self.broker.ib.reqScannerDataAsync(
-            sub, [], [TagValue("changePercAbove", "5.5"), TagValue("priceBelow", "20")]
+        started = asyncio.get_running_loop().time()
+        self.scan_metrics = {}
+        generation = self.broker.data_generation
+        rows = await self.broker.ib.scanner(
+            sub, [TagValue("changePercAbove", "5.5"), TagValue("priceBelow", "20")]
         )
+        if generation != self.broker.data_generation:
+            raise ValueError("SCANNER_DATA_INTERRUPTED")
         if len(rows) > 25:
             raise ValueError("SCANNER_ROW_LIMIT_VIOLATION")
         seen = {
@@ -182,25 +260,96 @@ class Runtime:
         }
         fresh = [r for r in rows if r.contractDetails.contract.symbol not in seen]
         candidates = await asyncio.gather(
-            *(self.candidate(r, opened, clock, previous_close) for r in fresh)
+            *(self.candidate(r, opened, clock, previous_close, started + 43) for r in fresh)
         )
+        # The native observation above is already known. A later history failure
+        # rejects that frozen appearance with its actual request error; it does
+        # not erase other successfully observed candidates or permit readmission.
         # Inputs complete as one batch; asynchronous response order cannot allocate slots.
         selected = self.store.observe(session, clock, closed, candidates)
+        self.last_observation = clock.isoformat()
+        self.scan_metrics.update(
+            batch_seconds=asyncio.get_running_loop().time() - started,
+            candidates=len(fresh),
+            requests=2 * len(fresh),
+        )
         contracts = {r.contractDetails.contract.conId: r.contractDetails.contract for r in fresh}
         for event in selected:
             task = asyncio.create_task(self.execute(event, contracts[event["con_id"]]))
             self.tasks.add(task)
-            task.add_done_callback(self.tasks.discard)
+            task.add_done_callback(self.execution_done)
+
+    def execution_done(self, task: asyncio.Task[None]) -> None:
+        self.tasks.discard(task)
+        if not task.cancelled() and (error := task.exception()) is not None:
+            self.broker.fatal_error = "EXECUTION_TASK_FAILED: " + str(error)
+            self.report_failure("execution_task", error)
+
+    def report_failure(self, name: str, error: BaseException) -> None:
+        self.broker.report_error(
+            name, {"time": now().isoformat(), "error": str(error) or type(error).__name__}
+        )
+
+    async def cancel_tasks(self, tasks: set[asyncio.Task[None]]) -> None:
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=5)
+            for task in done:
+                if not task.cancelled():
+                    task.exception()
+            if pending:
+                self.broker.fatal_error = "SHUTDOWN_TASK_TIMEOUT"
+                log.critical("FIRST4 cleanup exceeded five seconds: %s", pending)
+                for task in pending:
+                    task.add_done_callback(self.execution_done)
+
+    async def critical(self, name: str, work: Callable[[], Awaitable[None]]) -> None:
+        try:
+            await work()
+            if name != "opening" and not self.stopping:
+                raise RuntimeError(name + " terminated unexpectedly")
+        except BaseException as exc:
+            if isinstance(exc, asyncio.CancelledError) and self.stopping:
+                raise
+            if name == "manager":
+                self.manager_health = "FAILED"
+            else:
+                self.worker_health = "FAILED"
+            # Inhibit entries in the failing task before another ready coroutine
+            # can resume preparation or reach the submission boundary.
+            self.broker.management_block = "CRITICAL_TASK_FAILED: " + name
+            self.broker.fatal_error = self.broker.management_block
+            self.report_failure(name, exc)
+            if isinstance(exc, asyncio.CancelledError):
+                raise RuntimeError(name + " was cancelled unexpectedly") from exc
+            raise
 
     async def run(self) -> None:
-        manager = asyncio.create_task(self.maintain_broker())
-        opening = asyncio.create_task(self.arm_at_open())
+        self.stopping = False
+        self.worker_health = self.manager_health = "RUNNING"
+        manager = asyncio.create_task(self.critical("manager", self.maintain_broker))
+        opening = asyncio.create_task(self.critical("opening", self.arm_at_open))
+        scanner = asyncio.create_task(self.critical("worker", self.scan_sessions))
+        self.critical_tasks = {manager, opening, scanner}
         try:
-            await self.scan_sessions()
+            watched = set(self.critical_tasks)
+            while watched:
+                done, _ = await asyncio.wait(watched, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    watched.remove(task)
+                    task.result()  # A normal dated-check completion is expected.
         finally:
-            manager.cancel()
-            opening.cancel()
-            await asyncio.gather(manager, opening, return_exceptions=True)
+            self.stopping = True
+            self.broker.management_block = self.broker.management_block or "WORKER_STOPPED"
+            await self.cancel_tasks(self.critical_tasks | self.tasks)
+            self.mark_stopped()
+
+    def mark_stopped(self) -> None:
+        if self.worker_health != "FAILED":
+            self.worker_health = "STOPPED"
+        if self.manager_health != "FAILED":
+            self.manager_health = "STOPPED"
 
     async def arm_at_open(self) -> None:
         target = self.config.arm_after_quote_check_on
@@ -254,6 +403,7 @@ class Runtime:
         }
         self.store.set_meta(key, report)
         try:
+            generation = self.broker.data_generation
             self.opening_guard(day, opened)
             async with asyncio.timeout(15):
                 await self.broker.reconcile(require_flat=True)
@@ -261,6 +411,8 @@ class Runtime:
             deadline = opened + timedelta(minutes=14)
             async with asyncio.timeout(max(0, (deadline - now()).total_seconds())):
                 report.update(await option_access(self.broker, deadline))
+            if generation != self.broker.data_generation:
+                raise ValueError("OPENING_CHECK_INTERRUPTED")
             self.opening_guard(day, opened)
             if report.get("blockers") or not all(
                 report.get("checks", {}).get(name) is True
@@ -279,24 +431,23 @@ class Runtime:
         except asyncio.CancelledError:
             self.broker.opening_verified_session = None
             report.update(status="FAILED", error="OPENING_CHECK_INTERRUPTED")
-            self.store.set_meta(key, report)
+            self.broker.report_error(key, report)
             raise
         except Exception as exc:
             self.broker.opening_verified_session = None
             report.update(status="FAILED", error=str(exc) or type(exc).__name__)
-            self.store.set_meta(key, report)
+            self.broker.report_error(key, report)
             log.warning("FIRST4 opening verification failed: %s", report["error"])
 
     async def maintain_broker(self) -> None:
         """Exit obligations never wait for scanner history or option qualification."""
         while self.running:
             try:
+                if self.broker.fatal_error:
+                    raise sqlite3.OperationalError(self.broker.fatal_error)
                 if not self.broker.ib.isConnected():
                     async with asyncio.timeout(30):
                         await self.broker.connect()
-                    if self.session:
-                        self.store.block(self.session, "SCANNER_CONTINUITY_LOST_AFTER_DISCONNECT")
-                        self.problem = "SCANNER_CONTINUITY_LOST_AFTER_DISCONNECT"
                 elif not self.broker.reconciled and not self.broker.reconciliation_lock.locked():
                     async with asyncio.timeout(15):
                         await self.broker.reconcile()
@@ -305,17 +456,25 @@ class Runtime:
                         await self.broker.cancel_due_entries()
                 except Exception as exc:
                     self.broker.problem = str(exc) or type(exc).__name__
-                    self.store.set_meta(
+                    self.broker.report_error(
                         "entry_cancellation_error",
                         {"time": now().isoformat(), "error": self.broker.problem},
                     )
                 await self.broker.close_due()
+                if self.broker.fatal_error:
+                    raise sqlite3.OperationalError(self.broker.fatal_error)
+                self.manager_health = "RUNNING"
+                self.broker.management_block = ""
                 await asyncio.sleep(0.1)
             except asyncio.CancelledError:
                 raise
+            except sqlite3.Error:
+                raise
             except Exception as exc:
+                self.manager_health = "DEGRADED"
+                self.broker.management_block = "BROKER_MANAGER_UNAVAILABLE"
                 self.broker.problem = str(exc) or type(exc).__name__
-                self.store.set_meta(
+                self.broker.report_error(
                     "broker_manager_error",
                     {
                         "time": now().isoformat(),
@@ -324,65 +483,81 @@ class Runtime:
                 )
                 await asyncio.sleep(5)
 
+    async def scan_step(self, calendar: Any) -> None:
+        current_time = now()
+        today = current_time.astimezone(ZoneInfo("America/New_York")).date()
+        if self.calendar_date != today:
+            frame = await asyncio.to_thread(
+                calendar.schedule,
+                start_date=today - timedelta(days=10),
+                end_date=today + timedelta(days=1),
+            )
+            self.schedule = [
+                (str(d.date()), r.market_open.to_pydatetime(), r.market_close.to_pydatetime())
+                for d, r in frame.iterrows()
+            ]
+            self.calendar_date = today
+        current = next((r for r in self.schedule if r[0] == today.isoformat()), None)
+        if self.broker.opening_verified_session != today.isoformat():
+            self.broker.opening_verified_session = None
+        if not current:
+            self.problem = "EXCHANGE_CLOSED"
+            return
+        day, opened, closed = current
+        if self.session != day:
+            self.session = day
+            self.broker.chains.clear()
+            state = self.store.db.execute(
+                "SELECT * FROM first4_sessions WHERE session=?", (day,)
+            ).fetchone()
+            self.problem = state["blocked"] if state and state["blocked"] else ""
+            self.next_clock = opened + timedelta(minutes=1)
+            if current_time >= self.next_clock and not self.problem:
+                self.problem = "SESSION_START_OR_SCANNER_HISTORY_MISSED"
+                self.store.block(day, self.problem)
+        if self.problem or self.next_clock is None:
+            return
+        # Advance only after Store.observe commits the required minute. A
+        # reconnect before any due observation is not a scanner-history gap.
+        if self.next_clock < closed and current_time >= self.next_clock + timedelta(seconds=2):
+            self.problem = "SCANNER_MINUTE_MISSED"
+            self.store.block(day, self.problem)
+            return
+        if not opened < current_time < closed or current_time < self.next_clock:
+            return
+        if (
+            not self.broker.ib.isConnected()
+            or not self.broker.reconciled
+            or not self.broker.upstream_available
+        ):
+            return
+        prior_close = [r[2] for r in self.schedule if r[0] < day][-1]
+        async with asyncio.timeout(45):
+            await self.scan(day, opened, closed, prior_close, self.next_clock)
+        self.next_clock += timedelta(minutes=1)
+
     async def scan_sessions(self) -> None:
         calendar = get_market_calendar("NYSE")
-        next_clock: datetime = now()
         while self.running:
             try:
-                if not self.broker.reconciled:
-                    await asyncio.sleep(0.1)
-                    continue
-                today = now().astimezone(ZoneInfo("America/New_York")).date()
-                if not self.schedule or self.schedule[-1][0] < today.isoformat():
-                    # Calendar construction is off the broker event loop, once per day.
-                    frame = await asyncio.to_thread(
-                        calendar.schedule,
-                        start_date=today - timedelta(days=10),
-                        end_date=today + timedelta(days=1),
-                    )
-                    self.schedule = [
-                        (
-                            str(d.date()),
-                            r.market_open.to_pydatetime(),
-                            r.market_close.to_pydatetime(),
-                        )
-                        for d, r in frame.iterrows()
-                    ]
-                current = next((r for r in self.schedule if r[0] == today.isoformat()), None)
-                if current:
-                    day, opened, closed = current
-                    if self.session != day:
-                        self.session = day
-                        self.problem = ""
-                        self.broker.chains.clear()
-                        if now() >= opened + timedelta(minutes=1):
-                            self.store.block(day, "SESSION_START_OR_SCANNER_HISTORY_MISSED")
-                            self.problem = "SESSION_START_OR_SCANNER_HISTORY_MISSED"
-                        next_clock = opened + timedelta(minutes=1)
-                    if opened < now() < closed and not self.problem and now() >= next_clock:
-                        if now() >= next_clock + timedelta(seconds=2):
-                            raise ValueError("SCANNER_MINUTE_MISSED")
-                        prior_close = [r[2] for r in self.schedule if r[0] < day][-1]
-                        async with asyncio.timeout(45):
-                            await self.scan(day, opened, closed, prior_close, next_clock)
-                        next_clock += timedelta(minutes=1)
+                await self.scan_step(calendar)
                 await asyncio.sleep(0.1)
             except asyncio.CancelledError:
                 raise
+            except sqlite3.Error:
+                raise
             except Exception as exc:
                 self.problem = str(exc) or type(exc).__name__
-                self.store.set_meta(
-                    "runtime_error", {"time": now().isoformat(), "error": self.problem}
-                )
+                self.report_failure("runtime_error", exc)
                 if self.session:
                     self.store.block(self.session, self.problem)
                 log.exception("FIRST4 runtime blocked; exit obligations retained")
                 await asyncio.sleep(5)
 
     async def stop(self) -> None:
+        self.stopping = True
         self.running = False
         self.pause = True
-        for task in self.tasks:
-            task.cancel()
-        await asyncio.gather(*self.tasks, return_exceptions=True)
+        self.broker.management_block = "STOPPING"
+        await self.cancel_tasks(set(self.tasks))
         self.broker.ib.disconnect()

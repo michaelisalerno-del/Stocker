@@ -102,6 +102,7 @@ class Runtime:
                 else "STALE"
             ),
             "data_problem": self.broker.data_problem,
+            "market_data_block": self.broker.market_data_block,
             "last_scanner_observation": last_clock,
             "entry_block_reason": reason,
             "outstanding_obligations": obligations,
@@ -198,7 +199,9 @@ class Runtime:
             def on_tick(t: Any) -> None:
                 for tick in t.tickByTicks:
                     if (
-                        baseline <= tick.time < baseline + timedelta(minutes=1)
+                        generation == self.broker.data_generation
+                        and not self.broker.market_data_block
+                        and baseline <= tick.time < baseline + timedelta(minutes=1)
                         and tick.price > 0
                         and not anchor.done()
                     ):
@@ -529,6 +532,7 @@ class Runtime:
             not self.broker.ib.isConnected()
             or not self.broker.reconciled
             or not self.broker.upstream_available
+            or self.broker.market_data_block
         ):
             return
         prior_close = [r[2] for r in self.schedule if r[0] < day][-1]

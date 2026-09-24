@@ -394,6 +394,9 @@ def test_scanner_burst_rank_partial_failure_and_cancellation(tmp_path, monkeypat
 
 
 def report_fill(b, reference, leg, exec_id, side="BOT", quantity=1, price=1):
+    order = b.store.db.execute(
+        "SELECT order_id,perm_id FROM first4_orders WHERE reference=?", (reference,)
+    ).fetchone()
     b.fill(
         None,
         NS(
@@ -402,6 +405,9 @@ def report_fill(b, reference, leg, exec_id, side="BOT", quantity=1, price=1):
                 acctNumber=b.config.expected_account,
                 orderRef=reference,
                 execId=exec_id,
+                clientId=b.config.client_id,
+                orderId=order["order_id"],
+                permId=order["perm_id"] or 11,
                 shares=quantity,
                 price=price,
                 side=side,

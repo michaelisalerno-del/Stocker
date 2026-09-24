@@ -83,3 +83,29 @@ def test_research_harness_exposes_no_order_path() -> None:
     source = Path(run_experiment.__file__).read_text(encoding="utf-8")
     assert "placeOrder" not in source
     assert "submit_order" not in source
+
+
+def test_fetch_is_retired_and_compare_remains_offline(capsys):
+    parser = run_experiment.parser()
+    assert "retired" in parser.format_help()
+    with pytest.raises(SystemExit) as error:
+        parser.parse_args(["fetch"])
+    assert error.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+    args = parser.parse_args(
+        [
+            "compare",
+            "--ibkr-dir",
+            "cached",
+            "--output",
+            "out",
+            "--ledger",
+            "ledger",
+            "--source-root",
+            "source",
+            "--stocker-local",
+            "local",
+        ]
+    )
+    assert args.command == "compare"
+    assert not hasattr(run_experiment, "fetch_ibkr_history")

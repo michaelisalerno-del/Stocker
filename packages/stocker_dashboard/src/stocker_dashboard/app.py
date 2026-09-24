@@ -4,7 +4,7 @@ import json
 import sqlite3
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
@@ -120,17 +120,28 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         session: date | None = None,
         limit: int = Query(150, ge=1, le=200),
         offset: int = Query(0, ge=0),
+        view: Literal[
+            "all", "system", "settings", "candidates", "orders", "positions", "trades"
+        ] = "all",
     ) -> dict[str, Any]:
         day = selected_session(session)
-        orders = runtime.store.page("orders", day, limit, offset)
+        orders = (
+            runtime.store.page("orders", day, limit, offset)
+            if view in {"all", "orders", "trades"}
+            else []
+        )
         return {
             "system": runtime.status(),
             "session": day,
             "limit": limit,
             "offset": offset,
-            "candidates": runtime.store.page("events", day, limit, offset),
+            "candidates": runtime.store.page("events", day, limit, offset)
+            if view in {"all", "candidates"}
+            else [],
             "orders": orders,
-            "fills": runtime.store.page("fills", day, limit, offset),
+            "fills": runtime.store.page("fills", day, limit, offset)
+            if view in {"all", "trades"}
+            else [],
             "positions": await positions(),
             "errors": [
                 dict(r)
@@ -149,7 +160,7 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
                     "WHERE role='ENTRY' AND obligation_done=0 ORDER BY session,reference LIMIT 200"
                 )
             ],
-            "pnl": session_pnl(runtime, day),
+            "pnl": session_pnl(runtime, day) if view in {"all", "system", "settings"} else {},
             "quote_comparisons": [
                 {
                     "reference": o["reference"],

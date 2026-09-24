@@ -413,7 +413,9 @@ def test_shared_option_access_checks_quotes_after_metadata_without_orders(tmp_pa
     monkeypatch.setattr("stocker_execution.first4_readiness.now", lambda: OPEN)
     b.ib.reqMarketDataType = Mock()
     b.ib.qualifyContractsAsync = AsyncMock(return_value=[Contract(conId=42, symbol="F")])
-    b.ib.reqTickersAsync = AsyncMock(return_value=[NS(marketPrice=lambda: 13)])
+    b.ib.reqTickersAsync = AsyncMock(
+        return_value=[NS(marketPrice=lambda: 13, marketDataType=1, time=OPEN)]
+    )
     b.chain = AsyncMock(
         return_value=[
             NS(
@@ -523,13 +525,19 @@ def test_leg_fills_idempotent_and_combo_status_not_fills(tmp_path):
         event, "ENTRY", 1, {"put": {"conId": 100}, "call": {"conId": 101}, "quantity": 1}
     )
     b.order_status(
-        NS(order=NS(orderRef=ref, orderId=1), orderStatus=NS(status="Filled", permId=22))
+        NS(
+            order=Order(orderRef=ref, orderId=1, account=PAPER_ACCOUNT, clientId=81),
+            orderStatus=NS(status="Filled", permId=22),
+        )
     )
     assert b.owned_quantities() == {}
     execution = NS(
         acctNumber=PAPER_ACCOUNT,
         orderRef=ref,
         execId="LEG1",
+        clientId=81,
+        orderId=1,
+        permId=22,
         shares=1,
         price=2,
         side="BOT",
@@ -565,6 +573,10 @@ def test_completed_order_decoder_shape_recovers_by_permanent_identity(tmp_path):
     )
     assert completed.order.clientId == completed.order.orderId == completed.orderStatus.permId == 0
     b.ib.reqCompletedOrdersAsync.return_value = [completed]
+    with pytest.raises(ValueError, match="Completed order identity"):
+        asyncio.run(b.reconcile())
+    b.store.db.execute("UPDATE first4_orders SET perm_id=9001 WHERE reference=?", (ref,))
+    b.store.db.commit()
     asyncio.run(b.reconcile())
     row = b.store.rows("orders")[0]
     assert (row["order_id"], row["perm_id"], row["status"]) == (101, 9001, "Cancelled")
@@ -672,6 +684,9 @@ def prepare_exit(b, quantities=(1, 1)):
                         acctNumber=PAPER_ACCOUNT,
                         orderRef=ref,
                         execId=str(leg.conId),
+                        clientId=81,
+                        orderId=1,
+                        permId=11,
                         shares=quantity,
                         price=1,
                         side="BOT",

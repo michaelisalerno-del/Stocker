@@ -1,11 +1,45 @@
 # Current server deployment
 
-Verified on September 24, 2026 at 15:00 UTC (16:00 UK).
+Verified on September 24, 2026 at 15:32 UTC (16:32 UK).
 
-Pending source change: the user subsequently approved the native
-`averageOptionVolumeAbove=1` scanner restriction. It is not part of the active
-release recorded below. See [the approved universe change](FIRST4.md#approved-scanner-universe-change--september-24-2026).
-Today's recorded slots and dated authorization are not reset by this change.
+The active release is `b5d6962cbd2d13eb39129ed0a116d9f4c87a9cac`, published to
+GitHub `main` and activated at 15:31:51 UTC after explicit user authorization.
+It adds the approved native `averageOptionVolumeAbove=1` scanner restriction.
+All 353 tracked files matched the release manifest. The locked server-only
+installation and offline smoke passed. All six
+[CI checks](https://github.com/michaelisalerno-del/Stocker/actions/runs/36020107705)
+passed before activation; local full Python validation passed 530 tests with five
+existing warnings. See [the approved universe change](FIRST4.md#approved-scanner-universe-change--september-24-2026)
+for the read-only broker filter verification and historical-fixture limitations.
+
+The user subsequently authorized preparing the September 25 PAPER session.
+Only `arm_after_quote_check_on` changed, from `2026-09-24` to `2026-09-25`;
+`armed` remains false and every other parsed configuration value was verified
+unchanged. The new configuration SHA-256 is
+`5dfd04751b08394d8e7f47a0f84442c2b1e5861cfe6e8e1a343d3bbd79a53818`.
+The authenticated dashboard now shows **2026-09-25 — WAITING_FOR_OPEN**.
+The service is prepared to run the existing dated opening checks and may enable
+PAPER entries only after they pass. This is not a recurring authorization or a
+claim that tomorrow's quotes or trading will succeed. LIVE remains disabled.
+
+FIRST4 PID 1305023 is active with zero automatic restarts. Worker, manager and
+web health are RUNNING; the broker is connected and reconciled. Current entries
+are unarmed, and September 24 retains `SESSION_START_OR_SCANNER_HISTORY_MISSED`
+and its last 14:59 UTC scanner observation. All four consumed slots and the
+September 24 opening audit remain intact. Orders, fills, positions and exit
+obligations are zero. No replay, slot reset or further broker probe was performed
+during this activation.
+
+Consistent root-only ledger and prior-configuration backups are in
+`/var/lib/stocker/backups/first4-b5d6962cbd2d/`, as `first4-before.sqlite3` and
+`first4-before.yaml`. The ledger snapshot passed SQLite `quick_check`.
+Gateway PID 1274679 and observer PID 1297975 remained running; observer
+collector/service/timer hashes were unchanged.
+
+## Previous 15:00 UTC deployment record (superseded)
+
+The following describes the prior release and September 24 permission, before
+the explicitly authorized deployment and September 25 date change above.
 
 The active release is `1fef5daa2c375466e82accaf787353e1b2820b1f`, published to
 GitHub `main` and activated with explicit user authorization at 14:59:57 UTC.

@@ -310,7 +310,11 @@ class Runtime:
         clock: datetime,
     ) -> None:
         sub = ScannerSubscription(
-            instrument="STK", locationCode="STK.US", scanCode="MOST_ACTIVE", numberOfRows=25
+            instrument="STK",
+            locationCode="STK.US",
+            scanCode="MOST_ACTIVE",
+            numberOfRows=25,
+            averageOptionVolumeAbove=1,
         )
         started = asyncio.get_running_loop().time()
         self.scan_metrics = {}

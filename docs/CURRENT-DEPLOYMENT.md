@@ -2,6 +2,11 @@
 
 Verified on September 24, 2026 at 15:00 UTC (16:00 UK).
 
+Pending source change: the user subsequently approved the native
+`averageOptionVolumeAbove=1` scanner restriction. It is not part of the active
+release recorded below. See [the approved universe change](FIRST4.md#approved-scanner-universe-change--september-24-2026).
+Today's recorded slots and dated authorization are not reset by this change.
+
 The active release is `1fef5daa2c375466e82accaf787353e1b2820b1f`, published to
 GitHub `main` and activated with explicit user authorization at 14:59:57 UTC.
 All 352 tracked release files matched the commit. The locked server-only

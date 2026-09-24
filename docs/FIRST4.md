@@ -1,8 +1,45 @@
-# Frozen FIRST4 PAPER replacement
+# FIRST4 PAPER execution
 
 Source: the local 2026-09-23-fast-four-trade-chronological-selection-test workspace, not GitHub main. Authoritative `run_test.py`, `protocol.json`, `verification.json`, and the `execution_delay_v0` frozen input, protocol, verification, manifest and delay ledger were inspected. Fixtures preserve 1,293 TOP25 first appearances and the original source functions; all 80 FIRST4 allocations over 20 sessions are compared without running the research experiment. SHA-256 provenance is in `tests/fixtures/first4/source_manifest.json` and the original copied manifests.
 
-The upstream source is `2026-09-23-fast-broad-universe-scanner-depth-test/expanded.py` and `options_replay.py`, using `scanner_filter_v0/historical.py:excursion` for PRIOR15. Native scanner: STK, STK.US, MOST_ACTIVE, changePercAbove=5.5, priceBelow=20, 25 rows. Historical eligibility is change >=5.5 and price strictly <20; broker scanner ranks are retained, never reconstructed from asynchronous replies. The historical volume-rank approximation's stable alphabetical tie order is already encoded in the saved ranks. Production accepts the native rank as requested, rather than promising that a native scanner reproduces a historical approximation of its universe.
+The upstream source is `2026-09-23-fast-broad-universe-scanner-depth-test/expanded.py` and `options_replay.py`, using `scanner_filter_v0/historical.py:excursion` for PRIOR15. Original native scanner: STK, STK.US, MOST_ACTIVE, changePercAbove=5.5, priceBelow=20, 25 rows. Historical eligibility is change >=5.5 and price strictly <20; broker scanner ranks are retained, never reconstructed from asynchronous replies. The historical volume-rank approximation's stable alphabetical tie order is already encoded in the saved ranks. Production accepts the native rank as requested, rather than promising that a native scanner reproduces a historical approximation of its universe.
+
+## Approved scanner universe change — September 24, 2026
+
+The user approved adding IBKR's native `averageOptionVolumeAbove=1` field to the
+existing scanner request. This is a minimum **average option volume** filter,
+not a boolean guarantee of option availability. It is a `ScannerSubscription`
+field in the pinned ib_async 2.1 API, not a guessed `avgoptionvolume` tag.
+[IBKR field documentation](https://www.interactivebrokers.com/docs/tws-api/protobuf/scanner-subscription).
+
+IBKR applies this restriction before returning its top 25 stocks. FIRST4 records
+first appearances and commits slots in that filtered universe's native rank
+order. All other scanner fields, PRIOR15/Q5 calculations and execution rules
+remain unchanged. A failed filtered scan never falls back to an unfiltered scan.
+This adds no per-stock requests or new subscriptions to the application loop.
+
+The original 1,293 appearances and 80 allocations remain unchanged historical
+fixtures. Their passing tests validate the original calculations and slot rules;
+they do **not** validate performance or selections in the newly filtered universe.
+Exact standard chains, approved expiry/strikes and fresh two-sided quotes still
+require the existing execution checks. A stock admitted by this filter can still
+fail those checks and consume a slot. No fifth replacement is allowed.
+
+Do not reinterpret existing session records using the new universe or clear
+today's slots. Activation requires a new process; an interrupted session remains
+blocked and a later session needs its existing explicit dated authorization.
+See [CURRENT-DEPLOYMENT.md](CURRENT-DEPLOYMENT.md) for activation status.
+
+A separate read-only PAPER diagnostic at 15:24 UTC on September 24 verified that
+Gateway accepted this field. Two sequential scans returned 25 original-universe
+stocks and 23 filtered stocks; GCDT and PMAX appeared only in the former snapshot.
+The first three filtered results (GLND, SNDQ, CRML) each returned one permitted
+standard option chain. This is a current API observation, not historical strategy
+validation or proof of executable strikes/quotes. No order actions were attempted;
+the diagnostic client disconnected with no outstanding request/subscription state.
+The application and independent observer continued without restart.
+
+## Retained calculation and allocation rules
 
 PRIOR15 uses the 15 completed minute OHLC bars ending j, with reference close(j-15), or the first session open when j=14. With H=max(high), L=min(low), ref as above, the source performs up=max(0,(H/ref-1)*10000), down=max(0,(1-L/ref)*10000), then (up+down)/100. It is anchor-inclusive range, not absolute return or (H-L)/last close. Invalid/missing bars or reference are unavailable; no interpolation, earlier-window substitution or later readmission. Q5 is strictly >4.459368321659181 percent.
 

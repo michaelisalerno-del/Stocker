@@ -2,11 +2,11 @@
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from ib_async import ScannerSubscription, TagValue
+from ib_async import ScannerSubscription, TagValue, util
 
 from stocker_data.calendars import get_market_calendar
 from stocker_execution.first4 import METHOD, Bar, prior15
@@ -25,18 +25,30 @@ class Runtime:
         self.running = True
         self.session: str | None = None
         self.schedule: list[tuple[str, datetime, datetime]] = []
+        self.calendar_covered_through: date | None = None
         self.history_limit = asyncio.Semaphore(4)
         self.tasks: set[asyncio.Task[None]] = set()
         self.pause = bool(store.get_meta("paused", False))
         self.problem = "STARTING"
 
     def status(self) -> dict[str, Any]:
+        state = self.store.db.execute(
+            "SELECT blocked FROM first4_sessions WHERE session=?", (self.session,)
+        ).fetchone()
+        scanner_problem = state["blocked"] if state else ""
         return {
             "method": METHOD,
             "market": "US",
             "environment": "PAPER",
             "account": self.config.expected_account,
             "connected": self.broker.ib.isConnected(),
+            "upstream_lost": self.broker.upstream_lost,
+            "trading_ready": self.broker.ib.isConnected()
+            and not self.broker.upstream_lost
+            and self.broker.reconciled
+            and not self.problem
+            and not scanner_problem
+            and not self.broker.entry_blocker,
             "reconciled": self.broker.reconciled,
             "armed": self.broker.entries_armed()
             and not self.pause
@@ -49,7 +61,10 @@ class Runtime:
                 "opening_check:" + str(self.config.arm_after_quote_check_on), {}
             ),
             "missing_settings": self.config.missing(),
-            "problem": self.problem or self.broker.problem or self.broker.entry_blocker,
+            "problem": self.problem
+            or self.broker.problem
+            or scanner_problem
+            or self.broker.entry_blocker,
             "session": self.session,
             "live_enabled": False,
             "settings": self.config.model_dump(mode="json"),
@@ -57,18 +72,49 @@ class Runtime:
 
     async def history(self, contract: Any, end: datetime, duration: str) -> list[Any]:
         async with self.history_limit:
-            result = await self.broker.ib.reqHistoricalDataAsync(
-                contract,
-                endDateTime=end,
-                durationStr=duration,
-                barSizeSetting="1 min",
-                whatToShow="TRADES",
-                useRTH=True,
-                formatDate=2,
-                keepUpToDate=False,
-                timeout=15,
-            )
-            return list(result)
+            ib = self.broker.ib
+            request_id = ib.client.getReqId()
+            bars: list[Any] = []
+            future = ib.wrapper.startReq(request_id, contract, container=bars)
+            failure = None
+            completed = False
+
+            def failed(req_id: int, code: int, message: str, *args: Any) -> None:
+                nonlocal failure
+                if req_id == request_id:
+                    failure = ValueError(f"HISTORY_REQUEST_FAILED:{code}:{message}")
+                    if not future.done():
+                        future.set_result(bars)
+
+            ib.errorEvent += failed
+            try:
+                ib.client.reqHistoricalData(
+                    request_id,
+                    contract,
+                    util.formatIBDatetime(end),
+                    duration,
+                    "1 min",
+                    "TRADES",
+                    True,
+                    2,
+                    False,
+                    [],
+                )
+                await asyncio.wait_for(future, 15)
+                if failure:
+                    raise failure
+                completed = True
+                return list(bars)
+            finally:
+                ib.errorEvent -= failed
+                try:
+                    if not completed:
+                        ib.client.cancelHistoricalData(request_id)
+                finally:
+                    future.cancel()
+                    ib.wrapper._futures.pop(request_id, None)
+                    ib.wrapper._results.pop(request_id, None)
+                    ib.wrapper._reqId2Contract.pop(request_id, None)
 
     async def candidate(
         self, row: Any, opened: datetime, clock: datetime, previous_close: datetime
@@ -83,10 +129,10 @@ class Runtime:
             "prior15": None,
         }
         try:
-            bars, previous = await asyncio.gather(
-                self.history(contract, clock, "960 S"),
-                self.history(contract, previous_close, "60 S"),
-            )
+            async with asyncio.TaskGroup() as group:
+                recent = group.create_task(self.history(contract, clock, "960 S"))
+                prior = group.create_task(self.history(contract, previous_close, "60 S"))
+            bars, previous = recent.result(), prior.result()
             values = [
                 Bar(b.date, b.open, b.high, b.low, b.close)
                 for b in bars
@@ -166,12 +212,54 @@ class Runtime:
         previous_close: datetime,
         clock: datetime,
     ) -> None:
+        try:
+            await self._scan(session, opened, closed, previous_close, clock)
+        except BaseException:
+            self.problem = "SCANNER_OBSERVATION_UNKNOWN_CONTINUITY_LOST"
+            self.store.block(session, self.problem)
+            raise
+
+    async def scanner_rows(self, sub: Any) -> list[Any]:
+        # ib_async 2.1's convenience helper treats API errors as partial success
+        # and lacks finally cleanup. Only scannerDataEnd emits this update event.
+        done: asyncio.Future[list[Any]] = asyncio.get_running_loop().create_future()
+        rows = self.broker.ib.reqScannerSubscription(
+            sub, [], [TagValue("changePercAbove", "5.5"), TagValue("priceBelow", "20")]
+        )
+
+        def complete(data: Any) -> None:
+            if not done.done():
+                done.set_result(list(data))
+
+        def failed(request_id: int, code: int, message: str, *args: Any) -> None:
+            if (request_id == rows.reqId or code in {1100, 1101, 1102, 2110}) and not done.done():
+                done.set_exception(ValueError(f"SCANNER_REQUEST_FAILED:{code}:{message}"))
+
+        rows.updateEvent += complete
+        self.broker.ib.errorEvent += failed
+        try:
+            return await done
+        finally:
+            rows.updateEvent -= complete
+            self.broker.ib.errorEvent -= failed
+            try:
+                self.broker.ib.client.cancelScannerSubscription(rows.reqId)
+            finally:
+                self.broker.ib.wrapper.endSubscription(rows)
+
+    async def _scan(
+        self,
+        session: str,
+        opened: datetime,
+        closed: datetime,
+        previous_close: datetime,
+        clock: datetime,
+    ) -> None:
+        generation = self.broker.connection_generation
         sub = ScannerSubscription(
             instrument="STK", locationCode="STK.US", scanCode="MOST_ACTIVE", numberOfRows=25
         )
-        rows = await self.broker.ib.reqScannerDataAsync(
-            sub, [], [TagValue("changePercAbove", "5.5"), TagValue("priceBelow", "20")]
-        )
+        rows = await self.scanner_rows(sub)
         if len(rows) > 25:
             raise ValueError("SCANNER_ROW_LIMIT_VIOLATION")
         seen = {
@@ -184,6 +272,8 @@ class Runtime:
         candidates = await asyncio.gather(
             *(self.candidate(r, opened, clock, previous_close) for r in fresh)
         )
+        if generation != self.broker.connection_generation or self.broker.upstream_lost:
+            raise ValueError("SCANNER_CONNECTION_CHANGED")
         # Inputs complete as one batch; asynchronous response order cannot allocate slots.
         selected = self.store.observe(session, clock, closed, candidates)
         contracts = {r.contractDetails.contract.conId: r.contractDetails.contract for r in fresh}
@@ -243,6 +333,7 @@ class Runtime:
             raise ValueError("OPENING_CHECK_REQUIRES_RECONCILED_FLAT_ACCOUNT")
 
     async def check_opening(self, day: str, opened: datetime) -> None:
+        generation = self.broker.connection_generation
         key = "opening_check:" + day
         report: dict[str, Any] = {
             "session": day,
@@ -271,6 +362,8 @@ class Runtime:
                 )
             ):
                 raise ValueError("OPENING_CHECK_INCOMPLETE")
+            if generation != self.broker.connection_generation:
+                raise ValueError("CONNECTION_CHANGED_DURING_OPENING_CHECK")
             report["status"] = "ARMED"
             report["armed_at"] = now().isoformat()
             self.store.set_meta(key, report)
@@ -297,6 +390,9 @@ class Runtime:
                     if self.session:
                         self.store.block(self.session, "SCANNER_CONTINUITY_LOST_AFTER_DISCONNECT")
                         self.problem = "SCANNER_CONTINUITY_LOST_AFTER_DISCONNECT"
+                elif self.broker.upstream_lost:
+                    await asyncio.sleep(0.1)
+                    continue
                 elif not self.broker.reconciled and not self.broker.reconciliation_lock.locked():
                     async with asyncio.timeout(15):
                         await self.broker.reconcile()
@@ -324,6 +420,20 @@ class Runtime:
                 )
                 await asyncio.sleep(5)
 
+    async def refresh_calendar(self, calendar: Any, today: date) -> None:
+        if self.calendar_covered_through is not None and today <= self.calendar_covered_through:
+            return
+        frame = await asyncio.to_thread(
+            calendar.schedule,
+            start_date=today - timedelta(days=10),
+            end_date=today + timedelta(days=1),
+        )
+        self.schedule = [
+            (str(d.date()), r.market_open.to_pydatetime(), r.market_close.to_pydatetime())
+            for d, r in frame.iterrows()
+        ]
+        self.calendar_covered_through = today + timedelta(days=1)
+
     async def scan_sessions(self) -> None:
         calendar = get_market_calendar("NYSE")
         next_clock: datetime = now()
@@ -333,26 +443,13 @@ class Runtime:
                     await asyncio.sleep(0.1)
                     continue
                 today = now().astimezone(ZoneInfo("America/New_York")).date()
-                if not self.schedule or self.schedule[-1][0] < today.isoformat():
-                    # Calendar construction is off the broker event loop, once per day.
-                    frame = await asyncio.to_thread(
-                        calendar.schedule,
-                        start_date=today - timedelta(days=10),
-                        end_date=today + timedelta(days=1),
-                    )
-                    self.schedule = [
-                        (
-                            str(d.date()),
-                            r.market_open.to_pydatetime(),
-                            r.market_close.to_pydatetime(),
-                        )
-                        for d, r in frame.iterrows()
-                    ]
+                await self.refresh_calendar(calendar, today)
                 current = next((r for r in self.schedule if r[0] == today.isoformat()), None)
                 if current:
                     day, opened, closed = current
                     if self.session != day:
                         self.session = day
+                        self.broker.active_session = day
                         self.problem = ""
                         self.broker.chains.clear()
                         if now() >= opened + timedelta(minutes=1):

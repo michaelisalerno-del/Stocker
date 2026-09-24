@@ -841,7 +841,7 @@ def test_contract_mapping_verifies_standard_roots_multiplier_and_expiry(tmp_path
             )
         ]
 
-    b.ib.reqContractDetailsAsync = AsyncMock(side_effect=qualified)
+    b.contract_details = AsyncMock(side_effect=qualified)
     p, c, combo = asyncio.run(b.contracts(underlying, 100, OPEN))
     assert (p.contract.strike, c.contract.strike) == (97, 103)
     assert (
@@ -856,7 +856,7 @@ def test_contract_mapping_verifies_standard_roots_multiplier_and_expiry(tmp_path
         c.localSymbol = "ABC1  250724P00097000"
         return result
 
-    b.ib.reqContractDetailsAsync.side_effect = adjusted
+    b.contract_details.side_effect = adjusted
     with pytest.raises(ValueError, match="NONSTANDARD"):
         asyncio.run(b.contracts(underlying, 100, OPEN))
 

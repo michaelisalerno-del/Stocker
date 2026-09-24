@@ -33,7 +33,70 @@ class Store:
         CREATE TABLE IF NOT EXISTS first4_positions (
             con_id INTEGER PRIMARY KEY, quantity REAL, payload TEXT);
         CREATE TABLE IF NOT EXISTS first4_meta (key TEXT PRIMARY KEY, value TEXT);
+        CREATE INDEX IF NOT EXISTS first4_order_allocation ON first4_orders(session,symbol);
+        CREATE INDEX IF NOT EXISTS first4_fill_reference ON first4_fills(reference);
+        CREATE INDEX IF NOT EXISTS first4_unresolved ON first4_orders(reference)
+            WHERE role='ENTRY' AND coalesce(json_extract(payload,'$.management_resolved'),0)=0;
         """)
+
+    def unresolved(self) -> list[dict[str, Any]]:
+        # This marker is written only after terminal orders and verified zero legs;
+        # event outcome text is deliberately not an authority for this query.
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT * FROM first4_orders WHERE role='ENTRY' "
+                "AND coalesce(json_extract(payload,'$.management_resolved'),0)=0"
+            )
+        ]
+
+    def order(self, reference: str) -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT * FROM first4_orders WHERE reference=?", (reference,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def event(self, order: dict[str, Any]) -> dict[str, Any]:
+        return dict(
+            self.db.execute(
+                "SELECT * FROM first4_events WHERE session=? AND symbol=?",
+                (order["session"], order["symbol"]),
+            ).fetchone()
+        )
+
+    def allocation_orders(self, order: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT * FROM first4_orders WHERE session=? AND symbol=?",
+                (order["session"], order["symbol"]),
+            )
+        ]
+
+    def executions(self, reference: str) -> list[dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self.db.execute("SELECT * FROM first4_fills WHERE reference=?", (reference,))
+        ]
+
+    def reopen(self, reference: str) -> None:
+        self.db.execute(
+            "UPDATE first4_orders SET payload=json_remove(payload,'$.management_resolved') "
+            "WHERE (session,symbol)=(SELECT session,symbol FROM first4_orders WHERE reference=?) "
+            "AND role='ENTRY' AND json_extract(payload,'$.management_resolved')=1",
+            (reference,),
+        )
+
+    def page(self, table: str, limit: int = 150, offset: int = 0) -> list[dict[str, Any]]:
+        if table not in {"events", "orders", "fills", "meta", "positions"}:
+            raise ValueError("Unknown history table")
+        return [
+            dict(r)
+            for r in self.db.execute(
+                f"SELECT * FROM first4_{table} ORDER BY rowid DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            )
+        ]
 
     def rows(self, table: str) -> list[dict[str, Any]]:
         if table not in {"sessions", "events", "orders", "fills", "positions", "meta"}:
@@ -43,7 +106,9 @@ class Store:
     def set_meta(self, key: str, value: Any) -> None:
         with self.db:
             self.db.execute(
-                "INSERT OR REPLACE INTO first4_meta VALUES (?,?)", (key, json.dumps(value))
+                "INSERT INTO first4_meta VALUES (?,?) ON CONFLICT(key) DO UPDATE "
+                "SET value=excluded.value WHERE value IS NOT excluded.value",
+                (key, json.dumps(value)),
             )
 
     def get_meta(self, key: str, default: Any = None) -> Any:
@@ -141,12 +206,15 @@ class Store:
             previous = json.loads(row[0]) if row and row[0] else {}
             detail = {**(previous or {}), **(detail or {})}
             self.db.execute(
-                "UPDATE first4_events SET outcome=?,detail=? WHERE session=? AND symbol=?",
+                "UPDATE first4_events SET outcome=?,detail=? WHERE session=? AND symbol=? "
+                "AND (outcome IS NOT ? OR detail IS NOT ?)",
                 (
                     outcome,
                     json.dumps(detail),
                     event["session"],
                     event["symbol"],
+                    outcome,
+                    json.dumps(detail),
                 ),
             )
 

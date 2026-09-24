@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ib_async import IB, ComboLeg, Contract, ExecutionFilter, LimitOrder, MarketOrder, Option
+from ib_async.wrapper import RequestError
 
 from stocker_execution.first4_config import PAPER_ACCOUNT, First4Config
 from stocker_execution.first4_store import Store
@@ -75,6 +76,10 @@ class PaperBroker:
         self.chains: dict[int, Any] = {}
         self.opening_verified_session: str | None = None
         self.reconciliation_lock = asyncio.Lock()
+        self.connection_generation = 0
+        self.upstream_lost = False
+        self.active_session: str | None = None
+        self.order_observation_generation = 0
         self.ib.disconnectedEvent += self.disconnected
         self.ib.execDetailsEvent += self.fill
         self.ib.commissionReportEvent += self.commission
@@ -83,14 +88,32 @@ class PaperBroker:
         self.ib.positionEvent += self.position
 
     def disconnected(self, *args: Any) -> None:
+        self.invalidate_connection("DISCONNECTED_RECONCILIATION_REQUIRED")
+
+    def invalidate_connection(self, reason: str) -> None:
+        self.connection_generation += 1
         self.opening_verified_session = None
         self.reconciled = False
-        self.problem = "DISCONNECTED_RECONCILIATION_REQUIRED"
+        self.problem = reason
+        self.chains.clear()
+        day = (
+            self.active_session or now().astimezone(ZoneInfo("America/New_York")).date().isoformat()
+        )
+        state = self.store.db.execute(
+            "SELECT last_clock FROM first4_sessions WHERE session=?", (day,)
+        ).fetchone()
+        if self.active_session or (state and state["last_clock"]):
+            self.store.block(day, "SCANNER_CONTINUITY_LOST_AFTER_DISCONNECT")
 
     def entries_armed(self) -> bool:
+        day = now().astimezone(ZoneInfo("America/New_York")).date()
+        state = self.store.db.execute(
+            "SELECT blocked FROM first4_sessions WHERE session=?", (day.isoformat(),)
+        ).fetchone()
+        if self.upstream_lost or not self.reconciled or (state and state["blocked"]):
+            return False
         if self.config.armed:
             return True
-        day = now().astimezone(ZoneInfo("America/New_York")).date()
         if (
             self.config.arm_after_quote_check_on != day
             or self.opening_verified_session != day.isoformat()
@@ -114,6 +137,9 @@ class PaperBroker:
         owned = self.owned_quantities()
         if con_id in owned:
             with self.store.db:
+                if not position.position and not owned[con_id]:
+                    self.store.db.execute("DELETE FROM first4_positions WHERE con_id=?", (con_id,))
+                    return
                 self.store.db.execute(
                     "INSERT OR REPLACE INTO first4_positions VALUES (?,?,?)",
                     (
@@ -136,11 +162,14 @@ class PaperBroker:
             raise ValueError("Verified PAPER account is not connected")
         if self.ib.client.clientId != self.config.client_id:
             raise ValueError("Unexpected FIRST4 execution client")
+        if self.upstream_lost:
+            raise ValueError("UPSTREAM_CONNECTION_LOST")
         if not self.reconciled:
             raise ValueError("Broker reconciliation required: " + self.problem)
 
     async def connect(self) -> None:
         self.reconciled = False
+        generation = self.connection_generation
         await self.ib.connectAsync(
             self.config.host,
             self.config.port,
@@ -153,6 +182,9 @@ class PaperBroker:
         if self.ib.managedAccounts() != [PAPER_ACCOUNT]:
             self.ib.disconnect()
             raise ValueError("Connected account differs from verified PAPER account")
+        if generation != self.connection_generation:
+            raise ValueError("CONNECTION_CHANGED_DURING_CONNECT")
+        self.upstream_lost = False
         self.ib.reqMarketDataType(1)
         await self.reconcile()
 
@@ -166,7 +198,7 @@ class PaperBroker:
         ).fetchone():
             return
         with self.store.db:
-            self.store.db.execute(
+            inserted = self.store.db.execute(
                 "INSERT OR IGNORE INTO first4_fills VALUES (?,?,?,?,?,?,?,?,NULL)",
                 (
                     e.execId,
@@ -179,6 +211,8 @@ class PaperBroker:
                     e.time.isoformat(),
                 ),
             )
+            if inserted.rowcount:
+                self.store.reopen(reference)
 
     def commission(self, trade: Any, fill: Any, report: Any) -> None:
         if (
@@ -189,23 +223,48 @@ class PaperBroker:
             return
         with self.store.db:
             self.store.db.execute(
-                "UPDATE first4_fills SET commission=? WHERE exec_id=?",
-                (report.commission, report.execId),
+                "UPDATE first4_fills SET commission=? WHERE exec_id=? AND commission IS NOT ?",
+                (report.commission, report.execId, report.commission),
             )
 
     def order_status(self, trade: Any) -> None:
         with self.store.db:
-            self.store.db.execute(
-                "UPDATE first4_orders SET status=?,perm_id=? WHERE reference=? AND order_id=?",
+            row = self.store.order(trade.order.orderRef)
+            if not row or row["order_id"] != trade.order.orderId:
+                return
+            status = trade.orderStatus.status
+            terminal = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
+            if row["status"] in terminal and status not in terminal:
+                self.order_observation_generation += 1
+                self.reconciled = False
+                self.problem = "OUT_OF_ORDER_STATUS_RECONCILIATION_REQUIRED"
+                self.store.reopen(row["reference"])
+                return
+            perm_id = trade.orderStatus.permId or trade.order.permId
+            changed = self.store.db.execute(
+                "UPDATE first4_orders SET status=?,perm_id=? WHERE reference=? AND order_id=? "
+                "AND (status IS NOT ? OR perm_id IS NOT ?)",
                 (
-                    trade.orderStatus.status,
-                    trade.orderStatus.permId or trade.order.permId,
+                    status,
+                    perm_id,
                     trade.order.orderRef,
                     trade.order.orderId,
+                    status,
+                    perm_id,
                 ),
             )
+            if changed.rowcount:
+                self.store.reopen(row["reference"])
 
     def error(self, request_id: int, code: int, message: str, contract: Any = None) -> None:
+        if code in {1100, 2110}:
+            self.upstream_lost = True
+            self.invalidate_connection("UPSTREAM_CONNECTION_LOST_RECONCILIATION_REQUIRED")
+        elif code in {1101, 1102}:
+            # 1101: subscriptions lost; 1102: maintained. All our market-data
+            # subscriptions are scoped to a request and are recreated after recovery.
+            self.invalidate_connection("UPSTREAM_RESTORED_RECONCILIATION_REQUIRED")
+            self.upstream_lost = False
         if code in {2104, 2106, 2158, 2108}:
             return
         self.store.set_meta(
@@ -213,18 +272,31 @@ class PaperBroker:
             {"time": now().isoformat(), "request_id": request_id, "code": code, "message": message},
         )
 
-    def owned_quantities(self, allocation: str | None = None) -> dict[int, float]:
-        result: dict[int, float] = {}
-        for f in self.store.rows("fills"):
-            if allocation is not None and not f["reference"].startswith(allocation):
-                continue
-            result[f["con_id"]] = result.get(f["con_id"], 0) + f["quantity"] * (
-                1 if f["side"] == "BOT" else -1
+    def owned_quantities(
+        self, allocation: str | None = None, *, all_history: bool = False
+    ) -> dict[int, float]:
+        query = "SELECT f.con_id, sum(f.quantity * CASE f.side WHEN 'BOT' THEN 1 ELSE -1 END) "
+        if all_history:
+            query += "FROM first4_fills f WHERE 1=1 "
+            params: tuple[Any, ...] = ()
+        elif allocation is not None:
+            query += (
+                "FROM first4_orders e JOIN first4_orders o USING(session,symbol) "
+                "JOIN first4_fills f ON f.reference=o.reference WHERE e.reference=? "
             )
-        return result
+            params = (allocation + "ENTRY",)
+        else:
+            query += (
+                "FROM first4_orders e INDEXED BY first4_unresolved "
+                "CROSS JOIN first4_orders o USING(session,symbol) "
+                "CROSS JOIN first4_fills f ON f.reference=o.reference WHERE e.role='ENTRY' "
+                "AND coalesce(json_extract(e.payload,'$.management_resolved'),0)=0 "
+            )
+            params = ()
+        return {r[0]: r[1] for r in self.store.db.execute(query + "GROUP BY f.con_id", params)}
 
     def deadline_blocker(self) -> str:
-        for order in self.store.rows("orders"):
+        for order in self.store.unresolved():
             if order["role"] != "ENTRY":
                 continue
             payload = json.loads(order["payload"])
@@ -245,7 +317,13 @@ class PaperBroker:
 
     async def _reconcile(self, require_flat: bool) -> None:
         self.reconciled = False
-        if not self.ib.isConnected() or self.ib.managedAccounts() != [PAPER_ACCOUNT]:
+        generation = self.connection_generation
+        order_generation = self.order_observation_generation
+        if (
+            self.upstream_lost
+            or not self.ib.isConnected()
+            or self.ib.managedAccounts() != [PAPER_ACCOUNT]
+        ):
             raise ValueError("PAPER identity mismatch during reconciliation")
         opens = await self.ib.reqAllOpenOrdersAsync()
         completed = await self.ib.reqCompletedOrdersAsync(apiOnly=False)
@@ -280,18 +358,28 @@ class PaperBroker:
                 ):
                     raise ValueError("Completed order identity mismatch")
                 with self.store.db:
-                    self.store.db.execute(
-                        "UPDATE first4_orders SET status=?,perm_id=? WHERE reference=?",
-                        (t.orderStatus.status, permanent_id, row["reference"]),
+                    changed = self.store.db.execute(
+                        "UPDATE first4_orders SET status=?,perm_id=? WHERE reference=? "
+                        "AND (status IS NOT ? OR perm_id IS NOT ?)",
+                        (
+                            t.orderStatus.status,
+                            permanent_id,
+                            row["reference"],
+                            t.orderStatus.status,
+                            permanent_id,
+                        ),
                     )
+                    if changed.rowcount:
+                        self.store.reopen(row["reference"])
                 matched.add(row["reference"])
         terminal = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
+        orders = self.store.rows("orders")
         uncertain = [
             o["reference"]
-            for o in self.store.rows("orders")
+            for o in orders
             if o["status"] not in terminal and o["reference"] not in matched
         ]
-        for order in self.store.rows("orders"):
+        for order in orders:
             if order["status"] != "Filled":
                 continue
             payload = json.loads(order["payload"])
@@ -301,9 +389,7 @@ class PaperBroker:
                 else payload["exit_con_ids"]
             )
             expected = payload["quantity"] if order["role"] == "ENTRY" else payload["exit_quantity"]
-            executions = [
-                f for f in self.store.rows("fills") if f["reference"] == order["reference"]
-            ]
+            executions = self.store.executions(order["reference"])
             if any(
                 sum(f["quantity"] for f in executions if f["con_id"] == con_id) != expected
                 for con_id in ids
@@ -312,7 +398,7 @@ class PaperBroker:
         actual = {
             p.contract.conId: p for p in positions if p.account == PAPER_ACCOUNT and p.position
         }
-        owned = self.owned_quantities()
+        owned = self.owned_quantities(all_history=True)
         unknown = sorted(set(actual) - set(owned))
         self.entry_blocker = (
             f"UNOWNED_BROKER_POSITIONS:{unknown}" if unknown else self.deadline_blocker()
@@ -322,6 +408,8 @@ class PaperBroker:
             for con_id, quantity in owned.items():
                 p = actual.get(con_id)
                 broker_quantity = float(p.position) if p else 0
+                if not quantity and not broker_quantity:
+                    continue  # Positions is a current snapshot; executions retain history.
                 self.store.db.execute(
                     "INSERT INTO first4_positions VALUES (?,?,?)",
                     (
@@ -341,16 +429,56 @@ class PaperBroker:
             raise ValueError(self.problem)
         if require_flat and (opens or actual):
             raise ValueError("OPENING_CHECK_REQUIRES_FLAT_ACCOUNT_AND_NO_OPEN_ORDERS")
+        if (
+            generation != self.connection_generation
+            or order_generation != self.order_observation_generation
+            or self.upstream_lost
+            or not self.ib.isConnected()
+        ):
+            raise ValueError("CONNECTION_CHANGED_DURING_RECONCILIATION")
         # Unrelated contracts/orders are never cancelled or managed by FIRST4.
         self.reconciled, self.problem = True, ""
         self.store.set_meta("reconciled_at", now().isoformat())
 
     async def chain(self, underlying: Any) -> Any:
+        generation = self.connection_generation
         if underlying.conId not in self.chains:
-            self.chains[underlying.conId] = await self.ib.reqSecDefOptParamsAsync(
+            result = await self.ib.reqSecDefOptParamsAsync(
                 underlying.symbol, "", "STK", underlying.conId
             )
+            if generation != self.connection_generation:
+                raise ValueError("CONNECTION_CHANGED_DURING_OPTION_CHAIN")
+            self.chains[underlying.conId] = result
         return self.chains[underlying.conId]
+
+    async def contract_details(self, contract: Any) -> list[Any]:
+        """Distinguish request failure from a completed empty contract lookup."""
+        request_id = self.ib.client.getReqId()
+        future = self.ib.wrapper.startReq(request_id, contract)
+        failure = None
+
+        def failed(req_id: int, code: int, message: str, *args: Any) -> None:
+            nonlocal failure
+            if req_id == request_id:
+                failure = RequestError(req_id, code, message)
+                if not future.done():
+                    future.set_result([])
+
+        self.ib.errorEvent += failed
+        try:
+            self.ib.client.reqContractDetails(request_id, contract)
+            result = await future
+            if failure:
+                raise failure
+            return list(result)
+        finally:
+            self.ib.errorEvent -= failed
+            future.cancel()
+            # The API offers no contract-details cancellation. Late callbacks are
+            # ignored once these request-specific containers have been removed.
+            self.ib.wrapper._futures.pop(request_id, None)
+            self.ib.wrapper._results.pop(request_id, None)
+            self.ib.wrapper._reqId2Contract.pop(request_id, None)
 
     async def contracts(
         self, underlying: Any, anchor: float, baseline: datetime
@@ -368,7 +496,7 @@ class PaperBroker:
 
         async def qualify(expiry: str, right: str) -> Any:
             strike = listed_strike(list(chain.strikes), anchor, right)
-            details = await self.ib.reqContractDetailsAsync(
+            details = await self.contract_details(
                 Option(
                     underlying.symbol,
                     expiry,
@@ -380,6 +508,8 @@ class PaperBroker:
                     tradingClass=chain.tradingClass,
                 )
             )
+            if not details:
+                return None
             if len(details) != 1 or details[0].underConId != underlying.conId:
                 raise ValueError("OPTION_CONTRACT_UNAVAILABLE_OR_AMBIGUOUS")
             d = details[0]
@@ -414,10 +544,25 @@ class PaperBroker:
         )
         # At most three specific contracts, not full option-chain downloads. Unknown
         # expiry metadata rejects the candidate rather than widening the search.
-        puts = await asyncio.gather(*(qualify(e, "P") for e in dates))
-        by_expiry = dict(zip(dates, puts, strict=True))
+        puts = await asyncio.gather(*(qualify(e, "P") for e in dates), return_exceptions=True)
+        by_expiry = {}
+        for e, result in zip(dates, puts, strict=True):
+            # Code 200 can also mean ambiguous metadata. Only this explicit
+            # no-security-definition response proves nonexistence.
+            if (
+                isinstance(result, RequestError)
+                and result.code == 200
+                and "No security definition has been found" in result.message
+            ):
+                continue
+            if isinstance(result, BaseException):
+                raise result
+            if result is not None:
+                by_expiry[e] = result
         expiry = listed_expiry({e: expiration_at(d) for e, d in by_expiry.items()}, baseline)
         legs = [by_expiry[expiry], await qualify(expiry, "C")]
+        if legs[1] is None:
+            raise ValueError("OPTION_CONTRACT_UNAVAILABLE_OR_AMBIGUOUS")
         if expiration_at(legs[0]) != expiration_at(legs[1]):
             raise ValueError("OPTION_EXPIRY_TIME_MISMATCH")
         combo = Contract(
@@ -435,6 +580,7 @@ class PaperBroker:
     async def quotes(
         self, contracts: list[Any], deadline: datetime, quantity: float = 1, side: str = "BUY"
     ) -> list[dict[str, Any]]:
+        generation = self.connection_generation
         subscriptions = []
         states: list[dict[str, Any]] = [{"bid_at": None, "ask_at": None} for _ in contracts]
         try:
@@ -451,6 +597,8 @@ class PaperBroker:
                 t.updateEvent += update
                 subscriptions.append((contract, t, update))
             while now() < deadline:
+                if generation != self.connection_generation or self.upstream_lost:
+                    raise ValueError("CONNECTION_CHANGED_DURING_QUOTES")
                 result = []
                 for (_, t, _), s in zip(subscriptions, states, strict=True):
                     stamps = [s["bid_at"], s["ask_at"]]
@@ -547,6 +695,14 @@ class PaperBroker:
                 if contract.secType == "BAG"
                 else [contract.conId]
             )
+            for working in self.ib.openTrades():
+                working_ids = (
+                    [leg.conId for leg in working.contract.comboLegs]
+                    if working.contract.secType == "BAG"
+                    else [working.contract.conId]
+                )
+                if not working.isDone() and set(ids).intersection(working_ids):
+                    raise ValueError("CONFLICTING_WORKING_ORDER_ON_EXIT_LEGS")
             if order.action != "SELL" or any(
                 actual.get(con_id, 0) != owned.get(con_id, 0)
                 or not 0 < order.totalQuantity <= allocated.get(con_id, 0)
@@ -646,7 +802,7 @@ class PaperBroker:
     async def cancel_due_entries(self) -> None:
         """GTD is backed by explicit owned-order cancellation and broker reconciliation."""
         terminal = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
-        for entry in self.store.rows("orders"):
+        for entry in self.store.unresolved():
             if entry["role"] != "ENTRY":
                 continue
             payload = json.loads(entry["payload"])
@@ -676,11 +832,7 @@ class PaperBroker:
                     "UPDATE first4_orders SET payload=? WHERE reference=?",
                     (json.dumps(payload), entry["reference"]),
                 )
-            event = next(
-                e
-                for e in self.store.rows("events")
-                if e["session"] == entry["session"] and e["symbol"] == entry["symbol"]
-            )
+            event = self.store.event(entry)
             allocation = entry["reference"].rsplit(":", 1)[0] + ":"
             quantity = self.owned_quantities(allocation)
             self.store.outcome(
@@ -703,7 +855,7 @@ class PaperBroker:
             self.ib.cancelMktData(combo)
 
     async def close_due(self) -> None:
-        for entry in self.store.rows("orders"):
+        for entry in self.store.unresolved():
             if entry["role"] != "ENTRY":
                 continue
             try:
@@ -712,11 +864,12 @@ class PaperBroker:
                 self.problem = str(exc) or type(exc).__name__
                 self.store.set_meta(
                     "exit_exception:" + entry["reference"],
-                    {"time": now().isoformat(), "error": self.problem, "requires_operator": True},
+                    {"error": self.problem, "requires_operator": True},
                 )
 
     async def close_one(self, reference: str) -> None:
-        entries = [o for o in self.store.rows("orders") if o["reference"] == reference]
+        found = self.store.order(reference)
+        entries = [found] if found else []
         for entry in entries:
             payload = json.loads(entry["payload"])
             if now() < datetime.fromisoformat(payload["exit_at"]):
@@ -736,11 +889,7 @@ class PaperBroker:
             if entry["status"] not in {"Filled", "Cancelled", "ApiCancelled", "Inactive"}:
                 self.problem = "EXIT_WAITING_FOR_ENTRY_CANCELLATION_OR_RECONCILIATION"
                 return
-            event = next(
-                e
-                for e in self.store.rows("events")
-                if e["session"] == entry["session"] and e["symbol"] == entry["symbol"]
-            )
+            event = self.store.event(entry)
             # Always reconcile actual individual legs; a BAG acknowledgement is not two fills.
             quantities = self.owned_quantities()
             legs = [Contract.create(**payload[key]) for key in ("put", "call")]
@@ -753,38 +902,70 @@ class PaperBroker:
             allocation = entry["reference"].rsplit(":", 1)[0] + ":"
             allocated_quantities = self.owned_quantities(allocation)
             q = [allocated_quantities.get(x.conId, 0) for x in legs]
+            if any(k not in {x.conId for x in legs} and v for k, v in allocated_quantities.items()):
+                self.reconciled = False
+                raise ValueError("UNEXPECTED_ALLOCATION_LEG_RECONCILIATION_REQUIRED")
+            prior_exits = [o for o in self.store.allocation_orders(entry) if o["role"] == "EXIT"]
+            terminal = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
+            working = [
+                t
+                for t in self.ib.openTrades()
+                if t.order.orderRef.startswith(allocation) and not t.isDone()
+            ]
+            pending = working or any(o["status"] not in terminal for o in prior_exits)
+            if pending and (
+                not any(q)
+                or q[0] == q[1]
+                or any(o["reference"] == allocation + "EXIT" for o in prior_exits)
+            ):
+                status = "EXIT_WORKING" if working else "EXIT_ACKNOWLEDGEMENT_UNRESOLVED"
+                if now() >= datetime.fromisoformat(event["close_at"]):
+                    status = "EXIT_OVERDUE"
+                self.exit_obligation(event, status, q)
+                continue
             if min(q) < 0:
                 raise ValueError("UNEXPECTED_SHORT_OPTION_POSITION")
             if not any(q):
-                entry_fills = [
-                    f for f in self.store.rows("fills") if f["reference"] == entry["reference"]
-                ]
+                entry_fills = self.store.executions(entry["reference"])
                 if entry["status"] == "Filled" and not entry_fills:
                     self.problem = "FILLED_ENTRY_MISSING_LEG_EXECUTIONS"
                     self.reconciled = False
                     continue
+                if prior_exits:
+                    # Submission/status callbacks alone cannot establish closure.
+                    # This fresh snapshot also validates all Filled leg executions.
+                    await self.reconcile()
+                    if any(self.owned_quantities(allocation).values()):
+                        continue
+                    refreshed = self.store.allocation_orders(entry)
+                    if any(o["status"] not in terminal for o in refreshed) or any(
+                        t.order.orderRef.startswith(allocation) and not t.isDone()
+                        for t in self.ib.openTrades()
+                    ):
+                        self.exit_obligation(event, "EXIT_ACKNOWLEDGEMENT_UNRESOLVED", q)
+                        continue
                 self.store.outcome(event, "CLOSED" if entry_fills else "ENTRY_UNFILLED")
+                with self.store.db:
+                    self.store.db.execute(
+                        "UPDATE first4_orders SET payload=json_set(payload,"
+                        "'$.management_resolved',1,'$.deadline_reconciled',1) WHERE reference=?",
+                        (reference,),
+                    )
                 continue
-            prior_exits = [
-                o
-                for o in self.store.rows("orders")
-                if o["session"] == entry["session"]
-                and o["symbol"] == entry["symbol"]
-                and o["role"] == "EXIT"
-            ]
             combo_exit = next(
                 (o for o in prior_exits if o["reference"] == allocation + "EXIT"), None
             )
             if combo_exit:
-                self.problem = (
-                    "EXIT_PENDING_OR_INCOMPLETE_REQUIRES_OPERATOR"
-                    if not all(o["status"] == "Filled" for o in prior_exits)
-                    else "EXIT_FILL_POSITION_RECONCILIATION_REQUIRED"
+                self.exit_obligation(
+                    event,
+                    "EXIT_OVERDUE"
+                    if now() >= datetime.fromisoformat(event["close_at"])
+                    else "EXIT_TERMINAL_RESIDUAL_REQUIRES_OPERATOR",
+                    q,
                 )
                 continue
             if now() >= datetime.fromisoformat(event["close_at"]):
-                self.problem = "MISSED_SESSION_CLOSE_EXIT_REQUIRES_OPERATOR"
-                self.store.outcome(event, "EXIT_OVERDUE", {"remaining_legs": q})
+                self.exit_obligation(event, "EXIT_OVERDUE", q)
                 continue
             if q[0] == q[1] and not prior_exits:
                 combo = Contract(
@@ -806,9 +987,13 @@ class PaperBroker:
                             o["reference"] == allocation + "EXIT" + str(leg.conId)
                             for o in prior_exits
                         ):
-                            self.problem = "LEG_EXIT_PENDING_OR_INCOMPLETE_REQUIRES_OPERATOR"
+                            self.exit_obligation(event, "LEG_EXIT_RESIDUAL_REQUIRES_OPERATOR", q)
                             continue
                         await self.close_order(event, leg, [leg], quantity, payload, str(leg.conId))
+
+    def exit_obligation(self, event: dict[str, Any], status: str, quantities: list[float]) -> None:
+        self.problem = status
+        self.store.outcome(event, status, {"remaining_legs": quantities})
 
     async def close_order(
         self,

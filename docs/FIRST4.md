@@ -78,6 +78,28 @@ SQLite stores first appearances, allocations, order reservations/IDs, actual leg
 
 The scanner and broker/exit manager use separate asynchronous tasks in the same process so history requests do not defer close-out. Contract chains are cached per underlying/session. No universe history download, research calculation, model load, observer dependency or extra candidate scanner is on the path.
 
+Scanner completion now requires the request's end event with no request error. Empty
+successful scans remain valid; errors, cancellation and timeouts permanently block
+that session's admissions without consuming slots. Local API connectivity is shown
+separately from readiness. Upstream loss revokes reconciliation and dated opening
+authority; restoration reconciles exposure but never erases a scanner gap or re-arms
+the dated opening check. Request-scoped data subscriptions are cancelled and recreated
+when needed; stale callbacks cannot restore readiness.
+
+Exit statuses distinguish working orders, unresolved acknowledgements, terminal orders
+with residual legs and overdue exposure. `CLOSED` requires terminal orders, attributable
+leg executions and a fresh reconciliation to zero exposure. There is still no automatic
+retry of an existing exit. Relaxing two-sided quote requirements or defining bounded
+resubmission after verified rejection/cancellation requires explicit execution-policy
+approval. Individual exits remain limited to the already approved unmatched-entry route.
+
+The manager queries unresolved obligations through a partial SQLite index. The verified
+zero-exposure marker is independent of the displayed outcome and is revoked by new fills
+or changed order observations. All execution history remains available. Dashboard history
+is newest-first and paginated; displayed P&L covers the labelled current/latest session.
+See [the offline reliability audit](FIRST4-reliability-audit-20260924.md) for measured
+capacity limits and verification evidence. No settings or approved trading dates changed.
+
 Historical runtime databases/configuration are backed up before cutover and kept outside active FIRST4 configuration. The new app does not parse old run files or old runtime state. The independently pinned three-scanner observation service is not changed.
 
 ## Verification

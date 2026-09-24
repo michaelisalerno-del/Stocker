@@ -8,7 +8,8 @@ const path = require('node:path');
  const root=process.env.STOCKER_DASHBOARD_ASSETS || path.join(__dirname,'../packages/stocker_dashboard/src/stocker_dashboard/static');
  await page.route('http://stocker.test/**', async route=>{
   const url=new URL(route.request().url());
-  if(url.pathname==='/api/overview') return route.fulfill({json:{system:{account:'DUP655399',connected:true,reconciled:true,armed:false,missing_settings:['premium_budget_usd'],settings:{},problem:'',session:'2026-09-23'},candidates:[{symbol:'<img src=x onerror=alert(1)>',decision:'SELECTED',slot:1,outcome:'UNARMED'}],orders:[],positions:[],fills:[],errors:[],pnl:{currency:'USD',realised:0}}});
+  if(url.pathname==='/api/overview') return route.fulfill({json:{system:{account:'DUP655399',connected:true,reconciled:true,armed:false,missing_settings:['premium_budget_usd'],settings:{},problem:'',session:'2026-09-23'},candidates:[{symbol:'<img src=x onerror=alert(1)>',decision:'SELECTED',slot:1,outcome:'UNARMED'}],orders:Array.from({length:100},(_,i)=>({reference:`recent-${i}`})),positions:[],fills:[],errors:[],pnl:{currency:'USD',session:'2026-09-23',realised:0}}});
+  if(url.pathname==='/api/orders') { assert.equal(url.searchParams.get('offset'),'100'); return route.fulfill({json:[{reference:'older-page-order'}]}); }
   const file=url.pathname.startsWith('/static/')?url.pathname.slice(8):'index.html';
   return route.fulfill({body:fs.readFileSync(path.join(root,file)),contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html'});
  });
@@ -25,7 +26,12 @@ const path = require('node:path');
  assert.equal(await menu.getAttribute('aria-expanded'),'true');
  assert.equal(await page.locator('#sidebar').evaluate(el=>el.classList.contains('open')),true);
  await page.locator('#sidebar a[href="/orders"]').click();
- await page.waitForURL('http://stocker.test/orders');
+  await page.waitForURL('http://stocker.test/orders');
+ await page.getByRole('button',{name:'Older',exact:true}).click();
+ await page.getByText('older-page-order',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Older',exact:true}).isDisabled(),true);
+ await page.getByRole('button',{name:'Newer',exact:true}).click();
+ await page.getByText('recent-0',{exact:true}).waitFor();
  assert.equal(await page.getByRole('button',{name:'Toggle navigation'}).getAttribute('aria-expanded'),'false');
  await menu.click();
  await menu.click();

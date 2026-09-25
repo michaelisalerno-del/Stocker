@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from stocker_execution.first4 import Q5
 from stocker_execution.first4_store import Store
 
-EVENT_COLUMNS = "session,symbol,information_at,rank,prior15,decision,slot,entry_at,outcome"
+EVENT_COLUMNS = "session,con_id,symbol,information_at,rank,prior15,decision,slot,entry_at,outcome"
 TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
 
 

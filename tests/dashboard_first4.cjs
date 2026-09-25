@@ -26,8 +26,26 @@ const system = {
   option_quote_state: "STALE",
   outstanding_obligations: 0,
 };
+const flowFixture = {
+  state: "COLLECTING_ESTIMATED_FLOW", feed_mode: "TBT_TRADES_TBT_QUOTES",
+  first_received_at: "2026-09-24T14:01:02Z", quote_age_ms: 230, trade_age_ms: 410,
+  pre_capture_gap_seconds: 2, dropped_events: 0, observation_state: "OBSERVED_PRINTS",
+  coverage_warning: "Partial capture: quote pacing gap; one interrupted segment.",
+  totals: {classified_volume_fraction: 0.8},
+  rolling_5m: {buy_est_volume: 7200, sell_est_volume: 4800, unknown_volume: 3000,
+    excluded_volume: 100, eligible_observed_volume: 15000, volume_delta: 2400,
+    classified_volume_fraction: 0.8, partial_coverage: true},
+  last_completed_minute: {volume_delta: -420},
+  captures: [{gaps:[{at:"2026-09-24T14:04:00Z", reason:"DISCONNECT"}]}],
+  bars: Array.from({length:30}, (_,i) => ({minute:new Date(Date.parse("2026-09-24T14:01:00Z") + i*60000).toISOString(),
+    capture_id: i < 4 ? "fixture-a" : "fixture-b", price:10 + Math.sin(i/3)*0.4,
+    volume_delta:Math.round(Math.sin(i/2)*800), unknown_volume:120+(i%3)*80,
+    cumulative_volume_delta:Math.round(Math.sin(i/7)*1800), classified_volume_fraction:0.8,
+    has_gap:i===4})),
+};
 const allocation = (slot, state) => ({
   slot,
+  order_flow: flowFixture,
   symbol: ["ALFA", "BRAV", "CHAR", "DELT"][slot - 1],
   session,
   state,
@@ -120,6 +138,7 @@ const overview = () => ({
   pnl,
 });
 const detail = () => ({
+  order_flow: flowFixture,
   event: { symbol: "SYN000", detail: "<svg onload=alert(1)>" },
   orders: [
     {
@@ -194,7 +213,7 @@ const detail = () => ({
     await page.locator('#sidebar a[aria-current="page"]').textContent(),
     "Overview",
   );
-  assert.equal(await page.locator("#main img, #main svg").count(), 0);
+  assert.equal(await page.locator("#main img, #main svg:not([data-chart])").count(), 0);
   assert.match(
     await page.locator("#snapshots").textContent(),
     /Equal to Q5 — does not pass/,
@@ -265,6 +284,29 @@ const detail = () => ({
     await page.locator("#fixture-label").evaluate((el) => el.remove());
   }
   await screenshot("overview-desktop.png");
+  await page.locator('.slot-card [class="secondary allocation-detail"]').first().click();
+  await page.waitForFunction(() => !document.querySelector("#reload-detail").disabled);
+  assert.equal(await page.locator(".flow-charts svg").count(), 3);
+  await page.locator("#flow-zoom").fill("3");
+  await page.locator("#flow-zoom").dispatchEvent("input");
+  await page.evaluate(() => {
+    document.querySelector(".flow-chart-scroll").scrollLeft = 240;
+    document.querySelector(".slot-card details").open = true;
+    window.savedFlowContainer = document.querySelector(".flow-chart-scroll");
+    window.savedFlowSelection = selectedDetail;
+    render(lastData);
+  });
+  await page.locator("#reload-detail").click();
+  await page.waitForFunction(() => !document.querySelector("#reload-detail").disabled);
+  assert.equal(await page.locator("#flow-zoom").inputValue(), "3");
+  assert.equal(await page.evaluate(() => document.querySelector(".flow-chart-scroll").scrollLeft), 240);
+  assert.equal(await page.evaluate(() => savedFlowContainer === document.querySelector(".flow-chart-scroll") && savedFlowSelection === selectedDetail && document.querySelector(".slot-card details").open), true);
+  assert.match(await page.locator("#flow-detail").textContent(), /Classified coverage 80.0%/);
+  await page.locator("#flow-zoom").fill("1");
+  await page.locator("#flow-zoom").dispatchEvent("input");
+  await screenshot("order-flow-fixture.png");
+  await page.locator("#close-detail").click();
+
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(
     await page.evaluate(
@@ -372,7 +414,7 @@ const detail = () => ({
     await page.evaluate(() => document.activeElement.name),
     "session",
   );
-  assert.equal(await page.locator("#evidence svg").count(), 0);
+  assert.equal(await page.locator("#evidence svg:not([data-chart])").count(), 0);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.evaluate(() => window.scrollTo(0, 0));
   await screenshot("opportunities-desktop.png");

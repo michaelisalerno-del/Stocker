@@ -1,0 +1,24 @@
+# Merge ONLY this section into a separately reviewed copy of your PAPER config.
+# Example entitlement numbers are NOT evidence of your account's capacity.
+# No change to armed, opening verification, account, port, or order settings.
+order_flow:
+  enabled: true
+  order_authoritative: false
+  may_submit_orders: false
+  max_stocks: 2
+  feed_mode: TBT_TRADES_TBT_QUOTES
+  # Available for THIS application after other clients/TWS consumption.
+  # This example permits two stocks: (8 - 4 reserved) / 2.
+  available_tbt: 8
+  reserved_tbt: 4
+  available_l1: 0
+  reserved_l1: 16
+  quote_age_ms: 1000
+  stale_seconds: 30
+  raw_path: /var/lib/stocker/first4-order-flow
+  max_storage_bytes: 2000000000
+  min_free_bytes: 1000000000
+  queue_events: 8192
+  batch_events: 512
+  flush_seconds: 0.25
+  max_segments_per_stock: 16

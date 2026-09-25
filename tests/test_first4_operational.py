@@ -308,7 +308,10 @@ def test_timeout_cannot_hide_fatal_error_raised_during_cleanup(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("case", ["valid", "contract", "quote", "ambiguous", "slow_metadata"])
-def test_complete_allocated_candidate_to_paper_submission_boundary(tmp_path, monkeypatch, case):
+@pytest.mark.parametrize("observe", [False, True])
+def test_complete_allocated_candidate_to_paper_submission_boundary(
+    tmp_path, monkeypatch, case, observe
+):
     async def check():
         b, ib, clock = wired(tmp_path, monkeypatch)
         b.guard = broker_module.PaperBroker.guard.__get__(b)
@@ -331,6 +334,8 @@ def test_complete_allocated_candidate_to_paper_submission_boundary(tmp_path, mon
             from test_first4_anchor import deliver
 
             clock[0] = baseline
+            if observe:
+                ib.flow_wire.retain_last(underlying, lambda *args, **kwargs: None)
             deliver(ib, baseline, baseline, "10")
             await asyncio.sleep(0)
             return [
@@ -402,6 +407,9 @@ def test_complete_allocated_candidate_to_paper_submission_boundary(tmp_path, mon
 
         ib.placeOrder.side_effect = submit
         await runtime.execute(event, underlying)
+        if observe:
+            assert ib.flow_last_retained(42)
+            ib.flow_wire.release_last(underlying.conId)
         row = b.store.event(event["session"], event["symbol"])
         detail = row["detail"]
         if isinstance(detail, str):

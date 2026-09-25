@@ -20,3 +20,7 @@ quote_max_age_seconds: 5
 entry_deadline_seconds: 180
 exit_seconds_before_close: 120
 exit_order: MARKET
+
+# Optional observations never grant order authority or become an entry prerequisite.
+order_flow:
+  enabled: false

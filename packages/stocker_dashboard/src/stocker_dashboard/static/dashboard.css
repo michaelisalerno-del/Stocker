@@ -565,3 +565,20 @@ dialog::backdrop {
   color: #36544b;
   font: 11px/1.5 var(--mono);
 }
+
+.flow-card { border-top: 1px solid var(--border, #ddd); margin-top: 18px; padding-top: 12px; font-size: 0.8rem; overflow-wrap: anywhere; }
+.flow-card h4 { margin: 0 0 8px; }
+.flow-stack { display: flex; height: 12px; background: #deddd7; border-radius: 3px; overflow: hidden; margin-bottom: 7px; }
+.flow-buy, .flow-buy-bar { background: #27856b; fill: #27856b; }
+.flow-sell, .flow-sell-bar { background: #c36a37; fill: #c36a37; }
+.flow-unknown, .flow-unknown-bar { background: #a3a4ac; fill: #a3a4ac; }
+.flow-warning { color: #97542e; }
+.flow-chart-scroll { overflow-x: auto; border: 1px solid #d5d5d2; margin: 12px 0; }
+.flow-charts { min-width: 760px; }
+.flow-charts svg { display: block; width: 100%; height: 180px; }
+.flow-axis { fill: #64666b; font: 12px sans-serif; }
+.flow-grid { stroke: #ddd; stroke-width: 0.6; }
+.flow-gap { fill: #d9924f; opacity: 0.15; }
+.flow-line { stroke: #345b77; stroke-width: 1.6; }
+.flow-point { fill: #345b77; }
+#flow-zoom { max-width: 240px; vertical-align: middle; }

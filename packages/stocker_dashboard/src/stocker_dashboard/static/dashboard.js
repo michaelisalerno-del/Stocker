@@ -112,11 +112,13 @@ function cardShell(slot) {
     <dl><div><dt data-field="seen-label">Seen</dt><dd data-field="seen">—</dd></div><div><dt data-field="entry-label">Scheduled entry</dt><dd data-field="entry">—</dd></div><div><dt data-field="trigger-label">PRIOR15 / rank</dt><dd data-field="trigger">—</dd></div></dl>
     <p class="next-step" data-field="next">Awaiting a qualifying first appearance.</p>
     <details><summary>Timing &amp; held legs</summary><dl>${pair("Anchor", "anchor")}${pair("Actual fill", "fill")}${pair("Exit", "exit")}${pair("Elapsed / until exit", "elapsed")}${pair("Actual premium paid", "premium")}${pair("Fees", "fees")}${pair("Remaining legs", "legs")}${pair("Return on actual premium paid", "return")}</dl><small data-field="caveat">—</small></details>
+    ${First4Flow.cardShell()}
     <button class="secondary allocation-detail" disabled>Allocation evidence</button></article>`;
 }
 function evidenceShell() {
   return `<section id="evidence" class="section evidence" hidden><div class="section-head"><h2 id="evidence-title">Allocation evidence</h2><button id="close-detail" class="secondary">Close detail</button></div>
     <p id="detail-receipt" class="muted"></p><p id="detail-error" class="warning" hidden></p><button id="reload-detail" class="secondary">Refresh detail</button>
+    ${First4Flow.detailShell()}
     <h3>Order reservations &amp; broker status</h3>${tableShell("detail-orders", ["Reference", "Role", "Broker order ID", "Status", "Completion verified"])}
     <h3>Quoted comparisons — not broker P&amp;L</h3>${tableShell("detail-quotes", ["Order", "Entry ask for exit legs", "Exit bid", "Quoted gross difference"])}
     <h3>Actual PAPER leg executions</h3>${tableShell("detail-fills", ["Execution", "Contract ID", "Side", "Quantity", "Price", "Multiplier", "Commission", "Time", "Superseded"])}
@@ -353,6 +355,7 @@ function renderSlots(items) {
           ? `Actual PAPER fills. ${item.fees_complete ? "All commissions reported." : "Return is provisional until commissions arrive."}`
           : "Selection does not imply a fill or an open position.",
     );
+    First4Flow.renderCard(card, item?.order_flow);
     const button = card.querySelector("button");
     button.disabled = !allocated;
     button.onclick = () => openDetail(item.session, item.symbol, button);
@@ -731,6 +734,7 @@ async function openDetail(session, symbol, trigger, offset = 0) {
         r.superseded ? "Yes" : "No",
       ],
     );
+    First4Flow.renderDetail(data.order_flow, changed);
     text($("#detail-json"), JSON.stringify(data, null, 2));
     text(
       $("#detail-receipt"),

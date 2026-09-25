@@ -5,9 +5,46 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 PAPER_ACCOUNT = "DUP655399"
+
+
+class OrderFlowConfig(BaseModel):
+    """Optional evidence only; budgets are operator-confirmed spare entitlement."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+    enabled: bool = False
+    order_authoritative: Literal[False] = False
+    may_submit_orders: Literal[False] = False
+    max_stocks: int = Field(default=4, ge=0, le=4)
+    feed_mode: Literal["TBT_TRADES_TBT_QUOTES", "TBT_TRADES_L1_QUOTES"] = "TBT_TRADES_TBT_QUOTES"
+    available_tbt: int = Field(default=0, ge=0, le=1000)
+    reserved_tbt: int = Field(default=4, ge=4, le=1000)
+    available_l1: int = Field(default=0, ge=0, le=10000)
+    reserved_l1: int = Field(default=16, ge=16, le=10000)
+    quote_age_ms: int = Field(default=1000, ge=1, le=60000)
+    stale_seconds: int = Field(default=30, ge=1, le=300)
+    raw_path: Path = Path("data/first4-order-flow")
+    max_storage_bytes: int = Field(default=2_000_000_000, ge=1_000_000)
+    min_free_bytes: int = Field(default=1_000_000_000, ge=1_000_000)
+    queue_events: int = Field(default=8192, ge=16, le=65536)
+    batch_events: int = Field(default=512, ge=1, le=2048)
+    flush_seconds: float = Field(default=0.25, ge=0.05, le=1)
+    max_segments_per_stock: int = Field(default=16, ge=1, le=32)
+
+    @model_validator(mode="after")
+    def bounded_batch(self) -> "OrderFlowConfig":
+        if self.batch_events > self.queue_events:
+            raise ValueError("order_flow batch_events must not exceed queue_events")
+        return self
+
+    def stock_capacity(self) -> int:
+        cost = 2 if self.feed_mode == "TBT_TRADES_TBT_QUOTES" else 1
+        capacity = max(0, self.available_tbt - self.reserved_tbt) // cost
+        if self.feed_mode == "TBT_TRADES_L1_QUOTES":
+            capacity = min(capacity, max(0, self.available_l1 - self.reserved_l1))
+        return min(self.max_stocks, capacity)
 
 
 class First4Config(BaseModel):
@@ -18,6 +55,7 @@ class First4Config(BaseModel):
     host: Literal["127.0.0.1"] = "127.0.0.1"
     port: int = Field(default=4003, ge=1, le=65535)
     client_id: Literal[81] = 81
+    order_flow: OrderFlowConfig = Field(default_factory=OrderFlowConfig)
     armed: bool = False
     # Explicit, single-session permission to arm only after the opening check.
     arm_after_quote_check_on: date | None = None

@@ -1,5 +1,6 @@
 """Authenticated, bounded FIRST4 ledger views and independent health."""
 
+import asyncio
 import json
 import sqlite3
 from datetime import date
@@ -100,10 +101,16 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         row = runtime.store.db.execute("SELECT MAX(session) FROM first4_sessions").fetchone()
         return str(row[0] or "")
 
+    async def with_flow(items: list[dict[str, Any]], day: str) -> list[dict[str, Any]]:
+        views = await asyncio.gather(
+            *(runtime.order_flow.view(day, item["con_id"]) for item in items)
+        )
+        return [{**item, "order_flow": view} for item, view in zip(items, views, strict=True)]
+
     @app.get("/api/overview")
     async def overview(session: date | None = None) -> dict[str, Any]:
         day = selected_session(session)
-        items = allocations(runtime.store, day)
+        items = await with_flow(allocations(runtime.store, day), day)
         by_slot = {item["slot"]: item for item in items}
         return {
             "system": status(),
@@ -139,7 +146,7 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
     @app.get("/api/execution")
     async def execution(session: date | None = None) -> dict[str, Any]:
         day = selected_session(session)
-        items = allocations(runtime.store, day)
+        items = await with_flow(allocations(runtime.store, day), day)
         return {"system": status(), "session": day, "allocations": items, "pnl": economics(items)}
 
     @app.get("/api/detail")
@@ -177,6 +184,7 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         evidence["detail"] = json.loads(evidence["detail"] or "{}")
         return {
             "event": evidence,
+            "order_flow": await runtime.order_flow.view(day, event["con_id"], detail=True),
             "orders": orders,
             "fills": fills,
             "offset": offset,

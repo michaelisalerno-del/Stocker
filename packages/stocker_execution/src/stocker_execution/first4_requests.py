@@ -12,6 +12,8 @@ from typing import Any, cast
 
 from ib_async import IB, ScanDataList, TickAttribLast, Ticker, util
 
+from stocker_execution.first4_flow_wire import FlowWire, LastLease
+
 
 class First4IB(IB):
     RaiseRequestErrors = True
@@ -25,6 +27,31 @@ class First4IB(IB):
         # packet receipt time. Adapt only this instance, before any connection.
         self._original_trade_tick = self.wrapper.tickByTickAllLast
         self.wrapper.tickByTickAllLast = self.trade_tick
+        self.flow_wire = FlowWire(self)
+
+    def reqTickByTickData(
+        self, contract: Any, tickType: str, numberOfTicks: int = 0, ignoreSize: bool = False
+    ) -> Ticker:
+        if tickType == "Last" and (lease := self.flow_wire.valid_last(contract.conId)):
+            lease.entry = True
+            return cast(Ticker, lease.ticker)
+        ticker = super().reqTickByTickData(contract, tickType, numberOfTicks, ignoreSize)
+        self.flow_wire.mark_requested(contract.conId)
+        if tickType == "Last":
+            req = self.wrapper.ticker2ReqId["Last"][ticker]
+            self.flow_wire.lasts[contract.conId] = LastLease(ticker, req)
+        return ticker
+
+    def cancelTickByTickData(self, contract: Any, tickType: str) -> bool:
+        if tickType == "Last" and (lease := self.flow_wire.lasts.get(contract.conId)):
+            lease.entry = False
+            if not lease.observer:
+                self.flow_wire.end_last(contract.conId)
+            return True
+        return super().cancelTickByTickData(contract, tickType)
+
+    def flow_last_retained(self, request_id: int) -> bool:
+        return any(x.request_id == request_id and x.observer for x in self.flow_wire.lasts.values())
 
     def trade_tick(
         self,
@@ -37,6 +64,9 @@ class First4IB(IB):
         exchange: str,
         conditions: str,
     ) -> None:
+        self.flow_wire.trade(
+            request_id, tick_type, timestamp, price, size, attributes, exchange, conditions
+        )
         self._original_trade_tick(
             request_id, tick_type, timestamp, price, size, attributes, exchange, conditions
         )

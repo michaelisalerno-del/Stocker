@@ -16,6 +16,7 @@ from stocker_data.calendars import get_market_calendar
 from stocker_execution.first4 import METHOD, Bar, prior15
 from stocker_execution.first4_broker import OptionChainError, PaperBroker, now
 from stocker_execution.first4_config import First4Config
+from stocker_execution.first4_flow_observer import FlowObserver
 from stocker_execution.first4_readiness import option_access
 from stocker_execution.first4_store import Store
 
@@ -55,6 +56,7 @@ class Runtime:
         self.critical_tasks: set[asyncio.Task[None]] = set()
         self.stopping = False
         self.opening_active = False
+        self.order_flow = FlowObserver(self)
 
     def status(self) -> dict[str, Any]:
         available = True
@@ -344,7 +346,8 @@ class Runtime:
                             anchor.exception()  # Retrieve errors even if chain lookup failed first.
                     if request_id is not None:
                         self.broker.ib.finish_request(request_id)
-                        self.broker.ib.wrapper.reqId2Ticker.pop(request_id, None)
+                        if not self.broker.ib.flow_last_retained(request_id):
+                            self.broker.ib.wrapper.reqId2Ticker.pop(request_id, None)
 
     async def scan(
         self,
@@ -397,6 +400,13 @@ class Runtime:
             task = asyncio.create_task(self.execute(event, contracts[event["con_id"]]))
             self.tasks.add(task)
             task.add_done_callback(self.execution_done)
+        if self.config.order_flow.enabled:
+            try:
+                for event in selected:
+                    self.order_flow.allocate(event, contracts[event["con_id"]])
+            except Exception as exc:
+                self.order_flow.problem = "ALLOCATION_CAPTURE_FAILED: " + str(exc)
+                log.exception("Optional observation allocation failed")
 
     def execution_done(self, task: asyncio.Task[None]) -> None:
         self.tasks.discard(task)
@@ -451,6 +461,7 @@ class Runtime:
         opening = asyncio.create_task(self.critical("opening", self.arm_at_open))
         scanner = asyncio.create_task(self.critical("worker", self.scan_sessions))
         self.critical_tasks = {manager, opening, scanner}
+        observer = asyncio.create_task(self.order_flow.run())
         try:
             watched = set(self.critical_tasks)
             while watched:
@@ -462,6 +473,8 @@ class Runtime:
             self.stopping = True
             self.broker.management_block = self.broker.management_block or "WORKER_STOPPED"
             await self.cancel_tasks(self.critical_tasks | self.tasks)
+            observer.cancel()
+            await asyncio.gather(observer, return_exceptions=True)
             self.mark_stopped()
 
     def mark_stopped(self) -> None:

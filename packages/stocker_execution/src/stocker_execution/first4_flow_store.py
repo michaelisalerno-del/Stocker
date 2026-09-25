@@ -170,7 +170,7 @@ class FlowWriter:
                                 cid,
                                 metadata["session"],
                                 metadata["con_id"],
-                                metadata["requested_at"],
+                                metadata.get("segment_requested_at", metadata["requested_at"]),
                                 json.dumps({**metadata, **snapshot}),
                             ),
                         )
@@ -226,7 +226,7 @@ def read_flow(root: Path, session: str, con_id: int) -> dict[str, Any]:
             json.loads(row[0])
             for row in db.execute(
                 "SELECT payload FROM captures WHERE session=? AND con_id=? "
-                "ORDER BY requested_at DESC LIMIT 32",
+                "ORDER BY requested_at DESC,rowid DESC LIMIT 32",
                 (session, con_id),
             )
         ]
@@ -235,7 +235,7 @@ def read_flow(root: Path, session: str, con_id: int) -> dict[str, Any]:
             for row in db.execute(
                 "SELECT m.capture_id,m.payload FROM captures c JOIN minutes m USING(capture_id) "
                 "WHERE c.session=? AND c.con_id=? "
-                "ORDER BY m.minute DESC,c.requested_at DESC LIMIT 400",
+                "ORDER BY m.minute DESC,c.requested_at DESC,c.rowid DESC LIMIT 400",
                 (session, con_id),
             )
         ]

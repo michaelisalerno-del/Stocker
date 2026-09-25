@@ -58,12 +58,15 @@ class Capture:
     terminal: bool = False
     pending_stop: bool = False
     stale: bool = False
+    gap_count: int = 0
     errors: list[dict[str, Any]] = field(default_factory=list)
 
     def emit(self, request: int, kind: str, **values: Any) -> None:
         """Callback: immutable copy + bounded enqueue only; exceptions stay optional."""
         try:
             observer = self.observer
+            if self.ended_at:
+                return
             if kind not in {"gap", "end"} and (
                 self.pending_stop
                 or self.ended_at
@@ -77,6 +80,13 @@ class Capture:
                 self.event["close_at"]
             ):
                 return
+            if kind == "gap":
+                if self.gap_count >= 63:
+                    kind, values = "end", {"reason": "CAPTURE_GAP_LIMIT"}
+                    self.state, self.reason = "PARTIAL_COVERAGE", "CAPTURE_GAP_LIMIT"
+                    self.pending_stop = self.terminal = True
+                else:
+                    self.gap_count += 1
             self.sequence += 1
             event = FlowEvent(
                 self.capture_id,
@@ -95,6 +105,8 @@ class Capture:
                 self.state, self.reason = "STORAGE_ERROR", "CAPTURE_QUEUE_OR_WRITER_UNAVAILABLE"
                 self.pending_stop = self.terminal = True
                 return
+            if kind == "end":
+                self.ended_at = event.received_at
             if kind in {"quote", "trade"}:
                 self.first_received_at = self.first_received_at or event.received_at
                 if kind == "trade":
@@ -169,6 +181,7 @@ class FlowObserver:
         capture.last_trade_at = capture.last_quote_at = None
         capture.pending_stop = False
         capture.stale = False
+        capture.gap_count = 0
         capture.segment_requested_at = utc_now().isoformat()
         capture.state, capture.reason = "STARTING", "WAITING_FOR_TRADE_AND_QUOTE"
         metadata = {
@@ -246,67 +259,87 @@ class FlowObserver:
                     )
                     self.captures[event["con_id"]].segments = len(prior["captures"])
         for capture in sorted(self.captures.values(), key=lambda c: c.event["slot"]):
-            if capture.terminal or capture.pending_stop:
-                if not capture.capture_id and self.writer and not self.writer.error:
-                    state, reason = capture.state, capture.reason
-                    await self.start_capture(capture, subscribe=False)
-                    capture.state, capture.reason = state, reason
-                self.finish(capture, capture.reason)
-                continue
-            if self.writer and self.writer.error:
-                capture.state, capture.reason = "STORAGE_ERROR", self.writer.error
+            try:
+                await self.step_capture(capture, current)
+            except Exception as exc:
+                capture.state, capture.reason = (
+                    "PARTIAL_COVERAGE",
+                    "OBSERVER_REQUEST_FAILED:" + str(exc),
+                )
                 capture.terminal = True
-                self.finish(capture, capture.reason)
-                continue
-            if current >= datetime.fromisoformat(capture.event["close_at"]):
-                capture.state, capture.reason = "PARTIAL_COVERAGE", "REGULAR_SESSION_ENDED"
-                capture.terminal = True
-                self.finish(capture, capture.reason)
-                continue
-            if not self.available() or (
-                capture.trade_request is not None
-                and capture.generation != self.broker.data_generation
+                try:
+                    self.finish(capture, capture.reason)
+                except Exception:
+                    log.exception("Optional capture cleanup failed for %s", capture.event["symbol"])
+                log.warning("Optional capture failed for %s: %s", capture.event["symbol"], exc)
+
+    async def step_capture(self, capture: Capture, current: datetime) -> None:
+        if capture.terminal or capture.pending_stop:
+            if not capture.capture_id and self.writer and not self.writer.error:
+                state, reason = capture.state, capture.reason
+                await self.start_capture(capture, subscribe=False)
+                capture.state, capture.reason = state, reason
+            self.finish(capture, capture.reason)
+            return
+        if self.writer and self.writer.error:
+            capture.state, capture.reason = "STORAGE_ERROR", self.writer.error
+            capture.terminal = True
+            self.finish(capture, capture.reason)
+            return
+        if current >= datetime.fromisoformat(capture.event["close_at"]):
+            capture.state, capture.reason = "PARTIAL_COVERAGE", "REGULAR_SESSION_ENDED"
+            capture.terminal = True
+            self.finish(capture, capture.reason)
+            return
+        if not self.available() or (
+            capture.trade_request is not None and capture.generation != self.broker.data_generation
+        ):
+            capture.state, capture.reason = "STALE_OR_DISCONNECTED", "SHARED_DATA_INTERRUPTION"
+            self.finish(capture, capture.reason)
+            return
+        wire = self.broker.ib.flow_wire
+        if capture.trade_request is None:
+            if wire.valid_last(capture.event["con_id"]) is None and wire.remaining_pacing(
+                capture.event["con_id"]
             ):
-                capture.state, capture.reason = "STALE_OR_DISCONNECTED", "SHARED_DATA_INTERRUPTION"
-                self.finish(capture, capture.reason)
-                continue
-            wire = self.broker.ib.flow_wire
+                return
+            await self.start_capture(capture)
             if capture.trade_request is None:
-                if wire.valid_last(capture.event["con_id"]) is None and wire.remaining_pacing(
-                    capture.event["con_id"]
-                ):
-                    continue
-                await self.start_capture(capture)
-            if capture.quote_request is None and capture.trade_request is not None:
-                if self.config.feed_mode == "TBT_TRADES_TBT_QUOTES" and wire.remaining_pacing(
-                    capture.event["con_id"]
-                ):
-                    capture.state, capture.reason = "PARTIAL_COVERAGE", "QUOTE_REQUEST_PACING_WAIT"
-                    continue
-                capture.quote_request = wire.quote_request(
-                    capture.contract, self.config.feed_mode, capture.emit
-                )
-            if (
-                not capture.first_received_at
-                and capture.segment_requested_at
-                and (current - datetime.fromisoformat(capture.segment_requested_at)).total_seconds()
-                > self.config.stale_seconds
+                return
+        if capture.quote_request is None and capture.trade_request is not None:
+            if self.config.feed_mode == "TBT_TRADES_TBT_QUOTES" and wire.remaining_pacing(
+                capture.event["con_id"]
             ):
-                capture.state, capture.reason = "STALE_OR_DISCONNECTED", "NO_OBSERVED_EVENTS"
-            if capture.first_received_at:
-                stamps = [capture.last_trade_at, capture.last_quote_at]
-                fresh = all(
-                    s
-                    and 0
-                    <= (current - datetime.fromisoformat(s)).total_seconds()
-                    <= self.config.stale_seconds
-                    for s in stamps
-                )
-                if not fresh and not capture.stale:
-                    capture.emit(-1, "gap", reason="FRESHNESS_UNVERIFIED")
-                capture.stale = not fresh
-                capture.state = "COLLECTING_ESTIMATED_FLOW" if fresh else "STALE_OR_DISCONNECTED"
-                capture.reason = "" if fresh else "TRADE_OR_QUOTE_FRESHNESS_UNVERIFIED"
+                capture.state, capture.reason = "PARTIAL_COVERAGE", "QUOTE_REQUEST_PACING_WAIT"
+                return
+            capture.quote_request = wire.quote_request(
+                capture.contract, self.config.feed_mode, capture.emit
+            )
+        if (
+            not capture.first_received_at
+            and capture.segment_requested_at
+            and (current - datetime.fromisoformat(capture.segment_requested_at)).total_seconds()
+            > self.config.stale_seconds
+        ):
+            capture.state, capture.reason = "STALE_OR_DISCONNECTED", "NO_OBSERVED_EVENTS"
+        if capture.first_received_at:
+            stamps = [capture.last_trade_at, capture.last_quote_at]
+            fresh = all(
+                s
+                and 0
+                <= (current - datetime.fromisoformat(s)).total_seconds()
+                <= self.config.stale_seconds
+                for s in stamps
+            )
+            if not fresh and not capture.stale:
+                capture.emit(-1, "gap", reason="FRESHNESS_UNVERIFIED")
+            if fresh and capture.stale:
+                capture.emit(-1, "resume", reason="FRESH_TRADE_AND_QUOTE_OBSERVED")
+            if capture.terminal or capture.pending_stop:
+                return
+            capture.stale = not fresh
+            capture.state = "COLLECTING_ESTIMATED_FLOW" if fresh else "STALE_OR_DISCONNECTED"
+            capture.reason = "" if fresh else "TRADE_OR_QUOTE_FRESHNESS_UNVERIFIED"
 
     async def run(self) -> None:
         if not self.config.enabled:
@@ -354,6 +387,8 @@ class FlowObserver:
         captures = evidence["captures"]
         capture = self.captures.get(con_id) if session == self.session else None
         latest = captures[-1] if captures else {}
+        if capture and capture.capture_id:
+            latest = next((row for row in captures if row["capture_id"] == capture.capture_id), {})
         stamp = utc_now()
         if latest:
             base.update(latest)
@@ -376,7 +411,7 @@ class FlowObserver:
             )
         if self.problem or (self.writer and self.writer.error):
             base.update(
-                state="STORAGE_ERROR",
+                state="STORAGE_ERROR" if self.writer and self.writer.error else "PARTIAL_COVERAGE",
                 reason=self.problem or (self.writer.error if self.writer else ""),
             )
         if not self.config.enabled:
@@ -402,17 +437,28 @@ class FlowObserver:
             base["uncommitted_events"] = self.writer.uncommitted_events
             base["queue_high_water"] = self.writer.high_water
         first = base.get("first_received_at")
-        base["coverage_duration_seconds"] = (
+        coverage_end = base.get("ended_at") or (
+            stamp.isoformat() if capture and not capture.ended_at else base.get("last_received_at")
+        )
+        duration = (
             max(
                 0,
                 (
-                    datetime.fromisoformat(base.get("ended_at") or stamp.isoformat())
-                    - datetime.fromisoformat(first)
+                    datetime.fromisoformat(coverage_end) - datetime.fromisoformat(first)
                 ).total_seconds(),
             )
-            if first
+            if first and coverage_end
             else 0
         )
+        for gap in latest.get("gaps", []):
+            if first and coverage_end:
+                gap_start = max(datetime.fromisoformat(first), datetime.fromisoformat(gap["at"]))
+                gap_end = min(
+                    datetime.fromisoformat(coverage_end),
+                    datetime.fromisoformat(gap.get("end_at") or coverage_end),
+                )
+                duration -= max(0, (gap_end - gap_start).total_seconds())
+        base["coverage_duration_seconds"] = max(0, duration)
         base["pre_capture_gap_seconds"] = (
             max(
                 0,
@@ -424,6 +470,20 @@ class FlowObserver:
             else None
         )
         base["coverage_warning"] = "Capture starts after allocation; gaps are not zero activity."
+        gap_intervals = []
+        for row in captures:
+            segment_end = row.get("ended_at") or (
+                stamp.isoformat()
+                if capture and row["capture_id"] == capture.capture_id
+                else row.get("last_received_at")
+            )
+            if segment_end:
+                for gap in row.get("gaps", []):
+                    end = min(
+                        datetime.fromisoformat(segment_end),
+                        datetime.fromisoformat(gap.get("end_at") or segment_end),
+                    )
+                    gap_intervals.append((datetime.fromisoformat(gap["at"]), end))
         cutoff = stamp.replace(second=0, microsecond=0)
         # Rolling windows advance on completed receipt-minute boundaries.
         for name, seconds in (("rolling_1m", 60), ("rolling_5m", 300)):
@@ -445,6 +505,15 @@ class FlowObserver:
                     len({b["minute"] for b in selected}) < seconds // 60
                     or any(b.get("has_gap") for b in selected)
                     or len({b["capture_id"] for b in selected}) > 1
+                    or not first
+                    or datetime.fromisoformat(first) > cutoff - timedelta(seconds=seconds)
+                    or not coverage_end
+                    or datetime.fromisoformat(coverage_end) < cutoff
+                    or any(
+                        start < cutoff and end > cutoff - timedelta(seconds=seconds)
+                        for start, end in gap_intervals
+                        if end > start
+                    )
                 )
         base["last_completed_minute"] = base["rolling_1m"]
         base["observation_state"] = (

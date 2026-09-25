@@ -172,7 +172,7 @@ async def trial(root: Path, enabled: bool, packets: int = 1000) -> dict:
         if enabled:
             result["raw_replay_matches"] = all(
                 all(
-                    c["saved_totals_match"]
+                    c["saved_totals_match"] and c["saved_minutes_match"]
                     for c in replay(root / "flow", runtime.session, i)["captures"]
                 )
                 for i in range(1, 5)

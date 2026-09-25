@@ -35,12 +35,20 @@ class First4IB(IB):
         if tickType == "Last" and (lease := self.flow_wire.valid_last(contract.conId)):
             lease.entry = True
             return cast(Ticker, lease.ticker)
-        ticker = super().reqTickByTickData(contract, tickType, numberOfTicks, ignoreSize)
+        if tickType != "Last":
+            ticker = super().reqTickByTickData(contract, tickType, numberOfTicks, ignoreSize)
+            self.flow_wire.mark_requested(contract.conId)
+            return ticker
+        req = self.client.getReqId()
+        ticker = self.wrapper.startTicker(req, contract, "Last")
+        self.flow_wire.lasts[contract.conId] = LastLease(ticker, req)
         self.flow_wire.mark_requested(contract.conId)
-        if tickType == "Last":
-            req = self.wrapper.ticker2ReqId["Last"][ticker]
-            self.flow_wire.lasts[contract.conId] = LastLease(ticker, req)
-        return ticker
+        try:
+            self.client.reqTickByTickData(req, contract, "Last", numberOfTicks, ignoreSize)
+        except Exception:
+            self.flow_wire.end_last(contract.conId)
+            raise
+        return cast(Ticker, ticker)
 
     def cancelTickByTickData(self, contract: Any, tickType: str) -> bool:
         if tickType == "Last" and (lease := self.flow_wire.lasts.get(contract.conId)):

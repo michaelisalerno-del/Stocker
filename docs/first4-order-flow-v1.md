@@ -1,7 +1,8 @@
 # FIRST4 order-flow observation V1
 
-Status: implementation verification in progress. No broker connection, subscription purchase,
-operational config change, arming, deployment or service restart is part of this task.
+Status: **IMPLEMENTED_AND_OFFLINE_TESTED**. **CONNECTED_AND_RECORDING_VERIFIED: no**.
+No broker connection, subscription purchase, operational config change, arming, deployment or
+service restart was performed.
 Source: `main`, `95685c0bdc22a2cbd7f4f1efd8de25cf0b6f9d50`.
 Branch: `codex/first4-order-flow-v1`.
 
@@ -105,8 +106,10 @@ Each tape header records classification version, configuration, source commit, a
 
 Defaults: **2 GB** observer-directory budget; **1 GB** free-disk reserve; **16 KB** maximum encoded raw
 record; **4** active reducers; **400** minute bins per segment; **16** segments per stock/session (max 32);
-**64** gap markers per segment; **10,000** files at startup. Limits stop capture explicitly and never
-prune evidence. Summary queries use indexed session/conId lookup, at most 32 captures and 400 minute
+**63** nonterminal gap markers plus a terminal end marker per segment; **10,000** files at startup. Limits stop capture explicitly and never
+prune evidence. A per-stock gap/segment limit stops that stock, not the shared writer or other stocks.
+Open stale gaps continue marking affected minutes until an explicit resume; coverage duration excludes
+recorded gaps and stops at the last evidence on an interrupted restart. Summary queries use indexed session/conId lookup, at most 32 captures and 400 minute
 rows, off the event loop. Raw directory inspection occurs only at writer startup/offline replay.
 
 Queue overflow stops collection, preserving queued evidence where writable and reporting dropped
@@ -138,7 +141,12 @@ For a **separately authorised** PAPER activation, copy the existing PAPER config
 `order_flow` from `configs/first4-order-flow.paper.example.yaml`. Set the actual available/reserved
 budgets, desired mode/max stocks and approved capture path. Do not change `armed`, dated opening checks,
 account settings, ports, order rules or LIVE restrictions. The example's eight TBT slots are illustrative.
-Validate the copied config offline with `stocker_execution.first4_config.load(Path(...))` before use.
+Validate the copied config offline before use:
+
+```sh
+uv run --no-sync python -c 'import sys; from pathlib import Path; from stocker_execution.first4_config import load; c=load(Path(sys.argv[1])); print(c.order_flow.model_dump(mode="json"))' /path/to/reviewed-paper.yaml
+```
+
 Use the existing launcher with that reviewed config when separately authorised:
 
 ```sh
@@ -158,5 +166,82 @@ and sustained recording through a real regular/early close. No CONNECTED_AND_REC
 
 ## Verification
 
-Commands and measured results will be recorded here after final review. Fixtures use temporary stores,
-fake wire callbacks and intercepted browser responses. Screenshot imagery is explicitly synthetic.
+Fixtures use temporary stores, fake wire callbacks and intercepted browser responses. No test connects
+to IBKR. Results on macOS 26.6.2 arm64, Python 3.12.13, pinned ib_async 2.1.0 and Playwright 1.62.1:
+
+| Check | Actual result |
+| --- | --- |
+| `rtk .venv/bin/pytest` | **629 passed in 59.30 s**, including FIRST4 regression tests and 43 dedicated order-flow tests |
+| `rtk .venv/bin/ruff check .` | Passed |
+| `rtk .venv/bin/ruff format --check .` | 201 files already formatted |
+| `rtk .venv/bin/mypy packages apps` | Passed, 113 source files |
+| `rtk git diff --check` | Passed |
+| `node tests/dashboard_first4.cjs` | SLRNO browser acceptance passed with mocked endpoints and bundled pinned Playwright |
+
+The Python suite emitted five existing warnings: one Starlette/httpx deprecation and four NumPy empty-slice
+warnings in behavioral-state tests. Browser checks retained selection, expanded card, horizontal scroll
+(260 to 260), detail chart zoom and scroll. Maximum concurrent refreshes: 1; requests while hidden for
+60 seconds: 0; unchanged main-content mutations: 0. Existing polling rates remain 12/4/12/2 requests per
+minute for overview/opportunities/execution/system. Flow rendering has no broker calls.
+
+For a normal installed Node/Playwright environment, reproduce browser validation without overwriting
+existing screenshots using:
+
+```sh
+STOCKER_SCREENSHOT_DIR=/tmp/first4-flow-ui rtk npm test
+```
+
+This run used the Codex bundled Node executable and `NODE_PATH` for the same pinned Playwright version.
+[Fixture screenshot](first4-order-flow-fixture.png) shows synthetic evidence, three separately labelled
+axes, unknown volume and a gap. It is not broker recording evidence.
+
+### Measured performance
+
+Reproduce with `rtk .venv/bin/python scripts/first4_order_flow_benchmark.py`.
+[All six trial results](first4-order-flow-benchmark.json) retain measurements without rounding.
+Each enabled trial sends 4,000 trades and 4,000 quotes across four stocks in 1,000 packets, concurrently
+with four real FIRST4 entry coroutines using a fake broker, plus a cooperative event-loop yield probe.
+The disabled comparison sends the same trades without optional quote callbacks or recording.
+
+| Measurement (three trials) | Observer disabled | Observer enabled |
+| --- | --- | --- |
+| Median callback duration | 1.625–1.708 μs | 9.166–9.375 μs |
+| p99 callback duration | 2.000–2.583 μs | 20.334–29.416 μs |
+| Worst callback | 249.542 μs | 5,873.667 μs |
+| Median loop yield interval | 0.111–0.116 ms | 0.817–0.846 ms |
+| Maximum loop yield interval | 0.742–14.063 ms | 7.800–8.088 ms |
+| Complete burst duration | 12.38–25.36 ms | 111.37–127.45 ms |
+| Maximum queue depth | 0 | 5,960 of 8,192 |
+| Maximum queue latency | N/A | 369.617 ms |
+| Dropped events | 0 | 0 |
+
+All trials completed four entry preparations with identical anchor prices. All enabled trials replayed
+saved classifications, totals and minute bars exactly; there were no writer errors. The observer has
+measurable CPU/queue overhead. Host scheduling produced outliers in both configurations; this cooperative
+probe does not establish production position-management latency or real-broker sustained throughput.
+
+### Standards review
+
+Resolved both findings: isolate a stock's request exception from other captures; stop only the affected
+stock at its gap limit. A follow-up terminal-reason overwrite was also fixed and regression tested.
+
+### Spec review
+
+Resolved all three findings: give reconnect segments deterministic ordering and never relabel older totals;
+flag mid-minute starts as partial; keep ongoing stale gaps visible and avoid growing interrupted coverage
+on restart. Both reviews used the source commit above as their fixed baseline.
+
+## Changed files
+
+- Execution: `first4_config.py`, `first4_requests.py`, `first4_runtime.py`; new
+  `first4_flow.py`, `first4_flow_wire.py`, `first4_flow_observer.py`, `first4_flow_store.py`
+  under `packages/stocker_execution/src/stocker_execution/`.
+- Dashboard: `app.py`, `views.py`, `static/dashboard.js`, `static/dashboard.css`, `static/index.html`;
+  new `static/order-flow.js` under `packages/stocker_dashboard/src/stocker_dashboard/`.
+- Configuration examples: `configs/first4.example.yaml`, `configs/first4-order-flow.paper.example.yaml`.
+- Verification: `tests/test_first4_order_flow.py`, `tests/test_first4_operational.py`,
+  `tests/dashboard_first4.cjs`, `scripts/first4_order_flow_benchmark.py`.
+- Handover: this document, `docs/first4-order-flow-benchmark.json`, `docs/first4-order-flow-fixture.png`.
+
+`first4_broker.py`, the execution store/ledger schema, pinned dependencies and operational configurations
+are unchanged. The separate frozen three-scanner experiment was not modified.

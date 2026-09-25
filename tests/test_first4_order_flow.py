@@ -472,3 +472,159 @@ def test_shared_competing_session_error_still_blocks_existing_broker(tmp_path, m
         flow.finish(capture, "TEST_END")
     flow.writer.close()
     ib.errorEvent -= flow.error
+
+
+def test_one_stock_request_failure_does_not_stop_other_captures(tmp_path, monkeypatch):
+    async def check():
+        flow, ib, clock = observer(tmp_path, monkeypatch)
+
+        def request(req, contract, *args):
+            if contract.conId == 1:
+                raise ValueError("synthetic per-stock request rejection")
+
+        ib.client.reqTickByTickData.side_effect = request
+        await flow.step()
+        assert flow.captures[1].terminal
+        assert flow.captures[2].trade_request is not None
+        assert not flow.problem and not flow.writer.error
+        assert 1 not in ib.flow_wire.lasts
+        for c in flow.captures.values():
+            flow.finish(c, "TEST_END")
+        flow.writer.close()
+        assert not flow.writer.error
+
+    asyncio.run(check())
+
+
+def test_gap_limit_is_per_stock_and_late_callbacks_cannot_reopen_capture(tmp_path, monkeypatch):
+    async def check():
+        flow, ib, clock = observer(tmp_path, monkeypatch)
+        await flow.step()
+        c = flow.captures[1]
+        for _ in range(64):
+            c.emit(-1, "gap", reason="synthetic stale")
+            c.emit(-1, "resume", reason="synthetic fresh")
+        assert c.terminal and c.reason == "CAPTURE_GAP_LIMIT"
+        seq = c.sequence
+        c.emit(-1, "gap", reason="after end")
+        assert c.sequence == seq
+        await flow.step()
+        assert flow.captures[2].trade_request is not None and not flow.writer.error
+        for c in flow.captures.values():
+            flow.finish(c, "TEST_END")
+        flow.writer.close()
+        assert not flow.writer.error
+
+    asyncio.run(check())
+
+
+def test_reconnect_segment_sort_uses_segment_time_and_never_relabels_old_totals(
+    tmp_path, monkeypatch
+):
+    async def check():
+        flow, ib, clock = observer(tmp_path, monkeypatch)
+        await flow.step()
+        c = flow.captures[1]
+        old_id = c.capture_id
+        c.emit(c.trade_request, "trade", tick_type=1, price=10, size=17)
+        flow.finish(c, "DISCONNECT")
+        clock[0] += timedelta(minutes=1)
+        ib.flow_wire.requested[1] -= 16
+        await flow.start_capture(c)
+        assert c.capture_id != old_id
+        # First flush may still contain old capture evidence. Never relabel it.
+        v = await flow.view("2026-09-25", 1)
+        assert v.get("totals", {}).get("unknown_volume", 0) == 0
+        c.emit(c.trade_request, "trade", tick_type=1, price=10, size=23)
+        for item in flow.captures.values():
+            flow.finish(item, "TEST_END")
+        flow.writer.close()
+        rows = read_flow(tmp_path / "flow", "2026-09-25", 1)["captures"]
+        assert rows[-1]["capture_id"] == c.capture_id
+        assert rows[-1]["totals"]["unknown_volume"] == 23
+        assert rows[0]["requested_at"] == rows[-1]["requested_at"]
+        assert all(
+            row["saved_minutes_match"]
+            for row in replay(tmp_path / "flow", "2026-09-25", 1)["captures"]
+        )
+
+    asyncio.run(check())
+
+
+def test_partial_first_minute_and_inactive_duration_do_not_claim_full_coverage(
+    tmp_path, monkeypatch
+):
+    config = First4Config(order_flow=OrderFlowConfig(enabled=True, raw_path=tmp_path))
+    flow = FlowObserver(NS(config=config, broker=NS()))
+    reducer = FlowReducer()
+    received = STAMP + timedelta(seconds=59)
+    reducer.apply(replace(quote(), received_at=received.isoformat()))
+    state = dict(metadata(), **reducer.snapshot())
+    bars = [dict(b, capture_id="fixture") for b in state.pop("bars")]
+    monkeypatch.setattr(
+        observer_module, "read_flow", lambda *args: {"captures": [state], "bars": bars}
+    )
+    monkeypatch.setattr(observer_module, "utc_now", lambda: STAMP + timedelta(minutes=1))
+    result = asyncio.run(flow.view("2026-09-25", 1))
+    assert result["rolling_1m"]["partial_coverage"]
+    assert result["coverage_duration_seconds"] == 0
+    monkeypatch.setattr(observer_module, "utc_now", lambda: STAMP + timedelta(hours=2))
+    assert asyncio.run(flow.view("2026-09-25", 1))["coverage_duration_seconds"] == 0
+
+
+def test_open_stale_gap_marks_every_minute_until_explicit_resume():
+    reducer = FlowReducer()
+    reducer.apply(quote())
+    reducer.apply(
+        event(2, "gap", received_at=(STAMP + timedelta(seconds=30)).isoformat(), reason="STALE")
+    )
+    for minute in range(1, 7):
+        reducer.apply(
+            event(minute + 2, received_at=(STAMP + timedelta(minutes=minute)).isoformat())
+        )
+    assert all(bar["has_gap"] for bar in reducer.snapshot()["bars"])
+    assert reducer.gaps[0]["end_at"] is None
+    resume_at = (STAMP + timedelta(minutes=7)).isoformat()
+    reducer.apply(event(9, "resume", received_at=resume_at))
+    reducer.apply(replace(quote(10), received_at=resume_at))
+    assert reducer.gaps[0]["end_at"] == resume_at
+    assert not reducer.snapshot()["bars"][-1]["has_gap"]
+
+
+def test_gap_limit_reason_survives_real_freshness_step(tmp_path, monkeypatch):
+    async def check():
+        flow, ib, clock = observer(tmp_path, monkeypatch)
+        await flow.step()
+        for con_id in (1, 2):
+            ib.flow_wire.requested[con_id] -= 16
+        await flow.step()
+        c = flow.captures[1]
+        c.gap_count = 63
+        c.first_received_at = c.last_trade_at = c.last_quote_at = STAMP.isoformat()
+        clock[0] += timedelta(seconds=31)
+        await flow.step()
+        assert c.terminal and c.reason == "CAPTURE_GAP_LIMIT"
+        assert (await flow.view("2026-09-25", 1))["reason"] == "CAPTURE_GAP_LIMIT"
+        for capture in flow.captures.values():
+            flow.finish(capture, "TEST_END")
+        flow.writer.close()
+        assert not flow.writer.error
+
+    asyncio.run(check())
+
+
+def test_session_reset_releases_old_observer_subscriptions(tmp_path, monkeypatch):
+    async def check():
+        flow, ib, clock = observer(tmp_path, monkeypatch)
+        await flow.step()
+        flow.runtime.session = "2026-09-28"
+        await flow.step()
+        assert not flow.captures and not ib.flow_wire.sinks and not ib.flow_wire.lasts
+        flow.writer.close()
+        assert not flow.writer.error
+        assert (
+            read_flow(tmp_path / "flow", "2026-09-25", 1)["captures"][0]["end_reason"]
+            == "SESSION_RESET"
+        )
+
+    asyncio.run(check())

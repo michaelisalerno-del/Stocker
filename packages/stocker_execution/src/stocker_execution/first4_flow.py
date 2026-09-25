@@ -145,11 +145,13 @@ class FlowReducer:
                 "minute": minute,
                 "price": None,
                 "coarse_timestamp_trades": 0,
-                "has_gap": False,
+                "has_gap": bool(self.gaps and self.gaps[-1].get("end_at") is None),
                 "first_event_at": event.received_at,
                 "last_event_at": event.received_at,
             }
         self.bars[minute]["last_event_at"] = event.received_at
+        if self.gaps and self.gaps[-1].get("end_at") is None:
+            self.bars[minute]["has_gap"] = True
         return self.bars[minute]
 
     def apply(self, event: FlowEvent) -> dict[str, Any] | None:
@@ -162,9 +164,14 @@ class FlowReducer:
             self.minute_bar(event)["has_gap"] = True
             self.quote = None
             self.fields.clear()
-            self.gaps.append({"at": event.received_at, "reason": event.reason})
-            if len(self.gaps) > 64:
-                raise ValueError("COVERAGE_SEGMENT_LIMIT")
+            if not self.gaps or self.gaps[-1].get("end_at") is not None:
+                if len(self.gaps) >= 64:
+                    raise ValueError("COVERAGE_SEGMENT_LIMIT")
+                self.gaps.append({"at": event.received_at, "reason": event.reason, "end_at": None})
+            return None
+        if event.kind == "resume":
+            if self.gaps and self.gaps[-1].get("end_at") is None:
+                self.gaps[-1]["end_at"] = event.received_at
             return None
         if event.kind == "market_data_type":
             self.market_data_type = event.tick_type or 0

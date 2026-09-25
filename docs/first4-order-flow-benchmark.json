@@ -1,0 +1,179 @@
+{
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "python": "3.12.13",
+  "workload": "1000 packets x four stocks; cooperative manager yield probe",
+  "scope": "OFFLINE_FAKE_BROKER_NOT_PRODUCTION_LATENCY",
+  "trials": [
+    {
+      "enabled": false,
+      "stock_streams": 4,
+      "trade_prints": 4000,
+      "quote_events": 0,
+      "burst_seconds": 0.0123806249757763,
+      "callback_microseconds": {
+        "median": 1.625,
+        "p99": 2.583,
+        "max": 16.041
+      },
+      "execution_loop_yield_ms": {
+        "median": 0.11360450298525393,
+        "p99": 0.7513750169891864,
+        "max": 0.7513750169891864
+      },
+      "concurrent_entry_preparations_completed": 4,
+      "entry_anchor_prices": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "queue_high_water": 0,
+      "dropped_events": 0,
+      "queue_latency_max_ms": 0,
+      "writer_error": ""
+    },
+    {
+      "enabled": true,
+      "stock_streams": 4,
+      "trade_prints": 4000,
+      "quote_events": 4000,
+      "burst_seconds": 0.12744579199352302,
+      "callback_microseconds": {
+        "median": 9.375,
+        "p99": 27.292,
+        "max": 5873.667
+      },
+      "execution_loop_yield_ms": {
+        "median": 0.8455415081698447,
+        "p99": 8.088291011517867,
+        "max": 8.088291011517867
+      },
+      "concurrent_entry_preparations_completed": 4,
+      "entry_anchor_prices": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "queue_high_water": 5884,
+      "dropped_events": 0,
+      "queue_latency_max_ms": 369.14475,
+      "writer_error": "",
+      "raw_replay_matches": true
+    },
+    {
+      "enabled": false,
+      "stock_streams": 4,
+      "trade_prints": 4000,
+      "quote_events": 0,
+      "burst_seconds": 0.01268254200113006,
+      "callback_microseconds": {
+        "median": 1.708,
+        "p99": 2.083,
+        "max": 249.542
+      },
+      "execution_loop_yield_ms": {
+        "median": 0.11568800255190581,
+        "p99": 0.7415410073008388,
+        "max": 0.7415410073008388
+      },
+      "concurrent_entry_preparations_completed": 4,
+      "entry_anchor_prices": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "queue_high_water": 0,
+      "dropped_events": 0,
+      "queue_latency_max_ms": 0,
+      "writer_error": ""
+    },
+    {
+      "enabled": true,
+      "stock_streams": 4,
+      "trade_prints": 4000,
+      "quote_events": 4000,
+      "burst_seconds": 0.1228428750182502,
+      "callback_microseconds": {
+        "median": 9.209,
+        "p99": 29.416,
+        "max": 400.167
+      },
+      "execution_loop_yield_ms": {
+        "median": 0.820354005554691,
+        "p99": 7.950125000206754,
+        "max": 7.950125000206754
+      },
+      "concurrent_entry_preparations_completed": 4,
+      "entry_anchor_prices": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "queue_high_water": 5960,
+      "dropped_events": 0,
+      "queue_latency_max_ms": 369.616458,
+      "writer_error": "",
+      "raw_replay_matches": true
+    },
+    {
+      "enabled": false,
+      "stock_streams": 4,
+      "trade_prints": 4000,
+      "quote_events": 0,
+      "burst_seconds": 0.025360083003761247,
+      "callback_microseconds": {
+        "median": 1.625,
+        "p99": 2.0,
+        "max": 12.916
+      },
+      "execution_loop_yield_ms": {
+        "median": 0.11131250357721001,
+        "p99": 14.062875008676201,
+        "max": 14.062875008676201
+      },
+      "concurrent_entry_preparations_completed": 4,
+      "entry_anchor_prices": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "queue_high_water": 0,
+      "dropped_events": 0,
+      "queue_latency_max_ms": 0,
+      "writer_error": ""
+    },
+    {
+      "enabled": true,
+      "stock_streams": 4,
+      "trade_prints": 4000,
+      "quote_events": 4000,
+      "burst_seconds": 0.11137087500537746,
+      "callback_microseconds": {
+        "median": 9.166,
+        "p99": 20.334,
+        "max": 292.333
+      },
+      "execution_loop_yield_ms": {
+        "median": 0.8171664958354086,
+        "p99": 7.799749990226701,
+        "max": 7.799749990226701
+      },
+      "concurrent_entry_preparations_completed": 4,
+      "entry_anchor_prices": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "queue_high_water": 5960,
+      "dropped_events": 0,
+      "queue_latency_max_ms": 362.748708,
+      "writer_error": "",
+      "raw_replay_matches": true
+    }
+  ]
+}

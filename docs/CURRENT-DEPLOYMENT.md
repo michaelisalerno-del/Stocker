@@ -1,5 +1,52 @@
 # SLRNO — current server deployment
 
+Verified September 25, 2026 at **11:19:09 UTC (12:19 UK)**.
+
+Active release: **`42a266d02a8dc83dfa363445f0e2f1a7c3d363c1`**, pushed to GitHub
+`main` and activated at **11:15:47 UTC** following explicit user authorization to
+push and deploy. It adds FIRST4 order-flow observation V1. **Observation remains
+DISABLED**; deployment did not authorize or enable additional data subscriptions.
+See the [implementation and offline verification report](first4-order-flow-v1.md).
+
+All six [CI checks](https://github.com/michaelisalerno-del/Stocker/actions/runs/36126802550)
+passed for the exact deployed commit. Local validation passed 629 Python tests.
+All 383 archived files matched their SHA-256 manifest. The locked 56-package
+server installation and network-blocked smoke test passed as the service user.
+All fourteen checked authenticated health/data/page/asset endpoints returned HTTP
+200; served JavaScript, CSS and the new order-flow asset match the release.
+Historical allocation cards and detail API explicitly report order-flow DISABLED.
+
+Only `stocker-v1.service` was restarted: PID **1344003**, active with zero automatic
+restarts. Worker, manager and web health are RUNNING; the normal PAPER client is
+connected and reconciled. Gateway PID **1335744** stayed unchanged. The separate
+frozen three-scanner collector, service and timer hashes are unchanged; its service
+remains inactive pending its existing schedule. No additional broker probe was run.
+
+Execution configuration SHA-256 remains
+`5dfd04751b08394d8e7f47a0f84442c2b1e5861cfe6e8e1a343d3bbd79a53818`.
+Configured and effective arming are false; LIVE remains disabled. The existing
+September 25 opening permission and WAITING_FOR_OPEN state remain intact. All 51
+events, permanent slots, session rows, dated checks and pause state were preserved.
+Orders, fills, positions and outstanding obligations are zero. The only changed
+metadata key was the normal startup `reconciled_at` timestamp. SQLite quick_check
+passed.
+
+Root-only consistent ledger/configuration backups and activation/verification
+records are at `/var/lib/stocker/backups/first4-42a266d02a8d/`. The previous release
+`2a31cde8a31a09f350d197d03b4dee779485819a` is retained for a coordinated code rollback.
+Never restore the ledger snapshot over subsequent trading activity. No operational
+configuration, arming or observation enablement was changed. Reload an existing
+browser tab to load the new assets.
+
+Status: **DEPLOYED_WITH_OBSERVATION_DISABLED**. The order-flow feature remains
+**IMPLEMENTED_AND_OFFLINE_TESTED**, not **CONNECTED_AND_RECORDING_VERIFIED**.
+Actual order-flow entitlement, pacing, units and recording still require separately
+authorized verification and explicit observation configuration.
+
+[Sanitized deployment evidence](first4-order-flow-deployment-20260925.json).
+
+## Previous September 24 20:51 UTC deployment record (superseded)
+
 Verified September 24, 2026 at **20:56:22 UTC (21:56 UK)**.
 
 Active release: **`2a31cde8a31a09f350d197d03b4dee779485819a`**, published to

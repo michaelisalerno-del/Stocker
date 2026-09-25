@@ -1,0 +1,126 @@
+{
+  "revision": "42a266d02a8dc83dfa363445f0e2f1a7c3d363c1",
+  "activated_at": "2026-09-25T11:15:47.471717+00:00",
+  "verified_at": "2026-09-25T11:19:09.665667+00:00",
+  "ci_url": "https://github.com/michaelisalerno-del/Stocker/actions/runs/36126802550",
+  "backup": "/var/lib/stocker/backups/first4-42a266d02a8d",
+  "services": {
+    "stocker-v1.service": {
+      "MainPID": "1344003",
+      "NRestarts": "0",
+      "ActiveState": "active"
+    },
+    "stocker-ibgateway.service": {
+      "MainPID": "1335744",
+      "NRestarts": "0",
+      "ActiveState": "active"
+    },
+    "stocker-frozen-scanner-observation-20260923.service": {
+      "MainPID": "0",
+      "NRestarts": "0",
+      "ActiveState": "inactive"
+    }
+  },
+  "http": {
+    "/api/health": {
+      "status": 200,
+      "bytes": 1838
+    },
+    "/api/system": {
+      "status": 200,
+      "bytes": 1936
+    },
+    "/api/overview": {
+      "status": 200,
+      "bytes": 1144
+    },
+    "/api/overview?session=2026-09-24": {
+      "status": 200,
+      "bytes": 8917
+    },
+    "/api/opportunities": {
+      "status": 200,
+      "bytes": 483
+    },
+    "/api/execution": {
+      "status": 200,
+      "bytes": 940
+    },
+    "/api/detail?session=2026-09-24&symbol=GCDT": {
+      "status": 200,
+      "bytes": 1094
+    },
+    "/": {
+      "status": 200,
+      "bytes": 2690
+    },
+    "/opportunities": {
+      "status": 200,
+      "bytes": 2690
+    },
+    "/execution": {
+      "status": 200,
+      "bytes": 2690
+    },
+    "/system": {
+      "status": 200,
+      "bytes": 2690
+    },
+    "/static/dashboard.js": {
+      "status": 200,
+      "bytes": 31798
+    },
+    "/static/dashboard.css": {
+      "status": 200,
+      "bytes": 10607
+    },
+    "/static/order-flow.js": {
+      "status": 200,
+      "bytes": 8890
+    }
+  },
+  "config_sha256": "5dfd04751b08394d8e7f47a0f84442c2b1e5861cfe6e8e1a343d3bbd79a53818",
+  "ledger_counts": {
+    "first4_events": 51,
+    "first4_fills": 0,
+    "first4_meta": 7,
+    "first4_orders": 0,
+    "first4_positions": 0,
+    "first4_sessions": 2
+  },
+  "ledger_tables_unchanged": {
+    "first4_events": true,
+    "first4_fills": true,
+    "first4_orders": true,
+    "first4_positions": true,
+    "first4_sessions": true
+  },
+  "changed_metadata_keys": [
+    "reconciled_at"
+  ],
+  "dated_checks_and_pause_unchanged": true,
+  "observer_files_unchanged": true,
+  "manifest_files_verified": 383,
+  "served_assets_match": true,
+  "quick_check": "ok",
+  "order_flow_state": "DISABLED",
+  "system": {
+    "connected": true,
+    "reconciled": true,
+    "armed": false,
+    "configured_armed": false,
+    "paused": false,
+    "worker_health": "RUNNING",
+    "manager_health": "RUNNING",
+    "web_health": "RUNNING",
+    "ledger_available": true,
+    "live_enabled": false,
+    "entry_block_reason": "PAPER entries are unarmed",
+    "opening_check": {
+      "status": "WAITING_FOR_OPEN",
+      "session": "2026-09-25"
+    },
+    "opening_check_active": false,
+    "outstanding_obligations": 0
+  }
+}

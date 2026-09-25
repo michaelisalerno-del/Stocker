@@ -1,5 +1,70 @@
 # SLRNO — current server deployment
 
+Verified September 25, 2026 at **11:58:36 UTC (12:58 UK)**.
+
+Active release: **`a7ac6db9c81cb140af857d2af5534e397153785e`**, published to GitHub
+`main` and activated at **11:57:30 UTC**. The user authorized observation enablement,
+then selected **one observed slot for now**, preferring accurate quote matching.
+
+**Order-flow observation is ENABLED for permanent FIRST4 slot 1 only**, in
+`TBT_TRADES_TBT_QUOTES` mode: the existing canonical Last trades plus request-scoped
+BidAsk ticks including size changes. FIRST4's four trading slots, execution rules,
+readiness gates and dated opening permission are unchanged. Slots 2–4 will have
+CAPACITY_LIMITED observation status; they remain eligible for normal FIRST4 PAPER
+execution. No stock is replaced because its order-flow data are unavailable.
+
+The prior budget counted shared Last streams twice. This release counts each once:
+four reserved Last streams cover the four permanent execution slots and their
+observer ownership; a fifth stream supplies slot 1's BidAsk. Configured available
+TBT is 5, reserved TBT is 4, max_stocks is 1. This uses IBKR's documented minimum
+100-line/five-TBT allowance; no higher account-specific allowance was assumed.
+Socket inspection showed FIRST4 as the sole active API consumer. The independent
+frozen collector has no TBT requests and caps L1 snapshots at 25. Remaining L1
+budget is 75 with 16 reserved, although this mode adds no L1 subscriptions.
+[Allocation rules](https://www.interactivebrokers.com/docs/general/market-data-subscriptions/market-data-lines/how-market-data-is-allocated)
+and [specialized limits](https://www.interactivebrokers.com/docs/general/market-data-subscriptions/market-data-lines/specialized-market-data-lines).
+No subscription was purchased, Gateway setting changed or extra diagnostic broker
+connection made. One-slot Last + L1 had been enabled at 11:47 UTC; no allocations
+or captures existed before switching to the preferred mode.
+
+All six [CI checks](https://github.com/michaelisalerno-del/Stocker/actions/runs/36131831553)
+passed. Local observation/anchor/operational tests: **110 passed**; Ruff and mypy
+passed. Standards review: no findings. Spec review: no findings. The new regression
+first reproduced capacity denial, then verified four canonical Last streams across
+both ownership acquisition orders, entry cleanup, reconnect and volume replay.
+The locked 56-package server installation and network-blocked smoke passed. All
+384 archived source files matched their manifest before activation.
+
+Only FIRST4 restarted, PID **1345759**, with zero automatic restarts. Worker,
+manager and web are RUNNING; PAPER is connected and reconciled. Gateway PID
+**1335744** and the frozen collector/service/timer remain unchanged. Health,
+system, overview and allocation-detail reads passed. All trading ledger tables,
+session rows, dated checks and pause state match the backup; only the normal
+`reconciled_at` timestamp changed. Orders, fills, positions and obligations are zero.
+
+Only observation configuration changed. Execution configuration SHA-256 is now
+`7601a1f5aa32a99d357cf2b20619f614cbbcb9c254327dd9a232fff9c787490f`.
+Configured/effective arming remain false; the existing September 25 permission is
+WAITING_FOR_OPEN. LIVE remains disabled. Observation storage is initialized at
+`/var/lib/stocker/v1/first4-order-flow`, with a 2 GB limit, 1 GB free-space reserve,
+8,192-event queue and 250 ms flush policy. Quote-age limit remains 1,000 ms.
+
+Status: **ENABLED_AWAITING_FIRST4_SLOT_1**. There are no captures yet. This is not
+**CONNECTED_AND_RECORDING_VERIFIED**: actual print/quote arrival, shares units,
+broker request acceptance and sustained coverage remain unverified. Estimated
+buy/sell direction is still inferred even with tick-by-tick quotes.
+
+Root-only config, execution-ledger and observer-summary backups are in
+`/var/lib/stocker/backups/first4-a7ac6db9c81c/`. To disable observation, change only
+`order_flow.enabled` to false under the usual coordinated maintenance procedure.
+The previous code release is retained; its earlier conservative budget cannot use
+this one-stock TBT-quote configuration, so coordinate a code rollback with the saved
+configuration. Never restore ledger snapshots over subsequent trading activity.
+
+[Sanitized activation evidence](first4-order-flow-enabled-20260925.json).
+
+## Previous September 25 11:15 UTC deployment record (superseded)
+
 Verified September 25, 2026 at **11:19:09 UTC (12:19 UK)**.
 
 Active release: **`42a266d02a8dc83dfa363445f0e2f1a7c3d363c1`**, pushed to GitHub

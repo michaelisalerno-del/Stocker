@@ -1,10 +1,10 @@
 # FIRST4 order-flow observation V1
 
-**Subsequent authorized deployment:** code release `42a266d02a8d` was deployed on
-September 25 at 11:15:47 UTC with observation still disabled. The normal FIRST4
-startup reconnected its existing PAPER client; no extra broker probe or observation
-subscription was made. See [current deployment](CURRENT-DEPLOYMENT.md). The original
-implementation-only boundary below describes the preceding offline phase.
+**Subsequent authorized deployment and enablement:** release `a7ac6db9c81c` is active
+with slot 1 observation enabled in `TBT_TRADES_TBT_QUOTES` mode. The shared-stream
+budget correction counts each canonical Last once. No data subscription was purchased.
+See [current deployment](CURRENT-DEPLOYMENT.md) for exact configuration and evidence.
+The original implementation-only boundary below describes the preceding offline phase.
 
 Status: **IMPLEMENTED_AND_OFFLINE_TESTED**. **CONNECTED_AND_RECORDING_VERIFIED: no**.
 No broker connection, subscription purchase, operational config change, arming, deployment or

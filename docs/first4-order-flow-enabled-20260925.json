@@ -1,0 +1,74 @@
+{
+  "revision": "a7ac6db9c81cb140af857d2af5534e397153785e",
+  "previous_release": "/opt/stocker/releases/42a266d02a8dc83dfa363445f0e2f1a7c3d363c1",
+  "activated_at": "2026-09-25T11:57:30.305447+00:00",
+  "backup": "/var/lib/stocker/backups/first4-a7ac6db9c81c",
+  "order_flow": {
+    "enabled": true,
+    "order_authoritative": false,
+    "may_submit_orders": false,
+    "max_stocks": 1,
+    "feed_mode": "TBT_TRADES_TBT_QUOTES",
+    "available_tbt": 5,
+    "reserved_tbt": 4,
+    "available_l1": 75,
+    "reserved_l1": 16,
+    "quote_age_ms": 1000,
+    "stale_seconds": 30,
+    "raw_path": "/var/lib/stocker/v1/first4-order-flow",
+    "max_storage_bytes": 2000000000,
+    "min_free_bytes": 1000000000,
+    "queue_events": 8192,
+    "batch_events": 512,
+    "flush_seconds": 0.25,
+    "max_segments_per_stock": 16
+  },
+  "config_sha256": "7601a1f5aa32a99d357cf2b20619f614cbbcb9c254327dd9a232fff9c787490f",
+  "manifest_files_verified": 384,
+  "ci_url": "https://github.com/michaelisalerno-del/Stocker/actions/runs/36131831553",
+  "capacity_basis": "Documented minimum 5 TBT; four canonical Last streams shared with execution reserve plus one BidAsk; max_stocks=1; no TBT used by frozen experiment",
+  "no_non_observation_config_change": true,
+  "recording_verified": false,
+  "verified_at": "2026-09-25T11:58:36.238512+00:00",
+  "services": {
+    "stocker-v1.service": {
+      "MainPID": "1345759",
+      "NRestarts": "0",
+      "ActiveState": "active"
+    },
+    "stocker-ibgateway.service": {
+      "MainPID": "1335744",
+      "NRestarts": "0",
+      "ActiveState": "active"
+    },
+    "stocker-frozen-scanner-observation-20260923.service": {
+      "MainPID": "0",
+      "NRestarts": "0",
+      "ActiveState": "inactive"
+    }
+  },
+  "observer_database_initialized": true,
+  "captures": 0,
+  "status": "ENABLED_AWAITING_FIRST4_SLOT_1",
+  "ledger_trading_tables_unchanged": true,
+  "changed_metadata_keys": [
+    "reconciled_at"
+  ],
+  "dated_permission_preserved": true,
+  "gateway_and_frozen_experiment_unchanged": true,
+  "system": {
+    "connected": true,
+    "reconciled": true,
+    "armed": false,
+    "configured_armed": false,
+    "worker_health": "RUNNING",
+    "manager_health": "RUNNING",
+    "web_health": "RUNNING",
+    "live_enabled": false,
+    "opening_check": {
+      "status": "WAITING_FOR_OPEN",
+      "session": "2026-09-25"
+    },
+    "outstanding_obligations": 0
+  }
+}

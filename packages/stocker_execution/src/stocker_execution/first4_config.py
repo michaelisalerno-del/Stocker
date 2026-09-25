@@ -40,10 +40,14 @@ class OrderFlowConfig(BaseModel):
         return self
 
     def stock_capacity(self) -> int:
-        cost = 2 if self.feed_mode == "TBT_TRADES_TBT_QUOTES" else 1
-        capacity = max(0, self.available_tbt - self.reserved_tbt) // cost
+        # The four permanent slots share one canonical Last request per conId.
+        # Those requests live inside the execution reserve, including after entry
+        # cleanup or reconnect. Only observer quotes need additional capacity.
+        if self.available_tbt < self.reserved_tbt:
+            return 0
+        capacity = self.available_tbt - self.reserved_tbt
         if self.feed_mode == "TBT_TRADES_L1_QUOTES":
-            capacity = min(capacity, max(0, self.available_l1 - self.reserved_l1))
+            capacity = max(0, self.available_l1 - self.reserved_l1)
         return min(self.max_stocks, capacity)
 
 

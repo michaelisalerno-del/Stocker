@@ -289,23 +289,27 @@ def test_config_cannot_acquire_order_authority_or_steal_execution_reserve(update
 
 
 def test_capacity_deterministic_and_modes_explicit():
-    assert OrderFlowConfig(available_tbt=5).stock_capacity() == 0
-    assert OrderFlowConfig(available_tbt=8).stock_capacity() == 2
+    assert OrderFlowConfig(available_tbt=3).stock_capacity() == 0
+    assert OrderFlowConfig(available_tbt=4).stock_capacity() == 0
+    assert OrderFlowConfig(available_tbt=5).stock_capacity() == 1
+    assert OrderFlowConfig(available_tbt=6).stock_capacity() == 2
+    assert OrderFlowConfig(available_tbt=8).stock_capacity() == 4
     assert OrderFlowConfig(available_tbt=12).stock_capacity() == 4
     assert (
         OrderFlowConfig(
-            available_tbt=8, feed_mode="TBT_TRADES_L1_QUOTES", available_l1=20
+            available_tbt=4, feed_mode="TBT_TRADES_L1_QUOTES", available_l1=20
         ).stock_capacity()
         == 4
     )
 
 
-def observer(tmp_path, monkeypatch, capacity=8):
+def observer(tmp_path, monkeypatch, capacity=6, **flow_settings):
     ib = wired()
     config = First4Config(
         order_flow=OrderFlowConfig(
             enabled=True,
             available_tbt=capacity,
+            **flow_settings,
             raw_path=tmp_path / "flow",
             flush_seconds=0.05,
             min_free_bytes=1_000_000,
@@ -628,3 +632,88 @@ def test_session_reset_releases_old_observer_subscriptions(tmp_path, monkeypatch
         )
 
     asyncio.run(check())
+
+
+def test_four_l1_slots_share_execution_tick_budget(tmp_path, monkeypatch):
+    async def check():
+        flow, ib, clock = observer(
+            tmp_path,
+            monkeypatch,
+            capacity=5,
+            feed_mode="TBT_TRADES_L1_QUOTES",
+            available_l1=20,
+        )
+        captures = list(flow.captures.values())
+        try:
+            # Two anchors subscribe before observation; two join after it starts.
+            for capture in captures[:2]:
+                ib.reqTickByTickData(capture.contract, "Last")
+            await flow.step()
+            assert all(not capture.terminal for capture in captures)
+            assert len(ib.flow_wire.lasts) == 4
+            assert ib.client.reqTickByTickData.call_count == 4
+            assert ib.client.reqMktData.call_count == 4
+            for capture in captures:
+                ticker = ib.reqTickByTickData(capture.contract, "Last")
+                assert ticker is ib.flow_wire.lasts[capture.contract.conId].ticker
+                ib.cancelTickByTickData(capture.contract, "Last")
+                quote_id, trade_id = capture.quote_request, capture.trade_request
+                ib.wrapper.marketDataType(quote_id, 1)
+                ib.wrapper.priceSizeTick(quote_id, 1, 10, 50)
+                ib.wrapper.priceSizeTick(quote_id, 2, 11, 50)
+                for _ in range(2):
+                    ib.wrapper.tickByTickAllLast(
+                        trade_id,
+                        1,
+                        int(STAMP.timestamp()),
+                        11,
+                        10,
+                        TickAttribLast(),
+                        "FIXTURE",
+                        "",
+                    )
+            assert ib.client.reqTickByTickData.call_count == 4
+            ib.client.cancelTickByTickData.assert_not_called()
+            # A reconnect replaces the four requests, never adds four parallel trades.
+            flow.broker.data_generation += 1
+            await flow.step()
+            assert not ib.flow_wire.lasts and not ib.flow_wire.quotes
+            ib.wrapper.reset()
+            for key in ib.flow_wire.requested:
+                ib.flow_wire.requested[key] -= 16
+            await flow.step()
+            assert len(ib.flow_wire.lasts) == 4
+            assert ib.client.reqTickByTickData.call_count == 8
+            assert len(ib.flow_wire.quotes) == 4
+        finally:
+            for capture in captures:
+                flow.finish(capture, "FIXTURE_COMPLETE")
+            flow.writer.close()
+        assert not flow.writer.error and flow.writer.dropped == 0
+        for con_id in range(1, 5):
+            result = replay(tmp_path / "flow", "2026-09-25", con_id)
+            assert (
+                sum(c["replayed"]["totals"]["eligible_observed_volume"] for c in result["captures"])
+                == 20
+            )
+            assert all(
+                c["saved_totals_match"] and c["saved_minutes_match"] for c in result["captures"]
+            )
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize(
+    "tbt,l1,reserve,expected",
+    [(3, 20, 4, 0), (4, 16, 4, 0), (4, 18, 4, 2), (4, 20, 4, 4), (5, 20, 6, 0), (6, 20, 6, 4)],
+)
+def test_l1_capacity_keeps_full_execution_and_extra_reserves(tbt, l1, reserve, expected):
+    assert (
+        OrderFlowConfig(
+            available_tbt=tbt,
+            reserved_tbt=reserve,
+            available_l1=l1,
+            feed_mode="TBT_TRADES_L1_QUOTES",
+        ).stock_capacity()
+        == expected
+    )

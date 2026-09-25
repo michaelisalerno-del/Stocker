@@ -8,8 +8,9 @@ order_flow:
   max_stocks: 2
   feed_mode: TBT_TRADES_TBT_QUOTES
   # Available for THIS application after other clients/TWS consumption.
-  # This example permits two stocks: (8 - 4 reserved) / 2.
-  available_tbt: 8
+  # The four reserved Last streams are shared with entry.
+  # Six total TBT permits two additional BidAsk streams.
+  available_tbt: 6
   reserved_tbt: 4
   available_l1: 0
   reserved_l1: 16

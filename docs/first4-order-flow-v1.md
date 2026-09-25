@@ -50,13 +50,19 @@ and receipt-time trade substitution are why ownership and capture occur at these
 ## Capacity and modes
 
 The existing execution path uses up to four Last streams, plus temporary option/combo L1 requests.
-The observer conservatively charges each stock one Last stream even when shared, plus one BidAsk
-in preferred mode. It reserves at least four TBT slots and sixteen L1 lines for execution/safety.
+The four reserved TBT streams cover the four permanent slots' canonical Last requests, shared
+with execution and retained after entry cleanup. No stock can consume both an execution Last and
+an observer Last. Preferred mode additionally requires one BidAsk per observed stock. The observer
+reserves at least four TBT slots and sixteen L1 lines for execution/safety.
 `available_*` means capacity remaining for this app after other API clients and TWS usage; another
 client is not additional entitlement. Defaults are zero available capacity.
 
-- `TBT_TRADES_TBT_QUOTES`: capacity `min(max_stocks, floor((available_tbt-reserved_tbt)/2))`.
-- `TBT_TRADES_L1_QUOTES`: one TBT and one spare L1 line per stock; both budgets constrain capacity.
+- `TBT_TRADES_TBT_QUOTES`: capacity `min(max_stocks, available_tbt-reserved_tbt)`.
+- `TBT_TRADES_L1_QUOTES`: one shared Last inside the execution reserve and one spare L1 line per stock.
+  Once `available_tbt >= reserved_tbt`, capacity is `min(max_stocks, available_l1-reserved_l1)`.
+  Both modes have zero observation capacity when the full TBT execution reserve cannot be met.
+  With four reserved Last streams, four stocks need four total TBT plus four spare L1 lines in L1 mode,
+  or eight total TBT in TBT-quote mode. Extra configured reserves remain unavailable to quotes.
 - `UNAVAILABLE`: no active/retained usable capture. This is never substituted with ordinary last updates.
 
 Slots 1..capacity are chosen deterministically. No outcome-based replacement or rotation. A shared
@@ -146,7 +152,7 @@ and reports any raw tail after the summary checkpoint. It never edits research e
 For a **separately authorised** PAPER activation, copy the existing PAPER configuration and merge only
 `order_flow` from `configs/first4-order-flow.paper.example.yaml`. Set the actual available/reserved
 budgets, desired mode/max stocks and approved capture path. Do not change `armed`, dated opening checks,
-account settings, ports, order rules or LIVE restrictions. The example's eight TBT slots are illustrative.
+account settings, ports, order rules or LIVE restrictions. The example's six TBT slots are illustrative.
 Validate the copied config offline before use:
 
 ```sh

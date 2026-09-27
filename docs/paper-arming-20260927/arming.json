@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-27T18:08:21.691826+00:00",
+  "release": "3ac8cf32afcc78d602bf1041d79b72fa97e99212",
+  "backup": "/var/lib/stocker/backups/futures-arm-20260927T180821Z",
+  "user_authorized": true,
+  "changed": {
+    "armed": {
+      "before": false,
+      "after": true
+    }
+  },
+  "unchanged_config_asserted": true,
+  "orders_sent_by_operation": 0,
+  "entry_blocks_preserved": [
+    "MARKET_DATA_ALLOCATION_UNVERIFIED",
+    "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
+  ],
+  "note": "PAPER arming switch enabled; no market becomes order-eligible and no test order is submitted."
+}

@@ -1,6 +1,7 @@
 # Futures PAPER deployment — approval required for cutover and arming
 
-The futures replacement is deployed, unarmed. See [current deployment evidence](CURRENT-DEPLOYMENT.md).
+The futures replacement is deployed. PAPER arming is enabled following the user's request,
+but readiness gates still block entries. See [current deployment evidence](CURRENT-DEPLOYMENT.md).
 The procedure below applies to future approved cutovers; installation never authorises arming.
 The existing release-directory, locked uv, systemd and authenticated reverse-proxy workflow remains.
 Do not alter the independent scanner collector service, timer or observations.

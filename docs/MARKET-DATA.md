@@ -1,7 +1,7 @@
 # Market data and optional L2 observations
 
 This extends the futures migration at `4eff5fc3b55f703bd78cf1794a25561847413f9b`,
-on `codex/futures-paper-replacement`. It is deployed **unarmed**, with L2 disabled; see
+on `codex/futures-paper-replacement`. It is deployed **PAPER armed with entry readiness blocks**, with L2 disabled; see
 [the current deployment record](CURRENT-DEPLOYMENT.md) for timestamped runtime evidence.
 No broker orders or subscription purchases were made. The independent research collector is untouched.
 

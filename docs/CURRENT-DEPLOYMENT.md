@@ -1,22 +1,24 @@
 # Deployed futures PAPER application
 
 SLRNO is deployed at [the authenticated dashboard](https://139.59.178.164).
-Execution remains **unarmed**, optional L2 **disabled**, and LIVE unavailable.
+PAPER is **armed, with all markets still blocked from entry**. Optional L2 is **disabled**,
+and LIVE remains unavailable. The arming switch does not approve missing mappings or data allowances.
 
 Runtime release: `3ac8cf32afcc78d602bf1041d79b72fa97e99212`.
 Branch: `codex/futures-paper-replacement`.
-The first futures cutover was 2026-09-27 15:22:14 UTC. The latest broker chain-ID correction
-started at **2026-09-27 17:28:32 UTC (18:28:32 Europe/London)**. The old runtime is no longer active.
+The first futures cutover was 2026-09-27 15:22:14 UTC. Following the explicit user arming request,
+the application restarted at **2026-09-27 18:08:21 UTC (19:08:21 Europe/London)**.
+Only the deployed arming flag changed; the code release and all readiness checks are unchanged.
 
-The latest recorded postflight is **2026-09-27 17:31:23 UTC**; see the
-[actual server evidence](btc-chain-fix-20260927/postflight.json). This is a point-in-time observation,
+The latest recorded postflight is **2026-09-27 18:20:27 UTC**; see the
+[actual server evidence](paper-arming-20260927/postflight.json). This is a point-in-time observation,
 not a guarantee of later positions, data or configuration.
 
 ## Verified runtime state
 
 - Broker-returned account exactly `DUP655399`; connected and reconciled.
 - Fresh read-only preflight immediately before each cutover. Final preflight:
-  17:28:32.677419 UTC, zero open orders, nonzero positions or returned executions.
+  18:08:21.332314 UTC, zero open orders, nonzero positions or returned executions.
 - Fresh futures namespace: `/var/lib/stocker/v1/futures.sqlite3`.
   Zero signals, reservations, orders, fills or positions at postflight.
 - All six permanent cards and actual standard futures qualified. BTC symbol is IB `BRR`,
@@ -25,7 +27,7 @@ not a guarantee of later positions, data or configuration.
   Zero temporary option quotes, L2 books or tick-by-tick feeds.
 - Account allowance 100 remains **ASSUMED**, external consumption unknown, headroom 40.
   Wire cap 40 requests/second, ten reserved for urgent work; observed queue high water one.
-- App active/running, PID 1441785, zero automatic restarts, about 62.4 MiB memory at postflight.
+- App active/running, PID 1444449, zero automatic restarts, about 63.7 MiB memory at postflight.
 - Authenticated overview/history/system/health/pages/assets returned 200; public HTTPS without
   authentication returned 401. Direct requests without the proxy token and foreign-origin
   reads/writes returned 403. Retired write route returned 405.
@@ -45,8 +47,8 @@ not a guarantee of later positions, data or configuration.
 | NQ | NQZ6, conId 563947726 | CLOSED; underlying quotes/bars subscribed | Required prior volume for historical reference selection unavailable |
 | SI | SIZ6, conId 535526329 | CLOSED; five reference sessions loaded | Listed option mapping unapproved |
 
-All six also remain subject to the shared unarmed configuration, empty approved option mappings
-and unverified allowance. No trade is authorised by the above monitoring state. Closed-market
+All six remain blocked by empty approved option mappings and the shared
+MARKET_DATA_ALLOCATION_UNVERIFIED check despite the armed configuration. No trade is authorised by the above monitoring state. Closed-market
 prices are labelled stale rather than described as live.
 
 GC experimental management remains disabled. BTC uses its actual broker calendar, including
@@ -55,6 +57,13 @@ that day's volume can be used for rollover; the completed Friday/Saturday fragme
 still-forming Monday volume into a prior completed day.
 
 ## Deployment work and validation
+
+The [authorised arming operation and RV15 check](paper-arming-20260927/README.md) verified
+that only the arming flag changed, with no orders sent. BTC's RV15 was exactly zero because
+IBKR returned identical completed closes with zero reported volume; an independent bounded
+bar query agreed and desktop/mobile zero-value rendering passed. No rule or data was substituted.
+The before-config and database backup are in
+`/var/lib/stocker/backups/futures-arm-20260927T180821Z`.
 
 The latest [BTC chain-ID correction](btc-chain-fix-20260927/README.md) normalizes validated
 text IDs at the broker callback boundary before strict underlying matching. Seven regressions
@@ -105,11 +114,12 @@ Protected consistent SQLite/config/unit/proxy backups:
 SQLite integrity checks passed. Original and intermediate databases were retained, not overwritten.
 No test trade, cancellation, subscription purchase or account-permission change was performed.
 
-## Remaining arming requirements
+## Remaining entry-enablement requirements
 
 Approve concrete listed option product/expiry/delta-tolerance mappings, verify account-wide
-data allowance/entitlements and external headroom, resolve required history readiness, then
-perform a separate reviewed arming operation. One contract, £10 including fees, four concurrent
+data allowance/entitlements and external headroom, and resolve required history readiness.
+Any mapping/allowance changes require separate review; the user's arming request did not
+approve or resolve them. One contract, £10 including fees, four concurrent
 reserved/open trades and £40 concurrent allocation remain enforced. L2 permission/routing must
 be verified before enabling optional collection.
 

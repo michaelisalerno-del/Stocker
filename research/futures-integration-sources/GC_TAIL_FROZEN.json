@@ -1,0 +1,29 @@
+{
+  "primary": "put_10d_0DTE",
+  "secondary": "put_spread_20_10_0DTE",
+  "selection_horizon": 60,
+  "primary_evidence": {
+    "structure": "put_10d_0DTE",
+    "recurrent": true,
+    "gain": 500,
+    "frequency": 0.0948275862068965,
+    "dates": 17,
+    "deleted2": 17,
+    "stress_frequency": 0.0517241379310344,
+    "stress_dates": 10,
+    "min_dates": 10,
+    "base_winners": 22,
+    "stress_winners": 12,
+    "pareto": true
+  },
+  "pareto": [
+    "put_10d_0DTE",
+    "put_20d_0DTE",
+    "put_spread_20_10_0DTE",
+    "put_spread_50_20_0DTE",
+    "put_20d_1DTE"
+  ],
+  "source_sha": "cda00d9b3b5e08f3f654a526cdacd807aff93e007d12fad79d2b69f83e191c84",
+  "protocol_sha": "f158f55cbf35134f8095f995dba69a9e3a5859e81090f6ce4fab1b1d769502e5",
+  "old_balanced": "put_spread_50_20_1DTE"
+}

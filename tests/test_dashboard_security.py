@@ -99,7 +99,7 @@ def test_websocket_boundary_rejects_before_application(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_first4_server_preserves_authenticated_proxy_socket_peer(monkeypatch, tmp_path):
+def test_futures_server_preserves_authenticated_proxy_socket_peer(monkeypatch, tmp_path):
     from unittest.mock import AsyncMock
 
     import httpx
@@ -107,7 +107,7 @@ def test_first4_server_preserves_authenticated_proxy_socket_peer(monkeypatch, tm
     from typer.testing import CliRunner
 
     from stocker_core.cli import app as cli
-    from stocker_execution.first4_runtime import Runtime
+    from stocker_execution.runtime import Runtime
 
     token = "isolated-proxy-credential-123456789"
     monkeypatch.delenv("STOCKER_DASHBOARD_PASSWORD", raising=False)
@@ -136,10 +136,10 @@ def test_first4_server_preserves_authenticated_proxy_socket_peer(monkeypatch, tm
                     statuses.append((await client.get("/api/system", headers=headers)).status_code)
 
     monkeypatch.setattr(uvicorn, "Server", Server)
-    config = tmp_path / "first4.yaml"
+    config = tmp_path / "futures.yaml"
     config.write_text("armed: false\n")
     result = CliRunner().invoke(
-        cli, ["first4-run", "--config", str(config), "--database", str(tmp_path / "state.sqlite")]
+        cli, ["futures-run", "--config", str(config), "--database", str(tmp_path / "state.sqlite")]
     )
     assert result.exit_code == 0, result.output
     assert statuses == [200, 200, 403]

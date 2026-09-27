@@ -1,0 +1,185 @@
+{
+  "study": "FAST_BTC_REAL_EXPIRY_RECONSTRUCTION_V0",
+  "research_only": true,
+  "live_ordering_enabled": false,
+  "order_placement": "disabled",
+  "sample": {
+    "start": "2026-07-24",
+    "end": "2026-09-25",
+    "all_dates_after_24_7_transition": true
+  },
+  "products": [
+    {
+      "name": "Options on Bitcoin Futures",
+      "rulebook": "350A",
+      "monthly_code": "BTC",
+      "weekly_codes": {
+        "Monday": "P1A-P5A",
+        "Tuesday": "P1B-P5B",
+        "Wednesday": "P1C-P5C",
+        "Thursday": "P1D-P5D",
+        "Friday": "P1E-P4E"
+      },
+      "underlying": "Nearest-expiring eligible standard Bitcoin futures; monthly options use same named delivery month.",
+      "underlying_code": "BTC",
+      "multiplier_bitcoin": 5,
+      "exercise": "European; automatic exercise; contrary instructions prohibited",
+      "settlement": "Delivers one futures contract at strike; monthly futures immediately cash-settle to BRR. Weekly delivery leaves futures exposure.",
+      "available_expiry_days": "Monday-Friday; monthly replaces corresponding Friday weekly",
+      "termination_timezone": "Europe/London",
+      "weekly_termination": "16:00:00 on named expiry",
+      "monthly_termination": "With underlying futures, normally last Friday of month at16:00 London",
+      "sample_termination_ny": "11:00 America/New_York",
+      "weekly_fixing": "Notionally adjusted transaction VWAP of BOTH standard Bitcoin and Micro Bitcoin futures during15:30:00-15:59:59 London",
+      "monthly_fixing": "Underlying final settlement: CME CF Bitcoin Reference Rate published16:00 London; observation window15:00-16:00 London",
+      "strike_rule": "STANDARD_MICRO_EFFECTIVE_2026_06_01",
+      "trading_schedule": "COMMON_CRYPTO_SCHEDULE",
+      "holiday_treatment": "COMMON_HOLIDAY_RULE",
+      "sources": [
+        "https://www.cmegroup.com/rulebook/CME/IV/350/350A.pdf",
+        "https://www.cmegroup.com/rulebook/CME/IV/350/350.pdf",
+        "https://www.cmegroup.com/content/dam/cmegroup/market-regulation/rule-filings/2026/5/26-114.pdf"
+      ]
+    },
+    {
+      "name": "Options on Micro Bitcoin Futures",
+      "rulebook": "348A",
+      "monthly_code": "WM",
+      "weekly_codes": {
+        "Monday": "W1A-W5A",
+        "Tuesday": "W1B-W5B",
+        "Wednesday": "W1C-W5C",
+        "Thursday": "W1D-W5D",
+        "Friday": "W1E-W4E"
+      },
+      "underlying_code": "MBT",
+      "underlying": "Nearest-expiring eligible Micro Bitcoin future",
+      "multiplier_bitcoin": 0.1,
+      "exercise": "European; automatic exercise; contrary instructions prohibited",
+      "settlement": "Delivers one Micro Bitcoin future; monthly delivered future immediately cash-settles to BRR",
+      "available_expiry_days": "Monday-Friday; monthly replaces corresponding Friday weekly",
+      "termination_timezone": "Europe/London",
+      "weekly_termination": "16:00:00",
+      "monthly_termination": "With underlying futures, normally last Friday of month at16:00 London",
+      "sample_termination_ny": "11:00 America/New_York",
+      "weekly_fixing": "Notionally adjusted combined Bitcoin and Micro Bitcoin transaction VWAP15:30:00-15:59:59 London",
+      "monthly_fixing": "BRR final settlement, published16:00 London; observation15:00-16:00",
+      "strike_rule": "STANDARD_MICRO_EFFECTIVE_2026_06_01",
+      "trading_schedule": "COMMON_CRYPTO_SCHEDULE",
+      "holiday_treatment": "COMMON_HOLIDAY_RULE",
+      "sources": [
+        "https://www.cmegroup.com/content/dam/cmegroup/rulebook/CME/III/300/348A.pdf",
+        "https://www.cmegroup.com/education/courses/micro-bitcoin-basics/managing-expiration-and-exercise-for-micro-cryptocurrency-options",
+        "https://www.cmegroup.com/content/dam/cmegroup/market-regulation/rule-filings/2026/5/26-114.pdf"
+      ]
+    },
+    {
+      "name": "Options on Bitcoin Friday Futures",
+      "rulebook": "451A",
+      "option_root_all_weekdays": "BFF",
+      "underlying_code": "BFF",
+      "underlying": "Nearest-expiring Bitcoin Friday futures contract",
+      "multiplier_bitcoin": 0.02,
+      "launch_trade_date": "2025-02-24",
+      "exercise": "European; automatic exercise; contrary instructions prohibited",
+      "settlement": "Financial; ITM call cash equals fixing minus strike multiplied by0.02",
+      "listing_schedule": "Daily Monday-Friday expirations for two consecutive weeks",
+      "termination_timezone": "America/New_York",
+      "termination": "16:00:00 on expiry date",
+      "nonfinal_business_day_fixing": "BFF transaction VWAP15:00:00-15:59:59 New York",
+      "last_business_day_of_week_fixing": "Underlying BFF final settlement: BRRNY published16:00 New York, observation15:00-16:00",
+      "holiday_rule": "Expiry remains if business day in either London or US; joint holiday shifts to preceding eligible day",
+      "strike_rule": "BFF_EFFECTIVE_2025_06_30",
+      "trading_schedule": "COMMON_CRYPTO_SCHEDULE",
+      "sources": [
+        "https://www.cmegroup.com/rulebook/CME/V/450/451A/451A.pdf",
+        "https://www.cmegroup.com/rulebook/CME/V/450/451/451.pdf",
+        "https://www.cmegroup.com/content/dam/cmegroup/notices/ser/2025/01/ser-9509.pdf",
+        "https://www.cmegroup.com/content/dam/cmegroup/notices/clearing/2025/01/chadv25-040.pdf"
+      ]
+    }
+  ],
+  "strike_rules": {
+    "STANDARD_MICRO_EFFECTIVE_2026_06_01": {
+      "effective": "2026-06-01",
+      "applicable_to_entire_sample": true,
+      "under_10_dte": {
+        "band": "10% above and5% below ATM",
+        "settlement_at_or_below_100000_increment_usd": 250,
+        "settlement_above_250000_increment_usd": 500
+      },
+      "under_240_dte": {
+        "band": "30% above and20% below ATM",
+        "settlement_at_or_below_100000_increment_usd": 500,
+        "settlement_at_or_below_250000_increment_usd": 1000,
+        "settlement_at_or_below_25000_increment_usd": 100
+      },
+      "caveat": "Listing bands and increments use underlying settlement/ATM. Not archived security-master evidence. Dynamic25-dollar strikes not assumed. Sample standard candidates use below100000 short-dated250 grid; no claim all other ladder branches reproduced.",
+      "supersedes": "Earlier January and September2025 schedules",
+      "sources": [
+        "https://www.cmegroup.com/content/dam/cmegroup/notices/clearing/2026/05/chadv26-187.pdf",
+        "https://www.cmegroup.com/notices/electronic-trading/2026/05/20260525.html"
+      ]
+    },
+    "BFF_EFFECTIVE_2025_06_30": {
+      "effective": "2025-06-30",
+      "base": "250-dollar increments within15% above/below ATM",
+      "under_7_dte": "Additional strikes within5% above/below ATM:100-dollar increments for settlement>=50000;50-dollar below50000",
+      "dynamic": "100-dollar increments at/above50000;50-dollar below50000",
+      "supersedes": "Original February2025 launch lattice",
+      "sources": [
+        "https://www.cmegroup.com/content/dam/cmegroup/notices/ser/2025/06/ser-9569.pdf",
+        "https://www.cmegroup.com/content/dam/cmegroup/market-regulation/rule-filings/2025/7/25-289.pdf"
+      ]
+    }
+  },
+  "trading_hours": {
+    "schedule_id": "COMMON_CRYPTO_SCHEDULE",
+    "expanded_schedule_effective": "2026-05-29T16:00:00-05:00",
+    "timezone": "America/Chicago",
+    "weekday_maintenance": "Monday-Friday16:00-16:02",
+    "saturday_maintenance": "02:00-04:00",
+    "sample_exception": "2026-09-19 Saturday maintenance extended02:00-08:00 CT; no study entry/valuation crosses it",
+    "weekend_holiday_trade_dates": "Following business-day clearing, settlement and reporting treatment",
+    "pre_transition": "Sunday17:00 through Friday16:00 CT, with daily16:00-17:00 maintenance",
+    "expiry_not_extended_by_24_7": true,
+    "sources": [
+      "https://www.cmegroup.com/content/dam/cmegroup/market-regulation/rule-filings/2026/5/26-114.pdf",
+      "https://www.cmegroup.com/media-room/press-releases/2026/6/01/cme_group_announceslaunchof247cryptocurrencyfuturesandoptionstra.html",
+      "https://www.cmegroup.com/markets/trade-24-7.html",
+      "https://www.cmegroup.com/notices/electronic-trading/2026/09/20260907.html",
+      "https://cmegroupclientsite.atlassian.net/wiki/spaces/EPICSANDBOX/pages/1283194884"
+    ]
+  },
+  "holiday_interpretation": {
+    "rule_id": "COMMON_HOLIDAY_RULE",
+    "single_country_holiday_changes_option_expiry": false,
+    "joint_us_uk_holiday_changes_expiry": true,
+    "sample_joint_holidays": [],
+    "august_31_uk_holiday": "Do not remove expiry solely for this holiday",
+    "september_7_us_holiday": "Do not remove expiry solely for this holiday",
+    "evidence": "Official CME FAQ Q19: single-country holidays leave regular expiration unaffected",
+    "source": "https://www.cmegroup.com/cryptooptionsfaq"
+  },
+  "mechanical_mapping": {
+    "basis": "Earliest unexpired same-day expiry; call direction and causal0.10delta method preserved; standard BTC wins Micro tie; no return-based selection",
+    "before_11_ny": "Standard BTC, subject correct underlying month/listing evidence",
+    "from_11_until_before_16_ny": "BFF, subject correct BFF underlying/data",
+    "at_or_after_16_ny": "NO_REAL_0DTE_MATCH",
+    "tomorrow_substitution": false,
+    "underlying_mismatch": "Use correct listed underlying with unchanged causal RV methodology where data exist; otherwise unavailable, never silently use another future",
+    "exact_historical_listing_verified": false
+  },
+  "model_audit_conclusions": {
+    "inherited_17_ny_expiry_matches_inspected_cme_contracts": false,
+    "original_architecture_classification": "C. purely synthetic expiry architecture",
+    "minute60_equals_expiry": "Only when actual selected expiry coincides",
+    "real_contract_life_after_synthetic_17_ny": "None among inspected same-day products",
+    "standard_weekly_fixing_from_btc_minute_closes_valid": false,
+    "bff_provider_vwap_fixing": "Complete minute-bar trade averages weighted by volume form labeled MODEL_ESTIMATED_FIXING_PROVIDER_VWAP_NOT_OFFICIAL; provider filtering unverified",
+    "monthly_brr_and_friday_brrny": "Published reference fixing required; no futures-close substitution",
+    "weekly_exercise_caveat": "Delivers futures with residual exposure; fixing intrinsic is not executable cash liquidation",
+    "real_option_marks": "REAL_OPTION_MARKS_UNAVAILABLE",
+    "execution_economics": "EXECUTION_ECONOMICS_UNVERIFIED"
+  }
+}

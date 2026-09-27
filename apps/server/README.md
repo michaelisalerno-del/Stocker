@@ -1,12 +1,8 @@
-# SLRNO FIRST4 PAPER server
+# SLRNO futures PAPER server
 
-Use `stocker first4-run --config /etc/stocker/v1/first4.yaml --database /var/lib/stocker/v1/first4.sqlite3 --host 127.0.0.1 --port 8765`.
+Use `stocker futures-run --config /etc/stocker/v1/futures.paper.yaml --database /var/lib/stocker/v1/futures.sqlite3 --host 127.0.0.1 --port 8765`.
 
-Only US FIRST4 and verified IBKR PAPER account DUP655399 are supported. See [FIRST4](../../docs/FIRST4.md).
-# Authenticated proxy boundary
-
-FIRST4 starts Uvicorn with `proxy_headers=False`: dashboard authentication must see the
-actual loopback socket peer, not the browser address in Caddy's `X-Forwarded-For`.
-The private proxy token, expected host and origin checks remain mandatory.
-The deployed Caddy write allowlist must allow `/api/first4/pause`; legacy run/settings
-write routes are no longer part of the application.
+See [deployment](../../docs/DEPLOYMENT.md) and [rulebook](../../docs/FUTURES-RULEBOOK.md).
+The authenticated reverse proxy remains required. Uvicorn uses `proxy_headers=False` so
+security receives the actual loopback peer. The write allowlist contains only
+`/api/entries/pause` and `/api/entries/resume`; neither route can arm configuration.

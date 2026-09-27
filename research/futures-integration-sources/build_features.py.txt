@@ -1,0 +1,133 @@
+"""Independent, offline synthetic-option discovery. No network or broker imports."""
+import sys,json,hashlib,itertools
+from pathlib import Path
+import numpy as np
+import pandas as pd
+from scipy.special import ndtr,ndtri
+from scipy.stats import rankdata
+ROOT=Path(__file__).resolve().parent
+SRC=ROOT.parent/'2026-09-26-run-a-fast-cheap-read-only'
+MARKETS=['BTC','CL','GC','NG','NQ','SI']; HS=[15,30,60]; GAINS=[.5,1,2,5]
+Q=np.array([10,20,25,33,40,50,60,67,75,80,90])
+
+def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
+def clean(v):
+ if isinstance(v,dict):return {str(k):clean(x) for k,x in v.items()}
+ if isinstance(v,(list,tuple,np.ndarray)):return [clean(x) for x in v]
+ if isinstance(v,(np.integer,)):return int(v)
+ if isinstance(v,(np.floating,float)):return float(v) if np.isfinite(v) else None
+ if isinstance(v,np.bool_):return bool(v)
+ return v
+
+def writej(p,x):p.write_text(json.dumps(clean(x),indent=2,allow_nan=False))
+def feature_names():
+ names=['rv5','rv15','rv30','range5','range15','range30','atr15','rel_rv','rel_range','rel_volume','volume_acceleration','volume5','volume15','volatility_change','range_change','compression_expansion','efficiency5','efficiency15','efficiency30','sign_consistency','direction_changes','overlap','body_fraction','wick_fraction','hour','price_per_volume']
+ names += ['signed_return1','signed_return5','signed_return15','signed_return30','signed_acceleration','signed_persistence','signed_vwap_distance','signed_session_location','signed_range_location','signed_opening_distance','signed_high_distance','signed_low_distance','signed_swing_distance','signed_body','signed_wick_balance']
+ return names
+
+def build():
+ import importlib.util
+ extra=ROOT.parent/'2026-09-26-run-a-fast-read-only-outcome/g7_replication'
+ spec=importlib.util.spec_from_file_location('cache_reader',extra/'replicate.py');reader=importlib.util.module_from_spec(spec);spec.loader.exec_module(reader)
+ bars,quality,hashes=reader.loadbars()
+ schedule=pd.concat([pd.read_csv(extra/'contract_schedule.csv'),pd.read_csv(SRC/'contract_schedule.csv')],ignore_index=True)
+ schedule=schedule.drop_duplicates(['market','date'],keep='last').sort_values(['market','date'])
+ contracts=json.loads((extra/'contracts.json').read_text())|json.loads((SRC/'contracts.json').read_text())
+ for base in [extra,SRC]:
+  for name in ['contract_schedule.csv','contracts.json']:hashes[str(base/name)]=sha(base/name)
+ for market in MARKETS:
+  out=ROOT/market;out.mkdir(exist_ok=True);pieces=[];coverage=[];history=[]
+  for sc in schedule[schedule.market==market].itertuples():
+   day=pd.Timestamp(sc.date,tz='America/New_York');idx=pd.date_range(day+pd.Timedelta(hours=8),day+pd.Timedelta(hours=17)-pd.Timedelta(minutes=1),freq='min')
+   d=bars[sc.conId].reindex(idx);c=d.close;p=c.shift(1);r=np.log(c).diff();z=pd.DataFrame(index=idx)
+   z['price']=p;z['rv15']=np.sqrt(r.pow(2).rolling(15).sum()).shift(1)
+   for n in [5,15,30]:
+    z[f'rv{n}']=np.sqrt(r.pow(2).rolling(n).sum()).shift(1)
+    z[f'range{n}']=(d.high.rolling(n).max()-d.low.rolling(n).min()).shift(1)/p
+    z[f'volume{n}']=d.volume.rolling(n).sum().shift(1)
+    z[f'efficiency{n}']=r.rolling(n).sum().abs().shift(1)/r.abs().rolling(n).sum().shift(1).replace(0,np.nan)
+   for n in [1,5,15,30]:z[f'return{n}']=p/c.shift(n+1)-1
+   z['acceleration']=z.return5-(c.shift(6)/c.shift(11)-1)
+   z['persistence']=np.sign(r).rolling(15).mean().shift(1)
+   z['sign_consistency']=z.persistence.abs()
+   z['direction_changes']=(np.sign(r)!=np.sign(r.shift(1))).rolling(15).mean().shift(1)
+   z['volatility_change']=z.rv5/(np.sqrt(r.pow(2).rolling(15).sum()).shift(6)*np.sqrt(5/15)).replace(0,np.nan)
+   z['range_change']=z.range5/z.range15.shift(5).replace(0,np.nan)
+   tr=pd.concat([d.high-d.low,(d.high-c.shift(1)).abs(),(d.low-c.shift(1)).abs()],axis=1).max(axis=1)
+   z['atr15']=tr.rolling(15).mean().shift(1)/p
+   z['volume_acceleration']=z.volume5/(d.volume.rolling(15).sum().shift(6)/3).replace(0,np.nan)
+   spread=(d.high-d.low).replace(0,np.nan);body=(d.close-d.open).abs()
+   z['body_fraction']=(body/spread).fillna(0).rolling(15).mean().shift(1)
+   z['wick_fraction']=1-z.body_fraction
+   z['body']=((d.close-d.open)/spread).fillna(0).rolling(5).mean().shift(1)
+   upper=d.high-d[['open','close']].max(axis=1);lower=d[['open','close']].min(axis=1)-d.low
+   z['wick_balance']=((lower-upper)/spread).fillna(0).rolling(5).mean().shift(1)
+   overlap=(np.minimum(d.high,d.high.shift(1))-np.maximum(d.low,d.low.shift(1))).clip(lower=0)
+   z['overlap']=(overlap/spread).fillna(0).rolling(15).mean().shift(1)
+   avg=d['average'] if 'average' in d else (d.high+d.low+d.close)/3
+   vwap=(avg*d.volume).cumsum().shift(1)/d.volume.cumsum().shift(1).replace(0,np.nan)
+   z['vwap_distance']=(p-vwap)/p
+   sh=d.high.expanding().max().shift(1);sl=d.low.expanding().min().shift(1)
+   z['session_location']=(2*(p-sl)/(sh-sl).replace(0,np.nan)-1)
+   rh=d.high.rolling(30).max().shift(1);rl=d.low.rolling(30).min().shift(1)
+   z['range_location']=2*(p-rl)/(rh-rl).replace(0,np.nan)-1
+   z['high_distance']=(p-rh)/p;z['low_distance']=(p-rl)/p
+   # Swing proxy: midpoint of previous completed 5-minute range, no future pivot confirmation.
+   z['swing_distance']=(p-(d.high.rolling(5).max().shift(6)+d.low.rolling(5).min().shift(6))/2)/p
+   opening=d.iloc[:30];mid=(opening.high.max()+opening.low.min())/2
+   z['opening_distance']=(p-mid)/p
+   z.loc[z.index<day+pd.Timedelta(hours=8,minutes=30),'opening_distance']=np.nan
+   z['price_per_volume']=z.return15.abs()/z.volume15.replace(0,np.nan)
+   z['hour']=idx.hour
+   summaries=z.groupby('hour')[['rv15','range15','volume15']].median()
+   if len(history)>=5:
+    norms=pd.concat(history[-5:]).groupby(level=0).median()
+    for f,name in [('rv15','rel_rv'),('range15','rel_range'),('volume15','rel_volume')]:z[name]=z[f].to_numpy()/norms[f].reindex(z.hour).to_numpy()
+   else:
+    for name in ['rel_rv','rel_range','rel_volume']:z[name]=np.nan
+   z['compression_expansion']=z.range_change/z.rel_range.replace(0,np.nan)
+   history.append(summaries)
+   z['date']=sc.date;z['market']=market;z['conId']=sc.conId;z['contract']=sc.localSymbol
+   z['checkpoint']=idx;z['minute']=idx.hour*60+idx.minute
+   futclose=np.column_stack([c.shift(-k).to_numpy() for k in range(60)])
+   futhigh=np.column_stack([d.high.shift(-k).to_numpy() for k in range(60)])
+   futlow=np.column_stack([d.low.shift(-k).to_numpy() for k in range(60)])
+   pastok=(c.rolling(31).count().shift(1)==31).to_numpy()
+   hours=(idx>=day+pd.Timedelta(hours=9))&(idx<=day+pd.Timedelta(hours=16))
+   complete=np.isfinite(futclose).all(axis=1)
+   expiry_ok=(day+pd.offsets.BDay(1)).strftime('%Y%m%d')<contracts[str(sc.conId)]['lastTradeDateOrContractMonth'][:8]
+   eligible=hours&pastok&(z.rv15.to_numpy()>0)&expiry_ok
+   coverage.append(dict(date=sc.date,available_bars=int(c.notna().sum()),eligible_path_N=int(eligible.sum()),missing_path_N=int((hours&~complete).sum()),expiry_ok=expiry_ok,warmup=len(history)<=5))
+   zz=z[eligible].copy();ii=np.flatnonzero(eligible)
+   for h in HS:
+    zz[f'future_close{h}']=futclose[ii,h-1]
+    zz[f'future_high{h}']=futhigh[ii,:h].max(axis=1)
+    zz[f'future_low{h}']=futlow[ii,:h].min(axis=1)
+   for k in range(60):zz[f'path{k+1}']=futclose[ii,k]
+   pieces.append(zz.reset_index(drop=True))
+  p=pd.concat(pieces,ignore_index=True)
+  basefeatures=[n.removeprefix('signed_') for n in feature_names()]
+  p=p.replace([np.inf,-np.inf],np.nan)
+  p['feature_complete']=p[basefeatures].notna().all(axis=1)
+  p=p[p.feature_complete].copy()
+  dates=sorted(p.date.unique());a=int(len(dates)*.4);b=a+int(len(dates)*.25);cc=b+int(len(dates)*.2)
+  splits={'ARCHITECTURE_DISCOVERY':dates[:a],'SIGNAL_DISCOVERY':dates[a:b],'VALIDATION':dates[b:cc],'TEST':dates[cc:]}
+  assert min(map(len,splits.values()))>=5
+  signed=[n.removeprefix('signed_') for n in feature_names() if n.startswith('signed_')]
+  sides=[]
+  for side,sign in [('call',1)]:
+   z=p.copy();z['side']=side;z['sign']=sign
+   for f in signed:z['signed_'+f]=sign*z[f]
+   for h in HS:
+    z[f'mfe{h}']=np.maximum(z[f'future_high{h}']/z.price-1,0) if side=='call' else np.maximum(1-z[f'future_low{h}']/z.price,0)
+    z[f'dret{h}']=sign*(z[f'future_close{h}']/z.price-1)
+    z[f'mfe_rv{h}']=z[f'mfe{h}']/z.rv15
+   sides.append(z)
+  p=pd.concat(sides,ignore_index=True).sort_values(['side','date','checkpoint']).reset_index(drop=True)
+  for split,ds in splits.items():
+   z=p[p.date.isin(ds)].copy();z['split']=split;z.to_parquet(out/f'{split}_features.parquet',index=False)
+  writej(out/'chronology.json',dict(market=market,source_dates=sorted(schedule[schedule.market==market].date.unique()),splits=splits,coverage=coverage,rows={s:int(p.date.isin(ds).sum()) for s,ds in splits.items()},feature_count=len(feature_names())))
+  print(market,'split dates', {s:len(ds) for s,ds in splits.items()},'rows',len(p),flush=True)
+ writej(ROOT/'input_audit.json',dict(hashes=hashes,quality=quality,protocol_sha256=sha(ROOT/'PROTOCOL.md'),research_only=True,live_ordering_enabled=False,order_placement='disabled'))
+
+if __name__=='__main__':build()

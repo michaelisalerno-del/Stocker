@@ -1,0 +1,178 @@
+"""Offline fixed-clock tail survey; no broker or application imports."""
+import sys,json,hashlib,warnings
+from pathlib import Path
+import numpy as np,pandas as pd
+from scipy.special import ndtri,ndtr
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+from study import MENU,price
+from build_features import clean,writej,sha,MARKETS
+R=Path(__file__).resolve().parent;OLD=R.parent
+GAINS=[50,100,200,300,500];HORIZONS=['15','30','60','120','SESSION'];IVS=[1.,1.25]
+PANEL=['return5','return15','efficiency15','rv15','rv_change','relative_volume5','range_change','vwap_distance','acceleration','opening_displacement','prior_extreme_distance']
+SIGNED=['return5','return15','vwap_distance','acceleration','opening_displacement','prior_extreme_distance']
+warnings.filterwarnings('ignore',category=RuntimeWarning)
+
+def rawbars():
+ aud=json.loads((OLD/'input_audit.json').read_text());buf={}
+ for p,h in aud['hashes'].items():
+  assert sha(Path(p))==h,(p,'source changed')
+  if '/cache/' not in p:continue
+  j=json.loads(Path(p).read_text());t=j['task'];buf.setdefault(t['contract']['conId'],[]).append(pd.DataFrame(j['data']))
+ out={}
+ for cid,parts in buf.items():
+  d=pd.concat(parts,ignore_index=True);d['date']=pd.to_datetime(d.date,utc=True)
+  assert not d[['date','open','high','low','close','volume']].drop_duplicates().date.duplicated().any()
+  out[cid]=d.drop_duplicates('date').set_index('date').sort_index()
+ return out,aud
+
+def build():
+ bars,aud=rawbars();extra=OLD.parent/'2026-09-26-run-a-fast-read-only-outcome/g7_replication';src=OLD.parent/'2026-09-26-run-a-fast-cheap-read-only'
+ schedule=pd.concat([pd.read_csv(extra/'contract_schedule.csv'),pd.read_csv(src/'contract_schedule.csv')]).drop_duplicates(['market','date'],keep='last').sort_values(['market','date'])
+ for m in MARKETS:
+  out=R/m;out.mkdir(exist_ok=True);eligible=[]
+  for block in ['ARCHITECTURE_DISCOVERY','SIGNAL_DISCOVERY','VALIDATION','TEST']:
+   z=pd.read_parquet(OLD/m/f'{block}_features.parquet');z=z[(z.minute-540)%15==0].copy();z['original_block']=block;z['block']='DISCOVERY' if block=='ARCHITECTURE_DISCOVERY' else 'AUDIT';eligible.append(z)
+  el=pd.concat(eligible).sort_values('checkpoint');hist=[];ctxs=[];entries=[];close=[];high=[];low=[];volume=[];pre=[];runs=[];offset=0
+  for sc in schedule[schedule.market==m].itertuples():
+   day=pd.Timestamp(sc.date,tz='America/New_York');ix=pd.date_range(day+pd.Timedelta(hours=8),periods=541,freq='min');d=bars[sc.conId].reindex(ix)
+   c=d.close;p=c.shift(1);lr=np.log(c).diff();f=pd.DataFrame(index=ix);f['checkpoint']=ix;f['date']=sc.date;f['market']=m;f['conId']=sc.conId;f['minute']=ix.hour*60+ix.minute;f['price']=p
+   f['rv15']=np.sqrt(lr.pow(2).rolling(15).sum()).shift(1)
+   for n in [5,15]:f[f'return{n}']=p/c.shift(n+1)-1
+   f['efficiency15']=lr.rolling(15).sum().abs().shift(1)/lr.abs().rolling(15).sum().shift(1).replace(0,np.nan)
+   f['rv_change']=np.sqrt(lr.pow(2).rolling(5).sum()).shift(1)/(np.sqrt(lr.pow(2).rolling(15).sum()).shift(6)*np.sqrt(5/15)).replace(0,np.nan)
+   f['volume5']=d.volume.rolling(5).sum().shift(1);f['volume15']=d.volume.rolling(15).sum().shift(1)
+   f['range15']=(d.high.rolling(15).max()-d.low.rolling(15).min()).shift(1)/p
+   f['range_change']=(d.high.rolling(5).max()-d.low.rolling(5).min()).shift(1)/(d.high.rolling(15).max()-d.low.rolling(15).min()).shift(6).replace(0,np.nan)
+   av=d['average'] if 'average' in d else (d.high+d.low+d.close)/3
+   vw=(av*d.volume).cumsum().shift(1)/d.volume.cumsum().shift(1).replace(0,np.nan);f['vwap_distance']=(p-vw)/p
+   f['acceleration']=f.return5-(c.shift(6)/c.shift(11)-1)
+   oh=d.high.iloc[:30].max();ol=d.low.iloc[:30].min();f['opening_displacement']=(p-(oh+ol)/2)/p
+   f['opening_relation']=np.where(p>oh,1,np.where(p<ol,-1,0));f.loc[f.minute<510,['opening_displacement','opening_relation']]=np.nan
+   f['high_distance']=(p-d.high.rolling(15).max().shift(1))/p;f['low_distance']=(p-d.low.rolling(15).min().shift(1))/p
+   f['prior_extreme_distance']=f.high_distance
+   f['hour']=ix.hour
+   summary=f.groupby('hour')[['rv15','volume5','range15']].median()
+   if len(hist)>=5:
+    norms=pd.concat(hist[-5:]).groupby(level=0).median()
+    for col,name in [('volume5','relative_volume5'),('rv15','relative_rv15'),('range15','relative_range15')]:f[name]=f[col].to_numpy()/norms[col].reindex(f.hour).to_numpy()
+   else:
+    for name in ['relative_volume5','relative_rv15','relative_range15']:f[name]=np.nan
+   hist.append(summary)
+   # Retrospective move identities use complete 15m bars only; never causal features.
+   vals=c.iloc[:540].to_numpy().reshape(36,15)[:,-1];sg=pd.Series(np.sign(np.diff(vals,prepend=np.nan))).replace(0,np.nan).ffill().fillna(0).to_numpy();rid=np.cumsum(np.r_[True,sg[1:]!=sg[:-1]])
+   runmin=np.repeat(rid,15);runmin=np.r_[runmin,runmin[-1]];f['move_run']=runmin
+   f=f.reset_index(drop=True);f['context_id']=np.arange(offset,offset+541);ctxs.append(f)
+   for row in el[el.date==sc.date].itertuples():
+    start=int(row.minute-480);remain=540-start;eid=len(entries)
+    rec=dict(entry_id=eid,uid=f'{m}|{sc.date}|{sc.conId}|{row.minute}',market=m,date=sc.date,conId=sc.conId,contract=row.contract,checkpoint=row.checkpoint,minute=row.minute,context_id=offset+start,day_offset=offset,block=row.block,original_block=row.original_block,price=row.price,rv15=row.rv15,range15=row.range15,volume15=row.volume15,remain=remain)
+    assert np.isclose(rec['price'],f.iloc[start].price) and np.isclose(rec['rv15'],f.iloc[start].rv15)
+    entries.append(rec)
+    for store,col in [(close,'close'),(high,'high'),(low,'low'),(volume,'volume')]:
+     a=np.full(480,np.nan);a[:remain]=d[col].iloc[start:540];store.append(a)
+    pre.append(c.iloc[start-31:start].to_numpy());rr=np.full(480,-1,dtype=int);rr[:remain]=runmin[start:540];runs.append(rr)
+   offset+=541
+  e=pd.DataFrame(entries);e.to_parquet(out/'entries.parquet',index=False);pd.concat(ctxs,ignore_index=True).to_parquet(out/'contexts.parquet',index=False)
+  np.savez_compressed(out/'underlying_paths.npz',close=np.array(close),high=np.array(high),low=np.array(low),volume=np.array(volume),pre=np.array(pre),move_run=np.array(runs))
+  writej(out/'scope.json',dict(market=m,source_dates=sorted(schedule[schedule.market==m].date.unique()),blocks={b:sorted(e[e.block==b].date.unique()) for b in ['DISCOVERY','AUDIT']},entries=len(e),grid_minutes=15,original_chronology=json.loads((OLD/m/'chronology.json').read_text())['splits']))
+  print(m,'BUILD',len(e),'grid entries',e.groupby('block').date.nunique().to_dict(),flush=True)
+ writej(R/'INPUT_FROZEN.json',dict(source_hashes=aud['hashes'],prior_artifacts={str(p):sha(p) for m in MARKETS for p in (OLD/m).glob('*.json')},protocol_sha=sha(R/'PROTOCOL.md'),simulator_sha=sha(OLD/'study.py'),research_only=True,live_ordering_enabled=False,order_placement='disabled'))
+
+def model(e,paths,a,mult):
+ F=e.price.to_numpy();s=e.rv15.to_numpy()*np.sqrt(525600/15)*mult;days=pd.to_datetime(e.date);extra=((days+pd.offsets.BDay(1))-days).dt.days.to_numpy()*1440 if a['dte'] else 0
+ T=(e.remain.to_numpy()+extra)/525600;v=s*np.sqrt(T);premium=np.zeros(len(e));marks=np.zeros_like(paths);strikes=[]
+ for sg,delta,qty in a['legs']:
+  K=F if delta is None else F*np.exp(.5*v*v-sg*ndtri(delta)*v)
+  if delta is not None:assert np.allclose(ndtr(sg*(np.log(F/K)/v+v/2)),delta,atol=1e-10)
+  assert np.allclose(price(F,K,s,T,1)-price(F,K,s,T,-1),F-K,atol=1e-8)
+  premium+=qty*price(F,K,s,T,sg);marks+=qty*price(paths,K[:,None],s[:,None],T[:,None]-np.arange(1,481)/525600,sg);strikes.append(K)
+ assert (premium>0).all();rop=marks/premium[:,None]-1
+ cap=np.abs(strikes[0]-strikes[1])/premium-1 if a['kind']=='spread' else np.full(len(e),np.inf)
+ assert np.nanmin(rop)>=-1-1e-8
+ if a['kind']=='spread':assert np.nanmax(rop-cap[:,None])<=1e-7
+ return rop,premium,cap,strikes
+
+def records(e,paths,a,mult):
+ rop,premium,cap,ks=model(e,paths,a,mult);d=e.copy();d['structure']=a['id'];d['side']=a['side'];d['iv']=mult;d['premium_ratio']=premium/e.price.to_numpy();d['cap']=cap
+ for i,k in enumerate(ks):d[f'strike{i}']=k
+ for g in GAINS:
+  hit=rop>=g/100;d[f'time{g}']=np.where(hit.any(1),hit.argmax(1)+1,np.nan);d[f'reachable{g}']=cap>=g/100
+ for h in HORIZONS:
+  n=e.remain.to_numpy() if h=='SESSION' else np.full(len(e),int(h))
+  complete=np.array([np.isfinite(paths[i,:nn]).all() and nn<=e.remain.iloc[i] for i,nn in enumerate(n)])
+  grid=(e.minute.to_numpy()==540) if h=='SESSION' else ((e.minute.to_numpy()-540)%int(h)==0)
+  mx=np.array([np.nanmax(rop[i,:nn]) for i,nn in enumerate(n)]);fx=rop[np.arange(len(e)),n-1]
+  d[f'valid_{h}']=complete;d[f'independent_{h}']=complete&grid;d[f'max_{h}']=np.where(complete,mx,np.nan);d[f'fixed_{h}']=np.where(complete,fx,np.nan)
+  d[f'time_max_{h}']=np.array([np.nanargmax(rop[i,:nn])+1 if complete[i] else np.nan for i,nn in enumerate(n)])
+ return d,rop
+
+def recurrence(z,h,g,runmap):
+ reachable=z[z[f'reachable{g}']];w=reachable[reachable[f'max_{h}']>=g/100];n=len(w);dates=sorted(reachable.date.unique());cnt=w.groupby('date').size().reindex(dates,fill_value=0).sort_values(ascending=False,kind='stable');counts=cnt.to_numpy();top=int(counts[0]) if len(counts) else 0;top2=int(counts[:2].sum());nd=int((cnt>0).sum());after2=n-top2
+ if n==0:flag='TAIL_NOT_SUPPORTED'
+ elif n>=10 and (top/n>.35 or top2/n>.55):flag='TAIL_DATE_CONCENTRATED'
+ elif n>=10 and nd>=6 and after2>=5:flag='TAIL_RECURRENT'
+ else:flag='TAIL_PROMISING_LOW_SAMPLE'
+ move=[]
+ for rr in w.itertuples():
+  t=int(getattr(rr,f'time{g}'));run=int(runmap[rr.entry_id,t-1]);move.append(f'{rr.date}|run{run}')
+ mc=pd.Series(move,dtype=str).value_counts();mmax=int(mc.max()) if len(mc) else 0
+ r=dict(N=len(z),reachable_N=len(reachable),reachable_share=len(reachable)/len(z) if len(z) else np.nan,winners=n,prob=n/len(reachable) if len(reachable) else np.nan,winning_dates=nd,eligible_dates=len(dates),largest_date=cnt.index[0] if len(cnt) else None,max_date_share=top/n if n else np.nan,top2_dates=list(cnt.index[:2]),top2_share=top2/n if n else np.nan,leave1_min=n-top,leave1_max=n-int(counts[-1]) if len(counts) else 0,leave2_count=after2,winning_dates_after2=max(nd-2,0),move_groups=len(mc),max_move_share=mmax/n if n else np.nan,flag=flag,structurally_unreachable=len(reachable)==0)
+ dc=[dict(date=d,winners=int(c),leave_one_date_out=n-int(c)) for d,c in cnt.items()]
+ return r,dc
+
+def summarize(d,m,block,runmap):
+ met=[];rec=[];daily=[]
+ for (aid,iv),z in d.groupby(['structure','iv'],sort=False):
+  for h in HORIZONS:
+   v=z[z[f'independent_{h}']];x=v[f'fixed_{h}'];mx=v[f'max_{h}'];base=dict(market=m,block=block,structure=aid,iv=iv,horizon=h)
+   o=dict(**base,N=len(v),dates=v.date.nunique(),median=x.median(),mean=x.mean(),loss_rate=(x<0).mean(),median_loser=x[x<0].median(),worst=x.min(),max_gain=mx.max(),median_max_gain=mx.median(),loss50=(x<-.5).mean(),loss80=(x<-.8).mean(),loss95=(x<=-.95).mean(),premium_median=v.premium_ratio.median())
+   for q in [1,5,10,25,50,75,90,95,99]:o[f'fixed_q{q}']=x.quantile(q/100);o[f'max_q{q}']=mx.quantile(q/100)
+   met.append(o)
+   for g in GAINS:
+    r,ds=recurrence(v,h,g,runmap);rec.append(dict(**base,gain=g,**r));daily += [dict(**base,gain=g,**dd) for dd in ds]
+ return pd.DataFrame(met),pd.DataFrame(rec),pd.DataFrame(daily)
+
+def simulate(block):
+ for m in MARKETS:
+  out=R/m;e0=pd.read_parquet(out/'entries.parquet');e=e0[e0.block==block].reset_index(drop=True);p=np.load(out/'underlying_paths.npz');paths=p['close'][e.entry_id.to_numpy()];allrows=[]
+  if block=='AUDIT':assert (out/'TAIL_FROZEN.json').exists()
+  for aid,a in MENU.items():
+   for iv in IVS:
+    d,_=records(e,paths,a,iv);allrows.append(d)
+   print(m,block,aid,flush=True)
+  result=pd.concat(allrows,ignore_index=True);result.to_parquet(out/f'{block}_outcomes.parquet',index=False)
+  met,rec,daily=summarize(result,m,block,p['move_run']);met.to_csv(out/f'{block}_metrics.csv',index=False);rec.to_csv(out/f'{block}_recurrence.csv',index=False);daily.to_parquet(out/f'{block}_date_deletions.parquet',index=False)
+  print(m,block,'COMPLETE',len(result),flush=True)
+
+def select():
+ for m in MARKETS:
+  out=R/m;assert not (out/'AUDIT_outcomes.parquet').exists(),'freeze must precede audit'
+  rec=pd.read_csv(out/'DISCOVERY_recurrence.csv');rec=rec[rec.horizon.astype(str)=='60'];rows=[]
+  for aid,a in MENU.items():
+   z=rec[rec.structure==aid];ok=[];diag=[]
+   for g in GAINS:
+    b=z[(z.iv==1)&(z.gain==g)].iloc[0];s=z[(z.iv==1.25)&(z.gain==g)].iloc[0]
+    if b.winners and b.winning_dates>=3:diag.append(g)
+    if b.flag=='TAIL_RECURRENT' and s.winners>=.5*b.winners and s.winning_dates>=4:ok.append(g)
+   g=max(ok) if ok else (max(diag) if diag else 0)
+   if not g:continue
+   b=z[(z.iv==1)&(z.gain==g)].iloc[0];s=z[(z.iv==1.25)&(z.gain==g)].iloc[0]
+   rows.append(dict(structure=aid,recurrent=bool(ok),gain=g,frequency=b.prob,dates=b.winning_dates,deleted2=b.leave2_count,stress_frequency=s.prob,stress_dates=s.winning_dates,min_dates=min(b.winning_dates,s.winning_dates),base_winners=b.winners,stress_winners=s.winners))
+  df=pd.DataFrame(rows);cols=['gain','frequency','dates','deleted2','stress_frequency','stress_dates'];front=[]
+  for i,row in df.iterrows():
+   a=df[cols].to_numpy();x=row[cols].to_numpy(dtype=float);dom=(a>=x).all(1)&(a>x).any(1);front.append(not dom.any())
+  df['pareto']=front;df.to_csv(out/'pareto.csv',index=False)
+  pool=df[df.pareto].sort_values(['recurrent','gain','min_dates','deleted2','stress_frequency','frequency','structure'],ascending=[False,False,False,False,False,False,True])
+  primary=pool.iloc[0].structure if len(pool) else None;secondary=None
+  if primary:
+   a=MENU[primary]
+   for row in pool.iloc[1:].itertuples():
+    b=MENU[row.structure]
+    if any(a[k]!=b[k] for k in ['kind','side','dte']):secondary=row.structure;break
+  writej(out/'TAIL_FROZEN.json',dict(primary=primary,secondary=secondary,selection_horizon=60,primary_evidence=pool.iloc[0].to_dict() if len(pool) else None,pareto=pool.structure.tolist(),source_sha=sha(out/'DISCOVERY_outcomes.parquet'),protocol_sha=sha(R/'PROTOCOL.md'),old_balanced=json.loads((OLD/m/'ARCHITECTURE_FROZEN.json').read_text())['primary']))
+  print(m,'TAIL FROZEN',primary,secondary,flush=True)
+
+if __name__=='__main__':
+ action=sys.argv[1]
+ if action=='build':build()
+ elif action=='select':select()
+ else:simulate(action)

@@ -1,0 +1,51 @@
+{
+  "fixed_spec.json": {
+    "source": "/Users/michaelsalerno/Documents/Codex/2026-09-26-run-exactly-one-next-experiment-a/FIXED_ARCHITECTURE_SPEC.json",
+    "sha256": "f2857420e4b6b80686e80d906a27a2a413c94c3d7fff9696340cfafb1b895755"
+  },
+  "gc_diagnostic.md": {
+    "source": "/Users/michaelsalerno/Documents/Codex/2026-09-27-run-fast-gc16-g2-deconfound-v0/REPORT.md",
+    "sha256": "db89aaca436f4ab98eacfa3196a43ee351840b32fc568a5c7d563ec9057f7ef9"
+  },
+  "btc_mapping.md": {
+    "source": "/Users/michaelsalerno/Documents/Codex/2026-09-27-run-fast-gc16-g2-deconfound-v0/FAST_BTC_REAL_EXPIRY_RECONSTRUCTION_V0/REPORT.md",
+    "sha256": "3c90d2a8bb319e298bd9a4ebba1bc07d758be71eb279b42ad6bfbc319739b0eb"
+  },
+  "btc_rules.json": {
+    "source": "/Users/michaelsalerno/Documents/Codex/2026-09-27-run-fast-gc16-g2-deconfound-v0/FAST_BTC_REAL_EXPIRY_RECONSTRUCTION_V0/CME_RULES_AUDIT.json",
+    "sha256": "5d494f0846b2763ff79513d8ca34c804ebe1b392b3279977dd1d0c22e0c5f48e"
+  },
+  "build_features.py": {
+    "source": "/Users/michaelsalerno/Documents/Codex/2026-09-26-greedy-market-specific-futures-option-strategy/build_features.py",
+    "sha256": "411e534eecafe898b7e4a53982ae2d72bbbb5af2e2def4387884cdef83fe3263"
+  },
+  "tail_first_v1/tail.py": {
+    "source": "/Users/michaelsalerno/Documents/Codex/2026-09-26-greedy-market-specific-futures-option-strategy/tail_first_v1/tail.py",
+    "sha256": "5c6356d9d8038307e93934a2141aca4ba5d7675da1c89ba464bbffeb7776cd98"
+  },
+  "BTC_TAIL_FROZEN.json": {
+    "source": "/Users/michaelsalerno/Documents/Codex/2026-09-26-greedy-market-specific-futures-option-strategy/tail_first_v1/BTC/TAIL_FROZEN.json",
+    "sha256": "1c0db7ae385df77040249e0f72788f9f7f3389f92962e0b82986d80d32bfb4fc"
+  },
+  "CL_TAIL_FROZEN.json": {
+    "source": "/Users/michaelsalerno/Documents/Codex/2026-09-26-greedy-market-specific-futures-option-strategy/tail_first_v1/CL/TAIL_FROZEN.json",
+    "sha256": "f43b3a633e1438bbbbc1042440b2f6201482206499f7c8d1016e55a1d096fc16"
+  },
+  "GC_TAIL_FROZEN.json": {
+    "source": "/Users/michaelsalerno/Documents/Codex/2026-09-26-greedy-market-specific-futures-option-strategy/tail_first_v1/GC/TAIL_FROZEN.json",
+    "sha256": "24030157dc377d2a308782f72e32fd69776d26d60f06e417b8c07d6db5157e26"
+  },
+  "NG_TAIL_FROZEN.json": {
+    "source": "/Users/michaelsalerno/Documents/Codex/2026-09-26-greedy-market-specific-futures-option-strategy/tail_first_v1/NG/TAIL_FROZEN.json",
+    "sha256": "5a79e753ab0b20d08ac6bc451b1ce174c615c8ad060d087cf5835ac48298f2d9"
+  },
+  "NQ_TAIL_FROZEN.json": {
+    "source": "/Users/michaelsalerno/Documents/Codex/2026-09-26-greedy-market-specific-futures-option-strategy/tail_first_v1/NQ/TAIL_FROZEN.json",
+    "sha256": "3fa8adb9c2a40e2cca860b5e75cb83cfd44507f336fde3c1669ab1cbfa7b61d6"
+  },
+  "SI_TAIL_FROZEN.json": {
+    "source": "/Users/michaelsalerno/Documents/Codex/2026-09-26-greedy-market-specific-futures-option-strategy/tail_first_v1/SI/TAIL_FROZEN.json",
+    "sha256": "54ce25d91854d79ee03c2508a78df5e5655762e4be1e738700061e8b5ee1eb66"
+  },
+  "copied_calculations": "build_features.py.txt and tail.py.txt are read-only source evidence, not importable runtime modules."
+}

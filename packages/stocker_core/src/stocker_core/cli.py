@@ -4322,20 +4322,20 @@ def server_dry_run(
     )
 
 
-@app.command("first4-run")
-def first4_run(
-    config: Annotated[Path, typer.Option("--config")] = Path("configs/first4.example.yaml"),
-    database: Annotated[Path, typer.Option("--database")] = Path(".stocker/first4.sqlite3"),
+@app.command("futures-run")
+def futures_run(
+    config: Annotated[Path, typer.Option("--config")] = Path("configs/futures.paper.yaml"),
+    database: Annotated[Path, typer.Option("--database")] = Path(".stocker/futures.sqlite3"),
     host: str = "127.0.0.1",
     port: int = 8765,
 ) -> None:
-    """Run the single frozen FIRST4 PAPER pipeline and existing dashboard."""
+    """Run the single frozen futures-options PAPER pipeline and existing dashboard."""
     import uvicorn
 
     from stocker_dashboard.app import create_dashboard_app
-    from stocker_execution.first4_config import load
-    from stocker_execution.first4_runtime import Runtime
-    from stocker_execution.first4_store import Store
+    from stocker_execution.config import load
+    from stocker_execution.runtime import Runtime
+    from stocker_execution.store import Store
 
     async def serve() -> None:
         runtime = Runtime(load(config), Store(database))
@@ -4363,9 +4363,9 @@ def first4_run(
             worker_error = worker.exception() if worker in done and not worker.cancelled() else None
             if worker in done and (worker_error is not None or web not in done):
                 runtime.worker_health = "FAILED"
-                runtime.broker.management_block = "EXECUTION_WORKER_TERMINATED"
+                runtime.broker.fatal_error = "EXECUTION_WORKER_TERMINATED"
                 error = worker_error or RuntimeError(
-                    "FIRST4 execution worker terminated unexpectedly"
+                    "futures-options execution worker terminated unexpectedly"
                 )
                 runtime.report_failure("worker", error)
                 server.should_exit = True

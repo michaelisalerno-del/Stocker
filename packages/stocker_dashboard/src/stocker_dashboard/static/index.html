@@ -2,74 +2,126 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SLRNO — FIRST4 / US PAPER</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>SLRNO · Futures PAPER</title>
     <link rel="stylesheet" href="/static/dashboard.css" />
-    <script src="/static/order-flow.js" defer></script>
     <script src="/static/dashboard.js" defer></script>
   </head>
   <body>
-    <a class="skip-link" href="#main">Skip to operational view</a>
-    <header class="topbar">
-      <a class="brand" href="/" aria-label="SLRNO overview"
-        ><span class="brand-mark">S/</span
-        ><span>SLRNO<small>FIRST4 / US PAPER</small></span></a
-      >
-      <button
-        id="menu-button"
-        class="menu-button"
-        aria-label="Toggle navigation"
-        aria-controls="sidebar"
-        aria-expanded="false"
-      >
-        Menu
-      </button>
-      <div class="top-status" aria-label="Global operational status">
-        <div>
-          <span>PAPER connection</span><strong id="paper-status">—</strong>
-        </div>
-        <div>
-          <span>Reconciliation</span><strong id="reconciliation">—</strong>
-        </div>
-        <div>
-          <span>Entries</span><strong id="system-status">LOADING</strong>
-        </div>
-        <div>
-          <span>Current session</span><strong id="current-session">—</strong>
-        </div>
-      </div>
-      <button id="pause" class="secondary">Pause entries</button>
+    <a class="skip" href="#main">Skip to markets</a>
+    <header>
+      <a class="brand" href="/">SLRNO<span>FUTURES / OPTIONS</span></a>
+      <nav aria-label="Main navigation">
+        <a href="/">Overview</a><a href="/trades">Trades & signals</a
+        ><a href="/system">System</a>
+      </nav>
+      <span class="paper">PAPER ONLY</span>
     </header>
-    <div class="receipt" id="last-refresh" role="status">
-      Waiting for dashboard data
-    </div>
-    <div class="shell">
-      <aside class="sidebar" id="sidebar">
-        <nav aria-label="Primary">
-          <a href="/">Overview</a><a href="/opportunities">Opportunities</a>
-          <a href="/execution">Execution</a><a href="/system">System</a>
-        </nav>
-        <div class="sidebar-foot">
-          PAPER EXECUTION<br />Four slots. One session.
+    <main id="main">
+      <div class="heading">
+        <div>
+          <p class="eyebrow">SIX MARKETS · ONE FROZEN METHOD</p>
+          <h1 id="title">Futures overview</h1>
         </div>
-      </aside>
-      <div class="workspace">
-        <p id="control-result" class="notice" role="status" hidden></p>
-        <p id="transport-error" class="warning" role="status" hidden></p>
-        <main id="main" tabindex="-1"></main>
+        <div class="clock" id="clock"></div>
       </div>
-    </div>
-    <dialog id="pause-dialog" aria-labelledby="pause-title">
-      <h2 id="pause-title">Pause new entries?</h2>
-      <p>
-        This persists across restarts. Existing positions, reconciliation and
-        exit management continue.
-      </p>
-      <p>This dashboard cannot resume or arm entries.</p>
-      <div class="dialog-actions">
-        <button id="cancel-pause" class="secondary">Cancel</button
-        ><button id="confirm-pause">Confirm pause</button>
-      </div>
-    </dialog>
+      <div id="notice" role="status" aria-live="polite"></div>
+      <section class="summary" aria-label="Account and allocation">
+        <div>
+          <small>Paper account</small><strong id="account">Connecting…</strong
+          ><span id="connection"></span>
+        </div>
+        <div>
+          <small>Open + reserved trades</small
+          ><strong id="capacity">— / 4</strong><span>Concurrent positions</span>
+        </div>
+        <div>
+          <small>Reserved + open allocation</small
+          ><strong id="allocation">— / £40</strong
+          ><span>Concurrent ceiling · not a daily loss limit</span>
+        </div>
+        <div>
+          <small>Realised net P&L</small><strong id="realised">—</strong
+          ><span id="pnl-note">Broker executions + commissions</span>
+        </div>
+        <div>
+          <small>Unrealised estimate</small><strong id="unrealised">—</strong
+          ><span id="valuation-note">Bid-based · freshness required</span>
+        </div>
+        <div>
+          <small>Entries</small><strong id="entries">Unarmed</strong
+          ><button id="pause" type="button">Pause entries</button>
+        </div>
+      </section>
+      <section id="overview">
+        <div id="markets" class="markets"></div>
+        <p id="evidence" class="evidence"></p>
+      </section>
+      <section id="trades" hidden>
+        <div class="filters">
+          <label
+            >Market<select id="market-filter">
+              <option value="">All six</option>
+              <option>BTC</option>
+              <option>CL</option>
+              <option>GC</option>
+              <option>NG</option>
+              <option>NQ</option>
+              <option>SI</option>
+            </select></label
+          >
+          <label>Date (UTC)<input type="date" id="day-filter" /></label
+          ><label
+            >Rule version<input id="version-filter" placeholder="All versions"
+          /></label>
+          <label
+            >Sort<select id="sort-filter">
+              <option value="desc">Newest first</option>
+              <option value="asc">Oldest first</option>
+            </select></label
+          >
+        </div>
+        <div
+          class="table-scroll"
+          tabindex="0"
+          aria-label="Signal and trade history"
+        >
+          <table>
+            <thead>
+              <tr>
+                <th>Opportunity · London</th>
+                <th>Market</th>
+                <th>State</th>
+                <th>Reason</th>
+                <th>Rule</th>
+                <th>Evidence</th>
+              </tr>
+            </thead>
+            <tbody id="history"></tbody>
+          </table>
+        </div>
+        <p id="history-empty">No prospective opportunities recorded.</p>
+        <div class="paging">
+          <button id="prev">Previous</button><span id="page-number"></span
+          ><button id="next">Next</button>
+        </div>
+        <details id="trade-detail">
+          <summary>Selected opportunity · orders and executions</summary>
+          <pre id="trade-json"></pre>
+        </details>
+      </section>
+      <section id="system" hidden>
+        <h2>Connectivity and readiness</h2>
+        <p>
+          Live trading is unavailable. Installation, data readiness and
+          execution arming are separate.
+        </p>
+        <pre id="system-json"></pre>
+      </section>
+      <footer>
+        Broker-simulated PAPER fills · historical synthetic research is excluded
+        · times shown in Europe/London
+      </footer>
+    </main>
   </body>
 </html>

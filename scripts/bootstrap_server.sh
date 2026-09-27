@@ -22,4 +22,4 @@ uv sync --locked --no-default-groups --group server
 echo
 echo "Bootstrap complete."
 echo "Next steps:"
-echo "  uv run --no-sync stocker first4-run --config configs/first4.example.yaml --database .stocker/first4.sqlite3"
+echo "  uv run --no-sync stocker futures-run --config configs/futures.paper.yaml --database .stocker/futures.sqlite3"

@@ -1,0 +1,15 @@
+# Installation and connection do not arm orders. Research did not approve listed adaptations.
+environment: PAPER
+expected_account: DUP655399
+host: 127.0.0.1
+port: 4003
+client_id: 83
+armed: false
+max_premium_risk_gbp: 10
+max_open_positions: 4
+max_simultaneous_entry_risk_gbp: 40
+max_contracts_per_trade: 1
+mappings: {}
+# Record verified remaining account capacity (minimum 16, including history streams) at preflight.
+available_market_data_lines: null
+market_data_allocation_source: null

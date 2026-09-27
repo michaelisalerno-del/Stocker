@@ -1,3 +1,3 @@
-"""Frozen FIRST4 IBKR PAPER execution."""
+"""Frozen futures-options PAPER execution."""
 
 __version__ = "0.1.0"

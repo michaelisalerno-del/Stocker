@@ -2,7 +2,7 @@
   "name": "stocker-dashboard-tests",
   "private": true,
   "scripts": {
-    "test": "node tests/dashboard_first4.cjs"
+    "test": "node tests/dashboard_futures.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"

@@ -1,36 +1,37 @@
 # SLRNO
 
-SLRNO runs one US-only frozen FIRST4 method against IBKR PAPER account `DUP655399`.
-LIVE execution is unavailable. Research and raw data remain separate from trading.
-
-See [current deployment and effective configuration](docs/CURRENT-DEPLOYMENT.md).
-Older cutover reports describe their recorded deployment, not current settings.
-
-Run `uv sync --locked --no-default-groups --group server`, then:
+A continuous six-market futures-options PAPER application: **BTC, CL, GC, NG, NQ, SI**.
+One shared IBKR connection, a fresh durable ledger and a compact authenticated dashboard.
+LIVE is unavailable. Historical synthetic results never enter trading P&L.
 
 ```sh
-stocker first4-run --config configs/first4.example.yaml --database .stocker/first4.sqlite3
+uv sync --locked --no-default-groups --group server
+stocker futures-run --config configs/futures.paper.yaml --database .stocker/futures.sqlite3
 ```
 
-The existing dashboard is served on loopback port 8765. Its authenticated reverse-proxy boundary is unchanged.
-The example config contains the user's PAPER execution settings and remains unarmed until the non-transmitting broker checks pass, including fresh real-time option quotes.
-See [FIRST4 protocol and execution](docs/FIRST4.md) for exact sources, differences and recovery.
+The example is **unarmed**. Its listed-product mappings are deliberately empty: the frozen
+research defined continuous strikes and a hypothetical expiry, without approving real products
+or delta tolerance. All six markets can be monitored; none may submit an order until its
+specific mapping is established. See [execution rulebook](docs/FUTURES-RULEBOOK.md).
 
-Data and research CLI commands remain available via `stocker data --help` and `stocker research --help`.
-Historical operational reports are retained under `research/operational-history`; they are not instructions for starting this application.
+The executable path submits actual IBKR PAPER limit orders to allowlisted account DUP655399.
+Connection is verified by broker-returned account identity, never by a port or UI label.
+One option contract, at most £10 including premium and conservative fee reserve, four concurrent
+reserved/open trades and £40 concurrent allocation. Full £10 is reserved per admitted trade.
+Uncertain submissions and exits retain reservations until reconciled closure.
 
-## Dashboard
+Overview contains six permanent market cards. Trades & signals contains orders, executions
+and skipped opportunities. System contains connectivity, readiness and configuration.
+Quotes, observations and broker-simulated fills are separate. P&L with missing fees or FX is
+provisional. Refreshes preserve cards, focus, filters, expansion and scroll.
 
-Overview shows four permanent slots, frozen first-appearance proximity snapshots and
-session economics. Opportunities provides bounded decision history. Execution groups
-actual fills and remaining exposure by allocation. System contains opening verification,
-read-only configuration and diagnostics. Unrealised P&L is unavailable without a reliable
-valuation; quote comparisons are never realised broker results.
+[Deployment and non-transmitting preflight](docs/DEPLOYMENT.md) ·
+[Implementation status](docs/CURRENT-DEPLOYMENT.md)
+· [Implementation report and fixture screenshots](docs/IMPLEMENTATION-REPORT.md)
 
-Research workstations keep the default dev/research groups; production must use
-`--no-default-groups --group server`. The internal `stocker` CLI, environment variables,
-database names and service paths are intentionally unchanged.
+Existing authentication, loopback proxy boundary, locked server installation, research/data
+CLI, backups and raw research records remain. The independent scanner research schedule is
+not part of this application and is not changed. Retired operational evidence is retained in
+research/operational-history, outside the active runtime and its economics.
 
-See [SLRNO implementation and verification](docs/SLRNO-implementation.md) for local
-changes, synthetic screenshots and measured performance. See the current deployment record
-for the active release and operational state.
+Run `bash scripts/check.sh` for format, lint, typing, Python, browser and server-only checks.

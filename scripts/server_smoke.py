@@ -20,9 +20,9 @@ def smoke() -> None:
     import httpx
 
     from stocker_dashboard.app import create_dashboard_app
-    from stocker_execution.first4_config import First4Config
-    from stocker_execution.first4_runtime import Runtime
-    from stocker_execution.first4_store import Store
+    from stocker_execution.config import FuturesConfig
+    from stocker_execution.runtime import Runtime
+    from stocker_execution.store import Store
 
     def disconnected(*args: object, **kwargs: object) -> None:
         raise AssertionError("Server smoke must never contact a network")
@@ -34,7 +34,7 @@ def smoke() -> None:
     assert importlib.util.find_spec("joblib") is None
     with tempfile.TemporaryDirectory(prefix="stocker-smoke-state-") as directory:
         root = Path(directory)
-        runtime = Runtime(First4Config(), Store(root / "state.sqlite"))
+        runtime = Runtime(FuturesConfig(), Store(root / "state.sqlite"))
         app = create_dashboard_app(runtime)
 
         async def check() -> None:
@@ -49,7 +49,7 @@ def smoke() -> None:
                     assert response.status_code == 200, (path, response.text)
 
         asyncio.run(check())
-    print("PASS: server-only imports, FIRST4 and offline dashboard startup/assets")
+    print("PASS: server-only imports, futures-options and offline dashboard startup/assets")
 
 
 def main() -> None:

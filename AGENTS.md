@@ -38,17 +38,14 @@ in the runtime trading hot path.
 ## Architecture rules
 
 - One repository and one application/codebase with clear modules.
-- One direct US-only frozen FIRST4 PAPER pipeline. No strategy catalogue or legacy execution paths.
+- One frozen six-market futures-options PAPER pipeline. No strategy catalogue or legacy execution paths.
 - The existing authenticated dashboard is a consumer of runtime state; its failure must not stop position management.
-- Pure FIRST4 calculations receive completed IBKR bars and never request broker data.
+- Pure frozen futures calculations receive completed IBKR bars and never request broker data.
 - Frozen synthetic research prices must never substitute for listed contracts, quotes or executions.
 - Account exposure, permissions, reconciliation and emergency controls remain shared.
-- PRE calculations receive bars as input and do not communicate with IBKR.
-- Production and paper PRE history originates exclusively from IBKR. A local cache may store only
+- Execution history originates exclusively from IBKR. A local cache may store only
   IBKR-originated history and is not an alternative source.
-- Never substitute another vendor's history for production or paper PRE calculations.
-- Calculate shared data and features once where sensible; do not duplicate them for PAPER/LIVE or
-  multiple strategies using the same snapshot.
+- Calculate shared data and features once where sensible.
 - The broker's actual position is authoritative for broker positions.
 - Keep enough local audit information to explain each decision without prematurely building an
   event-sourcing framework.

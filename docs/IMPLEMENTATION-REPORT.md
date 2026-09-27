@@ -4,6 +4,11 @@ Implemented on `codex/futures-paper-replacement` from GitHub main
 `86d4790eb142f85a75792546dd19da4512e05a9e`. **Local, unarmed, not deployed and not trading.**
 The existing server, Gateway and independent scanner schedule were not modified.
 
+The subsequent market-data/API/L2 extension is documented in
+[MARKET-DATA-VALIDATION.md](MARKET-DATA-VALIDATION.md), with current budgets, measurements,
+review outcomes and additional fixture screenshots. It is integrated into this same migration,
+also local, unarmed and awaiting deployment.
+
 ## Replacement
 
 Removed the retired stock strategy, broker/runtime/slot logic, stock discovery dependencies

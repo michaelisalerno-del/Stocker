@@ -1,10 +1,11 @@
 """One account, one frozen method, and explicit listed-product authorisations."""
 
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 PAPER_ACCOUNT = "DUP655399"
 MARKETS = ("BTC", "CL", "GC", "NG", "NQ", "SI")
@@ -41,6 +42,62 @@ class ProductMapping(BaseModel):
     strike_rule: Literal["NEAREST_FROZEN_MODEL_DELTA"]
 
 
+class MarketDataConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    total_lines: int = Field(default=100, ge=16, le=1000)
+    allowance_status: Literal["ASSUMED", "CONFIGURED", "BROKER_VERIFIED"] = "ASSUMED"
+    allowance_source: str | None = None
+    verified_at: str | None = None
+    app_line_cap: int = Field(default=60, ge=16, le=60)
+    external_headroom: int = Field(default=40, ge=0)
+    known_external_lines: int | None = Field(default=None, ge=0)
+    depth_slots: int = Field(default=3, ge=0, le=3)
+    tick_by_tick_slots: int = Field(default=5, ge=0, le=5)
+    temporary_option_quotes: int = Field(default=15, ge=1, le=15)
+    option_batch_size: int = Field(default=5, ge=1, le=5)
+    outbound_limit: int = Field(default=50, ge=10, le=50)
+    outbound_headroom: int = Field(default=10, ge=1)
+    urgent_reserve: int = Field(default=10, ge=2)
+    queue_size: int = Field(default=128, ge=32, le=256)
+    cancel_drain_seconds: float = Field(default=1, ge=0.1, le=5)
+    rejection_backoff_seconds: int = Field(default=300, ge=60, le=3600)
+
+    @property
+    def line_budget(self) -> int:
+        external = max(self.external_headroom, self.known_external_lines or 0)
+        return max(0, min(self.app_line_cap, self.total_lines - external))
+
+    @property
+    def request_budget(self) -> int:
+        return min(self.outbound_limit, self.total_lines // 2) - self.outbound_headroom
+
+    @model_validator(mode="after")
+    def coherent(self) -> "MarketDataConfig":
+        if self.request_budget <= self.urgent_reserve:
+            raise ValueError("Outbound headroom/reserve exhausts request budget")
+        if self.allowance_status != "ASSUMED" and not self.allowance_source:
+            raise ValueError("Configured allowance requires a source")
+        if self.allowance_status == "BROKER_VERIFIED" and not self.verified_at:
+            raise ValueError("Broker verification requires a timestamp")
+        if self.verified_at and datetime.fromisoformat(self.verified_at).tzinfo is None:
+            raise ValueError("Allowance verification timestamp requires timezone")
+        return self
+
+
+class L2Config(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    enabled: bool = False
+    levels: int = Field(default=5, ge=1, le=5)
+    pre_seconds: int = Field(default=120, ge=1, le=300)
+    post_seconds: int = Field(default=120, ge=1, le=300)
+    dwell_seconds: int = Field(default=60, ge=10, le=300)
+    stale_seconds: int = Field(default=30, ge=5, le=120)
+    events_per_book: int = Field(default=10000, ge=100, le=20000)
+    memory_bytes: int = Field(default=32 * 1024 * 1024, ge=65536, le=64 * 1024 * 1024)
+    disk_bytes: int = Field(default=256 * 1024 * 1024, ge=65536, le=1024 * 1024 * 1024)
+    writer_queue: int = Field(default=32, ge=2, le=64)
+
+
 class FuturesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
     environment: Literal["PAPER"] = "PAPER"
@@ -61,8 +118,8 @@ class FuturesConfig(BaseModel):
     entry_deadline_seconds: Literal[20] = 20
     exit_attempts: Literal[3] = 3
     exit_cutoff_buffer_seconds: Literal[120] = 120
-    available_market_data_lines: int | None = Field(default=None, ge=16, le=75)
-    market_data_allocation_source: str | None = Field(default=None, min_length=10)
+    market_data: MarketDataConfig = Field(default_factory=MarketDataConfig)
+    l2: L2Config = Field(default_factory=L2Config)
 
 
 def load(path: Path) -> FuturesConfig:

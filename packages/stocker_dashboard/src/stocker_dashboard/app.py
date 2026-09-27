@@ -82,6 +82,7 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
             "orders": runtime.store.orders(identity),
             "fills": runtime.store.fills(identity),
             "inputs": json.loads(row["detail"]),
+            "l2_observation": runtime.store.depth_summary(identity),
             "lifecycle": [
                 dict(r)
                 for r in runtime.store.db.execute(

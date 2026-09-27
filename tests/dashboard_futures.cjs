@@ -20,6 +20,34 @@ const state = {
     paused: false,
     reserved_open_trades: 2,
     allocation_pennies: 2000,
+    market_data: {
+      owned_lines: 24,
+      app_budget: 60,
+      total_account_allowance: 100,
+      allowance_status: "ASSUMED",
+      external_headroom: 40,
+      external_usage: null,
+      depth_used: 3,
+      depth_limit: 3,
+      temporary_quotes: 5,
+      temporary_quote_limit: 15,
+      pacing: {
+        outbound_last_second: 4,
+        outbound_cap: 40,
+        urgent_reserve: 10,
+        queued: 0,
+      },
+      errors: [],
+    },
+    l2_recording: {
+      assigned_markets: ["BTC", "GC", "NG"],
+      disk_bytes: 12582912,
+      disk_limit: 268435456,
+      memory_bytes: 2097152,
+      memory_limit: 33554432,
+      recording_gaps: 1,
+      writer_queue: 0,
+    },
   },
   pnl: {
     realised_net_gbp: null,
@@ -38,6 +66,30 @@ const state = {
     market_status: "OPEN",
     data_status: "CURRENT",
     updated_at: at,
+    l1: { status: "ACTIVE", data_type: 1, last_receipt: at, last_change: at },
+    l2: {
+      status: [
+        "COLLECTING",
+        "WAITING_FOR_SLOT",
+        "COLLECTING",
+        "INCOMPLETE",
+        "UNAVAILABLE",
+        "DISABLED",
+      ][i],
+      target_pre_seconds: 120,
+      pre_seconds: [120, 0, 42, 15, 0, 0][i],
+      fresh: i === 0 || i === 2,
+      last_receipt: at,
+      asks: Array.from({ length: 5 }, (_, n) => ({
+        price: 2651 + n,
+        size: 10 + n,
+      })),
+      bids: Array.from({ length: 5 }, (_, n) => ({
+        price: 2650 - n,
+        size: 12 + n,
+      })),
+      reason: i === 4 ? "IBKR_354:NO_DEPTH_PERMISSION" : "",
+    },
     entry_enabled: false,
     strategy_state: [
       "BLOCKED",
@@ -218,6 +270,12 @@ async function label(page) {
     });
     await page.locator("#card-GC summary").click();
     await page.locator("#card-GC summary").focus();
+    assert.match(await page.locator("#l2-GC").textContent(), /42 \/ 120s/);
+    assert.equal(await page.locator("#depth-GC-0").isVisible(), true);
+    await page.screenshot({
+      path: path.join(output, "depth-expanded-fixture.png"),
+      fullPage: true,
+    });
     await page.evaluate(() => {
       window.savedCard = document.querySelector("#card-GC");
       window.savedFocus = document.activeElement;
@@ -235,6 +293,10 @@ async function label(page) {
     );
     assert(await page.locator("#card-GC details").evaluate((n) => n.open));
     assert.equal(await page.evaluate(() => scrollY), y);
+    state.markets[2].l2.fresh = false;
+    await page.evaluate(() => refresh());
+    assert.equal(await page.locator("#depth-GC-0").isVisible(), false);
+    assert(await page.locator("#card-GC details").evaluate((n) => n.open));
     await page.goto(`${base}/trades`);
     await page.waitForFunction(
       () => document.querySelectorAll("#history tr").length === 80,
@@ -304,6 +366,18 @@ async function label(page) {
         .querySelector("#system-json")
         .textContent.includes('"live_available": false'),
     );
+    await page.setViewportSize({ width: 1440, height: 1080 });
+    await label(page);
+    assert.match(await page.locator("#api-lines").textContent(), /24 \/ 60/);
+    assert.match(
+      await page.locator("#api-depth").textContent(),
+      /3 \/ 3 research books/,
+    );
+    assert.match(await page.locator("#api-external").textContent(), /unknown/);
+    await page.screenshot({
+      path: path.join(output, "system-api-fixture.png"),
+      fullPage: true,
+    });
     assert.deepEqual(errors, []);
     console.log(
       "PASS: six fixed cards, signal/fill markers, provisional P&L, refresh identity/focus/scroll/filter retention, mobile layout and System",

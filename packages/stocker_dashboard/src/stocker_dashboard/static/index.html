@@ -111,12 +111,40 @@
         </details>
       </section>
       <section id="system" hidden>
+        <h2>Market data & API</h2>
+        <div class="api-panel">
+          <div>
+            <small>Application subscriptions</small
+            ><strong id="api-lines"></strong><span id="api-allowance"></span
+            ><span id="api-external"></span>
+          </div>
+          <div class="research-slots">
+            <small>L2 pool · separate from trading slots</small
+            ><strong id="api-depth"></strong><span id="api-assignments"></span>
+          </div>
+          <div>
+            <small>Option preparation</small><strong id="api-options"></strong
+            ><span>Shared pool · unused quotes released</span>
+          </div>
+          <div>
+            <small>Outbound traffic</small><strong id="api-pacing"></strong
+            ><span id="api-queue"></span>
+          </div>
+          <div>
+            <small>Optional recording</small><strong id="api-storage"></strong
+            ><span id="api-gaps"></span>
+          </div>
+        </div>
+        <p class="block" id="api-error"></p>
         <h2>Connectivity and readiness</h2>
         <p>
           Live trading is unavailable. Installation, data readiness and
           execution arming are separate.
         </p>
-        <pre id="system-json"></pre>
+        <details>
+          <summary>Operational diagnostics</summary>
+          <pre id="system-json"></pre>
+        </details>
       </section>
       <footer>
         Broker-simulated PAPER fills · historical synthetic research is excluded

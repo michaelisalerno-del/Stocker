@@ -57,6 +57,14 @@ async def preflight(path: Path) -> dict[str, Any]:
             ],
             "returned_executions": len(executions),
             "mapping_authority": {m: p.approval for m, p in config.mappings.items()},
+            "market_data": {
+                **config.market_data.model_dump(),
+                "effective_app_budget": config.market_data.line_budget,
+                "effective_outbound_cap": config.market_data.request_budget,
+                "external_usage_observed_by_this_preflight": None,
+                "entitlements_verified_by_this_preflight": False,
+            },
+            "l2_enabled": config.l2.enabled,
             "note": "Account snapshot only; quotes, products and actual fills remain unverified",
         }
     finally:

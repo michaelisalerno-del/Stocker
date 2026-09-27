@@ -9,6 +9,7 @@ const names = {
   NQ: "Nasdaq 100",
   SI: "Silver",
 };
+const depthReceipts = new Map();
 const page =
   location.pathname === "/trades"
     ? "trades"
@@ -63,11 +64,16 @@ for (const m of markets) {
   card.id = `card-${m}`;
   card.innerHTML = `<div class="card-head"><div><h2>${m} <span>${names[m]}</span></h2><p id="contract-${m}"></p></div><span class="state" id="state-${m}"></span></div>
  <div class="status-line"><span id="market-${m}"></span><span id="data-${m}"></span></div>
+ <div class="feed-line"><span id="l1-${m}"></span><span id="l2-${m}"></span></div>
  <svg class="chart" viewBox="0 0 420 92" role="img" aria-label="${m} completed underlying prices"><path class="chart-grid" d="M0 30H420 M0 62H420"/><polyline id="line-${m}" fill="none"/><g id="markers-${m}"></g><text id="chart-empty-${m}" x="210" y="48" text-anchor="middle">Awaiting completed bars</text></svg>
  <div class="condition"><span id="direction-${m}"></span><strong id="conditions-${m}"></strong></div>
  <p class="block" id="block-${m}"></p><div class="position" id="position-${m}"></div>
  <div class="next"><span>Next clock · NY</span><strong id="next-${m}"></strong></div>
- <p class="diagnostic" id="diagnostic-${m}"></p><details><summary>Contract & rule details</summary><pre id="details-${m}"></pre></details>`;
+ <p class="diagnostic" id="diagnostic-${m}"></p><details><summary>Contract, rule & research depth</summary>
+ <div class="depth"><p>Research only — does not affect trades</p><small id="depth-note-${m}"></small>
+ <table aria-label="${m} displayed depth"><thead><tr><th>Bid size</th><th>Bid</th><th>Ask</th><th>Ask size</th></tr></thead>
+ <tbody>${Array.from({ length: 5 }, (_, i) => `<tr id="depth-${m}-${i}" hidden><td></td><td></td><td></td><td></td></tr>`).join("")}</tbody></table></div>
+ <pre id="details-${m}"></pre></details>`;
   $("markets").append(card);
 }
 function chart(m) {
@@ -185,9 +191,11 @@ function render(d) {
     text(
       `data-${m.market}`,
       m.updated_at
-        ? `${display(m.data_status)} · ${Math.max(0, Math.floor((Date.now() - Date.parse(m.updated_at)) / 1000))}s`
-        : display(m.data_status),
+        ? `Bars ${display(m.data_status)} · ${Math.max(0, Math.floor((Date.now() - Date.parse(m.updated_at)) / 1000))}s`
+        : `Bars ${display(m.data_status)}`,
     );
+    text(`l1-${m.market}`, `L1 ${display(m.l1?.status || "DISCONNECTED")}`);
+    depth(m.market, m.l2 || { status: "DISABLED" });
     text(`direction-${m.market}`, m.direction);
     text(
       `conditions-${m.market}`,
@@ -219,6 +227,8 @@ function render(d) {
       JSON.stringify(
         {
           ...m.details,
+          l1: m.l1,
+          l2: m.l2,
           exchange_trade_date: m.exchange_trade_date,
           next_market_time: m.next_market_time,
           trades: m.trades,
@@ -234,6 +244,76 @@ function render(d) {
     "evidence",
     `${p.opportunities} opportunities · ${p.eligible_trades} eligible trades · ${p.skip_reasons.SKIP_BUDGET_TOO_SMALL || 0} budget skips · ${p.skip_reasons.SKIP_CAPACITY_FULL || 0} capacity skips · ${p.fills} executions · ${p.win_rate == null ? "Win rate unavailable" : `${(p.win_rate * 100).toFixed(1)}% win rate`} (${p.wins}/${p.closed_with_complete_costs} closed with complete costs)`,
   );
+  const a = s.market_data || {},
+    l = s.l2_recording || {},
+    pace = a.pacing || {};
+  text("api-lines", `${a.owned_lines ?? "—"} / ${a.app_budget ?? "—"} lines`);
+  text(
+    "api-allowance",
+    `${a.total_account_allowance ?? "—"} account allowance · ${display(a.allowance_status || "ASSUMED")}`,
+  );
+  text(
+    "api-external",
+    `External usage ${a.external_usage == null ? "unknown" : a.external_usage} · ${a.external_headroom ?? "—"} lines held outside SLRNO`,
+  );
+  text(
+    "api-depth",
+    `${a.depth_used ?? 0} / ${a.depth_limit ?? 3} research books`,
+  );
+  text(
+    "api-assignments",
+    (l.assigned_markets || []).join(" · ") || "No books allocated",
+  );
+  text(
+    "api-options",
+    `${a.temporary_quotes ?? 0} / ${a.temporary_quote_limit ?? 15} temporary quotes`,
+  );
+  text(
+    "api-pacing",
+    `${pace.outbound_last_second ?? 0} / ${pace.outbound_cap ?? "—"} requests / s`,
+  );
+  text(
+    "api-queue",
+    `${pace.queued ?? 0} queued · ${pace.urgent_reserve ?? "—"} requests reserved for urgent work`,
+  );
+  text(
+    "api-storage",
+    `${((l.disk_bytes || 0) / 1048576).toFixed(1)} / ${((l.disk_limit || 0) / 1048576).toFixed(0)} MiB stored`,
+  );
+  text(
+    "api-gaps",
+    `${l.recording_gaps ?? 0} recording gaps · ${l.writer_queue ?? 0} queued batches`,
+  );
+  text(
+    "api-error",
+    l.paused_reason ||
+      a.errors?.at(-1)?.message ||
+      "No reported entitlement or capacity errors",
+  );
+}
+function depth(m, d) {
+  depthReceipts.set(m, d.fresh ? Date.parse(d.last_receipt) : 0);
+  const covered = Math.floor(d.pre_seconds || 0);
+  text(
+    `l2-${m}`,
+    `L2 ${display(d.status)}${d.target_pre_seconds ? ` · ${covered} / ${d.target_pre_seconds}s pre-context` : ""}`,
+  );
+  const fresh = d.fresh && Date.now() - Date.parse(d.last_receipt) <= 30000;
+  text(
+    `depth-note-${m}`,
+    `${display(d.reason)}${fresh ? ` · Local receipt ${time(d.last_receipt)}` : " · No current ladder"}`,
+  );
+  for (let i = 0; i < 5; i++) {
+    const row = $(`depth-${m}-${i}`),
+      bid = fresh ? d.bids?.[i] : null,
+      ask = fresh ? d.asks?.[i] : null;
+    row.hidden = !bid && !ask;
+    [bid?.size, bid?.price, ask?.price, ask?.size].forEach((v, j) => {
+      const value = String(v ?? "—");
+      if (row.children[j].textContent !== value)
+        row.children[j].textContent = value;
+    });
+  }
 }
 async function get(path) {
   const r = await fetch(path, { cache: "no-store" });
@@ -307,6 +387,8 @@ async function refresh() {
     text("notice", "");
   } catch (e) {
     text("notice", `${e.message} · last displayed values may be stale`);
+    for (const m of markets)
+      depth(m, { status: "UNAVAILABLE", reason: "DASHBOARD_DATA_STALE" });
   } finally {
     pending = false;
   }
@@ -335,9 +417,11 @@ $("next").onclick = () => {
   offset += 100;
   history();
 };
-setInterval(
-  () => text("clock", `${time(new Date().toISOString())} · London`),
-  1000,
-);
+setInterval(() => {
+  text("clock", `${time(new Date().toISOString())} · London`);
+  for (const [m, at] of depthReceipts)
+    if (at && Date.now() - at > 30000)
+      depth(m, { status: "INCOMPLETE", reason: "LADDER_RECEIPT_STALE" });
+}, 1000);
 setInterval(refresh, 5000);
 refresh();

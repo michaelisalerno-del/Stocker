@@ -16,7 +16,13 @@ from ib_async import Contract, ContractDetails, Order, OrderStatus, Trade
 
 from stocker_dashboard.app import create_dashboard_app
 from stocker_execution.broker import PaperBroker
-from stocker_execution.config import MARKETS, PAPER_ACCOUNT, FuturesConfig, ProductMapping
+from stocker_execution.config import (
+    MARKETS,
+    PAPER_ACCOUNT,
+    FuturesConfig,
+    MarketDataConfig,
+    ProductMapping,
+)
 from stocker_execution.contracts import (
     Calendar,
     Quote,
@@ -109,6 +115,12 @@ class FakeIB:
         self.connected = True
         self.counter = 10
         self.client = NS(clientId=83, getReqId=self.next_id)
+        from stocker_execution.requests import BrokerConnection
+
+        self.wrapper = BrokerConnection().wrapper
+        self.client.reqMktData = lambda *args: None
+        self.client.cancelMktData = lambda *args: None
+        self.wrapper.depth_handlers = {}
         self.trades = []
         self.executions = []
         self.positions = []
@@ -127,6 +139,7 @@ class FakeIB:
 
     def disconnect(self):
         self.connected = False
+        self.disconnectedEvent.emit()
 
     def placeOrder(self, contract, order):
         order.clientId = 83
@@ -171,8 +184,11 @@ def setup(tmp_path, monkeypatch, armed=True):
         FuturesConfig(
             armed=armed,
             mappings={"GC": mapping()},
-            available_market_data_lines=16,
-            market_data_allocation_source="OFFLINE TEST FIXTURE",
+            market_data=MarketDataConfig(
+                allowance_status="CONFIGURED",
+                allowance_source="OFFLINE TEST FIXTURE",
+                cancel_drain_seconds=0.1,
+            ),
         ),
         store,
         ib,
@@ -449,7 +465,7 @@ def test_initial_broker_sync_serializes_reconciliation(tmp_path, monkeypatch):
             return []
 
         async def qualify(*args):
-            return [Contract(conId=90)]
+            return [Contract(conId=90, secType="CASH", exchange="IDEALPRO", currency="USD")]
 
         ib.connectAsync = connect
         ib.reqAllOpenOrdersAsync = opened

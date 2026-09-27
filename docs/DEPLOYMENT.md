@@ -27,19 +27,30 @@ Do not alter the independent scanner collector service, timer or observations.
 6. Verify authenticated `/api/health`, `/api/system`, `/api/overview`, history and assets; six
    permanent cards, actual account identity, reconciliation, fresh calendars and per-market history.
    “Installed”, “connected”, “monitoring” and “armed” are distinct. Do not place test orders.
-7. Arming is a separate user-reviewed operation. Resolve each product/expiry/tolerance approval,
+7. Verify the market-data section described in [MARKET-DATA.md](MARKET-DATA.md): actual account
+   lines and data entitlements, source/timestamp, external-client headroom, L1 and one-minute bars.
+   The 100 account lines / 60 app lines / 3 depth books are planning ceilings, not verified rights.
+   External consumption is unknown unless separately observed. Depth routing and permission can
+   be checked non-transmitting; leave optional recording disabled until verified. Never purchase
+   data, stop an independent collector or use a second client to evade shared limits.
+8. Arming is a separate user-reviewed operation. Resolve each product/expiry/tolerance approval,
    verify remaining account market-data capacity and record its source in configuration,
    verify actual contract metadata, fresh quotes, budget and cutoff support through read-only
    preflight. Unresolved markets stay blocked. Configure only approved mappings. `armed: true`
    must never be introduced by install scripts. Resume in the UI merely removes pause and does
    not arm, approve mappings or override reconciliation. LIVE has no setting or route.
 
-The current read-only broker snapshot is saved in CURRENT-DEPLOYMENT.md. Repeat it at cutover.
+The earlier read-only broker snapshot is saved in CURRENT-DEPLOYMENT.md. Repeat it at cutover.
 Run `uv run --no-sync python scripts/futures_preflight.py --config configs/futures.paper.yaml`
 only on the server hosting the verified loopback PAPER endpoint. It never calls order submission.
 
-Bounded resource use: six futures history streams and L1 + one FX line; one temporary option selection/exit
-quote per serialized broker operation and four owned positions. No tick-by-tick observation worker,
-stock discovery, daily allocation reset or full-chain quote download exists in the futures runtime.
-Completed OHLCV is retained; tick history is not collected. Contract chain metadata is cached by
-underlying/date, reference histories by bootstrap contract, and dashboard history is indexed/paged.
+Resource use: 13 conservatively counted monitoring lines (six L1, six bar streams, one FX),
+16 with three optional books; up to 39 with four options, four retained underlyings and fifteen
+temporary quotes (40 during a serial admission quote handoff). These fit the default 60 ceiling,
+but reduced available capacity can block entries.
+The one wire scheduler allows at most 40 outbound messages/second, with ten reserved for urgent
+operations. Core state is durable; optional capture windows are bounded separately in
+`futures.l2` beside `futures.sqlite3`. Include that directory in backups without replacing or deleting
+the trading ledger. Storage saturation pauses optional recording instead of pruning audit history.
+Completed OHLCV remains retained. No tick-by-tick, stock discovery or full-chain quote streaming
+is enabled. Read [MARKET-DATA.md](MARKET-DATA.md) before changing collection settings.

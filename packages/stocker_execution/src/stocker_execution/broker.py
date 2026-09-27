@@ -12,9 +12,11 @@ from ib_async import Contract, ExecutionFilter, Forex, FuturesOption, LimitOrder
 
 from stocker_execution.config import PAPER_ACCOUNT, FuturesConfig
 from stocker_execution.contracts import Quote, budget, tick_price, utc, verify_option
+from stocker_execution.pacing import CORE, EXPOSURE, URGENT, priority, traffic
 from stocker_execution.requests import BrokerConnection
 from stocker_execution.rules import frozen_strike, model_delta
 from stocker_execution.store import TERMINAL, Store
+from stocker_execution.subscriptions import Subscription, Subscriptions
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +28,9 @@ def now() -> datetime:
 class PaperBroker:
     def __init__(self, config: FuturesConfig, store: Store, ib: Any = None):
         self.config, self.store = config, store
-        self.ib: Any = ib if ib is not None else BrokerConnection()
+        self.ib: Any = ib if ib is not None else BrokerConnection(config.market_data)
+        self.data = Subscriptions(self.ib, config.market_data)
+        self.exposure_data_problem = ""
         self.reconciled = False
         self.synchronized = False
         self.problem = "NOT_CONNECTED"
@@ -35,7 +39,6 @@ class PaperBroker:
         self.generation = 0
         self.reconciled_at: datetime | None = None
         self.lock = asyncio.Lock()
-        self.quote_lock = asyncio.Lock()
         self.chains: dict[tuple[int, str], Any] = {}
         self.fx: tuple[float, datetime] | None = None
         self.fx_contract: Any = None
@@ -43,6 +46,8 @@ class PaperBroker:
         self.fx_bid_at: datetime | None = None
         self.fx_ask_at: datetime | None = None
         self.option_quotes: dict[int, Quote] = {}
+        self.quote_greeks: dict[int, dict[str, Any]] = {}
+        self.data.quote_sink = self.option_update
         self.management_problems: dict[str, str] = {}
         for event, callback in (
             ("execDetailsEvent", self.fill),
@@ -74,10 +79,12 @@ class PaperBroker:
         self.fx = None
         self.fx_bid_at = self.fx_ask_at = None
         self.option_quotes.clear()
+        self.quote_greeks.clear()
 
     def error(self, request_id: int, code: int, message: str, contract: Any = None) -> None:
         if code in {1100, 1300, 10197}:
             self.upstream = False
+            self.ib.disconnect()
             self.disconnected()
             self.problem = f"BROKER_{code}:{message}"
         elif code in {1101, 1102}:
@@ -109,17 +116,17 @@ class PaperBroker:
             return "ENTRIES_PAUSED"
         if not self.config.armed:
             return "EXECUTION_UNARMED"
-        if (
-            not self.config.available_market_data_lines
-            or not self.config.market_data_allocation_source
-        ):
+        if self.config.market_data.allowance_status == "ASSUMED":
             return "MARKET_DATA_ALLOCATION_UNVERIFIED"
+        if self.exposure_data_problem:
+            return self.exposure_data_problem
         return ""
 
     async def connect(self) -> None:
         async with self.lock:
             try:
-                await self._connect()
+                with priority(URGENT):
+                    await self._connect()
             except BaseException:
                 self.ib.disconnect()
                 self.synchronized = False
@@ -145,9 +152,10 @@ class PaperBroker:
             raise
         self.ib.reqMarketDataType(1)
         await self._reconcile()
+        await self.restore_exposure_data()
         self.fx_contract = (await self.ib.qualifyContractsAsync(Forex("GBPUSD")))[0]
-        self.fx_ticker = self.ib.reqMktData(self.fx_contract, "", False, False)
-        self.fx_ticker.marketDataType = 0
+        feed = await self.data.acquire(self.fx_contract, "QUOTE", "fx", "fx", level=EXPOSURE)
+        self.fx_ticker = feed.value
         self.fx_ticker.updateEvent += self.update_fx
         self.synchronized = True
 
@@ -304,7 +312,8 @@ class PaperBroker:
 
     async def reconcile(self) -> None:
         async with self.lock:
-            await self._reconcile()
+            with priority(URGENT):
+                await self._reconcile()
 
     async def _reconcile(self) -> None:
         self.reconciled = False
@@ -391,6 +400,33 @@ class PaperBroker:
             },
         )
 
+    async def restore_exposure_data(self) -> None:
+        required: set[str] = set()
+        problems = []
+        for row in self.store.active():
+            plan = json.loads(row["plan"])
+            for field in ("option", "signal_future"):
+                if field not in plan:
+                    continue
+                owner = f"exposure:{row['id']}:{field}"
+                required.add(owner)
+                try:
+                    for sub in list(self.data.items.values()):
+                        if owner in sub.consumers and sub.state == "FAILED":
+                            await self.data.release(sub, owner)
+                    await self.data.acquire(
+                        Contract.create(**plan[field]), "QUOTE", owner, "exposure", level=EXPOSURE
+                    )
+                except Exception as exc:
+                    problems.append(str(exc))
+        for sub in list(self.data.items.values()):
+            for owner in list(sub.consumers):
+                if owner.startswith("exposure:") and owner not in required:
+                    await self.data.release(sub, owner)
+        self.exposure_data_problem = (
+            "EXPOSURE_DATA_UNAVAILABLE:" + ";".join(problems) if problems else ""
+        )
+
     def completed_order(self, trade: Any) -> None:
         """IB completedOrder has no clientId/orderId and a default-zero OrderStatus total."""
         order = trade.order
@@ -432,43 +468,70 @@ class PaperBroker:
                 )
 
     async def quote(self, contract: Any) -> Quote:
-        async with self.quote_lock:
-            return await self._quote(contract)
-
-    async def _quote(self, contract: Any) -> Quote:
         generation = self.generation
-        bid_at = ask_at = None
-        ready = asyncio.Event()
-
-        def update(ticker: Any) -> None:
-            nonlocal bid_at, ask_at
-            for tick in ticker.ticks:
-                if tick.tickType == 1:
-                    bid_at = utc(tick.time)
-                elif tick.tickType == 2:
-                    ask_at = utc(tick.time)
-            if bid_at and ask_at:
-                ready.set()
-
-        with self.ib.market_data(contract, update) as (ticker, request):
-            waiter = asyncio.create_task(ready.wait())
-            try:
-                done, _ = await asyncio.wait(
-                    {waiter, request}, timeout=5, return_when=asyncio.FIRST_COMPLETED
-                )
-                if request in done:
-                    request.result()
-                if not ready.is_set() or bid_at is None or ask_at is None:
+        owner = f"quote:{id(asyncio.current_task())}:{contract.conId}"
+        owned = any(
+            s.contract.conId == contract.conId and "exposure" in s.consumers.values()
+            for s in self.data.items.values()
+        )
+        context = traffic.get()
+        deadline = min(
+            asyncio.get_running_loop().time() + 5, context.deadline if context else float("inf")
+        )
+        sub = await self.data.acquire(
+            contract,
+            "QUOTE",
+            owner,
+            "exposure" if owned else "selection",
+            level=EXPOSURE if owned else CORE,
+            deadline=deadline,
+        )
+        try:
+            while not sub.bid_at or not sub.ask_at:
+                if sub.error:
+                    raise ValueError(sub.error)
+                if asyncio.get_running_loop().time() >= deadline:
                     raise ValueError("OPTION_QUOTE_NOT_RECEIVED")
-                if generation != self.generation:
-                    raise ValueError("BROKER_STATE_CHANGED_DURING_QUOTE")
-                result = Quote(ticker.bid, ticker.ask, bid_at, ask_at, ticker.marketDataType)
-                result.validate(now())
-                self.option_quotes[contract.conId] = result
-                return result
-            finally:
-                waiter.cancel()
-                await asyncio.gather(waiter, return_exceptions=True)
+                await asyncio.sleep(0.02)
+            if generation != self.generation:
+                raise ValueError("BROKER_STATE_CHANGED_DURING_QUOTE")
+            ticker = sub.value
+            result = Quote(ticker.bid, ticker.ask, sub.bid_at, sub.ask_at, ticker.marketDataType)
+            result.validate(now())
+            self.option_quotes[contract.conId] = result
+            if len(self.quote_greeks) >= 32:
+                self.quote_greeks.pop(next(iter(self.quote_greeks)))
+            self.quote_greeks[contract.conId] = {
+                name: {
+                    "delta": g.delta if g and math.isfinite(g.delta) else None,
+                    "status": "OBSERVED_FRESHNESS_UNVERIFIED"
+                    if g and math.isfinite(g.delta)
+                    else "MISSING",
+                    "observed_at": now().isoformat(),
+                }
+                for name, g in (
+                    ("IB_BID_OPTION_COMPUTATION", ticker.bidGreeks),
+                    ("IB_ASK_OPTION_COMPUTATION", ticker.askGreeks),
+                    ("IB_MODEL_OPTION_COMPUTATION", ticker.modelGreeks),
+                )
+            }
+            return result
+        finally:
+            await self.data.release(sub, owner)
+
+    def option_update(self, sub: Subscription) -> None:
+        if sub.contract.secType != "FOP" or not sub.bid_at or not sub.ask_at:
+            return
+        ticker = sub.value
+        value = Quote(ticker.bid, ticker.ask, sub.bid_at, sub.ask_at, ticker.marketDataType)
+        try:
+            value.validate(now())
+        except ValueError:
+            self.option_quotes.pop(sub.contract.conId, None)
+            return
+        if len(self.option_quotes) >= 32 and sub.contract.conId not in self.option_quotes:
+            self.option_quotes.pop(next(iter(self.option_quotes)))
+        self.option_quotes[sub.contract.conId] = value
 
     async def increments(self, details: Any) -> list[tuple[float, float]]:
         exchanges = details.validExchanges.split(",")
@@ -594,6 +657,9 @@ class PaperBroker:
             "increments": increments,
             "selected_delta": delta,
             "delta_basis": "FROZEN_PRIOR_RV_MODEL_WITH_APPROVED_REAL_EXPIRY_ADAPTATION",
+            "broker_greeks_observation_only": self.quote_greeks.get(
+                detail.contract.conId, {"status": "MISSING"}
+            ),
             "bid": quote.bid,
             "ask": quote.ask,
             "bid_at": quote.bid_at.isoformat(),
@@ -603,6 +669,29 @@ class PaperBroker:
         }
 
     async def enter(self, event: dict[str, Any], plan: dict[str, Any]) -> str:
+        # Ownership precedes transmission and survives uncertain submissions and late fills.
+        owners = []
+        try:
+            if reason := self.entry_reason():
+                return reason
+            for field in ("option", "signal_future"):
+                if field in plan:
+                    owner = f"exposure:{event['id']}:{field}"
+                    owners.append(owner)
+                    await self.data.acquire(
+                        Contract.create(**plan[field]), "QUOTE", owner, "exposure", level=EXPOSURE
+                    )
+            return await self._enter(event, plan)
+        finally:
+            reserved = self.store.db.execute(
+                "SELECT 1 FROM reservations WHERE id=?", (event["id"],)
+            ).fetchone()
+            if not reserved:
+                for owner in owners:
+                    await self.data.release_owner(owner)
+
+    async def _enter(self, event: dict[str, Any], plan: dict[str, Any]) -> str:
+        await self.pace(CORE, datetime.fromisoformat(event["signal_at"]) + timedelta(seconds=20))
         async with self.lock:
             reason = self.entry_reason()
             if reason:
@@ -679,7 +768,12 @@ class PaperBroker:
         try:
             # No await between final account guard and submission; timeout never triggers resend.
             self.guard()
-            self.ib.placeOrder(Contract.create(**plan["option"]), order)
+            with priority(
+                URGENT if role == "EXIT" else CORE,
+                asyncio.get_running_loop().time() + max(0, (deadline - now()).total_seconds()),
+                immediate=True,
+            ):
+                self.ib.placeOrder(Contract.create(**plan["option"]), order)
         except Exception:
             with self.store.db:
                 self.store.db.execute(
@@ -698,6 +792,7 @@ class PaperBroker:
             or (now() - self.reconciled_at).total_seconds() >= 15
         ):
             await self.reconcile()
+        await self.restore_exposure_data()
         for row in self.store.active():
             try:
                 await self.manage_one(row)
@@ -723,8 +818,10 @@ class PaperBroker:
                 None,
             )
             if trade and order["status"] != "PendingCancel":
+                await self.pace(URGENT, now() + timedelta(seconds=10))
                 self.guard()
-                self.ib.cancelOrder(trade.order)
+                with priority(URGENT, immediate=True):
+                    self.ib.cancelOrder(trade.order)
         if pending:
             return
         quantity = self.store.exposure(row["id"])
@@ -765,6 +862,8 @@ class PaperBroker:
         generation = self.generation
         quote = await self.quote(Contract.create(**plan["option"]))
         price = tick_price(quote.bid, plan["increments"], False)
+        await self.pace(URGENT, now() + timedelta(seconds=5))
+        quote.validate(now())
         async with self.lock:
             # Position/order callbacks may have changed exposure while the quote was awaited.
             if generation != self.generation:
@@ -788,3 +887,10 @@ class PaperBroker:
                 quantity,
             )
         self.management_problems.pop(row["id"], None)
+
+    async def pace(self, level: int, deadline: datetime) -> None:
+        if hasattr(self.ib.client, "ready"):
+            await self.ib.client.ready(
+                level,
+                asyncio.get_running_loop().time() + max(0, (deadline - now()).total_seconds()),
+            )

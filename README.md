@@ -25,6 +25,12 @@ and skipped opportunities. System contains connectivity, readiness and configura
 Quotes, observations and broker-simulated fills are separate. P&L with missing fees or FX is
 provisional. Refreshes preserve cards, focus, filters, expansion and scroll.
 
+One subscription manager accounts for quotes, bars, retained exposure, FX and option selection.
+The default app cap is 60 lines with 40 held outside SLRNO; account capacity is explicitly assumed
+until verified. Optional L2 uses at most three underlying books and records bounded signal windows.
+It never changes trades. See [market-data budgets, observation policy and API sources](docs/MARKET-DATA.md).
+The [validation record](docs/MARKET-DATA-VALIDATION.md) includes measured limits and fixture screenshots.
+
 [Deployment and non-transmitting preflight](docs/DEPLOYMENT.md) ·
 [Implementation status](docs/CURRENT-DEPLOYMENT.md)
 · [Implementation report and fixture screenshots](docs/IMPLEMENTATION-REPORT.md)

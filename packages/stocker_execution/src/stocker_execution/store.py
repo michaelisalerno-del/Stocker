@@ -40,6 +40,10 @@ class Store:
         CREATE INDEX IF NOT EXISTS signal_history ON signals(signal_at,market,rule_version);
         CREATE INDEX IF NOT EXISTS signal_decision ON signals(decision);
         CREATE INDEX IF NOT EXISTS signal_reason ON signals(reason);
+        CREATE TABLE IF NOT EXISTS depth_captures (
+          id TEXT PRIMARY KEY REFERENCES signals(id), summary TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS depth_capture_status
+          ON depth_captures(json_extract(summary,'$.status'));
         CREATE TABLE IF NOT EXISTS reservations (
           id TEXT PRIMARY KEY REFERENCES signals(id), allocation_pennies INTEGER NOT NULL
           CHECK(allocation_pennies=1000), active INTEGER NOT NULL CHECK(active IN (0,1)),
@@ -113,6 +117,40 @@ class Store:
                 "DECISION",
                 {"decision": decision, "reason": reason, "capacity": self.capacity()},
             )
+
+    def depth_capture(self, identity: str, summary: dict[str, Any]) -> None:
+        # One small durable denominator row per opportunity/window, never per depth callback.
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO depth_captures VALUES(?,?)", (identity, encode(summary))
+            )
+
+    def depth_summary(self, identity: str) -> dict[str, Any]:
+        row = self.db.execute(
+            "SELECT summary FROM depth_captures WHERE id=?", (identity,)
+        ).fetchone()
+        return (
+            json.loads(row[0])
+            if row
+            else {"status": "NOT_RECORDED", "reason": "NO_CAPTURE_METADATA"}
+        )
+
+    def recover_depth(self) -> None:
+        for row in list(
+            self.db.execute(
+                "SELECT id,summary FROM depth_captures "
+                "WHERE json_extract(summary,'$.status')='CAPTURING'"
+            )
+        ):
+            summary = json.loads(row[1])
+            if summary.get("status") == "CAPTURING":
+                summary.update(
+                    status="NOT_RETAINED",
+                    reason="INTERRUPTED_RESTART",
+                    pre_seconds=0,
+                    post_seconds=0,
+                )
+                self.depth_capture(row[0], summary)
 
     def capacity(self) -> dict[str, int]:
         row = self.db.execute(

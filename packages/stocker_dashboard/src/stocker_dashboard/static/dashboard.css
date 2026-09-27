@@ -1,3 +1,52 @@
+.feed-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 10px;
+  color: var(--muted);
+  min-height: 24px;
+}
+.depth p {
+  color: var(--muted);
+  font-size: 11px;
+}
+.depth table {
+  width: 100%;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.depth th,
+.depth td {
+  padding: 5px;
+  font-size: 11px;
+  text-align: right;
+}
+.api-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+.api-panel > div {
+  border: 1px solid var(--line);
+  padding: 18px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.api-panel strong {
+  font-size: 20px;
+}
+.api-panel span,
+.api-panel small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.api-panel .research-slots {
+  border-color: #8497b0;
+  background: #172433;
+}
 :root {
   color-scheme: dark;
   --bg: #10191e;

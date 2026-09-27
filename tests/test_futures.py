@@ -31,6 +31,7 @@ from stocker_execution.contracts import (
     select_future,
     verify_option,
 )
+from stocker_execution.requests import BrokerConnection
 from stocker_execution.rules import (
     Bar,
     clocks,
@@ -398,16 +399,29 @@ def test_listed_selection_quote_budget_path_never_searches_for_cheaper_contract(
     ask = 0.1
 
     async def chain(*args):
-        return [
-            NS(
-                exchange="COMEX",
-                tradingClass="OG",
-                underlyingConId=1,
-                multiplier="100",
-                expirations={"20260928"},
-                strikes=strikes,
+        # Replay the real ib_async wire decoder: it delivers the underlying ID as text.
+        connection = BrokerConnection()
+        connection.client.getReqId = lambda: 91
+
+        def reply(rid, *request):
+            connection.client.decoder.interpret(
+                [
+                    "75",
+                    str(rid),
+                    "COMEX",
+                    "1",
+                    "OG",
+                    "100",
+                    "1",
+                    "20260928",
+                    str(len(strikes)),
+                    *(str(s) for s in strikes),
+                ]
             )
-        ]
+            connection.client.decoder.interpret(["76", str(rid)])
+
+        connection.client.reqSecDefOptParams = reply
+        return await connection.reqSecDefOptParamsAsync(*args)
 
     async def details(contract):
         requested.append(contract.strike)

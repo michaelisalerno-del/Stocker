@@ -16,6 +16,29 @@ from stocker_execution.pacing import CORE, EXPOSURE, PacedClient, drain, priorit
 class DepthWrapper(Wrapper):
     """Raw depth callbacks: avoid ib_async 2.1's dictionary overwrite row semantics."""
 
+    def securityDefinitionOptionParameter(
+        self,
+        reqId: int,
+        exchange: str,
+        underlyingConId: int | str,
+        tradingClass: str,
+        multiplier: str,
+        expirations: list[str],
+        strikes: list[float],
+    ) -> None:
+        if reqId not in self._futures:
+            return  # Ignore late rows after completion, cancellation or an invalid identity.
+        # ib_async 2.1's decoder forwards this integer protocol field as text.
+        identity = str(underlyingConId)
+        if not identity.isascii() or not identity.isdecimal() or int(identity) <= 0:
+            self._results.pop(reqId, None)
+            error = ValueError("OPTION_CHAIN_UNDERLYING_ID_INVALID")
+            self._endReq(reqId, error, success=False)  # type: ignore[no-untyped-call]
+            return
+        super().securityDefinitionOptionParameter(
+            reqId, exchange, int(identity), tradingClass, multiplier, expirations, strikes
+        )
+
     def updateMktDepth(
         self, reqId: int, position: int, operation: int, side: int, price: float, size: float
     ) -> None:

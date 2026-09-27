@@ -548,3 +548,42 @@ def test_disconnect_during_bar_start_does_not_cancel_monitor():
         assert not data.items and not ib.wrapper._futures
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("wire_id", ["", "0", "-1", "1.5", "１２"])
+def test_option_chain_invalid_underlying_identity_fails_request(wire_id):
+    async def scenario():
+        ib = BrokerConnection()
+        pending = ib.wrapper.startReq(123)
+        ib.client.decoder.interpret(
+            ["75", "123", "CME", wire_id, "BTC", "5", "1", "20261030", "1", "85000"]
+        )
+        ib.client.decoder.interpret(["76", "123"])
+        with pytest.raises(ValueError, match="OPTION_CHAIN_UNDERLYING_ID_INVALID"):
+            await pending
+        # Late callbacks cannot revive a failed request or leak an abandoned chain.
+        ib.client.decoder.interpret(
+            ["75", "123", "CME", "876880607", "BTC", "5", "1", "20261030", "1", "85000"]
+        )
+        assert not ib.wrapper._futures and not ib.wrapper._results
+
+    asyncio.run(scenario())
+
+
+def test_option_chain_normalizes_id_without_changing_identity_or_listing():
+    async def scenario():
+        ib = BrokerConnection()
+        pending = ib.wrapper.startReq(123)
+        for cid in ["876880607", "876880608"]:
+            ib.client.decoder.interpret(
+                ["75", "123", "CME", cid, "BTC", "5", "1", "20261030", "1", "85000"]
+            )
+        ib.client.decoder.interpret(["76", "123"])
+        chains = await pending
+        assert [c.underlyingConId for c in chains] == [876880607, 876880608]
+        assert all(type(c.underlyingConId) is int for c in chains)
+        assert len([c for c in chains if c.underlyingConId == 876880607]) == 1
+        assert chains[0].expirations == ["20261030"] and chains[0].strikes == [85000.0]
+        assert chains[0].tradingClass == "BTC" and chains[0].multiplier == "5"
+
+    asyncio.run(scenario())

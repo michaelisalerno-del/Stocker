@@ -32,7 +32,7 @@ It never changes trades. See [market-data budgets, observation policy and API so
 The [validation record](docs/MARKET-DATA-VALIDATION.md) includes measured limits and fixture screenshots.
 
 [Deployment and non-transmitting preflight](docs/DEPLOYMENT.md) ·
-[Implementation status](docs/CURRENT-DEPLOYMENT.md)
+[Current deployment status](docs/CURRENT-DEPLOYMENT.md)
 · [Implementation report and fixture screenshots](docs/IMPLEMENTATION-REPORT.md)
 
 Existing authentication, loopback proxy boundary, locked server installation, research/data

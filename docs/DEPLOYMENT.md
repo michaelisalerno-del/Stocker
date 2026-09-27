@@ -1,6 +1,7 @@
 # Futures PAPER deployment — approval required for cutover and arming
 
-This change is prepared locally. It has not restarted the server or enabled transmission.
+The futures replacement is deployed, unarmed. See [current deployment evidence](CURRENT-DEPLOYMENT.md).
+The procedure below applies to future approved cutovers; installation never authorises arming.
 The existing release-directory, locked uv, systemd and authenticated reverse-proxy workflow remains.
 Do not alter the independent scanner collector service, timer or observations.
 
@@ -14,9 +15,11 @@ Do not alter the independent scanner collector service, timer or observations.
 3. Make a consistent SQLite backup and protected config/unit/proxy backup using the existing
    backup workflow. Preserve historical audit records outside the new runtime. Never overwrite
    a live ledger with an old backup after new activity.
-4. Stage `/etc/stocker/v1/futures.paper.yaml` from the unarmed example and a new empty
+4. On the initial replacement only, stage `/etc/stocker/v1/futures.paper.yaml` from the unarmed
+   example and a new empty
    `/var/lib/stocker/v1/futures.sqlite3`, owned by the existing service user. Do not reuse old
-   slot/economic tables. Preserve existing authentication environment. The new owner is IB client 83;
+   slot/economic tables. Subsequent releases preserve the existing futures ledger and configuration;
+   never reset them during an upgrade. Preserve existing authentication environment. The new owner is IB client 83;
    only one futures process may own that ledger. The service must remain loopback-only.
 5. After cutover approval, change the service ExecStart to:
    `/opt/stocker/current/.venv/bin/stocker futures-run --config /etc/stocker/v1/futures.paper.yaml

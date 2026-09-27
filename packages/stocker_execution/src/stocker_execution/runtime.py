@@ -9,12 +9,19 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from ib_async import Future
 from ib_async.objects import BarData
 
 from stocker_execution.broker import PaperBroker, now
 from stocker_execution.config import MARKETS, RULE_VERSION, FuturesConfig
-from stocker_execution.contracts import EXCHANGES, Calendar, nearby_futures, select_future, utc
+from stocker_execution.contracts import (
+    SIGNAL_IDENTITY_VERSION,
+    Calendar,
+    nearby_futures,
+    select_future,
+    signal_future_request,
+    utc,
+    verified_signal_futures,
+)
 from stocker_execution.depth import DepthObserver
 from stocker_execution.pacing import CORE, priority
 from stocker_execution.rules import (
@@ -41,6 +48,7 @@ class MarketState:
     ticker: Any = None
     bars: list[Bar] = field(default_factory=list)
     references: list[dict[int, dict[str, float]]] = field(default_factory=list)
+    reference_problem: str = ""
     problem: str = "NOT_CONNECTED"
     last_update: datetime | None = None
     live_since: datetime | None = None
@@ -340,6 +348,7 @@ class Runtime:
                             state.live_since = None
                         if (
                             state.live_since is None
+                            or len(state.references) < 5
                             or state.selected_day != now().astimezone(NY).date()
                         ) and (
                             not state.last_attempt
@@ -410,17 +419,14 @@ class Runtime:
         state.problem = "WARMING_UP"
         state.bars = []
         state.references = []
+        state.reference_problem = ""
         state.live_since = None
         state.last_update = None
         at = now()
         today = at.astimezone(NY).date()
-        listed = await self.broker.ib.reqContractDetailsAsync(
-            Future(
-                symbol=state.market,
-                exchange=EXCHANGES[state.market],
-                currency="USD",
-                includeExpired=True,
-            )
+        listed = verified_signal_futures(
+            state.market,
+            await self.broker.ib.reqContractDetailsAsync(signal_future_request(state.market)),
         )
         details = nearby_futures(listed, today)
         if not details:
@@ -497,37 +503,44 @@ class Runtime:
             state.calendar.timezone,
             state.calendar.observed_at,
         )
-        # Five source reference dates, using their own preceding daily volume and contract identity.
-        cached: dict[int, list[Bar]] = {}
-        reference_key = f"futures_reference:{RULE_VERSION}:{state.market}:{today.isoformat()}"
-        saved = self.store.get_meta(reference_key)
-        if saved:
-            state.references = [{int(h): v for h, v in ref.items()} for ref in saved]
-        for day in [] if saved else reference_days:
-            prior = max((d for d in set(previous) if d < day), default=None)
-            if prior is None:
-                continue
-            historical = select_future(
-                [
-                    (d, prior, daily[d.contract.conId].get(prior, float("nan")))
-                    for d in candidates[day]
-                ],
-                prior,
-                day,
+        try:
+            # Each reference date uses its own preceding volume and contract identity.
+            cached: dict[int, list[Bar]] = {}
+            reference_key = (
+                f"futures_reference:{RULE_VERSION}:{SIGNAL_IDENTITY_VERSION}:"
+                f"{state.market}:{today.isoformat()}"
             )
-            cid = historical.contract.conId
-            if cid not in cached:
-                raw = await self.history(historical.contract, "10 D")
-                cached[cid] = self.convert(raw, at)
-            bars = [
-                b
-                for b in cached[cid]
-                if b.at.astimezone(NY).date() == day and 8 <= b.at.astimezone(NY).hour < 17
-            ]
-            if bars:
-                state.references.append(reference_summary(bars))
-        if len(state.references) == 5:
-            self.store.set_meta(reference_key, state.references)
+            saved = self.store.get_meta(reference_key)
+            if saved:
+                state.references = [{int(h): v for h, v in ref.items()} for ref in saved]
+            for day in [] if saved else reference_days:
+                prior = max((d for d in set(previous) if d < day), default=None)
+                if prior is None:
+                    continue
+                historical = select_future(
+                    [
+                        (d, prior, daily[d.contract.conId].get(prior, float("nan")))
+                        for d in candidates[day]
+                    ],
+                    prior,
+                    day,
+                )
+                cid = historical.contract.conId
+                if cid not in cached:
+                    raw = await self.history(historical.contract, "10 D")
+                    cached[cid] = self.convert(raw, at)
+                bars = [
+                    b
+                    for b in cached[cid]
+                    if b.at.astimezone(NY).date() == day and 8 <= b.at.astimezone(NY).hour < 17
+                ]
+                if bars:
+                    state.references.append(reference_summary(bars))
+            if len(state.references) == 5:
+                self.store.set_meta(reference_key, state.references)
+        except Exception as exc:
+            state.references = []
+            state.reference_problem = f"REFERENCE_HISTORY_BLOCKED:{exc}"
         reusable = (
             cached_contract == selected.contract.conId
             and bool(cached_bars)
@@ -654,7 +667,7 @@ class Runtime:
                 "rv15": prior_rv(state.bars, latest),
                 "completed_closes": min(len(state.bars), 31),
             }
-            state.problem = (
+            state.problem = state.reference_problem or (
                 "" if len(state.references) >= 5 else "WARMING_UP_FIVE_REFERENCE_SESSIONS"
             )
         except ValueError as exc:

@@ -35,6 +35,18 @@ Signal FUT and purchased FOP identities remain separate. Signal monitoring choos
 volume nearby actual future on the strictly preceding completed exchange session, excluding
 contracts at/after last-trade date; equal-volume ties use conId ascending. Candidate metadata is
 bounded to the six nearest listed contracts. Missing prior-session volume blocks selection.
+Only the exact standard signal product participates: BTC uses IB symbol BRR / trading class BTC /
+multiplier 5; CL 1000, GC 100, NG 10000, NQ 20 and SI 5000 use their matching trading classes.
+All are USD with price magnifier 1. Query constraints and returned identity checks exclude
+micro/mini products before candidate selection. In particular, IB's SI symbol also returns SIL
+(multiplier 1000), which is not the frozen SI signal product. These identities were verified
+against broker metadata on 2026-09-27; IB also documents [BRR](https://www.interactivebrokers.com/en/accounts/fees/CME.php)
+and the [distinct silver products](https://www.ibkrguides.com/clientportal/comexpreciousmetals.htm).
+Reference-cache keys include the signal identity version; earlier ambiguous-product observations
+remain in the audit database and are not reused. A verified current future can retain its L1/bar
+monitoring while missing historical reference volume blocks strategy readiness. No absent volume
+is inferred to be zero, and the five-reference requirement is unchanged.
+
 The six-contract bound and conId tie-break are documented execution conventions; the frozen
 research said “nearby” without an ongoing numerical bound. Each source reference date uses
 its own selected contract, including subsequently expired contracts. No continuous symbol or spliced

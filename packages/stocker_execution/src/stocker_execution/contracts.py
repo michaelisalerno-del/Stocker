@@ -7,9 +7,54 @@ from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ib_async import Future
+
 from stocker_execution.config import ProductMapping
 
 EXCHANGES = {"BTC": "CME", "CL": "NYMEX", "GC": "COMEX", "NG": "NYMEX", "NQ": "CME", "SI": "COMEX"}
+# IB symbols need not equal CME product codes; SI's symbol also returns micro silver.
+SIGNAL_PRODUCTS = {
+    "BTC": ("BRR", "BTC", "5"),
+    "CL": ("CL", "CL", "1000"),
+    "GC": ("GC", "GC", "100"),
+    "NG": ("NG", "NG", "10000"),
+    "NQ": ("NQ", "NQ", "20"),
+    "SI": ("SI", "SI", "5000"),
+}
+SIGNAL_IDENTITY_VERSION = "STANDARD_FUTURES_V1"
+
+
+def signal_future_request(market: str) -> Future:
+    symbol, trading_class, multiplier = SIGNAL_PRODUCTS[market]
+    return Future(
+        symbol=symbol,
+        tradingClass=trading_class,
+        multiplier=multiplier,
+        exchange=EXCHANGES[market],
+        currency="USD",
+        includeExpired=True,
+    )
+
+
+def verified_signal_futures(market: str, details: list[Any]) -> list[Any]:
+    expected = signal_future_request(market)
+    verified = {}
+    for detail in details:
+        contract = detail.contract
+        if (
+            contract.secType == "FUT"
+            and contract.conId > 0
+            and all(
+                getattr(contract, field) == getattr(expected, field)
+                for field in ("symbol", "tradingClass", "exchange", "currency")
+            )
+            and contract.multiplier == expected.multiplier
+            and detail.priceMagnifier == 1
+        ):
+            verified[contract.conId] = detail
+    if not verified:
+        raise ValueError("SIGNAL_PRODUCT_IDENTITY_UNVERIFIED")
+    return list(verified.values())
 
 
 def utc(value: datetime) -> datetime:

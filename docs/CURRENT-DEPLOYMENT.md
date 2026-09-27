@@ -3,20 +3,20 @@
 SLRNO is deployed at [the authenticated dashboard](https://139.59.178.164).
 Execution remains **unarmed**, optional L2 **disabled**, and LIVE unavailable.
 
-Runtime release: `a1cc1dac652b94eafeb8b0aab7ac1c43635ee8db`.
+Runtime release: `9b0466347820939215d83003470b05d0609bc389`.
 Branch: `codex/futures-paper-replacement`.
-The first futures cutover was 2026-09-27 15:22:14 UTC. The final corrected release started at
-**2026-09-27 16:17:37 UTC (17:17:37 Europe/London)**. The old runtime is no longer active.
+The first futures cutover was 2026-09-27 15:22:14 UTC. The BTC history repair started at
+**2026-09-27 16:38:05 UTC (17:38:05 Europe/London)**. The old runtime is no longer active.
 
-The latest recorded postflight is **2026-09-27 16:18:24 UTC**; see the
-[actual server evidence](futures-deployment-20260927.json). This is a point-in-time observation,
+The latest recorded postflight is **2026-09-27 16:39:04 UTC**; see the
+[actual server evidence](btc-history-fix-20260927.json). This is a point-in-time observation,
 not a guarantee of later positions, data or configuration.
 
 ## Verified runtime state
 
 - Broker-returned account exactly `DUP655399`; connected and reconciled.
 - Fresh read-only preflight immediately before each cutover. Final preflight:
-  16:17:36.765279 UTC, zero open orders, nonzero positions or returned executions.
+  16:38:04.770066 UTC, zero open orders, nonzero positions or returned executions.
 - Fresh futures namespace: `/var/lib/stocker/v1/futures.sqlite3`.
   Zero signals, reservations, orders, fills or positions at postflight.
 - All six permanent cards and actual standard futures qualified. BTC symbol is IB `BRR`,
@@ -25,7 +25,7 @@ not a guarantee of later positions, data or configuration.
   Zero temporary option quotes, L2 books or tick-by-tick feeds.
 - Account allowance 100 remains **ASSUMED**, external consumption unknown, headroom 40.
   Wire cap 40 requests/second, ten reserved for urgent work; observed queue high water one.
-- App active/running, PID 1435627, zero automatic restarts, about 67 MiB memory at postflight.
+- App active/running, PID 1437618, zero automatic restarts, about 63 MiB memory at postflight.
 - Authenticated overview/history/system/health/pages/assets returned 200; public HTTPS without
   authentication returned 401. Direct requests without the proxy token and foreign-origin
   reads/writes returned 403. Retired write route returned 405.
@@ -38,7 +38,7 @@ not a guarantee of later positions, data or configuration.
 
 | Market | Monitored contract | Market/data | Additional readiness block |
 |---|---|---|---|
-| BTC | BTCV6, conId 876880607 | OPEN, current Sunday quotes and bars | Reference history request timed out; bounded retry remains active |
+| BTC | BTCV6, conId 876880607 | OPEN, current Sunday quotes/bars; five reference sessions loaded | Listed option mapping unapproved |
 | CL | CLX6, conId 304037511 | CLOSED; five reference sessions loaded | Listed option mapping unapproved |
 | GC | GCZ6, conId 462941472 | CLOSED; five reference sessions loaded | Listed option mapping unapproved |
 | NG | NGX26, conId 269460170 | CLOSED; five reference sessions loaded | Listed option mapping unapproved |
@@ -65,6 +65,24 @@ IB's Bitcoin symbol, ambiguous standard/micro silver metadata, and BTC's split w
 date. Reference-cache identity was versioned; prior observations were retained and are not reused.
 Missing reference data now blocks strategy readiness while the verified current underlying
 continues monitoring.
+
+The subsequent BTC history repair replaced a ten-day minute-bar request ending at the current
+time with five exact 08:00–17:00 America/New_York reference windows. The original expired BTCU6
+request timed out at 15 seconds even with includeExpired enabled. The corrected non-transmitting
+probe returned all 540 bars per window in 0.205–0.439 seconds, selecting BTCU6 for September 21–24
+and BTCV6 for September 25 using the unchanged frozen rollover calculation. The deployed app
+then reported five references and current BTC data. No threshold, entry window, exit anchor,
+data requirement or request timeout was relaxed. Existing same-day reference summaries remain cached.
+NQ's separate prior-volume history block remains unresolved.
+
+This repair passed **67 focused tests**, including the regression demonstrated failing before
+the fix and exact reference-summary/contract-selection/cache parity. Three CI smoke tests, Ruff,
+Mypy and installed server-only startup/assets checks passed. Fresh broker preflight was flat;
+the app-only restart preserved the ledger and left Gateway/scanner processes unchanged.
+The protected pre-repair database is
+`btc-history-fix-20260927T163804Z.sqlite3` in the backup directory below.
+The earlier [initial deployment snapshot](futures-deployment-20260927.json) is retained as history.
+
 
 The final corrections passed **61 focused tests**, Ruff lint/format and Mypy over the execution
 package; three CI smoke tests also passed. Each installed release passed server-only offline

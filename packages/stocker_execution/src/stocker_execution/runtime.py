@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -499,7 +499,6 @@ class Runtime:
         )
         try:
             # Each reference date uses its own preceding volume and contract identity.
-            cached: dict[int, list[Bar]] = {}
             reference_key = (
                 f"futures_reference:{RULE_VERSION}:{SIGNAL_IDENTITY_VERSION}:"
                 f"{state.market}:{today.isoformat()}"
@@ -519,13 +518,13 @@ class Runtime:
                     prior,
                     day,
                 )
-                cid = historical.contract.conId
-                if cid not in cached:
-                    raw = await self.history(historical.contract, "10 D")
-                    cached[cid] = self.convert(raw, at)
+                # Fetch only the frozen 08:00–17:00 NY window for this date.
+                # A multi-day request ending now can time out after a contract expires.
+                end = datetime.combine(day, time(17), NY).astimezone(UTC)
+                raw = await self.history(historical.contract, "32400 S", end=end)
                 bars = [
                     b
-                    for b in cached[cid]
+                    for b in self.convert(raw, at)
                     if b.at.astimezone(NY).date() == day and 8 <= b.at.astimezone(NY).hour < 17
                 ]
                 if bars:

@@ -1,9 +1,9 @@
 # Market data and optional L2 observations
 
 This extends the futures migration at `4eff5fc3b55f703bd78cf1794a25561847413f9b`,
-on `codex/futures-paper-replacement`. It is implemented locally, **unarmed and not deployed**.
-No broker orders, live entitlement probes, service restarts or subscription purchases were made
-for this addition. The independent research collector is untouched.
+on `codex/futures-paper-replacement`. It is deployed **unarmed**, with L2 disabled; see
+[the current deployment record](CURRENT-DEPLOYMENT.md) for timestamped runtime evidence.
+No broker orders or subscription purchases were made. The independent research collector is untouched.
 
 ## Allowances and resource accounting
 
@@ -80,7 +80,12 @@ History has two response slots, at most 16 queued/deduplicated requests, 350ms b
 daily TRADES plus exchange SCHEDULE requests are supported. The small-bar/5-second-bar and
 tick-by-tick endpoints are unavailable, so their special limits cannot be accidentally bypassed.
 Identical completed history requests share a five-minute bounded cache; five-session reference
-summaries are persisted. Reconnect reuses recent same-contract bars and requests 30 minutes where
+summaries are persisted. Reference retrieval requests each required date separately: 32,400 seconds
+ending at 17:00 America/New_York, retaining the same 08:00–17:00 completed minute bars and
+per-date frozen contract selection. This bounds each response to 540 bars (2,700 over five dates),
+including when rollover requires an expired future. It avoids a ten-day request ending now that
+timed out for BTCU6. Missing/failed data still blocks readiness; deadlines and reference calculations
+are unchanged. Reconnect reuses recent same-contract bars and requests 30 minutes where
 possible. Gap repair is bounded to 30 minutes per market per five minutes, uses only broker bars,
 never fills a session gap, and cannot replay a repaired opportunity into an order.
 
@@ -174,6 +179,7 @@ Screenshots are actual browser renders with clearly labelled offline fixtures:
 - [Depth exchange metadata](https://www.interactivebrokers.com/docs/tws-api/doc/market-data-live/market-depth-exchanges/receive-market-depth-exchanges).
 - [Five-second bars](https://www.interactivebrokers.com/docs/tws-api/doc/market-data-live/5-second-bars/introduction): separate endpoint with special pacing; not introduced here.
 - [Historical live updates](https://www.interactivebrokers.com/docs/tws-api/doc/market-data-historical/historical-bars/keep-up-to-date): mutable bars revise at approximately 4–6 second intervals.
+- [Historical duration by bar size](https://www.interactivebrokers.com/docs/tws-api/doc/market-data-historical/historical-bars/max-duration-per-bar-size): 32,400-second windows are supported for one-minute bars.
 - [Small-bar historical pacing](https://www.interactivebrokers.com/docs/tws-api/doc/market-data-historical/historical-data-limitations/pacing-violations-for-small-bars-30-secs-or-less): separate restrictions; unsupported small-bar requests are rejected.
 
 These sources verify API behaviour and planning limits, **not** this account's current entitlements,

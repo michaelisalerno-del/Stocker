@@ -117,7 +117,9 @@ inputs are retained as observations. A 16:00 cohort label is never a later failu
 The card says “Experimental management disabled”.
 
 BTC monitoring is independent of equity sessions/weekends. Actual broker contract calendars govern
-market status. CME expanded cryptocurrency futures/options to 24/7 from May 29, 2026, with maintenance
+market status. A clearing trade date is complete only after all broker schedule intervals
+with that refDate have ended. The Friday/Saturday maintenance split must not make Monday
+volume eligible for rollover during the weekend. CME expanded cryptocurrency futures/options to 24/7 from May 29, 2026, with maintenance
 and following-business-day trade dates for weekend activity ([CME notice](https://www.cmegroup.com/notices/electronic-trading/2026/05/20260525.html)).
 Monitoring does not extend the frozen weekday entry clocks. Standard BTC/MBT expiry is 16:00 London;
 BFF expiry is 16:00 New York in the audited sources. UK/US DST differences are calculated by zone,

@@ -11,6 +11,7 @@ from ib_async.objects import BarData
 from stocker_execution.config import RULE_VERSION
 from stocker_execution.contracts import (
     SIGNAL_PRODUCTS,
+    completed_trade_dates,
     signal_future_request,
     verified_signal_futures,
 )
@@ -133,3 +134,20 @@ def test_missing_reference_volume_keeps_core_monitoring_but_blocks_strategy(tmp_
         store.db.close()
 
     asyncio.run(scenario())
+
+
+def test_weekend_crypto_trade_date_requires_all_maintenance_fragments_complete():
+    # Actual IB schedule shape observed Sunday 2026-09-27, Central daylight time.
+    schedule = NS(
+        timeZone="US/Central",
+        sessions=[
+            NS(refDate="20260925", endDateTime="20260925-16:00:00"),
+            NS(refDate="20260928", endDateTime="20260926-02:00:00"),
+            NS(refDate="20260928", endDateTime="20260928-16:00:00"),
+        ],
+    )
+    assert completed_trade_dates(schedule, AT - timedelta(days=1)) == [date(2026, 9, 25)]
+    assert completed_trade_dates(schedule, AT + timedelta(hours=9)) == [
+        date(2026, 9, 25),
+        date(2026, 9, 28),
+    ]

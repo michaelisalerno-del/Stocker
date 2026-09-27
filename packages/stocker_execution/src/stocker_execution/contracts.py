@@ -122,6 +122,21 @@ class Calendar:
         return any(a <= start < end < b for a, b, _ in self.sessions)
 
 
+def completed_trade_dates(schedule: Any, at: datetime) -> list[date]:
+    """Maintenance can split one clearing trade date into several intervals."""
+    zone = ZoneInfo(schedule.timeZone)
+    ends: dict[date, datetime] = {}
+    for session in schedule.sessions:
+        day = datetime.strptime(session.refDate, "%Y%m%d").date()
+        end = (
+            datetime.strptime(session.endDateTime, "%Y%m%d-%H:%M:%S")
+            .replace(tzinfo=zone)
+            .astimezone(UTC)
+        )
+        ends[day] = max(ends.get(day, end), end)
+    return sorted(day for day, end in ends.items() if end < at)
+
+
 def nearby_futures(details: list[Any], day: date) -> list[Any]:
     """Use the same bounded candidate rule independently for each source date."""
     return sorted(

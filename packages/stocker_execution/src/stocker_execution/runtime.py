@@ -16,6 +16,7 @@ from stocker_execution.config import MARKETS, RULE_VERSION, FuturesConfig
 from stocker_execution.contracts import (
     SIGNAL_IDENTITY_VERSION,
     Calendar,
+    completed_trade_dates,
     nearby_futures,
     select_future,
     signal_future_request,
@@ -358,7 +359,7 @@ class Runtime:
                             try:
                                 await self.monitor(state)
                             except Exception as exc:
-                                state.problem = str(exc)
+                                state.problem = str(exc) or type(exc).__name__
                         elif state.stream is not None:
                             await self.repair_gap(state)
                     self.core_restored = True
@@ -439,14 +440,7 @@ class Runtime:
                 ),
             )
         zone = ZoneInfo(schedule.timeZone)
-        previous = [
-            datetime.strptime(s.refDate, "%Y%m%d").date()
-            for s in schedule.sessions
-            if datetime.strptime(s.endDateTime, "%Y%m%d-%H:%M:%S")
-            .replace(tzinfo=zone)
-            .astimezone(UTC)
-            < at
-        ]
+        previous = completed_trade_dates(schedule, at)
         if not previous:
             raise ValueError("PREVIOUS_COMPLETED_EXCHANGE_SESSION_UNKNOWN")
         previous_day = max(previous)
@@ -540,7 +534,7 @@ class Runtime:
                 self.store.set_meta(reference_key, state.references)
         except Exception as exc:
             state.references = []
-            state.reference_problem = f"REFERENCE_HISTORY_BLOCKED:{exc}"
+            state.reference_problem = f"REFERENCE_HISTORY_BLOCKED:{str(exc) or type(exc).__name__}"
         reusable = (
             cached_contract == selected.contract.conId
             and bool(cached_bars)
@@ -671,7 +665,7 @@ class Runtime:
                 "" if len(state.references) >= 5 else "WARMING_UP_FIVE_REFERENCE_SESSIONS"
             )
         except ValueError as exc:
-            state.problem = str(exc)
+            state.problem = str(exc) or type(exc).__name__
 
     async def decisions(self) -> None:
         # Admission order is opportunity UTC then fixed market order; no performance ranking.

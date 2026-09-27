@@ -3,20 +3,20 @@
 SLRNO is deployed at [the authenticated dashboard](https://139.59.178.164).
 Execution remains **unarmed**, optional L2 **disabled**, and LIVE unavailable.
 
-Runtime release: `9b0466347820939215d83003470b05d0609bc389`.
+Runtime release: `3ac8cf32afcc78d602bf1041d79b72fa97e99212`.
 Branch: `codex/futures-paper-replacement`.
-The first futures cutover was 2026-09-27 15:22:14 UTC. The BTC history repair started at
-**2026-09-27 16:38:05 UTC (17:38:05 Europe/London)**. The old runtime is no longer active.
+The first futures cutover was 2026-09-27 15:22:14 UTC. The latest broker chain-ID correction
+started at **2026-09-27 17:28:32 UTC (18:28:32 Europe/London)**. The old runtime is no longer active.
 
-The latest recorded postflight is **2026-09-27 16:39:04 UTC**; see the
-[actual server evidence](btc-history-fix-20260927.json). This is a point-in-time observation,
+The latest recorded postflight is **2026-09-27 17:31:23 UTC**; see the
+[actual server evidence](btc-chain-fix-20260927/postflight.json). This is a point-in-time observation,
 not a guarantee of later positions, data or configuration.
 
 ## Verified runtime state
 
 - Broker-returned account exactly `DUP655399`; connected and reconciled.
 - Fresh read-only preflight immediately before each cutover. Final preflight:
-  16:38:04.770066 UTC, zero open orders, nonzero positions or returned executions.
+  17:28:32.677419 UTC, zero open orders, nonzero positions or returned executions.
 - Fresh futures namespace: `/var/lib/stocker/v1/futures.sqlite3`.
   Zero signals, reservations, orders, fills or positions at postflight.
 - All six permanent cards and actual standard futures qualified. BTC symbol is IB `BRR`,
@@ -25,7 +25,7 @@ not a guarantee of later positions, data or configuration.
   Zero temporary option quotes, L2 books or tick-by-tick feeds.
 - Account allowance 100 remains **ASSUMED**, external consumption unknown, headroom 40.
   Wire cap 40 requests/second, ten reserved for urgent work; observed queue high water one.
-- App active/running, PID 1437618, zero automatic restarts, about 63 MiB memory at postflight.
+- App active/running, PID 1441785, zero automatic restarts, about 62.4 MiB memory at postflight.
 - Authenticated overview/history/system/health/pages/assets returned 200; public HTTPS without
   authentication returned 401. Direct requests without the proxy token and foreign-origin
   reads/writes returned 403. Retired write route returned 405.
@@ -55,6 +55,16 @@ that day's volume can be used for rollover; the completed Friday/Saturday fragme
 still-forming Monday volume into a prior completed day.
 
 ## Deployment work and validation
+
+The latest [BTC chain-ID correction](btc-chain-fix-20260927/README.md) normalizes validated
+text IDs at the broker callback boundary before strict underlying matching. Seven regressions
+failed before the fix and passed afterward; 76 focused tests, Ruff, Mypy and installed startup
+checks passed. A non-transmitting probe verified the real chain now matches. Raw broker metadata
+still contains conflicting BTC future/option expiry clocks, and the bounded weekly search did
+not establish a real same-day mapping. Neither issue was overridden. The protected pre-update
+database is `chain-id-fix-20260927T172832Z.sqlite3` in the backup directory below.
+The [prior history-repair snapshot](btc-history-fix-20260927.json) remains available.
+
 
 Installed the locked server-only environment, preserving authenticated loopback access and
 systemd hardening. Changed the app command to `futures-run` and the Caddy write allowlist to

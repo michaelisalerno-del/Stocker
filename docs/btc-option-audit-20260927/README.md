@@ -8,6 +8,10 @@ Verified PAPER account: `DUP655399`. Tests ran between 16:46 and 17:01 UTC.
 No orders, what-if orders, cancellations of orders, permission changes, service restarts
 or subscription purchases were made. Micro/BFF products were not substituted or authorised.
 
+**Follow-up:** the chain-ID defect was corrected and deployed in `3ac8cf3`.
+See the [fix, tests and later broker evidence](../btc-chain-fix-20260927/README.md).
+The results below describe the original audit before that fix; its raw records are preserved.
+
 ## Results
 
 | Check | Result |
@@ -52,8 +56,8 @@ The first filtered chain result looked empty. Capturing the raw callback showed 
 `underlyingConId="876880607"`, exchange CME, class BTC, multiplier 5. The installed ib_async
 2.1.0 decoder forwards this field without converting it to an integer; the app compares it to
 integer 876880607 in `PaperBroker.prepare`. The [offline reproducer](chain_id_reproducer.py)
-exercises that decoder and intentionally exits with an assertion failure. It is evidence of a
-known defect, not a passing regression or a new test included in normal CI.
+exercises that decoder and exited with an assertion failure on the audited release. It now
+passes after the correction; permanent regressions are in the futures and market-data tests.
 
 An exploratory request with an empty futures exchange returned error 321 and timed out; it was
 not repeated. A later audit script stopped while serialising a market-rule named tuple. Both
@@ -72,7 +76,7 @@ Callback times are local receipt timestamps, not exchange timestamps. Some resou
 hold references to consumer dictionaries that were emptied during cleanup; counts describe the
 pre-cleanup snapshot, while those dictionaries reflect the later cleanup.
 
-## Required follow-up
+## Follow-up required at the original audit
 
 Correct and regression-test the ID conversion at the broker boundary while retaining strict
 identity checks. Resolve weekly contract discovery and expiry field semantics using exact

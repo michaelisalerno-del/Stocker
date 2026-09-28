@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from stocker_dashboard.security import DashboardSecurity
@@ -132,12 +132,16 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         return runtime.status()
 
     @app.post("/oauth/saxo/start")
-    async def oauth_start() -> RedirectResponse:
+    async def oauth_start(request: Request) -> Response:
         try:
             location, binding = runtime.data.client.oauth.begin()
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
-        response = RedirectResponse(location, status_code=303)
+        response: Response = (
+            JSONResponse({"authorization_url": location})
+            if "application/json" in request.headers.get("accept", "")
+            else RedirectResponse(location, status_code=303)
+        )
         response.set_cookie(
             "slrno_oauth_binding",
             binding,

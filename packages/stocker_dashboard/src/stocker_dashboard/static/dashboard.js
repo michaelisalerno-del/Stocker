@@ -445,6 +445,28 @@ async function refresh() {
     pending = false;
   }
 }
+$("saxo-connect").onsubmit = async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector("button");
+  button.disabled = true;
+  text("oauth-notice", "");
+  try {
+    // A native form POST with no-referrer sends Origin: null. Fetch's default
+    // cors mode preserves the Origin for this same-origin authenticated POST.
+    const response = await fetch("/oauth/saxo/start", {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      credentials: "same-origin",
+      signal: AbortSignal.timeout(15000),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Saxo connection could not start");
+    window.location.assign(result.authorization_url);
+  } catch (error) {
+    text("oauth-notice", error.message);
+    button.disabled = false;
+  }
+};
 $("pause").onclick = async () => {
   await fetch(`/api/entries/${paused ? "resume" : "pause"}`, {
     method: "POST",

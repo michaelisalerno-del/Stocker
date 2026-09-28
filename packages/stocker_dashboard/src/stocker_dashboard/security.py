@@ -63,12 +63,26 @@ class DashboardSecurity:
             denied = (403, "Unauthenticated dashboard is loopback-only")
         if self.protected and host != urlsplit(self.origin).netloc:
             denied = (403, "Unexpected dashboard host")
-        if origin and origin != allowed_origin:
-            denied = (403, "Cross-origin access rejected")
         oauth_callback = (
-            scope.get("path") == "/oauth/saxo/callback" and scope.get("method") == "GET"
+            scope["type"] == "http"
+            and scope.get("path") == "/oauth/saxo/callback"
+            and scope.get("method") == "GET"
         )
-        if headers.get(b"sec-fetch-site") == b"cross-site" and not oauth_callback:
+        document_navigation = (
+            scope["type"] == "http"
+            and scope.get("method") == "GET"
+            and scope.get("path")
+            in {"/", "/markets", "/opportunities", "/execution", "/trades", "/system"}
+            and headers.get(b"sec-fetch-mode") == b"navigate"
+            and headers.get(b"sec-fetch-dest") == b"document"
+        )
+        # OAuth redirects can carry a null Origin through the landing navigation.
+        # The callback validates single-use state and its browser-bound cookie.
+        # These exceptions never bypass authentication/host checks or cover APIs/writes.
+        cross_site_navigation = oauth_callback or document_navigation
+        if origin and origin != allowed_origin and not cross_site_navigation:
+            denied = (403, "Cross-origin access rejected")
+        if headers.get(b"sec-fetch-site") == b"cross-site" and not cross_site_navigation:
             denied = (403, "Cross-site access rejected")
         if denied:
             if scope["type"] == "websocket":

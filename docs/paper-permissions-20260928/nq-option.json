@@ -1,0 +1,372 @@
+{
+  "started_at": "2026-09-28T04:31:10.942553+00:00",
+  "purpose": "PAPER_PERMISSION_AND_DATA_DIAGNOSTIC_ONLY",
+  "executable_orders_sent": 0,
+  "previews_sent": [
+    {
+      "request_id": 22,
+      "con_id": 563947726,
+      "what_if": true,
+      "quantity": 1,
+      "limit": 30682,
+      "account": "DUP655399"
+    },
+    {
+      "request_id": 23,
+      "con_id": 922982859,
+      "what_if": true,
+      "quantity": 1,
+      "limit": 118.5,
+      "account": "DUP655399"
+    }
+  ],
+  "errors": [
+    {
+      "request_id": -1,
+      "code": 2104,
+      "message": "Market data farm connection is OK:usfuture"
+    },
+    {
+      "request_id": -1,
+      "code": 2104,
+      "message": "Market data farm connection is OK:eufarm"
+    },
+    {
+      "request_id": -1,
+      "code": 2104,
+      "message": "Market data farm connection is OK:cashfarm"
+    },
+    {
+      "request_id": -1,
+      "code": 2106,
+      "message": "HMDS data farm connection is OK:euhmds"
+    },
+    {
+      "request_id": -1,
+      "code": 2106,
+      "message": "HMDS data farm connection is OK:ushmds"
+    },
+    {
+      "request_id": -1,
+      "code": 2158,
+      "message": "Sec-def data farm connection is OK:secdefeu"
+    },
+    {
+      "request_id": -1,
+      "code": 2119,
+      "message": "Market data farm is connecting:usfarm.nj"
+    },
+    {
+      "request_id": -1,
+      "code": 2104,
+      "message": "Market data farm connection is OK:usfarm.nj"
+    }
+  ],
+  "samples": [
+    {
+      "contract": {
+        "secType": "FUT",
+        "conId": 563947726,
+        "symbol": "NQ",
+        "lastTradeDateOrContractMonth": "20261218",
+        "strike": 0,
+        "right": "",
+        "multiplier": "20",
+        "exchange": "CME",
+        "primaryExchange": "",
+        "currency": "USD",
+        "localSymbol": "NQZ6",
+        "tradingClass": "NQ",
+        "includeExpired": false,
+        "secIdType": "",
+        "secId": "",
+        "description": "",
+        "issuerId": "",
+        "comboLegsDescrip": "",
+        "comboLegs": [],
+        "deltaNeutralContract": null
+      },
+      "under_con_id": 11004958,
+      "quote": {
+        "at": "2026-09-28T04:31:16.051242+00:00",
+        "bid": 30681.25,
+        "ask": 30682,
+        "last": 30681.25,
+        "data_type": 1,
+        "bid_at": "2026-09-28T04:31:16.023700+00:00",
+        "ask_at": "2026-09-28T04:31:16.023700+00:00",
+        "last_receipt": "2026-09-28T04:31:16.023861+00:00",
+        "subscription_state": "ACTIVE",
+        "error": "",
+        "quality": "FRESH_REALTIME_BID_ASK"
+      },
+      "preview_result": {
+        "status": "PreSubmitted",
+        "initMarginBefore": "0.0",
+        "maintMarginBefore": "0.0",
+        "equityWithLoanBefore": "254395.3",
+        "initMarginChange": "50959.35",
+        "maintMarginChange": "32465.46",
+        "equityWithLoanChange": "-1.6900000000023283",
+        "initMarginAfter": "50959.35",
+        "maintMarginAfter": "32465.46",
+        "equityWithLoanAfter": "254393.61",
+        "commission": 2.24,
+        "minCommission": 1.7976931348623157e+308,
+        "maxCommission": 1.7976931348623157e+308,
+        "commissionCurrency": "USD",
+        "warningText": "",
+        "completedTime": "",
+        "completedStatus": ""
+      }
+    },
+    {
+      "contract": {
+        "secType": "FOP",
+        "conId": 922982859,
+        "symbol": "NQ",
+        "lastTradeDateOrContractMonth": "20260928",
+        "strike": 30700,
+        "right": "P",
+        "multiplier": "20",
+        "exchange": "CME",
+        "primaryExchange": "",
+        "currency": "USD",
+        "localSymbol": "Q4AU6 P30700",
+        "tradingClass": "Q4A",
+        "includeExpired": false,
+        "secIdType": "",
+        "secId": "",
+        "description": "",
+        "issuerId": "",
+        "comboLegsDescrip": "",
+        "comboLegs": [],
+        "deltaNeutralContract": null
+      },
+      "under_con_id": 563947726,
+      "quote": {
+        "at": "2026-09-28T04:31:16.107714+00:00",
+        "bid": 115.5,
+        "ask": 118.5,
+        "last": 118,
+        "data_type": 1,
+        "bid_at": "2026-09-28T04:31:16.023700+00:00",
+        "ask_at": "2026-09-28T04:31:16.023700+00:00",
+        "last_receipt": "2026-09-28T04:31:16.023845+00:00",
+        "subscription_state": "ACTIVE",
+        "error": "",
+        "quality": "FRESH_REALTIME_BID_ASK"
+      },
+      "preview_result": {
+        "status": "PreSubmitted",
+        "initMarginBefore": "0.0",
+        "maintMarginBefore": "0.0",
+        "equityWithLoanBefore": "254395.3",
+        "initMarginChange": "1488.04",
+        "maintMarginChange": "1352.76",
+        "equityWithLoanChange": "-1.0599999999976717",
+        "initMarginAfter": "1488.04",
+        "maintMarginAfter": "1352.76",
+        "equityWithLoanAfter": "254394.24",
+        "commission": 1.41,
+        "minCommission": 1.7976931348623157e+308,
+        "maxCommission": 1.7976931348623157e+308,
+        "commissionCurrency": "USD",
+        "warningText": "",
+        "completedTime": "",
+        "completedStatus": ""
+      }
+    }
+  ],
+  "account": "DUP655399",
+  "before": {
+    "at": "2026-09-28T04:31:12.984283+00:00",
+    "open_orders": [],
+    "positions": [],
+    "returned_executions": 0
+  },
+  "chain_summaries": [
+    {
+      "exchange": "CME",
+      "trading_class": "QN4",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261023"
+      ],
+      "strike_count": 99
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "QN3",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261016",
+        "20261120"
+      ],
+      "strike_count": 218
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "QN2",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261009"
+      ],
+      "strike_count": 146
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "QN1",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261002",
+        "20261106"
+      ],
+      "strike_count": 402
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "QNE",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20260930",
+        "20261030",
+        "20261130"
+      ],
+      "strike_count": 521
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "Q1D",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261001"
+      ],
+      "strike_count": 402
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "NQ",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261218"
+      ],
+      "strike_count": 123
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "Q1C",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261007"
+      ],
+      "strike_count": 201
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "Q2D",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261008"
+      ],
+      "strike_count": 123
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "Q1B",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261006"
+      ],
+      "strike_count": 188
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "Q2C",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261014"
+      ],
+      "strike_count": 120
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "Q1A",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261005"
+      ],
+      "strike_count": 191
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "Q2B",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261013"
+      ],
+      "strike_count": 117
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "Q2A",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20261012"
+      ],
+      "strike_count": 120
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "Q4A",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20260928"
+      ],
+      "strike_count": 440
+    },
+    {
+      "exchange": "CME",
+      "trading_class": "Q5B",
+      "under_con_id": 563947726,
+      "multiplier": "20",
+      "expirations": [
+        "20260929"
+      ],
+      "strike_count": 428
+    }
+  ],
+  "peak_owned_lines": 2,
+  "lines_after_cleanup": 0,
+  "after": {
+    "at": "2026-09-28T04:31:18.820509+00:00",
+    "open_orders": [],
+    "positions": [],
+    "returned_executions": 0
+  },
+  "pacing": {
+    "outbound_last_second": 3,
+    "outbound_cap": 5,
+    "urgent_reserve": 2,
+    "queued": 0,
+    "queue_high_water": 1,
+    "expired": 0,
+    "rejected": 0
+  },
+  "ended_at": "2026-09-28T04:31:18.820859+00:00"
+}

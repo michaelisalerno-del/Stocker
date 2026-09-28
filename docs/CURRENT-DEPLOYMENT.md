@@ -10,11 +10,21 @@ The first futures cutover was 2026-09-27 15:22:14 UTC. Following the explicit us
 the application restarted at **2026-09-27 18:08:21 UTC (19:08:21 Europe/London)**.
 Only the deployed arming flag changed; the code release and all readiness checks are unchanged.
 
-The latest recorded postflight is **2026-09-27 18:20:27 UTC**; see the
+The recorded deployment postflight is **2026-09-27 18:20:27 UTC**; see the
 [actual server evidence](paper-arming-20260927/postflight.json). This is a point-in-time observation,
 not a guarantee of later positions, data or configuration.
 
-## Verified runtime state
+## Latest permission check — 2026-09-28
+
+At 04:32 UTC the app remained armed, connected/reconciled and flat, with 13 app-owned lines.
+All six underlyings had current bars; all new entries remained blocked. Non-executing PAPER
+previews rejected the tested BTC future and monthly call with IBKR error 201, No Trading
+Permission / Customer Ineligible. The tested NQ future and same-day put returned estimates
+without a permission rejection. These preview responses do not prove fills or approve mappings.
+See [the exact contracts, responses and test limits](paper-permissions-20260928/README.md).
+No executable order, config change or restart was performed.
+
+## Verified deployment state — 2026-09-27
 
 - Broker-returned account exactly `DUP655399`; connected and reconciled.
 - Fresh read-only preflight immediately before each cutover. Final preflight:

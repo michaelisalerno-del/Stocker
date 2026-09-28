@@ -1,0 +1,235 @@
+{
+  "started_at": "2026-09-28T04:28:37.593669+00:00",
+  "purpose": "PAPER_PERMISSION_AND_DATA_DIAGNOSTIC_ONLY",
+  "executable_orders_sent": 0,
+  "previews_sent": [
+    {
+      "request_id": 10,
+      "con_id": 876880607,
+      "what_if": true,
+      "quantity": 1,
+      "limit": 83850,
+      "account": "DUP655399"
+    },
+    {
+      "request_id": 11,
+      "con_id": 877338421,
+      "what_if": true,
+      "quantity": 1,
+      "limit": 3060,
+      "account": "DUP655399"
+    },
+    {
+      "request_id": 12,
+      "con_id": 563947726,
+      "what_if": true,
+      "quantity": 1,
+      "limit": 30687.25,
+      "account": "DUP655399"
+    }
+  ],
+  "errors": [
+    {
+      "request_id": -1,
+      "code": 2104,
+      "message": "Market data farm connection is OK:usfuture"
+    },
+    {
+      "request_id": -1,
+      "code": 2104,
+      "message": "Market data farm connection is OK:eufarm"
+    },
+    {
+      "request_id": -1,
+      "code": 2104,
+      "message": "Market data farm connection is OK:cashfarm"
+    },
+    {
+      "request_id": -1,
+      "code": 2106,
+      "message": "HMDS data farm connection is OK:euhmds"
+    },
+    {
+      "request_id": -1,
+      "code": 2106,
+      "message": "HMDS data farm connection is OK:ushmds"
+    },
+    {
+      "request_id": -1,
+      "code": 2158,
+      "message": "Sec-def data farm connection is OK:secdefeu"
+    },
+    {
+      "request_id": 10,
+      "code": 201,
+      "message": "Order rejected - reason:No Trading Permission, Customer Ineligible; Ineligibility reasons:<br>Retail clients from your country cannot open positions in Crypto ETPs that do not have a UK listing."
+    },
+    {
+      "request_id": 11,
+      "code": 201,
+      "message": "Order rejected - reason:No Trading Permission, Customer Ineligible; Ineligibility reasons:<br>Retail clients from your country cannot open positions in Crypto ETPs that do not have a UK listing."
+    }
+  ],
+  "samples": [
+    {
+      "contract": {
+        "secType": "FUT",
+        "conId": 876880607,
+        "symbol": "BRR",
+        "lastTradeDateOrContractMonth": "20261030",
+        "strike": 0,
+        "right": "",
+        "multiplier": "5",
+        "exchange": "CME",
+        "primaryExchange": "",
+        "currency": "USD",
+        "localSymbol": "BTCV6",
+        "tradingClass": "BTC",
+        "includeExpired": false,
+        "secIdType": "",
+        "secId": "",
+        "description": "",
+        "issuerId": "",
+        "comboLegsDescrip": "",
+        "comboLegs": [],
+        "deltaNeutralContract": null
+      },
+      "under_con_id": 296180912,
+      "quote": {
+        "at": "2026-09-28T04:28:42.344920+00:00",
+        "bid": 83820,
+        "ask": 83850,
+        "last": 83835,
+        "data_type": 1,
+        "bid_at": "2026-09-28T04:28:40.695946+00:00",
+        "ask_at": "2026-09-28T04:28:40.695946+00:00",
+        "last_receipt": "2026-09-28T04:28:40.696138+00:00",
+        "subscription_state": "ACTIVE",
+        "error": "",
+        "quality": "FRESH_REALTIME_BID_ASK"
+      },
+      "preview_error": "RequestError:[reqId 10] API error: 201: Order rejected - reason:No Trading Permission, Customer Ineligible; Ineligibility reasons:<br>Retail clients from your country cannot open positions in Crypto ETPs that do not have a UK listing."
+    },
+    {
+      "contract": {
+        "secType": "FOP",
+        "conId": 877338421,
+        "symbol": "BRR",
+        "lastTradeDateOrContractMonth": "20261030",
+        "strike": 85000,
+        "right": "C",
+        "multiplier": "5",
+        "exchange": "CME",
+        "primaryExchange": "",
+        "currency": "USD",
+        "localSymbol": "BTCV6 C85000",
+        "tradingClass": "BTC",
+        "includeExpired": false,
+        "secIdType": "",
+        "secId": "",
+        "description": "",
+        "issuerId": "",
+        "comboLegsDescrip": "",
+        "comboLegs": [],
+        "deltaNeutralContract": null
+      },
+      "under_con_id": 876880607,
+      "quote": {
+        "at": "2026-09-28T04:28:42.966746+00:00",
+        "bid": 2900,
+        "ask": 3060,
+        "last": null,
+        "data_type": 1,
+        "bid_at": "2026-09-28T04:28:41.875105+00:00",
+        "ask_at": "2026-09-28T04:28:42.242537+00:00",
+        "last_receipt": "2026-09-28T04:28:42.242653+00:00",
+        "subscription_state": "ACTIVE",
+        "error": "",
+        "quality": "FRESH_REALTIME_BID_ASK"
+      },
+      "preview_error": "RequestError:[reqId 11] API error: 201: Order rejected - reason:No Trading Permission, Customer Ineligible; Ineligibility reasons:<br>Retail clients from your country cannot open positions in Crypto ETPs that do not have a UK listing."
+    },
+    {
+      "contract": {
+        "secType": "FUT",
+        "conId": 563947726,
+        "symbol": "NQ",
+        "lastTradeDateOrContractMonth": "20261218",
+        "strike": 0,
+        "right": "",
+        "multiplier": "20",
+        "exchange": "CME",
+        "primaryExchange": "",
+        "currency": "USD",
+        "localSymbol": "NQZ6",
+        "tradingClass": "NQ",
+        "includeExpired": false,
+        "secIdType": "",
+        "secId": "",
+        "description": "",
+        "issuerId": "",
+        "comboLegsDescrip": "",
+        "comboLegs": [],
+        "deltaNeutralContract": null
+      },
+      "under_con_id": 11004958,
+      "quote": {
+        "at": "2026-09-28T04:28:43.002895+00:00",
+        "bid": 30686.25,
+        "ask": 30687.25,
+        "last": 30686.25,
+        "data_type": 1,
+        "bid_at": "2026-09-28T04:28:42.934666+00:00",
+        "ask_at": "2026-09-28T04:28:42.934666+00:00",
+        "last_receipt": "2026-09-28T04:28:42.934737+00:00",
+        "subscription_state": "ACTIVE",
+        "error": "",
+        "quality": "FRESH_REALTIME_BID_ASK"
+      },
+      "preview_result": {
+        "status": "PreSubmitted",
+        "initMarginBefore": "0.0",
+        "maintMarginBefore": "0.0",
+        "equityWithLoanBefore": "254395.3",
+        "initMarginChange": "50970.91",
+        "maintMarginChange": "32472.83",
+        "equityWithLoanChange": "-13.489999999990687",
+        "initMarginAfter": "50970.91",
+        "maintMarginAfter": "32472.83",
+        "equityWithLoanAfter": "254381.81",
+        "commission": 2.24,
+        "minCommission": 1.7976931348623157e+308,
+        "maxCommission": 1.7976931348623157e+308,
+        "commissionCurrency": "USD",
+        "warningText": "",
+        "completedTime": "",
+        "completedStatus": ""
+      }
+    }
+  ],
+  "account": "DUP655399",
+  "before": {
+    "at": "2026-09-28T04:28:39.636375+00:00",
+    "open_orders": [],
+    "positions": [],
+    "returned_executions": 0
+  },
+  "peak_owned_lines": 3,
+  "lines_after_cleanup": 0,
+  "after": {
+    "at": "2026-09-28T04:28:46.694723+00:00",
+    "open_orders": [],
+    "positions": [],
+    "returned_executions": 0
+  },
+  "pacing": {
+    "outbound_last_second": 3,
+    "outbound_cap": 5,
+    "urgent_reserve": 2,
+    "queued": 0,
+    "queue_high_water": 1,
+    "expired": 0,
+    "rejected": 0
+  },
+  "ended_at": "2026-09-28T04:28:46.694982+00:00"
+}

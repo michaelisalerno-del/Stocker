@@ -1,0 +1,76 @@
+{
+  "at": "2026-09-28T04:32:00.614001+00:00",
+  "release": "3ac8cf32afcc78d602bf1041d79b72fa97e99212",
+  "system": {
+    "account": "DUP655399",
+    "armed": true,
+    "connected": true,
+    "reconciled": true,
+    "entry_block_reason": "MARKET_DATA_ALLOCATION_UNVERIFIED",
+    "live_available": false,
+    "reconciliation": {
+      "account": "DUP655399",
+      "at": "2026-09-28T04:31:58.788368+00:00",
+      "open_orders": 0,
+      "positions": {},
+      "problem": ""
+    }
+  },
+  "ledger_counts": {
+    "orders": 0,
+    "fills": 0,
+    "positions": 0,
+    "reservations": 0
+  },
+  "market_data": {
+    "owned_lines": 13,
+    "app_budget": 60,
+    "temporary_quotes": 0,
+    "depth_used": 0,
+    "allowance_status": "ASSUMED"
+  },
+  "markets": [
+    {
+      "market": "BTC",
+      "contract": "BTCV6",
+      "entry_enabled": false,
+      "block_reason": "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED",
+      "data_status": "CURRENT"
+    },
+    {
+      "market": "CL",
+      "contract": "CLX6",
+      "entry_enabled": false,
+      "block_reason": "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED",
+      "data_status": "CURRENT"
+    },
+    {
+      "market": "GC",
+      "contract": "GCZ6",
+      "entry_enabled": false,
+      "block_reason": "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED",
+      "data_status": "CURRENT"
+    },
+    {
+      "market": "NG",
+      "contract": "NGX26",
+      "entry_enabled": false,
+      "block_reason": "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED",
+      "data_status": "CURRENT"
+    },
+    {
+      "market": "NQ",
+      "contract": "NQZ6",
+      "entry_enabled": false,
+      "block_reason": "REFERENCE_HISTORY_BLOCKED:ROLLOVER_PRIOR_SESSION_VOLUME_UNAVAILABLE",
+      "data_status": "CURRENT"
+    },
+    {
+      "market": "SI",
+      "contract": "SIZ6",
+      "entry_enabled": false,
+      "block_reason": "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED",
+      "data_status": "CURRENT"
+    }
+  ]
+}

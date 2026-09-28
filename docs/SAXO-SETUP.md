@@ -16,6 +16,13 @@ Do not paste secrets into chat, Git, browser payloads, screenshots or the record
    {"environment":"SAXO_SIM","client_id":"REPLACE_LOCALLY","client_secret":"REPLACE_LOCALLY","account_key":"REPLACE_WITH_SIM_ACCOUNT_KEY"}
    ```
 
+   `account_key` may be omitted for the initial OAuth login. After authentication, obtain the
+   account list using the same environment's read-only `GET /port/v1/accounts/me` and explicitly
+   select the intended AccountKey in the protected file. Until selected and verified, the service
+   reports `ACCOUNT_SELECTION_REQUIRED`, starts no data subscriptions, and permits no broker orders.
+   Never use an AppSecret as an AccountKey. When Saxo lists two active AppSecrets, configure one;
+   the second is not an account identifier. Restart disarmed after updating the selected account.
+
    For LIVE data use an entirely separate file with `environment: SAXO_LIVE`, LIVE app credentials
    and LIVE account key. Set only its path in `saxo.credentials_file`. The application verifies the
    returned account in that environment; UICs/account identifiers are never copied between them.

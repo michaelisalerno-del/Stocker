@@ -82,9 +82,9 @@ class OAuth:
             self.credentials = private_read(settings.credentials_file)
             if self.credentials.get("environment") != environment:
                 raise ValueError("CREDENTIAL_ENVIRONMENT_MISMATCH")
-            if not all(
-                self.credentials.get(k) for k in ("client_id", "client_secret", "account_key")
-            ):
+            # OAuth identifies the application before the operator can discover/select
+            # an account. DataService still requires a verified account before any stream.
+            if not all(self.credentials.get(k) for k in ("client_id", "client_secret")):
                 raise ValueError("INCOMPLETE_SAXO_CREDENTIALS")
             self.status = "RECONNECT_REQUIRED"
             if self.token_file.exists():

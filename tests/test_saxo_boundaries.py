@@ -11,8 +11,10 @@ from pydantic import ValidationError
 
 from stocker_execution.config import MARKETS, FuturesConfig, SaxoSettings
 from stocker_execution.contracts import budget, future_identity
+from stocker_execution.recorder import Recorder
 from stocker_execution.saxo_auth import ENDPOINTS, OAuth, atomic_json
 from stocker_execution.saxo_client import SaxoClient, allowed
+from stocker_execution.saxo_data import DataService
 from stocker_execution.saxo_stream import Frames, PriceState, merge
 from stocker_execution.store import Store
 
@@ -137,6 +139,75 @@ def test_secrets_permissions_redirects_and_live_request_transmission(tmp_path):
         os.chmod(auth.settings.credentials_file, 0o644)
         with pytest.raises(ValueError, match="0600"):
             OAuth("SAXO_LIVE", auth.settings, tmp_path)
+
+    asyncio.run(scenario())
+
+
+def test_oauth_can_precede_account_selection_without_enabling_orders(tmp_path):
+    async def scenario():
+        requests = []
+
+        def response(req):
+            requests.append((req.method, req.url.path))
+            if req.url.path == "/token":
+                return httpx.Response(
+                    200,
+                    json={
+                        "access_token": "fixture-access",
+                        "refresh_token": "fixture-refresh",
+                        "expires_in": 1200,
+                        "refresh_token_expires_in": 2400,
+                    },
+                )
+            if req.url.path.endswith("/root/v2/user"):
+                return httpx.Response(200, json={"UserId": "fixture-user"})
+            if req.url.path.endswith("/port/v1/accounts/me"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "Data": [
+                            {
+                                "AccountKey": "fixture-account",
+                                "AccountId": "fixture-id",
+                                "Currency": "GBP",
+                            }
+                        ]
+                    },
+                )
+            raise AssertionError("Unexpected request")
+
+        auth = oauth_fixture(tmp_path, handler=response)
+        path = auth.settings.credentials_file
+        credentials = json.loads(path.read_text())
+        del credentials["account_key"]
+        atomic_json(path, credentials)
+        await auth.close()
+        auth = OAuth(
+            "SAXO_SIM",
+            SaxoSettings(credentials_file=path),
+            tmp_path,
+            transport=httpx.MockTransport(response),
+        )
+        _, binding = auth.begin()
+        await auth.callback(auth.pending[0], binding, "fixture-code")
+        assert auth.status == "AUTHENTICATED" and auth.account_key == ""
+        client = SaxoClient(auth, httpx.MockTransport(response))
+        config = FuturesConfig()
+        data = DataService(config, client, Recorder(config.recorder, tmp_path / "events"))
+        with pytest.raises(ValueError, match="ACCOUNT_SELECTION_REQUIRED"):
+            await data.verify_account()
+        assert not data.account_verified and not client.sim_account_verified
+        assert not data.connected and not data.subscriptions
+        with pytest.raises(ValueError, match="BLOCKED"):
+            await client.request(
+                "POST", "/trade/v2/orders", execution=True, body={"AccountKey": "fixture-account"}
+            )
+        assert requests == [
+            ("POST", "/token"),
+            ("GET", "/sim/openapi/root/v2/user"),
+            ("GET", "/sim/openapi/port/v1/accounts/me"),
+        ]
+        await client.close()
 
     asyncio.run(scenario())
 

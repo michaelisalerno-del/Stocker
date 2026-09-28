@@ -107,6 +107,8 @@ class DataService:
         self.account_verified = self.client.sim_account_verified = False
         await self.client.request("GET", "/root/v2/user")
         result = await self.client.request("GET", "/port/v1/accounts/me")
+        if not self.client.oauth.account_key:
+            raise SaxoError("ACCOUNT_SELECTION_REQUIRED")
         accounts = [
             a
             for a in result.get("Data", [])

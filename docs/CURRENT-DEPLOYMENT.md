@@ -2,7 +2,7 @@
 
 Deployed to [the authenticated dashboard](https://139.59.178.164) on **2026-09-28 at
 11:20:47 UTC / 12:20:47 Europe/London** following the user's deployment instruction.
-Current runtime release: `7ec4c50269a6052d56644a5cdd44149a17257e99`, branch `codex/saxo-only`.
+Current runtime release: `94339bb27dec08996d9054500243993eadcf26ba`, branch `codex/saxo-only`.
 This includes migration `c74e68a`, safety/recovery fixes `b066386`, book flow `c809f9f`, and
 OAuth bootstrap `b1e9f5c` deployed at **12:54:49 UTC**. The first supplied SIM AppSecret is held
 in a stocker-owned 0600 file; no credential values appear in this repository. Account selection may
@@ -18,7 +18,12 @@ Safe OAuth failure diagnostics `7ec4c50` were deployed at **13:33:26 UTC**, with
 [HTTPS postflight](saxo-oauth-diagnostics-20260928.json) verified at **13:33:29 UTC**. A subsequent
 user login had reached the token exchange but failed with the old generic error. The next fresh
 attempt now exposes only a fixed failure category in the callback and System; no provider payloads
-or exception text are exposed. The underlying authentication failure is not yet resolved.
+or exception text are exposed. At that postflight the underlying authentication failure was unresolved.
+The next browser attempt identified `OAUTH_TOKEN_HTTP_201`, confirmed in running service state.
+The handler incorrectly rejected this response before validating its body. Release `94339bb`,
+deployed at **13:43:07 UTC**, accepts HTTP 200/201 for issuance and renewal while retaining all
+payload, lifetime, state and storage checks. [Postflight](saxo-oauth-created-20260928.json) passed
+at **13:43:10 UTC**. A fresh browser grant is still required to verify actual token acceptance.
 The original sibling checkout and historical releases remain unchanged.
 
 The application is deployed and healthy, but **Saxo is not authenticated**. CL, GC, NG, NQ and SI
@@ -28,7 +33,7 @@ monitor-only. There is no Bitcoin card or active stock scanner.
 | Stage | Current evidence |
 |---|---|
 | IMPLEMENTED | Saxo migration and observation-only sampled book flow deployed |
-| OFFLINE_TESTED | 446 Python tests, lint/format/types, locked server-only smoke and both browser suites; prior workload checks unchanged |
+| OFFLINE_TESTED | 451 Python tests, lint/format/types and locked server-only smoke; unchanged browser suites and workload previously passed |
 | AUTHENTICATED | **No** — SIM application credentials configured; browser login/grant pending |
 | DATA_VERIFIED | **No** — actual Saxo contracts, quotes, history and permissions unverified |
 | L2_VERIFIED | **No** — levels, counts, delay and cadence unverified for all five markets |
@@ -68,7 +73,7 @@ subscription or legal-agreement action was performed.
 ## Active configuration and checks
 
 - `stocker-v1.service`: active/running, zero automatic restarts at postflight.
-- `/opt/stocker/current` → `/opt/stocker/releases/7ec4c50269a6052d56644a5cdd44149a17257e99`.
+- `/opt/stocker/current` → `/opt/stocker/releases/94339bb27dec08996d9054500243993eadcf26ba`.
 - Config: `/etc/stocker/v1/saxo.sim.yaml`, mode 0640, root:stocker.
 - Data: **SAXO_SIM**; execution: **DISABLED**; armed: **false**; **LIVE ORDERS DISABLED**.
 - New ledger: `/var/lib/stocker/v1/saxo-sim-disabled.sqlite3`; old ledgers retained separately.
@@ -107,6 +112,9 @@ The diagnostic upgrade backup is `/var/lib/stocker/backups/saxo-oauth-diagnostic
 its previous release is `d4df009`. Restore that code pointer only after an obligation check,
 retaining newer ledger/token state. This restores the generic token error without affecting the
 previously fixed Connect origin handling. All upgrades preserve the disabled execution config.
+The HTTP 201 upgrade backup is `/var/lib/stocker/backups/saxo-oauth-created-20260928`;
+its previous release is `7ec4c50`. Code rollback would restore the HTTP 201 rejection. Preserve
+any newly issued tokens and ledger activity when reverting code; never automatically rearm.
 
 Remaining user actions: complete OAuth in System, select/verify the returned SIM account,
 discover/pin actual futures UICs, verify
@@ -164,3 +172,21 @@ Production HTTPS and served asset checks passed; service healthy with zero resta
 units masked, execution disabled/disarmed and no orders sent. Authentication/data/L2 remain
 unverified pending a fresh browser grant. Only the operator needs to complete that login;
 do not send the callback URL or any secrets to obtain the safe server-side failure category.
+
+## HTTP 201 token issuance fix
+
+The actual user callback produced HTTP 201 from the SIM token endpoint; no response body or
+tokens were retained by the old error path. A sanitized regression reproduced
+`OAUTH_TOKEN_HTTP_201` using a complete token payload. The one-condition fix now routes 200 and
+201 through the same validation and atomic private-file write. It does not accept all 2xx responses.
+
+Tests cover both statuses through the browser-bound callback, secure token storage, concurrent
+refresh and SIM/LIVE separation. Malformed/incomplete 201 payloads and empty 204 responses remain
+rejected. **451 tests passed** in 62.89 seconds, with 7 existing warnings. Ruff lint/format, mypy
+(116 files), isolated server-only smoke and installed server smoke passed. The browser code and its
+previous fixture test results are unchanged. Standards review: **0 findings**; Spec: **0 findings**.
+
+Authenticated dashboard HTTPS/security checks passed after deployment. All 13 legacy units remain
+masked, the service has zero restarts, credentials/configuration are unchanged, execution remains
+disabled/disarmed, and no orders were sent. Saxo authentication, account data and L2 are still
+unverified at this postflight; start a fresh Connect flow because the discarded grant cannot be reused.

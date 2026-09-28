@@ -265,6 +265,45 @@ def test_rest_compressed_response_still_enforces_decoded_size_limit(tmp_path):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("environment", ["SAXO_SIM", "SAXO_LIVE"])
+def test_stream_uses_documented_connect_path_and_header_auth(tmp_path, monkeypatch, environment):
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock
+    from urllib.parse import parse_qs, urlsplit
+
+    async def scenario():
+        auth = oauth_fixture(tmp_path, environment)
+        auth.tokens = {"access_token": "fixture-access", "expires_at": time.time() + 1200}
+        client = SaxoClient(auth)
+        config = FuturesConfig(data_environment=environment)
+        data = DataService(config, client, Recorder(config.recorder, tmp_path / "events"))
+        monkeypatch.setattr(data, "verify_account", AsyncMock())
+        monkeypatch.setattr(data, "startup", AsyncMock())
+        connections = []
+
+        @asynccontextmanager
+        async def connection(url, **kwargs):
+            connections.append((url, kwargs))
+            data.stopping = True
+            yield object()
+
+        monkeypatch.setattr("stocker_execution.saxo_data.connect", connection)
+        try:
+            await data.run()
+            assert len(connections) == 1
+            url, options = connections[0]
+            parsed = urlsplit(url)
+            prefix = "/sim" if environment == "SAXO_SIM" else ""
+            assert parsed.path == prefix + "/oapi/streaming/ws/connect"
+            assert parsed.netloc == ("sim" if prefix else "live") + "-streaming.saxobank.com"
+            assert set(parse_qs(parsed.query)) == {"contextId"}
+            assert options["additional_headers"] == {"Authorization": "Bearer fixture-access"}
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
 def test_merge_explicit_null_array_replacement_and_cleared_depth():
     snapshot = {"Quote": {"Bid": 1, "Ask": 2}, "MarketDepth": {"Bid": [1, 0.9], "BidSize": [2, 3]}}
     updated = merge(snapshot, {"Quote": {"Ask": None}, "MarketDepth": {"Bid": [0.95]}})

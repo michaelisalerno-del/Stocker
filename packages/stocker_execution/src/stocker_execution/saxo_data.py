@@ -702,7 +702,9 @@ class DataService:
                 token = await self.client.oauth.access_token()
                 generation = self.client.oauth.generation
                 async with connect(
-                    self.client.oauth.urls["stream"] + "?" + urlencode({"contextId": self.context}),
+                    self.client.oauth.urls["stream"]
+                    + "/connect?"
+                    + urlencode({"contextId": self.context}),
                     additional_headers={"Authorization": "Bearer " + token},
                     max_size=self.config.recorder.max_message_bytes,
                     max_queue=16,

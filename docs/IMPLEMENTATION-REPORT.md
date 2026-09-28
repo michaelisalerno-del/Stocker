@@ -9,7 +9,8 @@ immutable trading/research evidence remain. The original source checkout was not
 Branch: `codex/saxo-only`, based on the clean existing application commit
 `8f22d2b6e052d63ec440410c7ecb8e2f66b432d8`. Implementation commit: `c74e68a`;
 the subsequent review-fix commit includes atomic fill recovery, quote/session validation,
-stream recovery and the final dashboard/tests. This checkout has no remote release publication.
+stream recovery and the final dashboard/tests. Book-flow commit `c809f9f` includes both and was
+deployed through the existing immutable-release process on 2026-09-28; no Git remote publication was needed.
 
 | Stage | Evidence |
 |---|---|
@@ -19,7 +20,7 @@ stream recovery and the final dashboard/tests. This checkout has no remote relea
 | DATA_VERIFIED | **No** — actual account/UIC/quotes/history/session unverified |
 | L2_VERIFIED | **No** — no received broker depth or entitlement confirmation |
 | RECORDER_VERIFIED | **Offline fixtures/workload only**; persistent broker-data permission unverified |
-| DEPLOYED | **No** — authorised SSH identity/current server inventory unavailable |
+| DEPLOYED | **Yes** — `c809f9f`, disarmed; [verified server state](CURRENT-DEPLOYMENT.md) |
 
 No live or SIM order was sent, no paper execution armed, no broker subscription purchased, and
 no account/legal agreement changed. Tests simulate the broker boundary without transmitting.
@@ -37,7 +38,6 @@ product/expiry/cutoffs/delta tolerance/fees. GC remains monitor-only without a l
 Date-only option expiry or ambiguous broker obligations block the affected decision. The code never
 substitutes a synthetic expiry, guessed volume, alternative vendor or unapproved cheaper instrument.
 
-Production cutover also needs a fresh obligation check on the current IBKR/FIRST4 managers and a
-verified complete inventory of app-owned services, timers, cron and supervisor restart paths. Those
-services have not been stopped based on dated evidence. The supplied guide preserves position
-management and recoverable configurations; the old adapter/config remain available for controlled rollback.
+The authorised cutover used fresh flat broker/ledger checks and a current inventory of app-owned
+services, timers, cron and supervisor restart paths. Thirteen old provider/scanner units were parked
+with recoverable originals. Saxo authentication, data entitlements and recording rights remain unverified.

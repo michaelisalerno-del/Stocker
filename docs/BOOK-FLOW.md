@@ -4,6 +4,10 @@ Feature version: `SAXO_SAMPLED_BOOK_FLOW_V1`. Baseline: `b066386` on `codex/saxo
 The work extends the existing Prices consumer, recorder and Markets view. No second data pipeline,
 new service, strategy rule, capture trigger or execution control is introduced.
 
+Deployment update: `c809f9f` was deployed on 2026-09-28, disarmed and without Saxo credentials.
+See [verified current server state](CURRENT-DEPLOYMENT.md). The implementation checks below remain
+offline evidence; production feed/L2 behavior is still unverified.
+
 ## Subscription and data contract
 
 Saxo's current reference lists ordinary single-instrument Prices subscriptions as **Personal:

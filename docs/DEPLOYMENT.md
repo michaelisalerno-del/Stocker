@@ -1,6 +1,7 @@
 # Controlled data-only cutover and rollback
 
-This checkout is implemented; **production has not been inspected or cut over**. Use the existing
+Release `c809f9f` was cut over on 2026-09-28, disarmed and awaiting Saxo authentication; see
+[current verified deployment](CURRENT-DEPLOYMENT.md). For subsequent cutovers, use the existing
 immutable `/opt/stocker/releases/<commit>`, `/opt/stocker/current`, locked uv, systemd and authenticated
 Caddy process. Do not infer today's running state from old reports. No live or SIM test order or
 unattended arming is authorised. This guide authorises no financial account/subscription action.
@@ -68,5 +69,6 @@ IBKR history, rearm either runtime automatically, or unmask old schedules wholes
 IBKR/FIRST4/other providers is a separate explicit operator decision; default rollback is a stopped,
 recoverable deployment while required obligations remain managed. No automatic provider fallback.
 
-A reviewed current inventory is required to make the stop/mask commands concrete; it was unavailable
-in this task. The repository changes alone cannot guarantee a pre-existing server supervisor is parked.
+A reviewed current inventory is required to make stop/mask commands concrete. The 2026-09-28
+deployment report records the 13 parked units and protected original definitions. Reinspect before
+future changes; repository changes alone cannot guarantee a server supervisor remains parked.

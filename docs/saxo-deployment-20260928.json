@@ -1,0 +1,262 @@
+{
+  "at": "2026-09-28T11:20:47.850249+00:00",
+  "revision": "c809f9fff26bd344ab3b417d9a56f41672b0d7cd",
+  "previous_release": "/opt/stocker/releases/3ac8cf32afcc78d602bf1041d79b72fa97e99212",
+  "parked_units": [
+    "stocker-frozen-scanner-observation-20260923.service",
+    "stocker-ibgateway-daily-readiness.service",
+    "stocker-ibgateway-display.service",
+    "stocker-ibgateway-loopback-boundary.service",
+    "stocker-ibgateway-loopback-proxy.service",
+    "stocker-ibgateway-vnc.service",
+    "stocker-ibgateway-window-manager.service",
+    "stocker-ibgateway.service",
+    "stocker-ibkr-api-update.service",
+    "stocker-ibgateway-loopback-proxy.socket",
+    "stocker-frozen-scanner-observation-20260923.timer",
+    "stocker-ibgateway-daily-readiness.timer",
+    "stocker-ibkr-api-update.timer"
+  ],
+  "preflight_at": "2026-09-28T11:20:46.209008+00:00",
+  "open_orders": 0,
+  "positions": 0,
+  "returned_executions": 0,
+  "orders_sent": 0,
+  "execution_mode": "DISABLED",
+  "armed": false,
+  "backup": "/var/lib/stocker/backups/saxo-cutover-20260928",
+  "outbound_network_change": "Removed old loopback-only egress rule for Saxo HTTPS/WSS; listener/authentication/hardening retained",
+  "health": {
+    "application": "SLRNO",
+    "data_environment": "SAXO_SIM",
+    "execution_mode": "DISABLED",
+    "armed": false,
+    "live_orders_disabled": true,
+    "worker_health": "RUNNING",
+    "manager_health": "RUNNING",
+    "web_health": "RUNNING",
+    "oauth": "NOT_CONFIGURED",
+    "connected": false,
+    "problem": "SAXO_RECONNECT_REQUIRED",
+    "reserved_open_trades": 0,
+    "providers": {
+      "SAXO": "ACTIVE",
+      "IBKR": "PARKED",
+      "FMP": "INACTIVE",
+      "EODHD": "INACTIVE"
+    },
+    "market_data": {
+      "owned_lines": 0,
+      "app_budget": 32,
+      "rate_limits": {},
+      "rest_queue": 0
+    },
+    "l2_recording": {
+      "memory_bytes": 0,
+      "memory_limit": 33554432,
+      "memory_high_water": 0,
+      "queue_bytes": 0,
+      "writer_queue": 0,
+      "disk_bytes": 0,
+      "disk_limit": 2147483648,
+      "disk_free": 88525336576,
+      "disk_reserve": 2147483648,
+      "recording_gaps": 0,
+      "paused_reason": "RECORDING_PERMISSION_NOT_VERIFIED",
+      "persistent_capture": false
+    }
+  },
+  "capabilities": [
+    {
+      "market": "CL",
+      "contract": null,
+      "strategy_state": "BLOCKED",
+      "reason": "AUTHENTICATION_REQUIRED",
+      "l2_status": "L2_UNAVAILABLE",
+      "book_flow_status": "UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      },
+      "authenticated": false,
+      "l2_verified": false,
+      "delay": null,
+      "granted_cadence": null,
+      "observed_cadence": null
+    },
+    {
+      "market": "GC",
+      "contract": null,
+      "strategy_state": "MONITOR_ONLY",
+      "reason": "AUTHENTICATION_REQUIRED",
+      "l2_status": "L2_UNAVAILABLE",
+      "book_flow_status": "UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      },
+      "authenticated": false,
+      "l2_verified": false,
+      "delay": null,
+      "granted_cadence": null,
+      "observed_cadence": null
+    },
+    {
+      "market": "NG",
+      "contract": null,
+      "strategy_state": "BLOCKED",
+      "reason": "AUTHENTICATION_REQUIRED",
+      "l2_status": "L2_UNAVAILABLE",
+      "book_flow_status": "UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      },
+      "authenticated": false,
+      "l2_verified": false,
+      "delay": null,
+      "granted_cadence": null,
+      "observed_cadence": null
+    },
+    {
+      "market": "NQ",
+      "contract": null,
+      "strategy_state": "BLOCKED",
+      "reason": "AUTHENTICATION_REQUIRED",
+      "l2_status": "L2_UNAVAILABLE",
+      "book_flow_status": "UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      },
+      "authenticated": false,
+      "l2_verified": false,
+      "delay": null,
+      "granted_cadence": null,
+      "observed_cadence": null
+    },
+    {
+      "market": "SI",
+      "contract": null,
+      "strategy_state": "BLOCKED",
+      "reason": "AUTHENTICATION_REQUIRED",
+      "l2_status": "L2_UNAVAILABLE",
+      "book_flow_status": "UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      },
+      "authenticated": false,
+      "l2_verified": false,
+      "delay": null,
+      "granted_cadence": null,
+      "observed_cadence": null
+    }
+  ],
+  "authenticated_loopback_routes": {
+    "/": 200,
+    "/markets": 200,
+    "/opportunities": 200,
+    "/execution": 200,
+    "/system": 200,
+    "/api/health": 200,
+    "/api/system": 200,
+    "/api/overview": 200,
+    "/api/history": 200,
+    "/api/recordings": 200,
+    "/static/dashboard.js": 200,
+    "/static/dashboard.css": 200
+  },
+  "non_transmitting_preflight": {
+    "http_status": 409,
+    "result": {
+      "detail": "NOT_CONFIGURED"
+    }
+  },
+  "crypto_rejected": true,
+  "authenticated_https_routes": {
+    "/": 200,
+    "/markets": 200,
+    "/opportunities": 200,
+    "/execution": 200,
+    "/system": 200,
+    "/api/health": 200,
+    "/api/system": 200,
+    "/api/overview": 200,
+    "/api/history": 200,
+    "/api/recordings": 200,
+    "/static/dashboard.js": 200,
+    "/static/dashboard.css": 200
+  },
+  "https_non_transmitting_preflight_status": 409,
+  "invalid_oauth_callback_rejected": true,
+  "anonymous_https_status": 401,
+  "untrusted_loopback_status": 403,
+  "parked_units_verified": {
+    "stocker-frozen-scanner-observation-20260923.service": {
+      "ActiveState": "inactive",
+      "UnitFileState": "masked"
+    },
+    "stocker-ibgateway-daily-readiness.service": {
+      "ActiveState": "failed",
+      "UnitFileState": "masked"
+    },
+    "stocker-ibgateway-display.service": {
+      "ActiveState": "inactive",
+      "UnitFileState": "masked"
+    },
+    "stocker-ibgateway-loopback-boundary.service": {
+      "ActiveState": "inactive",
+      "UnitFileState": "masked"
+    },
+    "stocker-ibgateway-loopback-proxy.service": {
+      "ActiveState": "inactive",
+      "UnitFileState": "masked"
+    },
+    "stocker-ibgateway-vnc.service": {
+      "ActiveState": "failed",
+      "UnitFileState": "masked"
+    },
+    "stocker-ibgateway-window-manager.service": {
+      "ActiveState": "inactive",
+      "UnitFileState": "masked"
+    },
+    "stocker-ibgateway.service": {
+      "ActiveState": "inactive",
+      "UnitFileState": "masked"
+    },
+    "stocker-ibkr-api-update.service": {
+      "ActiveState": "inactive",
+      "UnitFileState": "masked"
+    },
+    "stocker-ibgateway-loopback-proxy.socket": {
+      "ActiveState": "inactive",
+      "UnitFileState": "masked"
+    },
+    "stocker-frozen-scanner-observation-20260923.timer": {
+      "ActiveState": "inactive",
+      "UnitFileState": "masked"
+    },
+    "stocker-ibgateway-daily-readiness.timer": {
+      "ActiveState": "inactive",
+      "UnitFileState": "masked"
+    },
+    "stocker-ibkr-api-update.timer": {
+      "ActiveState": "inactive",
+      "UnitFileState": "masked"
+    }
+  },
+  "app_service": {
+    "MainPID": "1473924",
+    "NRestarts": "0",
+    "ExecMainStartTimestamp": "Mon 2026-09-28 11:20:47 UTC",
+    "MemoryCurrent": "56614912",
+    "ActiveState": "active",
+    "SubState": "running"
+  },
+  "ledger_integrity": "PASS; old ledgers retained; separate Saxo ledger; no orders or positions",
+  "verified_at": "2026-09-28T11:22:40.943276+00:00",
+  "data_verified": false,
+  "l2_verified": false,
+  "recorder_verified": "OFFLINE_ONLY; no authenticated data received"
+}

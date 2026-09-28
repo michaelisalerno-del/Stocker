@@ -188,7 +188,7 @@ function render(d) {
   const exceptions = Object.values(s.management_problems || {}).join(" · ");
   text("execution-warning", exceptions || "No reported exposure exceptions");
   text("global-warning", exceptions || s.problem || s.l2_recording?.paused_reason || "");
-  text("auth-state", `OAuth: ${s.oauth || "UNVERIFIED"} · stream: ${s.connected ? "connected" : "disconnected"} · session: ${s.session?.TradeLevel || "UNVERIFIED"}`);
+  text("auth-state", `OAuth: ${s.oauth || "UNVERIFIED"}${s.oauth_problem ? ` (${s.oauth_problem})` : ""} · stream: ${s.connected ? "connected" : "disconnected"} · session: ${s.session?.TradeLevel || "UNVERIFIED"}`);
   for (let i = 0; i < 4; i++) {
     const label = i < s.reserved_open_trades ? `Slot ${i + 1} · reserved / open` : `Slot ${i + 1} · available`;
     text(`trade-slot-${i}`, label); text(`overview-slot-${i}`, label);

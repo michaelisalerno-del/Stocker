@@ -77,6 +77,7 @@ class OAuth:
         self.tokens: dict[str, Any] = {}
         self.credentials: dict[str, Any] = {}
         self.status = "NOT_CONFIGURED"
+        self.failure_reason = ""
         self.generation = 0
         if settings.credentials_file:
             self.credentials = private_read(settings.credentials_file)
@@ -125,6 +126,7 @@ class OAuth:
             await self.exchange({"grant_type": "authorization_code", "code": code})
 
     async def exchange(self, form: dict[str, str]) -> None:
+        reason = "OAUTH_TOKEN_NETWORK_ERROR"
         try:
             response = await self.http.post(
                 self.urls["auth"] + "/token",
@@ -132,10 +134,32 @@ class OAuth:
                 auth=(self.credentials["client_id"], self.credentials["client_secret"]),
             )
             if response.status_code != 200:
-                raise ValueError("AUTHENTICATION_EXPIRED_RECONNECT_REQUIRED")
+                reason = f"OAUTH_TOKEN_HTTP_{response.status_code}"
+                try:
+                    error = response.json()
+                except ValueError:
+                    error = None
+                code = error.get("error") if isinstance(error, dict) else None
+                # Never expose arbitrary provider text, which may echo a code/secret.
+                if isinstance(code, str) and code in {
+                    "invalid_client",
+                    "invalid_grant",
+                    "invalid_request",
+                    "unauthorized_client",
+                    "unsupported_grant_type",
+                    "server_error",
+                    "temporarily_unavailable",
+                }:
+                    reason = "OAUTH_" + code.upper()
+                raise ValueError(reason)
+            reason = "OAUTH_TOKEN_RESPONSE_INVALID"
             raw = response.json()
+            if not isinstance(raw, dict):
+                raise ValueError(reason)
+            reason = "OAUTH_TOKEN_RESPONSE_INCOMPLETE"
             if not raw.get("access_token") or not raw.get("refresh_token"):
-                raise ValueError("OAUTH_TOKEN_RESPONSE_INCOMPLETE")
+                raise ValueError(reason)
+            reason = "OAUTH_LIFETIME_INVALID"
             expires = float(raw["expires_in"])
             refresh_expires = float(raw["refresh_token_expires_in"])
             if not 0 < expires <= 86400 or not 0 < refresh_expires <= 86400 * 365:
@@ -148,15 +172,18 @@ class OAuth:
                 "refresh_expires_at": time.time() + refresh_expires,
             }
             # Replace the rotating refresh token atomically before making it available.
+            reason = "OAUTH_TOKEN_STORAGE_FAILED"
             await asyncio.to_thread(atomic_json, self.token_file, tokens)
             self.tokens = tokens
             self.generation += 1
             self.status = "AUTHENTICATED"
+            self.failure_reason = ""
         except Exception:
             self.status = "AUTHENTICATION_EXPIRED_RECONNECT_REQUIRED"
+            self.failure_reason = reason
             self.tokens = {}
             # Never render transport errors, request bodies or token responses.
-            raise ValueError(self.status) from None
+            raise ValueError(reason) from None
 
     async def access_token(self) -> str:
         async with self.lock:

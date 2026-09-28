@@ -115,6 +115,7 @@ class Runtime:
                 "EODHD": "INACTIVE",
             },
             "oauth": self.data.client.oauth.status,
+            "oauth_problem": self.data.client.oauth.failure_reason,
             "session": self.data.session,
             "stream": {
                 "connected": self.data.connected,

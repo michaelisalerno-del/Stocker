@@ -81,6 +81,22 @@ for `/oauth/saxo/callback`; never log callback codes, Authorization headers or c
 logging is disabled. The runtime log rotates at 2 MiB × 4 files and records exception classes only.
 HTTP/WebSocket debug logging must remain off.
 
+OAuth exchange failures expose only a safe category in the callback and System's `oauth_problem`:
+
+- `OAUTH_INVALID_CLIENT`: Saxo explicitly rejected the application credentials.
+- `OAUTH_INVALID_GRANT`: start a fresh browser login; the code/refresh grant was rejected.
+- `OAUTH_TOKEN_HTTP_401` (or another status): the token endpoint rejected the request without
+  a recognised OAuth error. This alone does not identify which credential or grant was wrong.
+- `OAUTH_TOKEN_NETWORK_ERROR`: check server DNS/TLS/connectivity to the configured auth host.
+- `OAUTH_TOKEN_RESPONSE_INVALID`, `OAUTH_TOKEN_RESPONSE_INCOMPLETE`, `OAUTH_LIFETIME_INVALID`:
+  the response cannot safely supply usable tokens.
+- `OAUTH_TOKEN_STORAGE_FAILED`: restore service-user write access/disk space for the private token
+  directory before another login. Successful reconnect clears the prior diagnostic.
+
+Do not paste callback URLs/codes, token responses or AppSecrets into reports. The application
+never renders arbitrary provider descriptions or exception strings. Diagnostic requests using an
+invalid grant are not proof that a real browser login or account authentication works.
+
 Verified official documentation (2026-09-28):
 [environments](https://www.developer.saxo/openapi/learn/environments),
 [authorization code](https://www.developer.saxo/openapi/learn/oauth-authorization-code-grant),

@@ -1,0 +1,376 @@
+"""Generated/sanitised Saxo fixtures: no network, broker authentication or orders."""
+
+import asyncio
+import json
+import time
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
+
+import httpx
+import pytest
+
+from stocker_dashboard.app import create_dashboard_app
+from stocker_execution.broker import PaperBroker
+from stocker_execution.config import FuturesConfig
+from stocker_execution.contracts import key
+from stocker_execution.recorder import Recorder
+from stocker_execution.runtime import Runtime
+from stocker_execution.saxo_client import SaxoError
+from stocker_execution.saxo_data import DataService, completed_bars
+from stocker_execution.saxo_stream import PriceState, merge_board
+from stocker_execution.store import Store
+
+FUTURE = {
+    "provider": "SAXO",
+    "environment": "SAXO_SIM",
+    "market": "CL",
+    "uic": 100,
+    "asset_type": "ContractFutures",
+    "symbol": "CLZ6:NYMEX",
+    "expiry": "2026-12-20",
+    "contract_month": "2026-12",
+    "exchange": "NYMEX",
+}
+OPTION = {
+    **FUTURE,
+    "uic": 101,
+    "asset_type": "FuturesOption",
+    "underlying_uic": 100,
+    "option_root_id": 50,
+    "right": "Call",
+    "strike": 70,
+    "currency": "USD",
+    "tick_size": 0.001,
+    "price_factor": 1000,
+    "multiplier": 1000,
+}
+
+
+def quote(bid=0.008, ask=0.009, at=None):
+    p = PriceState()
+    p.snapshot(
+        {
+            "Quote": {
+                "Bid": bid,
+                "Ask": ask,
+                "PriceTypeBid": "Tradable",
+                "PriceTypeAsk": "Tradable",
+                "DelayedByMinutes": 0,
+            },
+            "PriceInfoDetails": {"BidSize": 2, "AskSize": 2},
+        },
+        "fixture",
+        at or time.time(),
+    )
+    return p
+
+
+class FakeClient:
+    def __init__(self):
+        self.calls = []
+        self.sim_account_verified = True
+        self.oauth = SimpleNamespace(account_key="fixture-account")
+        self.positions = []
+        self.orders = []
+
+    async def request(self, method, path, **kwargs):
+        self.calls.append((method, path, kwargs))
+        if path == "/root/v2/user":
+            return {"UserId": "fixture-user"}
+        if path == "/port/v1/accounts/me":
+            return {
+                "Data": [
+                    {"AccountKey": "fixture-account", "AccountId": "fixture-id", "Currency": "GBP"}
+                ]
+            }
+        if path == "/root/v1/sessions/capabilities":
+            return {"TradeLevel": "FullTradingAndChat"}
+        if path == "/port/v1/positions/me":
+            return {"Data": self.positions}
+        if path == "/port/v1/orders/me":
+            return {"Data": self.orders}
+        if path.endswith("precheck"):
+            return {
+                "PreCheckResult": "Ok",
+                "EstimatedCashRequired": 7.9,
+                "EstimatedCashRequiredCurrency": "GBP",
+                "EstimatedTotalCostInAccountCurrency": 0.1,
+            }
+        raise SaxoError("AMBIGUOUS_REQUEST")
+
+
+def setup(tmp_path, mode="INTERNAL_PAPER"):
+    config = FuturesConfig(execution_mode=mode)
+    client = FakeClient()
+    r = Recorder(config.recorder, tmp_path / "events")
+    data = DataService(config, client, r)
+    data.connected = data.account_verified = True
+    data.account_id, data.account_currency = "fixture-id", "GBP"
+    data.session = {"TradeLevel": "FullTradingAndChat"}
+    data.markets["CL"].identity = FUTURE
+    data.markets["CL"].price = quote(70, 71)
+    r.register(key(FUTURE), FUTURE)
+    data.options[101] = (OPTION, quote())
+    data.subscriptions["option"] = {"target": "101"}
+    data.fx = quote(1.3, 1.31)
+    store = Store(tmp_path / "ledger.sqlite3")
+    store.bind("SAXO_SIM", mode)
+    broker = PaperBroker(config, store, data)
+    broker.armed = broker.reconciled = True
+    broker.problem = ""
+    return broker, data, store
+
+
+def signal(i):
+    at = datetime.now(UTC)
+    return {
+        "id": f"fixture-{i}",
+        "market": "CL",
+        "rule_version": "fixture",
+        "signal_at": at.isoformat(),
+        "exit_at": (at + timedelta(hours=1)).isoformat(),
+    }
+
+
+def plan():
+    return {
+        "quantity": 1,
+        "cash_pennies": 800,
+        "premium_gbp": 7.69,
+        "fees_gbp": 0.2,
+        "total_gbp": 8,
+        "limit": 0.01,
+        "option": OPTION,
+        "underlying": FUTURE,
+        "fee_per_side_gbp": 0.1,
+        "currency": "USD",
+        "multiplier": 1000,
+        "price_unit_factor": 1,
+        "fx": 1 / 1.3,
+        "fx_at": time.time(),
+        "cutoff": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+    }
+
+
+def test_depth_updates_and_heartbeats_do_not_refresh_quotes():
+    p = quote(at=100)
+    p.update({"MarketDepth": {"Bid": [1], "BidSize": [2]}}, "900", 106)
+    assert p.receipt == 100 and p.depth(106)["status"] == "L2_AVAILABLE"
+    p.update({"Quote": {"Ask": 0.01}}, "4", 107)
+    assert p.receipt == 100
+    with pytest.raises(ValueError, match="REPLAY_CONTENT_CONFLICT"):
+        p.update({"Quote": {"Ask": 99}}, "4", 108)
+    assert p.value is None and not p.depth(108)["bids"]
+
+
+def test_option_board_indexed_patches_and_explicit_nulls():
+    original = {
+        "Expiries": [
+            {
+                "Index": 0,
+                "Expiry": "2026-09-28",
+                "Strikes": [{"Index": 2, "Call": {"Bid": 2}, "Put": {"Bid": 3}}],
+            }
+        ]
+    }
+    merged = merge_board(
+        original,
+        {
+            "Expiries": [
+                {
+                    "Index": 0,
+                    "Strikes": [{"Index": 2, "Call": None}, {"Index": 3, "Put": {"Bid": 4}}],
+                }
+            ]
+        },
+    )
+    rows = merged["Expiries"][0]["Strikes"]
+    assert rows[0] == {"Index": 2, "Call": None, "Put": {"Bid": 3}}
+    assert rows[1]["Index"] == 3
+    assert merge_board(merged, {"Expiries": []})["Expiries"] == []
+
+
+def test_session_downgrade_reset_and_provider_envelopes(tmp_path):
+    async def scenario():
+        _, data, store = setup(tmp_path)
+        data.subscriptions["session"] = {"kind": "SESSION", "target": "SESSION"}
+        data.subscriptions["cl"] = {"kind": "PRICE", "target": "CL"}
+        data.recorder.ingest(key(FUTURE), "SNAPSHOT", data.markets["CL"].price.value, time.time())
+        msg = {
+            "reference": "cl",
+            "message_id": "900",
+            "payload": {"Timestamp": "fixture-provider-time", "Data": {"Quote": {"Ask": 72}}},
+        }
+        await data.receive(msg)
+        row = json.loads(data.recorder.windows[key(FUTURE)].rows[-1][1])
+        assert row["provider_message"] == msg
+        await data.receive(
+            {"reference": "session", "message_id": "2", "payload": {"TradeLevel": "OrdersOnly"}}
+        )
+        assert data.markets["CL"].price.value is None
+        assert data.problem == "SESSION_DOWNGRADED_EXPLICIT_UPGRADE_REQUIRED"
+        assert not data.client.calls
+        with pytest.raises(ValueError, match="FRESH_SNAPSHOTS"):
+            await data.receive(
+                {"reference": "_resetsubscriptions", "message_id": "3", "payload": {}}
+            )
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_history_completed_tail_missing_volume_and_gap_pagination(tmp_path):
+    at = datetime(2026, 9, 28, 13, tzinfo=UTC)
+    rows = [
+        {
+            "Time": (at + timedelta(minutes=i)).isoformat(),
+            "Open": 70,
+            "High": 71,
+            "Low": 69,
+            "Close": 70.5,
+            "Volume": 20,
+        }
+        for i in range(4)
+    ]
+    del rows[1]["Volume"]
+    bars = completed_bars({"Data": rows}, at + timedelta(hours=1))
+    assert [b.at.minute for b in bars] == [0, 2]
+    assert bars[0].average is None
+
+    async def scenario():
+        _, data, store = setup(tmp_path)
+
+        async def get(*args, **kwargs):
+            return {"Data": rows[:1], "DataVersion": 1}
+
+        data.client.request = get
+        with pytest.raises(ValueError, match="PAGINATION_DID_NOT_ADVANCE"):
+            await data.history_range(100, at, at + timedelta(hours=1))
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_internal_paper_never_transmits_and_capacity_releases_after_flat(tmp_path):
+    async def scenario():
+        broker, data, store = setup(tmp_path)
+        for i in range(2):
+            event = signal(i)
+            store.observe(event, "", {})
+            assert await broker.enter(event, plan()) == ""
+        assert not data.client.calls and store.capacity()["reserved_open_trades"] == 2
+        broker.armed = False  # disarming entries must not abandon existing management
+        with store.db:
+            store.db.execute(
+                "UPDATE signals SET exit_at=? WHERE id='fixture-0'",
+                ((datetime.now(UTC) - timedelta(seconds=1)).isoformat(),),
+            )
+        await broker.manage()
+        assert store.exposure("fixture-0") == 0 and store.exposure("fixture-1") == 1
+        assert store.capacity()["reserved_open_trades"] == 1
+        assert not data.client.calls
+        assert store.economics()["basis"] == "INTERNALLY_SIMULATED"
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_no_naked_short_futures_or_stale_size_fill(tmp_path):
+    async def scenario():
+        broker, data, store = setup(tmp_path)
+        with pytest.raises(ValueError, match="SELL_ONLY"):
+            broker.validate_order(plan(), "EXIT", "missing")
+        invalid = plan()
+        invalid["option"] = FUTURE
+        with pytest.raises(ValueError, match="ONLY_OWNED_LONG"):
+            broker.validate_order(invalid, "ENTRY", "missing")
+        event = signal(1)
+        store.observe(event, "", {})
+        data.options[101][1].size_receipt = time.time() - 10
+        await broker.enter(event, plan())
+        assert not store.fills(event["id"])
+        await broker.manage()
+        assert store.capacity()["reserved_open_trades"] == 0
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_sim_ambiguous_order_keeps_reservation_and_is_never_retried(tmp_path):
+    async def scenario():
+        broker, data, store = setup(tmp_path, "SAXO_SIM")
+        event = signal(1)
+        store.observe(event, "", {})
+        await broker.enter(event, plan())
+        assert not broker.reconciled
+        await broker.reconcile()
+        assert broker.problem == "AMBIGUOUS_ORDER_REQUIRES_BROKER_AUDIT"
+        assert store.capacity()["reserved_open_trades"] == 1
+        assert sum(path == "/trade/v2/orders" for _, path, _ in data.client.calls) == 1
+        with pytest.raises(ValueError):
+            await broker.enter(event, plan())
+        assert sum(path == "/trade/v2/orders" for _, path, _ in data.client.calls) == 1
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_preflight_is_non_transmitting_unknown_exposure_blocks(tmp_path):
+    async def scenario():
+        broker, data, store = setup(tmp_path, "SAXO_SIM")
+        broker.armed = False
+        data.client.positions = [
+            {
+                "PositionBase": {
+                    "AccountId": "fixture-id",
+                    "Uic": 999,
+                    "AssetType": "ContractFutures",
+                    "Amount": 1,
+                }
+            }
+        ]
+        result = await broker.preflight()
+        assert result["non_transmitting"] and not result["reconciled"]
+        assert all(method == "GET" for method, _, _ in data.client.calls)
+        with pytest.raises(ValueError, match="PREFLIGHT"):
+            broker.arm("ENABLE PAPER ONLY")
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_dashboard_defaults_do_not_leak_secrets_or_create_subscriptions(tmp_path):
+    async def scenario():
+        runtime = Runtime(FuturesConfig(), Store(tmp_path / "ledger.sqlite3"))
+        app = create_dashboard_app(runtime)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="http://127.0.0.1"
+        ) as client:
+            for _ in range(3):
+                result = (await client.get("/api/overview")).json()
+                assert [m["market"] for m in result["markets"]] == ["CL", "GC", "NG", "NQ", "SI"]
+                assert result["system"]["live_orders_disabled"]
+                assert not runtime.data.subscriptions
+            system = (await client.get("/api/system")).text
+            assert "client_secret" not in system and "access_token" not in system
+            assert (await client.get("/api/history?market=BTC")).status_code == 422
+            assert (
+                await client.post("/api/paper/arm", json={"acknowledgement": "ENABLE PAPER ONLY"})
+            ).status_code == 409
+        await runtime.stop()
+        runtime.store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_old_providers_are_not_network_capable():
+    from stocker_data.vendors.eodhd import EODHDClient, EODHDError
+
+    client = EODHDClient()
+    with pytest.raises(EODHDError, match="EODHD_INACTIVE"):
+        client._client.get("https://eodhd.com/api/eod/fixture")
+    client._client.close()
+    active = Path("packages/stocker_execution/src/stocker_execution")
+    assert not any("ib_async" in p.read_text() for p in active.glob("*.py"))
+    assert not any(p.exists() for p in [active / "depth.py", active / "subscriptions.py"])

@@ -12,19 +12,19 @@
     <header>
       <a class="brand" href="/">SLRNO<span>FUTURES / OPTIONS</span></a>
       <nav aria-label="Main navigation">
-        <a href="/">Overview</a><a href="/trades">Trades & signals</a
-        ><a href="/system">System</a>
+        <a href="/">Overview</a><a href="/markets">Markets</a><a href="/opportunities">Opportunities</a><a href="/execution">Execution</a><a href="/system">System</a>
       </nav>
-      <span class="paper">PAPER ONLY</span>
+      <span class="paper">LIVE ORDERS DISABLED</span>
     </header>
     <main id="main">
       <div class="heading">
         <div>
-          <p class="eyebrow">SIX MARKETS · ONE FROZEN METHOD</p>
+          <p class="eyebrow">FIVE MARKETS · ONE FROZEN METHOD</p>
           <h1 id="title">Futures overview</h1>
         </div>
         <div class="clock" id="clock"></div>
       </div>
+      <p id="mode-banner" class="mode-banner">DATA ENVIRONMENT: unverified · EXECUTION MODE: DISABLED · LIVE ORDERS DISABLED</p>
       <div id="notice" role="status" aria-live="polite"></div>
       <section class="summary" aria-label="Account and allocation">
         <div>
@@ -54,15 +54,16 @@
         </div>
       </section>
       <section id="overview">
+        <label id="market-selector" hidden>Market <select id="selected-market"><option>CL</option><option>GC</option><option>NG</option><option>NQ</option><option>SI</option></select></label>
         <div id="markets" class="markets"></div>
         <p id="evidence" class="evidence"></p>
       </section>
+      <section id="execution" hidden><h2>Four concurrent trade slots</h2><div id="trade-slots" class="trade-slots"></div><p id="execution-warning"></p><pre id="execution-json"></pre></section>
       <section id="trades" hidden>
         <div class="filters">
           <label
             >Market<select id="market-filter">
-              <option value="">All six</option>
-              <option>BTC</option>
+              <option value="">All five</option>
               <option>CL</option>
               <option>GC</option>
               <option>NG</option>
@@ -111,7 +112,7 @@
         </details>
       </section>
       <section id="system" hidden>
-        <h2>Market data & API</h2>
+        <h2>Saxo connection</h2><form action="/oauth/saxo/start" method="post"><button>Connect configured Saxo environment</button></form><p>Connecting data never arms execution. A session upgrade can downgrade another Saxo application; SLRNO never upgrades automatically.</p><p id="provider-status"></p><h2>Market data &amp; API</h2>
         <div class="api-panel">
           <div>
             <small>Application subscriptions</small
@@ -136,7 +137,7 @@
           </div>
         </div>
         <p class="block" id="api-error"></p>
-        <h2>Connectivity and readiness</h2>
+        <h2>Saved recordings</h2><div id="recording-list"></div><h2>Connectivity and readiness</h2>
         <p>
           Live trading is unavailable. Installation, data readiness and
           execution arming are separate.
@@ -147,7 +148,7 @@
         </details>
       </section>
       <footer>
-        Broker-simulated PAPER fills · historical synthetic research is excluded
+        Saxo data · paper execution mode labelled separately · historical synthetic research is excluded
         · times shown in Europe/London
       </footer>
     </main>

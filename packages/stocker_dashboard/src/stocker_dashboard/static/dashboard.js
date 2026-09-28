@@ -1,8 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const markets = ["BTC", "CL", "GC", "NG", "NQ", "SI"];
+const markets = ["CL", "GC", "NG", "NQ", "SI"];
 const names = {
-  BTC: "Bitcoin",
   CL: "Crude oil",
   GC: "Gold",
   NG: "Natural gas",
@@ -10,12 +9,10 @@ const names = {
   SI: "Silver",
 };
 const depthReceipts = new Map();
-const page =
-  location.pathname === "/trades"
-    ? "trades"
-    : location.pathname === "/system"
-      ? "system"
-      : "overview";
+const route = location.pathname.slice(1) || "overview";
+const page = ["opportunities", "trades"].includes(route) ? "trades" : route === "markets" ? "overview" : route;
+let selectedMarket = sessionStorage.getItem("slrno-market") || "CL";
+if (!markets.includes(selectedMarket)) selectedMarket = "CL";
 let offset = 0,
   paused = false,
   pending = false,
@@ -44,7 +41,7 @@ const text = (id, v) => {
   if (el && el.textContent !== next) el.textContent = next;
 };
 const display = (v) => String(v || "").replaceAll("_", " ");
-for (const name of ["overview", "trades", "system"])
+for (const name of ["overview", "trades", "execution", "system"])
   $(name).hidden = name !== page;
 text(
   "title",
@@ -52,7 +49,7 @@ text(
     ? "Trades & signal history"
     : page === "system"
       ? "System"
-      : "Futures overview",
+      : page === "execution" ? "Paper execution" : route === "markets" ? "Market detail" : "Futures overview",
 );
 document.querySelectorAll("nav a").forEach((a) => {
   if (a.pathname === location.pathname) a.setAttribute("aria-current", "page");
@@ -67,12 +64,12 @@ for (const m of markets) {
  <div class="feed-line"><span id="l1-${m}"></span><span id="l2-${m}"></span></div>
  <svg class="chart" viewBox="0 0 420 92" role="img" aria-label="${m} completed underlying prices"><path class="chart-grid" d="M0 30H420 M0 62H420"/><polyline id="line-${m}" fill="none"/><g id="markers-${m}"></g><text id="chart-empty-${m}" x="210" y="48" text-anchor="middle">Awaiting completed bars</text></svg>
  <div class="condition"><span id="direction-${m}"></span><strong id="conditions-${m}"></strong></div>
- <p class="block" id="block-${m}"></p><div class="position" id="position-${m}"></div>
+ <p class="quote" id="quote-${m}"></p><p class="recorder-line" id="recorder-${m}"></p><p class="block" id="block-${m}"></p><div class="position" id="position-${m}"></div>
  <div class="next"><span>Next clock · NY</span><strong id="next-${m}"></strong></div>
  <p class="diagnostic" id="diagnostic-${m}"></p><details><summary>Contract, rule & research depth</summary>
  <div class="depth"><p>Research only — does not affect trades</p><small id="depth-note-${m}"></small>
  <table aria-label="${m} displayed depth"><thead><tr><th>Bid size</th><th>Bid</th><th>Ask</th><th>Ask size</th></tr></thead>
- <tbody>${Array.from({ length: 5 }, (_, i) => `<tr id="depth-${m}-${i}" hidden><td></td><td></td><td></td><td></td></tr>`).join("")}</tbody></table></div>
+ <tbody>${Array.from({ length: 20 }, (_, i) => `<tr id="depth-${m}-${i}" hidden><td></td><td></td><td></td><td></td></tr>`).join("")}</tbody></table></div>
  <pre id="details-${m}"></pre></details>`;
   $("markets").append(card);
 }
@@ -111,7 +108,7 @@ function chart(m) {
       .map((t) => ({
         id: `fill-${t.id}`,
         at: t.entry_at,
-        label: "Broker paper fill",
+        label: `Paper fill · ${t.basis || "basis unverified"}`,
         kind: "fill",
       })),
   ];
@@ -145,6 +142,10 @@ function render(d) {
   const s = d.system,
     p = d.pnl;
   paused = s.paused;
+  text("mode-banner", `DATA ENVIRONMENT: ${s.data_environment || "UNVERIFIED"} · EXECUTION MODE: ${s.execution_mode || "DISABLED"} · LIVE ORDERS DISABLED`);
+  text("provider-status", "IBKR PARKED · FMP INACTIVE · EODHD INACTIVE");
+  text("execution-warning", Object.values(s.management_problems || {}).join(" · ") || "No reported exposure exceptions");
+  for (let i = 0; i < 4; i++) text(`trade-slot-${i}`, i < s.reserved_open_trades ? `Slot ${i + 1} · reserved / open` : `Slot ${i + 1} · available`);
   text("account", s.account);
   text(
     "connection",
@@ -161,7 +162,7 @@ function render(d) {
     "pnl-note",
     p.provisional_closed
       ? `${p.provisional_closed} closed trade(s) provisional · missing costs/FX`
-      : "Broker executions + commissions",
+      : display(p.basis || "Paper evidence unavailable"),
   );
   text(
     "entries",
@@ -185,6 +186,10 @@ function render(d) {
       : "No open paper positions",
   );
   for (const m of d.markets) {
+    if (!markets.includes(m.market)) continue;
+    const q = m.l1?.quote || {}, sizes = m.l1?.sizes || {}, rec = m.recorder || {};
+    text(`quote-${m.market}`, `Bid ${q.Bid ?? "—"} × ${sizes.bid ?? "—"} · Ask ${q.Ask ?? "—"} × ${sizes.ask ?? "—"} · spread ${m.l1?.spread ?? "—"} · delay ${m.l1?.delay_minutes ?? "unknown"} min`);
+    text(`recorder-${m.market}`, `${rec.state || "UNAVAILABLE"} · ${Math.floor(rec.prehistory_seconds || 0)} / 900s prehistory · ${display(rec.reason)}`);
     text(`contract-${m.market}`, m.contract || "Contract pending verification");
     text(`state-${m.market}`, display(m.strategy_state));
     text(`market-${m.market}`, display(m.market_status));
@@ -192,7 +197,7 @@ function render(d) {
       `data-${m.market}`,
       m.updated_at
         ? `Bars ${display(m.data_status)} · ${Math.max(0, Math.floor((Date.now() - Date.parse(m.updated_at)) / 1000))}s`
-        : `Bars ${display(m.data_status)}`,
+        : `Feed ${display(m.data_status)}`,
     );
     text(`l1-${m.market}`, `L1 ${display(m.l1?.status || "DISCONNECTED")}`);
     depth(m.market, m.l2 || { status: "DISABLED" });
@@ -229,6 +234,9 @@ function render(d) {
           ...m.details,
           l1: m.l1,
           l2: m.l2,
+          recorder: m.recorder,
+          options: m.option,
+          capabilities: m.capabilities,
           exchange_trade_date: m.exchange_trade_date,
           next_market_time: m.next_market_time,
           trades: m.trades,
@@ -242,40 +250,17 @@ function render(d) {
   }
   text(
     "evidence",
-    `${p.opportunities} opportunities · ${p.eligible_trades} eligible trades · ${p.skip_reasons.SKIP_BUDGET_TOO_SMALL || 0} budget skips · ${p.skip_reasons.SKIP_CAPACITY_FULL || 0} capacity skips · ${p.fills} executions · ${p.win_rate == null ? "Win rate unavailable" : `${(p.win_rate * 100).toFixed(1)}% win rate`} (${p.wins}/${p.closed_with_complete_costs} closed with complete costs)`,
+    `${p.opportunities} opportunities · ${p.eligible_trades} eligible trades · ${p.skip_reasons.MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET || 0} budget skips · ${p.skip_reasons.SKIP_CAPACITY_FULL || 0} capacity skips · ${p.fills} executions · ${p.win_rate == null ? "Win rate unavailable" : `${(p.win_rate * 100).toFixed(1)}% win rate`} (${p.wins}/${p.closed_with_complete_costs} closed with complete costs)`,
   );
-  const a = s.market_data || {},
-    l = s.l2_recording || {},
-    pace = a.pacing || {};
-  text("api-lines", `${a.owned_lines ?? "—"} / ${a.app_budget ?? "—"} lines`);
-  text(
-    "api-allowance",
-    `${a.total_account_allowance ?? "—"} account allowance · ${display(a.allowance_status || "ASSUMED")}`,
-  );
-  text(
-    "api-external",
-    `External usage ${a.external_usage == null ? "unknown" : a.external_usage} · ${a.external_headroom ?? "—"} lines held outside SLRNO`,
-  );
-  text(
-    "api-depth",
-    `${a.depth_used ?? 0} / ${a.depth_limit ?? 3} research books`,
-  );
-  text(
-    "api-assignments",
-    (l.assigned_markets || []).join(" · ") || "No books allocated",
-  );
-  text(
-    "api-options",
-    `${a.temporary_quotes ?? 0} / ${a.temporary_quote_limit ?? 15} temporary quotes`,
-  );
-  text(
-    "api-pacing",
-    `${pace.outbound_last_second ?? 0} / ${pace.outbound_cap ?? "—"} requests / s`,
-  );
-  text(
-    "api-queue",
-    `${pace.queued ?? 0} queued · ${pace.urgent_reserve ?? "—"} requests reserved for urgent work`,
-  );
+  const a = s.market_data || {}, l = s.l2_recording || {};
+  text("api-lines", `${a.owned_lines ?? "—"} / ${a.app_budget ?? 32} subscriptions`);
+  text("api-allowance", `Saxo session: ${s.session?.TradeLevel || "UNVERIFIED"}`);
+  text("api-external", "Session upgrade is explicit; it can downgrade another Saxo application");
+  text("api-depth", `${d.markets.filter(m => m.l2?.status === "L2_AVAILABLE").length} / 5 markets with received depth`);
+  text("api-assignments", "CL · GC · NG · NQ · SI · independent server subscriptions");
+  text("api-options", `${d.markets.reduce((n,m) => n + (m.option?.quotes?.length || 0),0)} / 16 regular option quote subscriptions`);
+  text("api-pacing", JSON.stringify(a.rate_limits || {}));
+  text("api-queue", `${a.rest_queue ?? 0} / 32 queued REST requests`);
   text(
     "api-storage",
     `${((l.disk_bytes || 0) / 1048576).toFixed(1)} / ${((l.disk_limit || 0) / 1048576).toFixed(0)} MiB stored`,
@@ -298,12 +283,12 @@ function depth(m, d) {
     `l2-${m}`,
     `L2 ${display(d.status)}${d.target_pre_seconds ? ` · ${covered} / ${d.target_pre_seconds}s pre-context` : ""}`,
   );
-  const fresh = d.fresh && Date.now() - Date.parse(d.last_receipt) <= 30000;
+  const fresh = d.fresh && Date.now() - Date.parse(d.last_receipt) <= 5000;
   text(
     `depth-note-${m}`,
     `${display(d.reason)}${fresh ? ` · Local receipt ${time(d.last_receipt)}` : " · No current ladder"}`,
   );
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 20; i++) {
     const row = $(`depth-${m}-${i}`),
       bid = fresh ? d.bids?.[i] : null,
       ask = fresh ? d.asks?.[i] : null;
@@ -384,6 +369,22 @@ async function refresh() {
     if (page === "trades") await history();
     if (page === "system")
       text("system-json", JSON.stringify(await get("/api/system"), null, 2));
+    if (page === "system") {
+      const recordings = await get("/api/recordings");
+      const entries = [...(recordings.active || []), ...(recordings.completed || [])].slice(-132);
+      const wanted = new Set(entries.map(r => `recording-${r.segment}`));
+      for (const node of [...$("recording-list").children]) if (!wanted.has(node.id)) node.remove();
+      for (const rec of entries) {
+        const id = `recording-${rec.segment}`;
+        if (!$(id)) {
+          const link = document.createElement("a"); link.id = id;
+          link.href = `/api/recordings/${encodeURIComponent(rec.segment)}`;
+          $("recording-list").append(link);
+        }
+        text(id, `${rec.state} · ${rec.key} · ${rec.segment.slice(0, 10)}`);
+      }
+    }
+    if (page === "execution") text("execution-json", JSON.stringify(await get("/api/history"), null, 2));
     text("notice", "");
   } catch (e) {
     text("notice", `${e.message} · last displayed values may be stale`);
@@ -420,8 +421,25 @@ $("next").onclick = () => {
 setInterval(() => {
   text("clock", `${time(new Date().toISOString())} · London`);
   for (const [m, at] of depthReceipts)
-    if (at && Date.now() - at > 30000)
+    if (at && Date.now() - at > 5000)
       depth(m, { status: "INCOMPLETE", reason: "LADDER_RECEIPT_STALE" });
 }, 1000);
 setInterval(refresh, 5000);
 refresh();
+
+for (let i = 0; i < 4; i++) {
+  const slot = document.createElement("div"); slot.id = `trade-slot-${i}`;
+  $("trade-slots").append(slot);
+}
+$("market-selector").hidden = route !== "markets";
+$("selected-market").value = selectedMarket;
+function selectMarket() {
+  selectedMarket = $("selected-market").value;
+  sessionStorage.setItem("slrno-market", selectedMarket);
+  for (const market of markets) $(`card-${market}`).hidden = route === "markets" && market !== selectedMarket;
+}
+$("selected-market").addEventListener("change", selectMarket);
+selectMarket();
+if (route === "markets") text("title", "Markets");
+if (route === "opportunities") text("title", "Opportunities");
+if (route === "execution") text("title", "Execution");

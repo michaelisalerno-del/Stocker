@@ -1,139 +1,60 @@
-# Frozen futures execution rulebook — CLOCK60_NG13_20260927
+# Five-market frozen method
 
-## Authority and reconciliation
+Runtime version: `CLOCK60_NG13_20260927`. Exact original paths and SHA-256 hashes are in
+[saxo-frozen-sources.json](saxo-frozen-sources.json); the same hashes accompany every event.
+`fixed_spec.json`, each `*_TAIL_FROZEN.json`, `build_features.py.txt`, and `tail.py.txt` remain
+unchanged under `research/futures-integration-sources`. Historical providers and synthetic pricing
+are not relabelled Saxo. Previous operating rules are archived in the parked-runtime directory.
 
-The frozen primary source is `research/futures-integration-sources/fixed_spec.json`, an exact
-copy of the accepted FIXED_ARCHITECTURE_SPEC from September 26. The manifest records original
-paths and SHA-256 hashes, including build_features.py and tail_first_v1/tail.py. Prior user
-instructions in task 01a0df73 explicitly retained only NG CLOCK_13 for the current replay.
-The present integration prompt authorises PAPER implementation with the small-size limits.
-It does not approve a new listed-product/strike/expiry adaptation.
+| Market | Frozen primary | Absolute target delta | Historical attainment threshold |
+|---|---|---:|---:|
+| CL | Buy call, 0DTE | 0.10 | +500% |
+| GC | Buy put, 0DTE | 0.10 | +500% |
+| NG | Buy put, 0DTE | 0.10 | +500% |
+| NQ | Buy put, 0DTE | 0.10 | +500% |
+| SI | Buy put, 0DTE | 0.20 | +300% |
 
-CURRENT_RESEARCH_NG13_ONLY is the fixed-clock primary, not the stopped directional-trigger
-family. R4, G7, fresh-delta, failure-gate exits and all new volume vetoes are excluded.
-FAST_GC16_G2_DECONFOUND_V0 is diagnostic only. FAST_BTC_REAL_EXPIRY_RECONSTRUCTION_V0 rejects
-17:00 NY as a real BTC expiry and concludes real listed mapping remains inconclusive.
+Triggers are the frozen weekday 09:00–16:00 hourly clocks in America/New_York. NG 13:00 is vetoed
+but recorded. They are not every quote or near-clock update. The original opportunity time anchors
+the 60-minute exit; recorder duration never changes it. Attainment thresholds above are research
+outcome definitions, not newly added profit-taking rules. Secondary structures, GC16/G2 experiments,
+FIRST4 stock slots, L2 filters and new volume vetoes are not execution rules.
 
-## Per-market frozen specifications
+The inherited feature-availability gate needs 31 completed closes, positive RV15, five preceding
+source-session hourly medians, original opening/session windows and the underlying expiry guard.
+Saxo historical samples supply actual OHLCV; missing volume is not zero. No VWAP, open interest or
+volume is fabricated from last-price snapshots. Missing samples and mutable chart tails cannot enter
+completed-bar calculations. Gap requests are bounded and DataVersion changes require a fresh fetch.
 
-| Market | Frozen source primary | Direction | Target absolute delta | Opportunities | Veto | Order readiness |
-|---|---|---|---|---|---|---|
-| BTC | tail_first_v1/BTC/TAIL_FROZEN.json; fixed_spec | call_10d_0DTE / bullish | 0.10 | hourly 09–16 NY weekdays | none | Product, real expiry adaptation and tolerance unapproved; BTC/MBT/BFF never interchangeable |
-| CL | tail_first_v1/CL/TAIL_FROZEN.json; fixed_spec | call_10d_0DTE / bullish | 0.10 | hourly 09–16 NY weekdays | none | Listed product, real expiry adaptation and delta tolerance unapproved |
-| GC | tail_first_v1/GC/TAIL_FROZEN.json; fixed_spec | put_10d_0DTE / bearish | 0.10 | hourly 09–16 NY weekdays | none | Listed product, real expiry adaptation and delta tolerance unapproved |
-| NG | tail_first_v1/NG/TAIL_FROZEN.json; fixed_spec | put_10d_0DTE / bearish | 0.10 | hourly 09–16 NY weekdays | exact 13:00 NY purchase excluded | Listed product, real expiry adaptation and delta tolerance unapproved |
-| NQ | tail_first_v1/NQ/TAIL_FROZEN.json; fixed_spec | put_10d_0DTE / bearish | 0.10 | hourly 09–16 NY weekdays | none | Listed product, real expiry adaptation and delta tolerance unapproved |
-| SI | tail_first_v1/SI/TAIL_FROZEN.json; fixed_spec | put_20d_0DTE / bearish | 0.20 | hourly 09–16 NY weekdays | none | Listed product, real expiry adaptation and delta tolerance unapproved |
+Actual display contracts must be explicitly pinned from the selected environment's ContractFutures
+reference data. The standard CL/GC/NG/NQ/SI family, exchange, symbol/month and multiplier are verified.
+A config change is audited; buffers and option positions retain their original provider/environment/UIC.
+There is no unlabelled roll or continuous series. Contract month comes from the actual contract symbol,
+not its sometimes-earlier last trading month (for example a November crude contract expiring in October).
 
-Every row uses rule version CLOCK60_NG13_20260927 and the common mechanics below. No market
-is execution-ready merely because its underlying has bars. Missing authority is reported as
-LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED. No micro product substitution is approved.
+The frozen reference-selection rule is greatest volume on the strictly preceding **completed exchange
+session** among nearby actual futures, excluding expired contracts. Saxo daily chart boundaries have not
+been verified as those exchange sessions. Therefore selection is not guessed. An explicit, current,
+approved Saxo selection audit can be supplied via `reference_selections_file`; the implementation then
+fetches each selected session's actual contract bars and validates complete 08:00–17:00 NY coverage.
+See the schema in `reference_sessions.py`. Without that audit, the exact block is
+`REFERENCE_SESSION_CONTRACT_SELECTION_UNVERIFIED`. This is a remaining data-verification requirement.
 
-## Common frozen mechanics
+The research used continuous strikes and a hypothetical 17:00 NY expiry. It did **not** approve a
+listed-product substitution, universal actual expiry time, delta tolerance, fee schedule or changed DTE.
+All five execution mappings therefore start empty. Real FuturesOption reference relationships, actual
+0DTE timestamp, approved nearest frozen-model-delta tolerance, whole quantity, account quote, fees,
+GBP FX and an open session covering the original exit are required. Date-only/midnight expiry metadata
+is insufficient. Exercise cutoff text is retained but is never silently interpreted as a UTC deadline.
+Missing option-specific timing blocks admission. Never substitute a cheaper strike, micro contract,
+next expiry, CFD, direct future or fractional quantity to manufacture an affordable trade.
 
-Signal FUT and purchased FOP identities remain separate. Signal monitoring chooses the highest
-volume nearby actual future on the strictly preceding completed exchange session, excluding
-contracts at/after last-trade date; equal-volume ties use conId ascending. Candidate metadata is
-bounded to the six nearest listed contracts. Missing prior-session volume blocks selection.
-Only the exact standard signal product participates: BTC uses IB symbol BRR / trading class BTC /
-multiplier 5; CL 1000, GC 100, NG 10000, NQ 20 and SI 5000 use their matching trading classes.
-All are USD with price magnifier 1. Query constraints and returned identity checks exclude
-micro/mini products before candidate selection. In particular, IB's SI symbol also returns SIL
-(multiplier 1000), which is not the frozen SI signal product. These identities were verified
-against broker metadata on 2026-09-27; IB also documents [BRR](https://www.interactivebrokers.com/en/accounts/fees/CME.php)
-and the [distinct silver products](https://www.ibkrguides.com/clientportal/comexpreciousmetals.htm).
-Reference-cache keys include the signal identity version; earlier ambiguous-product observations
-remain in the audit database and are not reused. A verified current future can retain its L1/bar
-monitoring while missing historical reference volume blocks strategy readiness. No absent volume
-is inferred to be zero, and the five-reference requirement is unchanged.
+GC has a frozen research primary, but no unambiguous approved **listed execution mapping**. It is
+MONITOR_ONLY until that approval exists; no experimental GC management rule is adopted.
 
-The six-contract bound and conId tie-break are documented execution conventions; the frozen
-research said “nearby” without an ongoing numerical bound. Each source reference date uses
-its own selected contract, including subsequently expired contracts. No continuous symbol or spliced
-return is used. A rollover starts a new history buffer; positions retain their original FOP.
-
-Bars are UTC minute-start-stamped, available only after the minute completes. The purchase
-input is the close at opportunity minus one minute. RV15 is the square root of the sum of 15
-squared completed log returns (16 closes). Eligibility requires 31 contiguous completed closes,
-positive RV15, five preceding source-session hourly median references, the inherited finite
-feature gate and next weekday strictly before the future last-trade date. Session feature
-reference starts 08:00 NY, including the original opening-range and cumulative volume window.
-There is no interpolation, forward-fill, zero-RV floor or historical signal replay after restart.
-The runtime fetches only the bounded history required for these references, then streams bars.
-
-The opportunity and purchase clock are identical: exact hours 09:00 through 16:00 America/New_York
-on weekdays. There is no newly invented price crossing or smooth trigger gauge. The only veto
-is NG 13:00. Purchase direction is fixed by the table. Exit is **original opportunity +60 minutes**,
-not actual fill +60. Later order/fill/diagnostic timestamps are separate evidence.
-
-The historical strike formula used Black76, r=0, sigma=RV15*sqrt(525600/15), ACT/365 and
-K=F*exp(0.5*sigma²*T - sign*NormalInverse(abs_delta)*sigma*sqrt(T)), with a hypothetical
-same-day 17:00 NY expiry. That synthetic expiry and continuous strike cannot be sent to IBKR.
-No historical synthetic option price is an executable quote.
-
-## Explicit execution adaptations and safeguards
-
-A market's ProductMapping must cite an approved source and execution adaptation, actual product,
-symbol, exchange, trading class, currency, multiplier, price magnifier/units, termination zone/time,
-settlement mechanism, conservative fee reserve and delta tolerance. No mappings are supplied by
-this change because those missing choices cannot be inferred from research labels.
-The implemented adaptation selects the nearest listed **frozen-model delta**, using the approved
-real expiry. This changes synthetic strike construction and requires explicit mapping approval;
-it does not silently use broker IV/fresh-delta or seek a cheaper strike. Adjacent listed strikes
-are compared deterministically; lower strike wins an exact tie. Out-of-tolerance means skip.
-
-Broker details must confirm actual FOP conId, underlying conId, exchange, tradingClass, multiplier,
-currency, expiry and termination time. Listed expiry must be today and still live. No match is
-NO_REAL_0DTE_MATCH. No different expiry or direct future may replace it. Exit plus a 120-second
-operational buffer must precede both termination and the end of the actual option trading session;
-otherwise UNSUPPORTED_EXIT_BEFORE_CONTRACT_CUTOFF. This is an execution support check, not a new exit.
-
-Fresh positive uncrossed real-time bid/ask from the current request is required (five-second age).
-Delayed/frozen or missing prices block entry. One entry LMT at the ask rounded down to a verified
-market-rule increment; it expires at opportunity+20 seconds and is actively cancelled at deadline.
-There is no entry price chase or resubmission after timeout. A late fill keeps its original exit.
-At minute60 submit a SELL LMT at a fresh bid; maximum three attempts, each 20 seconds, only after
-reconciliation of the previous attempt. A failed exit is surfaced as exposure requiring operator
-attention. Exercise/delivery or unexplained positions block new entries and are never erased.
-
-Admission order: opportunity UTC ascending, then BTC, CL, GC, NG, NQ, SI. No stale queue. Each
-opportunity has one persistent identity per market, signal conId, clock and rule version. There is
-no same-event re-entry. Later valid clocks can enter after prior closure; overlapping trades retain
-separate obligations and cannot exceed global limits. There is no lifetime or daily consumed slot.
-
-Quantity is exactly one. Complete premium = limit * verified multiplier * price-unit factor.
-Convert USD to GBP with a timestamped GBPUSD bid (maximum 30 seconds), add conservative fees and
-round cash upwards to pennies. Above £10 is SKIP_BUDGET_TOO_SMALL. No fractional quantity, larger
-budget, alternative strike/expiry/product or multiple cheap contracts. Atomically reserve a full
-£10 and one of four slots before durable submission intent. Pending, uncertain, partial and closing
-exposure retain reservations until matching executions, terminal orders and broker positions agree.
-£40 is a concurrent allocation ceiling; cumulative daily losses may exceed it.
-
-## GC and BTC
-
-GC retains its base fixed-clock put and minute60 management. G2, GC16 exclusion/early exit and
-volume vetoes have no execution switch or order dependency. Completed OHLCV, range3 and volume
-inputs are retained as observations. A 16:00 cohort label is never a later failure-trigger timestamp.
-The card says “Experimental management disabled”.
-
-BTC monitoring is independent of equity sessions/weekends. Actual broker contract calendars govern
-market status. A clearing trade date is complete only after all broker schedule intervals
-with that refDate have ended. The Friday/Saturday maintenance split must not make Monday
-volume eligible for rollover during the weekend. CME expanded cryptocurrency futures/options to 24/7 from May 29, 2026, with maintenance
-and following-business-day trade dates for weekend activity ([CME notice](https://www.cmegroup.com/notices/electronic-trading/2026/05/20260525.html)).
-Monitoring does not extend the frozen weekday entry clocks. Standard BTC/MBT expiry is 16:00 London;
-BFF expiry is 16:00 New York in the audited sources. UK/US DST differences are calculated by zone,
-not fixed offsets. The reconstruction's standard/BFF switch was a diagnostic, not a product approval.
-At/after a product's same-day termination there is NO_REAL_0DTE_MATCH; no synthetic 17:00 substitution.
-A minute60 endpoint at termination is unsupported because it cannot safely close before the cutoff.
-
-## Accounting and evidence
-
-Broker executions and reported commissions drive realised results. Missing costs or execution FX
-leave results provisional; missing quotes never close a trade. Unrealised bid valuations show quote
-time and freshness and remain estimates. Historical research, prospective observations and broker
-PAPER executions remain separate; the fresh ledger begins with no historical profits.
-
-Every decision records source/rule identity, original clock, inputs, actual future/FOP, quote times,
-model delta, budget, FX, fees, capacity, order references, fills, commissions and skips. SQLite WAL,
-FULL synchronous writes, durable intent, process ownership and startup reconciliation remain required.
+INTERNAL_PAPER consumes no broker orders. Entry fills use ask plus one tick, exits bid minus one tick,
+with fresh displayed size and verified fee assumptions; no midpoint fills. All fills/P&L are labelled
+internally simulated. SAXO_SIM uses verified SIM account orders and confirmed broker evidence. Prechecks
+are required, disclaimers block, timeouts are never blindly retried, and unknown exposure blocks entries.
+Confirmed positions and terminal order/fill states govern capacity release. Costs/FX absent from SIM
+execution evidence leave P&L provisional, never zero-filled. Failed closure is a prominent exception.

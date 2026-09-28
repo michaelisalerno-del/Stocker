@@ -6,14 +6,16 @@ const http = require("node:http");
 const { chromium } = require("playwright");
 
 const at = "2026-09-28T14:20:00Z";
-const markets = ["BTC", "CL", "GC", "NG", "NQ", "SI"];
+const markets = ["CL", "GC", "NG", "NQ", "SI"];
 const staticRoot = path.resolve(
   "packages/stocker_dashboard/src/stocker_dashboard/static",
 );
-const output = path.resolve("docs/futures-screenshots");
+const output = path.resolve("docs/saxo-screenshots");
 const state = {
   system: {
     account: "OFFLINE FIXTURE",
+    data_environment: "SAXO_SIM", execution_mode: "DISABLED",
+    session: {TradeLevel: "OrdersOnly"},
     connected: true,
     reconciled: true,
     armed: false,
@@ -22,7 +24,7 @@ const state = {
     allocation_pennies: 2000,
     market_data: {
       owned_lines: 24,
-      app_budget: 60,
+      app_budget: 32,
       total_account_allowance: 100,
       allowance_status: "ASSUMED",
       external_headroom: 40,
@@ -40,7 +42,7 @@ const state = {
       errors: [],
     },
     l2_recording: {
-      assigned_markets: ["BTC", "GC", "NG"],
+      assigned_markets: ["CL", "GC", "NG"],
       disk_bytes: 12582912,
       disk_limit: 268435456,
       memory_bytes: 2097152,
@@ -76,9 +78,9 @@ const state = {
         "UNAVAILABLE",
         "DISABLED",
       ][i],
-      target_pre_seconds: 120,
-      pre_seconds: [120, 0, 42, 15, 0, 0][i],
-      fresh: i === 0 || i === 2,
+      target_pre_seconds: 900,
+      pre_seconds: [900, 42, 15, 0, 0][i],
+      fresh: i === 0 || i === 1,
       last_receipt: at,
       asks: Array.from({ length: 5 }, (_, n) => ({
         price: 2651 + n,
@@ -88,7 +90,7 @@ const state = {
         price: 2650 - n,
         size: 12 + n,
       })),
-      reason: i === 4 ? "IBKR_354:NO_DEPTH_PERMISSION" : "",
+      reason: i === 4 ? "SAXO_DEPTH_PERMISSION_UNVERIFIED" : "",
     },
     entry_enabled: false,
     strategy_state: [
@@ -124,7 +126,7 @@ const state = {
     chart: Array.from({ length: 90 }, (_, n) => ({
       at: new Date(Date.parse(at) - (90 - n) * 60000).toISOString(),
       close:
-        [67000, 72, 2650, 3, 23000, 32][i] *
+        [72, 2650, 3, 23000, 32][i] *
         (1 + n * 0.00001 + Math.sin(n * 0.25 + i) * 0.0008),
     })),
     signals: [
@@ -167,7 +169,7 @@ const state = {
 };
 const rows = Array.from({ length: 80 }, (_, i) => ({
   id: `fixture-${i}`,
-  market: markets[i % 6],
+  market: markets[i % 5],
   signal_at: new Date(Date.parse(at) - i * 60000).toISOString(),
   rule_version: "CLOCK60_NG13_20260927",
   decision: i % 3 ? "SKIPPED" : "BROKER_PAPER_FILL",
@@ -178,6 +180,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   let data;
   if (url.pathname === "/api/overview") data = state;
+  else if (url.pathname === "/api/recordings") data = {active: [], completed: []};
   else if (url.pathname === "/api/history")
     data = {
       rows: rows.filter(
@@ -270,7 +273,7 @@ async function label(page) {
     });
     await page.locator("#card-GC summary").click();
     await page.locator("#card-GC summary").focus();
-    assert.match(await page.locator("#l2-GC").textContent(), /42 \/ 120s/);
+    assert.match(await page.locator("#l2-GC").textContent(), /42 \/ 900s/);
     assert.equal(await page.locator("#depth-GC-0").isVisible(), true);
     await page.screenshot({
       path: path.join(output, "depth-expanded-fixture.png"),
@@ -282,7 +285,7 @@ async function label(page) {
       window.scrollTo(0, 250);
     });
     const y = await page.evaluate(() => scrollY);
-    state.markets[2].chart.at(-1).close += 1;
+    state.markets[1].chart.at(-1).close += 1;
     await page.evaluate(() => refresh());
     assert(
       await page.evaluate(
@@ -293,7 +296,7 @@ async function label(page) {
     );
     assert(await page.locator("#card-GC details").evaluate((n) => n.open));
     assert.equal(await page.evaluate(() => scrollY), y);
-    state.markets[2].l2.fresh = false;
+    state.markets[1].l2.fresh = false;
     await page.evaluate(() => refresh());
     assert.equal(await page.locator("#depth-GC-0").isVisible(), false);
     assert(await page.locator("#card-GC details").evaluate((n) => n.open));
@@ -368,19 +371,19 @@ async function label(page) {
     );
     await page.setViewportSize({ width: 1440, height: 1080 });
     await label(page);
-    assert.match(await page.locator("#api-lines").textContent(), /24 \/ 60/);
+    assert.match(await page.locator("#api-lines").textContent(), /24 \/ 32/);
     assert.match(
       await page.locator("#api-depth").textContent(),
-      /3 \/ 3 research books/,
+      /0 \/ 5 markets with received depth/,
     );
-    assert.match(await page.locator("#api-external").textContent(), /unknown/);
+    assert.match(await page.locator("#api-external").textContent(), /explicit/);
     await page.screenshot({
       path: path.join(output, "system-api-fixture.png"),
       fullPage: true,
     });
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: six fixed cards, signal/fill markers, provisional P&L, refresh identity/focus/scroll/filter retention, mobile layout and System",
+      "PASS: five fixed cards, signal/fill markers, provisional P&L, refresh identity/focus/scroll/filter retention, mobile layout and System",
     );
   } finally {
     await browser.close();

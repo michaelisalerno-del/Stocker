@@ -1,77 +1,73 @@
-"""Continuous six-market monitoring, with independent position management."""
+"""Existing SLRNO runtime, now Saxo-only and unarmed on every startup."""
 
 import asyncio
+import fcntl
+import hashlib
 import json
 import logging
-from dataclasses import asdict, dataclass, field
-from datetime import UTC, date, datetime, time, timedelta
+import time
+from datetime import UTC, datetime, timedelta
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
-
-from ib_async.objects import BarData
 
 from stocker_execution.broker import PaperBroker, now
-from stocker_execution.config import MARKETS, RULE_VERSION, FuturesConfig
-from stocker_execution.contracts import (
-    SIGNAL_IDENTITY_VERSION,
-    Calendar,
-    completed_trade_dates,
-    nearby_futures,
-    select_future,
-    signal_future_request,
-    utc,
-    verified_signal_futures,
-)
-from stocker_execution.depth import DepthObserver
-from stocker_execution.pacing import CORE, priority
-from stocker_execution.rules import (
-    NY,
-    Bar,
-    clocks,
-    eligibility,
-    next_clock,
-    opportunity,
-    prior_rv,
-    reference_summary,
-)
-from stocker_execution.store import Store, encode
+from stocker_execution.config import RULE_VERSION, FuturesConfig
+from stocker_execution.contracts import key, quote_check, session_state
+from stocker_execution.recorder import Recorder
+from stocker_execution.rules import NY, clocks, eligibility, next_clock, opportunity, prior_rv
+from stocker_execution.saxo_auth import OAuth
+from stocker_execution.saxo_client import SaxoClient
+from stocker_execution.saxo_data import DataService
+from stocker_execution.store import Store
 
 log = logging.getLogger(__name__)
 
 
-@dataclass
-class MarketState:
-    market: str
-    detail: Any = None
-    calendar: Calendar | None = None
-    stream: Any = None
-    ticker: Any = None
-    bars: list[Bar] = field(default_factory=list)
-    references: list[dict[int, dict[str, float]]] = field(default_factory=list)
-    reference_problem: str = ""
-    problem: str = "NOT_CONNECTED"
-    last_update: datetime | None = None
-    live_since: datetime | None = None
-    last_clock: datetime | None = None
-    selected_day: date | None = None
-    last_attempt: datetime | None = None
-    features: dict[str, float] = field(default_factory=dict)
-    gap_repair_at: datetime | None = None
-
-
 class Runtime:
-    def __init__(self, config: FuturesConfig, store: Store, broker: PaperBroker | None = None):
+    def __init__(self, config: FuturesConfig, store: Store, data: DataService | None = None):
         self.config, self.store = config, store
-        self.broker = broker or PaperBroker(config, store)
-        self.markets = {m: MarketState(m) for m in MARKETS}
+        store.bind(config.data_environment, config.execution_mode)
+        self.root = Path(store.db.execute("PRAGMA database_list").fetchone()[2]).parent
+        self.recorder = Recorder(config.recorder, self.root / config.data_environment / "events")
+        self.data = data or DataService(
+            config,
+            SaxoClient(OAuth(config.data_environment, config.saxo, self.root)),
+            self.recorder,
+        )
+        if data:
+            self.recorder = data.recorder
+        self.broker = PaperBroker(config, store, self.data)
+        self.markets = self.data.markets
         self.worker_health = self.manager_health = self.web_health = "STARTING"
         self.stopping = False
         self.tasks: set[asyncio.Task[Any]] = set()
         self.owner: Any = None
-        db_path = Path(store.db.execute("PRAGMA database_list").fetchone()[2])
-        self.depth = DepthObserver(self.broker.data, store, config.l2, db_path.with_suffix(".l2"))
-        self.core_restored = False
+        self.config_hash = hashlib.sha256(config.model_dump_json().encode()).hexdigest()
+        self.started_at = now()
+        self.depth = self.recorder  # existing read-only dashboard recording access
+        directory = self.root / config.data_environment
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        handler = RotatingFileHandler(directory / "slrno.log", maxBytes=2 * 1024**2, backupCount=3)
+        log.addHandler(handler)
+        log.setLevel(logging.INFO)
+        log.propagate = False
+        self.log_handler = handler
+        for name in ("httpx", "httpcore", "websockets"):
+            logging.getLogger(name).setLevel(logging.WARNING)
+        selections = {k: v.model_dump(mode="json") for k, v in config.contracts.items()}
+        if store.get_meta("display_contracts") != selections:
+            with store.db:
+                store.audit(
+                    "configuration",
+                    "EXPLICIT_DISPLAY_CONTRACT_SELECTION",
+                    {
+                        "before": store.get_meta("display_contracts"),
+                        "after": selections,
+                        "configuration_hash": self.config_hash,
+                    },
+                )
+            store.set_meta("display_contracts", selections)
 
     @property
     def pause(self) -> bool:
@@ -82,7 +78,8 @@ class Runtime:
         self.store.set_meta("paused", value)
 
     def report_failure(self, worker: str, exc: BaseException) -> None:
-        log.error("%s failed: %s", worker, exc)
+        # Exception strings can contain request URLs or authorization details.
+        log.error("%s failed (%s)", worker, type(exc).__name__)
 
     async def cancel_tasks(self, tasks: set[asyncio.Task[Any]]) -> None:
         for task in tasks:
@@ -92,653 +89,348 @@ class Runtime:
     def status(self) -> dict[str, Any]:
         return {
             "application": "SLRNO",
-            "environment": "PAPER",
-            "account": self.config.expected_account,
-            "connected": self.broker.ib.isConnected(),
+            "data_environment": self.config.data_environment,
+            "execution_mode": self.config.execution_mode,
+            "environment": self.config.data_environment,
+            "account": "Verified configured Saxo account"
+            if self.data.account_verified
+            else "Unverified",
+            "connected": self.data.connected,
             "reconciled": self.broker.reconciled,
-            "armed": self.config.armed,
+            "armed": self.broker.armed,
             "paused": self.pause,
             "entry_block_reason": self.broker.entry_reason(),
-            "problem": self.broker.problem,
+            "problem": self.data.problem,
             "worker_health": self.worker_health,
             "manager_health": self.manager_health,
             "web_health": self.web_health,
             "rule_version": RULE_VERSION,
-            "reconciliation": self.store.get_meta("reconciliation"),
-            "management_problems": self.broker.management_problems,
+            "configuration_hash": self.config_hash,
             "live_available": False,
-            "market_data": self.broker.data.snapshot(),
-            "l2_recording": self.depth.status(),
+            "live_orders_disabled": True,
+            "providers": {
+                "SAXO": "ACTIVE",
+                "IBKR": "PARKED",
+                "FMP": "INACTIVE",
+                "EODHD": "INACTIVE",
+            },
+            "oauth": self.data.client.oauth.status,
+            "session": self.data.session,
+            "stream": {
+                "connected": self.data.connected,
+                "reconnects": self.data.reconnects,
+                "last_message_id": self.data.last_message_id,
+            },
+            "market_data": {
+                "owned_lines": len(self.data.subscriptions),
+                "app_budget": 32,
+                "rate_limits": self.data.client.rate_headers,
+                "rest_queue": self.data.client.waiters,
+            },
+            "l2_recording": self.recorder.status(),
+            "bar_storage": {
+                "bytes": self.data.bar_cache.size,
+                "limit": self.config.recorder.bar_max_bytes,
+                "problem": self.data.bar_cache.problem,
+            },
+            "management_problems": self.broker.management_problems,
             **self.store.capacity(),
         }
 
     def overview(self) -> dict[str, Any]:
-        active = self.store.active()
         cards = []
+        active = self.store.active()
+        recent = self.store.history(None, None, None)
         for market, state in self.markets.items():
-            market_status, next_market, trade_date = (
-                state.calendar.state(now()) if state.calendar else ("BLOCKED", None, None)
+            reason = state.problem or state.history_problem
+            if not reason and market not in self.config.mappings:
+                reason = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
+            reason = reason or self.broker.entry_reason()
+            value = state.price.value or {}
+            quote = value.get("Quote") or {}
+            details = value.get("PriceInfoDetails") or {}
+            current = (
+                state.price.receipt is not None
+                and 0 <= time.time() - state.price.receipt <= 5
+                and not state.price.problem
             )
-            mapping_reason = (
-                ""
-                if market in self.config.mappings
-                else "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
+            identity = state.identity
+            depth = state.price.depth(time.time())
+            depth["last_receipt"] = (
+                datetime.fromtimestamp(state.price.depth_receipt, UTC).isoformat()
+                if state.price.depth_receipt
+                else None
             )
-            reason = state.problem or mapping_reason or self.broker.entry_reason()
-            local = now().astimezone(NY)
-            outside_window = local.weekday() > 4 or local.hour < 9 or local.hour > 16
-            positions = [r for r in active if r["market"] == market]
-            qty = sum(self.store.exposure(r["id"]) for r in positions)
-            strategy = (
-                "POSITION_OPEN"
-                if qty
-                else "ORDER_PENDING"
-                if positions
-                else "BLOCKED"
-                if reason
-                else "MONITORING"
+            recording = (
+                self.recorder.view(key(identity), time.time())
+                if identity
+                else {"state": "UNAVAILABLE", "prehistory_seconds": 0}
             )
-            if not positions and market_status in {"CLOSED", "MAINTENANCE"}:
-                strategy = market_status
-            elif not positions and "WARMING" in reason:
-                strategy = "WARMING_UP"
-            elif not positions and outside_window:
-                strategy = "OUTSIDE_ENTRY_WINDOW"
-            contract = state.detail.contract if state.detail else None
-            l1 = next(
-                (
-                    s
-                    for s in self.broker.data.items.values()
-                    if f"core:{market}" in s.consumers and s.feed == "QUOTE"
-                ),
-                None,
-            )
-            values = []
-            for row in positions:
-                plan = json.loads(row["plan"])
-                quote = self.broker.option_quotes.get(plan["option"]["conId"])
-                valuation: dict[str, Any] = {
-                    "value_gbp": None,
-                    "method": "BID_MINUS_AVERAGE_PREMIUM_AT_CURRENT_FX_BEFORE_COMMISSIONS",
-                    "quote_at": quote.bid_at.isoformat() if quote else None,
-                    "fresh": False,
-                    "fx_rate": self.broker.fx[0] if self.broker.fx else None,
-                    "fx_at": self.broker.fx[1].isoformat() if self.broker.fx else None,
-                }
-                if quote:
-                    try:
-                        quote.validate(now())
-                        fills = self.store.fills(row["id"])
-                        fx = self.broker.fx
-                        if fx and 0 <= (now() - fx[1]).total_seconds() <= 30 and fills:
-                            native_entry = sum(
-                                f["quantity"] * f["price"] for f in fills if f["side"] == "BOT"
-                            )
-                            bought = sum(f["quantity"] for f in fills if f["side"] == "BOT")
-                            remaining = self.store.exposure(row["id"])
-                            valuation.update(
-                                value_gbp=(quote.bid - native_entry / bought)
-                                * remaining
-                                * plan["multiplier"]
-                                * plan["price_unit_factor"]
-                                * fx[0],
-                                fresh=True,
-                            )
-                    except ValueError:
-                        pass
-                values.append(
-                    {
-                        "id": row["id"],
-                        "state": row["state"],
-                        "quantity": self.store.exposure(row["id"]),
-                        "entry_at": next(
-                            (f["at"] for f in self.store.fills(row["id"]) if f["side"] == "BOT"),
-                            None,
-                        ),
-                        "exit_at": row["exit_at"],
-                        "option": plan["option"],
-                        "valuation": valuation,
-                    }
-                )
+            depth.update(pre_seconds=recording["prehistory_seconds"], target_pre_seconds=900)
+            features = {}
+            try:
+                if state.bars:
+                    features["rv15"] = prior_rv(
+                        state.bars,
+                        state.bars[-1].at.replace(second=0) + timedelta(minutes=1),
+                    )
+            except ValueError:
+                pass
             cards.append(
                 {
                     "market": market,
-                    "contract": contract.localSymbol if contract else None,
-                    "market_status": market_status,
-                    "data_status": "CURRENT"
-                    if state.last_update and (now() - state.last_update).total_seconds() < 90
-                    else "STALE_OR_MISSING",
+                    "contract": identity["symbol"] if identity else None,
+                    "identity": identity,
+                    "market_status": session_state(state.reference, now()),
+                    "data_status": "CURRENT" if current else "STALE_OR_MISSING",
+                    "strategy_state": "MONITOR_ONLY"
+                    if market == "GC" and reason
+                    else "BLOCKED"
+                    if reason
+                    else "MONITORING",
+                    "entry_enabled": not reason and self.broker.armed and not self.pause,
+                    "block_reason": reason,
+                    "direction": "BUY CALL" if market == "CL" else "BUY PUT",
+                    "conditions": features,
+                    "trades": [self.trade_view(t) for t in active if t["market"] == market],
                     "l1": {
-                        "status": l1.state if l1 else "DISCONNECTED",
-                        "data_type": state.ticker.marketDataType if state.ticker else None,
-                        "last_receipt": l1.last_receipt.isoformat()
-                        if l1 and l1.last_receipt
+                        "status": "CURRENT" if current else "STALE_OR_MISSING",
+                        "quote": quote,
+                        "sizes": {"bid": details.get("BidSize"), "ask": details.get("AskSize")},
+                        "spread": quote["Ask"] - quote["Bid"]
+                        if isinstance(quote.get("Ask"), (int, float))
+                        and isinstance(quote.get("Bid"), (int, float))
                         else None,
-                        "last_change": l1.last_change.isoformat()
-                        if l1 and l1.last_change
+                        "delay_minutes": quote.get("DelayedByMinutes"),
+                        "provider_timestamp": value.get("LastUpdated"),
+                        "last_receipt": datetime.fromtimestamp(state.price.receipt, UTC).isoformat()
+                        if state.price.receipt
                         else None,
                     },
-                    "updated_at": state.last_update.isoformat() if state.last_update else None,
-                    "entry_enabled": not reason and market_status == "OPEN" and not outside_window,
-                    "strategy_state": strategy,
-                    "direction": "CALL / LONG"
-                    if market in {"BTC", "CL"}
-                    else "PUT / SHORT DIRECTION",
-                    "block_reason": reason,
-                    "conditions": state.features,
+                    "l2": depth,
+                    "recorder": recording,
+                    "capabilities": self.data.capability_view(state),
+                    "option": {
+                        "root": state.option_root,
+                        "discovered": len(state.option_space),
+                        "board": state.option_board,
+                        "quotes": [
+                            {"identity": ident, "price": price.value, "receipt": price.receipt}
+                            for ident, price in self.data.options.values()
+                            if ident["market"] == market
+                        ],
+                    },
                     "chart": [{"at": b.at.isoformat(), "close": b.close} for b in state.bars[-90:]],
                     "signals": [
-                        dict(r)
-                        for r in self.store.db.execute(
-                            "SELECT id,signal_at,decision,reason FROM signals "
-                            "WHERE market=? AND signal_at>=? ORDER BY signal_at DESC LIMIT 50",
-                            (
-                                market,
-                                state.bars[-90].at.isoformat()
-                                if len(state.bars) >= 90
-                                else state.bars[0].at.isoformat()
-                                if state.bars
-                                else now().isoformat(),
-                            ),
-                        )
-                    ],
-                    "trades": values,
-                    "l2": self.depth.view(market),
+                        {k: s[k] for k in ("id", "signal_at", "decision", "reason")}
+                        for s in recent
+                        if s["market"] == market
+                    ][:8],
                     "next_time": next_clock(now()).isoformat(),
-                    "next_market_time": next_market.isoformat() if next_market else None,
-                    "exchange_trade_date": trade_date,
+                    "next_market_time": None,
+                    "exchange_trade_date": None,
                     "rule_version": RULE_VERSION,
-                    "diagnostic": "Experimental management disabled" if market == "GC" else "",
+                    "diagnostic": "L2 observation only",
                     "details": {
-                        "signal_contract": contract.dict() if contract else None,
-                        "mapping": self.config.mappings[market].model_dump()
-                        if market in self.config.mappings
-                        else None,
+                        "signal_contract": identity,
                         "reference_sessions": len(state.references),
-                        "entry_timezone": "America/New_York",
-                        "entry_clocks": "09:00–16:00 weekdays; NG 13:00 veto",
+                        "entry_clocks": "09:00–16:00 America/New_York weekdays; NG 13:00 veto",
                         "exit_anchor": "Original opportunity + 60 minutes",
-                        "volume": "Observation only",
+                        "options_block": "Verify actual 0DTE expiry, product and delta tolerance",
+                        "recording": recording,
                     },
                 }
             )
         return {"system": self.status(), "markets": cards, "pnl": self.store.economics()}
 
+    def trade_view(self, row: dict[str, Any]) -> dict[str, Any]:
+        plan = json.loads(row["plan"])
+        fills = self.store.fills(row["id"])
+        quantity = self.store.exposure(row["id"])
+        valuation: dict[str, Any] = {
+            "value_gbp": None,
+            "fresh": False,
+            "method": "CONSERVATIVE_BID_ESTIMATE",
+        }
+        try:
+            _, price = self.data.options[plan["option"]["uic"]]
+            q = quote_check(price.value or {}, price.receipt, now())
+            fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, now())
+            entries = [f for f in fills if f["side"] == "BOT"]
+            if quantity and entries and all(f["fx"] is not None for f in entries):
+                cost = sum(f["quantity"] * f["price"] * f["fx"] for f in entries)
+                valuation.update(
+                    value_gbp=(quantity * float(q["Bid"]) / float(fx["Ask"]) - cost)
+                    * plan["multiplier"],
+                    fresh=True,
+                    quote_at=datetime.fromtimestamp(price.receipt or 0, UTC).isoformat(),
+                    fx_at=self.data.fx.receipt,
+                )
+        except (KeyError, ValueError):
+            pass
+        return {
+            "id": row["id"],
+            "state": row["state"],
+            "quantity": quantity,
+            "entry_at": next((f["at"] for f in fills if f["side"] == "BOT"), None),
+            "exit_at": row["exit_at"],
+            "option": plan["option"],
+            "premium_gbp": plan["premium_gbp"],
+            "fees_gbp": plan["fees_gbp"],
+            "total_gbp": plan["total_gbp"],
+            "valuation": valuation,
+            "basis": self.config.execution_mode,
+        }
+
+    async def decisions(self) -> None:
+        at = now()
+        for state in self.markets.values():
+            if not state.identity:
+                continue
+            for clock in clocks(at.astimezone(NY).date()):
+                if (
+                    clock < self.started_at
+                    or clock > at
+                    or (state.last_clock and clock <= state.last_clock)
+                ):
+                    continue
+                event = opportunity(state.market, state.identity["uic"], clock)
+                event["id"] = self.config.data_environment + "|" + str(event["id"])
+                event.update(
+                    provider="SAXO",
+                    environment=self.config.data_environment,
+                    contract=state.identity,
+                    configuration_hash=self.config_hash,
+                )
+                reason = str(event["veto"])
+                inputs: dict[str, float] = {}
+                try:
+                    if not reason:
+                        if (at - clock).total_seconds() > 20:
+                            raise ValueError("STALE_SIGNAL_NO_REPLAY")
+                        if state.problem or state.history_problem:
+                            raise ValueError(state.problem or state.history_problem)
+                        quote_check(state.price.value or {}, state.price.receipt, at)
+                        inputs = eligibility(
+                            state.bars,
+                            clock,
+                            datetime.fromisoformat(state.identity["expiry"][:10]).date(),
+                            state.references,
+                        )
+                except ValueError as exc:
+                    reason = str(exc)
+                state.last_clock = clock
+                # Capture an observed frozen clock even for veto, capacity, option or data skips.
+                event["skip_reason"] = reason
+                observed = self.store.observe(event, reason, inputs)
+                if not observed:
+                    continue
+                option_keys = [
+                    key(i)
+                    for i, _ in self.data.options.values()
+                    if i["market"] == state.market and i["underlying_uic"] == state.identity["uic"]
+                ]
+                capture = self.recorder.trigger(
+                    key(state.identity), event, time.time(), option_keys
+                )
+                self.store.depth_capture(str(event["id"]), capture)
+                if not reason:
+                    reason = "ENTRIES_PAUSED" if self.pause else self.broker.entry_reason()
+                if not reason:
+                    try:
+                        plan = await self.broker.prepare(event, state, inputs)
+                        reason = await self.broker.enter(event, plan)
+                    except (ValueError, KeyError) as exc:
+                        reason = str(exc)
+                if reason:
+                    self.store.decision(str(event["id"]), "SKIPPED", reason)
+                self.recorder.annotate(str(event["id"]), {"skip_reason": reason, "inputs": inputs})
+
     async def manager(self) -> None:
         self.manager_health = "RUNNING"
         while not self.stopping:
             try:
-                if self.broker.ib.isConnected() and self.broker.synchronized:
-                    await self.broker.manage()
+                await self.broker.manage()
             except Exception as exc:
                 self.broker.reconciled = False
-                self.broker.problem = str(exc)
                 self.report_failure("management", exc)
             await asyncio.sleep(2)
 
-    async def optional_data(self) -> None:
-        try:
-            await self.depth.start()
-        except Exception as exc:
-            self.depth.paused = f"OPTIONAL_RECORDING_START_FAILED:{exc}"
-            return
+    async def history_worker(self) -> None:
         while not self.stopping:
             try:
-                candidates = {
-                    m: s.detail
-                    for m, s in self.markets.items()
-                    if s.detail and s.calendar and s.calendar.state(now())[0] == "OPEN"
-                }
-                await self.depth.tick(
-                    candidates,
-                    {m: next_clock(now()) for m in MARKETS},
-                    self.broker.synchronized and self.core_restored,
-                    {
-                        m
-                        for m, s in self.markets.items()
-                        if s.calendar and s.calendar.state(now())[0] in {"CLOSED", "MAINTENANCE"}
-                    },
+                await self.data.release_unused_options(
+                    {json.loads(r["plan"])["option"]["uic"] for r in self.store.active()}
                 )
             except Exception as exc:
-                self.depth.paused = f"OPTIONAL_L2_FAILURE:{type(exc).__name__}:{exc}"
-                log.warning("Optional depth paused: %s", exc)
-            await asyncio.sleep(1)
+                self.report_failure("option-subscription-cleanup", exc)
+            for state in self.markets.values():
+                if self.data.connected and time.monotonic() - state.history_checked >= 60:
+                    try:
+                        await self.data.history(state)
+                    except Exception as exc:
+                        state.history_problem = "SAXO_HISTORY_UNAVAILABLE"
+                        state.history_checked = time.monotonic()
+                        self.report_failure("history", exc)
+            await asyncio.sleep(5)
 
     async def run(self) -> None:
-        # Lock the namespace for its lifetime; SQLite admission alone does not own the socket.
-        import fcntl
-
-        db_path = Path(self.store.db.execute("PRAGMA database_list").fetchone()[2])
-        self.owner = db_path.with_suffix(".owner.lock").open("a")
+        # Environment lock prevents another browser/server instance duplicating subscriptions.
+        lock = self.root / self.config.data_environment / "data.owner.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        self.owner = lock.open("a")
         fcntl.flock(self.owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.worker_health = "RUNNING"
-        manager = asyncio.create_task(self.manager())
-        self.tasks.add(manager)
-        self.tasks.add(asyncio.create_task(self.optional_data()))
+        try:
+            await self.recorder.start()
+        except (OSError, ValueError):
+            self.recorder.problem = "RECORDER_STORAGE_UNAVAILABLE"
+        for row in self.store.db.execute(
+            "SELECT s.id,c.summary FROM signals s LEFT JOIN depth_captures c USING(id) "
+            "WHERE c.id IS NULL OR json_extract(c.summary,'$.state')='CAPTURING'"
+        ).fetchall():
+            summary = json.loads(row["summary"]) if row["summary"] else {}
+            self.store.depth_capture(
+                row["id"],
+                {**summary, "state": "INCOMPLETE", "reason": "INTERRUPTED_RESTART_CHECK_MANIFEST"},
+            )
+        self.tasks.update(
+            {
+                asyncio.create_task(self.data.run()),
+                asyncio.create_task(self.manager()),
+                asyncio.create_task(self.history_worker()),
+            }
+        )
         try:
             while not self.stopping:
                 try:
-                    if not self.broker.ib.isConnected() or not self.broker.synchronized:
-                        self.core_restored = False
-                        for state in self.markets.values():
-                            state.live_since = None
-                            state.problem = "BROKER_RECONNECTING"
-                            state.stream = state.ticker = None
-                            state.last_attempt = None
-                        await self.broker.connect()
-                    # Daily rollover/bootstrap is isolated from the independent exit manager.
-                    for state in self.markets.values():
-                        feeds = [
-                            s
-                            for s in self.broker.data.items.values()
-                            if f"core:{state.market}" in s.consumers
-                        ]
-                        if state.live_since and len(feeds) < 2:
-                            state.problem = "CORE_DATA_PREEMPTED_OR_DISCONNECTED"
-                            state.live_since = None
-                        failed = next(
-                            (
-                                s
-                                for s in self.broker.data.items.values()
-                                if f"core:{state.market}" in s.consumers and s.state == "FAILED"
-                            ),
-                            None,
-                        )
-                        if failed:
-                            state.problem = failed.error
-                            state.live_since = None
-                        if (
-                            state.live_since is None
-                            or len(state.references) < 5
-                            or state.selected_day != now().astimezone(NY).date()
-                        ) and (
-                            not state.last_attempt
-                            or now() - state.last_attempt >= timedelta(minutes=5)
-                        ):
-                            state.last_attempt = now()
-                            try:
-                                await self.monitor(state)
-                            except Exception as exc:
-                                state.problem = str(exc) or type(exc).__name__
-                        elif state.stream is not None:
-                            await self.repair_gap(state)
-                    self.core_restored = True
+                    self.recorder.tick(time.time())
+                except Exception as exc:
+                    self.recorder.problem = "RECORDER_FAILED"
+                    self.report_failure("recorder", exc)
+                try:
                     await self.decisions()
                 except Exception as exc:
-                    self.broker.reconciled = False
-                    self.broker.problem = str(exc)
-                    self.report_failure("monitor", exc)
-                    await asyncio.sleep(10)
-                await asyncio.sleep(0.5)
+                    self.broker.armed = False
+                    self.broker.problem = "DECISION_WORKER_ERROR_REVIEW_REQUIRED"
+                    self.report_failure("decisions", exc)
+                for task in self.tasks:
+                    if task.done() and not task.cancelled():
+                        raise RuntimeError("BACKGROUND_WORKER_STOPPED") from task.exception()
+                await asyncio.sleep(0.25)
         finally:
             await self.stop()
 
     async def stop(self) -> None:
-        self.stopping = True
+        if self.stopping:
+            return
+        self.stopping = self.data.stopping = True
+        self.broker.armed = False
         await self.cancel_tasks(self.tasks)
-        await self.depth.close()
-        for state in self.markets.values():
-            await self.unsubscribe(state)
-        await self.broker.data.close()
-        if self.broker.ib.isConnected():
-            self.broker.ib.disconnect()
+        await self.recorder.close()
+        await self.data.client.close()
+        log.removeHandler(self.log_handler)
+        self.log_handler.close()
         if self.owner:
             self.owner.close()
             self.owner = None
-
-    async def unsubscribe(self, state: MarketState) -> None:
-        await self.broker.data.release_owner(f"core:{state.market}")
-        state.stream = state.ticker = None
-
-    async def history(
-        self, contract: Any, duration: str, size: str = "1 min", end: Any = "", stream: bool = False
-    ) -> Any:
-        if stream:
-            raise ValueError("STREAMS_MUST_USE_SHARED_SUBSCRIPTION_OWNER")
-        bars = await self.broker.data.historical(
-            (contract.conId, duration, size, str(end)),
-            lambda: self.broker.ib.reqHistoricalDataAsync(
-                contract,
-                end,
-                duration,
-                size,
-                "TRADES",
-                useRTH=False,
-                formatDate=2,
-                keepUpToDate=False,
-                timeout=15,
-            ),
-        )
-        if not bars:
-            raise ValueError("IBKR_HISTORY_UNAVAILABLE")
-        return bars
-
-    async def monitor(self, state: MarketState) -> None:
-        cached_bars = list(state.bars)
-        cached_contract = state.detail.contract.conId if state.detail else None
-        await self.unsubscribe(state)
-        state.problem = "WARMING_UP"
-        state.bars = []
-        state.references = []
-        state.reference_problem = ""
-        state.live_since = None
-        state.last_update = None
-        at = now()
-        today = at.astimezone(NY).date()
-        listed = verified_signal_futures(
-            state.market,
-            await self.broker.ib.reqContractDetailsAsync(signal_future_request(state.market)),
-        )
-        details = nearby_futures(listed, today)
-        if not details:
-            raise ValueError("NO_LISTED_SIGNAL_FUTURE")
-        async with asyncio.timeout(15):
-            schedule = await self.broker.data.historical(
-                (details[0].contract.conId, "schedule", today.isoformat()),
-                lambda: self.broker.ib.reqHistoricalScheduleAsync(
-                    details[0].contract, 14, useRTH=False
-                ),
-            )
-        zone = ZoneInfo(schedule.timeZone)
-        previous = completed_trade_dates(schedule, at)
-        if not previous:
-            raise ValueError("PREVIOUS_COMPLETED_EXCHANGE_SESSION_UNKNOWN")
-        previous_day = max(previous)
-        reference_days = sorted(d for d in set(previous) if d < today and d.weekday() < 5)[-5:]
-        candidates = {day: nearby_futures(listed, day) for day in [*reference_days, today]}
-        history_contracts = {d.contract.conId: d for group in candidates.values() for d in group}
-        daily: dict[int, dict[date, float]] = {}
-        for detail in history_contracts.values():
-            rows = await self.history(detail.contract, "14 D", "1 day")
-            daily[detail.contract.conId] = {
-                b.date: float(b.volume) for b in rows if isinstance(b.date, date)
-            }
-        selected = select_future(
-            [
-                (d, previous_day, daily[d.contract.conId].get(previous_day, float("nan")))
-                for d in details
-            ],
-            previous_day,
-            today,
-        )
-        state.detail = selected
-        state.calendar = Calendar.from_details(selected, at)
-        if selected.contract.conId != details[0].contract.conId:
-            async with asyncio.timeout(15):
-                schedule = await self.broker.data.historical(
-                    (selected.contract.conId, "schedule", today.isoformat()),
-                    lambda: self.broker.ib.reqHistoricalScheduleAsync(
-                        selected.contract, 14, useRTH=False
-                    ),
-                )
-            zone = ZoneInfo(schedule.timeZone)
-        # HistoricalSchedule.refDate is the broker's explicit exchange trade date.
-        dated_sessions = []
-        for start, end, _ in state.calendar.sessions:
-            ref = next(
-                (
-                    s.refDate
-                    for s in schedule.sessions
-                    if datetime.strptime(s.startDateTime, "%Y%m%d-%H:%M:%S")
-                    .replace(tzinfo=zone)
-                    .astimezone(UTC)
-                    == start
-                    and datetime.strptime(s.endDateTime, "%Y%m%d-%H:%M:%S")
-                    .replace(tzinfo=zone)
-                    .astimezone(UTC)
-                    == end
-                ),
-                "",
-            )
-            dated_sessions.append((start, end, ref))
-        state.calendar = Calendar(
-            tuple(dated_sessions),
-            state.calendar.covered_dates,
-            state.calendar.timezone,
-            state.calendar.observed_at,
-        )
-        try:
-            # Each reference date uses its own preceding volume and contract identity.
-            reference_key = (
-                f"futures_reference:{RULE_VERSION}:{SIGNAL_IDENTITY_VERSION}:"
-                f"{state.market}:{today.isoformat()}"
-            )
-            saved = self.store.get_meta(reference_key)
-            if saved:
-                state.references = [{int(h): v for h, v in ref.items()} for ref in saved]
-            for day in [] if saved else reference_days:
-                prior = max((d for d in set(previous) if d < day), default=None)
-                if prior is None:
-                    continue
-                historical = select_future(
-                    [
-                        (d, prior, daily[d.contract.conId].get(prior, float("nan")))
-                        for d in candidates[day]
-                    ],
-                    prior,
-                    day,
-                )
-                # Fetch only the frozen 08:00–17:00 NY window for this date.
-                # A multi-day request ending now can time out after a contract expires.
-                end = datetime.combine(day, time(17), NY).astimezone(UTC)
-                raw = await self.history(historical.contract, "32400 S", end=end)
-                bars = [
-                    b
-                    for b in self.convert(raw, at)
-                    if b.at.astimezone(NY).date() == day and 8 <= b.at.astimezone(NY).hour < 17
-                ]
-                if bars:
-                    state.references.append(reference_summary(bars))
-            if len(state.references) == 5:
-                self.store.set_meta(reference_key, state.references)
-        except Exception as exc:
-            state.references = []
-            state.reference_problem = f"REFERENCE_HISTORY_BLOCKED:{str(exc) or type(exc).__name__}"
-        reusable = (
-            cached_contract == selected.contract.conId
-            and bool(cached_bars)
-            and (at - cached_bars[-1].at).total_seconds() < 1800
-        )
-        owner = f"core:{state.market}"
-        bars_feed = await self.broker.data.acquire(
-            selected.contract,
-            "BARS",
-            owner,
-            "core_bars",
-            {"duration": "1800 S" if reusable else "2 D"},
-        )
-        state.stream = bars_feed.value
-        if reusable and state.stream:
-            first = utc(state.stream[0].date)
-            state.stream[:0] = [
-                BarData(
-                    date=b.at,
-                    open=b.open,
-                    high=b.high,
-                    low=b.low,
-                    close=b.close,
-                    volume=b.volume,
-                    average=b.average,
-                )
-                for b in cached_bars
-                if b.at < first
-            ]
-        feed = await self.broker.data.acquire(selected.contract, "QUOTE", owner, "core_quote")
-        state.ticker = feed.value
-        state.live_since = now()
-        state.selected_day = today
-        state.last_clock = now().replace(second=0, microsecond=0)
-        self.update_bars(state)
-
-    async def repair_gap(self, state: MarketState) -> None:
-        # At most one bounded IB-originated repair per market / five minutes. No fabricated bars.
-        at = now()
-        if (
-            not state.calendar
-            or state.calendar.state(at)[0] != "OPEN"
-            or (state.gap_repair_at and at - state.gap_repair_at < timedelta(minutes=5))
-        ):
-            return
-        recent = self.convert(state.stream[-32:-1], at)
-        if len(recent) < 2 or all(
-            b.at - a.at == timedelta(minutes=1) for a, b in zip(recent, recent[1:], strict=False)
-        ):
-            return
-        state.gap_repair_at = at
-        try:
-            raw = await self.history(state.detail.contract, "1800 S")
-            # Only bars preceding the live mutable tail qualify. Retain broker timestamps/volume.
-            tail = utc(state.stream[-1].date)
-            merged = {utc(b.date): b for b in state.stream}
-            merged.update({utc(b.date): b for b in raw if utc(b.date) < tail})
-            state.stream[:] = [merged[t] for t in sorted(merged)][-1442:]
-            state.last_update = None
-            # A repaired older clock must never be replayed as a fresh order.
-            state.last_clock = max(state.last_clock or at, at.replace(second=0, microsecond=0))
-        except Exception as exc:
-            log.warning("Bounded bar repair %s failed: %s", state.market, exc)
-
-    @staticmethod
-    def convert(raw: Any, at: datetime) -> list[Bar]:
-        result = []
-        for b in raw:
-            if not isinstance(b.date, datetime):
-                continue
-            start = utc(b.date)
-            if start + timedelta(minutes=1) <= at:
-                bar = Bar(
-                    start,
-                    float(b.open),
-                    float(b.high),
-                    float(b.low),
-                    float(b.close),
-                    float(b.volume),
-                    float(b.average),
-                )
-                if bar.valid():
-                    result.append(bar)
-        return result
-
-    def update_bars(self, state: MarketState) -> None:
-        if state.stream is None:
-            return
-        if (
-            len(state.stream) >= 2
-            and isinstance(state.stream[-2].date, datetime)
-            and utc(state.stream[-2].date) + timedelta(minutes=1) == state.last_update
-        ):
-            return
-        # The current stream tail is mutable. Only a subsequent IB bar proves rollover;
-        # the wall clock alone must not promote the still-updating tail to a decision input.
-        completed = self.convert(state.stream[:-1], now())
-        if not completed:
-            state.problem = "COMPLETED_BARS_UNAVAILABLE"
-            return
-        latest = completed[-1].at + timedelta(minutes=1)
-        if state.last_update == latest:
-            return
-        new = [
-            b
-            for b in completed
-            if not state.last_update or b.at + timedelta(minutes=1) > state.last_update
-        ]
-        with self.store.db:
-            for bar in new:
-                data = asdict(bar)
-                data["at"] = bar.at.isoformat()
-                self.store.db.execute(
-                    "INSERT OR IGNORE INTO bars VALUES(?,?,?,?)",
-                    (state.detail.contract.conId, bar.at.isoformat(), state.market, encode(data)),
-                )
-        state.bars = completed[-1440:]
-        state.last_update = latest
-        # Bound the in-memory streaming series while retaining completed OHLCV in the ledger.
-        if len(state.stream) > 1442:
-            del state.stream[:-1442]
-        try:
-            state.features = {
-                "rv15": prior_rv(state.bars, latest),
-                "completed_closes": min(len(state.bars), 31),
-            }
-            state.problem = state.reference_problem or (
-                "" if len(state.references) >= 5 else "WARMING_UP_FIVE_REFERENCE_SESSIONS"
-            )
-        except ValueError as exc:
-            state.problem = str(exc) or type(exc).__name__
-
-    async def decisions(self) -> None:
-        # Admission order is opportunity UTC then fixed market order; no performance ranking.
-        pending = []
-        at = now()
-        for state in self.markets.values():
-            self.update_bars(state)
-            if state.live_since is None or state.detail is None:
-                continue
-            for clock in clocks(at.astimezone(NY).date()):
-                if state.live_since <= clock <= at and (
-                    state.last_clock is None or clock > state.last_clock
-                ):
-                    pending.append((clock, MARKETS.index(state.market), state))
-        for clock, _, state in sorted(pending, key=lambda item: (item[0], item[1])):
-            if (state.last_update is None or state.last_update < clock) and (
-                now() - clock
-            ).total_seconds() < self.config.entry_deadline_seconds:
-                continue
-            event = opportunity(state.market, state.detail.contract.conId, clock)
-            reason = str(event["veto"])
-            inputs: dict[str, float] = {}
-            try:
-                if (
-                    not reason
-                    and (now() - clock).total_seconds() >= self.config.entry_deadline_seconds
-                ):
-                    reason = "STALE_SIGNAL_NO_REPLAY"
-                if not reason:
-                    if not state.calendar or state.calendar.state(now())[0] != "OPEN":
-                        raise ValueError("SIGNAL_MARKET_NOT_OPEN")
-                    if not state.ticker or state.ticker.marketDataType != 1:
-                        raise ValueError("SIGNAL_DATA_NOT_REALTIME")
-                    inputs = eligibility(
-                        state.bars,
-                        clock,
-                        datetime.strptime(
-                            state.detail.contract.lastTradeDateOrContractMonth[:8], "%Y%m%d"
-                        ).date(),
-                        state.references,
-                    )
-            except ValueError as exc:
-                reason = str(exc)
-            state.last_clock = clock
-            observed = self.store.observe(event, reason, inputs)
-            if observed:
-                try:
-                    self.depth.signal(event)
-                except Exception as exc:
-                    self.depth.paused = f"CAPTURE_METADATA_FAILED:{type(exc).__name__}"
-                    log.warning("Optional capture failed: %s", exc)
-            if not observed or reason:
-                continue
-            try:
-                deadline = asyncio.get_running_loop().time() + max(
-                    0, self.config.entry_deadline_seconds - (now() - clock).total_seconds()
-                )
-                with priority(CORE, deadline):
-                    async with asyncio.timeout_at(deadline):
-                        plan = await self.broker.prepare(event, state.detail.contract, inputs)
-                reason = await self.broker.enter(event, plan)
-                if reason:
-                    self.store.decision(str(event["id"]), "SKIPPED", reason)
-            except Exception as exc:
-                reserved = self.store.db.execute(
-                    "SELECT 1 FROM reservations WHERE id=?", (event["id"],)
-                ).fetchone()
-                self.store.decision(
-                    str(event["id"]),
-                    "ORDER_STATUS_UNCERTAIN" if reserved else "SKIPPED",
-                    str(exc)
-                    or (
-                        "ENTRY_PREPARATION_DEADLINE"
-                        if isinstance(exc, TimeoutError)
-                        else type(exc).__name__
-                    ),
-                )

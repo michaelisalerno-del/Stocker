@@ -74,6 +74,22 @@ class Store:
         if self.db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
             raise ValueError("LEDGER_INTEGRITY_FAILURE")
 
+    def bind(self, environment: str, execution_mode: str) -> None:
+        expected = {
+            "provider": "SAXO",
+            "data_environment": environment,
+            "execution_mode": execution_mode,
+        }
+        saved = self.get_meta("provenance")
+        if saved is None and any(
+            self.db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+            for table in ("signals", "orders", "positions", "bars")
+        ):
+            raise ValueError("EXISTING_LEDGER_PROVENANCE_MUST_NOT_BE_RELABELLED")
+        if saved is not None and saved != expected:
+            raise ValueError("SEPARATE_ENVIRONMENT_AND_EXECUTION_LEDGER_REQUIRED")
+        self.set_meta("provenance", expected)
+
     def set_meta(self, key: str, value: Any) -> None:
         with self.db:
             self.db.execute(
@@ -166,7 +182,7 @@ class Store:
                 return "DUPLICATE_OPPORTUNITY"
             capacity = self.capacity()
             if plan["quantity"] != 1 or not 0 < plan["cash_pennies"] <= 1000:
-                reason = "SKIP_BUDGET_TOO_SMALL"
+                reason = "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET"
             elif capacity["reserved_open_trades"] >= 4:
                 reason = "SKIP_CAPACITY_FULL"
             elif capacity["allocation_pennies"] + 1000 > 4000:
@@ -290,7 +306,12 @@ class Store:
                         "UPDATE fills SET superseded=? WHERE exec_id=?",
                         (int(number < latest), row["exec_id"]),
                     )
-            self.audit(values["reference"], "BROKER_FILL", values)
+            mode = self.get_meta("provenance", {}).get("execution_mode")
+            self.audit(
+                values["reference"],
+                "INTERNAL_SIMULATED_FILL" if mode == "INTERNAL_PAPER" else "SAXO_SIM_BROKER_FILL",
+                values,
+            )
             event = self.db.execute(
                 "SELECT event_id FROM orders WHERE reference=?", (values["reference"],)
             ).fetchone()[0]
@@ -383,5 +404,7 @@ class Store:
             "skip_reasons": reasons,
             "eligible_trades": self.db.execute("SELECT COUNT(*) FROM reservations").fetchone()[0],
             "fills": self.db.execute("SELECT COUNT(*) FROM fills WHERE superseded=0").fetchone()[0],
-            "basis": "BROKER_SIMULATED_PAPER_EXECUTIONS",
+            "basis": "INTERNALLY_SIMULATED"
+            if self.get_meta("provenance", {}).get("execution_mode") == "INTERNAL_PAPER"
+            else "SAXO_SIM_BROKER_EXECUTIONS",
         }

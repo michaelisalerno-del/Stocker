@@ -4325,7 +4325,9 @@ def server_dry_run(
 @app.command("futures-run")
 def futures_run(
     config: Annotated[Path, typer.Option("--config")] = Path("configs/futures.paper.yaml"),
-    database: Annotated[Path, typer.Option("--database")] = Path(".stocker/futures.sqlite3"),
+    database: Annotated[Path, typer.Option("--database")] = Path(
+        ".stocker/saxo-sim-disabled.sqlite3"
+    ),
     host: str = "127.0.0.1",
     port: int = 8765,
 ) -> None:
@@ -4341,7 +4343,9 @@ def futures_run(
         runtime = Runtime(load(config), Store(database))
         app = create_dashboard_app(runtime)
         # Security authenticates the actual loopback proxy peer, not X-Forwarded-For.
-        server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, proxy_headers=False))
+        server = uvicorn.Server(
+            uvicorn.Config(app, host=host, port=port, proxy_headers=False, access_log=False)
+        )
         worker = asyncio.create_task(runtime.run())
 
         async def dashboard() -> None:

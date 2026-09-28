@@ -6,8 +6,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from stocker_dashboard.security import DashboardSecurity
@@ -47,9 +47,15 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
     async def system() -> dict[str, Any]:
         return {
             **runtime.status(),
-            "configuration": runtime.config.model_dump(),
+            "configuration": runtime.config.model_dump(mode="json", exclude={"saxo"}),
             "markets": [
-                {"market": s.market, "problem": s.problem, "reference_sessions": len(s.references)}
+                {
+                    "market": s.market,
+                    "problem": s.problem,
+                    "reference_sessions": len(s.references),
+                    "capabilities": runtime.data.capability_view(s),
+                    "candidates": s.candidates,
+                }
                 for s in runtime.markets.values()
             ],
             "broker_positions": [
@@ -104,9 +110,106 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         runtime.pause = False
         return runtime.status()
 
+    @app.post("/api/paper/preflight")
+    async def preflight() -> dict[str, Any]:
+        try:
+            return await runtime.broker.preflight()
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @app.post("/api/paper/arm")
+    async def arm(request: Request) -> dict[str, Any]:
+        payload = await request.json()
+        try:
+            runtime.broker.arm(payload.get("acknowledgement", ""))
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return runtime.status()
+
+    @app.post("/api/paper/disarm")
+    async def disarm() -> dict[str, Any]:
+        runtime.broker.armed = False
+        return runtime.status()
+
+    @app.post("/oauth/saxo/start")
+    async def oauth_start() -> RedirectResponse:
+        try:
+            location, binding = runtime.data.client.oauth.begin()
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+        response = RedirectResponse(location, status_code=303)
+        response.set_cookie(
+            "slrno_oauth_binding",
+            binding,
+            max_age=600,
+            httponly=True,
+            secure=runtime.config.saxo.redirect_uri.startswith("https:"),
+            samesite="lax",
+            path="/oauth/saxo",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    @app.get("/oauth/saxo/callback")
+    async def oauth_callback(request: Request) -> RedirectResponse:
+        try:
+            await runtime.data.client.oauth.callback(
+                request.query_params.get("state", ""),
+                request.cookies.get("slrno_oauth_binding", ""),
+                request.query_params.get("code", ""),
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        response = RedirectResponse("/system", status_code=303)
+        response.delete_cookie("slrno_oauth_binding", path="/oauth/saxo")
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    @app.get("/api/recordings")
+    async def recordings() -> dict[str, Any]:
+        return {
+            "active": list(runtime.recorder.active.values()),
+            "completed": runtime.recorder.catalog[-100:],
+        }
+
+    @app.get("/api/recordings/{segment}")
+    async def recording(segment: str) -> FileResponse:
+        if len(segment) != 64 or any(c not in "0123456789abcdef" for c in segment):
+            raise HTTPException(404, "Unknown recording")
+        path = runtime.recorder.directory / (segment + ".jsonl.gz")
+        if not path.is_file():
+            raise HTTPException(404, "Recording unavailable")
+        return FileResponse(path, media_type="application/gzip", filename=path.name)
+
+    @app.get("/api/recordings/{segment}/manifest")
+    async def recording_manifest(segment: str) -> FileResponse:
+        if len(segment) != 64 or any(c not in "0123456789abcdef" for c in segment):
+            raise HTTPException(404, "Unknown recording")
+        path = runtime.recorder.directory / (segment + ".manifest.json")
+        if not path.is_file():
+            raise HTTPException(404, "Manifest unavailable")
+        return FileResponse(path, media_type="application/json", filename=path.name)
+
+    @app.post("/api/recordings/{segment}/prune")
+    async def prune_recording(segment: str) -> dict[str, Any]:
+        referenced = {
+            json.loads(r[0]).get("segment", "")
+            for r in runtime.store.db.execute("SELECT summary FROM depth_captures")
+        }
+        try:
+            # Completed, unreferenced, unprotected records only. Runs off the risk loop.
+            import asyncio
+
+            await asyncio.to_thread(runtime.recorder.prune, segment, referenced)
+        except (OSError, ValueError):
+            raise HTTPException(409, "ACTIVE_REFERENCED_PROTECTED_OR_UNAVAILABLE") from None
+        return {"pruned": segment}
+
     @app.get("/{page:path}")
     async def page(page: str) -> Any:
-        if page not in {"", "trades", "system"}:
+        if page not in {"", "markets", "opportunities", "execution", "trades", "system"}:
             raise HTTPException(404, "No such SLRNO page")
         return FileResponse(static / "index.html")
 

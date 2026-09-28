@@ -65,7 +65,10 @@ class DashboardSecurity:
             denied = (403, "Unexpected dashboard host")
         if origin and origin != allowed_origin:
             denied = (403, "Cross-origin access rejected")
-        if headers.get(b"sec-fetch-site") == b"cross-site":
+        oauth_callback = (
+            scope.get("path") == "/oauth/saxo/callback" and scope.get("method") == "GET"
+        )
+        if headers.get(b"sec-fetch-site") == b"cross-site" and not oauth_callback:
             denied = (403, "Cross-site access rejected")
         if denied:
             if scope["type"] == "websocket":

@@ -1,43 +1,35 @@
 # SLRNO
 
-A continuous six-market futures-options PAPER application: **BTC, CL, GC, NG, NQ, SI**.
-One shared IBKR connection, a fresh durable ledger and a compact authenticated dashboard.
-LIVE is unavailable. Historical synthetic results never enter trading P&L.
+Saxo-only futures data and disarmed options paper trading for **CL, GC, NG, NQ, SI**.
+The existing Python runtime and authenticated dashboard are retained. No LIVE execution mode exists.
 
 ```sh
 uv sync --locked --no-default-groups --group server
-stocker futures-run --config configs/futures.paper.yaml --database .stocker/futures.sqlite3
+uv run --no-sync stocker futures-run --config configs/futures.paper.yaml --database .stocker/saxo-sim-disabled.sqlite3
 ```
 
-The example is **unarmed**. Its listed-product mappings are deliberately empty: the frozen
-research defined continuous strikes and a hypothetical expiry, without approving real products
-or delta tolerance. All six markets can be monitored; none may submit an order until its
-specific mapping is established. See [execution rulebook](docs/FUTURES-RULEBOOK.md).
+The example starts without broker credentials, with execution disabled. Complete server-side OAuth,
+verify each actual futures UIC, and obtain recording permission before enabling event archives.
+SIM and LIVE data use distinct credentials, identities, token stores, caches and ledgers.
+LIVE data can feed INTERNAL_PAPER; the LIVE client blocks broker mutations.
 
-The executable path submits actual IBKR PAPER limit orders to allowlisted account DUP655399.
-Connection is verified by broker-returned account identity, never by a port or UI label.
-One option contract, at most £10 including premium and conservative fee reserve, four concurrent
-reserved/open trades and £40 concurrent allocation. Full £10 is reserved per admitted trade.
-Uncertain submissions and exits retain reservations until reconciled closure.
+The server keeps a bounded 15-minute L1/L2 window independently of browsers. Frozen clock events
+preserve available prehistory and at least 60 minutes afterward, including skipped trades. There
+is no permanent full-session raw archive. Missing depth remains L1_ONLY/L2_UNAVAILABLE.
 
-Overview contains six permanent market cards. Trades & signals contains orders, executions
-and skipped opportunities. System contains connectivity, readiness and configuration.
-Quotes, observations and broker-simulated fills are separate. P&L with missing fees or FX is
-provisional. Refreshes preserve cards, focus, filters, expansion and scroll.
+Paper admission means one whole long option, at most £10 including costs, and four concurrent
+reservations/open trades. Ambiguous orders retain capacity. The frozen research does not approve
+listed option products, actual 0DTE expiry clocks or delta tolerances; missing evidence blocks entries.
+GC remains monitored. No orders were sent or paper execution armed during this migration.
 
-One subscription manager accounts for quotes, bars, retained exposure, FX and option selection.
-The default app cap is 60 lines with 40 held outside SLRNO; account capacity is explicitly assumed
-until verified. Optional L2 uses at most three underlying books and records bounded signal windows.
-It never changes trades. See [market-data budgets, observation policy and API sources](docs/MARKET-DATA.md).
-The [validation record](docs/MARKET-DATA-VALIDATION.md) includes measured limits and fixture screenshots.
+[Setup and OAuth](docs/SAXO-SETUP.md) · [Cutover and rollback](docs/DEPLOYMENT.md) ·
+[Rules and provenance](docs/FUTURES-RULEBOOK.md) · [Storage and stream policy](docs/MARKET-DATA.md) ·
+[Delivery status and checks](docs/IMPLEMENTATION-REPORT.md) · [Server evidence status](docs/CURRENT-DEPLOYMENT.md)
 
-[Deployment and non-transmitting preflight](docs/DEPLOYMENT.md) ·
-[Current deployment status](docs/CURRENT-DEPLOYMENT.md)
-· [Implementation report and fixture screenshots](docs/IMPLEMENTATION-REPORT.md)
+IBKR's recoverable adapter/configuration is in `research/operational-history/parked-ibkr-runtime`.
+Original ledgers, research, dated deployment evidence and historical provider labels remain intact.
+EODHD external transport is disabled; retained offline research parsers/caches still work.
+Server jobs must be stopped and masked through the controlled cutover; this checkout is not evidence
+that the previously deployed server has changed.
 
-Existing authentication, loopback proxy boundary, locked server installation, research/data
-CLI, backups and raw research records remain. The independent scanner research schedule is
-not part of this application and is not changed. Retired operational evidence is retained in
-research/operational-history, outside the active runtime and its economics.
-
-Run `bash scripts/check.sh` for format, lint, typing, Python, browser and server-only checks.
+Run `bash scripts/check.sh` for format, lint, types, Python tests, browser checks and server-only smoke.

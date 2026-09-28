@@ -1,0 +1,176 @@
+"""Server-side authorization code flow. Secrets never enter public runtime state."""
+
+import asyncio
+import hmac
+import json
+import os
+import secrets
+import stat
+import time
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlencode
+
+import httpx
+
+from stocker_execution.config import Environment, SaxoSettings
+
+ENDPOINTS = {
+    "SAXO_SIM": {
+        "rest": "https://gateway.saxobank.com/sim/openapi",
+        "auth": "https://sim.logonvalidation.net",
+        "stream": "wss://sim-streaming.saxobank.com/sim/oapi/streaming/ws",
+    },
+    "SAXO_LIVE": {
+        "rest": "https://gateway.saxobank.com/openapi",
+        "auth": "https://live.logonvalidation.net",
+        "stream": "wss://live-streaming.saxobank.com/oapi/streaming/ws",
+    },
+}
+
+
+def private_read(path: Path) -> dict[str, Any]:
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.getuid():
+        raise ValueError("SECRET_FILE_MUST_BE_OWNED_REGULAR_MODE_0600")
+    if info.st_size > 16384:
+        raise ValueError("SECRET_FILE_TOO_LARGE")
+    result = json.loads(path.read_text())
+    if not isinstance(result, dict):
+        raise ValueError("INVALID_SECRET_FILE")
+    return result
+
+
+def atomic_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temp = path.with_name(path.name + ".tmp-" + secrets.token_hex(8))
+    try:
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as out:
+            json.dump(value, out, separators=(",", ":"), allow_nan=False)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temp, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+class OAuth:
+    def __init__(
+        self,
+        environment: Environment,
+        settings: SaxoSettings,
+        directory: Path,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
+        self.environment, self.settings = environment, settings
+        self.urls = ENDPOINTS[environment]
+        self.token_file = directory / environment / "oauth-tokens.json"
+        self.http = httpx.AsyncClient(transport=transport, timeout=15, follow_redirects=False)
+        self.lock = asyncio.Lock()
+        self.pending: tuple[str, str, float] | None = None
+        self.tokens: dict[str, Any] = {}
+        self.credentials: dict[str, Any] = {}
+        self.status = "NOT_CONFIGURED"
+        self.generation = 0
+        if settings.credentials_file:
+            self.credentials = private_read(settings.credentials_file)
+            if self.credentials.get("environment") != environment:
+                raise ValueError("CREDENTIAL_ENVIRONMENT_MISMATCH")
+            if not all(
+                self.credentials.get(k) for k in ("client_id", "client_secret", "account_key")
+            ):
+                raise ValueError("INCOMPLETE_SAXO_CREDENTIALS")
+            self.status = "RECONNECT_REQUIRED"
+            if self.token_file.exists():
+                self.tokens = private_read(self.token_file)
+                if self.tokens.get("environment") != environment:
+                    raise ValueError("TOKEN_ENVIRONMENT_MISMATCH")
+
+    @property
+    def account_key(self) -> str:
+        return str(self.credentials.get("account_key", ""))
+
+    def begin(self) -> tuple[str, str]:
+        if not self.credentials:
+            raise ValueError("SAXO_CREDENTIALS_NOT_CONFIGURED")
+        state, binding = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+        self.pending = (state, binding, time.monotonic() + 600)
+        return self.urls["auth"] + "/authorize?" + urlencode(
+            {
+                "response_type": "code",
+                "client_id": self.credentials["client_id"],
+                "redirect_uri": self.settings.redirect_uri,
+                "state": state,
+            }
+        ), binding
+
+    async def callback(self, state: str, binding: str, code: str) -> None:
+        async with self.lock:
+            pending, self.pending = self.pending, None
+            if (
+                not pending
+                or time.monotonic() > pending[2]
+                or not hmac.compare_digest(state, pending[0])
+                or not hmac.compare_digest(binding, pending[1])
+                or not code
+                or len(code) > 4096
+            ):
+                raise ValueError("OAUTH_STATE_INVALID_OR_EXPIRED")
+            await self.exchange({"grant_type": "authorization_code", "code": code})
+
+    async def exchange(self, form: dict[str, str]) -> None:
+        try:
+            response = await self.http.post(
+                self.urls["auth"] + "/token",
+                data={**form, "redirect_uri": self.settings.redirect_uri},
+                auth=(self.credentials["client_id"], self.credentials["client_secret"]),
+            )
+            if response.status_code != 200:
+                raise ValueError("AUTHENTICATION_EXPIRED_RECONNECT_REQUIRED")
+            raw = response.json()
+            if not raw.get("access_token") or not raw.get("refresh_token"):
+                raise ValueError("OAUTH_TOKEN_RESPONSE_INCOMPLETE")
+            expires = float(raw["expires_in"])
+            refresh_expires = float(raw["refresh_token_expires_in"])
+            if not 0 < expires <= 86400 or not 0 < refresh_expires <= 86400 * 365:
+                raise ValueError("OAUTH_LIFETIME_INVALID")
+            tokens = {
+                "environment": self.environment,
+                "access_token": raw["access_token"],
+                "refresh_token": raw["refresh_token"],
+                "expires_at": time.time() + expires,
+                "refresh_expires_at": time.time() + refresh_expires,
+            }
+            # Replace the rotating refresh token atomically before making it available.
+            await asyncio.to_thread(atomic_json, self.token_file, tokens)
+            self.tokens = tokens
+            self.generation += 1
+            self.status = "AUTHENTICATED"
+        except Exception:
+            self.status = "AUTHENTICATION_EXPIRED_RECONNECT_REQUIRED"
+            self.tokens = {}
+            # Never render transport errors, request bodies or token responses.
+            raise ValueError(self.status) from None
+
+    async def access_token(self) -> str:
+        async with self.lock:
+            if not self.credentials or not self.tokens:
+                raise ValueError(self.status)
+            if float(self.tokens.get("expires_at", 0)) <= time.time() + 90:
+                if float(self.tokens.get("refresh_expires_at", 0)) <= time.time() + 10:
+                    self.status = "AUTHENTICATION_EXPIRED_RECONNECT_REQUIRED"
+                    raise ValueError(self.status)
+                await self.exchange(
+                    {"grant_type": "refresh_token", "refresh_token": self.tokens["refresh_token"]}
+                )
+            self.status = "AUTHENTICATED"
+            return str(self.tokens["access_token"])
+
+    async def close(self) -> None:
+        await self.http.aclose()

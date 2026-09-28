@@ -7,9 +7,10 @@ from statistics import NormalDist, median
 from zoneinfo import ZoneInfo
 
 from stocker_execution.config import RULE_VERSION
+from stocker_execution.frozen_sources import FROZEN, SOURCE_HASHES
 
 NY = ZoneInfo("America/New_York")
-RIGHTS = {"BTC": "C", "CL": "C", "GC": "P", "NG": "P", "NQ": "P", "SI": "P"}
+RIGHTS = {"CL": "C", "GC": "P", "NG": "P", "NQ": "P", "SI": "P"}
 
 
 @dataclass(frozen=True)
@@ -20,16 +21,16 @@ class Bar:
     low: float
     close: float
     volume: float
-    average: float
+    average: float | None = None  # not supplied by Saxo charts; never fabricate VWAP
 
     def valid(self) -> bool:
         return (
             self.at.utcoffset() == timedelta(0)
             and self.at.second == self.at.microsecond == 0
             and all(
-                math.isfinite(x) and x > 0
-                for x in (self.open, self.high, self.low, self.close, self.average)
+                math.isfinite(x) and x > 0 for x in (self.open, self.high, self.low, self.close)
             )
+            and (self.average is None or math.isfinite(self.average) and self.average > 0)
             and math.isfinite(self.volume)
             and self.volume >= 0
             and self.low <= min(self.open, self.close) <= max(self.open, self.close) <= self.high
@@ -73,6 +74,8 @@ def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:
         "right": RIGHTS[market],
         "target_delta": 0.2 if market == "SI" else 0.1,
         "veto": "NG_CLOCK_13" if market == "NG" and local.hour == 13 else "",
+        "frozen_definition": FROZEN[market],
+        "source_hashes": SOURCE_HASHES,
     }
 
 

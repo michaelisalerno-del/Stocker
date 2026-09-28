@@ -47,3 +47,10 @@ data/reports/*
 # Local release diagnostics and frontend tooling
 .stocker/
 node_modules/
+
+# Local Saxo credentials and environment-specific recordings
+configs/saxo.*.local.yaml
+*saxo*credentials*.json
+**/oauth-tokens.json
+**/SAXO_SIM/
+**/SAXO_LIVE/

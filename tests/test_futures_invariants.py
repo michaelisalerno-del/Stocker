@@ -1,0 +1,166 @@
+"""Preserved provider-independent frozen mathematics and durable-obligation regressions."""
+
+import json
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from stocker_execution.config import MARKETS
+from stocker_execution.rules import (
+    Bar,
+    clocks,
+    eligibility,
+    frozen_strike,
+    model_delta,
+    opportunity,
+    prior_rv,
+)
+from stocker_execution.store import Store
+
+AT = datetime(2026, 9, 28, 13, tzinfo=UTC)
+
+
+def plan(cid=100):
+    return {
+        "quantity": 1,
+        "cash_pennies": 1000,
+        "multiplier": 100,
+        "price_unit_factor": 1,
+        "currency": "USD",
+        "option": {"uic": cid, "asset_type": "FuturesOption"},
+    }
+
+
+def record_entry(store, identity="x", cid=100):
+    event = {**opportunity("GC", 1, AT), "id": identity}
+    store.observe(event, "", {})
+    assert store.reserve(identity, plan(cid)) == ""
+    return store.prepare_order(
+        identity,
+        "ENTRY",
+        10 + cid,
+        (AT + timedelta(seconds=20)).isoformat(),
+        {"con_id": cid, "quantity": 1, "limit": 0.1},
+    )
+
+
+def fill_record(ref, exec_id="exec.1", side="BOT", at=AT):
+    return dict(
+        exec_id=exec_id,
+        reference=ref,
+        con_id=100,
+        quantity=1,
+        price=0.1,
+        side=side,
+        at=at.isoformat(),
+        fx=0.8,
+        fx_at=at.isoformat(),
+    )
+
+
+def test_source_fixture_rv_clocks_and_original_exit_anchor():
+    fixture = json.loads(Path("tests/fixtures/futures/frozen.json").read_text())
+    for row in fixture["rows"]:
+        if row["market"] not in MARKETS:
+            continue  # Historical fixture remains immutable; active universe is five markets.
+        at = datetime.fromisoformat(row["at"]).astimezone(UTC)
+        bars = [
+            Bar(at - timedelta(minutes=31 - i), p, p, p, p, 1, p)
+            for i, p in enumerate(row["pre31"])
+        ]
+        assert prior_rv(bars, at) == pytest.approx(row["rv15"], rel=1e-10, abs=1e-14)
+        event = opportunity(row["market"], row["con_id"], at)
+        assert datetime.fromisoformat(event["exit_at"]) == at + timedelta(minutes=60)
+        expiry = at.replace(hour=21)
+        strike = frozen_strike(
+            row["price"], row["rv15"], at, expiry, event["right"], event["target_delta"]
+        )
+        assert model_delta(
+            row["price"], strike, row["rv15"], at, expiry, event["right"]
+        ) == pytest.approx(event["target_delta"], abs=1e-10)
+        # An incomplete current bar cannot contaminate the completed prefix.
+        assert prior_rv(bars + [Bar(at, 999, 999, 999, 999, 1, 999)], at) == prior_rv(bars, at)
+        with pytest.raises(ValueError, match="INCOMPLETE"):
+            prior_rv(bars[:-1], at)
+
+
+def test_dst_weekends_and_only_approved_veto():
+    assert clocks(date(2026, 3, 9))[0].hour == 13  # US DST precedes UK
+    assert clocks(date(2026, 3, 2))[0].hour == 14
+    assert clocks(date(2026, 10, 26))[0].hour == 13  # UK reverts before US
+    assert clocks(date(2026, 11, 2))[0].hour == 14
+    assert clocks(date(2026, 9, 27)) == []
+    for market in MARKETS:
+        for at in clocks(date(2026, 9, 28)):
+            event = opportunity(market, 1, at)
+            assert bool(event["veto"]) == (market == "NG" and at.hour == 17)
+    assert opportunity("GC", 1, AT + timedelta(hours=7))["veto"] == ""
+
+
+def test_cancel_uncertainty_and_late_fill_keep_obligation(tmp_path):
+    s = Store(tmp_path / "futures.sqlite")
+    ref = record_entry(s)
+    assert not s.confirm_closed("x", 0)
+    with s.db:
+        s.db.execute("UPDATE orders SET status='Cancelled' WHERE reference=?", (ref,))
+    assert s.confirm_closed("x", 0)
+    assert s.capacity()["reserved_open_trades"] == 0
+    s.record_fill(fill_record(ref))
+    assert s.capacity()["reserved_open_trades"] == 1
+    assert not s.confirm_closed("x", 0)
+    with s.db:
+        s.db.execute("UPDATE orders SET filled=1 WHERE reference=?", (ref,))
+    assert not s.confirm_closed("x", 1)
+
+
+def test_missing_commission_is_provisional_and_exit_submission_does_not_release(tmp_path):
+    s = Store(tmp_path / "futures.sqlite")
+    ref = record_entry(s)
+    s.record_fill(fill_record(ref))
+    with s.db:
+        s.db.execute(
+            "UPDATE orders SET status='Filled',filled=1,remaining=0 WHERE reference=?", (ref,)
+        )
+    exit_ref = s.prepare_order("x", "EXIT", 900, AT.isoformat(), {"con_id": 100})
+    assert not s.confirm_closed("x", 1)
+    s.record_fill({**fill_record(exit_ref, "exit.1", "SLD"), "price": 0.15})
+    with s.db:
+        s.db.execute(
+            "UPDATE orders SET status='Filled',filled=1,remaining=0 WHERE reference=?", (exit_ref,)
+        )
+    assert s.confirm_closed("x", 0)
+    assert s.economics()["realised_net_gbp"] is None
+    with s.db:
+        s.db.execute("UPDATE fills SET commission=1,commission_currency='USD'")
+    assert s.economics()["realised_net_gbp"] == pytest.approx(2.4)
+    assert s.economics()["closed_with_complete_costs"] == 1
+    # A terminal unfilled exit attempt has no commission to await.
+    with s.db:
+        s.db.execute(
+            "INSERT INTO orders"
+            "(reference,event_id,role,order_id,status,filled,remaining,deadline,payload) "
+            "VALUES('cancelled-exit','x','EXIT',901,'Cancelled',0,0,?,'{}')",
+            (AT.isoformat(),),
+        )
+    assert s.economics()["realised_net_gbp"] == pytest.approx(2.4)
+    s.record_fill({**fill_record(ref, "exec.2"), "price": 0.11})
+    assert s.exposure("x") == 0
+    assert len(s.fills("x")) == 2
+
+
+def test_inherited_feature_gate_rejects_flat_last_five_returns():
+    prices = [100 + i * 0.01 for i in range(60)]
+    references = [{9: {"rv15": 0.01, "range15": 0.01, "volume15": 150}} for _ in range(5)]
+
+    def bars(values):
+        return [
+            Bar(AT - timedelta(minutes=60 - i), p, p + 0.01, p - 0.01, p, 10, p)
+            for i, p in enumerate(values)
+        ]
+
+    assert eligibility(bars(prices), AT, date(2026, 12, 1), references)["rv15"] > 0
+    prices[-6:] = [prices[-6]] * 6
+    assert prior_rv(bars(prices), AT) > 0
+    with pytest.raises(ValueError, match="FEATURE_AVAILABILITY"):
+        eligibility(bars(prices), AT, date(2026, 12, 1), references)

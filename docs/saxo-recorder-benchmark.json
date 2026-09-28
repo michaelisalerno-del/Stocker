@@ -1,0 +1,39 @@
+{
+  "evidence": "OFFLINE_GENERATED_SIMULATION",
+  "markets": [
+    "CL",
+    "GC",
+    "NG",
+    "NQ",
+    "SI"
+  ],
+  "virtual_seconds": 7200,
+  "requested_delivered_cadence_ms": 1000,
+  "messages": 36005,
+  "events": 3,
+  "shared_segments": 2,
+  "wall_seconds": 11.107,
+  "process_peak_rss_bytes": 58867712,
+  "ingest_p99_ms": 0.53,
+  "ingest_max_ms": 5.263,
+  "event_loop_max_delay_ms": 13.685,
+  "buffer_coverage_seconds": {
+    "CL": 900,
+    "GC": 900,
+    "NG": 900,
+    "NQ": 900,
+    "SI": 900
+  },
+  "memory_bytes": 5789550,
+  "memory_limit": 33554432,
+  "memory_high_water": 5794570,
+  "queue_bytes": 0,
+  "writer_queue": 0,
+  "disk_bytes": 878040,
+  "disk_limit": 2147483648,
+  "disk_free": 246649782272,
+  "disk_reserve": 2147483648,
+  "recording_gaps": 0,
+  "paused_reason": "",
+  "persistent_capture": true
+}

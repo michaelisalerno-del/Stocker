@@ -1,42 +1,22 @@
-# Installation and connection do not arm orders. Research did not approve listed adaptations.
-environment: PAPER
-expected_account: DUP655399
-host: 127.0.0.1
-port: 4003
-client_id: 83
+# SLRNO starts disarmed. No legacy provider credentials are required.
+data_environment: SAXO_SIM
+execution_mode: DISABLED
 armed: false
-max_premium_risk_gbp: 10
-max_open_positions: 4
-max_simultaneous_entry_risk_gbp: 40
-max_contracts_per_trade: 1
-mappings: {}
-# Planning ceilings only; verify account allowances/entitlements and preserve external headroom.
-market_data:
-  total_lines: 100
-  allowance_status: ASSUMED
-  allowance_source: null
-  verified_at: null
-  app_line_cap: 60
-  external_headroom: 40
-  known_external_lines: null
-  depth_slots: 3
-  tick_by_tick_slots: 5 # Planning ceiling only; tick-by-tick is not enabled.
-  temporary_option_quotes: 15
-  option_batch_size: 5
-  outbound_limit: 50
-  outbound_headroom: 10
-  urgent_reserve: 10
-  queue_size: 128
-  cancel_drain_seconds: 1
-  rejection_backoff_seconds: 300
-l2:
-  enabled: false
-  levels: 5
-  pre_seconds: 120
-  post_seconds: 120
-  dwell_seconds: 60
-  stale_seconds: 30
-  events_per_book: 10000
-  memory_bytes: 33554432
-  disk_bytes: 268435456
-  writer_queue: 32
+markets: [CL, GC, NG, NQ, SI]
+saxo:
+  credentials_file: null
+  redirect_uri: http://127.0.0.1:8765/oauth/saxo/callback
+contracts: {} # Populate only from this environment's returned ContractFutures reference data.
+mappings: {} # Real product/expiry adaptation approval remains required.
+recorder:
+  pre_event_minutes: 15
+  minimum_post_event_minutes: 60
+  post_close_minutes: 5
+  rolling_max_bytes: 33554432
+  queue_max_bytes: 8388608
+  queue_max_items: 512
+  archive_max_bytes: 2147483648
+  disk_reserve_bytes: 2147483648
+  bar_max_bytes: 134217728
+  persistent_capture: false
+  recording_permission_evidence: null

@@ -38,13 +38,13 @@ in the runtime trading hot path.
 ## Architecture rules
 
 - One repository and one application/codebase with clear modules.
-- One frozen six-market futures-options PAPER pipeline. No strategy catalogue or legacy execution paths.
+- One frozen five-market Saxo futures-options PAPER pipeline. IBKR is parked outside active packages.
 - The existing authenticated dashboard is a consumer of runtime state; its failure must not stop position management.
-- Pure frozen futures calculations receive completed IBKR bars and never request broker data.
+- Pure frozen futures calculations receive completed Saxo bars and never request broker data.
 - Frozen synthetic research prices must never substitute for listed contracts, quotes or executions.
 - Account exposure, permissions, reconciliation and emergency controls remain shared.
-- Execution history originates exclusively from IBKR. A local cache may store only
-  IBKR-originated history and is not an alternative source.
+- Existing IBKR execution evidence retains its provenance. New Saxo broker-paper and internal
+  paper ledgers are separate by data environment and execution mode; never relabel history.
 - Calculate shared data and features once where sensible.
 - The broker's actual position is authoritative for broker positions.
 - Keep enough local audit information to explain each decision without prematurely building an

@@ -158,8 +158,13 @@ class EODHDFetchResult:
         }
 
 
+class ParkedTransport(httpx.BaseTransport):
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        raise EODHDError("EODHD_INACTIVE_SAXO_ONLY_RUNTIME_USE_EXISTING_RESEARCH_CACHE")
+
+
 class EODHDClient:
-    """Small synchronous EODHD HTTP client."""
+    """Retained cache/fixture adapter. External EODHD requests are parked."""
 
     def __init__(
         self,
@@ -172,7 +177,9 @@ class EODHDClient:
         self._sleep = sleep or time.sleep
         self._client = httpx.Client(
             timeout=self.config.request_timeout_seconds,
-            transport=transport,
+            transport=transport
+            if isinstance(transport, httpx.MockTransport)
+            else ParkedTransport(),
         )
 
     def require_token(self) -> str:

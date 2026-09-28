@@ -1,0 +1,102 @@
+{
+  "evidence": "OFFLINE_ONLY_NO_AUTHENTICATED_ACCOUNT",
+  "as_of": "2026-09-28",
+  "environment": "UNCONFIGURED",
+  "markets": {
+    "CL": {
+      "instrument_discovery": "UNVERIFIED",
+      "account_permissions": "UNVERIFIED",
+      "l1_quotes_delay": "UNVERIFIED",
+      "market_data_entitlements": "UNVERIFIED",
+      "l2_received_depth_fields": "UNVERIFIED",
+      "futures_option_chain_quotes_greeks_volume_open_interest": "UNVERIFIED",
+      "historical_chart_coverage": "UNVERIFIED",
+      "session_capabilities": "UNVERIFIED",
+      "persistent_recording_permission": "UNVERIFIED",
+      "strategy_status": "BLOCKED",
+      "required_actions": [
+        "Saxo OAuth and environment-specific account verification",
+        "Pin returned actual standard ContractFutures UIC and verify L1/L2/option entitlements",
+        "Verify recording permission before enabling disk archives",
+        "Provide approved prior-session contract selection audit and actual completed Saxo bars",
+        "Approve listed FuturesOption product, real 0DTE expiry/cutoffs, delta tolerance and fee evidence"
+      ]
+    },
+    "GC": {
+      "instrument_discovery": "UNVERIFIED",
+      "account_permissions": "UNVERIFIED",
+      "l1_quotes_delay": "UNVERIFIED",
+      "market_data_entitlements": "UNVERIFIED",
+      "l2_received_depth_fields": "UNVERIFIED",
+      "futures_option_chain_quotes_greeks_volume_open_interest": "UNVERIFIED",
+      "historical_chart_coverage": "UNVERIFIED",
+      "session_capabilities": "UNVERIFIED",
+      "persistent_recording_permission": "UNVERIFIED",
+      "strategy_status": "MONITOR_ONLY",
+      "required_actions": [
+        "Saxo OAuth and environment-specific account verification",
+        "Pin returned actual standard ContractFutures UIC and verify L1/L2/option entitlements",
+        "Verify recording permission before enabling disk archives",
+        "Provide approved prior-session contract selection audit and actual completed Saxo bars",
+        "Approve listed FuturesOption product, real 0DTE expiry/cutoffs, delta tolerance and fee evidence"
+      ]
+    },
+    "NG": {
+      "instrument_discovery": "UNVERIFIED",
+      "account_permissions": "UNVERIFIED",
+      "l1_quotes_delay": "UNVERIFIED",
+      "market_data_entitlements": "UNVERIFIED",
+      "l2_received_depth_fields": "UNVERIFIED",
+      "futures_option_chain_quotes_greeks_volume_open_interest": "UNVERIFIED",
+      "historical_chart_coverage": "UNVERIFIED",
+      "session_capabilities": "UNVERIFIED",
+      "persistent_recording_permission": "UNVERIFIED",
+      "strategy_status": "BLOCKED",
+      "required_actions": [
+        "Saxo OAuth and environment-specific account verification",
+        "Pin returned actual standard ContractFutures UIC and verify L1/L2/option entitlements",
+        "Verify recording permission before enabling disk archives",
+        "Provide approved prior-session contract selection audit and actual completed Saxo bars",
+        "Approve listed FuturesOption product, real 0DTE expiry/cutoffs, delta tolerance and fee evidence"
+      ]
+    },
+    "NQ": {
+      "instrument_discovery": "UNVERIFIED",
+      "account_permissions": "UNVERIFIED",
+      "l1_quotes_delay": "UNVERIFIED",
+      "market_data_entitlements": "UNVERIFIED",
+      "l2_received_depth_fields": "UNVERIFIED",
+      "futures_option_chain_quotes_greeks_volume_open_interest": "UNVERIFIED",
+      "historical_chart_coverage": "UNVERIFIED",
+      "session_capabilities": "UNVERIFIED",
+      "persistent_recording_permission": "UNVERIFIED",
+      "strategy_status": "BLOCKED",
+      "required_actions": [
+        "Saxo OAuth and environment-specific account verification",
+        "Pin returned actual standard ContractFutures UIC and verify L1/L2/option entitlements",
+        "Verify recording permission before enabling disk archives",
+        "Provide approved prior-session contract selection audit and actual completed Saxo bars",
+        "Approve listed FuturesOption product, real 0DTE expiry/cutoffs, delta tolerance and fee evidence"
+      ]
+    },
+    "SI": {
+      "instrument_discovery": "UNVERIFIED",
+      "account_permissions": "UNVERIFIED",
+      "l1_quotes_delay": "UNVERIFIED",
+      "market_data_entitlements": "UNVERIFIED",
+      "l2_received_depth_fields": "UNVERIFIED",
+      "futures_option_chain_quotes_greeks_volume_open_interest": "UNVERIFIED",
+      "historical_chart_coverage": "UNVERIFIED",
+      "session_capabilities": "UNVERIFIED",
+      "persistent_recording_permission": "UNVERIFIED",
+      "strategy_status": "BLOCKED",
+      "required_actions": [
+        "Saxo OAuth and environment-specific account verification",
+        "Pin returned actual standard ContractFutures UIC and verify L1/L2/option entitlements",
+        "Verify recording permission before enabling disk archives",
+        "Provide approved prior-session contract selection audit and actual completed Saxo bars",
+        "Approve listed FuturesOption product, real 0DTE expiry/cutoffs, delta tolerance and fee evidence"
+      ]
+    }
+  }
+}

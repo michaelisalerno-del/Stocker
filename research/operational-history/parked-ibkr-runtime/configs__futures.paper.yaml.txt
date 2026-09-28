@@ -1,0 +1,42 @@
+# Installation and connection do not arm orders. Research did not approve listed adaptations.
+environment: PAPER
+expected_account: DUP655399
+host: 127.0.0.1
+port: 4003
+client_id: 83
+armed: false
+max_premium_risk_gbp: 10
+max_open_positions: 4
+max_simultaneous_entry_risk_gbp: 40
+max_contracts_per_trade: 1
+mappings: {}
+# Planning ceilings only; verify account allowances/entitlements and preserve external headroom.
+market_data:
+  total_lines: 100
+  allowance_status: ASSUMED
+  allowance_source: null
+  verified_at: null
+  app_line_cap: 60
+  external_headroom: 40
+  known_external_lines: null
+  depth_slots: 3
+  tick_by_tick_slots: 5 # Planning ceiling only; tick-by-tick is not enabled.
+  temporary_option_quotes: 15
+  option_batch_size: 5
+  outbound_limit: 50
+  outbound_headroom: 10
+  urgent_reserve: 10
+  queue_size: 128
+  cancel_drain_seconds: 1
+  rejection_backoff_seconds: 300
+l2:
+  enabled: false
+  levels: 5
+  pre_seconds: 120
+  post_seconds: 120
+  dwell_seconds: 60
+  stale_seconds: 30
+  events_per_book: 10000
+  memory_bytes: 33554432
+  disk_bytes: 268435456
+  writer_queue: 32

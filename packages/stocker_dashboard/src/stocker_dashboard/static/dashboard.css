@@ -508,3 +508,11 @@ footer {
     max-width: 170px;
   }
 }
+
+.mode-banner { border-left: 3px solid #e3ad5a; padding: .75rem 1rem; background: #171d25; font-family: monospace; }
+.recorder-line, .quote { font-variant-numeric: tabular-nums; font-size: .82rem; }
+.trade-slots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+.trade-slots > div { padding: 1.4rem; border: 1px solid #455065; }
+#recording-list a { display: block; margin-block: .65rem; }
+[hidden] { display: none !important; }
+@media(max-width:700px) { .trade-slots { grid-template-columns: repeat(2,1fr); } nav { flex-wrap: wrap; } }

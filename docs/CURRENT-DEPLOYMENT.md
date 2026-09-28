@@ -2,12 +2,18 @@
 
 Deployed to [the authenticated dashboard](https://139.59.178.164) on **2026-09-28 at
 11:20:47 UTC / 12:20:47 Europe/London** following the user's deployment instruction.
-Current runtime release: `b1e9f5c248efc2eaf2267a46b8b47119fc3109cc`, branch `codex/saxo-only`.
+Current runtime release: `d4df009bf58f7760f0c9f5dffe0f0fae13f5a0f4`, branch `codex/saxo-only`.
 This includes migration `c74e68a`, safety/recovery fixes `b066386`, book flow `c809f9f`, and
 OAuth bootstrap `b1e9f5c` deployed at **12:54:49 UTC**. The first supplied SIM AppSecret is held
 in a stocker-owned 0600 file; no credential values appear in this repository. Account selection may
 follow OAuth, but remains mandatory before data subscriptions or broker order permission.
 [OAuth setup postflight](saxo-oauth-setup-20260928.json): healthy, disarmed, SIM login redirect verified.
+The OAuth Origin fix `d4df009` was deployed at **13:19:58 UTC**, with
+[HTTPS postflight](saxo-oauth-origin-20260928.json) verified at **13:20:02 UTC**. The production
+`no-referrer` policy caused the native Connect form to send `Origin: null`. Connect now uses
+a same-origin fetch followed by navigation. The GET callback and top-level HTML landing permit
+redirected navigation while retaining authentication, host checks, OAuth state and browser binding.
+API, write and WebSocket origin protections remain enforced. Configuration and credentials are unchanged.
 The original sibling checkout and historical releases remain unchanged.
 
 The application is deployed and healthy, but **Saxo is not authenticated**. CL, GC, NG, NQ and SI
@@ -17,7 +23,7 @@ monitor-only. There is no Bitcoin card or active stock scanner.
 | Stage | Current evidence |
 |---|---|
 | IMPLEMENTED | Saxo migration and observation-only sampled book flow deployed |
-| OFFLINE_TESTED | 437 Python tests, lint/format/types and installed smoke; prior browser/workload checks unchanged |
+| OFFLINE_TESTED | 438 Python tests, lint/format/types, locked server-only smoke and both browser suites; prior workload checks unchanged |
 | AUTHENTICATED | **No** — SIM application credentials configured; browser login/grant pending |
 | DATA_VERIFIED | **No** — actual Saxo contracts, quotes, history and permissions unverified |
 | L2_VERIFIED | **No** — levels, counts, delay and cadence unverified for all five markets |
@@ -57,7 +63,7 @@ subscription or legal-agreement action was performed.
 ## Active configuration and checks
 
 - `stocker-v1.service`: active/running, zero automatic restarts at postflight.
-- `/opt/stocker/current` → `/opt/stocker/releases/b1e9f5c248efc2eaf2267a46b8b47119fc3109cc`.
+- `/opt/stocker/current` → `/opt/stocker/releases/d4df009bf58f7760f0c9f5dffe0f0fae13f5a0f4`.
 - Config: `/etc/stocker/v1/saxo.sim.yaml`, mode 0640, root:stocker.
 - Data: **SAXO_SIM**; execution: **DISABLED**; armed: **false**; **LIVE ORDERS DISABLED**.
 - New ledger: `/var/lib/stocker/v1/saxo-sim-disabled.sqlite3`; old ledgers retained separately.
@@ -87,6 +93,11 @@ old providers or rearm automatically. Default recovery leaves execution stopped/
 
 The subsequent OAuth upgrade backup is `/var/lib/stocker/backups/saxo-oauth-20260928`, including
 the prior config/ledger and protected credential backup. Both backups have SHA-256 manifests.
+The Origin fix backup is `/var/lib/stocker/backups/saxo-oauth-origin-20260928`, including the previous
+release pointer, consistent ledger backup, unchanged config/unit and postflight/hash manifests.
+Rollback this fix by restoring the previous release symlink after checking current obligations;
+retain the current ledger, credentials and tokens, and keep execution disabled. The previous UI has
+the reported OAuth defect. No provider units need changing for this rollback.
 
 Remaining user actions: complete OAuth in System, select/verify the returned SIM account,
 discover/pin actual futures UICs, verify
@@ -104,3 +115,21 @@ account selection cannot grant subscription or order permissions.
 No concrete findings. App-only OAuth setup is enabled; explicit verified account selection still
 precedes streaming and execution. The offline regression covers authentication, account reads and
 order rejection. Standards: 0 open findings; Spec: 0 open findings.
+
+## OAuth Origin fix verification
+
+- Full Python suite: **438 passed**, 7 existing dependency/numerical warnings, 65 seconds.
+- Ruff lint/format passed; mypy passed for 116 source files. Locked server-only smoke passed both
+  locally in an isolated environment and on the staged release as `stocker`.
+- Chromium regression reproduced the native form's null Origin and now passes the Connect → fixture
+  identity provider → callback → System flow under `Referrer-Policy: no-referrer`. Existing dashboard
+  focus/scroll/filter/DOM identity and mobile checks also passed. These are offline fixture checks.
+- Deployed authenticated HTTPS: JSON OAuth start 200 with SIM authorize URL and secure binding cookie;
+  redirected HTML navigation 200; invalid callback state 400 before token exchange; null-origin POST
+  and cross-origin API 403; anonymous access 401. Served JS hash matches the release.
+- All 13 legacy units remain masked. Service healthy, zero restarts, approximately 54 MiB idle memory;
+  no orders, fills, positions or active reservations. No new feed workload measurement was needed.
+- Standards review: **0 findings**. Spec review: **0 findings**.
+
+Authentication is still pending at this postflight; no account-specific feed/L2 claim is made.
+Reload System and start a fresh Connect attempt rather than reusing an earlier callback URL.

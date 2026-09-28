@@ -2,11 +2,11 @@
 
 Deployed to [the authenticated dashboard](https://139.59.178.164) on **2026-09-28 at
 11:20:47 UTC / 12:20:47 Europe/London** following the user's deployment instruction.
-Current runtime release: `94339bb27dec08996d9054500243993eadcf26ba`, branch `codex/saxo-only`.
+Current runtime release: `2ff57756e272b53b900a7c6e1291a97372c62af8`, branch `codex/saxo-only`.
 This includes migration `c74e68a`, safety/recovery fixes `b066386`, book flow `c809f9f`, and
 OAuth bootstrap `b1e9f5c` deployed at **12:54:49 UTC**. The first supplied SIM AppSecret is held
-in a stocker-owned 0600 file; no credential values appear in this repository. Account selection may
-follow OAuth, but remains mandatory before data subscriptions or broker order permission.
+in a stocker-owned 0600 file; no credential values appear in this repository. The sole active EUR SIM account was selected from the authenticated account response and verified
+on 2026-09-28; selection and verification remain mandatory before subscriptions or broker-paper orders.
 [OAuth setup postflight](saxo-oauth-setup-20260928.json): healthy, disarmed, SIM login redirect verified.
 The OAuth Origin fix `d4df009` was deployed at **13:19:58 UTC**, with
 [HTTPS postflight](saxo-oauth-origin-20260928.json) verified at **13:20:02 UTC**. The production
@@ -23,19 +23,28 @@ The next browser attempt identified `OAUTH_TOKEN_HTTP_201`, confirmed in running
 The handler incorrectly rejected this response before validating its body. Release `94339bb`,
 deployed at **13:43:07 UTC**, accepts HTTP 200/201 for issuance and renewal while retaining all
 payload, lifetime, state and storage checks. [Postflight](saxo-oauth-created-20260928.json) passed
-at **13:43:10 UTC**. A fresh browser grant is still required to verify actual token acceptance.
+at **13:43:10 UTC**. A subsequent user grant succeeded and created the private token file;
+the current runtime is authenticated. No further login is needed while renewal remains healthy.
 The original sibling checkout and historical releases remain unchanged.
 
-The application is deployed and healthy, but **Saxo is not authenticated**. CL, GC, NG, NQ and SI
-show authentication required, unavailable quotes/L2/book flow, and zero prehistory. GC remains
-monitor-only. There is no Bitcoin card or active stock scanner.
+The application is deployed and healthy, **Saxo SIM is authenticated**, and the configured SIM
+account is verified. Authenticated account/reference reads and the streaming connection work.
+The REST decompression fix `4b17a3d` was deployed at **13:49:22 UTC**; account selection was verified
+at **13:51:03 UTC**. The `/connect` endpoint fix `9c1fc30` was deployed at **13:55:36 UTC**.
+The subsequent heartbeat fix `2ff5775` was deployed at **14:03:23 UTC**, verified at **14:03:36 UTC**.
+See the [latest deployment postflight](saxo-stream-heartbeat-20260928.json) and
+[authenticated status/stability check](saxo-authenticated-status-20260928.json).
+
+Actual contract selection is still required for CL, GC, NG, NQ and SI; quotes/L2/book flow remain
+unavailable and raw prehistory is zero. GC remains monitor-only. There is no Bitcoin card or active
+stock scanner. Session state is `Authenticated / Standard / OrdersOnly`; no session upgrade was sent.
 
 | Stage | Current evidence |
 |---|---|
 | IMPLEMENTED | Saxo migration and observation-only sampled book flow deployed |
-| OFFLINE_TESTED | 451 Python tests, lint/format/types and locked server-only smoke; unchanged browser suites and workload previously passed |
-| AUTHENTICATED | **No** — SIM application credentials configured; browser login/grant pending |
-| DATA_VERIFIED | **No** — actual Saxo contracts, quotes, history and permissions unverified |
+| OFFLINE_TESTED | 457 Python tests, lint/format/types and locked server-only smoke; unchanged browser suites and workload previously passed |
+| AUTHENTICATED | **Yes** — real SIM grant, private persisted tokens, verified account and connected stream |
+| DATA_VERIFIED | **Partial** — account/reference REST verified; selected contracts, quotes, history and entitlements unverified |
 | L2_VERIFIED | **No** — levels, counts, delay and cadence unverified for all five markets |
 | RECORDER_VERIFIED | **Offline only** — no market data received; persistent capture permission-gated |
 | DEPLOYED | **Yes** — symlink, service, authenticated HTTPS routes and served asset hash verified |
@@ -73,7 +82,7 @@ subscription or legal-agreement action was performed.
 ## Active configuration and checks
 
 - `stocker-v1.service`: active/running, zero automatic restarts at postflight.
-- `/opt/stocker/current` → `/opt/stocker/releases/94339bb27dec08996d9054500243993eadcf26ba`.
+- `/opt/stocker/current` → `/opt/stocker/releases/2ff57756e272b53b900a7c6e1291a97372c62af8`.
 - Config: `/etc/stocker/v1/saxo.sim.yaml`, mode 0640, root:stocker.
 - Data: **SAXO_SIM**; execution: **DISABLED**; armed: **false**; **LIVE ORDERS DISABLED**.
 - New ledger: `/var/lib/stocker/v1/saxo-sim-disabled.sqlite3`; old ledgers retained separately.
@@ -87,7 +96,8 @@ overview/history/recordings and JS/CSS. Served JS matches the installed book-flo
 Anonymous HTTPS returned 401; untrusted loopback and foreign-origin requests returned 403.
 An invalid cross-site OAuth callback returned 400. Bitcoin history selection returned 422.
 At initial cutover, non-transmitting preflight returned **409 NOT_CONFIGURED**. The subsequent
-OAuth setup now reports login required; no authentication or market-data verification is claimed.
+OAuth setup originally reported login required. The current release is authenticated, but market
+quotes/options/history/L2 remain unverified.
 External direct-port access timed out; the application listens on `127.0.0.1:8765` only.
 All three ledgers passed integrity checks and contain no orders or positions.
 The service used approximately 54 MiB at postflight; this is idle evidence, not a feed benchmark.
@@ -116,10 +126,11 @@ The HTTP 201 upgrade backup is `/var/lib/stocker/backups/saxo-oauth-created-2026
 its previous release is `7ec4c50`. Code rollback would restore the HTTP 201 rejection. Preserve
 any newly issued tokens and ledger activity when reverting code; never automatically rearm.
 
-Remaining user actions: complete OAuth in System, select/verify the returned SIM account,
-discover/pin actual futures UICs, verify
-per-market quote/options/history/L2 permissions, and document recording rights before enabling
-persistent capture. Follow [Saxo setup](SAXO-SETUP.md); do not put secrets in chat or Git.
+OAuth and account selection are complete. Remaining setup: discover/pin actual futures contracts
+and deterministic rollover identities, verify per-market quote/options/history/L2 permissions,
+and document recording rights before enabling persistent capture. The current `NQ` keyword search
+returned no candidates; this is not evidence that the account cannot access Nasdaq futures.
+Refine discovery using verified Saxo reference identifiers before selecting that market. Follow [Saxo setup](SAXO-SETUP.md); do not put secrets in chat or Git.
 Listed-option product/expiry/cutoff/delta/fee approvals remain separate execution blockers.
 
 ## OAuth bootstrap Standards review
@@ -148,8 +159,8 @@ order rejection. Standards: 0 open findings; Spec: 0 open findings.
   no orders, fills, positions or active reservations. No new feed workload measurement was needed.
 - Standards review: **0 findings**. Spec review: **0 findings**.
 
-Authentication is still pending at this postflight; no account-specific feed/L2 claim is made.
-Reload System and start a fresh Connect attempt rather than reusing an earlier callback URL.
+Authentication was pending at the Origin-fix postflight; later authenticated evidence is above.
+The earlier browser fixture is not account-specific market-data/L2 evidence.
 
 ## Token-exchange investigation and diagnostics
 
@@ -169,9 +180,9 @@ network/storage failures and successful reconnect. **446 tests passed** in 63.48
 passed. Standards review: **0 findings**. Spec review: **0 findings**.
 
 Production HTTPS and served asset checks passed; service healthy with zero restarts, all 13 legacy
-units masked, execution disabled/disarmed and no orders sent. Authentication/data/L2 remain
-unverified pending a fresh browser grant. Only the operator needs to complete that login;
-do not send the callback URL or any secrets to obtain the safe server-side failure category.
+units masked, execution disabled/disarmed and no orders sent. Authentication/data/L2 were
+unverified at that diagnostic postflight. Later authentication succeeded; market data/L2 remain
+unverified. Callback URLs and secrets must not be shared for diagnostics.
 
 ## HTTP 201 token issuance fix
 
@@ -188,5 +199,53 @@ previous fixture test results are unchanged. Standards review: **0 findings**; S
 
 Authenticated dashboard HTTPS/security checks passed after deployment. All 13 legacy units remain
 masked, the service has zero restarts, credentials/configuration are unchanged, execution remains
-disabled/disarmed, and no orders were sent. Saxo authentication, account data and L2 are still
-unverified at this postflight; start a fresh Connect flow because the discarded grant cannot be reused.
+disabled/disarmed, and no orders were sent. Authentication, account data and L2 were unverified
+at this historical postflight. A later fresh grant succeeded, as recorded above.
+
+
+## Authenticated REST and stream follow-up
+
+The successful SIM grant exposed two transport defects: an already-decompressed HTTP body retained
+its `Content-Encoding` header and was decoded twice, and the stream used the base URL without the
+required `/connect` suffix. Authenticated non-ordering probes reproduced the response-decoding
+failure and bare-path HTTP 404; the corrected endpoint completed the WebSocket handshake.
+[REST postflight](saxo-rest-decode-20260928.json),
+[account-selection report](saxo-account-selection-20260928.json), and
+[connect postflight](saxo-stream-connect-20260928.json) preserve the separate evidence.
+
+The first connected release then repeatedly reconnected. A regression reproduced its rejection
+of the array-shaped heartbeat in Saxo's [current streaming guide](https://www.developer.saxo/openapi/learn/streaming).
+Release `2ff5775` accepts both envelope forms. Heartbeats update stream contact without changing
+quote receipt or field-change timestamps. Three authenticated checks from **14:04:14 to 14:05:14 UTC**
+received new stream messages, reported no error and retained connection count 1 (the initial
+connection; zero reconnects). This verifies session-stream health over that interval, not market
+quote or L2 availability. The final full suite passed **457 tests in 63.58 seconds**
+with seven existing warnings; Ruff lint/format, mypy (116 source files), isolated locked server
+smoke and staged installed smoke all passed. Browser assets are unchanged; earlier browser fixtures
+remain applicable. This is not a five-market feed or recorder workload benchmark.
+
+Standards review: **0 findings**. Spec review: **0 new findings**. The review also identified an
+inherited follow-up: a `SubscriptionPermanentlyDisabled` price heartbeat currently causes recreation;
+Saxo specifies removing that subscription without resetting it. This was not observed on the
+configured session-only stream and must be corrected before relying on permanent-disable handling
+for market subscriptions. No automatic session upgrade or entitlement changes were performed.
+
+| Market | Authenticated discovery candidates | Current market-data evidence |
+|---|---:|---|
+| CL | 16 | Contract selection required; quotes, levels, counts, delay and cadence unverified |
+| GC | 6 | Same; strategy remains MONITOR_ONLY |
+| NG | 7 | Contract selection required; quotes, levels, counts, delay and cadence unverified |
+| NQ | 0 for current keyword query | Refine reference discovery; no conclusion about account entitlement |
+| SI | 10 | Contract selection required; quotes, levels, counts, delay and cadence unverified |
+
+All five have zero raw prehistory, no active capture and unavailable book-flow features. No fixture
+proves account L2 access. Before account-selection restart, authenticated broker reads returned no
+orders or positions. Subsequent releases preserve the credentials, token store, disabled/disarmed
+configuration and flat ledger. All 13 legacy units remain masked. No orders were transmitted.
+
+Additional root-only backups are under `/var/lib/stocker/backups/`:
+`saxo-rest-decode-20260928`, `saxo-account-selection-20260928`, `saxo-stream-connect-20260928`,
+and `saxo-stream-heartbeat-20260928`. The last release's previous code pointer is `9c1fc30`.
+Rollback only after checking current obligations, preserving the current account selection,
+tokens and ledger. It would reintroduce the heartbeat defect; retain disabled execution and
+provider masks. Never restore old credentials or ledger snapshots over newer state.

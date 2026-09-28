@@ -1,0 +1,18 @@
+{
+  "at": "2026-09-28T13:51:03.032717+00:00",
+  "environment": "SAXO_SIM",
+  "selection": "SOLE_ACTIVE_ACCOUNT_RETURNED_BY_SAXO",
+  "currency": "EUR",
+  "broker_orders_before_restart": 0,
+  "broker_positions_before_restart": 0,
+  "oauth": "AUTHENTICATED",
+  "account": "Verified configured Saxo account",
+  "problem": "SAXO_RECONNECT_REQUIRED",
+  "connected": false,
+  "execution_mode": "DISABLED",
+  "armed": false,
+  "live_orders_disabled": true,
+  "session_upgrade_sent": false,
+  "orders_sent": 0,
+  "backup": "/var/lib/stocker/backups/saxo-account-selection-20260928"
+}

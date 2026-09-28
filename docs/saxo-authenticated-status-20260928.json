@@ -1,0 +1,115 @@
+{
+  "at": "2026-09-28T14:05:14.773079+00:00",
+  "release": "2ff57756e272b53b900a7c6e1291a97372c62af8",
+  "oauth": "AUTHENTICATED",
+  "oauth_problem": "",
+  "connected": true,
+  "problem": "",
+  "account": "Verified configured Saxo account",
+  "execution_mode": "DISABLED",
+  "armed": false,
+  "session": {
+    "AuthenticationLevel": "Authenticated",
+    "DataLevel": "Standard",
+    "TradeLevel": "OrdersOnly"
+  },
+  "providers": {
+    "SAXO": "ACTIVE",
+    "IBKR": "PARKED",
+    "FMP": "INACTIVE",
+    "EODHD": "INACTIVE"
+  },
+  "stream_reconnects": 1,
+  "stream_received_message": true,
+  "stability": [
+    {
+      "at": "2026-09-28T14:04:14.761740+00:00",
+      "connected": true,
+      "problem": "",
+      "connection_count": 1,
+      "received_message": true
+    },
+    {
+      "at": "2026-09-28T14:04:44.765358+00:00",
+      "connected": true,
+      "problem": "",
+      "connection_count": 1,
+      "received_message": true
+    },
+    {
+      "at": "2026-09-28T14:05:14.768212+00:00",
+      "connected": true,
+      "problem": "",
+      "connection_count": 1,
+      "received_message": true
+    }
+  ],
+  "new_messages_during_check": true,
+  "markets": [
+    {
+      "market": "CL",
+      "problem": "REFERENCE_CONTRACT_SELECTION_REQUIRED",
+      "discovery": "AVAILABLE",
+      "candidate_count": 16,
+      "strategy_state": "BLOCKED",
+      "l2_status": "L2_UNAVAILABLE",
+      "book_flow_status": "UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      }
+    },
+    {
+      "market": "GC",
+      "problem": "REFERENCE_CONTRACT_SELECTION_REQUIRED",
+      "discovery": "AVAILABLE",
+      "candidate_count": 6,
+      "strategy_state": "MONITOR_ONLY",
+      "l2_status": "L2_UNAVAILABLE",
+      "book_flow_status": "UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      }
+    },
+    {
+      "market": "NG",
+      "problem": "REFERENCE_CONTRACT_SELECTION_REQUIRED",
+      "discovery": "AVAILABLE",
+      "candidate_count": 7,
+      "strategy_state": "BLOCKED",
+      "l2_status": "L2_UNAVAILABLE",
+      "book_flow_status": "UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      }
+    },
+    {
+      "market": "NQ",
+      "problem": "REFERENCE_CONTRACT_SELECTION_REQUIRED",
+      "discovery": "NO_LISTED_FUTURES",
+      "candidate_count": 0,
+      "strategy_state": "BLOCKED",
+      "l2_status": "L2_UNAVAILABLE",
+      "book_flow_status": "UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      }
+    },
+    {
+      "market": "SI",
+      "problem": "REFERENCE_CONTRACT_SELECTION_REQUIRED",
+      "discovery": "AVAILABLE",
+      "candidate_count": 10,
+      "strategy_state": "BLOCKED",
+      "l2_status": "L2_UNAVAILABLE",
+      "book_flow_status": "UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      }
+    }
+  ]
+}

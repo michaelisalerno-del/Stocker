@@ -6,6 +6,11 @@ configuration and obsolete provider launchers are parked as hashed historical te
 IB dependencies are removed. EODHD external transport is blocked. Original caches, provenance and
 immutable trading/research evidence remain. The original source checkout was not changed.
 
+Branch: `codex/saxo-only`, based on the clean existing application commit
+`8f22d2b6e052d63ec440410c7ecb8e2f66b432d8`. Implementation commit: `c74e68a`;
+the subsequent review-fix commit includes atomic fill recovery, quote/session validation,
+stream recovery and the final dashboard/tests. This checkout has no remote release publication.
+
 | Stage | Evidence |
 |---|---|
 | IMPLEMENTED | OAuth, allowlisted clients, subscriptions, references, rolling/event recorder, paper risk, dashboard and cutover guides in this branch |
@@ -20,6 +25,7 @@ No live or SIM order was sent, no paper execution armed, no broker subscription 
 no account/legal agreement changed. Tests simulate the broker boundary without transmitting.
 
 Validation details and resource measurements: [MARKET-DATA-VALIDATION.md](MARKET-DATA-VALIDATION.md).
+[Independent review and resolutions](SAXO-REVIEW.md).
 [Capability matrix](saxo-capabilities.json) explicitly marks every unverified field for each market.
 [Source hashes](saxo-frozen-sources.json) preserve original strategy provenance.
 [Setup/OAuth](SAXO-SETUP.md), [cutover/rollback](DEPLOYMENT.md), [current server evidence limits](CURRENT-DEPLOYMENT.md).

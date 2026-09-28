@@ -41,9 +41,22 @@ OPTION = {
     "right": "Call",
     "strike": 70,
     "currency": "USD",
+    "minimum_quantity": 1,
+    "lot_size": 1,
+    "amount_decimals": 0,
     "tick_size": 0.001,
     "price_factor": 1000,
     "multiplier": 1000,
+    "is_tradable": True,
+    "trading_sessions": {
+        "Sessions": [
+            {
+                "StartTime": (datetime.now(UTC) - timedelta(hours=24)).isoformat(),
+                "EndTime": (datetime.now(UTC) + timedelta(hours=24)).isoformat(),
+                "State": "Open",
+            }
+        ]
+    },
 }
 
 
@@ -205,9 +218,10 @@ def test_session_downgrade_reset_and_provider_envelopes(tmp_path):
         await data.receive(msg)
         row = json.loads(data.recorder.windows[key(FUTURE)].rows[-1][1])
         assert row["provider_message"] == msg
-        await data.receive(
-            {"reference": "session", "message_id": "2", "payload": {"TradeLevel": "OrdersOnly"}}
-        )
+        with pytest.raises(ValueError, match="FRESH_SNAPSHOT"):
+            await data.receive(
+                {"reference": "session", "message_id": "2", "payload": {"TradeLevel": "OrdersOnly"}}
+            )
         assert data.markets["CL"].price.value is None
         assert data.problem == "SESSION_DOWNGRADED_EXPLICIT_UPGRADE_REQUIRED"
         assert not data.client.calls
@@ -287,7 +301,8 @@ def test_no_naked_short_futures_or_stale_size_fill(tmp_path):
             broker.validate_order(invalid, "ENTRY", "missing")
         event = signal(1)
         store.observe(event, "", {})
-        data.options[101][1].size_receipt = time.time() - 10
+        data.options[101][1].size_times["Ask"] = time.time() - 10
+        data.options[101][1].update({"PriceInfoDetails": {"BidSize": 99}}, "bid-size", time.time())
         await broker.enter(event, plan())
         assert not store.fills(event["id"])
         await broker.manage()
@@ -374,3 +389,108 @@ def test_old_providers_are_not_network_capable():
     active = Path("packages/stocker_execution/src/stocker_execution")
     assert not any("ib_async" in p.read_text() for p in active.glob("*.py"))
     assert not any(p.exists() for p in [active / "depth.py", active / "subscriptions.py"])
+
+
+def test_internal_fill_revalidates_fx_and_rejects_budget_overrun(tmp_path):
+    async def scenario():
+        broker, data, store = setup(tmp_path)
+        event = signal(1)
+        store.observe(event, "", {})
+        stale_plan = plan()
+        stale_plan["fx_at"] = time.time() - 60
+        data.fx = quote(0.9, 1)  # real cost now exceeds £10; do not use old cheap FX
+        await broker.enter(event, stale_plan)
+        assert not store.fills(event["id"])
+        assert (
+            store.history(None, None, None)[0]["reason"] == "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET"
+        )
+        await broker.manage()
+        assert store.capacity()["reserved_open_trades"] == 0
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure", ["indicative", "closed_session", "permission"])
+def test_paper_fills_require_tradable_open_session_quote(tmp_path, failure):
+    async def scenario():
+        broker, data, store = setup(tmp_path)
+        option, price = data.options[101]
+        option = {**option}
+        if failure == "indicative":
+            price.update({"Quote": {"PriceTypeAsk": "Indicative"}}, "indicative", time.time())
+        elif failure == "closed_session":
+            option["trading_sessions"] = {"Sessions": []}
+        else:
+            option["is_tradable"] = False
+        data.options[101] = (option, price)
+        event = signal(1)
+        store.observe(event, "", {})
+        await broker.enter(event, plan())
+        assert not store.fills(event["id"])
+        assert not data.client.calls
+        assert store.history(None, None, None)[0]["reason"].startswith("OPTION_")
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_broker_audit_replay_is_idempotent_across_crash_boundary(tmp_path, monkeypatch):
+    broker, _, store = setup(tmp_path, "SAXO_SIM")
+    event = signal(1)
+    store.observe(event, "", {})
+    store.reserve(event["id"], plan())
+    ref = store.prepare_order(event["id"], "ENTRY", 1, event["exit_at"], {"option": OPTION})
+    original = store.orders(event["id"])[0]
+    evidence = {
+        "OrderId": "fixture",
+        "LogId": "one",
+        "Status": "FinalFill",
+        "SubStatus": "Confirmed",
+        "FilledAmount": 1,
+        "AveragePrice": 0.01,
+        "ActivityTime": event["signal_at"],
+    }
+    audit = store.audit
+
+    def fail_after_fill(reference, kind, detail):
+        if kind == "SAXO_SIM_ORDER_EVIDENCE":
+            raise RuntimeError("SIMULATED_CRASH_BEFORE_COMMIT")
+        audit(reference, kind, detail)
+
+    monkeypatch.setattr(store, "audit", fail_after_fill)
+    with pytest.raises(RuntimeError, match="SIMULATED_CRASH"):
+        broker.apply_order_evidence(original, evidence)
+    assert not store.fills(event["id"]) and store.orders(event["id"])[0]["filled"] == 0
+    monkeypatch.setattr(store, "audit", audit)
+    broker.apply_order_evidence(original, evidence)
+    # Also recover ledgers interrupted at the old commit boundary.
+    with store.db:
+        store.db.execute("UPDATE orders SET filled=0,status='Submitted' WHERE reference=?", (ref,))
+    broker.apply_order_evidence(original, evidence)
+    assert len(store.fills(event["id"])) == 1 and store.orders(event["id"])[0]["filled"] == 1
+    store.db.close()
+
+
+def test_pending_snapshot_keeps_original_message_receipt(tmp_path):
+    async def scenario():
+        _, data, store = setup(tmp_path)
+        arrived = time.time() - 20
+        message = {
+            "reference": "early",
+            "message_id": "opaque",
+            "payload": {"Quote": {"Bid": 70, "Ask": 71}},
+        }
+        data.pending["early"] = []
+        await data.receive(message, arrived)
+        pending = data.pending.pop("early")
+        data.subscriptions["early"] = {"kind": "PRICE", "target": "CL"}
+        for queued in pending:
+            await data.receive(queued["message"], queued["receipt"])
+        assert data.markets["CL"].price.receipt == arrived
+        recorded = json.loads(data.recorder.windows[key(FUTURE)].rows[-1][1])
+        assert recorded["receipt"] == arrived
+        assert data.markets["CL"].price.depth(time.time())["status"] != "L2_AVAILABLE"
+        store.db.close()
+
+    asyncio.run(scenario())

@@ -26,6 +26,7 @@
       </div>
       <p id="mode-banner" class="mode-banner">DATA ENVIRONMENT: unverified · EXECUTION MODE: DISABLED · LIVE ORDERS DISABLED</p>
       <div id="notice" role="status" aria-live="polite"></div>
+      <p id="global-warning" role="alert" class="block"></p>
       <section class="summary" aria-label="Account and allocation">
         <div>
           <small>Paper account</small><strong id="account">Connecting…</strong
@@ -54,6 +55,7 @@
         </div>
       </section>
       <section id="overview">
+        <div id="overview-slots" class="trade-slots" aria-label="Four concurrent trade slots"></div>
         <label id="market-selector" hidden>Market <select id="selected-market"><option>CL</option><option>GC</option><option>NG</option><option>NQ</option><option>SI</option></select></label>
         <div id="markets" class="markets"></div>
         <p id="evidence" class="evidence"></p>
@@ -112,7 +114,7 @@
         </details>
       </section>
       <section id="system" hidden>
-        <h2>Saxo connection</h2><form action="/oauth/saxo/start" method="post"><button>Connect configured Saxo environment</button></form><p>Connecting data never arms execution. A session upgrade can downgrade another Saxo application; SLRNO never upgrades automatically.</p><p id="provider-status"></p><h2>Market data &amp; API</h2>
+        <h2>Saxo connection</h2><form action="/oauth/saxo/start" method="post"><button>Connect configured Saxo environment</button></form><p>Connecting data never arms execution. A session upgrade can downgrade another Saxo application; SLRNO never upgrades automatically.</p><p id="auth-state"></p><p id="provider-status"></p><div id="capability-list"></div><h2>Market data &amp; API</h2>
         <div class="api-panel">
           <div>
             <small>Application subscriptions</small
@@ -120,7 +122,7 @@
             ><span id="api-external"></span>
           </div>
           <div class="research-slots">
-            <small>L2 pool · separate from trading slots</small
+            <small>Actual received depth · observation only</small
             ><strong id="api-depth"></strong><span id="api-assignments"></span>
           </div>
           <div>

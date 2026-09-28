@@ -74,6 +74,7 @@ class PriceState:
         self.quote_times: dict[str, float] = {}
         self.depth_receipt: float | None = None
         self.size_receipt: float | None = None
+        self.size_times: dict[str, float] = {}
         self.last_contact: float | None = None
         self.problem = "AWAITING_SNAPSHOT"
         self.refresh_ms: int | None = None
@@ -83,6 +84,7 @@ class PriceState:
         self.generation = generation
         self.seen.clear()
         self.quote_times.clear()
+        self.size_times.clear()
         self.receipt = self.depth_receipt = self.size_receipt = None
         self.last_contact = at
         self.touch(value, at)
@@ -96,8 +98,11 @@ class PriceState:
             self.receipt = min(self.quote_times.values())
         if "MarketDepth" in value:
             self.depth_receipt = at
-        if any(k in (value.get("PriceInfoDetails") or {}) for k in ("BidSize", "AskSize")):
-            self.size_receipt = at
+        for side in ("Bid", "Ask"):
+            if side + "Size" in (value.get("PriceInfoDetails") or {}):
+                self.size_times[side] = at
+        if len(self.size_times) == 2:
+            self.size_receipt = min(self.size_times.values())
 
     def update(self, value: dict[str, Any], message_id: str, at: float) -> bool:
         self.last_contact = at
@@ -121,6 +126,7 @@ class PriceState:
         self.value = None
         self.receipt = self.depth_receipt = self.size_receipt = None
         self.quote_times.clear()
+        self.size_times.clear()
         self.problem = reason
 
     def depth(self, at: float) -> dict[str, Any]:

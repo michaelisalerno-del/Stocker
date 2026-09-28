@@ -128,6 +128,7 @@ def option_identity(
         "amount_decimals": raw.get("AmountDecimals"),
         "exercise_cutoff": raw.get("ExerciseCutOffTime"),
         "trading_sessions": raw.get("TradingSessions"),
+        "is_tradable": raw.get("IsTradable"),
     }
 
 
@@ -146,6 +147,22 @@ def quote_check(value: dict[str, Any], receipt: float | None, at: datetime) -> d
     bid, ask = positive(quote.get("Bid"), "BID"), positive(quote.get("Ask"), "ASK")
     if bid > ask:
         raise ValueError("CROSSED_QUOTE")
+    return quote
+
+
+def executable_quote(
+    option: dict[str, Any], value: dict[str, Any], receipt: float | None, at: datetime
+) -> dict[str, Any]:
+    quote = quote_check(value, receipt, at)
+    if option.get("is_tradable") is not True:
+        raise ValueError("OPTION_TRADING_PERMISSION_UNVERIFIED")
+    if session_state({"TradingSessions": option.get("trading_sessions")}, at) not in {
+        "OPEN",
+        "OPENFORTRADING",
+    }:
+        raise ValueError("OPTION_CURRENT_SESSION_NOT_OPEN_OR_UNVERIFIED")
+    if any(quote.get(k) != "Tradable" for k in ("PriceTypeBid", "PriceTypeAsk")):
+        raise ValueError("OPTION_QUOTE_NOT_TRADABLE")
     return quote
 
 

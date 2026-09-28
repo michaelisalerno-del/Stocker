@@ -8,7 +8,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from stocker_execution.config import FuturesConfig
-from stocker_execution.contracts import budget, key, positive, quote_check, utc, verified_cutoff
+from stocker_execution.contracts import (
+    budget,
+    executable_quote,
+    key,
+    positive,
+    quote_check,
+    utc,
+    verified_cutoff,
+)
 from stocker_execution.rules import NY, model_delta
 from stocker_execution.saxo_data import DataService, MarketState
 from stocker_execution.store import TERMINAL, Store, encode
@@ -114,7 +122,7 @@ class PaperBroker:
         self.data.recorder.attach(str(event["id"]), key(option), time.time())
         cutoff = verified_cutoff(option, exit_at)
         price = self.data.options[option["uic"]][1]
-        q = quote_check(price.value or {}, price.receipt, now())
+        q = executable_quote(option, price.value or {}, price.receipt, now())
         fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, now())
         if option["currency"] != "USD":
             raise ValueError("CURRENCY_CONVERSION_PAIR_UNVERIFIED")
@@ -234,8 +242,8 @@ class PaperBroker:
                 self.check_broker_cost(plan, precheck)
             # Revalidate after awaited I/O; disconnect/disarm/stale data cannot race admission.
             self.validate_order(plan, role, identity)
-            price_state = self.data.options[plan["option"]["uic"]][1]
-            quote_check(price_state.value or {}, price_state.receipt, now())
+            current_option, price_state = self.data.options[plan["option"]["uic"]]
+            executable_quote(current_option, price_state.value or {}, price_state.receipt, now())
             if now() >= deadline:
                 raise ValueError("ENTRY_PREFLIGHT_EXPIRED")
             transmitted = True  # durable SUBMITTING intent already exists
@@ -290,17 +298,26 @@ class PaperBroker:
         option, at = plan["option"], now()
         state = self.data.options[option["uic"]][1]
         try:
-            quote = quote_check(state.value or {}, state.receipt, at)
+            fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, at)
+            conversion = 1 / float(fx["Bid" if role == "ENTRY" else "Ask"])
+            if role == "ENTRY":
+                revised = budget(option, price, plan["fee_per_side_gbp"] * 2, conversion)
+                plan.update(revised)
+            plan.update(fx=conversion, fx_at=self.data.fx.receipt)
+            quote = executable_quote(
+                self.data.options[option["uic"]][0], state.value or {}, state.receipt, at
+            )
             side = "Ask" if role == "ENTRY" else "Bid"
             if (role == "ENTRY" and price < float(quote[side]) + option["tick_size"] - 1e-10) or (
                 role == "EXIT" and price > float(quote[side]) - option["tick_size"] + 1e-10
             ):
                 raise ValueError("PRICE_MOVED_NO_ASSUMED_FILL")
-            if state.size_receipt is None or not 0 <= at.timestamp() - state.size_receipt <= 5:
+            size_at = state.size_times.get(side)
+            if size_at is None or not 0 <= at.timestamp() - size_at <= 5:
                 raise ValueError("AVAILABLE_OPTION_SIZE_STALE")
             details = (state.value or {}).get("PriceInfoDetails") or {}
             size = positive(details.get(side + "Size"), "AVAILABLE_OPTION_SIZE")
-            receipt = state.size_receipt
+            receipt = size_at
             usage_key = (option["uic"], receipt, side)
             if size - self.size_used.get(usage_key, 0) < 1:
                 raise ValueError("INSUFFICIENT_DISPLAYED_OPTION_SIZE")
@@ -317,20 +334,21 @@ class PaperBroker:
                 identity, "SKIPPED" if role == "ENTRY" else "EXIT_EXCEPTION", str(exc)
             )
             return
-        self.store.record_fill(
-            {
-                "exec_id": "INTERNAL-" + reference,
-                "reference": reference,
-                "con_id": option["uic"],
-                "quantity": 1,
-                "price": price,
-                "side": "BOT" if role == "ENTRY" else "SLD",
-                "at": at.isoformat(),
-                "fx": plan["fx"],
-                "fx_at": datetime.fromtimestamp(plan["fx_at"], UTC).isoformat(),
-            }
-        )
         with self.store.db:
+            self.store.record_fill(
+                {
+                    "exec_id": "INTERNAL-" + reference,
+                    "reference": reference,
+                    "con_id": option["uic"],
+                    "quantity": 1,
+                    "price": price,
+                    "side": "BOT" if role == "ENTRY" else "SLD",
+                    "at": at.isoformat(),
+                    "fx": plan["fx"],
+                    "fx_at": datetime.fromtimestamp(plan["fx_at"], UTC).isoformat(),
+                },
+                commit=False,
+            )
             self.store.db.execute(
                 "UPDATE fills SET commission=?,commission_currency='GBP' WHERE reference=?",
                 (plan["fee_per_side_gbp"], reference),
@@ -347,6 +365,9 @@ class PaperBroker:
             self.store.db.execute(
                 "INSERT OR REPLACE INTO positions VALUES(?,?,?)",
                 (option["uic"], quantity, encode({"internally_simulated": True})),
+            )
+            self.store.db.execute(
+                "UPDATE reservations SET plan=? WHERE id=?", (encode(plan), identity)
             )
         self.store.decision(identity, "INTERNALLY_SIMULATED_FILL")
         self.data.recorder.annotate(
@@ -494,10 +515,17 @@ class PaperBroker:
         self.last_reconcile = time.monotonic()
 
     def apply_order_evidence(self, order: dict[str, Any], evidence: dict[str, Any]) -> None:
+        with self.store.db:
+            self._apply_order_evidence(order, evidence)
+
+    def _apply_order_evidence(self, order: dict[str, Any], evidence: dict[str, Any]) -> None:
         if evidence.get("SubStatus") != "Confirmed":
             raise ValueError("ORDER_TERMINAL_STATE_NOT_CONFIRMED")
         filled = float(evidence.get("FilledAmount", 0))
-        previous = float(order["filled"])
+        known = [
+            f for f in self.store.fills(order["event_id"]) if f["reference"] == order["reference"]
+        ]
+        previous = sum(float(f["quantity"]) for f in known)
         if not 0 <= previous <= filled <= 1:
             raise ValueError("FILL_CORRECTION_REQUIRES_RECONCILIATION")
         if filled > previous:
@@ -505,11 +533,7 @@ class PaperBroker:
                 "SELECT plan FROM reservations WHERE id=?", (order["event_id"],)
             ).fetchone()
             plan = json.loads(plan_row[0])
-            prior_cash = sum(
-                f["quantity"] * f["price"]
-                for f in self.store.fills(order["event_id"])
-                if f["reference"] == order["reference"]
-            )
+            prior_cash = sum(f["quantity"] * f["price"] for f in known)
             average = positive(evidence.get("AveragePrice"), "BROKER_AVERAGE_FILL")
             price = (average * filled - prior_cash) / (filled - previous)
             self.store.record_fill(
@@ -523,7 +547,8 @@ class PaperBroker:
                     "at": evidence["ActivityTime"],
                     "fx": None,
                     "fx_at": None,
-                }
+                },
+                commit=False,
             )
             self.data.recorder.annotate(
                 order["event_id"],
@@ -544,12 +569,11 @@ class PaperBroker:
         status = {"FinalFill": "Filled", "Cancelled": "Cancelled", "Expired": "Cancelled"}.get(
             evidence["Status"], "Submitted"
         )
-        with self.store.db:
-            self.store.db.execute(
-                "UPDATE orders SET status=?,filled=?,remaining=? WHERE reference=?",
-                (status, filled, 1 - filled, order["reference"]),
-            )
-            self.store.audit(order["reference"], "SAXO_SIM_ORDER_EVIDENCE", evidence)
+        self.store.db.execute(
+            "UPDATE orders SET status=?,filled=?,remaining=? WHERE reference=?",
+            (status, filled, 1 - filled, order["reference"]),
+        )
+        self.store.audit(order["reference"], "SAXO_SIM_ORDER_EVIDENCE", evidence)
 
     async def manage(self) -> None:
         async with self.lock:

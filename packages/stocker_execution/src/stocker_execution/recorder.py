@@ -164,8 +164,10 @@ class Recorder:
                 os.fsync(out.fileno())
 
     def register(self, key: str, identity: dict[str, Any]) -> None:
-        # Session schedules are mutable reference observations, not contract identity.
-        identity = {k: v for k, v in identity.items() if k != "trading_sessions"}
+        # Session schedules and permissions are mutable observations, not contract identity.
+        identity = {
+            k: v for k, v in identity.items() if k not in {"trading_sessions", "is_tradable"}
+        }
         if key not in self.windows:
             if len(self.windows) >= 32:
                 raise ValueError("RECORDER_INSTRUMENT_LIMIT")

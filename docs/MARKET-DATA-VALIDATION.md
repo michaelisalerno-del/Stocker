@@ -11,14 +11,20 @@ No evidence below proves a Saxo entitlement, broker fill or exchange recording p
 - Provider-independent frozen source/DST/feature-availability and durable late-fill/provisional-P&L
   regressions were retained in `tests/test_futures_invariants.py`. Obsolete IB-specific suites remain
   hashed historical evidence outside test collection; they are not falsely claimed as Saxo tests.
-- Full Python suite: final result recorded after review. The first full run exposed two old smoke
+- Full Python suite: **426 passed, 7 warnings in 58.25 seconds** after review fixes. Warnings were
+  existing NumPy empty-slice and HTTP/WebSocket dependency deprecations. The first full run exposed two old smoke
   tests requiring now-retired EODHD launchers; they were replaced by an archive/hash/non-active check.
 - Ruff format/lint and Mypy over `packages apps` pass; 115 source files type-checked at this stage.
+  Ruff checked formatting for 196 files. Review regressions cover atomic audit/fill recovery,
+  current FX budget revalidation, independent bid/ask size freshness, original buffered receipt
+  timestamps and rejection of indicative/out-of-session/unpermissioned paper fills.
 - Locked server-only install/import/dashboard smoke passes with all socket connections forbidden.
   It installs no `ib-async`, pytest, notebook or research-model dependencies.
 - Browser tests with locked Playwright dependencies pass five fixed cards, provisional P&L, stable
   DOM identity, scroll/focus/filter/expanded-panel preservation, stale ladder clearing and mobile layout.
   Screenshots are labelled OFFLINE TEST FIXTURE under `docs/saxo-screenshots/`.
+- Independent Standards and Spec reviews found five distinct issues, all fixed and rechecked;
+  see [review record](SAXO-REVIEW.md). No order was transmitted by verification.
 
 Representative recorder test: generated five underlying streams, ten depth levels, 1,000 ms
 virtual cadence, 36,005 messages over two virtual hours, three events merged into two segments.

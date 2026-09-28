@@ -9,6 +9,7 @@ const names = {
   SI: "Silver",
 };
 const depthReceipts = new Map();
+const quoteReceipts = new Map();
 const route = location.pathname.slice(1) || "overview";
 const page = ["opportunities", "trades"].includes(route) ? "trades" : route === "markets" ? "overview" : route;
 let selectedMarket = sessionStorage.getItem("slrno-market") || "CL";
@@ -144,8 +145,14 @@ function render(d) {
   paused = s.paused;
   text("mode-banner", `DATA ENVIRONMENT: ${s.data_environment || "UNVERIFIED"} · EXECUTION MODE: ${s.execution_mode || "DISABLED"} · LIVE ORDERS DISABLED`);
   text("provider-status", "IBKR PARKED · FMP INACTIVE · EODHD INACTIVE");
-  text("execution-warning", Object.values(s.management_problems || {}).join(" · ") || "No reported exposure exceptions");
-  for (let i = 0; i < 4; i++) text(`trade-slot-${i}`, i < s.reserved_open_trades ? `Slot ${i + 1} · reserved / open` : `Slot ${i + 1} · available`);
+  const exceptions = Object.values(s.management_problems || {}).join(" · ");
+  text("execution-warning", exceptions || "No reported exposure exceptions");
+  text("global-warning", exceptions || s.problem || s.l2_recording?.paused_reason || "");
+  text("auth-state", `OAuth: ${s.oauth || "UNVERIFIED"} · stream: ${s.connected ? "connected" : "disconnected"} · session: ${s.session?.TradeLevel || "UNVERIFIED"}`);
+  for (let i = 0; i < 4; i++) {
+    const label = i < s.reserved_open_trades ? `Slot ${i + 1} · reserved / open` : `Slot ${i + 1} · available`;
+    text(`trade-slot-${i}`, label); text(`overview-slot-${i}`, label);
+  }
   text("account", s.account);
   text(
     "connection",
@@ -187,6 +194,8 @@ function render(d) {
   );
   for (const m of d.markets) {
     if (!markets.includes(m.market)) continue;
+    quoteReceipts.set(m.market, Date.parse(m.l1?.last_receipt));
+    text(`capability-${m.market}`, `${m.market} · ${m.l1?.status || "UNVERIFIED"} · ${m.l2?.status || "L2_UNAVAILABLE"} · ${m.block_reason || "monitoring"}`);
     const q = m.l1?.quote || {}, sizes = m.l1?.sizes || {}, rec = m.recorder || {};
     text(`quote-${m.market}`, `Bid ${q.Bid ?? "—"} × ${sizes.bid ?? "—"} · Ask ${q.Ask ?? "—"} × ${sizes.ask ?? "—"} · spread ${m.l1?.spread ?? "—"} · delay ${m.l1?.delay_minutes ?? "unknown"} min`);
     text(`recorder-${m.market}`, `${rec.state || "UNAVAILABLE"} · ${Math.floor(rec.prehistory_seconds || 0)} / 900s prehistory · ${display(rec.reason)}`);
@@ -422,7 +431,8 @@ setInterval(() => {
   text("clock", `${time(new Date().toISOString())} · London`);
   for (const [m, at] of depthReceipts)
     if (at && Date.now() - at > 5000)
-      depth(m, { status: "INCOMPLETE", reason: "LADDER_RECEIPT_STALE" });
+      depth(m, { status: "L2_UNAVAILABLE", reason: "LADDER_RECEIPT_STALE" });
+  for (const [m, at] of quoteReceipts) if (!at || Date.now() - at > 5000) text(`l1-${m}`, "L1 STALE OR MISSING");
 }, 1000);
 setInterval(refresh, 5000);
 refresh();
@@ -430,6 +440,11 @@ refresh();
 for (let i = 0; i < 4; i++) {
   const slot = document.createElement("div"); slot.id = `trade-slot-${i}`;
   $("trade-slots").append(slot);
+  const overview = document.createElement("div"); overview.id = `overview-slot-${i}`;
+  $("overview-slots").append(overview);
+}
+for (const m of markets) {
+  const row = document.createElement("p"); row.id = `capability-${m}`; $("capability-list").append(row);
 }
 $("market-selector").hidden = route !== "markets";
 $("selected-market").value = selectedMarket;

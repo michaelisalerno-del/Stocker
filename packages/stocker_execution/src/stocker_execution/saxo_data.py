@@ -267,7 +267,7 @@ class DataService:
         pending = self.pending.pop(ref, [])
         self.pending_bytes -= sum(len(json.dumps(m)) for m in pending)
         for message in pending:
-            await self.receive(message)
+            await self.receive(message["message"], message["receipt"])
         return ref
 
     def price_target(self, target: str) -> tuple[PriceState, dict[str, Any] | None]:
@@ -576,14 +576,16 @@ class DataService:
         if identity:
             self.recorder.ingest(key(identity), "GAP", {"reason": reason}, time.time())
 
-    async def receive(self, message: dict[str, Any]) -> None:
+    async def receive(self, message: dict[str, Any], received_at: float | None = None) -> None:
+        receipt = time.time() if received_at is None else received_at
         ref, payload = message["reference"], message["payload"]
         self.last_message_id = message["message_id"]
         if ref in self.pending:
-            size = len(json.dumps(message))
+            queued = {"message": message, "receipt": receipt}
+            size = len(json.dumps(queued))
             if self.pending_bytes + size > 1024**2:
                 raise SaxoError("SNAPSHOT_PENDING_QUEUE_LIMIT")
-            self.pending[ref].append(message)
+            self.pending[ref].append(queued)
             self.pending_bytes += size
             return
         if ref == "_heartbeat":
@@ -593,13 +595,14 @@ class DataService:
                     subscription["contact"] = time.monotonic()
                     if heartbeat.get("Reason") != "NoNewData" and subscription["kind"] == "PRICE":
                         self.mark_gap(subscription["target"], "SUBSCRIPTION_DISABLED")
+                        raise SaxoError("SUBSCRIPTION_DISABLED_FRESH_SNAPSHOT_REQUIRED")
             return
         if ref in {"_resetsubscriptions", "_disconnect"}:
             raise SaxoError("STREAM_RESET_FRESH_SNAPSHOTS_REQUIRED")
         subscription = self.subscriptions.get(ref)
         if not subscription:
             return  # obsolete generation; never apply it to a replacement snapshot
-        subscription["contact"] = time.monotonic()
+        subscription["contact"] = time.monotonic() - max(0, time.time() - receipt)
         updates = payload if isinstance(payload, list) else [payload]
         for index, envelope in enumerate(updates):
             if envelope.get("TotalPartitions", 1) > 1:
@@ -612,18 +615,19 @@ class DataService:
                     for market in self.markets:
                         self.mark_gap(market, "SESSION_DOWNGRADED")
                     self.problem = "SESSION_DOWNGRADED_EXPLICIT_UPGRADE_REQUIRED"
+                    raise SaxoError("SESSION_DOWNGRADED_FRESH_SNAPSHOT_REQUIRED")
             elif subscription["kind"] == "BOARD":
                 state = self.markets[subscription["target"]]
                 state.option_board = merge_board(state.option_board, data)
             else:
                 price, identity = self.price_target(subscription["target"])
-                accepted = price.update(data, message["message_id"] + f":{index}", time.time())
+                accepted = price.update(data, message["message_id"] + f":{index}", receipt)
                 if identity:
                     self.recorder.ingest(
                         key(identity),
                         "UPDATE",
                         data,
-                        time.time(),
+                        receipt,
                         message_id=message["message_id"],
                         duplicate=not accepted,
                         generation=ref,
@@ -651,10 +655,12 @@ class DataService:
                     self.connected = True
                     self.problem = ""
                     self.reconnects += 1
-                    backoff = 2
+                    connected_at = time.monotonic()
                     frames = Frames(self.config.recorder.max_message_bytes)
                     setup = asyncio.create_task(self.startup())
                     while not self.stopping:
+                        if time.monotonic() - connected_at > 60:
+                            backoff = 2
                         if setup.done():
                             setup.result()
                         try:

@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -269,8 +270,10 @@ class Store:
             sum(f["quantity"] * (1 if f["side"] == "BOT" else -1) for f in self.fills(identity))
         )
 
-    def record_fill(self, values: dict[str, Any]) -> None:
-        with self.db:
+    def record_fill(self, values: dict[str, Any], *, commit: bool = True) -> None:
+        # A broker audit update can include the fill and cumulative order counters
+        # in one transaction; never commit halfway through that caller's update.
+        with self.db if commit else nullcontext():
             existing = self.db.execute(
                 "SELECT * FROM fills WHERE exec_id=?", (values["exec_id"],)
             ).fetchone()

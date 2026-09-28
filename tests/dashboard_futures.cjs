@@ -14,8 +14,9 @@ const output = path.resolve("docs/saxo-screenshots");
 const state = {
   system: {
     account: "OFFLINE FIXTURE",
-    data_environment: "SAXO_SIM", execution_mode: "DISABLED",
-    session: {TradeLevel: "OrdersOnly"},
+    data_environment: "SAXO_SIM", execution_mode: "SAXO_SIM",
+    oauth: "OFFLINE FIXTURE",
+    session: {TradeLevel: "FullTradingAndChat"},
     connected: true,
     reconciled: true,
     armed: false,
@@ -25,24 +26,10 @@ const state = {
     market_data: {
       owned_lines: 24,
       app_budget: 32,
-      total_account_allowance: 100,
-      allowance_status: "ASSUMED",
-      external_headroom: 40,
-      external_usage: null,
-      depth_used: 3,
-      depth_limit: 3,
-      temporary_quotes: 5,
-      temporary_quote_limit: 15,
-      pacing: {
-        outbound_last_second: 4,
-        outbound_cap: 40,
-        urgent_reserve: 10,
-        queued: 0,
-      },
       errors: [],
     },
     l2_recording: {
-      assigned_markets: ["CL", "GC", "NG"],
+      problem: "MINIMUM_DISK_RESERVE_REACHED",
       disk_bytes: 12582912,
       disk_limit: 268435456,
       memory_bytes: 2097152,
@@ -56,7 +43,7 @@ const state = {
     provisional_closed: 1,
     opportunities: 12,
     eligible_trades: 3,
-    skip_reasons: { SKIP_BUDGET_TOO_SMALL: 5, SKIP_CAPACITY_FULL: 1 },
+    skip_reasons: { MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET: 5, SKIP_CAPACITY_FULL: 1 },
     fills: 3,
     win_rate: null,
     wins: 0,
@@ -68,16 +55,10 @@ const state = {
     market_status: "OPEN",
     data_status: "CURRENT",
     updated_at: at,
-    l1: { status: "ACTIVE", data_type: 1, last_receipt: at, last_change: at },
+    l1: { status: "CURRENT", last_receipt: at, quote: {Bid: 70 + i, Ask: 70.01 + i}, sizes: {bid: 2, ask: 3}, spread: .01, delay_minutes: 0 },
+    recorder: {state: i === 4 ? "STORAGE_LIMIT" : "BUFFERING", prehistory_seconds: [900,42,15,0,0][i], reason: i === 4 ? "STORAGE_LIMIT_REACHED" : ""},
     l2: {
-      status: [
-        "COLLECTING",
-        "WAITING_FOR_SLOT",
-        "COLLECTING",
-        "INCOMPLETE",
-        "UNAVAILABLE",
-        "DISABLED",
-      ][i],
+      status: ["L2_AVAILABLE", "L2_AVAILABLE", "L1_ONLY", "L2_UNAVAILABLE", "L2_UNAVAILABLE"][i],
       target_pre_seconds: 900,
       pre_seconds: [900, 42, 15, 0, 0][i],
       fresh: i === 0 || i === 1,
@@ -95,26 +76,24 @@ const state = {
     entry_enabled: false,
     strategy_state: [
       "BLOCKED",
-      "BLOCKED",
+      "MONITOR_ONLY",
       "POSITION_OPEN",
       "MONITORING",
       "ORDER_PENDING",
-      "BLOCKED",
     ][i],
-    direction: i < 2 ? "CALL / LONG" : "PUT / SHORT DIRECTION",
+    direction: i === 0 ? "BUY CALL" : "BUY PUT",
     block_reason: [
       "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED",
-      "NO_REAL_0DTE_MATCH",
+      "GC_LISTED_EXECUTION_RULE_UNAPPROVED",
       "ENTRIES_PAUSED · existing position managed",
       "EXECUTION_UNARMED",
       "ORDER_STATUS_UNCERTAIN",
-      "SKIP_BUDGET_TOO_SMALL",
     ][i],
     conditions: { rv15: 0.0008 + i * 0.0002 },
     next_time: "2026-09-28T15:00:00Z",
     next_market_time: "2026-09-28T21:00:00Z",
     exchange_trade_date: null,
-    diagnostic: market === "GC" ? "Experimental management disabled" : "",
+    diagnostic: market === "GC" ? "L2 observation only" : "",
     details: {
       fixture: true,
       mapping: null,
@@ -138,10 +117,10 @@ const state = {
       },
     ],
     trades:
-      market === "GC"
+      market === "NG"
         ? [
             {
-              id: "gc-open",
+              id: "ng-open",
               state: "POSITION_OPEN",
               quantity: 1,
               entry_at: "2026-09-28T14:00:04Z",
@@ -154,10 +133,10 @@ const state = {
               },
             },
           ]
-        : market === "NQ"
+        : market === "SI"
           ? [
               {
-                id: "nq-pending",
+                id: "si-pending",
                 state: "EXPOSURE_REQUIRES_RECONCILIATION",
                 quantity: 0,
                 exit_at: "2026-09-28T15:00:00Z",
@@ -173,7 +152,7 @@ const rows = Array.from({ length: 80 }, (_, i) => ({
   signal_at: new Date(Date.parse(at) - i * 60000).toISOString(),
   rule_version: "CLOCK60_NG13_20260927",
   decision: i % 3 ? "SKIPPED" : "BROKER_PAPER_FILL",
-  reason: i % 3 ? "SKIP_BUDGET_TOO_SMALL" : "",
+  reason: i % 3 ? "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET" : "",
   state: null,
 }));
 const server = http.createServer((req, res) => {
@@ -262,10 +241,12 @@ async function label(page) {
     );
     assert.equal(
       await page.locator("#diagnostic-GC").textContent(),
-      "Experimental management disabled",
+      "L2 observation only",
     );
     assert.match(await page.locator("#pnl-note").textContent(), /provisional/);
     assert.equal(await page.locator("#entries").textContent(), "Unarmed");
+    assert.equal(await page.locator("#overview-slots > div").count(), 4);
+    assert.match(await page.locator("#mode-banner").textContent(), /LIVE ORDERS DISABLED/);
     await label(page);
     await page.screenshot({
       path: path.join(output, "overview-desktop-fixture.png"),
@@ -300,7 +281,14 @@ async function label(page) {
     await page.evaluate(() => refresh());
     assert.equal(await page.locator("#depth-GC-0").isVisible(), false);
     assert(await page.locator("#card-GC details").evaluate((n) => n.open));
-    await page.goto(`${base}/trades`);
+    await page.goto(`${base}/markets`);
+    await page.locator("#selected-market").selectOption("GC");
+    await page.evaluate(() => refresh());
+    assert.equal(await page.locator("#card-GC").isVisible(), true);
+    assert.equal(await page.locator("#card-CL").isVisible(), false);
+    await page.goto(`${base}/markets`);
+    assert.equal(await page.locator("#selected-market").inputValue(), "GC");
+    await page.goto(`${base}/opportunities`);
     await page.waitForFunction(
       () => document.querySelectorAll("#history tr").length === 80,
     );
@@ -374,7 +362,7 @@ async function label(page) {
     assert.match(await page.locator("#api-lines").textContent(), /24 \/ 32/);
     assert.match(
       await page.locator("#api-depth").textContent(),
-      /0 \/ 5 markets with received depth/,
+      /2 \/ 5 markets with received depth/,
     );
     assert.match(await page.locator("#api-external").textContent(), /explicit/);
     await page.screenshot({

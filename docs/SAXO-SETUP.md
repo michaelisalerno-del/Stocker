@@ -48,6 +48,10 @@ Do not paste secrets into chat, Git, browser payloads, screenshots or the record
    `ENABLE PAPER ONLY` and successful preflight less than 60 seconds old. Every restart disarms.
    Connecting a feed or resuming paused entries never arms execution.
 
+Paper fills also require a currently open option session, verified instrument trading permission,
+fresh tradable bid/ask prices and independently fresh available size on the side being filled.
+An indicative quote may be displayed but cannot generate an internally simulated fill.
+
 For a stopped service/isolated preflight owner, use:
 
 ```sh

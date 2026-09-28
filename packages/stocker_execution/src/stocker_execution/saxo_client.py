@@ -122,7 +122,15 @@ class SaxoClient:
                                 raise SaxoError("REST_RESPONSE_LIMIT")
                             content.extend(chunk)
                         response = httpx.Response(
-                            streamed.status_code, headers=streamed.headers, content=bytes(content)
+                            streamed.status_code,
+                            # aiter_bytes already decoded the wire compression. Retaining
+                            # its encoding header would decompress the JSON a second time.
+                            headers={
+                                k: v
+                                for k, v in streamed.headers.items()
+                                if k.lower() not in {"content-encoding", "content-length"}
+                            },
+                            content=bytes(content),
                         )
                 except httpx.HTTPError:
                     raise SaxoError(

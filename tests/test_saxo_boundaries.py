@@ -1,6 +1,7 @@
 """Sanitised offline provider fixtures. These tests never contact a broker."""
 
 import asyncio
+import gzip
 import json
 import os
 import time
@@ -209,6 +210,57 @@ def test_oauth_can_precede_account_selection_without_enabling_orders(tmp_path):
             ("GET", "/sim/openapi/port/v1/accounts/me"),
         ]
         await client.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("compressed", [False, True])
+def test_rest_response_decoded_once_with_rate_headers_preserved(tmp_path, compressed):
+    async def scenario():
+        auth = oauth_fixture(tmp_path)
+        auth.tokens = {"access_token": "fixture-access", "expires_at": time.time() + 1200}
+        payload = {"UserId": 123, "GeneralOperations": []}
+
+        def response(request):
+            assert request.method == "GET" and request.url.path.endswith("/root/v2/user")
+            body = json.dumps(payload).encode()
+            headers = {"X-RateLimit-Session-Remaining": "119", "Content-Type": "application/json"}
+            if compressed:
+                body = gzip.compress(body)
+                headers["Content-Encoding"] = "gzip"
+            return httpx.Response(200, content=body, headers=headers)
+
+        client = SaxoClient(auth, httpx.MockTransport(response))
+        try:
+            assert await client.request("GET", "/root/v2/user") == payload
+            assert client.rate_headers["x-ratelimit-session-remaining"] == "119"
+            assert client.waiters == 0
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_rest_compressed_response_still_enforces_decoded_size_limit(tmp_path):
+    async def scenario():
+        auth = oauth_fixture(tmp_path)
+        auth.tokens = {"access_token": "fixture-access", "expires_at": time.time() + 1200}
+        client = SaxoClient(
+            auth,
+            httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    content=gzip.compress(b"x" * (4 * 1024**2 + 1)),
+                    headers={"Content-Encoding": "gzip"},
+                )
+            ),
+        )
+        try:
+            with pytest.raises(ValueError, match="REST_RESPONSE_LIMIT"):
+                await client.request("GET", "/root/v2/user")
+            assert client.waiters == 0
+        finally:
+            await client.close()
 
     asyncio.run(scenario())
 

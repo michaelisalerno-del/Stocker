@@ -1,11 +1,13 @@
 """Saxo data and paper execution are independent, closed sets of capabilities."""
 
+from datetime import date
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Market = Literal["CL", "GC", "NG", "NQ", "SI"]
 MARKETS: tuple[Market, ...] = ("CL", "GC", "NG", "NQ", "SI")
@@ -98,6 +100,22 @@ class OptionApproval(Strict):
     fee_evidence: str = Field(min_length=10)
     # Actual cutoff comes from verified option-specific reference evidence, never this config.
     selection: Literal["NEAREST_FROZEN_MODEL_DELTA"] = "NEAREST_FROZEN_MODEL_DELTA"
+    # ExpiryDate is a date, not the model's expiry instant. Evidence is specific
+    # to this approved root and date; never infer it from exercise time.
+    expiry_instants: dict[str, AwareDatetime] = Field(default_factory=dict)
+    expiry_time_evidence: str | None = Field(default=None, min_length=10)
+
+    @model_validator(mode="after")
+    def expiry_evidence(self) -> "OptionApproval":
+        if self.expiry_instants and not self.expiry_time_evidence:
+            raise ValueError("OPTION_EXPIRY_INSTANT_EVIDENCE_REQUIRED")
+        for day, instant in self.expiry_instants.items():
+            if (
+                date.fromisoformat(day).isoformat() != day
+                or instant.astimezone(ZoneInfo("America/New_York")).date().isoformat() != day
+            ):
+                raise ValueError("OPTION_EXPIRY_INSTANT_DATE_MISMATCH")
+        return self
 
 
 class FuturesConfig(Strict):
@@ -110,6 +128,8 @@ class FuturesConfig(Strict):
     mappings: dict[Market, OptionApproval] = Field(default_factory=dict)
     reference_selections_file: Path | None = None
     recorder: RecorderConfig = Field(default_factory=RecorderConfig)
+    option_subscription_budget: int = Field(default=16, ge=4, le=16)
+    option_candidate_window: int = Field(default=3, ge=1, le=3)
     refresh_rate_ms: Literal[1000] = 1000
     quote_max_age_seconds: Literal[5] = 5
     entry_deadline_seconds: Literal[20] = 20

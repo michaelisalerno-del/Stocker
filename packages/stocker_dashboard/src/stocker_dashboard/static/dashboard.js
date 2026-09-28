@@ -75,6 +75,18 @@ for (const m of markets) {
  <pre id="details-${m}"></pre></details>`;
   $("markets").append(card);
   if (route === "markets") {
+    const optionPanel = document.createElement("section");
+    optionPanel.className = "book-flow option-context";
+    optionPanel.id = `option-context-${m}`;
+    optionPanel.innerHTML = `<h3>Option context</h3>
+      <p id="option-identity-${m}"></p><p id="option-deadline-${m}"></p>
+      <p id="option-quote-${m}"></p><p id="option-analytics-${m}"></p>
+      <p id="option-volume-${m}"></p><p id="option-underlying-${m}"></p>
+      <p id="option-cost-${m}"></p><p id="option-coverage-${m}"></p>
+      <details><summary>Greeks, assumptions and contract history</summary>
+      <p>Provider analytics are unverified context. Chain indications and latest trades are not executable prices.</p>
+      <pre id="option-meta-${m}"></pre></details>`;
+    card.insertBefore(optionPanel, card.querySelector("details"));
     const panel = document.createElement("section");
     panel.className = "book-flow";
     panel.id = `book-flow-${m}`;
@@ -87,11 +99,35 @@ for (const m of markets) {
       <p id="flow-mid-${m}"></p><p id="flow-changes-${m}"></p><p id="flow-persistence-${m}"></p>
       <p id="flow-last-${m}"></p><p id="flow-volume-${m}"></p>
       <details id="flow-detail-${m}"><summary>Coverage, fields and observation times</summary><pre id="flow-meta-${m}"></pre></details>`;
-    card.insertBefore(panel, card.querySelector("details"));
+    card.insertBefore(panel, optionPanel);
     panel.append(card.querySelector(".depth"));
   }
 }
 const numeric = (v, suffix = "") => typeof v === "number" && Number.isFinite(v) ? `${Number(v.toFixed(4))}${suffix}` : "UNAVAILABLE";
+function optionContext(m) {
+  if (route !== "markets") return;
+  const context = m.option_context || {}, contracts = context.contracts || [];
+  const held = m.trades?.[0], event = context.latest_event;
+  const eventUic = event?.context?.identity?.uic;
+  const uic = held?.option?.uic || (contracts.some(c => c.identity?.uic === eventUic) ? eventUic : context.candidate_uic);
+  const o = contracts.find(c => c.identity?.uic === uic), id = o?.identity || {};
+  const q = o?.quote || {}, cost = o?.costs || {};
+  const obs = (name, rows) => {
+    const r = rows?.[name];
+    return r ? `${numeric(r.value)} · ${r.status} · age ${Math.floor(r.age_seconds)}s · effective ${r.effective_at || "unknown"}` : "MISSING";
+  };
+  const analytics = {...(o?.chain_analytics || {}), ...(o?.analytics || {})};
+  text(`option-identity-${m.market}`, o ? `${held ? "Owned contract" : uic === eventUic ? "Event-selected contract" : "Current candidate"}: ${id.symbol || id.uic} · ${id.right} ${id.strike} · UIC ${id.uic} · underlying ${id.underlying_symbol || "unknown"} / ${id.underlying_uic}` : `No selected contract · ${context.problem || "UNAVAILABLE"}`);
+  text(`option-deadline-${m.market}`, `Expiry ${id.expiry || "unknown"} · last trading ${id.last_trade_at || "UNVERIFIED"} · strategy exit ${held?.exit_at || (uic === eventUic && event?.context?.strategy_exit_at) || "set by event + 60 minutes"}`);
+  text(`option-quote-${m.market}`, `Regular quote ${o?.quote_status || "MISSING"} · bid ${numeric(q.Bid)} × ${numeric(o?.sizes?.Bid)} (${q.PriceTypeBid || "unknown"}) · ask ${numeric(q.Ask)} × ${numeric(o?.sizes?.Ask)} (${q.PriceTypeAsk || "unknown"}) · spread ${numeric(typeof q.Ask === "number" && typeof q.Bid === "number" ? q.Ask-q.Bid : null)} · delay ${q.DelayedByMinutes ?? "unknown"} min`);
+  text(`option-analytics-${m.market}`, `Provider delta ${obs("Greeks.Delta", analytics)} · IV ${obs(analytics["Greeks.MidVolatility"] ? "Greeks.MidVolatility" : "Greeks.MidVol", analytics)} · provider units / scaling unverified`);
+  text(`option-volume-${m.market}`, `Option volume ${obs("PriceInfoDetails.Volume", analytics)} · OI ${obs("InstrumentPriceDetails.OpenInterest", analytics)}`);
+  text(`option-underlying-${m.market}`, `Future volume ${obs("PriceInfoDetails.Volume", m.underlying_context)} · OI ${obs("InstrumentPriceDetails.OpenInterest", m.underlying_context)}`);
+  text(`option-cost-${m.market}`, `Minimum purchase ${numeric(cost.minimum_purchase_cost_gbp, " GBP")} · entry fees ${numeric(cost.entry_costs_gbp)} · estimated exit ${numeric(cost.estimated_exit_costs_gbp)} · budget total ${numeric(cost.total_gbp)} / £10 · remaining ${numeric(cost.remaining_budget_gbp)} · ${cost.reason || cost.budget_result || "UNVERIFIED"}`);
+  text(`option-coverage-${m.market}`, `Actual current option buffer ${Math.floor(o?.coverage_seconds || 0)} / 900s · subscription started ${o?.subscription_started_at ? new Date(o.subscription_started_at*1000).toISOString() : "unknown"} · latest event ${event?.id || "none"}: UIC ${event?.context?.identity?.uic || "unavailable"}, actual pre-trigger ${event ? Math.floor(event.context.pre_trigger_seconds || 0) + " / 900s" : "unavailable"}`);
+  text(`option-meta-${m.market}`, JSON.stringify(context, null, 2));
+  text(`option-quote-${m.market}`, $(`option-quote-${m.market}`).textContent + ` · bid size ${o?.size_status?.Bid || "UNVERIFIED"} · ask size ${o?.size_status?.Ask || "UNVERIFIED"}`);
+}
 function bookFlow(m, f, rec = {}, identity = {}) {
   if (route !== "markets") return;
   flowExpiry.set(m, (f.valid_until || 0) * 1000);
@@ -251,6 +287,7 @@ function render(d) {
     text(`l1-${m.market}`, `L1 ${display(m.l1?.status || "DISCONNECTED")}`);
     depth(m.market, m.l2 || { status: "DISABLED" });
     bookFlow(m.market, m.book_flow || {}, rec, m.identity || {environment:s.data_environment});
+    optionContext(m);
     text(`direction-${m.market}`, m.direction);
     text(
       `conditions-${m.market}`,
@@ -308,7 +345,7 @@ function render(d) {
   text("api-external", "Session upgrade is explicit; it can downgrade another Saxo application");
   text("api-depth", `${d.markets.filter(m => m.l2?.status === "L2_AVAILABLE").length} / 5 markets with received depth`);
   text("api-assignments", "CL · GC · NG · NQ · SI · independent server subscriptions");
-  text("api-options", `${d.markets.reduce((n,m) => n + (m.option?.quotes?.length || 0),0)} / 16 regular option quote subscriptions`);
+  text("api-options", `${d.markets.reduce((n,m) => n + (m.option?.quotes?.length || 0),0)} / ${a.option_budget || 16} regular option quote subscriptions`);
   text("api-pacing", JSON.stringify(a.rate_limits || {}));
   text("api-queue", `${a.rest_queue ?? 0} / 32 queued REST requests`);
   text(

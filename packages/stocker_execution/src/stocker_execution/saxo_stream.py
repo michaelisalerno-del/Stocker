@@ -7,6 +7,7 @@ import struct
 from collections import OrderedDict, deque
 from typing import Any
 
+from stocker_execution import option_context
 from stocker_execution.book_flow import FIELDS
 
 
@@ -69,6 +70,8 @@ class Frames:
 class PriceState:
     def __init__(self) -> None:
         self.value: dict[str, Any] | None = None
+        self.analytics: dict[str, Any] = {}
+        self.subscription_started_at: float | None = None
         self.seen: OrderedDict[str, bytes] = OrderedDict()
         self.last_message_id: str | None = None
         self.generation = ""
@@ -88,6 +91,8 @@ class PriceState:
 
     def snapshot(self, value: dict[str, Any], generation: str, at: float) -> None:
         self.value = merge({}, value)
+        self.subscription_started_at = at
+        self.analytics = option_context.fields(value, at, "REGULAR_PRICE")
         self.generation = generation
         self.seen.clear()
         self.quote_times.clear()
@@ -151,11 +156,13 @@ class PriceState:
                         self.field_changes[group + "." + field] = at
                         self.last_field_change = at
         self.value = merged
+        self.analytics.update(option_context.fields(value, at, "REGULAR_PRICE"))
         self.touch(value, at)
         return True
 
     def gap(self, reason: str) -> None:
         self.value = None
+        self.analytics.clear()
         self.receipt = self.depth_receipt = self.size_receipt = None
         self.quote_times.clear()
         self.size_times.clear()
@@ -172,6 +179,9 @@ class PriceState:
     def observation_context(self) -> dict[str, Any]:
         return {
             "subscription_id": self.generation,
+            "subscription_started_at": self.subscription_started_at,
+            # Values are already present in the delivered message/checkpoint.
+            "analytics_receipts": {k: v["received_at"] for k, v in self.analytics.items()},
             "granted_refresh_ms": self.refresh_ms,
             "observed_receipt_ms": {
                 "samples": len(self.intervals),
@@ -243,6 +253,8 @@ class PriceState:
 def merge_board(previous: Any, update: Any) -> Any:
     """Option-board Expiries/Strikes are keyed by Index; price arrays are replacements."""
     if not isinstance(update, dict):
+        return copy.deepcopy(update)
+    if "Uic" in update and isinstance(previous, dict) and previous.get("Uic") != update["Uic"]:
         return copy.deepcopy(update)
     result = copy.deepcopy(previous) if isinstance(previous, dict) else {}
     for name, value in update.items():

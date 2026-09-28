@@ -1,7 +1,6 @@
 """Generated/sanitised Saxo fixtures: no network, broker authentication or orders."""
 
 import asyncio
-import json
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,7 +13,7 @@ from stocker_dashboard.app import create_dashboard_app
 from stocker_execution.broker import PaperBroker
 from stocker_execution.config import FuturesConfig
 from stocker_execution.contracts import key
-from stocker_execution.recorder import Recorder
+from stocker_execution.recorder import Recorder, read_row
 from stocker_execution.runtime import Runtime
 from stocker_execution.saxo_client import SaxoError
 from stocker_execution.saxo_data import DataService, completed_bars
@@ -216,7 +215,7 @@ def test_session_downgrade_reset_and_provider_envelopes(tmp_path):
             "payload": {"Timestamp": "fixture-provider-time", "Data": {"Quote": {"Ask": 72}}},
         }
         await data.receive(msg)
-        row = json.loads(data.recorder.windows[key(FUTURE)].rows[-1][1])
+        row = read_row(data.recorder.windows[key(FUTURE)].rows[-1][1])
         assert row["provider_message"] == msg
         with pytest.raises(ValueError, match="FRESH_SNAPSHOT"):
             await data.receive(
@@ -488,7 +487,7 @@ def test_pending_snapshot_keeps_original_message_receipt(tmp_path):
         for queued in pending:
             await data.receive(queued["message"], queued["receipt"])
         assert data.markets["CL"].price.receipt == arrived
-        recorded = json.loads(data.recorder.windows[key(FUTURE)].rows[-1][1])
+        recorded = read_row(data.recorder.windows[key(FUTURE)].rows[-1][1])
         assert recorded["receipt"] == arrived
         assert data.markets["CL"].price.depth(time.time())["status"] != "L2_AVAILABLE"
         store.db.close()

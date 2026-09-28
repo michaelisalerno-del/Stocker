@@ -17,7 +17,6 @@ from stocker_execution.contracts import (
     utc,
     verified_cutoff,
 )
-from stocker_execution.rules import NY, model_delta
 from stocker_execution.saxo_data import DataService, MarketState
 from stocker_execution.store import TERMINAL, Store, encode
 
@@ -86,61 +85,40 @@ class PaperBroker:
             raise ValueError("LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED")
         if state.identity is None or state.option_root != mapping.option_root_id:
             raise ValueError("OPTION_ROOT_NOT_VERIFIED")
-        at, exit_at = utc(event["signal_at"]), utc(event["exit_at"])
-        candidates = []
-        for selected in state.option_space:
-            if selected.get("PutCall") != ("Call" if event["right"] == "C" else "Put"):
-                continue
-            expiry_text = str(selected.get("Expiry", ""))
-            if expiry_text[:10] != at.astimezone(NY).date().isoformat():
-                continue
-            # Date-only expiry is insufficient for a model using time-to-expiry.
-            if "T" not in expiry_text or utc(expiry_text).time().isoformat() == "00:00:00":
-                continue
-            expiry = utc(expiry_text)
-            delta = model_delta(
-                inputs["futures_price"],
-                float(selected["StrikePrice"]),
-                inputs["rv15"],
-                at,
-                expiry,
-                str(event["right"]),
-            )
-            candidates.append(
-                (
-                    abs(delta - float(event["target_delta"])),
-                    float(selected["StrikePrice"]),
-                    selected,
-                )
-            )
-        if not candidates:
-            raise ValueError("NO_VERIFIED_REAL_0DTE_EXPIRY_TIME")
-        distance, _, selected = min(candidates, key=lambda x: (x[0], x[1]))
-        if distance > mapping.delta_tolerance:
-            raise ValueError("FROZEN_DELTA_OUTSIDE_APPROVED_TOLERANCE")
-        option = await self.data.option_subscribe(state, selected)
-        self.data.recorder.attach(str(event["id"]), key(option), time.time())
+        option, distance = await self.select_option(event, state, inputs)
+        exit_at = utc(event["exit_at"])
         cutoff = verified_cutoff(option, exit_at)
-        price = self.data.options[option["uic"]][1]
-        q = executable_quote(option, price.value or {}, price.receipt, now())
-        fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, now())
-        if option["currency"] != "USD":
-            raise ValueError("CURRENCY_CONVERSION_PAIR_UNVERIFIED")
-        # Buy at ask + one tick internally; broker limit is the same conservative ceiling.
-        limit = (math.ceil(float(q["Ask"]) / option["tick_size"]) + 1) * option["tick_size"]
-        plan = budget(option, limit, mapping.fee_per_side_gbp * 2, 1 / float(fx["Bid"]))
+        context = self.data.option_view(option["uic"], time.time())
+        plan: dict[str, Any] = context["costs"]
+        if plan["budget_result"] != "WITHIN_BUDGET":
+            raise ValueError(plan.get("reason", plan["budget_result"]))
         plan.update(
+            option=option,
             cutoff=cutoff.isoformat(),
             exit_at=event["exit_at"],
-            quote_at=price.receipt,
-            fx_at=self.data.fx.receipt,
-            fee_per_side_gbp=mapping.fee_per_side_gbp,
-            fee_evidence=mapping.fee_evidence,
+            fee_evidence=self.data.option_references[option["uic"]]["version"],
             delta_distance=distance,
             underlying=state.identity,
             simulated=self.config.execution_mode == "INTERNAL_PAPER",
         )
         return plan
+
+    async def select_option(
+        self, event: dict[str, Any], state: MarketState, inputs: dict[str, float]
+    ) -> tuple[dict[str, Any], float]:
+        # One event pins one UIC, even if the running candidate later changes.
+        if event.get("selected_option"):
+            selected = event["selected_option"]
+            return selected, float(event["delta_distance"])
+        distance, _, selected = self.data.rank_candidates(state, event, inputs)[0]
+        option = await self.data.option_subscribe(state, selected)
+        event.update(selected_option=option, delta_distance=distance)
+        self.data.option_required_at[option["uic"]] = max(
+            self.data.option_required_at.get(option["uic"], 0),
+            utc(event["signal_at"]).timestamp() + 3600,
+        )
+        self.data.recorder.attach(str(event["id"]), key(option), time.time())
+        return option, distance
 
     def validate_order(self, plan: dict[str, Any], role: str, identity: str) -> None:
         option = plan["option"]

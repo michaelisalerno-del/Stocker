@@ -5,6 +5,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from stocker_execution.config import MARKETS, Environment
 
@@ -19,6 +20,8 @@ def utc(value: str) -> datetime:
 
 
 def positive(value: Any, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError("INVALID_" + name)
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -32,7 +35,7 @@ def future_identity(market: str, environment: Environment, raw: dict[str, Any]) 
     if market not in MARKETS or raw.get("AssetType") != "ContractFutures":
         raise ValueError("ONLY_APPROVED_LISTED_FUTURES")
     symbol = str(raw.get("Symbol", ""))
-    match = re.fullmatch(market + r"([FGHJKMNQUVXZ])([0-9]{1,4}):[A-Za-z0-9_-]+", symbol)
+    match = re.fullmatch(market + r"([FGHJKMNQUVXZ])([0-9]{1,4})(?::[A-Za-z0-9_-]+)?", symbol)
     if not match:
         raise ValueError("STANDARD_FUTURE_FAMILY_NOT_VERIFIED")
     multiplier = positive(raw.get("ContractSize"), "CONTRACT_MULTIPLIER")
@@ -70,6 +73,7 @@ def future_identity(market: str, environment: Environment, raw: dict[str, Any]) 
         "tick_value": tick * factor,
         "multiplier": multiplier,
         "price_factor": factor,
+        "notice_date": raw.get("NoticeDate"),
     }
 
 
@@ -105,6 +109,8 @@ def option_identity(
         raise ValueError("OPTION_RIGHT_MISMATCH")
     if raw.get("StrikePrice") != space.get("StrikePrice"):
         raise ValueError("OPTION_STRIKE_MISMATCH")
+    if space.get("Expiry") and str(raw.get("ExpiryDate", ""))[:10] != str(space["Expiry"])[:10]:
+        raise ValueError("OPTION_EXPIRY_MISMATCH")
     return {
         "provider": "SAXO",
         "environment": future["environment"],
@@ -112,6 +118,7 @@ def option_identity(
         "asset_type": "FuturesOption",
         "uic": raw["Uic"],
         "underlying_uic": future["uic"],
+        "underlying_symbol": future.get("symbol"),
         "option_root_id": root,
         "symbol": raw.get("Symbol"),
         "right": right,
@@ -127,6 +134,11 @@ def option_identity(
         "lot_size": positive(raw.get("LotSize"), "LOT_SIZE"),
         "amount_decimals": raw.get("AmountDecimals"),
         "exercise_cutoff": raw.get("ExerciseCutOffTime"),
+        "last_trade_at": space.get("LastTradeDate"),
+        "settlement_style": raw.get("SettlementStyle"),
+        "exercise_style": space.get("ExerciseStyle"),
+        "notice_date": raw.get("NoticeDate"),
+        "tick_size_scheme": raw.get("TickSizeScheme", space.get("TickSizeScheme")),
         "trading_sessions": raw.get("TradingSessions"),
         "is_tradable": raw.get("IsTradable"),
     }
@@ -153,6 +165,8 @@ def quote_check(value: dict[str, Any], receipt: float | None, at: datetime) -> d
 def executable_quote(
     option: dict[str, Any], value: dict[str, Any], receipt: float | None, at: datetime
 ) -> dict[str, Any]:
+    if value.get("price_source") == "OPTIONS_CHAIN":
+        raise ValueError("CHAIN_PRICE_NOT_EXECUTABLE")
     quote = quote_check(value, receipt, at)
     if option.get("is_tradable") is not True:
         raise ValueError("OPTION_TRADING_PERMISSION_UNVERIFIED")
@@ -166,6 +180,155 @@ def executable_quote(
     return quote
 
 
+def nonnegative(value: Any, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError("INVALID_" + name)
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("MISSING_" + name) from None
+    if not math.isfinite(result) or result < 0:
+        raise ValueError("INVALID_" + name)
+    return result
+
+
+def cost_estimate(
+    option: dict[str, Any], ask: float, conditions: dict[str, Any], native_to_gbp: float
+) -> dict[str, Any]:
+    """One whole contract, entry plus separately reserved exit costs, as before.
+
+    Fixed/per-lot commissions are supported. Ambiguous tiers, percentage fees,
+    taxes or conversion markup require verified conventions, never a zero fill.
+    Returned totals/price commissions are not added to these component costs.
+    """
+    if conditions.get("AssetType") != "FuturesOption" or conditions.get("Uic") != option["uic"]:
+        raise ValueError("CONTRACT_OPTION_COST_IDENTITY_UNVERIFIED")
+    if conditions.get("InstrumentCurrency") != option["currency"]:
+        raise ValueError("CONTRACT_OPTION_COST_CURRENCY_MISMATCH")
+    if conditions.get("IsTradable") is False:
+        raise ValueError("CONTRACT_OPTION_TRADING_NOT_ALLOWED")
+    if option["minimum_quantity"] != 1 or option["lot_size"] != 1 or option["amount_decimals"] != 0:
+        raise ValueError("ONE_WHOLE_CONTRACT_NOT_EXECUTABLE")
+    if option.get("tick_size_scheme"):
+        raise ValueError("VARIABLE_TICK_SCHEME_REQUIRES_VERIFIED_PRICE_TIER")
+    rate = positive(native_to_gbp, "GBP_CONVERSION")
+
+    def convert(amount: float, currency: Any) -> float:
+        if currency == "GBP":
+            return amount
+        if currency == option["currency"]:
+            return amount * rate
+        raise ValueError("FEE_CURRENCY_CONVERSION_UNVERIFIED")
+
+    for name in ("Taxes", "ScheduledContractOptionTradingConditions", "HoldingFee", "CarryingCost"):
+        if conditions.get(name):
+            raise ValueError("CONTRACT_OPTION_COST_RULE_UNVERIFIED_" + name.upper())
+    conversion = conditions.get("CurrencyConversion") or {}
+    if conditions.get("AccountCurrency") != option["currency"] and conversion.get("Markup") != 0:
+        raise ValueError("BROKER_FX_MARKUP_UNVERIFIED")
+    limits = [
+        r for r in conditions.get("CommissionLimits", []) if r.get("OrderAction") == "ExecuteOrder"
+    ]
+    if len(limits) != 1:
+        raise ValueError("COMMISSION_SCHEDULE_MISSING_OR_AMBIGUOUS")
+    rule = limits[0]
+    if any(
+        rule.get(k) is not None
+        for k in (
+            "MinAmount",
+            "MaxAmount",
+            "MinNumberOfContracts",
+            "MaxNumberOfContracts",
+            "MinPrice",
+            "MaxPrice",
+            "RateOnAmount",
+            "SpreadMarkup",
+            "SpreadRate",
+            "MinSpread",
+        )
+    ):
+        raise ValueError("COMMISSION_TIER_OR_SCALING_UNVERIFIED")
+    if "PerUnitRate" not in rule and "BaseCommission" not in rule:
+        raise ValueError("COMMISSION_VALUE_MISSING")
+    fee = sum(
+        nonnegative(rule[k], "COMMISSION") for k in ("PerUnitRate", "BaseCommission") if k in rule
+    )
+    if "MinCommission" in rule:
+        fee = max(fee, nonnegative(rule["MinCommission"], "MIN_COMMISSION"))
+    if "MaxCommission" in rule:
+        fee = min(fee, nonnegative(rule["MaxCommission"], "MAX_COMMISSION"))
+    entry = convert(fee, rule.get("Currency"))
+    # Schema says these rules are returned if exchange fees apply separately.
+    for exchange in conditions.get("ExchangeFeeRules", []):
+        if exchange.get("OrderAction") != "ExecuteOrder":
+            continue
+        if exchange.get("Type") not in {"Absolute", "PerAction", "PerLot"}:
+            raise ValueError("EXCHANGE_FEE_SCALING_UNVERIFIED")
+        fee = nonnegative(exchange.get("Value"), "EXCHANGE_FEE")
+        if "Minimum" in exchange:
+            fee = max(fee, nonnegative(exchange["Minimum"], "EXCHANGE_MINIMUM"))
+        if "Maximum" in exchange:
+            fee = min(fee, nonnegative(exchange["Maximum"], "EXCHANGE_MAXIMUM"))
+        entry += convert(fee, exchange.get("Currency"))
+    premium = (
+        Decimal(str(positive(ask, "ASK")))
+        * Decimal(str(positive(option["price_factor"], "PRICE_FACTOR")))
+        * Decimal(str(rate))
+    )
+    total = premium + Decimal(str(entry)) * 2
+    pennies = int((total * 100).to_integral_value(rounding=ROUND_CEILING))
+    return {
+        "quantity": 1,
+        "premium_gbp": float(premium),
+        "entry_costs_gbp": entry,
+        "estimated_exit_costs_gbp": entry,
+        "fees_gbp": entry * 2,
+        "minimum_purchase_cost_gbp": float(premium) + entry,
+        "total_gbp": pennies / 100,
+        "remaining_budget_gbp": (1000 - pennies) / 100,
+        "cash_pennies": pennies,
+        "budget_gbp": 10,
+        "budget_result": "WITHIN_BUDGET"
+        if pennies <= 1000
+        else "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET",
+        "basis": "ESTIMATE_NOT_BOOKED_CHARGES",
+        "policy": "PREMIUM_PLUS_ENTRY_AND_RESERVED_EXIT",
+        "fee_per_side_gbp": entry,
+        "currency": option["currency"],
+        "multiplier": option["price_factor"],
+        "price_unit_factor": 1,
+        "option": option,
+        "limit": ask,
+        "fx": rate,
+    }
+
+
+def deadline_instant(value: Any, day: str, zone: str | None = None) -> str | None:
+    """Accept a dated offset, or a local clock with an explicitly supplied IANA zone.
+
+    Ambiguous/nonexistent DST times and sentinel dates remain unknown.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        if "T" in value:
+            parsed = utc(value)
+            return parsed.isoformat() if parsed.year > 2000 else None
+        if not zone:
+            return None
+        local = datetime.fromisoformat(day + "T" + value)
+        tz = ZoneInfo(zone)
+        first, second = local.replace(tzinfo=tz, fold=0), local.replace(tzinfo=tz, fold=1)
+        if (
+            first.utcoffset() != second.utcoffset()
+            or first.astimezone(UTC).astimezone(tz).replace(tzinfo=None) != local
+        ):
+            return None
+        return first.astimezone(UTC).isoformat()
+    except (ValueError, ZoneInfoNotFoundError):
+        return None
+
+
 def budget(
     option: dict[str, Any], ask: float, fee_gbp: float, native_to_gbp: float
 ) -> dict[str, Any]:
@@ -174,7 +337,10 @@ def budget(
     if option["minimum_quantity"] != 1 or option["lot_size"] != 1 or option["amount_decimals"] != 0:
         raise ValueError("ONE_WHOLE_CONTRACT_NOT_EXECUTABLE")
     values = [
-        positive(x, "BUDGET_INPUT") for x in (ask, fee_gbp, native_to_gbp, option["price_factor"])
+        positive(ask, "ASK"),
+        nonnegative(fee_gbp, "FEES"),
+        positive(native_to_gbp, "FX"),
+        positive(option["price_factor"], "PRICE_FACTOR"),
     ]
     premium = Decimal(str(values[0])) * Decimal(str(values[3])) * Decimal(str(values[2]))
     fees = Decimal(str(values[1]))
@@ -197,12 +363,14 @@ def budget(
 
 
 def verified_cutoff(option: dict[str, Any], exit_at: datetime) -> datetime:
-    # Saxo ExpiryDate often supplies a date, not an exercise/last-trade instant.
-    # Do not promote a date-at-midnight or future's expiry to a verified option cutoff.
-    expiry = str(option.get("expiry", ""))
-    if "T" not in expiry or utc(expiry).time().isoformat() == "00:00:00":
+    expiry_instant = deadline_instant(
+        option.get("expiry_instant"), str(option.get("expiry", ""))[:10]
+    )
+    if not expiry_instant:
         raise ValueError("OPTION_SPECIFIC_EXPIRY_TIME_UNVERIFIED")
-    expiry_at = utc(expiry)
+    last_trade = deadline_instant(option.get("last_trade_at"), str(option.get("expiry", ""))[:10])
+    if not last_trade:
+        raise ValueError("OPTION_LAST_TRADING_DEADLINE_UNVERIFIED")
     sessions = (option.get("trading_sessions") or {}).get("Sessions", [])
     ends = [
         utc(s["EndTime"])
@@ -212,7 +380,7 @@ def verified_cutoff(option: dict[str, Any], exit_at: datetime) -> datetime:
     ]
     if not ends:
         raise ValueError("OPTION_EXIT_SESSION_UNVERIFIED")
-    cutoff = min(expiry_at, max(ends))
+    cutoff = min(utc(last_trade), utc(expiry_instant), max(ends))
     if exit_at + timedelta(seconds=120) >= cutoff:
         raise ValueError("UNSUPPORTED_EXIT_BEFORE_CONTRACT_CUTOFF")
     return cutoff

@@ -11,6 +11,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
+from stocker_execution import option_context
 from stocker_execution.broker import PaperBroker, now
 from stocker_execution.config import RULE_VERSION, FuturesConfig
 from stocker_execution.contracts import key, quote_check, session_state
@@ -38,6 +39,7 @@ class Runtime:
         if data:
             self.recorder = data.recorder
         self.broker = PaperBroker(config, store, self.data)
+        self.data.owned_options = {json.loads(r["plan"])["option"]["uic"] for r in store.active()}
         self.markets = self.data.markets
         self.worker_health = self.manager_health = self.web_health = "STARTING"
         self.stopping = False
@@ -125,6 +127,9 @@ class Runtime:
             "market_data": {
                 "owned_lines": len(self.data.subscriptions),
                 "app_budget": 32,
+                "option_budget": self.config.option_subscription_budget,
+                "option_lines": len(self.data.options),
+                "candidate_window": self.config.option_candidate_window,
                 "rate_limits": self.data.client.rate_headers,
                 "rest_queue": self.data.client.waiters,
             },
@@ -143,6 +148,10 @@ class Runtime:
         active = self.store.active()
         recent = self.store.history(None, None, None)
         for market, state in self.markets.items():
+            last_event = next((row for row in recent if row["market"] == market), None)
+            event_context = (
+                json.loads(last_event["detail"]).get("option_context") if last_event else None
+            )
             reason = state.problem or state.history_problem
             if not reason and market not in self.config.mappings:
                 reason = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
@@ -213,6 +222,24 @@ class Runtime:
                     else {"status": "UNAVAILABLE"},
                     "recorder": recording,
                     "capabilities": self.data.capability_view(state),
+                    "underlying_context": option_context.view(state.price.analytics, time.time()),
+                    "option_context": {
+                        "latest_event": {
+                            "id": last_event["id"],
+                            "signal_at": last_event["signal_at"],
+                            "context": event_context,
+                        }
+                        if last_event and event_context
+                        else None,
+                        "candidate_uic": state.candidate_uic,
+                        "problem": state.candidate_problem,
+                        "candidate_changes": list(state.candidate_changes),
+                        "contracts": [
+                            self.data.option_view(uic, time.time())
+                            for uic, (i, _) in self.data.options.items()
+                            if i["market"] == market
+                        ],
+                    },
                     "option": {
                         "root": state.option_root,
                         "discovered": len(state.option_space),
@@ -282,6 +309,9 @@ class Runtime:
             "fees_gbp": plan["fees_gbp"],
             "total_gbp": plan["total_gbp"],
             "valuation": valuation,
+            "option_context": self.data.option_view(plan["option"]["uic"], time.time())
+            if plan["option"]["uic"] in self.data.options
+            else {"status": "UNAVAILABLE"},
             "basis": self.config.execution_mode,
         }
 
@@ -337,6 +367,32 @@ class Runtime:
                     key(state.identity), event, time.time(), option_keys
                 )
                 self.store.depth_capture(str(event["id"]), capture)
+                context: dict[str, Any] = {"selection_status": "NOT_SELECTED", "reason": reason}
+                if not reason:
+                    try:
+                        selected, _ = await self.broker.select_option(event, state, inputs)
+                        context = self.data.option_view(selected["uic"], time.time())
+                        context.update(
+                            selection_status="SELECTED",
+                            strategy_exit_at=event["exit_at"],
+                            pre_trigger_seconds=max(
+                                0,
+                                context["coverage_seconds"]
+                                - max(0, time.time() - clock.timestamp()),
+                            ),
+                        )
+                    except (ValueError, KeyError) as exc:
+                        context["reason"] = str(exc)
+                self.recorder.annotate(str(event["id"]), {"option_context": context})
+                with self.store.db:
+                    row = self.store.db.execute(
+                        "SELECT detail FROM signals WHERE id=?", (event["id"],)
+                    ).fetchone()
+                    detail = json.loads(row[0])
+                    detail["option_context"] = context
+                    self.store.db.execute(
+                        "UPDATE signals SET detail=? WHERE id=?", (json.dumps(detail), event["id"])
+                    )
                 if not reason:
                     reason = "ENTRIES_PAUSED" if self.pause else self.broker.entry_reason()
                 if not reason:
@@ -367,10 +423,13 @@ class Runtime:
                 )
             except Exception as exc:
                 self.report_failure("option-subscription-cleanup", exc)
+            if self.data.connected:
+                await self.data.refresh_option_metadata()
             for state in self.markets.values():
                 if self.data.connected and time.monotonic() - state.history_checked >= 60:
                     try:
                         await self.data.history(state)
+                        await self.data.warm_candidates(state)
                     except Exception as exc:
                         state.history_problem = "SAXO_HISTORY_UNAVAILABLE"
                         state.history_checked = time.monotonic()

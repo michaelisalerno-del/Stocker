@@ -2,22 +2,43 @@
 
 import asyncio
 import json
+import math
 import secrets
 import time
+from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import quote as path_quote
 from urllib.parse import urlencode
 
 from websockets.asyncio.client import connect
 
+from stocker_execution import option_context
 from stocker_execution.bar_cache import BarCache
 from stocker_execution.config import MARKETS, FuturesConfig, Market
-from stocker_execution.contracts import future_identity, key, option_identity, quote_check, utc
+from stocker_execution.contracts import (
+    cost_estimate,
+    deadline_instant,
+    executable_quote,
+    future_identity,
+    key,
+    option_identity,
+    quote_check,
+    utc,
+)
 from stocker_execution.recorder import Recorder
 from stocker_execution.reference_sessions import load_selections
-from stocker_execution.rules import NY, Bar, reference_summary
+from stocker_execution.rules import (
+    NY,
+    Bar,
+    model_delta,
+    next_clock,
+    opportunity,
+    prior_rv,
+    reference_summary,
+)
 from stocker_execution.saxo_client import SaxoClient, SaxoError
 from stocker_execution.saxo_stream import Frames, PriceState, merge, merge_board
 
@@ -50,6 +71,9 @@ class MarketState:
     live_since: datetime | None = None
     history_checked: float = 0
     reference_day: str = ""
+    candidate_uic: int | None = None
+    candidate_problem: str = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
+    candidate_changes: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=32))
 
 
 def completed_bars(raw: dict[str, Any], at: datetime) -> list[Bar]:
@@ -85,6 +109,9 @@ class DataService:
         self.subscriptions: dict[str, dict[str, Any]] = {}
         self.options: dict[int, tuple[dict[str, Any], PriceState]] = {}
         self.option_required_at: dict[int, float] = {}
+        self.option_references: dict[int, dict[str, Any]] = {}
+        self.owned_options: set[int] = set()
+        self.disabled_targets: set[tuple[str, str]] = set()
         self.session: dict[str, Any] = {}
         self.fx = PriceState()
         self.fx_uic: int | None = None
@@ -141,6 +168,7 @@ class DataService:
             }
             for row in result.get("Data", [])[:100]
             if row.get("AssetType") == "ContractFutures"
+            and str(row.get("Symbol", "")).startswith(state.market)
         ]
         state.capabilities["discovery"] = "AVAILABLE" if state.candidates else "NO_LISTED_FUTURES"
         selection = self.config.contracts.get(state.market)
@@ -166,6 +194,14 @@ class DataService:
             "trading_status": raw.get("TradingStatus"),
         }
         self.recorder.register(key(identity), identity)
+        self.recorder.metadata_version(
+            key(identity),
+            {
+                "identity": identity,
+                "reference": self.safe_reference(raw),
+            },
+            time.time(),
+        )
         roots = [
             r["OptionRootId"]
             for r in raw.get("RelatedOptionRootsEnhanced", [])
@@ -192,6 +228,8 @@ class DataService:
                     **option,
                     "Expiry": expiry.get("Expiry"),
                     "LastTradeDate": expiry.get("LastTradeDate"),
+                    "ExerciseStyle": space.get("ExerciseStyle"),
+                    "TickSizeScheme": expiry.get("TickSizeScheme"),
                 }
                 for expiry in space.get("OptionSpace", [])
                 for option in expiry.get("SpecificOptions", [])
@@ -212,6 +250,8 @@ class DataService:
         old: str | None = None,
     ) -> str:
         async with self.subscribe_lock:
+            if (kind, target) in self.disabled_targets:
+                raise SaxoError("SUBSCRIPTION_PERMANENTLY_DISABLED")
             existing = next(
                 (
                     (ref, s)
@@ -290,6 +330,7 @@ class DataService:
             self.session = snapshot or {}
         else:
             self.markets[target].option_board = snapshot or {}
+            self.record_board(self.markets[target], snapshot or {}, time.time())
         pending = self.pending.pop(ref, [])
         self.pending_bytes -= sum(len(json.dumps(m)) for m in pending)
         for message in pending:
@@ -316,44 +357,437 @@ class DataService:
     ) -> dict[str, Any]:
         assert state.identity is not None and state.option_root is not None
         uic = selected["Uic"]
-        self.option_required_at[uic] = time.time()
         if uic in self.options and any(
             s["target"] == str(uic) for s in self.subscriptions.values()
         ):
+            self.option_required_at[uic] = max(self.option_required_at.get(uic, 0), time.time())
             return self.options[uic][0]
-        if uic not in self.options and len(self.options) >= 16:
-            raise SaxoError("OPTION_SUBSCRIPTION_CAPACITY")
+        if uic not in self.options and len(self.options) >= self.config.option_subscription_budget:
+            retired = next(
+                (
+                    k
+                    for k, (i, _) in self.options.items()
+                    if k not in self.owned_options
+                    and self.option_required_at.get(k, 0) <= time.time()
+                    and not any(key(i) in c["instruments"] for c in self.recorder.active.values())
+                ),
+                None,
+            )
+            if retired is None:
+                raise SaxoError("OPTION_SUBSCRIPTION_CAPACITY")
+            await self.unsubscribe_option(retired)
         raw = await self.client.request(
             "GET",
             f"/ref/v1/instruments/details/{uic}/FuturesOption",
             params={"AccountKey": self.client.oauth.account_key, "FieldGroups": "TradingSessions"},
         )
-        identity = option_identity(state.identity, raw, state.option_root, selected)
-        self.options[uic] = (identity, PriceState())
-        self.recorder.register(key(identity), identity)
         try:
-            await self.subscribe(
-                "PRICE",
-                {
-                    "Uic": uic,
-                    "AssetType": "FuturesOption",
-                    "Amount": 1,
-                    "AccountKey": self.client.oauth.account_key,
-                    "ToOpenClose": "ToOpen",
-                    "FieldGroups": [
-                        "Quote",
-                        "PriceInfoDetails",
-                        "Greeks",
-                        "Commissions",
-                        "InstrumentPriceDetails",
-                    ],
-                },
-                str(uic),
-            )
+            identity = option_identity(state.identity, raw, state.option_root, selected)
+        except (TypeError, AttributeError) as exc:
+            raise SaxoError("OPTION_REFERENCE_SCHEMA_UNVERIFIED") from exc
+        mapping = self.config.mappings.get(state.market)
+        expiry_instant = (
+            mapping.expiry_instants.get(str(identity["expiry"])[:10]) if mapping else None
+        )
+        identity["expiry_instant"] = expiry_instant.isoformat() if expiry_instant else None
+        identity["expiry_time_evidence"] = mapping.expiry_time_evidence if mapping else None
+        identity["exercise_at"] = deadline_instant(
+            identity.get("exercise_cutoff"), str(identity["expiry"])[:10]
+        )
+        self.recorder.register(key(identity), identity)
+        self.options[uic] = (identity, PriceState())
+        self.option_required_at[uic] = max(self.option_required_at.get(uic, 0), time.time())
+        try:
+            await self.option_conditions(identity, raw)
+            arguments = {
+                "Uic": uic,
+                "AssetType": "FuturesOption",
+                "Amount": 1,
+                "AccountKey": self.client.oauth.account_key,
+                "ToOpenClose": "ToOpen",
+                "FieldGroups": [
+                    "Quote",
+                    "PriceInfoDetails",
+                    "Greeks",
+                    "Commissions",
+                    "InstrumentPriceDetails",
+                ],
+            }
+            try:
+                await self.subscribe("PRICE", arguments, str(uic))
+            except SaxoError as exc:
+                if str(exc) not in {"InvalidRequest", "InvalidModelState", "HTTP_400", "NoAccess"}:
+                    raise
+                arguments["FieldGroups"] = ["Quote", "PriceInfoDetails", "InstrumentPriceDetails"]
+                await self.subscribe("PRICE", arguments, str(uic))
         except Exception:
             self.options.pop(uic, None)
+            self.option_required_at.pop(uic, None)
+            self.option_references.pop(uic, None)
             raise
         return identity
+
+    @staticmethod
+    def safe_reference(raw: dict[str, Any]) -> dict[str, Any]:
+        return {
+            k: raw[k]
+            for k in (
+                "Uic",
+                "AssetType",
+                "Symbol",
+                "Exchange",
+                "ContractSize",
+                "LotSize",
+                "LotSizeType",
+                "MinimumTradeSize",
+                "AmountDecimals",
+                "PriceToContractFactor",
+                "CurrencyCode",
+                "PriceCurrency",
+                "TickSize",
+                "TickSizeLimitOrder",
+                "TickSizeScheme",
+                "ExpiryDate",
+                "NoticeDate",
+                "TradingSessions",
+                "ExerciseCutOffTime",
+                "SettlementStyle",
+                "PutCall",
+                "StrikePrice",
+                "UnderlyingAssetType",
+                "IsTradable",
+                "TradingStatus",
+            )
+            if k in raw
+        }
+
+    async def option_conditions(self, identity: dict[str, Any], raw: dict[str, Any]) -> None:
+        uic, at = identity["uic"], time.time()
+        prior = self.option_references.get(uic)
+        if prior and 0 <= at - prior["received_at"] < 900:
+            return
+        entry: dict[str, Any] = {
+            "received_at": at,
+            "reference": self.safe_reference(raw),
+            "identity": dict(identity),
+            "conditions": {},
+            "problem": "",
+        }
+        try:
+            conditions = await self.client.request(
+                "GET",
+                "/cs/v1/tradingconditions/ContractOptionSpaces/"
+                + path_quote(self.client.oauth.account_key, safe="")
+                + f"/{identity['option_root_id']}",
+                params={"Uic": uic, "FieldGroups": "ScheduledTradingConditions"},
+            )
+            if conditions.get("Uic") != uic or conditions.get("AssetType") != "FuturesOption":
+                raise ValueError("CONTRACT_OPTION_COST_IDENTITY_UNVERIFIED")
+            entry["conditions"] = conditions
+            # ExpirationTime is explicitly last trading time, not option expiry instant.
+            last_trade = deadline_instant(
+                conditions.get("ExpirationTime"), str(identity["expiry"])[:10]
+            )
+            reference_trade = deadline_instant(
+                identity.get("last_trade_at"), str(identity["expiry"])[:10]
+            )
+            if last_trade and reference_trade and last_trade != reference_trade:
+                raise ValueError("OPTION_LAST_TRADING_DEADLINE_CONFLICT")
+            identity["last_trade_at"] = last_trade or reference_trade
+            entry["identity"] = dict(identity)
+        except (ValueError, TypeError, AttributeError) as exc:
+            entry["problem"] = (
+                "CONTRACT_OPTION_COST_SCHEMA_UNVERIFIED"
+                if isinstance(exc, (TypeError, AttributeError))
+                else str(exc)
+            )
+        self.option_references[uic] = entry
+        entry["version"] = self.recorder.metadata_version(
+            key(identity), {k: v for k, v in entry.items() if k != "received_at"}, at
+        )
+
+    def rank_candidates(
+        self, state: MarketState, event: dict[str, Any], inputs: dict[str, float]
+    ) -> list[tuple[float, float, dict[str, Any]]]:
+        mapping = self.config.mappings.get(state.market)
+        if mapping is None:
+            raise ValueError("LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED")
+        if state.identity is None or state.option_root != mapping.option_root_id:
+            raise ValueError("OPTION_ROOT_NOT_VERIFIED")
+        at = utc(event["signal_at"])
+        candidates = []
+        for selected in state.option_space:
+            if selected.get("UnderlyingUic") != state.identity["uic"]:
+                continue
+            if selected.get("PutCall") != ("Call" if event["right"] == "C" else "Put"):
+                continue
+            day = str(selected.get("Expiry", ""))[:10]
+            if day != at.astimezone(NY).date().isoformat():
+                continue
+            expiry = mapping.expiry_instants.get(day)
+            if expiry is None or expiry <= at:
+                continue
+            delta = model_delta(
+                inputs["futures_price"],
+                float(selected["StrikePrice"]),
+                inputs["rv15"],
+                at,
+                expiry,
+                str(event["right"]),
+            )
+            candidates.append(
+                (
+                    abs(delta - float(event["target_delta"])),
+                    float(selected["StrikePrice"]),
+                    selected,
+                )
+            )
+        if not candidates:
+            raise ValueError("NO_VERIFIED_REAL_0DTE_EXPIRY_TIME")
+        candidates.sort(key=lambda x: (x[0], x[1], x[2]["Uic"]))
+        if candidates[0][0] > mapping.delta_tolerance:
+            raise ValueError("FROZEN_DELTA_OUTSIDE_APPROVED_TOLERANCE")
+        return candidates
+
+    async def warm_candidates(self, state: MarketState) -> None:
+        # Observation only: reuses the frozen ranking; never creates an event or order.
+        for uic, (identity, _) in list(self.options.items()):
+            if identity["market"] == state.market and self.option_protected(uic):
+                await self.focus_board(state, identity)
+                break
+        if not state.identity or not state.bars or state.market == "GC":
+            return
+        try:
+            at = state.bars[-1].at + timedelta(minutes=1)
+            if not 0 <= time.time() - at.timestamp() <= 120:
+                raise ValueError("CANDIDATE_UNDERLYING_HISTORY_STALE")
+            # Reuse frozen right/target terms without requiring an entry clock
+            # just to warm observations. This descriptor never creates an event.
+            event = opportunity(state.market, state.identity["uic"], next_clock(at))
+            event["signal_at"] = at.isoformat()
+            inputs = {"futures_price": state.bars[-1].close, "rv15": prior_rv(state.bars, at)}
+            ranked = self.rank_candidates(state, event, inputs)
+            wanted = {c[2]["Uic"] for c in ranked[: self.config.option_candidate_window]}
+            async with self.subscription_lock:
+                for uic, (identity, _) in list(self.options.items()):
+                    if (
+                        identity["market"] == state.market
+                        and uic not in wanted
+                        and not self.option_protected(uic)
+                    ):
+                        await self.unsubscribe_option(uic)
+            # Leave four lines available for owned/pending/event contracts.
+            for _, _, candidate in ranked[: self.config.option_candidate_window]:
+                if (
+                    candidate["Uic"] not in self.options
+                    and len(self.options) >= self.config.option_subscription_budget - 4
+                ):
+                    break
+                await self.option_subscribe(state, candidate)
+            selected = ranked[0][2]["Uic"]
+            if selected not in self.options:
+                raise ValueError("OPTION_SUBSCRIPTION_CAPACITY")
+            await self.focus_board(state, self.options[selected][0])
+            if selected != state.candidate_uic:
+                change = {
+                    "old_uic": state.candidate_uic,
+                    "new_uic": selected,
+                    "received_at": time.time(),
+                    "reason": "NEAREST_FROZEN_MODEL_DELTA",
+                    "inputs": inputs,
+                    "selection_at": at.isoformat(),
+                }
+                state.candidate_changes.append(change)
+                self.recorder.ingest(key(state.identity), "CANDIDATE_CHANGE", change, time.time())
+                state.candidate_uic = selected
+            state.candidate_problem = ""
+        except (ValueError, KeyError) as exc:
+            state.candidate_problem = str(exc)
+
+    def option_protected(self, uic: int) -> bool:
+        identity = self.options[uic][0]
+        return (
+            uic in self.owned_options
+            or self.option_required_at.get(uic, 0) > time.time()
+            or any(key(identity) in c["instruments"] for c in self.recorder.active.values())
+        )
+
+    async def focus_board(self, state: MarketState, requested: dict[str, Any]) -> None:
+        """Move the existing small chain window; regular pinned quotes never change UIC."""
+        subscription = next(
+            (
+                (r, s)
+                for r, s in self.subscriptions.items()
+                if s.get("kind") == "BOARD" and s["target"] == state.market
+            ),
+            None,
+        )
+        if not subscription:
+            return
+        ref, current = subscription
+        protected = [
+            i
+            for uic, (i, _) in self.options.items()
+            if i["market"] == state.market and self.option_protected(uic)
+        ]
+        protected.sort(key=lambda i: (i["uic"] not in self.owned_options, i["uic"]))
+        identity = protected[0] if protected else requested
+        expiry = next(
+            (
+                e
+                for e in state.option_board.get("Expiries", []) or []
+                if str(e.get("Expiry", ""))[:10] == str(identity["expiry"])[:10]
+            ),
+            None,
+        )
+        if not expiry:
+            state.capabilities["option_chain_problem"] = "SELECTED_EXPIRY_NOT_IN_CHAIN"
+            return
+        selection = {"Index": expiry["Index"]}
+        strike = next(
+            (s for s in expiry.get("Strikes", []) or [] if s.get("Strike") == identity["strike"]),
+            None,
+        )
+        if strike:
+            selection["StrikeStartIndex"] = max(
+                0, strike["Index"] - self.config.option_candidate_window // 2
+            )
+        patch = {
+            "Expiries": [selection],
+            "MaxStrikesPerExpiry": self.config.option_candidate_window,
+        }
+        if current.get("board_window") == patch:
+            return
+        try:
+            await self.client.request(
+                "PATCH", current["path"] + f"/{self.context}/{ref}", body=patch
+            )
+            current["board_window"] = patch
+            state.capabilities["option_chain_problem"] = (
+                "" if strike else "AWAITING_SELECTED_EXPIRY_STRIKES"
+            )
+        except SaxoError as exc:
+            state.capabilities["option_chain_problem"] = str(exc)
+
+    def record_board(self, state: MarketState, update: dict[str, Any], at: float) -> None:
+        for expiry in update.get("Expiries", []) or []:
+            full_expiry: dict[str, Any] = next(
+                (
+                    e
+                    for e in state.option_board.get("Expiries", []) or []
+                    if e["Index"] == expiry["Index"]
+                ),
+                {},
+            )
+            for strike in expiry.get("Strikes", []) or []:
+                full_strike: dict[str, Any] = next(
+                    (
+                        s
+                        for s in full_expiry.get("Strikes", []) or []
+                        if s["Index"] == strike["Index"]
+                    ),
+                    {},
+                )
+                for right in ("Call", "Put"):
+                    if right not in strike:
+                        continue
+                    side = strike[right]
+                    uic = (side or {}).get("Uic") or (full_strike.get(right) or {}).get("Uic")
+                    if uic not in self.options:
+                        continue
+                    identity, _ = self.options[uic]
+                    if not state.identity or identity["underlying_uic"] != state.identity["uic"]:
+                        continue
+                    window = self.recorder.windows[key(identity)]
+                    analytics = dict(window.context.get("OPTIONS_CHAIN", {}).get("analytics", {}))
+                    if side is None:
+                        analytics = {}
+                    else:
+                        analytics.update(
+                            option_context.fields(
+                                option_context.chain_update(side, update.get("LastUpdated")),
+                                at,
+                                "OPTIONS_CHAIN",
+                            )
+                        )
+                    self.recorder.ingest(
+                        key(identity),
+                        "CHAIN_CONTEXT",
+                        side,
+                        at,
+                        context_source="OPTIONS_CHAIN",
+                        observation_context={
+                            "analytics": analytics,
+                            "executable": False,
+                            "receipt": at,
+                            "price_source": "OPTIONS_CHAIN",
+                        },
+                    )
+
+    def option_view(self, uic: int, at: float) -> dict[str, Any]:
+        identity, price = self.options[uic]
+        reference = self.option_references.get(uic, {})
+        window = self.recorder.windows.get(key(identity))
+        costs: dict[str, Any] = {"budget_result": "UNVERIFIED"}
+        try:
+            if reference.get("problem"):
+                raise ValueError(reference["problem"])
+            if not 0 <= at - reference.get("received_at", 0) <= 900:
+                raise ValueError("CONTRACT_OPTION_COSTS_STALE_OR_UNAVAILABLE")
+            q = executable_quote(
+                identity, price.value or {}, price.receipt, datetime.fromtimestamp(at, UTC)
+            )
+            rate = 1.0
+            if identity["currency"] != "GBP":
+                if identity["currency"] != "USD":
+                    raise ValueError("CURRENCY_CONVERSION_PAIR_UNVERIFIED")
+                fx = quote_check(
+                    self.fx.value or {}, self.fx.receipt, datetime.fromtimestamp(at, UTC)
+                )
+                rate = 1 / float(fx["Bid"])
+            limit = (math.ceil(float(q["Ask"]) / identity["tick_size"]) + 1) * identity["tick_size"]
+            costs = cost_estimate(identity, limit, reference["conditions"], rate)
+            costs["minimum_purchase_cost_gbp"] = cost_estimate(
+                identity, float(q["Ask"]), reference["conditions"], rate
+            )["minimum_purchase_cost_gbp"]
+            costs["minimum_purchase_basis"] = "REGULAR_ASK_PLUS_ENTRY_COSTS"
+            costs.pop("option")
+            costs.update(
+                quote_at=price.receipt,
+                fx_at=self.fx.receipt,
+                metadata_version=reference.get("version"),
+            )
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            costs["reason"] = (
+                "CONTRACT_OPTION_COST_SCHEMA_UNVERIFIED"
+                if isinstance(exc, (TypeError, AttributeError))
+                else str(exc)
+            )
+        return {
+            "identity": json.loads(json.dumps(identity)),
+            "quote": (price.value or {}).get("Quote"),
+            "quote_received_at": price.receipt,
+            "sizes": price.sizes(),
+            "size_status": {
+                side: "OBSERVED"
+                if price.size_times.get(side) is not None and 0 <= at - price.size_times[side] <= 5
+                else "STALE_OR_MISSING"
+                for side in ("Bid", "Ask")
+            },
+            "size_received_at": dict(price.size_times),
+            "quote_status": "STALE_OR_MISSING"
+            if price.receipt is None or not 0 <= at - price.receipt <= 5
+            else "OBSERVED",
+            "analytics": option_context.view(price.analytics, at),
+            "chain_analytics": option_context.view(
+                window.context.get("OPTIONS_CHAIN", {}).get("analytics", {}) if window else {}, at
+            ),
+            "subscription_started_at": price.subscription_started_at,
+            "coverage_seconds": window.coverage(at) if window else 0,
+            "metadata_version": reference.get("version"),
+            "costs": costs,
+            "analytics_basis": "PROVIDER_SUPPLIED_UNVERIFIED_NOT_STRATEGY_PROBABILITY",
+        }
 
     async def history(self, state: MarketState) -> None:
         if not state.identity:
@@ -447,7 +881,67 @@ class DataService:
             },
         )
 
+    async def refresh_option_metadata(self) -> None:
+        for uic, (identity, _) in list(self.options.items()):
+            prior = self.option_references.get(uic, {})
+            if time.time() - prior.get("received_at", 0) < 900:
+                continue
+            try:
+                raw = await self.client.request(
+                    "GET",
+                    f"/ref/v1/instruments/details/{uic}/FuturesOption",
+                    params={
+                        "AccountKey": self.client.oauth.account_key,
+                        "FieldGroups": "TradingSessions",
+                    },
+                )
+                if raw.get("Uic") != uic or raw.get("AssetType") != "FuturesOption":
+                    raise ValueError("OPTION_REFERENCE_REFRESH_MISMATCH")
+                verified = option_identity(
+                    {
+                        "uic": identity["underlying_uic"],
+                        "environment": identity["environment"],
+                        "market": identity["market"],
+                        "contract_month": identity["contract_month"],
+                    },
+                    raw,
+                    identity["option_root_id"],
+                    {
+                        "Uic": uic,
+                        "UnderlyingUic": identity["underlying_uic"],
+                        "PutCall": identity["right"],
+                        "StrikePrice": identity["strike"],
+                        "Expiry": identity["expiry"],
+                    },
+                )
+                for name in (
+                    "currency",
+                    "multiplier",
+                    "price_factor",
+                    "minimum_quantity",
+                    "lot_size",
+                    "amount_decimals",
+                    "tick_size",
+                    "tick_size_scheme",
+                    "settlement_style",
+                ):
+                    if verified.get(name) != identity.get(name):
+                        raise ValueError("OPTION_REFERENCE_CONVENTION_CHANGED_" + name.upper())
+                identity["trading_sessions"] = raw.get("TradingSessions")
+                identity["is_tradable"] = raw.get("IsTradable")
+                await self.option_conditions(identity, raw)
+            except (ValueError, KeyError, TypeError, AttributeError) as exc:
+                prior["problem"] = (
+                    "OPTION_METADATA_SCHEMA_UNVERIFIED"
+                    if isinstance(exc, (TypeError, AttributeError))
+                    else str(exc)
+                )
+                prior["received_at"] = time.time()
+                self.option_references[uic] = prior
+                identity["is_tradable"] = False
+
     async def release_unused_options(self, owned: set[int]) -> None:
+        self.owned_options = owned
         for uic, (identity, _) in list(self.options.items()):
             recording = any(
                 key(identity) in c["instruments"] for c in self.recorder.active.values()
@@ -459,15 +953,28 @@ class DataService:
             ):
                 continue
             async with self.subscription_lock:
-                for ref, subscription in list(self.subscriptions.items()):
-                    if subscription["target"] == str(uic):
-                        await self.client.request(
-                            "DELETE", subscription["path"] + f"/{self.context}/{ref}"
-                        )
-                        self.subscriptions.pop(ref, None)
-                self.options.pop(uic, None)
-                self.option_required_at.pop(uic, None)
-                self.recorder.windows.pop(key(identity), None)
+                await self.unsubscribe_option(uic)
+        # Retired strikes keep separate rolling history until its ordinary expiry.
+        for instrument, window in list(self.recorder.windows.items()):
+            if window.identity.get("asset_type") != "FuturesOption":
+                continue
+            if window.identity["uic"] in self.options:
+                continue
+            if any(instrument in c["instruments"] for c in self.recorder.active.values()):
+                continue
+            if not window.rows or window.rows[-1][0] < time.time() - 900:
+                self.recorder.windows.pop(instrument)
+
+    async def unsubscribe_option(self, uic: int) -> None:
+        identity, _ = self.options[uic]
+        for ref, subscription in list(self.subscriptions.items()):
+            if subscription["target"] == str(uic):
+                await self.client.request("DELETE", subscription["path"] + f"/{self.context}/{ref}")
+                self.subscriptions.pop(ref, None)
+        self.options.pop(uic, None)
+        self.option_required_at.pop(uic, None)
+        self.option_references.pop(uic, None)
+        self.recorder.ingest(key(identity), "GAP", {"reason": "OPTION_UNSUBSCRIBED"}, time.time())
 
     async def history_range(
         self,
@@ -569,13 +1076,11 @@ class DataService:
                             "Identifier": state.option_root,
                             "AssetType": "FuturesOption",
                             "AccountKey": self.client.oauth.account_key,
-                            "MaxStrikesPerExpiry": 12,
+                            "MaxStrikesPerExpiry": self.config.option_candidate_window,
                             "Expiries": [{"Index": 0}],
                         },
                         state.market,
                     )
-                    if state.option_space:
-                        await self.option_subscribe(state, state.option_space[0])
                 except (SaxoError, ValueError) as exc:
                     state.capabilities["options"] = {"problem": str(exc)}
         # Discover this environment's GBPUSD UIC; never reuse a SIM identifier in LIVE.
@@ -637,6 +1142,16 @@ class DataService:
                     subscription = self.subscriptions.get(heartbeat.get("OriginatingReferenceId"))
                     if subscription:
                         subscription["contact"] = time.monotonic()
+                        if heartbeat.get("Reason") == "SubscriptionPermanentlyDisabled":
+                            self.disabled_targets.add(
+                                (subscription["kind"], subscription["target"])
+                            )
+                            if subscription["kind"] == "PRICE":
+                                self.mark_gap(
+                                    subscription["target"], "SUBSCRIPTION_PERMANENTLY_DISABLED"
+                                )
+                            self.subscriptions.pop(heartbeat["OriginatingReferenceId"], None)
+                            continue
                         if (
                             heartbeat.get("Reason") != "NoNewData"
                             and subscription["kind"] == "PRICE"
@@ -679,6 +1194,7 @@ class DataService:
                     raise SaxoError("SESSION_DOWNGRADED_FRESH_SNAPSHOT_REQUIRED")
             elif subscription["kind"] == "BOARD":
                 state = self.markets[subscription["target"]]
+                self.record_board(state, data, receipt)
                 state.option_board = merge_board(state.option_board, data)
             else:
                 price, identity = self.price_target(subscription["target"])

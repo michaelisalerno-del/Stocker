@@ -15,7 +15,7 @@ from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from stocker_execution import book_flow
 from stocker_execution.config import RecorderConfig
@@ -26,6 +26,11 @@ from stocker_execution.saxo_stream import merge
 
 def packed(value: Any) -> bytes:
     return json.dumps(value, separators=(",", ":"), allow_nan=False).encode() + b"\n"
+
+
+def read_row(blob: bytes) -> dict[str, Any]:
+    """Lossless rolling-memory representation; disk archives remain ordinary JSONL."""
+    return cast(dict[str, Any], json.loads(zlib.decompress(blob)))
 
 
 def apply(state: Any, record: dict[str, Any]) -> Any:
@@ -50,6 +55,10 @@ class Window:
     sequence: int = 0
     flow: dict[str, Any] | None = None
     checkpoint_flow: dict[str, Any] | None = None
+    context: dict[str, Any] = field(default_factory=dict)
+    checkpoint_context: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata_version: str | None = None
 
     @property
     def size(self) -> int:
@@ -62,6 +71,9 @@ class Window:
                 + len(packed(self.current))
                 + len(packed(self.flow))
                 + len(packed(self.checkpoint_flow))
+                + len(packed(self.context))
+                + len(packed(self.checkpoint_context))
+                + len(packed(self.metadata))
             )
             + 2048
         )
@@ -69,10 +81,16 @@ class Window:
     def evict(self) -> None:
         at, blob = self.rows.popleft()
         self.row_bytes -= len(blob) + 128  # include bounded Python object overhead
-        record = json.loads(blob)
+        record = read_row(blob)
         self.checkpoint = apply(self.checkpoint, record)
         self.checkpoint_flow = record.get("book_flow")
         self.checkpoint_at = at
+        if record.get("observation_context"):
+            self.checkpoint_context[record.get("context_source", "REGULAR_PRICE")] = record[
+                "observation_context"
+            ]
+        if record["kind"] == "GAP":
+            self.checkpoint_context.clear()
 
     def coverage(self, at: float) -> float:
         if self.continuous_since is None or self.current is None or not self.rows:
@@ -91,10 +109,11 @@ class Window:
                     "receipt": self.checkpoint_at,
                     "payload": self.checkpoint,
                     "book_flow": self.checkpoint_flow,
+                    "observation_context": self.checkpoint_context,
                     "reconstruction": "state immediately before retained messages",
                 }
             ),
-            *(b for _, b in self.rows),
+            *(zlib.decompress(b) for _, b in self.rows),
         ]
 
 
@@ -181,7 +200,25 @@ class Recorder:
     def register(self, key: str, identity: dict[str, Any]) -> None:
         # Session schedules and permissions are mutable observations, not contract identity.
         identity = {
-            k: v for k, v in identity.items() if k not in {"trading_sessions", "is_tradable"}
+            k: v
+            for k, v in identity.items()
+            if k
+            in {
+                "provider",
+                "environment",
+                "asset_type",
+                "uic",
+                "market",
+                "symbol",
+                "exchange",
+                "contract_month",
+                "underlying_uic",
+                "option_root_id",
+                "right",
+                "strike",
+                "expiry",
+                "tick_size",
+            }
         }
         if key not in self.windows:
             if len(self.windows) >= 32:
@@ -192,6 +229,35 @@ class Recorder:
 
     def memory(self) -> int:
         return sum(w.size for w in self.windows.values())
+
+    def metadata_version(self, key: str, raw: dict[str, Any], received_at: float) -> str:
+        window = self.windows[key]
+        blob = packed(raw)
+        version = hashlib.sha256(blob).hexdigest()
+        if version not in window.metadata:
+            if len(blob) > 65536 or len(window.metadata) >= 16:
+                raise ValueError("REFERENCE_CACHE_LIMIT")
+            if self.memory() + len(blob) * 8 > self.config.rolling_max_bytes:
+                raise ValueError("REFERENCE_CACHE_MEMORY_LIMIT")
+            window.metadata[version] = {"received_at": received_at, "value": json.loads(blob)}
+            for segment, capture in self.active.items():
+                if key in capture["instruments"]:
+                    capture.setdefault("metadata_versions", {})[version] = window.metadata[version]
+                    self.enqueue(
+                        segment,
+                        capture,
+                        [
+                            packed(
+                                {
+                                    "kind": "METADATA",
+                                    "version": version,
+                                    "payload": window.metadata[version],
+                                }
+                            )
+                        ],
+                    )
+        window.metadata_version = version
+        return version
 
     def expire(self, at: float) -> None:
         for window in self.windows.values():
@@ -204,6 +270,8 @@ class Recorder:
                 for w in self.windows.values():
                     w.current = w.checkpoint = None
                     w.flow = w.checkpoint_flow = None
+                    w.context.clear()
+                    w.checkpoint_context.clear()
                     w.continuous_since = None
                 self.problem = "ROLLING_STATE_LIMIT"
                 break
@@ -222,6 +290,7 @@ class Recorder:
         generation: str = "",
         provider_message: Any = None,
         observation_context: dict[str, Any] | None = None,
+        context_source: str = "REGULAR_PRICE",
     ) -> None:
         window = self.windows[key]
         window.sequence += 1
@@ -235,6 +304,9 @@ class Recorder:
             "duplicate": duplicate,
             "payload": payload,
             "provider_message": provider_message,
+            "metadata_version": window.metadata_version,
+            "observation_context": observation_context,
+            "context_source": context_source,
         }
         provider_times = {}
         envelope = (
@@ -260,14 +332,19 @@ class Recorder:
         blob = packed(record)
         if len(blob) > self.config.max_message_bytes:
             kind, payload = "GAP", {"reason": "MESSAGE_BYTE_LIMIT"}
-            record.update(kind=kind, payload=payload, provider_message=None)
+            record.update(
+                kind=kind, payload=payload, provider_message=None, observation_context=None
+            )
             blob = packed(record)
         if kind == "SNAPSHOT":
             if window.current is None:
                 window.continuous_since = at
         elif kind == "GAP":
             window.continuous_since = None
+            window.context.clear()
             self.gaps += 1
+        if observation_context and kind != "GAP":
+            window.context[context_source] = observation_context
         window.current = apply(window.current, record)
         if window.identity.get("asset_type") == "ContractFutures" and window.identity.get(
             "tick_size"
@@ -281,7 +358,7 @@ class Recorder:
             for index, (_, prior) in enumerate(reversed(window.rows)):
                 if index >= 512:
                     break
-                point = json.loads(prior).get("book_flow")
+                point = read_row(prior).get("book_flow")
                 if point is not None:
                     history.append(point)
                     if point["at"] <= calculated_at - 60:
@@ -300,8 +377,9 @@ class Recorder:
                 )
             record["book_flow"] = window.flow
             blob = packed(record)
-        window.rows.append((at, blob))
-        window.row_bytes += len(blob) + 128
+        retained = zlib.compress(blob, level=1)
+        window.rows.append((at, retained))
+        window.row_bytes += len(retained) + 128
         self.expire(at)
         for segment, capture in list(self.active.items()):
             if key in capture["instruments"] and capture["state"] == "CAPTURING":
@@ -318,6 +396,11 @@ class Recorder:
             return False
         # A detached JSON copy prevents later event-loop changes racing the writer.
         detached = json.loads(packed(manifest))
+        # Prehistory may contain many repeated identities/field names. Queue one
+        # lossless batch within the SAME byte/item caps, then expand in the writer.
+        if rows:
+            compressor = zlib.compressobj(level=1)
+            rows = [b"".join(compressor.compress(row) for row in rows) + compressor.flush()]
         size = len(packed(detached)) + sum(len(b) + 64 for b in rows)
         if self.queue.full() or self.queued_bytes + size > self.config.queue_max_bytes:
             self.problem = "WRITE_QUEUE_LIMIT_REACHED"
@@ -348,6 +431,7 @@ class Recorder:
             return {"state": "UNAVAILABLE", "reason": self.problem, "event_id": identity}
         window = self.windows[key]
         keys = [key, *(k for k in option_keys or [] if k in self.windows)]
+        event_at = utc(event["signal_at"]).timestamp() if event.get("signal_at") else at
         end = at + self.config.minimum_post_event_minutes * 60
         # Same identity and overlapping pre/post ranges share one physical archive.
         capture = next(
@@ -379,6 +463,7 @@ class Recorder:
                 "reason": "",
                 "last_receipt": None,
                 "last_sequences": {},
+                "metadata_versions": {},
                 "permission_evidence": self.config.recording_permission_evidence,
                 "raw_semantics": "Every delivered Saxo message; not a complete exchange tick feed",
             }
@@ -394,13 +479,16 @@ class Recorder:
             {
                 **event,
                 "detection_receipt": at,
-                "prehistory_seconds": {k: self.windows[k].coverage(at) for k in keys},
+                "prehistory_seconds": {
+                    k: max(0, self.windows[k].coverage(at) - max(0, at - event_at)) for k in keys
+                },
             }
         )
         if window.flow:
             capture["book_flow"] = self.flow_metadata(window, at)
         rows = []
         for instrument in keys:
+            capture.setdefault("metadata_versions", {}).update(self.windows[instrument].metadata)
             if instrument not in capture["instruments"]:
                 rows.extend(self.windows[instrument].prefix())
                 capture["instruments"].append(instrument)
@@ -408,9 +496,9 @@ class Recorder:
                 # A completed capture can overlap a new event's prehistory. Bridge
                 # the intervening window without copying already-written messages.
                 rows.extend(
-                    blob
+                    zlib.decompress(blob)
                     for _, blob in self.windows[instrument].rows
-                    if json.loads(blob)["local_sequence"]
+                    if read_row(blob)["local_sequence"]
                     > capture["last_sequences"].get(instrument, 0)
                 )
             capture["last_sequences"][instrument] = self.windows[instrument].sequence
@@ -460,6 +548,15 @@ class Recorder:
                 and instrument not in capture["instruments"]
             ):
                 window = self.windows[instrument]
+                event = next(e for e in capture["events"] if e["id"] == event_id)
+                event_at = (
+                    utc(event["signal_at"]).timestamp()
+                    if event.get("signal_at")
+                    else event["detection_receipt"]
+                )
+                pre = max(0, window.coverage(at) - max(0, at - event_at))
+                event.setdefault("prehistory_seconds", {})[instrument] = pre
+                capture.setdefault("metadata_versions", {}).update(window.metadata)
                 capture["instruments"].append(instrument)
                 capture["last_sequences"][instrument] = window.sequence
                 self.enqueue(
@@ -473,7 +570,7 @@ class Recorder:
                                 "event_id": event_id,
                                 "identity": window.identity,
                                 "receipt": at,
-                                "actual_prehistory_seconds": window.coverage(at),
+                                "actual_prehistory_seconds": pre,
                             }
                         ),
                     ],
@@ -506,7 +603,7 @@ class Recorder:
         for segment, capture in self.active.items():
             for event in capture["events"]:
                 if event["id"] == event_id:
-                    event.update(evidence)
+                    event.update(json.loads(packed(evidence)))
                     self.enqueue(
                         segment,
                         capture,
@@ -549,7 +646,13 @@ class Recorder:
             else:
                 grouped[segment] = (manifest, grouped[segment][1] + rows)
         for segment, (manifest, rows) in grouped.items():
-            blob = gzip.compress(b"".join(rows), compresslevel=3, mtime=0) if rows else b""
+            blob = (
+                gzip.compress(
+                    b"".join(zlib.decompress(row) for row in rows), compresslevel=3, mtime=0
+                )
+                if rows
+                else b""
+            )
             self.disk_free = shutil.disk_usage(self.directory).free
             # Leave reserved space for incomplete-state manifests; never prune to make room.
             needed = len(blob) + len(packed(manifest)) * 2 + 4096

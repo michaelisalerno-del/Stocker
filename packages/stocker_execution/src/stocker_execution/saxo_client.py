@@ -18,6 +18,7 @@ READ_PATHS = (
     r"/ref/v1/instruments",
     r"/ref/v1/instruments/details/[0-9]+/(ContractFutures|FuturesOption|FxSpot)",
     r"/ref/v1/instruments/contractoptionspaces/[0-9]+",
+    r"/cs/v1/tradingconditions/ContractOptionSpaces/(?:[A-Za-z0-9_=-]|%(?:2F|2B|3D|7C))+/[0-9]+",
     r"/ref/v1/exchanges/[A-Za-z0-9_-]+",
     r"/ref/v1/currencypairs",
     r"/trade/v1/(prices|infoprices)",
@@ -39,11 +40,15 @@ class SaxoError(ValueError):
 
 def allowed(method: str, path: str, *, sim_orders: bool = False) -> bool:
     # Accept canonical local paths only; no URL, traversal, escaping or query ambiguity.
-    if not re.fullmatch(r"/[A-Za-z0-9/_-]+", path) or "//" in path:
+    if not re.fullmatch(r"/[A-Za-z0-9/%=_-]+", path) or "//" in path:
         return False
     if method == "GET":
         return any(re.fullmatch(p, path) for p in READ_PATHS)
     if method == "POST" and path in SUBSCRIPTIONS:
+        return True
+    if method == "PATCH" and re.fullmatch(
+        r"/trade/v1/optionschain/subscriptions/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", path
+    ):
         return True
     if method == "DELETE" and any(
         re.fullmatch(re.escape(p) + r"/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", path) for p in SUBSCRIPTIONS

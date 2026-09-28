@@ -12,7 +12,7 @@ import pytest
 from stocker_execution.book_flow import VERSION, observe
 from stocker_execution.config import MARKETS, FuturesConfig, RecorderConfig
 from stocker_execution.contracts import key
-from stocker_execution.recorder import Recorder, apply
+from stocker_execution.recorder import Recorder, apply, read_row
 from stocker_execution.runtime import Runtime
 from stocker_execution.saxo_client import allowed
 from stocker_execution.saxo_data import DataService
@@ -164,7 +164,7 @@ def test_malformed_optional_depth_retains_raw_without_interrupting_data(tmp_path
     state = PriceState()
     state.snapshot(raw, "ref", 100)
     r.ingest("future", "SNAPSHOT", raw, 100)
-    assert json.loads(r.windows["future"].rows[-1][1])["payload"] == raw
+    assert read_row(r.windows["future"].rows[-1][1])["payload"] == raw
     assert r.windows["future"].flow["status"] == "UNAVAILABLE"
     r.ingest("future", "SNAPSHOT", book(), 101)
     assert r.windows["future"].flow["status"] == "CURRENT"
@@ -175,7 +175,7 @@ def test_queued_delta_does_not_backdate_calculation_using_later_snapshot(tmp_pat
     r.register("future", IDENTITY)
     r.ingest("future", "SNAPSHOT", book(), 100)
     r.ingest("future", "UPDATE", {"Quote": {"AskSize": 2}}, 90)
-    row = json.loads(r.windows["future"].rows[-1][1])
+    row = read_row(r.windows["future"].rows[-1][1])
     assert row["receipt"] == 90 and row["book_flow"]["at"] == 100
     assert row["book_flow"]["lookbacks"]["5"]["1"]["status"] == "INSUFFICIENT_HISTORY"
 
@@ -254,7 +254,7 @@ def test_five_ordinary_subscriptions_shared_by_consumers_and_heartbeats(
                 first + 21 + i,
             )
         flow = recorder.windows[key(data.markets[s["target"]].identity)].flow
-        recorded = json.loads(recorder.windows[key(data.markets[s["target"]].identity)].rows[-1][1])
+        recorded = read_row(recorder.windows[key(data.markets[s["target"]].identity)].rows[-1][1])
         assert recorded["provider_timestamps"]["Timestamp"] == "2026-09-28T10:00:00+00:00"
         assert flow["feed"]["granted_refresh_ms"] == 1500
         assert flow["feed"]["observed_receipt_ms"]["samples"] == 2
@@ -292,7 +292,7 @@ def test_same_recorder_checkpoint_event_overlap_limits_and_feature_manifest(tmp_
         assert w.coverage(1001) == 900
         rebuilt = w.checkpoint
         for _, blob in w.rows:
-            rebuilt = apply(rebuilt, json.loads(blob))
+            rebuilt = apply(rebuilt, read_row(blob))
         assert rebuilt == w.current and w.checkpoint_flow["version"] == VERSION
         assert r.memory() <= r.config.rolling_max_bytes
         event = {"id": "frozen-one", "skip_reason": "PAPER_DISARMED"}

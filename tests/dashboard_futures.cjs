@@ -57,6 +57,13 @@ const state = {
     updated_at: at,
     l1: { status: "CURRENT", last_receipt: at, quote: {Bid: 70 + i, Ask: 70.01 + i}, sizes: {bid: 2, ask: 3}, spread: .01, delay_minutes: 0 },
     recorder: {state: i === 4 ? "STORAGE_LIMIT" : "BUFFERING", prehistory_seconds: [900,42,15,0,0][i], reason: i === 4 ? "STORAGE_LIMIT_REACHED" : ""},
+    option_context: {candidate_uic: 1001+i, candidate_changes: [], latest_event: {id: "fixture-event", context: {identity: {uic: 1001+i}, pre_trigger_seconds: 42}}, contracts: [{
+      identity: {uic: 1001+i, underlying_uic: 100+i, underlying_symbol: `${market}Z6`, symbol: `${market} fixture option`, right: "Put", strike: 70, expiry: "2026-09-28", last_trade_at: "2026-09-28T20:00:00Z"},
+      quote: {Bid: .01, Ask: .02, PriceTypeBid: "Tradable", PriceTypeAsk: "Tradable", DelayedByMinutes: 0}, quote_status: "OBSERVED",
+      sizes: {Bid: 2, Ask: 3}, size_status: {Bid: "STALE_OR_MISSING", Ask: "OBSERVED"}, coverage_seconds: 55, subscription_started_at: Date.parse(at)/1000-55,
+      analytics: {"Greeks.Delta": {value: -.1, status: "OBSERVED_UNVERIFIED", age_seconds: 1}, "InstrumentPriceDetails.OpenInterest": {value: 200, status: "AS_OF_EFFECTIVE_TIME_UNKNOWN", age_seconds: 120}},
+      costs: {minimum_purchase_cost_gbp: 20, entry_costs_gbp: .1, estimated_exit_costs_gbp: .1, total_gbp: 20.1, remaining_budget_gbp: -10.1, budget_result: "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET"},
+    }]},
     l2: {
       status: ["L2_AVAILABLE", "L2_AVAILABLE", "L1_ONLY", "L2_UNAVAILABLE", "L2_UNAVAILABLE"][i],
       target_pre_seconds: 900,
@@ -304,6 +311,11 @@ async function label(page) {
     assert.match(await page.locator("#flow-depth-GC-10").textContent(), /UNAVAILABLE/);
     assert.match(await page.locator("#flow-volume-GC").textContent(), /change UNAVAILABLE/);
     assert.match(await page.locator("#flow-feed-GC").textContent(), /granted 1500 ms.*mean 1800 ms/);
+    assert.match(await page.locator("#option-identity-GC").textContent(), /UIC 1002.*underlying GCZ6 \/ 101/);
+    assert.match(await page.locator("#option-quote-GC").textContent(), /bid size STALE_OR_MISSING/);
+    assert.match(await page.locator("#option-volume-GC").textContent(), /AS_OF_EFFECTIVE_TIME_UNKNOWN.*effective unknown/);
+    assert.match(await page.locator("#option-coverage-GC").textContent(), /actual pre-trigger 42 \/ 900s/);
+    assert.match(await page.locator("#option-cost-GC").textContent(), /MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET/);
     await page.locator("#flow-detail-GC summary").click();
     await page.locator("#flow-detail-GC summary").focus();
     await page.evaluate(() => { window.flowRow=document.querySelector("#flow-depth-GC-5"); window.flowFocus=document.activeElement; window.scrollTo(0,350); });

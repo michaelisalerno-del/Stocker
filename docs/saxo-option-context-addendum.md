@@ -4,8 +4,8 @@
 
 - **IMPLEMENTED:** incremental changes on the existing `codex/saxo-only` branch, inspected baseline `ee193ee`. No second pipeline, recorder, strategy, provider, ledger or navigation tab.
 - **OFFLINE_TESTED:** 483 Python tests passed (26 new cases), strict type checks on 117 source files, lint/format on the repository targets, desktop/mobile dashboard and OAuth browser checks, and locked server-only installation smoke. Seven existing library/research warnings remain; none are test failures. Synthetic fixtures are not feed evidence.
-- **FEED_VERIFIED:** authenticated SIM account and connected stream were directly observed at 17:43 UTC. This does **not** verify futures or option field delivery: no exact underlying selections or option mappings are configured. See the per-market table.
-- **DEPLOYED:** pending final verification and the existing immutable-release upgrade. The directly inspected running release before this change was `2ff57756e272b53b900a7c6e1291a97372c62af8`, not the newer local branch baseline.
+- **FEED_VERIFIED:** authenticated SIM account and connected stream were directly observed again at 18:07 UTC after deployment. This does **not** verify futures or option field delivery: no exact underlying selections or option mappings are configured. See the per-market table and [sanitized runtime evidence](saxo-option-feed-verification.json).
+- **DEPLOYED:** `5aa3a7be4c1f37245ba171dde08968eb43b54375` at 18:05 UTC through the existing immutable-release upgrade. The prior running release was `2ff57756e272b53b900a7c6e1291a97372c62af8`, distinct from the inspected local branch baseline. [Deployment evidence](saxo-option-deployment.json) confirms installed smoke, authenticated HTTPS pages/assets, matching asset hash, invalid-origin/anonymous access guards, zero orders, unchanged configuration/credentials and 13 legacy units still masked. Follow-up at 18:07 UTC showed active service, zero restarts and 56,307,712 bytes service memory with no market streams configured. The subsequent local evidence-only commit does not change deployed application code.
 
 Execution remains DISABLED and unarmed. No orders/precheck test orders, purchases, agreements or session upgrades were performed. Saxo is the sole active external provider; IBKR remains parked. The five markets, £10 premium-plus-entry-and-reserved-exit policy, one-contract rule, four concurrent positions including reservations, GC monitor-only behavior, and frozen strategy sources remain intact.
 
@@ -47,9 +47,9 @@ The original 32 MiB rolling, 8 MiB/512-item queue, 2 GiB archive and 2 GiB free-
 
 Markets shows the owned/event-selected contract or current candidate, actual underlying identity, expiry/trading/strategy exit times, regular quote/spread/sizes and their states, provider delta/IV, volume/OI ages, minimum purchase/budget result, subscription start and actual latest-event prehistory. Secondary fields and candidate/metadata history remain in an expansion. Existing signal/trade detail JSON carries the related option context.
 
-## Directly verified availability before deployment
+## Directly verified availability after deployment
 
-Read-only application inspection at **2026-09-28 17:43 UTC**, SIM session `Authenticated / Standard / OrdersOnly`, two subscriptions (session and FX), zero positions/reservations:
+Read-only application inspection at **2026-09-28 18:07 UTC**, SIM session `Authenticated / Standard / OrdersOnly`, two subscriptions (session and FX), zero option subscriptions and zero positions/reservations:
 
 | Market | Futures search candidates | Selected future quote / volume / OI | Option identity / quote / Greeks / IV / volume / OI / costs | Recorded option prehistory |
 | --- | ---: | --- | --- | ---: |
@@ -57,9 +57,9 @@ Read-only application inspection at **2026-09-28 17:43 UTC**, SIM session `Authe
 | GC | 6 | Not verified; monitor-only | Not verified | 0 s |
 | NG | 7 | Not verified | Not verified | 0 s |
 | NQ | 0 | Not verified; search returned none | Not verified | 0 s |
-| SI | 10 before the exact-prefix discovery filter | Not verified | Not verified | 0 s |
+| SI | 6 | Not verified | Not verified | 0 s |
 
-All five report `REFERENCE_CONTRACT_SELECTION_REQUIRED`. No field is called unavailable by entitlement merely because it has not been requested/observed. The SI prefix filter excludes unrelated search results; post-deployment counts are recorded separately. Authentication is verified; exact future/root selection, approved tolerance/expiry evidence, safety-critical contract fields, relevant quote/analytics entitlements and recording permission remain unresolved. Persistent recording is disabled with `RECORDING_PERMISSION_NOT_VERIFIED`. Optional Greeks/IV do not delay the connected core service.
+All five report `REFERENCE_CONTRACT_SELECTION_REQUIRED`. No field is called unavailable by entitlement merely because it has not been requested/observed. Before deployment SI had 10 broad search results; the prefix filter now excludes four unrelated results. Authentication is verified; exact future/root selection, approved tolerance/expiry evidence, safety-critical contract fields, relevant quote/analytics entitlements and recording permission remain unresolved. Persistent recording is disabled with `RECORDING_PERMISSION_NOT_VERIFIED`. Optional Greeks/IV do not delay the connected core service. Runtime limits remain 32 MiB rolling, 8 MiB queue, 2 GiB archive and 2 GiB free-disk reserve; option budget 16, candidate window three, total subscription budget 32.
 
 ## Verification and resource evidence
 

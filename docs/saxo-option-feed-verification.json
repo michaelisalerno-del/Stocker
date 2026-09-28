@@ -1,0 +1,142 @@
+{
+  "at": "2026-09-28T18:07:47.232345+00:00",
+  "release": "5aa3a7be4c1f37245ba171dde08968eb43b54375",
+  "oauth": "AUTHENTICATED",
+  "oauth_problem": "",
+  "account": "Verified configured Saxo account",
+  "connected": true,
+  "problem": "",
+  "data_environment": "SAXO_SIM",
+  "execution_mode": "DISABLED",
+  "armed": false,
+  "live_orders_disabled": true,
+  "session": {
+    "AuthenticationLevel": "Authenticated",
+    "DataLevel": "Standard",
+    "TradeLevel": "OrdersOnly"
+  },
+  "providers": {
+    "SAXO": "ACTIVE",
+    "IBKR": "PARKED",
+    "FMP": "INACTIVE",
+    "EODHD": "INACTIVE"
+  },
+  "reserved_open_trades": 0,
+  "market_data": {
+    "owned_lines": 2,
+    "app_budget": 32,
+    "option_budget": 16,
+    "option_lines": 0,
+    "candidate_window": 3,
+    "rate_limits": {
+      "x-ratelimit-appday-limit": "10000000",
+      "x-ratelimit-appday-remaining": "9999954",
+      "x-ratelimit-appday-reset": "71426",
+      "x-ratelimit-tradepricesminute-limit": "120",
+      "x-ratelimit-tradepricesminute-remaining": "119",
+      "x-ratelimit-tradepricesminute-reset": "60"
+    },
+    "rest_queue": 0
+  },
+  "l2_recording": {
+    "memory_bytes": 0,
+    "memory_limit": 33554432,
+    "memory_high_water": 0,
+    "queue_bytes": 0,
+    "writer_queue": 0,
+    "disk_bytes": 0,
+    "disk_limit": 2147483648,
+    "disk_free": 88350617600,
+    "disk_reserve": 2147483648,
+    "recording_gaps": 0,
+    "paused_reason": "RECORDING_PERMISSION_NOT_VERIFIED",
+    "persistent_capture": false
+  },
+  "service": {
+    "NRestarts": "0",
+    "MemoryCurrent": "56307712",
+    "ActiveState": "active"
+  },
+  "markets": [
+    {
+      "market": "CL",
+      "problem": "REFERENCE_CONTRACT_SELECTION_REQUIRED",
+      "discovery": "AVAILABLE",
+      "candidate_count": 16,
+      "selected_underlying_uic": null,
+      "underlying_quote_observed": false,
+      "underlying_analytics_observed": [],
+      "option_contracts": [],
+      "strategy_state": "BLOCKED",
+      "l2_status": "L2_UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      }
+    },
+    {
+      "market": "GC",
+      "problem": "REFERENCE_CONTRACT_SELECTION_REQUIRED",
+      "discovery": "AVAILABLE",
+      "candidate_count": 6,
+      "selected_underlying_uic": null,
+      "underlying_quote_observed": false,
+      "underlying_analytics_observed": [],
+      "option_contracts": [],
+      "strategy_state": "MONITOR_ONLY",
+      "l2_status": "L2_UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      }
+    },
+    {
+      "market": "NG",
+      "problem": "REFERENCE_CONTRACT_SELECTION_REQUIRED",
+      "discovery": "AVAILABLE",
+      "candidate_count": 7,
+      "selected_underlying_uic": null,
+      "underlying_quote_observed": false,
+      "underlying_analytics_observed": [],
+      "option_contracts": [],
+      "strategy_state": "BLOCKED",
+      "l2_status": "L2_UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      }
+    },
+    {
+      "market": "NQ",
+      "problem": "REFERENCE_CONTRACT_SELECTION_REQUIRED",
+      "discovery": "NO_LISTED_FUTURES",
+      "candidate_count": 0,
+      "selected_underlying_uic": null,
+      "underlying_quote_observed": false,
+      "underlying_analytics_observed": [],
+      "option_contracts": [],
+      "strategy_state": "BLOCKED",
+      "l2_status": "L2_UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      }
+    },
+    {
+      "market": "SI",
+      "problem": "REFERENCE_CONTRACT_SELECTION_REQUIRED",
+      "discovery": "AVAILABLE",
+      "candidate_count": 6,
+      "selected_underlying_uic": null,
+      "underlying_quote_observed": false,
+      "underlying_analytics_observed": [],
+      "option_contracts": [],
+      "strategy_state": "BLOCKED",
+      "l2_status": "L2_UNAVAILABLE",
+      "recorder": {
+        "state": "UNAVAILABLE",
+        "prehistory_seconds": 0
+      }
+    }
+  ]
+}

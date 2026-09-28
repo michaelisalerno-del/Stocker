@@ -133,7 +133,9 @@ class OAuth:
                 data={**form, "redirect_uri": self.settings.redirect_uri},
                 auth=(self.credentials["client_id"], self.credentials["client_secret"]),
             )
-            if response.status_code != 200:
+            # Saxo SIM also returns 201 Created for issued tokens. Both success
+            # statuses still require the full payload/lifetime/storage validation below.
+            if response.status_code not in {200, 201}:
                 reason = f"OAUTH_TOKEN_HTTP_{response.status_code}"
                 try:
                     error = response.json()

@@ -81,6 +81,10 @@ for `/oauth/saxo/callback`; never log callback codes, Authorization headers or c
 logging is disabled. The runtime log rotates at 2 MiB × 4 files and records exception classes only.
 HTTP/WebSocket debug logging must remain off.
 
+Token issuance/renewal accepts HTTP 200 or 201. HTTP 201 was observed from the configured Saxo SIM
+token endpoint on 2026-09-28. Both statuses still require complete tokens, valid lifetimes and atomic
+private-file storage before authentication succeeds; a status alone never establishes authentication.
+
 OAuth exchange failures expose only a safe category in the callback and System's `oauth_problem`:
 
 - `OAUTH_INVALID_CLIENT`: Saxo explicitly rejected the application credentials.

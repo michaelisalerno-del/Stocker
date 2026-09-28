@@ -73,13 +73,14 @@ def oauth_fixture(tmp_path, env="SAXO_SIM", handler=None):
     )
 
 
-def test_oauth_state_rotation_and_environment_binding(tmp_path):
+@pytest.mark.parametrize("status", [200, 201])
+def test_oauth_state_rotation_and_environment_binding(tmp_path, status):
     requests = []
 
     def response(req):
         requests.append(req)
         return httpx.Response(
-            200,
+            status,
             json={
                 "access_token": f"access-{len(requests)}",
                 "refresh_token": f"refresh-{len(requests)}",

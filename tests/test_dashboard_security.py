@@ -146,7 +146,10 @@ def test_futures_server_preserves_authenticated_proxy_socket_peer(monkeypatch, t
     assert statuses == [200, 200, 403]
 
 
-def test_oauth_redirect_origin_reaches_state_validation_and_landing(monkeypatch, tmp_path):
+@pytest.mark.parametrize("token_status", [200, 201])
+def test_oauth_redirect_origin_reaches_state_validation_and_landing(
+    monkeypatch, tmp_path, token_status
+):
     import httpx
 
     from stocker_dashboard.app import create_dashboard_app
@@ -180,7 +183,7 @@ def test_oauth_redirect_origin_reaches_state_validation_and_landing(monkeypatch,
         def exchange(request):
             exchanges.append(request.url.path)
             return httpx.Response(
-                200,
+                token_status,
                 json={
                     "access_token": "fixture-access",
                     "refresh_token": "fixture-refresh",

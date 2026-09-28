@@ -26,6 +26,9 @@ from stocker_execution.saxo_auth import OAuth, atomic_json
         (400, {"error": "sensitive-value"}, "OAUTH_TOKEN_HTTP_400"),
         (200, {"access_token": "sensitive-access"}, "OAUTH_TOKEN_RESPONSE_INCOMPLETE"),
         (200, "sensitive-malformed-response", "OAUTH_TOKEN_RESPONSE_INVALID"),
+        (201, {"access_token": "sensitive-access"}, "OAUTH_TOKEN_RESPONSE_INCOMPLETE"),
+        (201, "sensitive-malformed-response", "OAUTH_TOKEN_RESPONSE_INVALID"),
+        (204, "", "OAUTH_TOKEN_HTTP_204"),
     ],
 )
 def test_exchange_reports_safe_failure_category(tmp_path, status, body, reason):

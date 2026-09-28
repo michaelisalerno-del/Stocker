@@ -180,7 +180,10 @@ def test_queued_delta_does_not_backdate_calculation_using_later_snapshot(tmp_pat
     assert row["book_flow"]["lookbacks"]["5"]["1"]["status"] == "INSUFFICIENT_HISTORY"
 
 
-def test_five_ordinary_subscriptions_shared_by_consumers_and_heartbeats(tmp_path, monkeypatch):
+@pytest.mark.parametrize("heartbeat_array", [False, True])
+def test_five_ordinary_subscriptions_shared_by_consumers_and_heartbeats(
+    tmp_path, monkeypatch, heartbeat_array
+):
     async def scenario():
         calls = []
 
@@ -233,6 +236,8 @@ def test_five_ordinary_subscriptions_shared_by_consumers_and_heartbeats(tmp_path
             "message_id": "heartbeat",
             "payload": {"Heartbeats": [{"OriginatingReferenceId": ref, "Reason": "NoNewData"}]},
         }
+        if heartbeat_array:
+            heartbeat["payload"] = [heartbeat["payload"]]
         await data.receive(heartbeat, first + 20)
         assert p.depth(first + 20)["fresh"] and p.last_receipt == first
         assert p.last_field_change == first

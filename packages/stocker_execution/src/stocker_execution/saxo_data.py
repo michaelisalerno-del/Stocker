@@ -631,27 +631,32 @@ class DataService:
             self.pending_bytes += size
             return
         if ref == "_heartbeat":
-            for heartbeat in payload.get("Heartbeats", []):
-                subscription = self.subscriptions.get(heartbeat.get("OriginatingReferenceId"))
-                if subscription:
-                    subscription["contact"] = time.monotonic()
-                    if heartbeat.get("Reason") != "NoNewData" and subscription["kind"] == "PRICE":
-                        self.mark_gap(subscription["target"], "SUBSCRIPTION_DISABLED")
-                        raise SaxoError("SUBSCRIPTION_DISABLED_FRESH_SNAPSHOT_REQUIRED")
-                    if subscription["kind"] == "PRICE":
-                        price, identity = self.price_target(subscription["target"])
-                        price.last_contact = receipt
-                        if identity:
-                            self.recorder.ingest(
-                                key(identity),
-                                "HEARTBEAT",
-                                heartbeat,
-                                receipt,
-                                message_id=message["message_id"],
-                                generation=price.generation,
-                                provider_message=message,
-                                observation_context=price.observation_context(),
-                            )
+            envelopes = payload if isinstance(payload, list) else [payload]
+            for envelope in envelopes:
+                for heartbeat in envelope.get("Heartbeats", []):
+                    subscription = self.subscriptions.get(heartbeat.get("OriginatingReferenceId"))
+                    if subscription:
+                        subscription["contact"] = time.monotonic()
+                        if (
+                            heartbeat.get("Reason") != "NoNewData"
+                            and subscription["kind"] == "PRICE"
+                        ):
+                            self.mark_gap(subscription["target"], "SUBSCRIPTION_DISABLED")
+                            raise SaxoError("SUBSCRIPTION_DISABLED_FRESH_SNAPSHOT_REQUIRED")
+                        if subscription["kind"] == "PRICE":
+                            price, identity = self.price_target(subscription["target"])
+                            price.last_contact = receipt
+                            if identity:
+                                self.recorder.ingest(
+                                    key(identity),
+                                    "HEARTBEAT",
+                                    heartbeat,
+                                    receipt,
+                                    message_id=message["message_id"],
+                                    generation=price.generation,
+                                    provider_message=message,
+                                    observation_context=price.observation_context(),
+                                )
             return
         if ref in {"_resetsubscriptions", "_disconnect"}:
             raise SaxoError("STREAM_RESET_FRESH_SNAPSHOTS_REQUIRED")

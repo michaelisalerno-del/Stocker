@@ -516,3 +516,11 @@ footer {
 #recording-list a { display: block; margin-block: .65rem; }
 [hidden] { display: none !important; }
 @media(max-width:700px) { .trade-slots { grid-template-columns: repeat(2,1fr); } nav { flex-wrap: wrap; } }
+.book-flow { margin: 1.2rem 0; padding-top: 1rem; border-top: 1px solid var(--line, #334850); }
+.book-flow h3 { font-size: 1rem; letter-spacing: .08em; }
+.book-flow p { line-height: 1.5; }
+.flow-table { overflow-x: auto; }
+.flow-table table { width: 100%; font-size: .78rem; }
+.book-flow .depth { max-width: 42rem; }
+.book-flow pre { max-height: 24rem; overflow: auto; }
+#markets.single-market { grid-template-columns: minmax(0, 1fr); max-width: 1100px; }

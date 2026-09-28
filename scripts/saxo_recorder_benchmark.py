@@ -14,6 +14,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from stocker_execution.book_flow import VERSION
 from stocker_execution.config import MARKETS, RecorderConfig
 from stocker_execution.recorder import Recorder
 
@@ -37,6 +38,7 @@ async def benchmark() -> dict:
                     "asset_type": "ContractFutures",
                     "uic": n + 100,
                     "market": market,
+                    "tick_size": 0.01,
                     "fixture": True,
                 },
             )
@@ -72,8 +74,20 @@ async def benchmark() -> dict:
             for n, market in enumerate(MARKETS):
                 price = 70 + n + (second % 100) * 0.01
                 payload = {
-                    "Quote": {"Bid": price, "Ask": price + 0.01, "DelayedByMinutes": 0},
-                    "PriceInfoDetails": {"BidSize": 2, "AskSize": 3},
+                    "Quote": {
+                        "Bid": price,
+                        "Ask": price + 0.01,
+                        "BidSize": 2,
+                        "AskSize": 3,
+                        "DelayedByMinutes": 0,
+                        "PriceTypeBid": "Tradable",
+                        "PriceTypeAsk": "Tradable",
+                    },
+                    "PriceInfoDetails": {
+                        "LastTraded": price,
+                        "LastTradedSize": 1,
+                        "Volume": second,
+                    },
                     "MarketDepth": {
                         "Bid": [price - i * 0.01 for i in range(10)],
                         "Ask": [price + (i + 1) * 0.01 for i in range(10)],
@@ -81,6 +95,9 @@ async def benchmark() -> dict:
                         "AskSize": [second % 31 + i for i in range(10)],
                         "NoOfBids": 10,
                         "NoOfOffers": 10,
+                        "UsingOrders": True,
+                        "BidOrders": [2] * 10,
+                        "AskOrders": [1] * 10,
                     },
                 }
                 before = time.perf_counter()
@@ -91,6 +108,23 @@ async def benchmark() -> dict:
                     second,
                     message_id=str(second * 17 + n),
                     provider_message={"Timestamp": second, "Data": payload},
+                    observation_context={
+                        "valid_until": second + 30,
+                        "subscription_id": market,
+                        "granted_refresh_ms": 1000,
+                        "last_receipt": second,
+                        "last_contact": second,
+                        "last_field_change": second,
+                        "last_depth_change": second,
+                        "last_trade_observation_change": second,
+                        "observed_receipt_ms": {
+                            "samples": 60,
+                            "mean": 1000,
+                            "minimum": 1000,
+                            "maximum": 1000,
+                        },
+                        "problem": "",
+                    },
                 )
                 timings.append(time.perf_counter() - before)
             recorder.tick(second)
@@ -104,6 +138,7 @@ async def benchmark() -> dict:
         rss_bytes = rss if sys.platform == "darwin" else rss * 1024
         return {
             "evidence": "OFFLINE_GENERATED_SIMULATION",
+            "feature_version": VERSION,
             "markets": list(MARKETS),
             "virtual_seconds": 7200,
             "requested_delivered_cadence_ms": 1000,

@@ -17,7 +17,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from stocker_execution import book_flow
 from stocker_execution.config import RecorderConfig
+from stocker_execution.contracts import utc
 from stocker_execution.saxo_auth import atomic_json
 from stocker_execution.saxo_stream import merge
 
@@ -46,18 +48,30 @@ class Window:
     continuous_since: float | None = None
     row_bytes: int = 0
     sequence: int = 0
+    flow: dict[str, Any] | None = None
+    checkpoint_flow: dict[str, Any] | None = None
 
     @property
     def size(self) -> int:
         # Dict/list/number allocations are larger than their JSON representations.
         return (
-            self.row_bytes + 8 * (len(packed(self.checkpoint)) + len(packed(self.current))) + 2048
+            self.row_bytes
+            + 8
+            * (
+                len(packed(self.checkpoint))
+                + len(packed(self.current))
+                + len(packed(self.flow))
+                + len(packed(self.checkpoint_flow))
+            )
+            + 2048
         )
 
     def evict(self) -> None:
         at, blob = self.rows.popleft()
         self.row_bytes -= len(blob) + 128  # include bounded Python object overhead
-        self.checkpoint = apply(self.checkpoint, json.loads(blob))
+        record = json.loads(blob)
+        self.checkpoint = apply(self.checkpoint, record)
+        self.checkpoint_flow = record.get("book_flow")
         self.checkpoint_at = at
 
     def coverage(self, at: float) -> float:
@@ -76,6 +90,7 @@ class Window:
                     "identity": self.identity,
                     "receipt": self.checkpoint_at,
                     "payload": self.checkpoint,
+                    "book_flow": self.checkpoint_flow,
                     "reconstruction": "state immediately before retained messages",
                 }
             ),
@@ -188,6 +203,7 @@ class Recorder:
                 # A single provider snapshot can itself exceed the retained-state budget.
                 for w in self.windows.values():
                     w.current = w.checkpoint = None
+                    w.flow = w.checkpoint_flow = None
                     w.continuous_since = None
                 self.problem = "ROLLING_STATE_LIMIT"
                 break
@@ -205,6 +221,7 @@ class Recorder:
         duplicate: bool = False,
         generation: str = "",
         provider_message: Any = None,
+        observation_context: dict[str, Any] | None = None,
     ) -> None:
         window = self.windows[key]
         window.sequence += 1
@@ -219,6 +236,27 @@ class Recorder:
             "payload": payload,
             "provider_message": provider_message,
         }
+        provider_times = {}
+        envelope = (
+            provider_message.get("payload", provider_message)
+            if isinstance(provider_message, dict)
+            else None
+        )
+        sources = [(payload, ("LastUpdated",))]
+        if isinstance(envelope, list):
+            for index, event in enumerate(envelope):
+                if isinstance(event, dict) and "Timestamp" in event:
+                    with suppress(TypeError, ValueError, AttributeError):
+                        provider_times[f"Timestamp[{index}]"] = utc(event["Timestamp"]).isoformat()
+        else:
+            sources.append((envelope, ("Timestamp",)))
+        for source, names in sources:
+            if isinstance(source, dict):
+                for name in names:
+                    if name in source:
+                        with suppress(TypeError, ValueError, AttributeError):
+                            provider_times[name] = utc(source[name]).isoformat()
+        record["provider_timestamps"] = provider_times
         blob = packed(record)
         if len(blob) > self.config.max_message_bytes:
             kind, payload = "GAP", {"reason": "MESSAGE_BYTE_LIMIT"}
@@ -231,6 +269,37 @@ class Recorder:
             window.continuous_since = None
             self.gaps += 1
         window.current = apply(window.current, record)
+        if window.identity.get("asset_type") == "ContractFutures" and window.identity.get(
+            "tick_size"
+        ):
+            context = observation_context or {"valid_until": at + 5, "subscription_id": generation}
+            # Queued deltas can predate the initial REST snapshot's arrival. Keep raw
+            # receipt intact, but never backdate a calculation using that later snapshot.
+            calculated_at = max(at, window.flow["at"] if window.flow else at)
+            history = []
+            # Bounded computation over the SAME retained rows, not another history store.
+            for index, (_, prior) in enumerate(reversed(window.rows)):
+                if index >= 512:
+                    break
+                point = json.loads(prior).get("book_flow")
+                if point is not None:
+                    history.append(point)
+                    if point["at"] <= calculated_at - 60:
+                        break
+            try:
+                window.flow = book_flow.observe(
+                    window.identity, window.current, calculated_at, context, list(reversed(history))
+                )
+            except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+                window.flow = book_flow.observe(
+                    window.identity,
+                    None,
+                    calculated_at,
+                    {**context, "problem": "FEATURE_SCHEMA_UNAVAILABLE"},
+                    [],
+                )
+            record["book_flow"] = window.flow
+            blob = packed(record)
         window.rows.append((at, blob))
         window.row_bytes += len(blob) + 128
         self.expire(at)
@@ -240,6 +309,8 @@ class Recorder:
                 capture["last_sequences"][key] = window.sequence
                 if kind == "GAP":
                     capture["gaps"] += 1
+                if window.flow:
+                    capture["book_flow"] = self.flow_metadata(window, at)
                 self.enqueue(segment, capture, [blob])
 
     def enqueue(self, segment: str, manifest: dict[str, Any], rows: list[bytes]) -> bool:
@@ -326,6 +397,8 @@ class Recorder:
                 "prehistory_seconds": {k: self.windows[k].coverage(at) for k in keys},
             }
         )
+        if window.flow:
+            capture["book_flow"] = self.flow_metadata(window, at)
         rows = []
         for instrument in keys:
             if instrument not in capture["instruments"]:
@@ -350,6 +423,33 @@ class Recorder:
             "pre_seconds": window.coverage(at),
             "reason": capture["reason"],
         }
+
+    @staticmethod
+    def flow_metadata(window: Window, at: float) -> dict[str, Any]:
+        flow = window.flow or {}
+        return {
+            "version": book_flow.VERSION,
+            "observation_only": True,
+            "coverage_seconds": window.coverage(at),
+            "calculated_at": flow.get("at"),
+            "quality_flags": flow.get("quality_flags", []),
+            "available_fields": flow.get("available_fields", {}),
+            "granted_refresh_ms": flow.get("feed", {}).get("granted_refresh_ms"),
+            "observed_receipt_ms": flow.get("feed", {}).get("observed_receipt_ms"),
+        }
+
+    def book_flow_view(self, key: str, at: float) -> dict[str, Any]:
+        window = self.windows.get(key)
+        if not window or not window.flow:
+            return {"version": book_flow.VERSION, "status": "UNAVAILABLE"}
+        if window.flow["valid_until"] < at or window.current is None:
+            return {
+                "version": book_flow.VERSION,
+                "status": "UNAVAILABLE",
+                "quality_flags": ["STREAM_OR_RECONSTRUCTION_UNAVAILABLE"],
+                "feed": window.flow["feed"],
+            }
+        return window.flow
 
     def attach(self, event_id: str, instrument: str, at: float) -> None:
         """Selected options may begin streaming after the trigger; report actual history."""
@@ -514,6 +614,8 @@ class Recorder:
                 else {k: manifest[k] for k in ("segment", "key", "start", "end")}
             )
             marker.update(state="INCOMPLETE", reason=self.problem)
+            if "book_flow" in manifest:
+                marker["book_flow"] = manifest["book_flow"]
             size = len(packed(marker))
             if (
                 self.disk_bytes + size * 2 < self.config.archive_max_bytes

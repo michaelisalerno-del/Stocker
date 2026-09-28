@@ -146,6 +146,18 @@ const state = {
           : [],
   })),
 };
+for (const m of state.markets) {
+  m.identity = {environment:"SAXO_SIM",uic:100+markets.indexOf(m.market)};
+  m.book_flow = {
+    version:"SAXO_SAMPLED_BOOK_FLOW_V1", at:Date.parse(at)/1000, valid_until:Date.parse(at)/1000+30,
+    status:"CURRENT", quality_flags:[], delay_minutes:0, spread_ticks:1,
+    available_levels:{bid:5,ask:5}, weighted_midpoint:70.0075, weighted_displacement_ticks:.25,
+    latest_trade:{price:70,size:2}, volume:{value:100,change:null,status:"SEMANTICS_UNVERIFIED"},
+    feed:{granted_refresh_ms:1500,observed_receipt_ms:{samples:20,mean:1800,minimum:1000,maximum:3000},last_receipt:Date.parse(at)/1000,last_field_change:Date.parse(at)/1000-50,last_contact:Date.parse(at)/1000},
+    depth:Object.fromEntries([1,3,5,10].map(n=>[n,n<=5?{bid:3*n,ask:n,imbalance:.5,order_imbalance:null,label:"BID_HEAVY"}:{}])),
+    lookbacks:Object.fromEntries([5,30,60].map(s=>[s,{5:{status:"AVAILABLE",bid_change:2,ask_change:-1,bid_heavy_fraction:.5,ask_heavy_fraction:.25,balanced_fraction:.25}}]))
+  };
+}
 const rows = Array.from({ length: 80 }, (_, i) => ({
   id: `fixture-${i}`,
   market: markets[i % 5],
@@ -281,11 +293,34 @@ async function label(page) {
     await page.evaluate(() => refresh());
     assert.equal(await page.locator("#depth-GC-0").isVisible(), false);
     assert(await page.locator("#card-GC details").evaluate((n) => n.open));
+    state.markets[1].l2.fresh = true;
+    state.markets[1].l2.valid_until = Date.parse(at)/1000+30;
     await page.goto(`${base}/markets`);
     await page.locator("#selected-market").selectOption("GC");
     await page.evaluate(() => refresh());
     assert.equal(await page.locator("#card-GC").isVisible(), true);
     assert.equal(await page.locator("#card-CL").isVisible(), false);
+    assert.match(await page.locator("#book-flow-GC").textContent(), /Sampled order-book observations; not a complete execution tape/);
+    assert.match(await page.locator("#flow-depth-GC-10").textContent(), /UNAVAILABLE/);
+    assert.match(await page.locator("#flow-volume-GC").textContent(), /change UNAVAILABLE/);
+    assert.match(await page.locator("#flow-feed-GC").textContent(), /granted 1500 ms.*mean 1800 ms/);
+    await page.locator("#flow-detail-GC summary").click();
+    await page.locator("#flow-detail-GC summary").focus();
+    await page.evaluate(() => { window.flowRow=document.querySelector("#flow-depth-GC-5"); window.flowFocus=document.activeElement; window.scrollTo(0,350); });
+    const flowY = await page.evaluate(() => scrollY);
+    await page.evaluate(() => refresh());
+    assert(await page.evaluate(() => flowRow===document.querySelector("#flow-depth-GC-5") && flowFocus===document.activeElement));
+    assert(await page.locator("#flow-detail-GC").evaluate(n=>n.open));
+    assert.equal(await page.evaluate(() => scrollY), flowY);
+    await page.locator("#flow-detail-GC summary").click();
+    await label(page);
+    await page.screenshot({path:path.join(output,"book-flow-desktop-fixture.png"),fullPage:true});
+    await page.clock.fastForward(6000);
+    assert(await page.locator("#depth-GC-0").isVisible()); // unchanged, healthy book
+    await page.setViewportSize({width:390,height:844});
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.screenshot({path:path.join(output,"book-flow-mobile-fixture.png"),fullPage:true});
+    await page.setViewportSize({width:1440,height:1080});
     await page.goto(`${base}/markets`);
     assert.equal(await page.locator("#selected-market").inputValue(), "GC");
     await page.goto(`${base}/opportunities`);

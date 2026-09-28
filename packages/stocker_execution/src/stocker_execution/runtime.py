@@ -148,7 +148,6 @@ class Runtime:
             reason = reason or self.broker.entry_reason()
             value = state.price.value or {}
             quote = value.get("Quote") or {}
-            details = value.get("PriceInfoDetails") or {}
             current = (
                 state.price.receipt is not None
                 and 0 <= time.time() - state.price.receipt <= 5
@@ -196,7 +195,7 @@ class Runtime:
                     "l1": {
                         "status": "CURRENT" if current else "STALE_OR_MISSING",
                         "quote": quote,
-                        "sizes": {"bid": details.get("BidSize"), "ask": details.get("AskSize")},
+                        "sizes": {side.lower(): size for side, size in state.price.sizes().items()},
                         "spread": quote["Ask"] - quote["Bid"]
                         if isinstance(quote.get("Ask"), (int, float))
                         and isinstance(quote.get("Bid"), (int, float))
@@ -208,6 +207,9 @@ class Runtime:
                         else None,
                     },
                     "l2": depth,
+                    "book_flow": self.recorder.book_flow_view(key(identity), time.time())
+                    if identity
+                    else {"status": "UNAVAILABLE"},
                     "recorder": recording,
                     "capabilities": self.data.capability_view(state),
                     "option": {

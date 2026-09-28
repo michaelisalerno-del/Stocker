@@ -10,6 +10,7 @@ const names = {
 };
 const depthReceipts = new Map();
 const quoteReceipts = new Map();
+const flowExpiry = new Map();
 const route = location.pathname.slice(1) || "overview";
 const page = ["opportunities", "trades"].includes(route) ? "trades" : route === "markets" ? "overview" : route;
 let selectedMarket = sessionStorage.getItem("slrno-market") || "CL";
@@ -73,6 +74,45 @@ for (const m of markets) {
  <tbody>${Array.from({ length: 20 }, (_, i) => `<tr id="depth-${m}-${i}" hidden><td></td><td></td><td></td><td></td></tr>`).join("")}</tbody></table></div>
  <pre id="details-${m}"></pre></details>`;
   $("markets").append(card);
+  if (route === "markets") {
+    const panel = document.createElement("section");
+    panel.className = "book-flow";
+    panel.id = `book-flow-${m}`;
+    panel.innerHTML = `<h3>BOOK FLOW — SAMPLED L2</h3>
+      <p class="muted">Sampled order-book observations; not a complete execution tape.</p>
+      <p id="flow-status-${m}"></p><p id="flow-feed-${m}"></p>
+      <p id="flow-spread-${m}"></p>
+      <div class="flow-table"><table aria-label="${m} book-flow depth totals"><thead><tr><th>Levels</th><th>Bid depth</th><th>Ask depth</th><th>Imbalance</th><th>Order imbalance</th><th>Observed state</th></tr></thead>
+      <tbody>${[1,3,5,10].map(n => `<tr id="flow-depth-${m}-${n}"><th>${n}</th><td></td><td></td><td></td><td></td><td></td></tr>`).join("")}</tbody></table></div>
+      <p id="flow-mid-${m}"></p><p id="flow-changes-${m}"></p><p id="flow-persistence-${m}"></p>
+      <p id="flow-last-${m}"></p><p id="flow-volume-${m}"></p>
+      <details id="flow-detail-${m}"><summary>Coverage, fields and observation times</summary><pre id="flow-meta-${m}"></pre></details>`;
+    card.insertBefore(panel, card.querySelector("details"));
+    panel.append(card.querySelector(".depth"));
+  }
+}
+const numeric = (v, suffix = "") => typeof v === "number" && Number.isFinite(v) ? `${Number(v.toFixed(4))}${suffix}` : "UNAVAILABLE";
+function bookFlow(m, f, rec = {}, identity = {}) {
+  if (route !== "markets") return;
+  flowExpiry.set(m, (f.valid_until || 0) * 1000);
+  text(`flow-status-${m}`, `${f.status || "UNAVAILABLE"} · ${(f.quality_flags || []).join(" · ")} · ${rec.state || "UNAVAILABLE"} · ${Math.floor(rec.prehistory_seconds || 0)} / 900s buffer`);
+  const feed = f.feed || {}, cadence = feed.observed_receipt_ms || {};
+  text(`flow-feed-${m}`, `${identity.environment || "UNVERIFIED"} · UIC ${identity.uic ?? "UNVERIFIED"} · delay ${numeric(f.delay_minutes, " min")} · granted ${numeric(feed.granted_refresh_ms, " ms")} · observed receipt mean ${numeric(cadence.mean, " ms")} (${cadence.samples || 0} intervals)`);
+  text(`flow-spread-${m}`, `Spread ${numeric(f.spread_ticks, " ticks")} · usable depth up to 10: ${f.available_levels?.bid ?? 0} bid / ${f.available_levels?.ask ?? 0} ask levels`);
+  for (const n of [1,3,5,10]) {
+    const d = f.depth?.[n] || {}, row = $(`flow-depth-${m}-${n}`);
+    [numeric(d.bid),numeric(d.ask),numeric(d.imbalance),numeric(d.order_imbalance),d.label || "UNAVAILABLE"].forEach((v,i) => { if(row.children[i+1].textContent !== v) row.children[i+1].textContent = v; });
+  }
+  text(`flow-mid-${m}`, `Size-weighted midpoint ${numeric(f.weighted_midpoint)} · displacement ${numeric(f.weighted_displacement_ticks, " ticks")}`);
+  text(`flow-changes-${m}`, "Observed five-level depth changes · " + [5,30,60].map(s => {
+    const d = f.lookbacks?.[s]?.[5];
+    return `${s}s: ${d?.status === "AVAILABLE" ? `bid ${numeric(d.bid_change)} / ask ${numeric(d.ask_change)}` : "INSUFFICIENT_HISTORY"}`;
+  }).join(" · "));
+  const p = f.lookbacks?.[60]?.[5] || {};
+  text(`flow-persistence-${m}`, `Five-level persistence over 60s · ${p.bid_heavy_fraction == null ? "INSUFFICIENT_HISTORY" : `BID_HEAVY ${numeric(p.bid_heavy_fraction * 100, "%")} / ASK_HEAVY ${numeric(p.ask_heavy_fraction * 100, "%")} / BALANCED ${numeric(p.balanced_fraction * 100, "%")}`}`);
+  text(`flow-last-${m}`, `Latest-trade observation: ${numeric(f.latest_trade?.price)} × ${numeric(f.latest_trade?.size)} · no inferred execution count`);
+  text(`flow-volume-${m}`, `Reported volume ${numeric(f.volume?.value)} · change UNAVAILABLE · ${f.volume?.status || "UNAVAILABLE"}`);
+  text(`flow-meta-${m}`, JSON.stringify({version:f.version, calculated_at:f.at, last_receipt:feed.last_receipt, last_field_change:feed.last_field_change, last_contact:feed.last_contact, cadence, available_fields:f.available_fields, recording:rec, matched_price_changes:f.lookbacks}, null, 2));
 }
 function chart(m) {
   const bars = m.chart || [],
@@ -210,6 +250,7 @@ function render(d) {
     );
     text(`l1-${m.market}`, `L1 ${display(m.l1?.status || "DISCONNECTED")}`);
     depth(m.market, m.l2 || { status: "DISABLED" });
+    bookFlow(m.market, m.book_flow || {}, rec, m.identity || {environment:s.data_environment});
     text(`direction-${m.market}`, m.direction);
     text(
       `conditions-${m.market}`,
@@ -286,16 +327,17 @@ function render(d) {
   );
 }
 function depth(m, d) {
-  depthReceipts.set(m, d.fresh ? Date.parse(d.last_receipt) : 0);
+  const expires = d.valid_until != null ? d.valid_until * 1000 : Date.parse(d.last_receipt) + 5000;
+  depthReceipts.set(m, d.fresh ? expires : 0);
   const covered = Math.floor(d.pre_seconds || 0);
   text(
     `l2-${m}`,
     `L2 ${display(d.status)}${d.target_pre_seconds ? ` · ${covered} / ${d.target_pre_seconds}s pre-context` : ""}`,
   );
-  const fresh = d.fresh && Date.now() - Date.parse(d.last_receipt) <= 5000;
+  const fresh = d.fresh && Date.now() <= expires;
   text(
     `depth-note-${m}`,
-    `${display(d.reason)}${fresh ? ` · Local receipt ${time(d.last_receipt)}` : " · No current ladder"}`,
+    `${display(d.reason)}${fresh ? ` · ${d.bids?.length || 0} bid / ${d.asks?.length || 0} ask levels received · Last depth receipt ${time(d.last_receipt)}` : " · No current ladder"}`,
   );
   for (let i = 0; i < 20; i++) {
     const row = $(`depth-${m}-${i}`),
@@ -430,8 +472,9 @@ $("next").onclick = () => {
 setInterval(() => {
   text("clock", `${time(new Date().toISOString())} · London`);
   for (const [m, at] of depthReceipts)
-    if (at && Date.now() - at > 5000)
-      depth(m, { status: "L2_UNAVAILABLE", reason: "LADDER_RECEIPT_STALE" });
+    if (at && Date.now() > at)
+      depth(m, { status: "L2_UNAVAILABLE", reason: "SUBSCRIPTION_HEALTH_EXPIRED" });
+  for (const [m, expires] of flowExpiry) if (expires && Date.now() > expires) bookFlow(m, {status:"UNAVAILABLE",quality_flags:["SUBSCRIPTION_HEALTH_EXPIRED"]});
   for (const [m, at] of quoteReceipts) if (!at || Date.now() - at > 5000) text(`l1-${m}`, "L1 STALE OR MISSING");
 }, 1000);
 setInterval(refresh, 5000);
@@ -447,6 +490,7 @@ for (const m of markets) {
   const row = document.createElement("p"); row.id = `capability-${m}`; $("capability-list").append(row);
 }
 $("market-selector").hidden = route !== "markets";
+if (route === "markets") $("markets").classList.add("single-market");
 $("selected-market").value = selectedMarket;
 function selectMarket() {
   selectedMarket = $("selected-market").value;

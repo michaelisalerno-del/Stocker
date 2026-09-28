@@ -315,8 +315,7 @@ class PaperBroker:
             size_at = state.size_times.get(side)
             if size_at is None or not 0 <= at.timestamp() - size_at <= 5:
                 raise ValueError("AVAILABLE_OPTION_SIZE_STALE")
-            details = (state.value or {}).get("PriceInfoDetails") or {}
-            size = positive(details.get(side + "Size"), "AVAILABLE_OPTION_SIZE")
+            size = positive(state.sizes().get(side), "AVAILABLE_OPTION_SIZE")
             receipt = size_at
             usage_key = (option["uic"], receipt, side)
             if size - self.size_used.get(usage_key, 0) < 1:

@@ -4,8 +4,10 @@ import copy
 import hashlib
 import json
 import struct
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from typing import Any
+
+from stocker_execution.book_flow import FIELDS
 
 
 def merge(previous: Any, update: Any) -> Any:
@@ -78,6 +80,11 @@ class PriceState:
         self.last_contact: float | None = None
         self.problem = "AWAITING_SNAPSHOT"
         self.refresh_ms: int | None = None
+        self.inactivity_timeout = 5
+        self.last_receipt: float | None = None
+        self.last_field_change: float | None = None
+        self.field_changes: dict[str, float] = {}
+        self.intervals: deque[float] = deque(maxlen=60)
 
     def snapshot(self, value: dict[str, Any], generation: str, at: float) -> None:
         self.value = merge({}, value)
@@ -87,6 +94,16 @@ class PriceState:
         self.size_times.clear()
         self.receipt = self.depth_receipt = self.size_receipt = None
         self.last_contact = at
+        self.last_receipt = at
+        self.last_field_change = at
+        self.field_changes.clear()
+        for group, fields in FIELDS.items():
+            if not isinstance(value.get(group), dict):
+                continue
+            for field in fields:
+                if (value.get(group) or {}).get(field) is not None:
+                    self.field_changes[group + "." + field] = at
+        self.intervals.clear()
         self.touch(value, at)
         self.problem = ""
 
@@ -99,13 +116,20 @@ class PriceState:
         if "MarketDepth" in value:
             self.depth_receipt = at
         for side in ("Bid", "Ask"):
-            if side + "Size" in (value.get("PriceInfoDetails") or {}):
+            field = side + "Size"
+            current_quote = (self.value or {}).get("Quote") or {}
+            if field in (value.get("Quote") or {}) or (
+                field not in current_quote and field in (value.get("PriceInfoDetails") or {})
+            ):
                 self.size_times[side] = at
         if len(self.size_times) == 2:
             self.size_receipt = min(self.size_times.values())
 
     def update(self, value: dict[str, Any], message_id: str, at: float) -> bool:
         self.last_contact = at
+        if self.last_receipt is not None and at > self.last_receipt:
+            self.intervals.append((at - self.last_receipt) * 1000)
+        self.last_receipt = at
         digest = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).digest()
         if message_id in self.seen:
             if self.seen[message_id] != digest:
@@ -118,7 +142,15 @@ class PriceState:
         self.last_message_id = message_id  # opaque: never subtract or order IDs
         if self.value is None:
             return False
-        self.value = merge(self.value, value)
+        merged = merge(self.value, value)
+        for group, fields in FIELDS.items():
+            prior, current = self.value.get(group) or {}, merged.get(group) or {}
+            if isinstance(prior, dict) and isinstance(current, dict):
+                for field in fields:
+                    if current.get(field) != prior.get(field):
+                        self.field_changes[group + "." + field] = at
+                        self.last_field_change = at
+        self.value = merged
         self.touch(value, at)
         return True
 
@@ -129,13 +161,51 @@ class PriceState:
         self.size_times.clear()
         self.problem = reason
 
+    def sizes(self) -> dict[str, Any]:
+        value = self.value or {}
+        quote, legacy = value.get("Quote") or {}, value.get("PriceInfoDetails") or {}
+        return {
+            side: quote[side + "Size"] if side + "Size" in quote else legacy.get(side + "Size")
+            for side in ("Bid", "Ask")
+        }
+
+    def observation_context(self) -> dict[str, Any]:
+        return {
+            "subscription_id": self.generation,
+            "granted_refresh_ms": self.refresh_ms,
+            "observed_receipt_ms": {
+                "samples": len(self.intervals),
+                "mean": sum(self.intervals) / len(self.intervals) if self.intervals else None,
+                "minimum": min(self.intervals) if self.intervals else None,
+                "maximum": max(self.intervals) if self.intervals else None,
+            },
+            "last_receipt": self.last_receipt,
+            "last_field_change": self.last_field_change,
+            "last_depth_change": max(
+                (at for k, at in self.field_changes.items() if k.startswith("MarketDepth.")),
+                default=None,
+            ),
+            "last_trade_observation_change": max(
+                (
+                    self.field_changes[k]
+                    for k in ("PriceInfoDetails.LastTraded", "PriceInfoDetails.LastTradedSize")
+                    if k in self.field_changes
+                ),
+                default=None,
+            ),
+            "last_contact": self.last_contact,
+            "valid_until": (self.last_contact or 0) + self.inactivity_timeout,
+            "problem": self.problem,
+        }
+
     def depth(self, at: float) -> dict[str, Any]:
         value = self.value or {}
         raw = value.get("MarketDepth")
         depth = raw if isinstance(raw, dict) else {}
         fresh = (
             self.depth_receipt is not None
-            and 0 <= at - self.depth_receipt <= 5
+            and self.last_contact is not None
+            and 0 <= at - self.last_contact <= self.inactivity_timeout
             and not self.problem
         )
         result: dict[str, Any] = {
@@ -145,6 +215,8 @@ class PriceState:
             "bids": [],
             "asks": [],
             "observation_only": True,
+            "valid_until": (self.last_contact or 0) + self.inactivity_timeout,
+            "last_field_change": self.last_field_change,
             "diagnostic": "Sampled provider depth; no inferred cancellations or aggressor trades",
         }
         for side, name, count in (("Bid", "bids", "NoOfBids"), ("Ask", "asks", "NoOfOffers")):

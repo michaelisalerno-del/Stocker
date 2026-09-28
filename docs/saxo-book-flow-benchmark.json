@@ -1,0 +1,40 @@
+{
+  "evidence": "OFFLINE_GENERATED_SIMULATION",
+  "feature_version": "SAXO_SAMPLED_BOOK_FLOW_V1",
+  "markets": [
+    "CL",
+    "GC",
+    "NG",
+    "NQ",
+    "SI"
+  ],
+  "virtual_seconds": 7200,
+  "requested_delivered_cadence_ms": 1000,
+  "messages": 36005,
+  "events": 3,
+  "shared_segments": 2,
+  "wall_seconds": 145.727,
+  "process_peak_rss_bytes": 92504064,
+  "ingest_p99_ms": 8.547,
+  "ingest_max_ms": 18.01,
+  "event_loop_max_delay_ms": 96.784,
+  "buffer_coverage_seconds": {
+    "CL": 900,
+    "GC": 900,
+    "NG": 900,
+    "NQ": 900,
+    "SI": 900
+  },
+  "memory_bytes": 26905680,
+  "memory_limit": 33554432,
+  "memory_high_water": 26955080,
+  "queue_bytes": 0,
+  "writer_queue": 0,
+  "disk_bytes": 4504502,
+  "disk_limit": 2147483648,
+  "disk_free": 246276292608,
+  "disk_reserve": 2147483648,
+  "recording_gaps": 0,
+  "paused_reason": "",
+  "persistent_capture": true
+}

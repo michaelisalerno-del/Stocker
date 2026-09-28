@@ -99,6 +99,7 @@ class DataService:
         self.pending: dict[str, list[dict[str, Any]]] = {}
         self.pending_bytes = 0
         self.subscription_lock = asyncio.Lock()
+        self.subscribe_lock = asyncio.Lock()
         self.changed = asyncio.Event()
         self.bar_cache = BarCache(recorder.directory.parent / "bars", config.recorder)
 
@@ -208,6 +209,24 @@ class DataService:
         target: str,
         old: str | None = None,
     ) -> str:
+        async with self.subscribe_lock:
+            existing = next(
+                (
+                    (ref, s)
+                    for ref, s in self.subscriptions.items()
+                    if s["kind"] == kind and s["target"] == target
+                ),
+                None,
+            )
+            if existing and old is None:
+                if existing[1]["arguments"] == arguments:
+                    return existing[0]
+                raise SaxoError("SUBSCRIPTION_ARGUMENT_CONFLICT")
+            return await self._subscribe(kind, arguments, target, old)
+
+    async def _subscribe(
+        self, kind: str, arguments: dict[str, Any], target: str, old: str | None
+    ) -> str:
         if len(self.subscriptions) >= 32 and old is None:
             raise SaxoError("SUBSCRIPTION_LIMIT")
         paths = {
@@ -247,9 +266,13 @@ class DataService:
         snapshot = result.get("Snapshot")
         if kind == "PRICE":
             if not isinstance(snapshot, dict):
+                await self.client.request("DELETE", paths[kind] + f"/{self.context}/{ref}")
+                self.subscriptions.pop(ref, None)
+                self.pending_bytes -= sum(len(json.dumps(m)) for m in self.pending.pop(ref, []))
                 raise SaxoError("PRICE_SNAPSHOT_MISSING")
             price, identity = self.price_target(target)
             price.refresh_ms = result.get("RefreshRate")
+            price.inactivity_timeout = self.subscriptions[ref]["timeout"]
             price.snapshot(snapshot, ref, time.time())
             if identity:
                 self.recorder.ingest(
@@ -259,6 +282,7 @@ class DataService:
                     time.time(),
                     generation=ref,
                     provider_message=snapshot,
+                    observation_context=price.observation_context(),
                 )
         elif kind == "SESSION":
             self.session = snapshot or {}
@@ -513,6 +537,15 @@ class DataService:
                 try:
                     await self.subscribe("PRICE", arguments, state.market)
                 except SaxoError as exc:
+                    if str(exc) not in {
+                        "HTTP_400",
+                        "HTTP_403",
+                        "InstrumentNotAllowed",
+                        "InvalidRequest",
+                        "InvalidModelState",
+                        "NoAccess",
+                    }:
+                        raise
                     # Some entitlements reject the entire depth field group.
                     # A second L1-only Saxo request preserves monitoring.
                     state.capabilities["depth_request_problem"] = str(exc)
@@ -574,7 +607,14 @@ class DataService:
         price, identity = self.price_target(target)
         price.gap(reason)
         if identity:
-            self.recorder.ingest(key(identity), "GAP", {"reason": reason}, time.time())
+            self.recorder.ingest(
+                key(identity),
+                "GAP",
+                {"reason": reason},
+                time.time(),
+                generation=price.generation,
+                observation_context=price.observation_context(),
+            )
 
     async def receive(self, message: dict[str, Any], received_at: float | None = None) -> None:
         receipt = time.time() if received_at is None else received_at
@@ -596,6 +636,20 @@ class DataService:
                     if heartbeat.get("Reason") != "NoNewData" and subscription["kind"] == "PRICE":
                         self.mark_gap(subscription["target"], "SUBSCRIPTION_DISABLED")
                         raise SaxoError("SUBSCRIPTION_DISABLED_FRESH_SNAPSHOT_REQUIRED")
+                    if subscription["kind"] == "PRICE":
+                        price, identity = self.price_target(subscription["target"])
+                        price.last_contact = receipt
+                        if identity:
+                            self.recorder.ingest(
+                                key(identity),
+                                "HEARTBEAT",
+                                heartbeat,
+                                receipt,
+                                message_id=message["message_id"],
+                                generation=price.generation,
+                                provider_message=message,
+                                observation_context=price.observation_context(),
+                            )
             return
         if ref in {"_resetsubscriptions", "_disconnect"}:
             raise SaxoError("STREAM_RESET_FRESH_SNAPSHOTS_REQUIRED")
@@ -632,6 +686,7 @@ class DataService:
                         duplicate=not accepted,
                         generation=ref,
                         provider_message=message,
+                        observation_context=price.observation_context(),
                     )
         self.changed.set()
 
@@ -737,6 +792,9 @@ class DataService:
             l2=state.price.depth(time.time()),
             session=self.session,
             refresh_ms=state.price.refresh_ms,
+            book_flow=self.recorder.book_flow_view(key(state.identity), time.time())
+            if state.identity
+            else {"status": "UNAVAILABLE"},
             user_action=(
                 "Review Saxo TradeLevel; upgrading can downgrade another Saxo application"
                 if self.session.get("TradeLevel") != "FullTradingAndChat"

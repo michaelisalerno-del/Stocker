@@ -317,7 +317,7 @@ function chart(m) {
     );
     const marks = (m.chart_context?.clocks || []).filter((c) => inRange(Date.parse(c.at)));
     $(`clocks-${m.market}`).replaceChildren(...marks.flatMap((c) => {
-      const cx = x(Date.parse(c.at)), closed = c.session && !["OPEN", "AUTOMATEDTRADING"].includes(String(c.session).toUpperCase());
+      const cx = x(Date.parse(c.at)), closed = ["CLOSED", "BREAK", "HALT", "SUSPENDED"].includes(String(c.session).toUpperCase());
       return [svgNode("line", {x1: cx, x2: cx, y1: 10, y2: 180, class: closed ? "closed" : ""}), svgNode("text", {x: cx, y: 192, "text-anchor": "middle"}, hhmm(c.at))];
     }));
     const rv = $(`rv-${m.market}`), rvWindow = m.chart_context?.rv_window;

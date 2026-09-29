@@ -110,3 +110,38 @@ def test_fresh_ledger_is_created_with_the_current_reservation_schema(tmp_path):
     reopened = Store(tmp_path / "fresh.sqlite3")  # reopening is a no-op
     assert reopened.db.execute("SELECT COUNT(*) FROM reservations").fetchone()[0] == 0
     reopened.db.close()
+
+
+def test_option_session_gate_uses_saxo_session_states():
+    """Saxo documents AutomatedTrading, not "Open"; every other state stays blocked."""
+    from datetime import UTC, datetime, timedelta
+
+    import pytest
+
+    from saxo_support import OPTION, quote
+    from stocker_execution.contracts import executable_quote, verified_cutoff
+
+    price = quote()
+    now = datetime.now(UTC)
+
+    def option(state):
+        session = {
+            "StartTime": (now - timedelta(hours=1)).isoformat(),
+            "EndTime": (now + timedelta(hours=3)).isoformat(),
+            "State": state,
+        }
+        return {
+            **OPTION,
+            "trading_sessions": {"Sessions": [session]},
+            "expiry_instant": (now + timedelta(hours=3)).isoformat(),
+            "last_trade_at": (now + timedelta(hours=3)).isoformat(),
+            "expiry": (now + timedelta(hours=3)).date().isoformat(),
+        }
+
+    assert executable_quote(option("AutomatedTrading"), price.value, price.receipt, now)
+    assert verified_cutoff(option("AutomatedTrading"), now + timedelta(minutes=60))
+    for state in ("Open", "Closed", "Break", "Halt", "OpeningAuction", "PreTrading", "Undefined"):
+        with pytest.raises(ValueError, match="SESSION_NOT_OPEN"):
+            executable_quote(option(state), price.value, price.receipt, now)
+        with pytest.raises(ValueError, match="EXIT_SESSION_UNVERIFIED"):
+            verified_cutoff(option(state), now + timedelta(minutes=60))

@@ -208,7 +208,7 @@ def test_deadlines_distinct_timezone_dst_and_missing_never_invented():
                 {
                     "StartTime": "2026-09-28T12:00:00Z",
                     "EndTime": "2026-09-28T19:00:00Z",
-                    "State": "Open",
+                    "State": "AutomatedTrading",
                 }
             ]
         },

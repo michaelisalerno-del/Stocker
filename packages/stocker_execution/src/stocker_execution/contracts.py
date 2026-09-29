@@ -16,6 +16,9 @@ from stocker_execution.config import (
 )
 
 MULTIPLIERS = {"CL": 1000, "GC": 100, "NG": 10000, "NQ": 20, "SI": 5000}
+# Saxo InstrumentSessionState for continuous trading. Saxo documents no "Open" state;
+# auctions, breaks, halts, pre/post sessions and unknown values all stay blocked.
+TRADING_SESSION_STATES = {"AUTOMATEDTRADING"}
 
 
 def utc(value: str) -> datetime:
@@ -176,10 +179,9 @@ def executable_quote(
     quote = quote_check(value, receipt, at)
     if option.get("is_tradable") is not True:
         raise ValueError("OPTION_TRADING_PERMISSION_UNVERIFIED")
-    if session_state({"TradingSessions": option.get("trading_sessions")}, at) not in {
-        "OPEN",
-        "OPENFORTRADING",
-    }:
+    if session_state({"TradingSessions": option.get("trading_sessions")}, at) not in (
+        TRADING_SESSION_STATES
+    ):
         raise ValueError("OPTION_CURRENT_SESSION_NOT_OPEN_OR_UNVERIFIED")
     if any(quote.get(k) != "Tradable" for k in ("PriceTypeBid", "PriceTypeAsk")):
         raise ValueError("OPTION_QUOTE_NOT_TRADABLE")
@@ -386,7 +388,7 @@ def verified_cutoff(option: dict[str, Any], exit_at: datetime) -> datetime:
         utc(s["EndTime"])
         for s in sessions
         if utc(s["StartTime"]) <= exit_at < utc(s["EndTime"])
-        and str(s.get("State", "")).lower() in {"open", "openfortrading"}
+        and str(s.get("State", "")).upper() in TRADING_SESSION_STATES
     ]
     if not ends:
         raise ValueError("OPTION_EXIT_SESSION_UNVERIFIED")

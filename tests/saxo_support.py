@@ -46,7 +46,7 @@ OPTION = {
             {
                 "StartTime": (datetime.now(UTC) - timedelta(hours=24)).isoformat(),
                 "EndTime": (datetime.now(UTC) + timedelta(hours=24)).isoformat(),
-                "State": "Open",
+                "State": "AutomatedTrading",
             }
         ]
     },

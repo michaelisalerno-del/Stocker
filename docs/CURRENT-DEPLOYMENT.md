@@ -1,12 +1,18 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `5aa3a7be4c1f37245ba171dde08968eb43b54375`, deployed on
-**2026-09-28 at 18:05 UTC** through the existing immutable-release process.
-[Deployment postflight](saxo-option-deployment.json) and
-[option-context implementation/validation](saxo-option-context-addendum.md) describe this release.
-Later commits update documentation and evidence only.
+Current application release: `bd2d7a0d7def351d583e8b85d57b8c236babb427` (branch
+`codex/audit-fixes`), deployed on **2026-09-29 at 18:19:57 UTC** through the existing
+immutable-release process, replacing `98a772c`. [Audit fixes](SLRNO-AUDIT-20260929.md) describe the
+changes; the [sanitised postflight](saxo-audit-fixes-deployment-20260929.json) records a flat ledger
+before the switch, the verified backup `/var/lib/stocker/backups/audit-fixes-20260929`, the
+`recorder.pre_event_minutes` configuration migration, installed smoke, matching served assets and an
+unchanged runtime state (SIM authenticated, stream connected, DISABLED/disarmed, no orders). The first
+token renewal after deployment (18:25:49 UTC) re-authorised the open stream without a reconnect.
+Rollback: restore the symlink to `/opt/stocker/releases/98a772c…` and restart; the migrated
+configuration loads under both releases.
 
-A fresh read-only check on **2026-09-29 at 07:51:16 UTC** confirmed the same release,
+Earlier: release `5aa3a7b` was deployed on 2026-09-28 at 18:05 UTC
+([postflight](saxo-option-deployment.json)). A fresh read-only check on **2026-09-29 at 07:51:16 UTC** confirmed the same release,
 an active service with zero automatic restarts, authenticated Saxo SIM and a connected stream:
 [sanitised runtime snapshot](github-sync-runtime-20260929.json).
 Execution remained **DISABLED**, armed **false**, **LIVE ORDERS DISABLED**, with zero reserved/open

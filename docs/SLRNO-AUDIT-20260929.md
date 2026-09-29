@@ -21,8 +21,8 @@ below was reproduced in code before it was fixed.
 
 - Token renewal re-authorises the open streaming context (`PUT …/streaming/ws/authorize`, 202
   Accepted) instead of tearing every subscription down for 30–50 s every ~18.5 minutes.
-  **Verify on SIM after rollout**: `reconnects` stays at 1 across a renewal; see
-  [Saxo setup](SAXO-SETUP.md).
+  **Verified on SIM** after deployment: the 18:25:49 UTC renewal kept `reconnects` at 1
+  ([postflight](saxo-audit-fixes-deployment-20260929.json)).
 - A temporarily disabled subscription, a `_resetsubscriptions` naming targets, or a single silent
   subscription now affects that subscription alone; a quiet session or several silent feeds still
   reconnect. `disabled_targets` clear with the context. FX discovery problems are named

@@ -134,11 +134,12 @@ class Window:
 
     def prefix(self, after_sequence: int | None = None) -> list[bytes]:
         rows = [zlib.decompress(b) for _, b in self.rows]
-        if after_sequence is not None:
-            # Reused candidates can have an unrecorded interval. Supply a checkpoint
-            # when the intervening raw rows have already left the rolling window.
-            if not rows or json.loads(rows[0])["local_sequence"] <= after_sequence + 1:
-                return [r for r in rows if json.loads(r)["local_sequence"] > after_sequence]
+        # Reused candidates can have an unrecorded interval. Supply a checkpoint
+        # when the intervening raw rows have already left the rolling window.
+        if after_sequence is not None and (
+            not rows or json.loads(rows[0])["local_sequence"] <= after_sequence + 1
+        ):
+            return [r for r in rows if json.loads(r)["local_sequence"] > after_sequence]
         return [
             packed(
                 {

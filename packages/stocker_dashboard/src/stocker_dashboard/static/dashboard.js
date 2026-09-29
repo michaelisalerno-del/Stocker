@@ -264,6 +264,7 @@ function render(d) {
       : "Disconnected",
   );
   text("capacity", `${s.reserved_open_trades} / ${limits.slots ?? "—"}`);
+  text("allocation-policy", `${money(limits.per_trade_gbp)} all-in per trade · one contract · concurrent ceiling, not a daily loss limit`);
   text("allocation", `${money(s.allocation_pennies / 100)} / ${money(limits.allocation_gbp)}`);
   if (d.pnl) {
   text("realised", money(p.realised_net_gbp));

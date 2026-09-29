@@ -24,12 +24,16 @@ GC remains monitored. No orders were sent or paper execution armed during this m
 
 [Setup and OAuth](docs/SAXO-SETUP.md) · [Cutover and rollback](docs/DEPLOYMENT.md) ·
 [Rules and provenance](docs/FUTURES-RULEBOOK.md) · [Storage and stream policy](docs/MARKET-DATA.md) ·
-[Delivery status and checks](docs/IMPLEMENTATION-REPORT.md) · [Server evidence status](docs/CURRENT-DEPLOYMENT.md)
+[Option context and validation](docs/saxo-option-context-addendum.md) ·
+[Current server evidence](docs/CURRENT-DEPLOYMENT.md) · [Initial migration report](docs/IMPLEMENTATION-REPORT.md)
 
 IBKR's recoverable adapter/configuration is in `research/operational-history/parked-ibkr-runtime`.
 Original ledgers, research, dated deployment evidence and historical provider labels remain intact.
 EODHD external transport is disabled; retained offline research parsers/caches still work.
-Server jobs must be stopped and masked through the controlled cutover; this checkout is not evidence
-that the previously deployed server has changed.
+The option-context release `5aa3a7b` is deployed. A read-only check on **2026-09-29 at 07:51 UTC**
+confirmed authenticated Saxo SIM, a connected stream, disabled/disarmed execution and no active
+reservations. Actual futures selection, market-data entitlements and recording rights remain
+unverified; no option field availability is claimed. See the [dated runtime snapshot](docs/github-sync-runtime-20260929.json).
+The 13 legacy provider/scanner units were verified parked at deployment; historical evidence is retained.
 
 Run `bash scripts/check.sh` for format, lint, types, Python tests, browser checks and server-only smoke.

@@ -1,4 +1,8 @@
-# Review of the Saxo migration
+# Review of the initial Saxo migration
+
+Historical review of the initial migration. Later option-context review resolutions and validation
+are recorded in the [addendum](saxo-option-context-addendum.md); actual runtime status is in
+[current deployment](CURRENT-DEPLOYMENT.md).
 
 Reviewed against the existing application baseline `8f22d2b6e052d63ec440410c7ecb8e2f66b432d8`
 and the user's Saxo-only migration task. Independent reviewers assessed implementation commit

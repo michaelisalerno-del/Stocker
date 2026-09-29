@@ -1,4 +1,9 @@
-# Saxo migration delivery — 2026-09-28
+# Initial Saxo migration delivery — 2026-09-28
+
+This is the historical initial-cutover report. For the current application and authenticated runtime,
+see [current deployment](CURRENT-DEPLOYMENT.md) and the
+[option-context addendum](saxo-option-context-addendum.md). The stage table below records the
+initial cutover before the later OAuth, stream and option-context updates.
 
 The existing SLRNO launcher, authenticated dashboard, frozen mathematics and durable execution
 store now use a Saxo-only active runtime. Five active families: CL, GC, NG, NQ, SI. IBKR adapters,
@@ -10,7 +15,7 @@ Branch: `codex/saxo-only`, based on the clean existing application commit
 `8f22d2b6e052d63ec440410c7ecb8e2f66b432d8`. Implementation commit: `c74e68a`;
 the subsequent review-fix commit includes atomic fill recovery, quote/session validation,
 stream recovery and the final dashboard/tests. Book-flow commit `c809f9f` includes both and was
-deployed through the existing immutable-release process on 2026-09-28; no Git remote publication was needed.
+deployed through the existing immutable-release process on 2026-09-28; GitHub publication had not yet occurred at that milestone.
 
 | Stage | Evidence |
 |---|---|

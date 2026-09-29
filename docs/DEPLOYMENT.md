@@ -1,10 +1,17 @@
 # Controlled data-only cutover and rollback
 
-Release `c809f9f` was cut over on 2026-09-28, disarmed and awaiting Saxo authentication; see
-[current verified deployment](CURRENT-DEPLOYMENT.md). For subsequent cutovers, use the existing
+The initial Saxo cutover took place on 2026-09-28. The current option-context application release is
+`5aa3a7b`, authenticated to SIM and still disarmed; see the dated
+[current verified deployment](CURRENT-DEPLOYMENT.md). For subsequent releases, use the existing
 immutable `/opt/stocker/releases/<commit>`, `/opt/stocker/current`, locked uv, systemd and authenticated
 Caddy process. Do not infer today's running state from old reports. No live or SIM test order or
 unattended arming is authorised. This guide authorises no financial account/subscription action.
+
+The numbered procedure below describes the initial migration from the parked IBKR runtime.
+A routine Saxo code upgrade preserves the existing Saxo configuration, credentials, token store and
+ledger; do not recreate them or reconnect retired providers. Inspect current obligations, back up
+state, stage the committed release, run installed smoke, switch the code symlink and verify the
+runtime using the same existing release process.
 
 1. With the user's existing authorised SSH identity, inspect the current release symlink, process
    arguments, service users, unit paths and restart relationships. Inventory `systemctl list-units

@@ -290,21 +290,21 @@ async def probe(client: SaxoClient, market: str, account: str, chain: bool) -> d
                 "MaxStrikesPerExpiry": 5,
                 "Expiries": [{"Index": 0, "StrikeStartIndex": start}],
             }
+            result = await client.request(
+                "POST",
+                path,
+                body={
+                    "ContextId": context,
+                    "ReferenceId": reference,
+                    "RefreshRate": 2000,
+                    "Format": "application/json",
+                    "Arguments": arguments,
+                },
+            )
             try:
-                result = await client.request(
-                    "POST",
-                    path,
-                    body={
-                        "ContextId": context,
-                        "ReferenceId": reference,
-                        "RefreshRate": 2000,
-                        "Format": "application/json",
-                        "Arguments": arguments,
-                    },
-                )
-            finally:
+                return dict(result.get("Snapshot") or {})
+            finally:  # only a created subscription needs deleting
                 await client.request("DELETE", f"{path}/{context}/{reference}")
-            return dict(result.get("Snapshot") or {})
 
         # Binary-search the five-strike window onto the underlying price.
         snapshot = await window(0)

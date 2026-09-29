@@ -1,7 +1,6 @@
 """Bounded binary framing and Saxo price-field reconstruction, independent of transport."""
 
 import copy
-import hashlib
 import json
 import struct
 from collections import OrderedDict, deque
@@ -14,16 +13,18 @@ from stocker_execution.book_flow import FIELDS
 def merge(previous: Any, update: Any) -> Any:
     """Missing properties survive; explicit null clears; price arrays replace in full.
 
-    Options-board indexed arrays and chart samples use their own reducers, not this function.
+    Only the groups the update names are rebuilt; untouched groups are shared with the
+    previous state, which is never mutated. Options-board indexed arrays and chart
+    samples use their own reducers, not this function.
     """
     if not isinstance(update, dict):
         return copy.deepcopy(update)
-    result = copy.deepcopy(previous) if isinstance(previous, dict) else {}
+    result = dict(previous) if isinstance(previous, dict) else {}
     for key, value in update.items():
         result[key] = merge(result.get(key), value)
     # Explicit zero depth counts also invalidate any prior price/size arrays.
-    if isinstance(result.get("MarketDepth"), dict):
-        depth = result["MarketDepth"]
+    if "MarketDepth" in update and isinstance(result.get("MarketDepth"), dict):
+        depth = result["MarketDepth"]  # rebuilt above, so mutating it is local
         for count, side in (("NoOfBids", "Bid"), ("NoOfOffers", "Ask")):
             if depth.get(count) == 0:
                 for suffix in ("", "Size", "Orders"):
@@ -72,7 +73,9 @@ class PriceState:
         self.value: dict[str, Any] | None = None
         self.analytics: dict[str, Any] = {}
         self.subscription_started_at: float | None = None
-        self.seen: OrderedDict[str, bytes] = OrderedDict()
+        # Recent message ids with their updates: a replayed id is ignored, a replayed id
+        # carrying different content is a provider fault. Compared only on an id match.
+        self.seen: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.last_message_id: str | None = None
         self.generation = ""
         self.receipt: float | None = None
@@ -135,20 +138,21 @@ class PriceState:
         if self.last_receipt is not None and at > self.last_receipt:
             self.intervals.append((at - self.last_receipt) * 1000)
         self.last_receipt = at
-        digest = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).digest()
         if message_id in self.seen:
-            if self.seen[message_id] != digest:
+            if self.seen[message_id] != value:
                 self.gap("REPLAY_CONTENT_CONFLICT")
                 raise ValueError("REPLAY_CONTENT_CONFLICT")
             return False
-        self.seen[message_id] = digest
+        self.seen[message_id] = value
         if len(self.seen) > 2048:
             self.seen.popitem(last=False)
         self.last_message_id = message_id  # opaque: never subtract or order IDs
         if self.value is None:
-            return False
+            return False  # gapped: only a fresh snapshot restores a usable state
         merged = merge(self.value, value)
         for group, fields in FIELDS.items():
+            if group not in value:
+                continue  # merge() shares untouched groups: nothing there changed
             prior, current = self.value.get(group) or {}, merged.get(group) or {}
             if isinstance(prior, dict) and isinstance(current, dict):
                 for field in fields:

@@ -130,7 +130,7 @@ def test_failed_reference_sessions_are_not_refetched_every_minute(tmp_path, monk
         client = FakeClient()
 
         async def chart(*args, **kwargs):
-            return {"Data": rows, "DataVersion": 1}
+            return {"Data": rows, "DataVersion": 1, "ChartInfo": {"DelayedByMinutes": 0}}
 
         client.request = chart
         data = DataService(config, client, Recorder(config.recorder, tmp_path / "events"))

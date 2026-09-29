@@ -92,3 +92,6 @@ explicit operator action.
 Configuration migration for releases after `21d9077`: remove the `recorder.pre_event_minutes`
 line from `/etc/stocker/v1/saxo.sim.yaml` before switching the release symlink. The key was never
 read (the rolling window is the fixed 15 minutes) and the configuration model rejects unknown keys.
+The same applies to the never-read pinned sentinels `refresh_rate_ms`, `quote_max_age_seconds`,
+`max_premium_risk_gbp`, `max_open_positions` and `max_contracts_per_trade` if the server
+configuration restates them; `entry_deadline_seconds` remains accepted (and must stay 20).

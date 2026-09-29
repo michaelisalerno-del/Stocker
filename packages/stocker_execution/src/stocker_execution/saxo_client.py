@@ -1,6 +1,7 @@
 """Explicit endpoint permissions. The LIVE client cannot transmit broker mutations."""
 
 import asyncio
+import json
 import re
 import time
 from typing import Any
@@ -126,7 +127,8 @@ class SaxoClient:
             raise SaxoError("REST_QUEUE_LIMIT")
         self.waiters += 1
         try:
-            for attempt in range(3 if method == "GET" else 1):
+            attempt = 0
+            while True:
                 token = await self.oauth.access_token()
                 async with self.pace:
                     await asyncio.sleep(max(0, self.next_request - time.monotonic()))
@@ -139,63 +141,51 @@ class SaxoClient:
                         json=body,
                         headers={"Authorization": "Bearer " + token},
                     ) as streamed:
+                        # aiter_bytes decodes the wire compression once; the body is
+                        # bounded here so a runaway response never fills memory.
                         content = bytearray()
                         async for chunk in streamed.aiter_bytes():
                             if len(content) + len(chunk) > 4 * 1024**2:
                                 raise SaxoError("REST_RESPONSE_LIMIT")
                             content.extend(chunk)
-                        response = httpx.Response(
-                            streamed.status_code,
-                            # aiter_bytes already decoded the wire compression. Retaining
-                            # its encoding header would decompress the JSON a second time.
-                            headers={
-                                k: v
-                                for k, v in streamed.headers.items()
-                                if k.lower() not in {"content-encoding", "content-length"}
-                            },
-                            content=bytes(content),
-                        )
+                        status, headers = streamed.status_code, streamed.headers
                 except httpx.HTTPError:
                     raise SaxoError(
                         "AMBIGUOUS_REQUEST" if execution else "SAXO_TRANSPORT_UNAVAILABLE"
                     ) from None
                 self.calls += 1
                 self.rate_headers = {
-                    k: v
-                    for k, v in response.headers.items()
-                    if k.lower().startswith("x-ratelimit-")
+                    k: v for k, v in headers.items() if k.lower().startswith("x-ratelimit-")
                 }
-                if response.status_code == 429:
-                    reset = response.headers.get("x-ratelimit-session-reset", "5")
+                if status == 429:
+                    reset = headers.get("x-ratelimit-session-reset", "5")
                     try:
                         seconds = min(60.0, max(1.0, float(reset)))
                     except ValueError:
                         seconds = 5.0
                     self.next_request = max(self.next_request, time.monotonic() + seconds)
-                    if method == "GET" and attempt < 2:
+                    if method == "GET" and attempt < 2:  # reads retry twice; writes never
+                        attempt += 1
                         continue
-                if response.status_code == 401:
+                if status == 401:
                     # The server rejects a token our clock still trusts: refresh it next.
                     self.oauth.expire()
-                if response.status_code >= 300:
+                if status >= 300:
                     # Restrict error evidence to code; server text can contain private identifiers.
-                    code = "HTTP_" + str(response.status_code)
+                    code = "HTTP_" + str(status)
                     try:
-                        candidate = str(response.json().get("ErrorCode", code))
+                        candidate = str(json.loads(bytes(content)).get("ErrorCode", code))
                         if re.fullmatch(r"[A-Za-z0-9_]{1,100}", candidate):
                             code = candidate
                     except (ValueError, AttributeError):
                         pass
                     raise SaxoError(code)
-                if not response.content:
+                if not content:
                     return {}
-                if len(response.content) > 4 * 1024**2:
-                    raise SaxoError("REST_RESPONSE_LIMIT")
-                result = response.json()
+                result = json.loads(bytes(content))
                 if not isinstance(result, dict):
                     raise SaxoError("INVALID_SAXO_RESPONSE")
                 return result
-            raise SaxoError("RATE_LIMIT_REACHED")
         finally:
             self.waiters -= 1
 

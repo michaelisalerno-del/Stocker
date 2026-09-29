@@ -7,6 +7,8 @@ See docs/BOOK-FLOW.md for formulas, units and deliberately unsupported tape/volu
 import math
 from typing import Any
 
+from stocker_execution.contracts import USABLE_PRICE_TYPES
+
 VERSION = "SAXO_SAMPLED_BOOK_FLOW_V1"
 LEVELS = (1, 3, 5, 10)
 LOOKBACKS = (5, 30, 60)
@@ -187,7 +189,7 @@ def observe(
     if bid is None or ask is None or bid > ask:
         quality.append("INVALID_QUOTE_OR_TICK_GRID")
     if quote.get("ErrorCode") not in (None, "None") or any(
-        quote.get(k) not in {"Tradable", "Indicative"} for k in ("PriceTypeBid", "PriceTypeAsk")
+        quote.get(k) not in USABLE_PRICE_TYPES for k in ("PriceTypeBid", "PriceTypeAsk")
     ):
         quality.append("QUOTE_STATUS_UNAVAILABLE")
     bids, asks = side_levels(depth, "Bid", tick), side_levels(depth, "Ask", tick)

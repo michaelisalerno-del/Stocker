@@ -39,7 +39,7 @@ async def preflight(config: Path, database: Path, seconds: int) -> dict:
     task = asyncio.create_task(runtime.data.run())
     runtime.tasks.add(task)
     try:
-        await asyncio.sleep(min(seconds, 120))
+        await asyncio.sleep(seconds)
         if task.done():
             task.result()
         try:
@@ -55,9 +55,7 @@ async def preflight(config: Path, database: Path, seconds: int) -> dict:
             "markets": {m: runtime.data.capability_view(s) for m, s in runtime.markets.items()},
         }
     finally:
-        await runtime.stop()
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        await runtime.stop()  # cancels the data task it owns
         runtime.store.db.close()
 
 

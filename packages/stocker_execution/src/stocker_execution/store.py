@@ -9,12 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from stocker_execution.config import (
-    MAX_ALLOCATION_PENNIES,
-    MAX_OPEN_POSITIONS,
-    MAX_PREMIUM_RISK_PENNIES,
-    PAGE_SIZE,
-)
+from stocker_execution.config import MAX_OPEN_POSITIONS, MAX_PREMIUM_RISK_PENNIES, PAGE_SIZE
 
 TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
 # Historical £10 (1,000p) reservations keep their policy amount; new ones use the current ceiling.
@@ -80,10 +75,6 @@ class Store:
           sequence INTEGER PRIMARY KEY, at TEXT NOT NULL, reference TEXT NOT NULL,
           kind TEXT NOT NULL, detail TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS lifecycle_reference ON lifecycle(reference,sequence);
-        CREATE TABLE IF NOT EXISTS bars (
-          con_id INTEGER NOT NULL, at TEXT NOT NULL, market TEXT NOT NULL, detail TEXT NOT NULL,
-          PRIMARY KEY(con_id,at));
-        CREATE INDEX IF NOT EXISTS bar_market ON bars(market,at);
         """)
         if "reservations" in tables:
             self.migrate_allocation()
@@ -132,7 +123,7 @@ class Store:
         saved = self.get_meta("provenance")
         if saved is None and any(
             self.db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
-            for table in ("signals", "orders", "positions", "bars")
+            for table in ("signals", "orders", "positions")
         ):
             raise ValueError("EXISTING_LEDGER_PROVENANCE_MUST_NOT_BE_RELABELLED")
         if saved is not None and saved != expected:
@@ -216,9 +207,9 @@ class Store:
             if plan["quantity"] != 1 or not 0 < plan["cash_pennies"] <= MAX_PREMIUM_RISK_PENNIES:
                 reason = "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET"
             elif capacity["reserved_open_trades"] >= MAX_OPEN_POSITIONS:
-                reason = "SKIP_CAPACITY_FULL"
-            elif capacity["allocation_pennies"] + MAX_PREMIUM_RISK_PENNIES > MAX_ALLOCATION_PENNIES:
-                reason = "SKIP_ALLOCATION_LIMIT"
+                reason = (
+                    "SKIP_CAPACITY_FULL"  # four slots at the per-trade ceiling is the allocation
+                )
             else:
                 reason = ""
             self.audit(identity, "ADMISSION", {**capacity, "reason": reason, "plan": plan})

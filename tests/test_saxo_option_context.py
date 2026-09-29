@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 
-from saxo_support import FUTURE, OPTION, FakeClient, quote, setup, signal
+from saxo_support import FUTURE, OPTION, FakeClient, frozen_strike, quote, setup, signal
 from stocker_execution import option_context
 from stocker_execution.config import FuturesConfig, OptionApproval, RecorderConfig
 from stocker_execution.contracts import (
@@ -24,7 +24,7 @@ from stocker_execution.contracts import (
     verified_cutoff,
 )
 from stocker_execution.recorder import Recorder, read_row
-from stocker_execution.rules import frozen_strike, opportunity
+from stocker_execution.rules import opportunity
 from stocker_execution.saxo_auth import SaxoError
 from stocker_execution.saxo_client import allowed
 from stocker_execution.saxo_data import DataService

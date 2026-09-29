@@ -76,7 +76,6 @@ class Runtime:
         self.owner: Any = None
         self.config_hash = hashlib.sha256(config.model_dump_json().encode()).hexdigest()
         self.started_at = now()
-        self.depth = self.recorder  # existing read-only dashboard recording access
         self.alerts = Alerts(config.alerts)
         # Optional context: an unreadable calendar is reported, never fatal.
         self.calendar: EventCalendar | None = None

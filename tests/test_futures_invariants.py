@@ -7,14 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from saxo_support import AT, fill_record, record_entry
+from saxo_support import AT, fill_record, frozen_strike, record_entry
 from stocker_execution.config import MARKETS
 from stocker_execution.contracts import grid_price
 from stocker_execution.rules import (
     Bar,
     clocks,
     eligibility,
-    frozen_strike,
     model_delta,
     opportunity,
     prior_rv,

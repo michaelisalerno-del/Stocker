@@ -473,7 +473,7 @@ def smile(
 
 
 def model_sigma(rv15: float | None) -> float | None:
-    """The frozen model's annualised volatility from RV15 (rules.frozen_strike)."""
+    """The frozen model's annualised volatility from RV15 (the frozen strike model)."""
     return rv15 * math.sqrt(525600 / 15) if rv15 else None
 
 

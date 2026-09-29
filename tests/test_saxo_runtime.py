@@ -35,6 +35,46 @@ def test_depth_updates_and_heartbeats_do_not_refresh_quotes():
     assert p.value is None and not p.depth(108)["bids"]
 
 
+def test_merge_rebuilds_only_updated_groups_and_never_mutates_the_previous_state():
+    """Equivalent to the former whole-state deep copy, without copying the state per tick."""
+    import copy
+
+    from saxo_support import book
+    from stocker_execution.saxo_stream import PriceState
+
+    def reference(previous, update):  # the former implementation, kept as the oracle
+        if not isinstance(update, dict):
+            return copy.deepcopy(update)
+        result = copy.deepcopy(previous) if isinstance(previous, dict) else {}
+        for k, v in update.items():
+            result[k] = reference(result.get(k), v)
+        if isinstance(result.get("MarketDepth"), dict):
+            depth = result["MarketDepth"]
+            for count, side in (("NoOfBids", "Bid"), ("NoOfOffers", "Ask")):
+                if depth.get(count) == 0:
+                    for suffix in ("", "Size", "Orders"):
+                        depth[side + suffix] = []
+        return result
+
+    p, snapshot = PriceState(), book()
+    p.snapshot(snapshot, "g", 1.0)
+    expected = reference({}, snapshot)
+    assert p.value == expected
+    updates = [
+        {"Quote": {"Ask": 70.02}},
+        {"MarketDepth": {"BidSize": [5] * 10}},
+        {"PriceInfoDetails": {"Volume": None}},
+        {"MarketDepth": {"NoOfBids": 0}},
+    ]
+    for i, update in enumerate(updates):
+        previous, frozen = p.value, copy.deepcopy(p.value)
+        assert p.update(update, str(i), 2.0 + i)
+        expected = reference(expected, update)
+        assert p.value == expected
+        assert previous == frozen  # shared groups are never mutated in place
+    assert p.value["MarketDepth"]["Bid"] == [] and "Quote.Ask" in p.field_changes
+
+
 def test_option_board_indexed_patches_and_explicit_nulls():
     original = {
         "Expiries": [

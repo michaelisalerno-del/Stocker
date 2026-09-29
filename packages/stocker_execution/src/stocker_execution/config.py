@@ -17,10 +17,7 @@ MAX_PREMIUM_RISK_GBP = 50
 MAX_PREMIUM_RISK_PENNIES = MAX_PREMIUM_RISK_GBP * 100
 MAX_OPEN_POSITIONS = 4
 MAX_SIMULTANEOUS_ENTRY_RISK_GBP = MAX_PREMIUM_RISK_GBP * MAX_OPEN_POSITIONS
-MAX_ALLOCATION_PENNIES = MAX_SIMULTANEOUS_ENTRY_RISK_GBP * 100
-MAX_CONTRACTS_PER_TRADE = 1
 QUOTE_MAX_AGE_SECONDS: Final = 5
-ENTRY_DEADLINE_SECONDS: Final = 20
 SUBSCRIPTION_LIMIT = 32  # Saxo streaming subscriptions owned by this application
 ROLLING_WINDOW_SECONDS = 15 * 60  # server-held L1/L2 prehistory per instrument
 OPTION_METADATA_MAX_AGE_SECONDS = 15 * 60
@@ -155,16 +152,8 @@ class FuturesConfig(Strict):
     # probe (docs/saxo-field-probe-20260929.json) read annual fractions, e.g. NG 0.651 between
     # bid/ask volatilities 0.645/0.657. Set UNVERIFIED to hide the IV spread again.
     provider_volatility_scale: Literal["UNVERIFIED", "FRACTION", "PERCENT"] = "FRACTION"
-    # Frozen parameters below are pinned sentinels: a configuration file may restate
-    # them but never change them. The code uses the module constants above.
-    refresh_rate_ms: Literal[1000] = 1000
-    quote_max_age_seconds: Literal[5] = QUOTE_MAX_AGE_SECONDS
-    entry_deadline_seconds: Literal[20] = ENTRY_DEADLINE_SECONDS
-    max_premium_risk_gbp: int = Field(
-        default=MAX_PREMIUM_RISK_GBP, ge=MAX_PREMIUM_RISK_GBP, le=MAX_PREMIUM_RISK_GBP
-    )
-    max_open_positions: Literal[4] = 4
-    max_contracts_per_trade: Literal[1] = 1
+    # Frozen: a configuration file may restate it but never change it.
+    entry_deadline_seconds: Literal[20] = 20
 
     @model_validator(mode="after")
     def separate(self) -> "FuturesConfig":

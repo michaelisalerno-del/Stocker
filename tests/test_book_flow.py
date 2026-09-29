@@ -11,7 +11,13 @@ import pytest
 
 from saxo_support import IDENTITY, book
 from stocker_execution.book_flow import VERSION, observe
-from stocker_execution.config import MARKETS, FuturesConfig, RecorderConfig
+from stocker_execution.config import (
+    MARKETS,
+    MAX_OPEN_POSITIONS,
+    MAX_PREMIUM_RISK_GBP,
+    FuturesConfig,
+    RecorderConfig,
+)
 from stocker_execution.contracts import key
 from stocker_execution.recorder import Recorder, apply, read_row
 from stocker_execution.runtime import Runtime
@@ -359,9 +365,7 @@ def test_l2_fluctuations_do_not_change_frozen_decisions_or_create_events(tmp_pat
                 (rows[0]["decision"], rows[0]["reason"], rows[0]["signal_at"], rows[0]["exit_at"])
             )
             assert not runtime.broker.armed and not store.orders(rows[0]["id"])
-            assert (
-                runtime.config.max_open_positions == 4 and runtime.config.max_premium_risk_gbp == 50
-            )
+            assert MAX_OPEN_POSITIONS == 4 and MAX_PREMIUM_RISK_GBP == 50
             await runtime.stop()
             store.db.close()
         assert len(set(decisions)) == 1

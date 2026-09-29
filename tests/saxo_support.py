@@ -1,7 +1,9 @@
 """Shared offline Saxo fixtures for runtime tests: no network, credentials or orders."""
 
+import math
 import time
 from datetime import UTC, datetime, timedelta
+from statistics import NormalDist
 from types import SimpleNamespace
 
 from stocker_execution.broker import PaperBroker
@@ -246,3 +248,16 @@ GC_MAPPING = {
     "fee_per_side_gbp": 0.1,
     "fee_evidence": "fixture fee evidence",
 }
+
+
+def frozen_strike(
+    futures: float, rv15: float, at: datetime, expiry: datetime, right: str, delta: float
+) -> float:
+    """The frozen research strike model, kept as evidence for model_delta's inverse."""
+    years = (expiry - at).total_seconds() / (365 * 86400)
+    if not (years > 0 and rv15 > 0 and futures > 0 and right in {"C", "P"}):
+        raise ValueError("INVALID_FROZEN_PRICING_INPUT")
+    sigma = rv15 * math.sqrt(525600 / 15)
+    v = sigma * math.sqrt(years)
+    sign = 1 if right == "C" else -1
+    return futures * math.exp(0.5 * v * v - sign * NormalDist().inv_cdf(delta) * v)

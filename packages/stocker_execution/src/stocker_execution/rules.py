@@ -91,18 +91,6 @@ def prior_rv(
     return math.sqrt(sum(math.log(b / a) ** 2 for a, b in zip(closes, closes[1:], strict=False)))
 
 
-def frozen_strike(
-    futures: float, rv15: float, at: datetime, expiry: datetime, right: str, delta: float
-) -> float:
-    years = (expiry - at).total_seconds() / (365 * 86400)
-    if not (years > 0 and rv15 > 0 and futures > 0 and right in {"C", "P"}):
-        raise ValueError("INVALID_FROZEN_PRICING_INPUT")
-    sigma = rv15 * math.sqrt(525600 / 15)
-    v = sigma * math.sqrt(years)
-    sign = 1 if right == "C" else -1
-    return futures * math.exp(0.5 * v * v - sign * NormalDist().inv_cdf(delta) * v)
-
-
 def model_delta(
     futures: float, strike: float, rv15: float, at: datetime, expiry: datetime, right: str
 ) -> float:

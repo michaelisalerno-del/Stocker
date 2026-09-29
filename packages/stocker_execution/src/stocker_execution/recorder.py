@@ -44,7 +44,7 @@ def apply(state: Any, record: dict[str, Any]) -> Any:
         return merge({}, record["payload"])
     if record["kind"] == "GAP":
         return None
-    if record["kind"] == "UPDATE" and not record.get("duplicate") and state is not None:
+    if record["kind"] == "UPDATE" and not record.get("dropped") and state is not None:
         return merge(state, record["payload"])
     return state
 
@@ -308,7 +308,7 @@ class Recorder:
         at: float,
         *,
         message_id: str | None = None,
-        duplicate: bool = False,
+        dropped: bool = False,
         generation: str = "",
         provider_message: Any = None,
         observation_context: dict[str, Any] | None = None,
@@ -323,7 +323,7 @@ class Recorder:
             "local_sequence": window.sequence,
             "message_id": message_id,
             "generation": generation,
-            "duplicate": duplicate,
+            "dropped": dropped,
             "payload": payload,
             "provider_message": provider_message,
             "metadata_version": window.metadata_version,

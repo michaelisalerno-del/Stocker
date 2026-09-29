@@ -139,7 +139,6 @@ class DataService:
         self.reset_refs: set[str] = set()  # subscriptions the run loop replaces one by one
         self.session: dict[str, Any] = {}
         self.fx = PriceState()
-        self.fx_uic: int | None = None
         self.connected = False
         self.problem = "AUTHENTICATION_REQUIRED"
         self.stopping = False
@@ -162,7 +161,6 @@ class DataService:
         self.pending_bytes = 0
         self.subscription_lock = asyncio.Lock()
         self.subscribe_lock = asyncio.Lock()
-        self.changed = asyncio.Event()
         self.bar_cache = BarCache(recorder.directory.parent / "bars", config.recorder)
 
     async def verify_account(self) -> None:
@@ -357,7 +355,7 @@ class DataService:
                 k: row.get(k)
                 for k in ("Identifier", "Symbol", "AssetType", "Description", "ExchangeId")
             }
-            for row in result.get("Data", [])[:100]
+            for row in result.get("Data", [])
             if row.get("AssetType") == "ContractFutures"
             and str(row.get("Symbol", "")).startswith(state.market)
         ]
@@ -425,7 +423,9 @@ class DataService:
                 for expiry in space.get("OptionSpace", [])
                 for option in expiry.get("SpecificOptions", [])
                 if option.get("UnderlyingUic") == identity["uic"]
-            ][:1000]
+            ]
+            if len(state.option_space) > 1000:
+                raise SaxoError("OPTION_SPACE_TOO_LARGE")
             state.capabilities["options"] = {
                 "discovered": len(state.option_space),
                 "quote": "UNVERIFIED",
@@ -601,10 +601,6 @@ class DataService:
             mapping.expiry_instants.get(str(identity["expiry"])[:10]) if mapping else None
         )
         identity["expiry_instant"] = expiry_instant.isoformat() if expiry_instant else None
-        identity["expiry_time_evidence"] = mapping.expiry_time_evidence if mapping else None
-        identity["exercise_at"] = deadline_instant(
-            identity.get("exercise_cutoff"), str(identity["expiry"])[:10]
-        )
         self.release_window_slot()
         self.recorder.register(key(identity), identity)
         self.options[uic] = (identity, PriceState())
@@ -677,6 +673,10 @@ class DataService:
         uic, at = identity["uic"], time.time()
         prior = self.option_references.get(uic)
         if prior and 0 <= at - prior["received_at"] < OPTION_METADATA_MAX_AGE_SECONDS:
+            # A re-created identity (reconnect, restore) inherits the cross-checked deadline.
+            identity["last_trade_at"] = prior["identity"].get(
+                "last_trade_at", identity.get("last_trade_at")
+            )
             return
         entry: dict[str, Any] = {
             "received_at": at,
@@ -1028,7 +1028,7 @@ class DataService:
             "semantics": "Saxo chart samples; mutable tail excluded; no quote reconstruction",
         }
         bars = completed_bars(result, datetime.now(UTC))
-        state.bars = bars[-1440:]
+        state.bars = bars
         state.history_checked = time.monotonic()
         try:
             await asyncio.to_thread(
@@ -1041,10 +1041,14 @@ class DataService:
             state.history_problem = "SAXO_COMPLETED_OHLCV_UNAVAILABLE"
             return
         delay = state.capabilities["history"]["delayed_by_minutes"]
-        if isinstance(delay, (int, float)) and delay != 0:
+        if delay != 0:
             # Delayed bars can never supply the final completed minute inside the entry
-            # deadline; name the cause instead of leaving an unexplained skip.
-            state.history_problem = "SAXO_CHART_DATA_DELAYED"
+            # deadline; an unreported delay is unknown, and unknown blocks (as for quotes).
+            state.history_problem = (
+                "SAXO_CHART_DATA_DELAYED"
+                if isinstance(delay, (int, float))
+                else "SAXO_CHART_DELAY_UNKNOWN"
+            )
             return
         if boundary:
             return
@@ -1257,12 +1261,10 @@ class DataService:
         uic: int,
         start: datetime,
         end: datetime,
-        *,
-        max_pages: int = 8,
     ) -> list[Bar]:
         samples: dict[str, dict[str, Any]] = {}
         cursor, version = start, None
-        for _ in range(min(max_pages, 8)):
+        for _ in range(8):  # pages of 1,200 minutes: more than a full session
             result = await self.client.request(
                 "GET",
                 "/chart/v3/charts",
@@ -1385,11 +1387,10 @@ class DataService:
         if len(matches) != 1:
             self.fx.gap("GBPUSD_FX_INSTRUMENT_NOT_UNIQUE")
             return
-        self.fx_uic = int(matches[0]["Identifier"])
         await self.subscribe(
             "PRICE",
             {
-                "Uic": self.fx_uic,
+                "Uic": int(matches[0]["Identifier"]),
                 "AssetType": "FxSpot",
                 "AccountKey": self.client.oauth.account_key,
                 "FieldGroups": ["Quote"],
@@ -1519,12 +1520,11 @@ class DataService:
                         data,
                         receipt,
                         message_id=message["message_id"],
-                        duplicate=not accepted,
+                        dropped=not accepted,  # gapped state: awaiting a fresh snapshot
                         generation=ref,
                         provider_message=message,
                         observation_context=price.observation_context(),
                     )
-        self.changed.set()
 
     async def replace_reset_subscriptions(self) -> None:
         """Fresh snapshots for the subscriptions Saxo or a timeout singled out, one at a time."""
@@ -1601,8 +1601,6 @@ class DataService:
                                 )
                             self.reset_refs.add(ref)
                         await self.replace_reset_subscriptions()
-            except asyncio.CancelledError:
-                raise
             except Exception as exc:
                 if setup:
                     setup.cancel()
@@ -1644,7 +1642,15 @@ class DataService:
                 with suppress(ValueError):
                     quote_check(price.value or {}, price.receipt, datetime.now(UTC))
                     usable += 1
+        recorded = result.get("options")  # the root, or the problem discovery/board hit
         result["options"] = {
+            **(
+                recorded
+                if isinstance(recorded, dict)
+                else {"problem": recorded}
+                if recorded
+                else {}
+            ),
             "discovered": len(state.option_space),
             "usable_quotes": usable,
             "status": "AVAILABLE" if usable else "UNVERIFIED_OR_UNAVAILABLE",

@@ -31,13 +31,14 @@ GC remains monitored. No orders were sent or paper execution armed during this m
 [Option context and validation](docs/saxo-option-context-addendum.md) ·
 [Current server evidence](docs/CURRENT-DEPLOYMENT.md) · [Initial migration report](docs/IMPLEMENTATION-REPORT.md)
 
-IBKR's recoverable adapter/configuration is in `research/operational-history/parked-ibkr-runtime`.
-Original ledgers, research, dated deployment evidence and historical provider labels remain intact.
-EODHD external transport is disabled; retained offline research parsers/caches still work.
 The option-context release `5aa3a7b` is deployed. A read-only check on **2026-09-29 at 07:51 UTC**
 confirmed authenticated Saxo SIM, a connected stream, disabled/disarmed execution and no active
 reservations. Actual futures selection, market-data entitlements and recording rights remain
 unverified; no option field availability is claimed. See the [dated runtime snapshot](docs/github-sync-runtime-20260929.json).
-The 13 legacy provider/scanner units were verified parked at deployment; historical evidence is retained.
+
+This repository holds only what runs on or ships to the server: `packages/stocker_execution`
+(runtime, entry point `stocker futures-run`), `packages/stocker_dashboard`, their tests, the
+operational scripts and the deployment evidence. The retired IBKR/EODHD providers, the research
+harness and the MCP server were removed on 2026-09-29; their history remains in git.
 
 Run `bash scripts/check.sh` for format, lint, types, Python tests, browser checks and server-only smoke.

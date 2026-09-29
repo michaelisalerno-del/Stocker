@@ -13,13 +13,9 @@ from pathlib import Path
 
 
 def smoke() -> None:
-    import stocker_launcher
-
-    stocker_launcher.configure_numeric_runtime()
-    stocker_launcher._ensure_monorepo_src_paths()
     import httpx
 
-    import stocker_core.cli  # noqa: F401 - the deployed `stocker futures-run` entry point
+    import stocker_execution.__main__  # noqa: F401 - the deployed `stocker futures-run` entry point
     from stocker_dashboard.app import create_dashboard_app
     from stocker_execution.config import FuturesConfig
     from stocker_execution.runtime import Runtime
@@ -29,12 +25,8 @@ def smoke() -> None:
         raise AssertionError("Server smoke must never contact a network")
 
     socket.socket.connect = disconnected
-    assert importlib.util.find_spec("pytest") is None
-    assert importlib.util.find_spec("jupyterlab") is None
-    assert importlib.util.find_spec("sklearn") is None
-    assert importlib.util.find_spec("joblib") is None
-    # Research/MCP libraries are not runtime dependencies.
-    for name in ("pandas", "numpy", "mcp", "pandas_market_calendars"):
+    # Development, research and CLI-framework libraries are not runtime dependencies.
+    for name in ("pytest", "pandas", "numpy", "typer", "rich", "structlog", "pydantic_settings"):
         assert importlib.util.find_spec(name) is None, name
     with tempfile.TemporaryDirectory(prefix="stocker-smoke-state-") as directory:
         root = Path(directory)

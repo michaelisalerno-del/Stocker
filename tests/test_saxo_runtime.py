@@ -4,7 +4,6 @@ import asyncio
 import time
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import httpx
 import pytest
@@ -234,18 +233,6 @@ def test_dashboard_defaults_do_not_leak_secrets_or_create_subscriptions(tmp_path
         runtime.store.db.close()
 
     asyncio.run(scenario())
-
-
-def test_old_providers_are_not_network_capable():
-    from stocker_data.vendors.eodhd import EODHDClient, EODHDError
-
-    client = EODHDClient()
-    with pytest.raises(EODHDError, match="EODHD_INACTIVE"):
-        client._client.get("https://eodhd.com/api/eod/fixture")
-    client._client.close()
-    active = Path("packages/stocker_execution/src/stocker_execution")
-    assert not any("ib_async" in p.read_text() for p in active.glob("*.py"))
-    assert not any(p.exists() for p in [active / "depth.py", active / "subscriptions.py"])
 
 
 def test_internal_fill_revalidates_fx_and_rejects_budget_overrun(tmp_path):

@@ -105,9 +105,8 @@ def test_futures_server_preserves_authenticated_proxy_socket_peer(monkeypatch, t
 
     import httpx
     import uvicorn
-    from typer.testing import CliRunner
 
-    from stocker_core.cli import app as cli
+    from stocker_execution.__main__ import main
     from stocker_execution.runtime import Runtime
 
     token = "isolated-proxy-credential-123456789"
@@ -140,10 +139,7 @@ def test_futures_server_preserves_authenticated_proxy_socket_peer(monkeypatch, t
     monkeypatch.setattr(uvicorn, "Server", Server)
     config = tmp_path / "futures.yaml"
     config.write_text("armed: false\n")
-    result = CliRunner().invoke(
-        cli, ["futures-run", "--config", str(config), "--database", str(tmp_path / "state.sqlite")]
-    )
-    assert result.exit_code == 0, result.output
+    main(["futures-run", "--config", str(config), "--database", str(tmp_path / "state.sqlite")])
     assert statuses == [200, 200, 403]
 
 

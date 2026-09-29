@@ -38,7 +38,9 @@ in the runtime trading hot path.
 ## Architecture rules
 
 - One repository and one application/codebase with clear modules.
-- One frozen five-market Saxo futures-options PAPER pipeline. IBKR is parked outside active packages.
+- One frozen five-market Saxo futures-options PAPER pipeline. This repository holds only the
+  runtime, its dashboard, their tests and operations material; retired providers and research
+  live in git history, never in active packages.
 - The existing authenticated dashboard is a consumer of runtime state; its failure must not stop position management.
 - Pure frozen futures calculations receive completed Saxo bars and never request broker data.
 - Frozen synthetic research prices must never substitute for listed contracts, quotes or executions.

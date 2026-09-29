@@ -80,3 +80,11 @@ recoverable deployment while required obligations remain managed. No automatic p
 A reviewed current inventory is required to make stop/mask commands concrete. The 2026-09-28
 deployment report records the 13 parked units and protected original definitions. Reinspect before
 future changes; repository changes alone cannot guarantee a server supervisor remains parked.
+
+## Server runtime
+
+The server runs `stocker futures-run` (console script for `stocker_execution.__main__`; the exact
+command, paths, proxy routes and rollout steps are above). The authenticated reverse proxy remains
+required. Uvicorn uses `proxy_headers=False` so the dashboard's security layer sees the actual
+loopback peer. Execution starts disabled and disarmed on every launch; arming is a separate,
+explicit operator action.

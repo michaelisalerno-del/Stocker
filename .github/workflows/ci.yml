@@ -23,12 +23,9 @@ jobs:
         if: matrix.check == 'frontend'
         with:
           node-version: "22"
-      - name: Install locked formatter and linter
-        if: matrix.check == 'format' || matrix.check == 'lint'
-        run: uv sync --locked --only-group dev
       - name: Install locked development dependencies
-        if: matrix.check == 'typing' || matrix.check == 'python'
-        run: uv sync --all-groups --locked
+        if: matrix.check != 'frontend' && matrix.check != 'server'
+        run: uv sync --locked
       - name: Install browser test dependencies
         if: matrix.check == 'frontend'
         run: |
@@ -40,8 +37,3 @@ jobs:
       - name: Required check
         if: matrix.check != 'server'
         run: bash scripts/check.sh ${{ matrix.check }}
-      - name: Numerical runtime diagnostics
-        if: always() && matrix.check == 'python'
-        run: |
-          uv run --no-sync python -c 'import numpy; numpy.show_runtime(); print(numpy.lib.introspect.opt_func_info(func_name="^log$"))'
-          uv run --no-sync python -c 'import stocker_launcher; stocker_launcher.configure_numeric_runtime(); import numpy; numpy.show_runtime(); print(numpy.lib.introspect.opt_func_info(func_name="^log$"))'

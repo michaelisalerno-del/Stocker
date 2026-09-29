@@ -1,6 +1,7 @@
 /* Real dashboard browser checks with explicitly labelled offline API fixtures. No broker. */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
 const { chromium } = require("playwright");
@@ -10,7 +11,13 @@ const markets = ["CL", "GC", "NG", "NQ", "SI"];
 const staticRoot = path.resolve(
   "packages/stocker_dashboard/src/stocker_dashboard/static",
 );
-const output = path.resolve("docs/cleanup-screenshots");
+// Screenshots go to a temporary directory unless explicitly requested, e.g.
+// `node tests/dashboard_futures.cjs --screenshots docs/cleanup-screenshots`.
+const screenshotFlag = process.argv.indexOf("--screenshots");
+const output =
+  screenshotFlag > 0
+    ? path.resolve(process.argv[screenshotFlag + 1])
+    : fs.mkdtempSync(path.join(os.tmpdir(), "slrno-dashboard-"));
 const state = {
   system: {
     account: "OFFLINE FIXTURE",

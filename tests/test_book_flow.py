@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from saxo_support import IDENTITY, book
 from stocker_execution.book_flow import VERSION, observe
 from stocker_execution.config import MARKETS, FuturesConfig, RecorderConfig
 from stocker_execution.contracts import key
@@ -18,41 +19,6 @@ from stocker_execution.saxo_client import allowed
 from stocker_execution.saxo_data import DataService
 from stocker_execution.saxo_stream import PriceState
 from stocker_execution.store import Store
-
-IDENTITY = {
-    "provider": "SAXO",
-    "environment": "SAXO_SIM",
-    "asset_type": "ContractFutures",
-    "market": "CL",
-    "uic": 123,
-    "tick_size": 0.01,
-}
-
-
-def book(n=10, bid_size=3, ask_size=1, shift=0):
-    return {
-        "Quote": {
-            "Bid": 70 + shift,
-            "Ask": 70.01 + shift,
-            "BidSize": bid_size,
-            "AskSize": ask_size,
-            "DelayedByMinutes": 0,
-            "PriceTypeBid": "Tradable",
-            "PriceTypeAsk": "Tradable",
-        },
-        "PriceInfoDetails": {"LastTraded": 70, "LastTradedSize": 2, "Volume": 100},
-        "MarketDepth": {
-            "Bid": [70 + shift - 0.01 * i for i in range(n)],
-            "Ask": [70.01 + shift + 0.01 * i for i in range(n)],
-            "BidSize": [bid_size] * n,
-            "AskSize": [ask_size] * n,
-            "BidOrders": [2] * n,
-            "AskOrders": [1] * n,
-            "NoOfBids": n,
-            "NoOfOffers": n,
-            "UsingOrders": True,
-        },
-    }
 
 
 def point(value, at, history=(), generation="one", timeout=5):

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from saxo_support import plan, signal
 from stocker_execution.store import Store
-from test_saxo_runtime import plan, signal
 
 
 def script(name):

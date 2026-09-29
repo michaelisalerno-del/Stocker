@@ -6,13 +6,24 @@ from datetime import timedelta
 
 import pytest
 
+from saxo_support import (
+    AT,
+    FUTURE,
+    IDENTITY,
+    OPTION,
+    book,
+    fill_record,
+    plan,
+    quote,
+    record_entry,
+    setup,
+    signal,
+)
 from stocker_execution.config import FuturesConfig
 from stocker_execution.contracts import budget, key
 from stocker_execution.rules import Bar
 from stocker_execution.runtime import Runtime
 from stocker_execution.store import Store
-from test_futures_invariants import AT
-from test_saxo_runtime import FUTURE, plan, quote, setup, signal
 
 
 def test_new_allocation_is_fifty_all_in_and_four_unique_slots(tmp_path):
@@ -102,8 +113,6 @@ def test_history_oldest_first_sorts_before_pagination(tmp_path):
 
 def test_migration_keeps_old_allocation_policy_orders_and_fills(tmp_path):
     import sqlite3
-
-    from test_futures_invariants import fill_record, record_entry
 
     path = tmp_path / "old.sqlite"
     store = Store(path)
@@ -234,7 +243,6 @@ def test_derived_flow_matches_raw_replay_and_accounting_is_cached(tmp_path, monk
     from stocker_execution.book_flow import observe
     from stocker_execution.config import RecorderConfig
     from stocker_execution.recorder import Recorder, apply, packed, read_row
-    from test_book_flow import IDENTITY, book
 
     recorder = Recorder(RecorderConfig(), tmp_path)
     recorder.register("future", IDENTITY)
@@ -274,7 +282,6 @@ def test_four_hour_rotation_does_not_pin_all_old_candidates(tmp_path, monkeypatc
     from stocker_execution.config import RecorderConfig
     from stocker_execution.recorder import Recorder
     from stocker_execution.saxo_stream import PriceState
-    from test_saxo_runtime import OPTION
 
     async def scenario():
         _, data, store = setup(tmp_path)
@@ -507,7 +514,6 @@ def test_reattached_candidate_bridges_snapshot_without_duplicate_sequences(
 
     from stocker_execution.config import RecorderConfig
     from stocker_execution.recorder import Recorder
-    from test_saxo_runtime import OPTION
 
     async def scenario():
         recorder = Recorder(

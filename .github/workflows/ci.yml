@@ -6,6 +6,7 @@ jobs:
   check:
     name: ${{ matrix.check }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -16,12 +17,17 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
       - uses: actions/setup-node@v4
         if: matrix.check == 'frontend'
         with:
           node-version: "22"
+      - name: Install locked formatter and linter
+        if: matrix.check == 'format' || matrix.check == 'lint'
+        run: uv sync --locked --only-group dev
       - name: Install locked development dependencies
-        if: matrix.check != 'server' && matrix.check != 'frontend'
+        if: matrix.check == 'typing' || matrix.check == 'python'
         run: uv sync --all-groups --locked
       - name: Install browser test dependencies
         if: matrix.check == 'frontend'

@@ -4,166 +4,19 @@ import asyncio
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 
 import httpx
 import pytest
 
+from saxo_support import FUTURE, OPTION, plan, quote, setup, signal
 from stocker_dashboard.app import create_dashboard_app
-from stocker_execution.broker import PaperBroker
 from stocker_execution.config import FuturesConfig
 from stocker_execution.contracts import key
-from stocker_execution.recorder import Recorder, read_row
+from stocker_execution.recorder import read_row
 from stocker_execution.runtime import Runtime
-from stocker_execution.saxo_client import SaxoError
-from stocker_execution.saxo_data import DataService, completed_bars
-from stocker_execution.saxo_stream import PriceState, merge_board
+from stocker_execution.saxo_data import completed_bars
+from stocker_execution.saxo_stream import merge_board
 from stocker_execution.store import Store
-
-FUTURE = {
-    "provider": "SAXO",
-    "environment": "SAXO_SIM",
-    "market": "CL",
-    "uic": 100,
-    "asset_type": "ContractFutures",
-    "symbol": "CLZ6:NYMEX",
-    "expiry": "2026-12-20",
-    "contract_month": "2026-12",
-    "exchange": "NYMEX",
-}
-OPTION = {
-    **FUTURE,
-    "uic": 101,
-    "asset_type": "FuturesOption",
-    "underlying_uic": 100,
-    "option_root_id": 50,
-    "right": "Call",
-    "strike": 70,
-    "currency": "USD",
-    "minimum_quantity": 1,
-    "lot_size": 1,
-    "amount_decimals": 0,
-    "tick_size": 0.001,
-    "price_factor": 1000,
-    "multiplier": 1000,
-    "is_tradable": True,
-    "trading_sessions": {
-        "Sessions": [
-            {
-                "StartTime": (datetime.now(UTC) - timedelta(hours=24)).isoformat(),
-                "EndTime": (datetime.now(UTC) + timedelta(hours=24)).isoformat(),
-                "State": "Open",
-            }
-        ]
-    },
-}
-
-
-def quote(bid=0.008, ask=0.009, at=None):
-    p = PriceState()
-    p.snapshot(
-        {
-            "Quote": {
-                "Bid": bid,
-                "Ask": ask,
-                "PriceTypeBid": "Tradable",
-                "PriceTypeAsk": "Tradable",
-                "DelayedByMinutes": 0,
-            },
-            "PriceInfoDetails": {"BidSize": 2, "AskSize": 2},
-        },
-        "fixture",
-        at or time.time(),
-    )
-    return p
-
-
-class FakeClient:
-    def __init__(self):
-        self.calls = []
-        self.sim_account_verified = True
-        self.oauth = SimpleNamespace(account_key="fixture-account")
-        self.positions = []
-        self.orders = []
-
-    async def request(self, method, path, **kwargs):
-        self.calls.append((method, path, kwargs))
-        if path == "/root/v2/user":
-            return {"UserId": "fixture-user"}
-        if path == "/port/v1/accounts/me":
-            return {
-                "Data": [
-                    {"AccountKey": "fixture-account", "AccountId": "fixture-id", "Currency": "GBP"}
-                ]
-            }
-        if path == "/root/v1/sessions/capabilities":
-            return {"TradeLevel": "FullTradingAndChat"}
-        if path == "/port/v1/positions/me":
-            return {"Data": self.positions}
-        if path == "/port/v1/orders/me":
-            return {"Data": self.orders}
-        if path.endswith("precheck"):
-            return {
-                "PreCheckResult": "Ok",
-                "EstimatedCashRequired": 7.9,
-                "EstimatedCashRequiredCurrency": "GBP",
-                "EstimatedTotalCostInAccountCurrency": 0.1,
-            }
-        raise SaxoError("AMBIGUOUS_REQUEST")
-
-
-def setup(tmp_path, mode="INTERNAL_PAPER"):
-    config = FuturesConfig(execution_mode=mode)
-    client = FakeClient()
-    r = Recorder(config.recorder, tmp_path / "events")
-    data = DataService(config, client, r)
-    data.connected = data.account_verified = True
-    data.account_id, data.account_currency = "fixture-id", "GBP"
-    data.session = {"TradeLevel": "FullTradingAndChat"}
-    data.markets["CL"].identity = FUTURE
-    data.markets["CL"].price = quote(70, 71)
-    r.register(key(FUTURE), FUTURE)
-    data.options[101] = (OPTION, quote())
-    data.subscriptions["option"] = {"target": "101"}
-    data.fx = quote(1.3, 1.31)
-    store = Store(tmp_path / "ledger.sqlite3")
-    store.bind("SAXO_SIM", mode)
-    broker = PaperBroker(config, store, data)
-    broker.armed = broker.reconciled = True
-    broker.last_reconcile = time.monotonic()
-    broker.problem = ""
-    return broker, data, store
-
-
-def signal(i):
-    at = datetime.now(UTC)
-    return {
-        "id": f"fixture-{i}",
-        "market": "CL",
-        "rule_version": "fixture",
-        "signal_at": at.isoformat(),
-        "exit_at": (at + timedelta(hours=1)).isoformat(),
-    }
-
-
-def plan():
-    return {
-        "quantity": 1,
-        "cash_pennies": 800,
-        "premium_gbp": 7.69,
-        "fees_gbp": 0.2,
-        "total_gbp": 8,
-        "limit": 0.01,
-        "option": OPTION,
-        "underlying": FUTURE,
-        "fee_per_side_gbp": 0.1,
-        "currency": "USD",
-        "multiplier": 1000,
-        "price_unit_factor": 1,
-        "fx": 1 / 1.3,
-        "fx_at": time.time(),
-        "cutoff": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
-    }
 
 
 def test_depth_updates_and_heartbeats_do_not_refresh_quotes():

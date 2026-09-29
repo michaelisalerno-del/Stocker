@@ -7,24 +7,13 @@ from datetime import timedelta
 
 import httpx
 
+from saxo_support import AT, FUTURE, GC_MAPPING, quote
 from stocker_dashboard.app import create_dashboard_app
 from stocker_execution.config import FuturesConfig
 from stocker_execution.contracts import key
 from stocker_execution.rules import Bar
 from stocker_execution.runtime import Runtime
 from stocker_execution.store import Store
-from test_futures_invariants import AT
-from test_saxo_runtime import FUTURE, quote
-
-GC_MAPPING = {
-    "environment": "SAXO_SIM",
-    "option_root_id": 60,
-    "delta_tolerance": 0.01,
-    "source": "fixture frozen source",
-    "approval": "fixture explicit approval",
-    "fee_per_side_gbp": 0.1,
-    "fee_evidence": "fixture fee evidence",
-}
 
 
 def test_dashboard_read_failure_is_503_and_never_changes_execution_state(tmp_path):

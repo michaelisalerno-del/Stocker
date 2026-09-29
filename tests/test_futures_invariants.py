@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from saxo_support import AT, fill_record, record_entry
 from stocker_execution.config import MARKETS
 from stocker_execution.rules import (
     Bar,
@@ -17,46 +18,6 @@ from stocker_execution.rules import (
     prior_rv,
 )
 from stocker_execution.store import Store
-
-AT = datetime(2026, 9, 28, 13, tzinfo=UTC)
-
-
-def plan(cid=100):
-    return {
-        "quantity": 1,
-        "cash_pennies": 1000,
-        "multiplier": 100,
-        "price_unit_factor": 1,
-        "currency": "USD",
-        "option": {"uic": cid, "asset_type": "FuturesOption"},
-    }
-
-
-def record_entry(store, identity="x", cid=100):
-    event = {**opportunity("GC", 1, AT), "id": identity}
-    store.observe(event, "", {})
-    assert store.reserve(identity, plan(cid)) == ""
-    return store.prepare_order(
-        identity,
-        "ENTRY",
-        10 + cid,
-        (AT + timedelta(seconds=20)).isoformat(),
-        {"con_id": cid, "quantity": 1, "limit": 0.1},
-    )
-
-
-def fill_record(ref, exec_id="exec.1", side="BOT", at=AT):
-    return dict(
-        exec_id=exec_id,
-        reference=ref,
-        con_id=100,
-        quantity=1,
-        price=0.1,
-        side=side,
-        at=at.isoformat(),
-        fx=0.8,
-        fx_at=at.isoformat(),
-    )
 
 
 def test_source_fixture_rv_clocks_and_original_exit_anchor():

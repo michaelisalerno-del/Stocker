@@ -101,7 +101,7 @@ event_calendar_file: /etc/stocker/v1/event-calendar.yaml   # see configs/event-c
 alerts:
   url_file: /etc/stocker/v1/alert-url.json   # mode 0600, owned by the service user
   stream_down_seconds: 120
-  login_warning_hours: 24
+  login_warning_minutes: 15   # healthy Saxo sessions keep 40-60 minutes
 option_chain_strikes: 11
 provider_volatility_scale: FRACTION     # verified live; UNVERIFIED hides the IV spread
 ```

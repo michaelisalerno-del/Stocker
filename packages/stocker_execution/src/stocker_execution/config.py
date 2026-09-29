@@ -83,7 +83,9 @@ class AlertSettings(Strict):
     # A mode-0600 JSON file {"url": "https://..."} (for example an ntfy topic); never inline.
     url_file: Path | None = None
     stream_down_seconds: int = Field(default=120, ge=30, le=3600)
-    login_warning_hours: int = Field(default=24, ge=1, le=168)
+    # Saxo's refresh token lasts about an hour but rotates at every ~20-minute access-token
+    # refresh, so a healthy session always shows 40-60 minutes left. Less means renewal stopped.
+    login_warning_minutes: int = Field(default=15, ge=5, le=30)
 
 
 class ContractSelection(Strict):

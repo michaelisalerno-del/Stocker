@@ -195,13 +195,17 @@ def test_alerts_warn_before_saxo_login_expires_and_reject_unsafe_urls(tmp_path):
     runtime = runtime_for(tmp_path)
     runtime.data.client.oauth.credentials = {"client_id": "fixture"}
     runtime.data.client.oauth.status = "AUTHENTICATED"
-    runtime.data.client.oauth.tokens = {"refresh_expires_at": 1000 + 3600}
     runtime.data.connected = True
     alerts = Alerts(AlertSettings())
-    found = alerts.conditions(runtime, at=1000)
-    assert found["login"].startswith("Saxo login expires") and not alerts.enabled
-    runtime.data.client.oauth.tokens = {"refresh_expires_at": 1000 + 3 * 86400}
-    assert "login" not in alerts.conditions(runtime, at=1000)
+    # A healthy rotating Saxo session always has 40-60 minutes of refresh lifetime left.
+    for remaining in (41 * 60, 60 * 60):
+        runtime.data.client.oauth.tokens = {"refresh_expires_at": 1000 + remaining}
+        assert "login" not in alerts.conditions(runtime, at=1000)
+    runtime.data.client.oauth.tokens = {"refresh_expires_at": 1000 + 14 * 60}
+    first = alerts.conditions(runtime, at=1000)["login"]
+    runtime.data.client.oauth.tokens = {"refresh_expires_at": 1000 + 10 * 60}
+    assert alerts.conditions(runtime, at=1000)["login"] == first  # stable text, no repeats
+    assert first.startswith("Saxo login renewal has stopped") and not alerts.enabled
     insecure = Alerts(AlertSettings(url_file=private_url(tmp_path, "http://ntfy.example/x")))
     assert insecure.problem == "ALERT_URL_FILE_INVALID" and not insecure.enabled
     os.chmod(tmp_path / "alert.json", 0o644)

@@ -5,7 +5,6 @@ A failed delivery is recorded and retried on the next change; it never affects t
 """
 
 import time
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
@@ -63,9 +62,13 @@ class Alerts:
             expires = float(oauth.tokens.get("refresh_expires_at", 0) or 0)
             if oauth.status == "AUTHENTICATION_EXPIRED_RECONNECT_REQUIRED" or not expires:
                 found["login"] = "Saxo login required: reconnect in System"
-            elif expires - at < self.settings.login_warning_hours * 3600:
-                when = datetime.fromtimestamp(expires, UTC).strftime("%d %b %H:%M UTC")
-                found["login"] = f"Saxo login expires {when}: reconnect in System before then"
+            elif expires - at < self.settings.login_warning_minutes * 60:
+                # Stable text: one alert per episode, not one per token rotation.
+                found["login"] = (
+                    "Saxo login renewal has stopped and the login expires within "
+                    f"{self.settings.login_warning_minutes} minutes: check the stream, "
+                    "then reconnect in System"
+                )
         return found
 
     async def check(self, runtime: "Runtime", at: float | None = None) -> None:

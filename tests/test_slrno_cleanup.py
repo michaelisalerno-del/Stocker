@@ -195,9 +195,19 @@ def test_balance_subscription_is_shared_scoped_and_never_arms(tmp_path, environm
         assert data.balance_view(time.time())["status"] == "Stale"
         assert data.balance_view(time.time())["total_value"] == 123.4
         assert data.balance_received_at == updated
-        data.receive_balance({"Currency": "USD", "TotalValue": 999}, 1000)
-        assert data.balance_view(time.time())["currency"] == "GBP"
+        data.receive_balance({"CashBalance": 30}, 1000)
+        assert data.balance_problem == "BALANCE_CALCULATION_UNVERIFIED"
+        assert data.balance_received_at == updated
         data.receive_balance({"CalculationReliability": "Ok"}, updated)
+        assert data.balance_view(time.time())["total_value"] == 999
+        assert data.balance_view(time.time())["cash_balance"] == 30
+        data.receive_balance({"Currency": "USD", "TotalValue": 200}, 1001)
+        assert data.balance_view(time.time())["currency"] == "GBP"
+        data.receive_balance({"CashBalance": 10}, 1002)
+        assert data.balance_problem == "BALANCE_CURRENCY_UNVERIFIED"
+        assert data.balance_received_at == updated
+        data.receive_balance({"Currency": "GBP"}, updated)
+        assert data.balance_view(time.time())["total_value"] == 200
         await data.receive(
             {
                 "reference": "_heartbeat",
@@ -485,5 +495,63 @@ def test_recording_burst_wakes_existing_writer_before_batch_delay(tmp_path):
         await recorder.write_loop()
         assert len(written) == 64
         assert recorder.queued_bytes == 0 and recorder.queue.empty() and not recorder.problem
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("retired_window", [False, True])
+def test_reattached_candidate_bridges_snapshot_without_duplicate_sequences(
+    tmp_path, retired_window
+):
+    import gzip
+
+    from stocker_execution.config import RecorderConfig
+    from stocker_execution.recorder import Recorder
+    from test_saxo_runtime import OPTION
+
+    async def scenario():
+        recorder = Recorder(
+            RecorderConfig(persistent_capture=True, recording_permission_evidence="OFFLINE TEST"),
+            tmp_path,
+        )
+        await recorder.start()
+        recorder.register("future", FUTURE)
+        recorder.register("option", OPTION)
+        recorder.ingest("future", "SNAPSHOT", {}, 0)
+        recorder.ingest("option", "SNAPSHOT", {"Quote": {"Bid": 1, "Ask": 2}}, 0)
+        segment = recorder.trigger("future", {"id": "first"}, 0, ["option"])["segment"]
+        recorder.trigger("future", {"id": "overlap"}, 1800)
+        await recorder.queue.join()
+        # The first event's option obligation has ended; the shared archive remains open.
+        recorder.ingest("option", "GAP", {}, 3601)
+        if retired_window:
+            recorder.windows.pop("option")
+            recorder.register("option", OPTION)
+        recorder.ingest("option", "SNAPSHOT", {"Quote": {"Bid": 10, "Ask": 20}}, 3700)
+        recorder.trigger("future", {"id": "selected-again"}, 3700)
+        recorder.attach("selected-again", "option", 3700)
+        recorder.attach("selected-again", "option", 3700)
+        recorder.ingest("option", "UPDATE", {"Quote": {"Bid": 11}}, 3701)
+        capture = recorder.active[segment]
+        assert "option" in capture["events"][-1]["prehistory_seconds"]
+        recorder.tick(7301)
+        await recorder.queue.join()
+        rows = [
+            json.loads(r)
+            for r in gzip.decompress((tmp_path / (segment + ".jsonl.gz")).read_bytes()).splitlines()
+        ]
+        option_rows = [
+            r
+            for r in rows
+            if r.get("identity", {}).get("uic") == OPTION["uic"] and "local_sequence" in r
+        ]
+        sequences = [r["local_sequence"] for r in option_rows]
+        assert len(sequences) == len(set(sequences))
+        assert any(r["receipt"] == 3700 and r["kind"] == "SNAPSHOT" for r in option_rows)
+        assert any(r["receipt"] == 3701 and r["kind"] == "UPDATE" for r in option_rows)
+        if not retired_window:
+            assert any(r["kind"] == "GAP" for r in option_rows)
+        assert not recorder.problem
+        await recorder.close()
 
     asyncio.run(scenario())

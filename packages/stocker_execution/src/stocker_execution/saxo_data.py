@@ -127,6 +127,7 @@ class DataService:
         self.account_currency: str | None = None
         self.account_id: str | None = None
         self.balance: dict[str, Any] = {}
+        self.balance_stream: dict[str, Any] = {}
         self.balance_account_key: str | None = None
         self.balance_received_at: float | None = None
         self.balance_problem = "ACCOUNT_BALANCE_UNAVAILABLE"
@@ -158,6 +159,7 @@ class DataService:
         self.account_verified = True
         if self.balance_account_key != self.client.oauth.account_key:
             self.balance.clear()
+            self.balance_stream.clear()
             self.balance_received_at = None
             self.balance_account_key = self.client.oauth.account_key
         self.client.sim_account_verified = self.config.data_environment == "SAXO_SIM"
@@ -200,9 +202,10 @@ class DataService:
             return
         if self.balance_account_key != self.client.oauth.account_key:
             self.balance.clear()
+            self.balance_stream.clear()
             self.balance_received_at = None
         self.balance_account_key = self.client.oauth.account_key
-        values = {} if snapshot else dict(self.balance)
+        values = {} if snapshot else dict(self.balance_stream)
         # Do not expose account/client keys or retain an unbounded broker payload.
         for name in (
             "TotalValue",
@@ -228,6 +231,7 @@ class DataService:
                 elif not isinstance(value, str):
                     value = None
                 values[name] = value
+        self.balance_stream = values
         if values.get("CalculationReliability") != "Ok":
             self.balance_problem = "BALANCE_CALCULATION_UNVERIFIED"
             return

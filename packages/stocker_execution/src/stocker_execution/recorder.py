@@ -132,7 +132,13 @@ class Window:
             beginning = max(at - 900, self.continuous_since, self.checkpoint_at)
         return max(0, at - beginning)
 
-    def prefix(self) -> list[bytes]:
+    def prefix(self, after_sequence: int | None = None) -> list[bytes]:
+        rows = [zlib.decompress(b) for _, b in self.rows]
+        if after_sequence is not None:
+            # Reused candidates can have an unrecorded interval. Supply a checkpoint
+            # when the intervening raw rows have already left the rolling window.
+            if not rows or json.loads(rows[0])["local_sequence"] <= after_sequence + 1:
+                return [r for r in rows if json.loads(r)["local_sequence"] > after_sequence]
         return [
             packed(
                 {
@@ -145,7 +151,7 @@ class Window:
                     "reconstruction": "state immediately before retained messages",
                 }
             ),
-            *(zlib.decompress(b) for _, b in self.rows),
+            *rows,
         ]
 
 
@@ -256,7 +262,11 @@ class Recorder:
         if key not in self.windows:
             if len(self.windows) >= 32:
                 raise ValueError("RECORDER_INSTRUMENT_LIMIT")
-            self.windows[key] = Window(identity)
+            # A retired candidate may return while its shared archive is still open.
+            sequence = max(
+                (c["last_sequences"].get(key, 0) for c in self.active.values()), default=0
+            )
+            self.windows[key] = Window(identity, sequence=sequence)
         elif self.windows[key].identity != identity:
             raise ValueError("RECORDING_IDENTITY_IMMUTABLE")
 
@@ -546,10 +556,7 @@ class Recorder:
                 # A completed capture can overlap a new event's prehistory. Bridge
                 # the intervening window without copying already-written messages.
                 rows.extend(
-                    zlib.decompress(blob)
-                    for _, blob in self.windows[instrument].rows
-                    if read_row(blob)["local_sequence"]
-                    > capture["last_sequences"].get(instrument, 0)
+                    self.windows[instrument].prefix(capture["last_sequences"].get(instrument, 0))
                 )
             capture["last_sequences"][instrument] = self.windows[instrument].sequence
         rows.append(packed({"kind": "TRIGGER", "payload": capture["events"][-1]}))
@@ -610,11 +617,9 @@ class Recorder:
             event = next((e for e in capture["events"] if e["id"] == event_id), None)
             if capture["state"] != "CAPTURING" or event is None:
                 continue
-            if instrument not in event["instruments"]:
-                event["instruments"].append(instrument)
-            if instrument in capture["instruments"]:
-                self.enqueue(segment, capture, [])
+            if instrument in event["instruments"]:
                 continue
+            event["instruments"].append(instrument)
             window = self.windows[instrument]
             event_at = (
                 utc(event["signal_at"]).timestamp()
@@ -624,13 +629,19 @@ class Recorder:
             pre = max(0, window.coverage(at) - max(0, at - event_at))
             event.setdefault("prehistory_seconds", {})[instrument] = pre
             capture["metadata_versions"].update(window.metadata)
-            capture["instruments"].append(instrument)
+            previous = (
+                capture["last_sequences"].get(instrument, 0)
+                if instrument in capture["instruments"]
+                else None
+            )
+            if instrument not in capture["instruments"]:
+                capture["instruments"].append(instrument)
             capture["last_sequences"][instrument] = window.sequence
             self.enqueue(
                 segment,
                 capture,
                 [
-                    *window.prefix(),
+                    *window.prefix(previous),
                     packed(
                         {
                             "kind": "OPTION_ATTACHED",

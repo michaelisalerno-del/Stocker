@@ -85,8 +85,7 @@ Two read-only probe runs ([evidence](saxo-field-probe-20260929.json)) establishe
   option's recorded context includes `iv_minus_model_sigma`. `provider_volatility_scale` now
   defaults to FRACTION.
 - **Price quality:** a live chain side reported `Indicative`; delayed quotes are `OldIndicative`.
-  The Tradable-only paper-fill rule would therefore reject normal real-time prices; the decision
-  remains yours once real-time data is available.
+  The Tradable-only paper-fill rule would have rejected normal real-time prices (resolved below).
 - **NQ is not offered** on this account: no ContractFutures match "NQ", "Nasdaq", "Nasdaq 100" or
   "E-mini Nasdaq".
 - **0DTE expiries exist** for CL (last trade 18:30 UTC = 14:30 New York) and GC (17:30 UTC =
@@ -119,12 +118,16 @@ official calendars, and holiday shifts must be entered by hand.
    `Open`/`OpenForTrading`, which Saxo's `InstrumentSessionState` does not contain. They now
    accept `AutomatedTrading`; auctions, breaks, halts, pre/post sessions and unknown values stay
    blocked. Without this every entry would have been rejected once approvals existed.
-2. **Decision needed — price quality.** Internal paper fills require `PriceTypeBid`/`Ask` equal
-   to `Tradable`, per `SAXO-SETUP.md` ("an indicative quote … cannot generate an internally
-   simulated fill"). Saxo now marks `Tradable` obsolete and its pricing guide describes
-   `Indicative` as "in most cases … as relevant as a Tradable price" (FX options excepted). If
-   live SIM futures-option quotes arrive as `Indicative`, no paper fill can occur. This policy
-   was left unchanged; check a live option quote once contracts are selected, then decide.
+2. **Resolved (owner-approved) — price quality.** Internal paper fills required
+   `PriceTypeBid`/`Ask` equal to `Tradable`, which Saxo marks obsolete; its pricing guide calls
+   `Indicative` "in most cases … as relevant as a Tradable price" (FX options excepted), and a
+   live chain quote used it. Execution now accepts `Indicative` or `Tradable` on both sides, and
+   still requires real-time delivery, a quote under five seconds old, no error code, an uncrossed
+   market, a tradable instrument in an `AutomatedTrading` session and fresh displayed size of at
+   least one contract; `OldIndicative`, `Pending`, `NoMarket`, `NoAccess` and unknown values are
+   rejected. Internal fills remain ask plus one tick and bid minus one tick. The real-time CME
+   subscription takes effect on 1 October 2026; rerun the probe then to confirm price quality,
+   depth and NQ availability.
 
 ## Rollout notes
 

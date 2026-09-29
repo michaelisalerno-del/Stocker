@@ -19,6 +19,11 @@ MULTIPLIERS = {"CL": 1000, "GC": 100, "NG": 10000, "NQ": 20, "SI": 5000}
 # Saxo InstrumentSessionState for continuous trading. Saxo documents no "Open" state;
 # auctions, breaks, halts, pre/post sessions and unknown values all stay blocked.
 TRADING_SESSION_STATES = {"AUTOMATEDTRADING"}
+# Saxo price qualities that represent a current price. Saxo marks Tradable obsolete and
+# documents Indicative as its normal price ("in most cases as relevant as a Tradable price";
+# the exception is FX options). OldIndicative (stale), Pending, NoMarket, NoAccess, None and
+# unknown values are never usable. Real-time delivery is checked separately.
+USABLE_PRICE_TYPES = {"Tradable", "Indicative"}
 
 
 def utc(value: str) -> datetime:
@@ -161,9 +166,7 @@ def quote_check(value: dict[str, Any], receipt: float | None, at: datetime) -> d
         raise ValueError("QUOTE_DELAYED_OR_DELAY_UNKNOWN")
     if quote.get("ErrorCode") not in (None, "None"):
         raise ValueError("QUOTE_PERMISSION_OR_SIZE_ERROR")
-    if any(
-        quote.get(k) not in {"Tradable", "Indicative"} for k in ("PriceTypeBid", "PriceTypeAsk")
-    ):
+    if any(quote.get(k) not in USABLE_PRICE_TYPES for k in ("PriceTypeBid", "PriceTypeAsk")):
         raise ValueError("QUOTE_NOT_USABLE")
     bid, ask = positive(quote.get("Bid"), "BID"), positive(quote.get("Ask"), "ASK")
     if bid > ask:
@@ -183,8 +186,6 @@ def executable_quote(
         TRADING_SESSION_STATES
     ):
         raise ValueError("OPTION_CURRENT_SESSION_NOT_OPEN_OR_UNVERIFIED")
-    if any(quote.get(k) != "Tradable" for k in ("PriceTypeBid", "PriceTypeAsk")):
-        raise ValueError("OPTION_QUOTE_NOT_TRADABLE")
     return quote
 
 

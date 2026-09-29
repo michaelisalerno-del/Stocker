@@ -55,9 +55,12 @@ Do not paste secrets into chat, Git, browser payloads, screenshots or the record
    `ENABLE PAPER ONLY` and successful preflight less than 60 seconds old. Every restart disarms.
    Connecting a feed or resuming paused entries never arms execution.
 
-Paper fills also require a currently open option session, verified instrument trading permission,
-fresh tradable bid/ask prices and independently fresh available size on the side being filled.
-An indicative quote may be displayed but cannot generate an internally simulated fill.
+Paper fills also require a currently open (`AutomatedTrading`) option session, verified instrument
+trading permission, real-time (`DelayedByMinutes` 0) bid/ask prices under five seconds old with a
+usable price quality, and independently fresh available size on the side being filled. Usable
+means `Indicative` (Saxo's normal real-time price) or the obsolete `Tradable`; `OldIndicative`,
+`Pending`, `NoMarket`, `NoAccess` and unknown values never fill. Internal fills stay pessimistic:
+ask plus one tick in, bid minus one tick out.
 
 For a stopped service/isolated preflight owner, use:
 

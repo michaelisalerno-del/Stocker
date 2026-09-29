@@ -107,14 +107,21 @@ def test_oi_publication_receipt_is_not_effective_date_or_backfilled_decision():
     )
 
 
-def test_indicative_chain_and_stale_prices_cannot_price_execution():
+def test_chain_old_delayed_and_stale_prices_cannot_price_execution():
     at = datetime.now(UTC)
     p = quote(at=at.timestamp())
     with pytest.raises(ValueError, match="CHAIN_PRICE"):
         executable_quote(OPTION, {**p.value, "price_source": "OPTIONS_CHAIN"}, p.receipt, at)
-    p.value["Quote"]["PriceTypeAsk"] = "Indicative"
-    with pytest.raises(ValueError, match="NOT_TRADABLE"):
-        executable_quote(OPTION, p.value, p.receipt, at)
+    # Saxo's normal real-time price quality is Indicative (Tradable is obsolete).
+    p.value["Quote"].update(PriceTypeBid="Indicative", PriceTypeAsk="Indicative")
+    assert executable_quote(OPTION, p.value, p.receipt, at)
+    for quality in ("OldIndicative", "Pending", "NoMarket", "NoAccess", "None", None):
+        stale = {**p.value, "Quote": {**p.value["Quote"], "PriceTypeAsk": quality}}
+        with pytest.raises(ValueError, match="QUOTE_NOT_USABLE"):
+            executable_quote(OPTION, stale, p.receipt, at)
+    delayed = {**p.value, "Quote": {**p.value["Quote"], "DelayedByMinutes": 10}}
+    with pytest.raises(ValueError, match="QUOTE_DELAYED"):
+        executable_quote(OPTION, delayed, p.receipt, at)
     with pytest.raises(ValueError, match="STALE"):
         executable_quote(OPTION, p.value, p.receipt, at + timedelta(seconds=6))
 

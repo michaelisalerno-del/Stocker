@@ -264,14 +264,16 @@ def test_internal_fill_revalidates_fx_and_rejects_budget_overrun(tmp_path):
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("failure", ["indicative", "closed_session", "permission"])
-def test_paper_fills_require_tradable_open_session_quote(tmp_path, failure):
+@pytest.mark.parametrize("failure", ["old_indicative", "delayed", "closed_session", "permission"])
+def test_paper_fills_require_current_open_session_quote(tmp_path, failure):
     async def scenario():
         broker, data, store = setup(tmp_path)
         option, price = data.options[101]
         option = {**option}
-        if failure == "indicative":
-            price.update({"Quote": {"PriceTypeAsk": "Indicative"}}, "indicative", time.time())
+        if failure == "old_indicative":
+            price.update({"Quote": {"PriceTypeAsk": "OldIndicative"}}, "old", time.time())
+        elif failure == "delayed":
+            price.update({"Quote": {"DelayedByMinutes": 10}}, "delayed", time.time())
         elif failure == "closed_session":
             option["trading_sessions"] = {"Sessions": []}
         else:
@@ -282,7 +284,37 @@ def test_paper_fills_require_tradable_open_session_quote(tmp_path, failure):
         await broker.enter(event, plan())
         assert not store.fills(event["id"])
         assert not data.client.calls
-        assert store.history(None, None, None)[0]["reason"].startswith("OPTION_")
+        assert (
+            store.history(None, None, None)[0]["reason"]
+            == {
+                "old_indicative": "QUOTE_NOT_USABLE",
+                "delayed": "QUOTE_DELAYED_OR_DELAY_UNKNOWN",
+                "closed_session": "OPTION_CURRENT_SESSION_NOT_OPEN_OR_UNVERIFIED",
+                "permission": "OPTION_TRADING_PERMISSION_UNVERIFIED",
+            }[failure]
+        )
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_real_time_indicative_quote_can_fill_internal_paper(tmp_path):
+    """Indicative is Saxo's normal real-time price; fills stay at ask plus one tick."""
+
+    async def scenario():
+        broker, data, store = setup(tmp_path)
+        _, price = data.options[101]
+        price.update(
+            {"Quote": {"PriceTypeBid": "Indicative", "PriceTypeAsk": "Indicative"}},
+            "indicative",
+            time.time(),
+        )
+        event = signal(1)
+        store.observe(event, "", {})
+        assert await broker.enter(event, plan()) == ""
+        (fill,) = store.fills(event["id"])
+        assert fill["side"] == "BOT" and fill["price"] == plan()["limit"]
+        assert not data.client.calls
         store.db.close()
 
     asyncio.run(scenario())

@@ -96,7 +96,10 @@ def test_unexpected_missing_field_is_not_recorded_as_a_trading_reason(tmp_path, 
         monkeypatch.setattr(runtime.broker, "select_option", missing)
         await runtime.decisions()
         (row,) = runtime.store.history(None, None, None)
-        context = json.loads(row["detail"])["option_context"]
+        (detail,) = runtime.store.db.execute(
+            "SELECT detail FROM signals WHERE id=?", (row["id"],)
+        ).fetchone()
+        context = json.loads(detail)["option_context"]
         assert context["reason"] == "UNEXPECTED_MISSING_FIELD"
         assert row["reason"] == "EXECUTION_DISABLED"
         await runtime.stop()

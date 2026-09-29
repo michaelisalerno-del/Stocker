@@ -409,14 +409,26 @@ class Store:
     ) -> list[dict[str, Any]]:
         if sort not in {"asc", "desc"}:
             raise ValueError("INVALID_HISTORY_SORT")
+        # Summary columns only; evidence blobs are fetched per opportunity on demand.
         return [
             dict(r)
             for r in self.db.execute(
-                "SELECT s.*,r.state,r.plan FROM signals s "
+                "SELECT s.id,s.market,s.rule_version,s.signal_at,s.exit_at,s.decision,s.reason,"
+                "r.state FROM signals s "
                 "LEFT JOIN reservations r USING(id) WHERE (? IS NULL OR market=?) "
                 "AND (? IS NULL OR substr(signal_at,1,10)=?) AND (? IS NULL OR rule_version=?) "
                 f"ORDER BY signal_at {sort},market,id LIMIT 100 OFFSET ?",
                 (market, market, day, day, version, version, offset),
+            )
+        ]
+
+    def recent_signals(self, market: str, limit: int = 8) -> list[dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT id,market,signal_at,decision,reason FROM signals WHERE market=? "
+                "ORDER BY signal_at DESC,market,id LIMIT ?",
+                (market, limit),
             )
         ]
 

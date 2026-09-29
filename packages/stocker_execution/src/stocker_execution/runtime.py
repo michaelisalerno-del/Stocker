@@ -241,18 +241,24 @@ class Runtime:
     def market_detail(self, selected: str, *, diagnostics: bool = False) -> dict[str, Any]:
         cards = []
         active = self.store.active()
-        recent = self.store.history(selected, None, None)
+        recent = self.store.recent_signals(selected)
         for market, state in self.markets.items():
             if market != selected:
                 continue
-            last_event = next((row for row in recent if row["market"] == market), None)
+            last_event = recent[0] if recent else None
             event_context = (
-                json.loads(last_event["detail"]).get("option_context") if last_event else None
+                json.loads(
+                    self.store.db.execute(
+                        "SELECT detail FROM signals WHERE id=?", (last_event["id"],)
+                    ).fetchone()[0]
+                ).get("option_context")
+                if last_event
+                else None
             )
             reason = state.problem or state.history_problem
             if not reason and market not in self.config.mappings:
                 reason = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
-            reason = reason or self.broker.entry_reason()
+            reason = reason or ("ENTRIES_PAUSED" if self.pause else self.broker.entry_reason())
             value = state.price.value or {}
             quote = value.get("Quote") or {}
             current = (
@@ -294,7 +300,7 @@ class Runtime:
                     else "BLOCKED"
                     if reason
                     else "MONITORING",
-                    "entry_enabled": not reason and self.broker.armed and not self.pause,
+                    "entry_enabled": not reason,
                     "block_reason": reason,
                     "direction": "BUY CALL" if market == "CL" else "BUY PUT",
                     "conditions": features,
@@ -339,10 +345,8 @@ class Runtime:
                     },
                     "chart": [{"at": b.at.isoformat(), "close": b.close} for b in state.bars[-90:]],
                     "signals": [
-                        {k: s[k] for k in ("id", "signal_at", "decision", "reason")}
-                        for s in recent
-                        if s["market"] == market
-                    ][:8],
+                        {k: s[k] for k in ("id", "signal_at", "decision", "reason")} for s in recent
+                    ],
                     "next_time": next_clock(now()).isoformat(),
                     "next_market_time": None,
                     "exchange_trade_date": None,

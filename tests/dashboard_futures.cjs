@@ -74,6 +74,7 @@ const state = {
       pre_seconds: [900, 42, 15, 0, 0][i],
       fresh: i === 0 || i === 1,
       last_receipt: at,
+      valid_until: Date.parse(at)/1000 + 5,
       asks: Array.from({ length: 5 }, (_, n) => ({
         price: 2651 + n,
         size: 10 + n,
@@ -199,7 +200,8 @@ const server = http.createServer((req, res) => {
     data = {
       fixture: true,
       ...state.system,
-      markets:state.markets,
+      // Production shape: per-market problem and capability view (saxo_data.capability_view).
+      markets:state.markets.map(m=>({market:m.market,problem:m.block_reason,reference_sessions:5,capabilities:{l2:m.l2},candidates:null})),
       live_available: false,
       mappings: {},
     };

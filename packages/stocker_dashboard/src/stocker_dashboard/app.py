@@ -9,17 +9,33 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from starlette.types import Scope
 
 from stocker_dashboard.security import DashboardSecurity
 from stocker_execution.config import MARKETS
 from stocker_execution.runtime import Runtime
+
+# Revalidate page assets so a deploy never pairs a stale script with new markup.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers.update(NO_CACHE)
+        return response
+
+
+class ArmRequest(BaseModel):
+    acknowledgement: str = Field("", max_length=64)
 
 
 def create_dashboard_app(runtime: Runtime) -> FastAPI:
     app = FastAPI(title="SLRNO — Futures PAPER")
     app.add_middleware(DashboardSecurity)
     static = Path(__file__).with_name("static")
-    app.mount("/static", StaticFiles(directory=static), name="static")
+    app.mount("/static", RevalidatedStaticFiles(directory=static), name="static")
 
     @app.exception_handler(sqlite3.Error)
     async def database_unavailable(request: Any, exc: sqlite3.Error) -> JSONResponse:
@@ -132,10 +148,9 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
             raise HTTPException(409, str(exc)) from None
 
     @app.post("/api/paper/arm")
-    async def arm(request: Request) -> dict[str, Any]:
-        payload = await request.json()
+    async def arm(body: ArmRequest) -> dict[str, Any]:
         try:
-            runtime.broker.arm(payload.get("acknowledgement", ""))
+            runtime.broker.arm(body.acknowledgement)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
         return runtime.status()
@@ -229,6 +244,6 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
     async def page(page: str) -> Any:
         if page not in {"", "markets", "opportunities", "execution", "trades", "system"}:
             raise HTTPException(404, "No such SLRNO page")
-        return FileResponse(static / "index.html")
+        return FileResponse(static / "index.html", headers=NO_CACHE)
 
     return app

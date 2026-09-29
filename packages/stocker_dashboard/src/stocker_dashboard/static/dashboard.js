@@ -175,6 +175,7 @@ function chart(m) {
   text(`chart-empty-${m.market}`, bars.length ? "" : "Awaiting completed bars");
   if (!bars.length) {
     line.setAttribute("points", "");
+    chartGeometry.delete(m.market);
     return;
   }
   const signature = JSON.stringify(bars);
@@ -407,7 +408,7 @@ function render(d) {
 }
 function depth(m, d) {
   if (route !== "markets") return;
-  const expires = d.valid_until != null ? d.valid_until * 1000 : Date.parse(d.last_receipt) + 5000;
+  const expires = (d.valid_until || 0) * 1000;
   depthReceipts.set(m, d.fresh ? expires : 0);
   const covered = Math.floor(d.pre_seconds || 0);
   text(
@@ -441,7 +442,7 @@ async function request(path, {method = "GET", signal, timeout = 8000} = {}) {
     const response = await fetch(path, {method, cache:"no-store", credentials:"same-origin",
       headers:{Accept:"application/json"}, signal:controller.signal});
     const result = await response.json().catch(error => {if(controller.signal.aborted) throw error; return null;});
-    if (!response.ok) throw Error(result?.detail || result?.error || `Request failed (${response.status})`);
+    if (!response.ok) throw Error((typeof result?.detail === "string" && result.detail) || result?.error || `Request failed (${response.status})`);
     if (result == null) throw Error("The server returned an unreadable response");
     return result;
   } catch (error) {
@@ -557,7 +558,7 @@ async function refresh(force = false) {
       if (page === "execution") renderExecution(d);
       else if (page === "system") {
         render({system:d});
-        text("api-depth", `${(d.markets || []).filter(m=>m.capabilities?.l2?.status === "L2_AVAILABLE" || m.l2?.status === "L2_AVAILABLE").length} / 5 markets with received depth`);
+        text("api-depth", `${(d.markets || []).filter(m=>m.capabilities?.l2?.status === "L2_AVAILABLE").length} / 5 markets with received depth`);
         for (const m of d.markets || []) text(`capability-${m.market}`, `${m.market} · ${display(m.problem) || "Connected"}`);
         if ($("system-detail").open) text("system-json",JSON.stringify(d,null,2));
         if ($("recordings-detail").open) {

@@ -23,6 +23,7 @@ Historical £10 reservations retain their original policy amounts. Ambiguous ord
 listed option products, actual 0DTE expiry clocks or delta tolerances; missing evidence blocks entries.
 GC remains monitored. No orders were sent or paper execution armed during this migration.
 
+[Audit fixes](docs/SLRNO-AUDIT-20260929.md) ·
 [Focused cleanup, verification and migration](docs/SLRNO-CLEANUP.md) ·
 [Review fixes](docs/SLRNO-REVIEW-FIXES.md) ·
 [Dashboard and Saxo data](docs/DASHBOARD-AND-DATA.md) ·

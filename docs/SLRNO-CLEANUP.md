@@ -140,6 +140,13 @@ Evidence: [normal before](cleanup-benchmarks/normal-before.json), [normal after]
 [burst before](cleanup-benchmarks/burst-before.json), [burst after](cleanup-benchmarks/burst-after.json),
 [API before](cleanup-benchmarks/dashboard-before.json), [API after](cleanup-benchmarks/dashboard-after.json).
 
+After the [29 September audit fixes](SLRNO-AUDIT-20260929.md), the same workloads measured
+(normal / burst): ingest p99 1.53 / 1.75 ms, maximum event-loop delay 44.5 / 269.4 ms, wall
+34.7 / 6.5 s, memory high water 15.1 / 26.8 MiB; API workload wall 0.121 s, maximum loop delay
+12.3 ms. Archive row counts are unchanged; the archived-message hash differs only because rows
+no longer carry the derived `provider_timestamps`. Evidence: [normal](cleanup-benchmarks/normal-audit.json),
+[burst](cleanup-benchmarks/burst-audit.json), [API](cleanup-benchmarks/dashboard-audit.json).
+
 The existing `scripts/saxo_recorder_benchmark.py` workload was reused, adding CPU and raw-row
 fidelity measurements. Run with `--option-count 5 --virtual-seconds 7200`, or
 `--option-count 16 --virtual-seconds 1200 --burst-events`, plus `--output <file>`.

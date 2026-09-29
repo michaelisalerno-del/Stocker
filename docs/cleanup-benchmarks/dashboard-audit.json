@@ -1,0 +1,39 @@
+{
+  "evidence": "OFFLINE_GENERATED_FIVE_API_CLIENTS",
+  "legacy": false,
+  "clients": 5,
+  "refreshes_per_client": 40,
+  "closed_trades": 400,
+  "wall_seconds": 0.12121820799075067,
+  "cpu_seconds": 0.12050100000000002,
+  "event_loop_max_delay_ms": 12.338167103938758,
+  "process_peak_rss_bytes": 66060288,
+  "broker_requests": 0,
+  "pages": {
+    "overview": {
+      "p50_ms": 0.4221039707772434,
+      "p95_ms": 0.475957989692688,
+      "response_bytes": 9121
+    },
+    "markets": {
+      "p50_ms": 0.6023329915478826,
+      "p95_ms": 0.7026250241324306,
+      "response_bytes": 16056
+    },
+    "opportunities": {
+      "p50_ms": 0.56681246496737,
+      "p95_ms": 0.6843749433755875,
+      "response_bytes": 23925
+    },
+    "execution": {
+      "p50_ms": 0.9793334174901247,
+      "p95_ms": 1.0201670229434967,
+      "response_bytes": 30518
+    },
+    "system": {
+      "p50_ms": 0.2891874755732715,
+      "p95_ms": 0.3146659582853317,
+      "response_bytes": 11200
+    }
+  }
+}

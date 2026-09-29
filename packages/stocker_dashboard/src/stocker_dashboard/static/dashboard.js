@@ -358,7 +358,8 @@ function smileChart(m) {
   const svg = $(`smile-${m.market}`), data = m.smile;
   if (!svg) return;
   const right = m.market === "CL" ? "call" : "put";
-  const points = (data?.strikes || []).map((s) => ({strike: s.strike, vol: s[right]?.mid_volatility ?? s.mid_volatility_pct, oi: s[right]?.open_interest})).filter((p) => typeof p.vol === "number");
+  const verified = data && data.scaling !== "PROVIDER_NATIVE_UNVERIFIED";
+  const points = (data?.strikes || []).map((s) => ({strike: s.strike, vol: verified ? s[right]?.iv : s[right]?.mid_volatility ?? s.mid_volatility_pct, spread: s[right]?.iv_minus_model, oi: s[right]?.open_interest})).filter((p) => typeof p.vol === "number");
   const {o} = optionChoice(m);
   const signature = JSON.stringify([points, o?.identity?.strike, data?.mid_strike_price]);
   if (svg.dataset.signature === signature) return;
@@ -379,7 +380,11 @@ function smileChart(m) {
   if (typeof strike === "number" && strike >= lo && strike <= hi) nodes.push(svgNode("circle", {cx: x(strike), cy: y(points.find((p) => p.strike === strike)?.vol ?? vlo), r: 3.5, class: "selected"}));
   nodes.push(svgNode("text", {x: 4, y: 9}, numeric(vhi)), svgNode("text", {x: 4, y: 68}, numeric(vlo)));
   svg.replaceChildren(...nodes);
-  text(`smile-note-${m.market}`, `${right} IV by strike, expiry ${String(data.expiry || "").slice(0, 10)} · bars: open interest · dashed: underlying · dot: ticket strike · provider units unverified · frozen model σ ${numeric(m.model_sigma)} (annualised RV15)`);
+  const atTicket = points.find((p) => p.strike === strike);
+  const comparison = verified
+    ? `annual IV (${data.scaling.toLowerCase()} verified) · frozen model σ ${numeric(m.model_sigma)}${typeof atTicket?.spread === "number" ? ` · IV − model σ at ticket strike ${atTicket.spread >= 0 ? "+" : ""}${atTicket.spread.toFixed(3)}` : ""}`
+    : `provider units unverified · frozen model σ ${numeric(m.model_sigma)} (annualised RV15)`;
+  text(`smile-note-${m.market}`, `${right} IV by strike, expiry ${String(data.expiry || "").slice(0, 10)} · bars: open interest · dashed: underlying · dot: ticket strike · ${comparison}`);
 }
 function spark(id, series, {min, max, zero} = {}) {
   const svg = $(id);

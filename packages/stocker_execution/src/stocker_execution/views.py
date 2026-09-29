@@ -368,12 +368,16 @@ def price_context(state: "MarketState") -> dict[str, Any]:
     }
 
 
-def smile(board: dict[str, Any], day: str) -> dict[str, Any] | None:
+def smile(
+    board: dict[str, Any], day: str, scale: str = "UNVERIFIED", sigma: float | None = None
+) -> dict[str, Any] | None:
     """Options-chain snapshot for one expiry: provider IV, delta, OI and indications.
 
-    Provider volatility scaling is undocumented, so values stay in provider units. Chain
-    prices are indications, never executable quotes.
+    Raw provider values are always kept. Only with an operator-verified scale is the
+    volatility normalised to an annual fraction and compared with the frozen model's
+    sigma. Chain prices are indications, never executable quotes.
     """
+    divisor = {"FRACTION": 1.0, "PERCENT": 100.0}.get(scale)
     expiries = [e for e in board.get("Expiries") or [] if isinstance(e, dict)]
     expiry = next(
         (e for e in expiries if str(e.get("Expiry", ""))[:10] == day),
@@ -387,12 +391,16 @@ def smile(board: dict[str, Any], day: str) -> dict[str, Any] | None:
             return None
         raw_greeks = value.get("Greeks")
         greeks: dict[str, Any] = raw_greeks if isinstance(raw_greeks, dict) else {}
+        raw = _number(greeks.get("MidVolatility"))
+        iv = raw / divisor if raw is not None and divisor else None
         return {
             "uic": value.get("Uic") if isinstance(value.get("Uic"), int) else None,
             "bid": _number(value.get("Bid")),
             "ask": _number(value.get("Ask")),
             "delta": _number(greeks.get("Delta")),
-            "mid_volatility": _number(greeks.get("MidVolatility")),
+            "mid_volatility": raw,
+            "iv": iv,
+            "iv_minus_model": iv - sigma if iv is not None and sigma else None,
             "open_interest": _number(value.get("OpenInterest")),
             "volume": _number(value.get("Volume")),
         }
@@ -414,7 +422,8 @@ def smile(board: dict[str, Any], day: str) -> dict[str, Any] | None:
         "strikes": sorted(
             (s for s in strikes if s["strike"] is not None), key=lambda s: s["strike"]
         ),
-        "scaling": "PROVIDER_NATIVE_UNVERIFIED",
+        "scaling": "PROVIDER_NATIVE_UNVERIFIED" if divisor is None else scale,
+        "model_sigma": sigma,
         "executable": False,
     }
 

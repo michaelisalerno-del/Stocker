@@ -386,7 +386,12 @@ class Runtime:
                 else [],
                 "candidate_deltas": {str(k): v for k, v in state.candidate_deltas.items()},
                 "price_context": views.price_context(state),
-                "smile": views.smile(state.option_board, now().astimezone(NY).date().isoformat()),
+                "smile": views.smile(
+                    state.option_board,
+                    now().astimezone(NY).date().isoformat(),
+                    self.config.provider_volatility_scale,
+                    views.model_sigma(features.get("rv15")),
+                ),
                 "model_sigma": views.model_sigma(features.get("rv15")),
                 "target_delta": 0.2 if market == "SI" else 0.1,
                 "signals": [
@@ -554,7 +559,10 @@ class Runtime:
                     detail["option_context"] = context
                     # Observation only: the chain as seen at this clock (provider units).
                     detail["option_chain"] = views.smile(
-                        state.option_board, clock.astimezone(NY).date().isoformat()
+                        state.option_board,
+                        clock.astimezone(NY).date().isoformat(),
+                        self.config.provider_volatility_scale,
+                        views.model_sigma(inputs.get("rv15")),
                     )
                     self.store.db.execute(
                         "UPDATE signals SET detail=? WHERE id=?", (encode(detail), event["id"])

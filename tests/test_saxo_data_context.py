@@ -143,6 +143,8 @@ def test_chain_smile_picks_todays_expiry_sorted_in_provider_units():
         "ask": 0.14,
         "delta": -0.11,
         "mid_volatility": 0.35,
+        "iv": None,
+        "iv_minus_model": None,
         "open_interest": 900,
         "volume": 25,
     }
@@ -261,3 +263,26 @@ def test_market_view_carries_smile_price_context_and_model_sigma(tmp_path):
     assert detail["price_context"]["basis"].startswith("Saxo")
     assert detail["model_sigma"] is None  # no completed bars yet
     runtime.store.db.close()
+
+
+def test_iv_spread_appears_only_with_an_operator_verified_scale():
+    raw = views.smile(BOARD, "2026-09-30", "UNVERIFIED", 0.2)
+    put = raw["strikes"][0]["put"]
+    assert put["mid_volatility"] == 0.35 and put["iv"] is None and put["iv_minus_model"] is None
+    assert raw["scaling"] == "PROVIDER_NATIVE_UNVERIFIED"
+    fraction = views.smile(BOARD, "2026-09-30", "FRACTION", 0.2)["strikes"][0]["put"]
+    assert fraction["iv"] == 0.35 and abs(fraction["iv_minus_model"] - 0.15) < 1e-12
+    board = {
+        "Expiries": [
+            {
+                "Expiry": "2026-09-30",
+                "Strikes": [{"Strike": 69, "Put": {"Greeks": {"MidVolatility": 35.0}}}],
+            }
+        ]
+    }
+    percent = views.smile(board, "2026-09-30", "PERCENT", 0.2)
+    assert percent["scaling"] == "PERCENT" and percent["strikes"][0]["put"]["iv"] == 0.35
+    assert (
+        views.smile(board, "2026-09-30", "PERCENT", None)["strikes"][0]["put"]["iv_minus_model"]
+        is None
+    )

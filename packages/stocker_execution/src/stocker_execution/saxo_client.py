@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from stocker_execution.saxo_auth import OAuth
+from stocker_execution.saxo_auth import OAuth, SaxoError
 
 READ_PATHS = (
     r"/root/v2/user",
@@ -36,10 +36,6 @@ SUBSCRIPTIONS = (
     "/chart/v3/charts/subscriptions",
     "/ens/v1/activities/subscriptions",
 )
-
-
-class SaxoError(ValueError):
-    pass
 
 
 def allowed(method: str, path: str, *, sim_orders: bool = False) -> bool:
@@ -161,7 +157,8 @@ class SaxoClient:
                     if method == "GET" and attempt < 2:
                         continue
                 if response.status_code == 401:
-                    self.oauth.status = "AUTHENTICATION_EXPIRED_RECONNECT_REQUIRED"
+                    # The server rejects a token our clock still trusts: refresh it next.
+                    self.oauth.expire()
                 if response.status_code >= 300:
                     # Restrict error evidence to code; server text can contain private identifiers.
                     code = "HTTP_" + str(response.status_code)

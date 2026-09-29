@@ -2,12 +2,14 @@
 
 import json
 from datetime import UTC, date, datetime, timedelta
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from pathlib import Path
 
 import pytest
 
 from saxo_support import AT, fill_record, record_entry
 from stocker_execution.config import MARKETS
+from stocker_execution.contracts import grid_price
 from stocker_execution.rules import (
     Bar,
     clocks,
@@ -127,3 +129,17 @@ def test_inherited_feature_gate_rejects_flat_last_five_returns():
     assert prior_rv(bars(prices), AT) > 0
     with pytest.raises(ValueError, match="FEATURE_AVAILABILITY"):
         eligibility(bars(prices), AT, date(2026, 12, 1), references)
+
+
+@pytest.mark.parametrize(
+    ("price", "tick"),
+    [(0.3, 0.1), (0.7, 0.1), (0.07, 0.01), (0.145, 0.005), (0.043, 0.001), (2.24, 0.01)],
+)
+def test_entry_limit_and_exit_price_stay_exactly_one_tick_from_the_quote(price, tick):
+    """Float division (0.3 / 0.1 = 2.999…) used to land paper fills two ticks away."""
+    entry = grid_price(price, tick, ROUND_CEILING, 1)
+    exit_price = grid_price(price, tick, ROUND_FLOOR, -1)
+    assert Decimal(str(entry)) == Decimal(str(price)) + Decimal(str(tick))
+    assert Decimal(str(exit_price)) == Decimal(str(price)) - Decimal(str(tick))
+    with pytest.raises(ValueError, match="INVALID_TICK_SIZE"):
+        grid_price(price, 0, ROUND_CEILING, 1)

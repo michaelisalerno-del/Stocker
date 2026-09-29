@@ -9,6 +9,7 @@ from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_CEILING
 from typing import Any
 from urllib.parse import quote as path_quote
 from urllib.parse import urlencode
@@ -31,6 +32,7 @@ from stocker_execution.contracts import (
     deadline_instant,
     executable_quote,
     future_identity,
+    grid_price,
     key,
     option_identity,
     quote_check,
@@ -47,7 +49,8 @@ from stocker_execution.rules import (
     prior_rv,
     reference_summary,
 )
-from stocker_execution.saxo_client import SaxoClient, SaxoError
+from stocker_execution.saxo_auth import SaxoError
+from stocker_execution.saxo_client import SaxoClient
 from stocker_execution.saxo_stream import Frames, PriceState, merge, merge_board
 
 REFERENCE_RETRY_SECONDS = 900
@@ -947,7 +950,7 @@ class DataService:
                     self.fx.value or {}, self.fx.receipt, datetime.fromtimestamp(at, UTC)
                 )
                 rate = 1 / float(fx["Bid"])
-            limit = (math.ceil(float(q["Ask"]) / identity["tick_size"]) + 1) * identity["tick_size"]
+            limit = grid_price(float(q["Ask"]), identity["tick_size"], ROUND_CEILING, 1)
             costs = cost_estimate(identity, limit, reference["conditions"], rate)
             costs["minimum_purchase_cost_gbp"] = cost_estimate(
                 identity, float(q["Ask"]), reference["conditions"], rate
@@ -1175,6 +1178,10 @@ class DataService:
                 identity["trading_sessions"] = raw.get("TradingSessions")
                 identity["is_tradable"] = raw.get("IsTradable")
                 await self.option_conditions(identity, raw)
+            except SaxoError:
+                # Transport/HTTP failure: keep the verified entry and retry on the next pass.
+                # Advancing received_at here would block exits for the whole metadata age.
+                continue
             except (ValueError, KeyError, TypeError, AttributeError) as exc:
                 prior["problem"] = (
                     "OPTION_METADATA_SCHEMA_UNVERIFIED"

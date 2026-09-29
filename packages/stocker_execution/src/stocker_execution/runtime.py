@@ -484,6 +484,9 @@ class Runtime:
                     event["scheduled_events"] = self.calendar.near(state.market, clock)
                 reason = str(event["veto"])
                 inputs: dict[str, float] = {}
+                # Earlier markets await broker I/O: gates need the time now, not at loop entry,
+                # or a quote refreshed meanwhile has a negative age and reads as stale.
+                at = now()
                 try:
                     if not reason:
                         if (at - clock).total_seconds() >= self.config.entry_deadline_seconds:

@@ -5,6 +5,7 @@ import json
 import math
 import time
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_FLOOR
 from typing import Any
 
 from stocker_execution.config import (
@@ -15,6 +16,7 @@ from stocker_execution.config import (
 from stocker_execution.contracts import (
     budget,
     executable_quote,
+    grid_price,
     key,
     positive,
     quote_check,
@@ -90,9 +92,11 @@ class PaperBroker:
 
     async def preflight(self) -> dict[str, Any]:
         # Only reference/portfolio reads. Never precheck or send a test order here.
-        await self.data.verify_account()
-        await self.reconcile()
-        self.preflight_at = time.monotonic() if self.reconciled else 0
+        # Same lock as manage(): a reconcile must not interleave with position management.
+        async with self.lock:
+            await self.data.verify_account()
+            await self.reconcile()
+            self.preflight_at = time.monotonic() if self.reconciled else 0
         return {
             "non_transmitting": True,
             "execution_mode": self.config.execution_mode,
@@ -712,12 +716,12 @@ class PaperBroker:
                         fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, now())
                         plan["fx"], plan["fx_at"] = 1 / float(fx["Ask"]), self.data.fx.receipt
                         # Internal sale includes one tick adverse slippage.
-                        price = (
-                            math.floor(float(q["Bid"]) / plan["option"]["tick_size"])
-                            * plan["option"]["tick_size"]
+                        price = grid_price(
+                            float(q["Bid"]),
+                            plan["option"]["tick_size"],
+                            ROUND_FLOOR,
+                            -1 if self.config.execution_mode == "INTERNAL_PAPER" else 0,
                         )
-                        if self.config.execution_mode == "INTERNAL_PAPER":
-                            price -= plan["option"]["tick_size"]
                         positive(price, "EXIT_BID")
                         exits = [o for o in self.store.orders(identity) if o["role"] == "EXIT"]
                         if len(exits) >= 3:

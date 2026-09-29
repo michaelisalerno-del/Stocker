@@ -25,7 +25,8 @@ from stocker_execution.contracts import (
 )
 from stocker_execution.recorder import Recorder, read_row
 from stocker_execution.rules import frozen_strike, opportunity
-from stocker_execution.saxo_client import SaxoError, allowed
+from stocker_execution.saxo_auth import SaxoError
+from stocker_execution.saxo_client import allowed
 from stocker_execution.saxo_data import DataService
 from stocker_execution.saxo_stream import PriceState, merge_board
 
@@ -514,6 +515,27 @@ def test_refreshed_multiplier_change_blocks_costs_and_old_size_is_labelled(tmp_p
         view = data.option_view(101, 110)
         assert view["size_status"]["Ask"] == "STALE_OR_MISSING"
         assert view["quote_status"] == "OBSERVED"
+        store.db.close()
+
+    asyncio.run(run())
+
+
+def test_transport_failure_during_metadata_refresh_keeps_the_verified_entry(tmp_path):
+    """A network blip must not mark an owned option untradable for the metadata age."""
+
+    async def run():
+        _, data, store = setup(tmp_path)
+        identity = dict(OPTION)
+        data.options[101] = (identity, quote(at=100))
+        data.option_references[101] = {"received_at": 100, "conditions": conditions()}
+        data.client.request = AsyncMock(side_effect=SaxoError("SAXO_TRANSPORT_UNAVAILABLE"))
+        await data.refresh_option_metadata()
+        assert identity["is_tradable"] is True
+        assert data.option_references[101] == {"received_at": 100, "conditions": conditions()}
+        data.client.request = AsyncMock(return_value="not-a-reference")
+        await data.refresh_option_metadata()
+        assert identity["is_tradable"] is False
+        assert data.option_references[101]["problem"] == "OPTION_METADATA_SCHEMA_UNVERIFIED"
         store.db.close()
 
     asyncio.run(run())

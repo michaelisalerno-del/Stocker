@@ -2,19 +2,23 @@
 
 import asyncio
 import time
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import pytest
 
-from saxo_support import FUTURE, OPTION, plan, quote, setup, signal
+from saxo_support import AT, FUTURE, OPTION, plan, quote, setup, signal
 from stocker_dashboard.app import create_dashboard_app
-from stocker_execution.config import FuturesConfig
+from stocker_execution.config import FuturesConfig, SaxoSettings
 from stocker_execution.contracts import key
-from stocker_execution.recorder import read_row
+from stocker_execution.recorder import Recorder, read_row
+from stocker_execution.rules import Bar
 from stocker_execution.runtime import Runtime
-from stocker_execution.saxo_data import completed_bars
+from stocker_execution.saxo_auth import OAuth, atomic_json
+from stocker_execution.saxo_client import SaxoClient
+from stocker_execution.saxo_data import DataService, completed_bars
 from stocker_execution.saxo_stream import merge_board
 from stocker_execution.store import Store
 
@@ -377,5 +381,103 @@ def test_pending_snapshot_keeps_original_message_receipt(tmp_path):
         assert recorded["receipt"] == arrived
         assert data.markets["CL"].price.depth(time.time())["status"] != "L2_AVAILABLE"
         store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_quote_refreshed_during_an_earlier_market_await_is_not_stale(tmp_path, monkeypatch):
+    """Gates use the time at their own clock, not the time decisions() started."""
+    import stocker_execution.runtime as module
+
+    clock = [AT + timedelta(seconds=5)]
+    monkeypatch.setattr(module, "now", lambda: clock[0])
+
+    async def scenario():
+        runtime = Runtime(FuturesConfig(), Store(tmp_path / "ledger.sqlite3"))
+        runtime.started_at = AT - timedelta(seconds=1)
+        for market, uic in (("CL", 100), ("GC", 200)):
+            state = runtime.markets[market]
+            state.identity = {**FUTURE, "market": market, "uic": uic}
+            state.problem = state.history_problem = ""
+            state.references = [
+                {9: {"rv15": 0.01, "range15": 0.01, "volume15": 150}} for _ in range(5)
+            ]
+            state.bars = [
+                Bar(
+                    AT - timedelta(minutes=60 - i),
+                    70 + i * 0.01,
+                    71 + i * 0.01,
+                    69,
+                    70 + i * 0.01,
+                    10,
+                )
+                for i in range(60)
+            ]
+            state.price = quote(70, 71, clock[0].timestamp())
+            runtime.recorder.register(key(state.identity), state.identity)
+
+        async def select(event, state, inputs):
+            # CL's broker I/O takes two seconds; GC's quote is refreshed meanwhile.
+            clock[0] += timedelta(seconds=2)
+            runtime.markets["GC"].price = quote(1900, 1901, clock[0].timestamp())
+            raise KeyError("uic")
+
+        monkeypatch.setattr(runtime.broker, "select_option", select)
+        await runtime.decisions()
+        reasons = {r["market"]: r["reason"] for r in runtime.store.history(None, None, None)}
+        assert reasons == {"CL": "EXECUTION_DISABLED", "GC": "EXECUTION_DISABLED"}
+        await runtime.stop()
+        runtime.store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_preflight_waits_for_the_management_lock(tmp_path):
+    async def scenario():
+        broker, data, store = setup(tmp_path, "SAXO_SIM")
+        async with broker.lock:
+            task = asyncio.create_task(broker.preflight())
+            await asyncio.sleep(0.05)
+            assert not task.done() and not data.client.calls
+        result = await task
+        assert result["reconciled"] and data.client.calls
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_stream_loop_survives_a_lost_token(tmp_path):
+    """Cleanup after a failed refresh must not raise out of run(): the runtime would stop."""
+
+    async def scenario():
+        credentials = tmp_path / "credentials.json"
+        atomic_json(
+            credentials,
+            {
+                "environment": "SAXO_SIM",
+                "client_id": "fixture-key",
+                "client_secret": "fixture-secret",
+                "account_key": "fixture-account",
+            },
+        )
+        transport = httpx.MockTransport(lambda request: httpx.Response(500))
+        oauth = OAuth("SAXO_SIM", SaxoSettings(credentials_file=credentials), tmp_path, transport)
+        config = FuturesConfig()
+        client = SaxoClient(oauth, transport=transport)
+        data = DataService(config, client, Recorder(config.recorder, tmp_path / "events"))
+        data.subscriptions["s1"] = {
+            "kind": "PRICE",
+            "target": "CL",
+            "path": "/trade/v1/prices/subscriptions",
+        }
+        task = asyncio.create_task(data.run())
+        await asyncio.sleep(0.1)
+        assert not task.done()
+        assert data.problem == "RECONNECT_REQUIRED" and not data.subscriptions
+        data.stopping = True
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        await client.close()
 
     asyncio.run(scenario())

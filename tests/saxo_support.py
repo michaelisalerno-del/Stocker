@@ -9,7 +9,7 @@ from stocker_execution.config import FuturesConfig
 from stocker_execution.contracts import key
 from stocker_execution.recorder import Recorder
 from stocker_execution.rules import opportunity
-from stocker_execution.saxo_client import SaxoError
+from stocker_execution.saxo_auth import SaxoError
 from stocker_execution.saxo_data import DataService
 from stocker_execution.saxo_stream import PriceState
 from stocker_execution.store import Store

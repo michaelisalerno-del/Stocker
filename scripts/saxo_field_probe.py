@@ -24,8 +24,8 @@ from pathlib import Path
 from typing import Any
 
 from stocker_execution.config import MARKETS, load
-from stocker_execution.saxo_auth import OAuth, private_read
-from stocker_execution.saxo_client import SaxoClient, SaxoError
+from stocker_execution.saxo_auth import OAuth, SaxoError, private_read
+from stocker_execution.saxo_client import SaxoClient
 
 MONTHS = "FGHJKMNQUVXZ"
 ALTERNATIVE_KEYWORDS = {

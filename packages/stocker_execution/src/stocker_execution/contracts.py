@@ -201,6 +201,16 @@ def nonnegative(value: Any, name: str) -> float:
     return result
 
 
+def grid_price(price: float, tick: float, rounding: str, ticks: int) -> float:
+    """Snap a price to the tick grid, then move a whole number of ticks.
+
+    Decimal from the printed values: float division (0.3 / 0.1 = 2.999…) lands a tick off.
+    """
+    grid = Decimal(str(positive(tick, "TICK_SIZE")))
+    steps = (Decimal(str(positive(price, "PRICE"))) / grid).to_integral_value(rounding=rounding)
+    return float((steps + ticks) * grid)
+
+
 def require_one_whole_contract(option: dict[str, Any]) -> None:
     if option["minimum_quantity"] != 1 or option["lot_size"] != 1 or option["amount_decimals"] != 0:
         raise ValueError("ONE_WHOLE_CONTRACT_NOT_EXECUTABLE")

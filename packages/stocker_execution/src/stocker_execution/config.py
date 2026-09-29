@@ -79,6 +79,13 @@ class SaxoSettings(Strict):
         return value
 
 
+class AlertSettings(Strict):
+    # A mode-0600 JSON file {"url": "https://..."} (for example an ntfy topic); never inline.
+    url_file: Path | None = None
+    stream_down_seconds: int = Field(default=120, ge=30, le=3600)
+    login_warning_hours: int = Field(default=24, ge=1, le=168)
+
+
 class ContractSelection(Strict):
     """Explicit environment-specific reference selection; no guessed or portable UICs."""
 
@@ -135,6 +142,9 @@ class FuturesConfig(Strict):
     contracts: dict[Market, ContractSelection] = Field(default_factory=dict)
     mappings: dict[Market, OptionApproval] = Field(default_factory=dict)
     reference_selections_file: Path | None = None
+    # Optional display/observation context; never an entry rule.
+    event_calendar_file: Path | None = None
+    alerts: AlertSettings = Field(default_factory=AlertSettings)
     recorder: RecorderConfig = Field(default_factory=RecorderConfig)
     option_subscription_budget: int = Field(default=16, ge=4, le=16)
     option_candidate_window: int = Field(default=3, ge=1, le=3)

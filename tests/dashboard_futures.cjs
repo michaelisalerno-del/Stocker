@@ -32,6 +32,17 @@ const state = {
     allocation_pennies: 10000,
     limits: {per_trade_gbp:50,allocation_gbp:200,slots:4},
     entry_block_reason:"PAPER_DISARMED",
+    server_time: Date.parse(at)/1000,
+    next_clock: "2026-09-28T15:00:00Z",
+    alerts: {enabled:false, problem:"", active:[], sent:0, last_error:""},
+    setup: [
+      {key:"oauth",label:"Saxo login",done:true,detail:"",optional:false},
+      {key:"contracts",label:"Futures contracts verified 5/5",done:true,detail:"",optional:false},
+      {key:"approvals",label:"Option approvals 1/5",done:false,detail:"Approve product, delta tolerance, fees and expiry times (GC optional)",optional:false},
+      {key:"mode",label:"Paper execution mode",done:true,detail:"",optional:false},
+      {key:"armed",label:"Armed after preflight",done:false,detail:"Run preflight, then arm explicitly",optional:false},
+      {key:"alerts",label:"Alerts",done:false,detail:"Optional: configure an alert URL file",optional:true},
+    ],
     market_data: {
       owned_lines: 24,
       app_budget: 32,
@@ -165,7 +176,16 @@ const state = {
           : [],
   })),
 };
+const gateLabels = [["saxo","Saxo"],["contract","Contract"],["quote","Quote"],["history","History"],["approval","Option approval"],["strike","Strike"],["cost","Cost ≤ £50"],["execution","Execution"]];
 for (const m of state.markets) {
+  m.gates = gateLabels.map(([key,label],i)=>({key,label,ok:i<4 || (m.market==="NQ" && i<6),detail:i<4?"":i===4?(m.market==="GC"?"GC_MONITOR_ONLY_UNTIL_APPROVED":"LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"):i===6?"MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET":"PAPER_DISARMED"}));
+  m.events = m.market==="CL" ? [{name:"EIA Weekly Petroleum Status",at:"2026-09-28T14:30:00Z",relation:"DURING_HOLDING_WINDOW"}] : [];
+  m.chart_context = {clocks:[13,14,15].map(h=>({at:`2026-09-28T${h}:00:00Z`,session:"AutomatedTrading"})), rv_window:["2026-09-28T14:05:00Z","2026-09-28T14:20:00Z"]};
+  m.candidate_deltas = {[String(1001+markets.indexOf(m.market))]: 0.1032};
+  m.target_delta = m.market==="SI" ? 0.2 : 0.1;
+  m.sessions_today = [{start:"2026-09-27T22:00:00Z",end:"2026-09-28T21:00:00Z",state:"AutomatedTrading"}];
+  m.events_today = m.market==="GC" ? [{at:"2026-09-28T12:30:00Z",name:"US CPI (fixture)"}] : [];
+  m.price_context = {open:2641,high:2660,low:2630,last_close:2638,net_change:12,percent_change:0.45,open_interest:512000,market_state:"Open",daily_range:31.5};
   m.identity = {environment:"SAXO_SIM",uic:100+markets.indexOf(m.market)};
   m.book_flow = {
     version:"SAXO_SAMPLED_BOOK_FLOW_V1", at:Date.parse(at)/1000, valid_until:Date.parse(at)/1000+30,
@@ -177,6 +197,17 @@ for (const m of state.markets) {
     lookbacks:Object.fromEntries([5,30,60].map(s=>[s,{5:{status:"AVAILABLE",bid_change:2,ask_change:-1,bid_heavy_fraction:.5,ask_heavy_fraction:.25,balanced_fraction:.25}}]))
   };
 }
+const bookSeries = {status:"AVAILABLE",tick_size:0.1,bucket_seconds:5,semantics:"Sampled Saxo depth, last observation per bucket; not an execution tape",
+  series:Array.from({length:120},(_,i)=>({at:Date.parse(at)/1000-600+i*5,status:"CURRENT",spread_ticks:1+(i%7===0),imbalance1:Math.sin(i/9),imbalance5:Math.sin(i/15)*.6,
+    bid:Array.from({length:10},(_,n)=>[26500-n-Math.round(Math.sin(i/20)*3),5+n*2+(n===4?40:0)]),
+    ask:Array.from({length:10},(_,n)=>[26501+n-Math.round(Math.sin(i/20)*3),4+n*2+(n===6?35:0)])}))};
+const timeline = [
+  {at:"2026-09-28T14:00:00Z",kind:"CLOCK",ok:true,title:"Frozen clock · NG",detail:"rule CLOCK60_NG13_20260927 · exit anchor 2026-09-28T15:00:00Z"},
+  {at:"2026-09-28T14:00:00Z",kind:"CHECKS",ok:true,title:"Data and eligibility checks",detail:"rv15 0.0012 · futures_price 3.1"},
+  {at:"2026-09-28T14:00:00Z",kind:"OPTION",ok:true,title:"Option selection",detail:"Put 3 · UIC 1003"},
+  {at:"2026-09-28T14:00:02Z",kind:"ADMISSION",ok:true,title:"Admission",detail:"reserved · cost £22.4"},
+  {at:null,kind:"OUTCOME",ok:null,title:"Current state",detail:"BROKER_PAPER_FILL · 1 fill(s)"},
+];
 const rows = Array.from({ length: 80 }, (_, i) => ({
   id: `fixture-${i}`,
   market: markets[i % 5],
@@ -190,6 +221,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   let data;
   if (url.pathname === "/api/overview") data = state;
+  else if (url.pathname.endsWith("/book")) data = bookSeries;
   else if (url.pathname.startsWith("/api/market/")) data={system:state.system,markets:state.markets.filter(m=>m.market===url.pathname.split("/").at(-1))};
   else if (url.pathname === "/api/execution") data={system:state.system,trades:[],orders:[],fills:[],positions:[]};
   else if (url.pathname === "/api/recordings") data = {active: [], completed: []};
@@ -215,6 +247,7 @@ const server = http.createServer((req, res) => {
   else if (url.pathname === "/api/detail")
     data = {
       fixture: true,
+      timeline,
       orders: [],
       fills: [],
       note: "Offline browser fixture",
@@ -282,7 +315,17 @@ async function label(page) {
     assert.match(await page.locator("#pnl-note").textContent(), /provisional/);
     assert.equal(await page.locator("#entries").textContent(), "Unarmed");
     assert.equal(await page.locator("#overview-slots > div").count(), 4);
-    assert.match(await page.locator("#mode-banner").textContent(), /LIVE ORDERS DISABLED/);
+    assert.match(await page.locator("#live-badge").textContent(), /LIVE ORDERS DISABLED/);
+    assert.match(await page.locator("#exec-chip").textContent(), /Execution SAXO_SIM/);
+    await page.clock.fastForward(1100);
+    assert.match(await page.locator("#countdown").textContent(), /Next clock 11:00 NY · in 39:5\d/);
+    assert.match(await page.locator("#setup-progress").textContent(), /3 of 5 required steps done/);
+    assert.equal(await page.locator("#gates-NQ li.ok").count(), 6);
+    assert.match(await page.locator("#gates-GC li.fail").first().getAttribute("title"), /monitor-only until its option mapping is approved/);
+    assert.match(await page.locator("#block-GC").textContent(), /Option approval: Gold is monitor-only/);
+    assert.match(await page.locator("#events-CL").textContent(), /EIA Weekly Petroleum Status 10:30 NY/);
+    assert(await page.locator("#events-GC").isHidden());
+    assert(await page.locator("#position-NG").isVisible() && await page.locator("#position-CL").isHidden());
     await label(page);
     await page.screenshot({
       path: path.join(output, "overview-desktop-fixture.png"),
@@ -304,6 +347,24 @@ async function label(page) {
     assert.match(await page.locator("#option-volume-GC").textContent(), /AS_OF_EFFECTIVE_TIME_UNKNOWN.*effective unknown/);
     assert.match(await page.locator("#option-coverage-GC").textContent(), /actual pre-trigger 42 \/ 900s/);
     assert.match(await page.locator("#option-cost-GC").textContent(), /MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET/);
+    assert.match(await page.locator("#ticket-contract-GC").textContent(), /Candidate · GC fixture option · Put 70/);
+    assert.match(await page.locator("#ticket-spread-GC").textContent(), /66\.7% of mid/);
+    assert.match(await page.locator("#ticket-delta-GC").textContent(), /model \|Δ\| 0\.1032 vs target 0\.1/);
+    assert.match(await page.locator("#ticket-cost-GC").textContent(), /£20\.10 all-in of £50\.00/);
+    assert.match(await page.locator("#sessions-GC").textContent(), /18:00–17:00 AutomatedTrading \(NY\)/);
+    assert.match(await page.locator("#events-today-GC").textContent(), /08:30 US CPI/);
+    assert.match(await page.locator("#price-context-GC").textContent(), /high 2660.*OI 512000/);
+    assert.equal(await page.locator("#clocks-GC line").count(), 2); // 13:00 and 14:00 UTC inside the 90-minute chart
+    assert(Number(await page.locator("#rv-GC").getAttribute("width")) > 0);
+    assert.match(await page.locator("#imbalance-GC").textContent(), /\+0\.50 · bid heavy/);
+    assert(Number(await page.locator("#depth-GC-0 .bar.bid i").evaluate(n=>parseFloat(n.style.width))) > 0);
+    await page.locator("#book-history-GC summary").click();
+    await page.waitForFunction(() => document.querySelector("#heatmap-GC").dataset.columns === "120");
+    assert.match(await page.locator("#heatmap-note-GC").textContent(), /120 × 5s buckets/);
+    assert(await page.locator("#spark-imbalance-GC polyline").count() >= 1);
+    await label(page);
+    await page.screenshot({path:path.join(output,"book-history-desktop-fixture.png"),fullPage:true});
+    await page.locator("#book-history-GC summary").click();
     await page.locator("#flow-detail-GC summary").click();
     await page.locator("#flow-detail-GC summary").focus();
     await page.evaluate(() => { window.flowRow=document.querySelector("#flow-depth-GC-5"); window.flowFocus=document.activeElement; window.scrollTo(0,350); });
@@ -353,6 +414,10 @@ async function label(page) {
       await page.locator("#trades .table-scroll").evaluate((n) => n.scrollTop),
       240,
     );
+    await page.locator("#history tr button").first().click();
+    await page.waitForFunction(() => document.querySelectorAll("#trade-timeline li").length === 5);
+    assert.equal(await page.locator("#trade-timeline li.ok").count(), 4);
+    assert.match(await page.locator("#trade-timeline li").nth(3).textContent(), /Admission.*reserved · cost £22\.4/);
     await page.screenshot({
       path: path.join(output, "history-desktop-fixture.png"),
       fullPage: true,

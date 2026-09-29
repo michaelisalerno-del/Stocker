@@ -14,7 +14,7 @@
       <nav aria-label="Main navigation">
         <a href="/">Overview</a><a href="/markets">Markets</a><a href="/opportunities">Opportunities</a><a href="/execution">Execution</a><a href="/system">System</a>
       </nav>
-      <span class="paper">LIVE ORDERS DISABLED</span>
+      <span class="paper" id="live-badge">LIVE ORDERS DISABLED</span>
     </header>
     <main id="main">
       <div class="heading">
@@ -24,129 +24,85 @@
         </div>
         <div class="clock" id="clock"></div>
       </div>
-      <p id="mode-banner" class="mode-banner">DATA ENVIRONMENT: unverified · EXECUTION MODE: DISABLED · LIVE ORDERS DISABLED</p>
+      <div class="status-bar" id="mode-banner" aria-label="Runtime status">
+        <span class="chip" id="env-chip">Data unverified</span>
+        <span class="chip" id="exec-chip">Execution DISABLED</span>
+        <span class="chip" id="entries">Unarmed</span>
+        <span class="chip" id="connection">Disconnected</span>
+        <span class="chip countdown" id="countdown">Next clock —</span>
+        <button id="pause" type="button">Pause entries</button>
+        <span class="refresh" id="last-refresh">No successful refresh yet</span>
+      </div>
       <div id="notice" role="status" aria-live="polite"></div>
-      <p id="global-warning" role="alert" class="block"></p>
-      <div class="connection-strip"><span id="connection">Disconnected</span><span id="readiness">Checking readiness</span><span id="entries">Unarmed</span><button id="pause" type="button">Pause entries</button><span id="last-refresh">No successful refresh yet</span></div>
-      <section id="account-strip" class="account-strip" aria-label="Saxo account">
-        <h2>Account <span id="account">Unavailable</span></h2><p id="account-note">Account environment unverified</p>
-        <div class="summary">
-          <div><small>Broker total account value</small><strong id="account-value">Unavailable</strong></div>
-          <div><small>Broker cash balance</small><strong id="account-cash">Unavailable</strong></div>
-          <div><small>Broker cash available for trading</small><strong id="account-available">Unavailable</strong></div>
-          <div><small>SLRNO committed / reserved</small><strong id="allocation">Unavailable</strong><span id="allocation-policy">Concurrent ceiling · not a daily loss limit</span></div>
-          <div><small>Occupied / reserved slots</small><strong id="capacity">Unavailable</strong></div>
-        </div><small id="account-freshness">Unavailable</small>
-        <details id="account-detail"><summary>Balance details</summary><p>Broker cash and internal allocation are separate. Reservations are not subtracted from broker figures. Values remain in the displayed native currency.</p><pre id="account-json"></pre></details>
+      <p id="global-warning" role="alert" class="exceptions"></p>
+      <section id="setup" class="setup" aria-label="Setup checklist" hidden>
+        <details id="setup-detail" open>
+          <summary><strong>Setup</strong> <span id="setup-progress"></span></summary>
+          <ol id="setup-list"></ol>
+        </details>
       </section>
-      <section id="strategy-summary" class="summary" aria-label="Strategy results">
-        <div><small>Strategy realised net P&amp;L</small><strong id="realised">Unavailable</strong><span id="pnl-note"></span></div>
-        <div><small>Open-trade P&amp;L estimate</small><strong id="unrealised">Unavailable</strong><span id="valuation-note"></span></div>
+      <section id="strategy-strip" class="strategy-strip" aria-label="Strategy capacity and results">
+        <div class="slots-cell"><small>Trade slots</small><div id="overview-slots" class="slot-bar" aria-label="Four concurrent trade slots"></div><strong id="capacity">Unavailable</strong></div>
+        <div><small>Committed / ceiling</small><strong id="allocation">Unavailable</strong><span id="allocation-policy">Concurrent ceiling · not a daily loss limit</span></div>
+        <div><small>Realised net P&amp;L</small><strong id="realised">Unavailable</strong><span id="pnl-note"></span></div>
+        <div><small>Open-trade estimate</small><strong id="unrealised">Unavailable</strong><span id="valuation-note"></span></div>
       </section>
       <section id="overview">
-        <div id="overview-slots" class="trade-slots" aria-label="Four concurrent trade slots"></div>
-        <label id="market-selector" hidden>Market <select id="selected-market"><option>CL</option><option>GC</option><option>NG</option><option>NQ</option><option>SI</option></select></label>
+        <label id="market-selector" class="market-selector" hidden>Market <select id="selected-market"><option>CL</option><option>GC</option><option>NG</option><option>NQ</option><option>SI</option></select></label>
         <div id="markets" class="markets"></div>
         <p id="evidence" class="evidence"></p>
+      </section>
+      <section id="account-strip" class="account-strip" aria-label="Saxo account">
+        <h2>Broker account <span id="account">Unavailable</span></h2><p id="account-note">Account environment unverified</p>
+        <div class="summary">
+          <div><small>Total account value</small><strong id="account-value">Unavailable</strong></div>
+          <div><small>Cash balance</small><strong id="account-cash">Unavailable</strong></div>
+          <div><small>Cash available for trading</small><strong id="account-available">Unavailable</strong></div>
+        </div><small id="account-freshness">Unavailable</small>
+        <details id="account-detail"><summary>Balance details</summary><p>Broker cash and internal allocation are separate. Reservations are not subtracted from broker figures. Values remain in the displayed native currency.</p><pre id="account-json"></pre></details>
       </section>
       <section id="execution" hidden><h2>Four concurrent trade slots</h2><div id="trade-slots" class="trade-slots"></div><p id="execution-warning"></p><p id="execution-empty"></p>
         <h3>Positions and reservations</h3><div class="table-scroll" tabindex="0"><table><thead><tr><th>Market</th><th>State</th><th>Option</th><th>Quantity</th><th>Allocation</th><th>Exit</th></tr></thead><tbody id="execution-trades"></tbody></table></div>
         <h3>Orders for active obligations</h3><div class="table-scroll" tabindex="0"><table><thead><tr><th>Role</th><th>Order</th><th>Status</th><th>Filled</th><th>Remaining</th><th>Deadline</th></tr></thead><tbody id="execution-orders"></tbody></table></div>
-        <h3>Broker positions</h3><table><thead><tr><th>Instrument</th><th>Quantity</th></tr></thead><tbody id="execution-positions"></tbody></table>
+        <h3>Broker positions</h3><div class="table-scroll" tabindex="0"><table><thead><tr><th>Instrument</th><th>Quantity</th></tr></thead><tbody id="execution-positions"></tbody></table></div>
         <h3>Recent fills</h3><div class="table-scroll" tabindex="0"><table><thead><tr><th>Time</th><th>Instrument</th><th>Side</th><th>Quantity</th><th>Native price</th><th>Commission</th></tr></thead><tbody id="execution-fills"></tbody></table></div>
         <details id="execution-detail"><summary>Raw execution evidence</summary><pre id="execution-json"></pre></details></section>
       <section id="trades" hidden>
         <div class="filters">
-          <label
-            >Market<select id="market-filter">
-              <option value="">All five</option>
-              <option>CL</option>
-              <option>GC</option>
-              <option>NG</option>
-              <option>NQ</option>
-              <option>SI</option>
-            </select></label
-          >
-          <label>Date (UTC)<input type="date" id="day-filter" /></label
-          ><label
-            >Rule version<input id="version-filter" placeholder="All versions"
-          /></label>
-          <label
-            >Sort<select id="sort-filter">
-              <option value="desc">Newest first</option>
-              <option value="asc">Oldest first</option>
-            </select></label
-          >
+          <label>Market<select id="market-filter"><option value="">All five</option><option>CL</option><option>GC</option><option>NG</option><option>NQ</option><option>SI</option></select></label>
+          <label>Date (UTC)<input type="date" id="day-filter" /></label>
+          <label>Rule version<input id="version-filter" placeholder="All versions" maxlength="80" /></label>
+          <label>Sort<select id="sort-filter"><option value="desc">Newest first</option><option value="asc">Oldest first</option></select></label>
         </div>
-        <div
-          class="table-scroll"
-          tabindex="0"
-          aria-label="Signal and trade history"
-        >
+        <div class="table-scroll" tabindex="0" aria-label="Signal and trade history">
           <table>
-            <thead>
-              <tr>
-                <th>Opportunity · London</th>
-                <th>Market</th>
-                <th>State</th>
-                <th>Reason</th>
-                <th>Rule</th>
-                <th>Evidence</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Opportunity · London</th><th>Market</th><th>State</th><th>Reason</th><th>Rule</th><th>Evidence</th></tr></thead>
             <tbody id="history"></tbody>
           </table>
         </div>
         <p id="history-empty">No prospective opportunities recorded.</p>
-        <div class="paging">
-          <button id="prev">Previous</button><span id="page-number"></span
-          ><button id="next">Next</button>
-        </div>
+        <div class="paging"><button id="prev">Previous</button><span id="page-number"></span><button id="next">Next</button></div>
         <details id="trade-detail">
-          <summary>Selected opportunity · orders and executions</summary>
-          <pre id="trade-json"></pre>
+          <summary>Selected opportunity</summary>
+          <ol id="trade-timeline" class="timeline"></ol>
+          <details id="trade-raw"><summary>Raw evidence</summary><pre id="trade-json">Select an opportunity to view its evidence</pre></details>
         </details>
       </section>
       <section id="system" hidden>
-        <h2>Saxo connection</h2><form id="saxo-connect" action="/oauth/saxo/start" method="post"><button>Connect configured Saxo environment</button></form><p id="oauth-notice" role="alert"></p><p>Connecting data never arms execution. A session upgrade can downgrade another Saxo application; SLRNO never upgrades automatically.</p><p id="auth-state"></p><p id="provider-status"></p><div id="capability-list"></div><h2>Market data &amp; API</h2>
+        <h2>Saxo connection</h2><form id="saxo-connect" action="/oauth/saxo/start" method="post"><button>Connect configured Saxo environment</button></form><p id="oauth-notice" role="alert"></p><p>Connecting data never arms execution. A session upgrade can downgrade another Saxo application; SLRNO never upgrades automatically.</p><p id="auth-state"></p><p id="alerts-state"></p><p id="provider-status"></p><div id="capability-list"></div><h2>Market data &amp; API</h2>
         <div class="api-panel">
-          <div>
-            <small>Application subscriptions</small
-            ><strong id="api-lines"></strong><span id="api-allowance"></span
-            ><span id="api-external"></span>
-          </div>
-          <div class="research-slots">
-            <small>Actual received depth · observation only</small
-            ><strong id="api-depth"></strong><span id="api-assignments"></span>
-          </div>
-          <div>
-            <small>Option preparation</small><strong id="api-options"></strong
-            ><span>Shared pool · unused quotes released</span>
-          </div>
-          <div>
-            <small>Outbound traffic</small><strong id="api-pacing"></strong
-            ><span id="api-queue"></span>
-          </div>
-          <div>
-            <small>Optional recording</small><strong id="api-storage"></strong
-            ><span id="api-gaps"></span>
-          </div>
+          <div><small>Application subscriptions</small><strong id="api-lines"></strong><span id="api-allowance"></span><span id="api-external"></span></div>
+          <div class="research-slots"><small>Actual received depth · observation only</small><strong id="api-depth"></strong><span id="api-assignments"></span></div>
+          <div><small>Option preparation</small><strong id="api-options"></strong><span>Shared pool · unused quotes released</span></div>
+          <div><small>Outbound traffic</small><strong id="api-pacing"></strong><span id="api-queue"></span></div>
+          <div><small>Optional recording</small><strong id="api-storage"></strong><span id="api-gaps"></span></div>
         </div>
         <p class="block" id="api-error"></p>
         <details id="recordings-detail"><summary>Saved recordings</summary><div id="recording-list"></div></details><h2>Connectivity and readiness</h2>
-        <p>
-          Live trading is unavailable. Installation, data readiness and
-          execution arming are separate.
-        </p>
-        <details id="system-detail">
-          <summary>Operational diagnostics</summary>
-          <pre id="system-json"></pre>
-        </details>
+        <p>Live trading is unavailable. Installation, data readiness and execution arming are separate.</p>
+        <details id="system-detail"><summary>Operational diagnostics</summary><pre id="system-json"></pre></details>
       </section>
-      <footer>
-        Saxo data · paper execution mode labelled separately · historical synthetic research is excluded
-        · times shown in Europe/London
-      </footer>
+      <footer>Saxo data · paper execution mode labelled separately · historical synthetic research is excluded · times in Europe/London unless marked NY</footer>
     </main>
   </body>
 </html>

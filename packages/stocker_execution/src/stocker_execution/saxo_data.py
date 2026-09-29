@@ -89,6 +89,8 @@ class MarketState:
     warm_uics: set[int] = field(default_factory=set)
     candidate_problem: str = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
     candidate_changes: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=32))
+    # Display only: frozen-model delta per ranked strike at the latest ranking.
+    candidate_deltas: dict[int, float] = field(default_factory=dict)
 
 
 def completed_bars(raw: dict[str, Any], at: datetime) -> list[Bar]:
@@ -677,6 +679,7 @@ class DataService:
             raise ValueError("OPTION_ROOT_NOT_VERIFIED")
         at = utc(event["signal_at"])
         candidates = []
+        deltas: dict[int, float] = {}
         for selected in state.option_space:
             if selected.get("UnderlyingUic") != state.identity["uic"]:
                 continue
@@ -696,6 +699,7 @@ class DataService:
                 expiry,
                 str(event["right"]),
             )
+            deltas[selected["Uic"]] = delta
             candidates.append(
                 (
                     abs(delta - float(event["target_delta"])),
@@ -703,6 +707,7 @@ class DataService:
                     selected,
                 )
             )
+        state.candidate_deltas = deltas
         if not candidates:
             raise ValueError("NO_VERIFIED_REAL_0DTE_EXPIRY_TIME")
         candidates.sort(key=lambda x: (x[0], x[1], x[2]["Uic"]))

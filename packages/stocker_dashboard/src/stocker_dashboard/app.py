@@ -14,7 +14,9 @@ from pydantic import BaseModel, Field
 from starlette.types import Scope
 
 from stocker_dashboard.security import DashboardSecurity
+from stocker_execution import views
 from stocker_execution.config import MARKETS, PAGE_SIZE
+from stocker_execution.contracts import key
 from stocker_execution.runtime import Runtime
 
 # Revalidate page assets so a deploy never pairs a stale script with new markup.
@@ -61,6 +63,21 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         if market not in MARKETS:
             raise HTTPException(422, "Unknown futures market")
         return runtime.market_detail(market, diagnostics=diagnostics)
+
+    @app.get("/api/market/{market}/book")
+    async def market_book(market: str) -> dict[str, Any]:
+        if market not in MARKETS:
+            raise HTTPException(422, "Unknown futures market")
+        identity = runtime.markets[market].identity
+        if identity is None:
+            return {"series": [], "tick_size": None, "status": "CONTRACT_NOT_VERIFIED"}
+        instrument = key(identity)
+        sequence, tick, blobs = views.book_rows(runtime.recorder, instrument)
+        # Decode the retained rows off the event loop that also runs trading.
+        return {
+            "status": "AVAILABLE" if blobs else "NO_RETAINED_ROWS",
+            **await asyncio.to_thread(views.book_series, sequence, tick, blobs, instrument),
+        }
 
     @app.get("/api/execution")
     async def execution() -> dict[str, Any]:
@@ -111,21 +128,24 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         row = runtime.store.db.execute("SELECT * FROM signals WHERE id=?", (identity,)).fetchone()
         if not row:
             raise HTTPException(404, "Opportunity not found")
+        lifecycle = [
+            dict(r)
+            for r in runtime.store.db.execute(
+                "SELECT * FROM lifecycle WHERE reference=? OR reference IN "
+                "(SELECT reference FROM orders WHERE event_id=?) "
+                "ORDER BY sequence DESC LIMIT 100",
+                (identity, identity),
+            )
+        ]
+        fills = runtime.store.fills(identity)
         return {
+            "timeline": views.timeline(dict(row), lifecycle, fills),
             "signal": dict(row),
             "orders": runtime.store.orders(identity),
-            "fills": runtime.store.fills(identity),
+            "fills": fills,
             "inputs": json.loads(row["detail"]),
             "l2_observation": runtime.store.depth_summary(identity),
-            "lifecycle": [
-                dict(r)
-                for r in runtime.store.db.execute(
-                    "SELECT * FROM lifecycle WHERE reference=? OR reference IN "
-                    "(SELECT reference FROM orders WHERE event_id=?) "
-                    "ORDER BY sequence DESC LIMIT 100",
-                    (identity, identity),
-                )
-            ],
+            "lifecycle": lifecycle,
         }
 
     @app.post("/api/entries/pause")

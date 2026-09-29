@@ -13,7 +13,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
-from stocker_execution import option_context
+from stocker_execution import option_context, views
+from stocker_execution.alerts import Alerts
 from stocker_execution.broker import PaperBroker, now
 from stocker_execution.config import (
     MAX_OPEN_POSITIONS,
@@ -27,6 +28,7 @@ from stocker_execution.config import (
     FuturesConfig,
 )
 from stocker_execution.contracts import key, quote_check, session_state
+from stocker_execution.event_calendar import EventCalendar, load_calendar
 from stocker_execution.recorder import Recorder
 from stocker_execution.rules import NY, clocks, eligibility, next_clock, opportunity, prior_rv
 from stocker_execution.saxo_auth import OAuth
@@ -75,6 +77,15 @@ class Runtime:
         self.config_hash = hashlib.sha256(config.model_dump_json().encode()).hexdigest()
         self.started_at = now()
         self.depth = self.recorder  # existing read-only dashboard recording access
+        self.alerts = Alerts(config.alerts)
+        # Optional context: an unreadable calendar is reported, never fatal.
+        self.calendar: EventCalendar | None = None
+        self.calendar_problem = ""
+        if config.event_calendar_file:
+            try:
+                self.calendar = load_calendar(config.event_calendar_file)
+            except (OSError, ValueError):
+                self.calendar_problem = "EVENT_CALENDAR_UNREADABLE"
         directory = self.root / config.data_environment
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         handler = RotatingFileHandler(directory / "slrno.log", maxBytes=2 * 1024**2, backupCount=3)
@@ -116,8 +127,15 @@ class Runtime:
         await asyncio.gather(*tasks, return_exceptions=True)
 
     def status(self) -> dict[str, Any]:
+        at = now()
         return {
             "application": "SLRNO",
+            # Clients derive countdowns from server time, so a skewed browser clock is harmless.
+            "server_time": at.timestamp(),
+            "next_clock": next_clock(at).isoformat(),
+            "setup": views.setup(self),
+            "alerts": self.alerts.status(),
+            "calendar_problem": self.calendar_problem,
             "limits": {
                 "per_trade_gbp": MAX_PREMIUM_RISK_GBP,
                 "slots": MAX_OPEN_POSITIONS,
@@ -172,6 +190,7 @@ class Runtime:
         trades = [self.trade_view(t) for t in self.store.active()]
         cards = []
         at = now()
+        clock = next_clock(at)
         for market, state in self.markets.items():
             reason = state.problem or state.history_problem
             if not reason and market not in self.config.mappings:
@@ -201,8 +220,10 @@ class Runtime:
                     "last_receipt": receipt,
                     "candidate_uic": state.candidate_uic,
                     "trades": market_trades,
-                    "next_time": (state.boundary_clock or next_clock(at)).isoformat(),
+                    "next_time": (state.boundary_clock or clock).isoformat(),
                     "pending_data": state.boundary_clock is not None,
+                    "gates": views.gates(self, market, state, at.timestamp()),
+                    "events": self.calendar.near(market, clock) if self.calendar else [],
                 }
             )
         return {
@@ -342,6 +363,17 @@ class Runtime:
                     ],
                 },
                 "chart": [{"at": b.at.isoformat(), "close": b.close} for b in state.bars[-90:]],
+                "chart_context": views.chart_context(state, now()),
+                "gates": views.gates(self, market, state, time.time()),
+                "sessions_today": views.sessions_today(state, now()),
+                "events_today": [
+                    {"at": at.isoformat(), "name": name}
+                    for at, name in self.calendar.occurrences(market, now().astimezone(NY).date())
+                ]
+                if self.calendar
+                else [],
+                "candidate_deltas": {str(k): v for k, v in state.candidate_deltas.items()},
+                "target_delta": 0.2 if market == "SI" else 0.1,
                 "signals": [
                     {k: s[k] for k in ("id", "signal_at", "decision", "reason")} for s in recent
                 ],
@@ -427,6 +459,9 @@ class Runtime:
                     contract=state.identity,
                     configuration_hash=self.config_hash,
                 )
+                if self.calendar:
+                    # Observation only: recorded with the event, never an entry rule.
+                    event["scheduled_events"] = self.calendar.near(state.market, clock)
                 reason = str(event["veto"])
                 inputs: dict[str, float] = {}
                 try:
@@ -564,6 +599,15 @@ class Runtime:
                     state.history_checked = time.monotonic()
                     self.report_failure("history", exc)
 
+    async def alert_worker(self) -> None:
+        # Isolated: an alert failure is recorded in alerts.status() and never stops trading.
+        while not self.stopping:
+            try:
+                await self.alerts.check(self)
+            except Exception as exc:
+                self.report_failure("alerts", exc)
+            await asyncio.sleep(30)
+
     async def history_worker(self) -> None:
         while not self.stopping:
             self.history_needed.clear()
@@ -606,6 +650,7 @@ class Runtime:
                 asyncio.create_task(self.data.run()),
                 asyncio.create_task(self.manager()),
                 asyncio.create_task(self.history_worker()),
+                asyncio.create_task(self.alert_worker()),
             }
         )
         try:
@@ -636,6 +681,7 @@ class Runtime:
         await self.cancel_tasks(self.tasks)
         await self.recorder.close()
         await self.data.client.close()
+        await self.alerts.close()
         log.removeHandler(self.log_handler)
         self.log_handler.close()
         if self.owner:

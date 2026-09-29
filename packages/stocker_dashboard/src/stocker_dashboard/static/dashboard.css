@@ -341,10 +341,6 @@ button:disabled {
   opacity: 0.4;
   cursor: default;
 }
-.summary button {
-  font-size: 10px;
-  padding: 4px 7px;
-}
 .filters {
   display: flex;
   gap: 20px;
@@ -514,7 +510,6 @@ footer {
 .trade-slots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
 .trade-slots > div { padding: 1.4rem; border: 1px solid #455065; }
 #recording-list a { display: block; margin-block: .65rem; }
-[hidden] { display: none !important; }
 @media(max-width:700px) { .trade-slots { grid-template-columns: repeat(2,1fr); } nav { flex-wrap: wrap; } }
 .book-flow { margin: 1.2rem 0; padding-top: 1rem; border-top: 1px solid var(--line, #334850); }
 .book-flow h3 { font-size: 1rem; letter-spacing: .08em; }

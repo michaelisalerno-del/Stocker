@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from stocker_execution import book_flow
-from stocker_execution.config import RecorderConfig
+from stocker_execution.config import ROLLING_WINDOW_SECONDS, SUBSCRIPTION_LIMIT, RecorderConfig
 from stocker_execution.contracts import utc
 from stocker_execution.saxo_auth import atomic_json
 from stocker_execution.saxo_stream import merge
@@ -127,9 +127,9 @@ class Window:
     def coverage(self, at: float) -> float:
         if self.continuous_since is None or self.current is None or not self.rows:
             return 0
-        beginning = max(at - 900, self.continuous_since, self.rows[0][0])
+        beginning = max(at - ROLLING_WINDOW_SECONDS, self.continuous_since, self.rows[0][0])
         if self.checkpoint is not None and self.checkpoint_at is not None:
-            beginning = max(at - 900, self.continuous_since, self.checkpoint_at)
+            beginning = max(at - ROLLING_WINDOW_SECONDS, self.continuous_since, self.checkpoint_at)
         return max(0, at - beginning)
 
     def prefix(self, after_sequence: int | None = None) -> list[bytes]:
@@ -261,7 +261,7 @@ class Recorder:
             }
         }
         if key not in self.windows:
-            if len(self.windows) >= 32:
+            if len(self.windows) >= SUBSCRIPTION_LIMIT:
                 raise ValueError("RECORDER_INSTRUMENT_LIMIT")
             # A retired candidate may return while its shared archive is still open.
             sequence = max(
@@ -310,7 +310,7 @@ class Recorder:
 
     def expire(self, at: float) -> None:
         for window in self.windows.values():
-            while window.rows and window.rows[0][0] < at - 900:
+            while window.rows and window.rows[0][0] < at - ROLLING_WINDOW_SECONDS:
                 window.evict()
         while self.memory() > self.config.rolling_max_bytes:
             populated = [w for w in self.windows.values() if w.rows]
@@ -498,7 +498,7 @@ class Recorder:
                 c
                 for c in self.active.values()
                 if c["key"] == key
-                and (c["open_trades"] or c["end"] >= at - 900)
+                and (c["open_trades"] or c["end"] >= at - ROLLING_WINDOW_SECONDS)
                 and c["state"] != "INCOMPLETE"
             ),
             None,
@@ -711,7 +711,7 @@ class Recorder:
             ):
                 capture["state"] = "COMPLETE" if not capture["gaps"] else "COMPLETE_WITH_GAPS"
                 self.enqueue(segment, capture, [])
-            if at > capture["end"] + 900 and not capture["open_trades"]:
+            if at > capture["end"] + ROLLING_WINDOW_SECONDS and not capture["open_trades"]:
                 self.catalog.append(
                     {
                         k: capture[k]
@@ -828,7 +828,7 @@ class Recorder:
             if window
             else "UNAVAILABLE",
             "prehistory_seconds": window.coverage(at) if window else 0,
-            "target_seconds": 900,
+            "target_seconds": ROLLING_WINDOW_SECONDS,
             "reason": self.problem,
             "persistent_capture_enabled": self.config.persistent_capture,
             "events": [

@@ -1,5 +1,6 @@
 """Fresh execution namespace, durable intent, reservations and broker evidence."""
 
+import hashlib
 import json
 import sqlite3
 import time
@@ -12,9 +13,19 @@ from stocker_execution.config import (
     MAX_ALLOCATION_PENNIES,
     MAX_OPEN_POSITIONS,
     MAX_PREMIUM_RISK_PENNIES,
+    PAGE_SIZE,
 )
 
 TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
+# Historical £10 (1,000p) reservations keep their policy amount; new ones use the current ceiling.
+RESERVATIONS = f"""CREATE TABLE {{table}} (
+    id TEXT PRIMARY KEY REFERENCES signals(id),
+    allocation_pennies INTEGER NOT NULL,
+    active INTEGER NOT NULL CHECK(active IN (0,1)),
+    state TEXT NOT NULL, plan TEXT NOT NULL, created_at TEXT NOT NULL,
+    policy_pennies INTEGER NOT NULL
+    CHECK(policy_pennies IN (1000,{MAX_PREMIUM_RISK_PENNIES})),
+    CHECK(allocation_pennies=policy_pennies))"""
 
 
 def stamp() -> str:
@@ -50,12 +61,7 @@ class Store:
         CREATE INDEX IF NOT EXISTS signal_reason ON signals(reason);
         CREATE TABLE IF NOT EXISTS depth_captures (
           id TEXT PRIMARY KEY REFERENCES signals(id), summary TEXT NOT NULL);
-        CREATE INDEX IF NOT EXISTS depth_capture_status
-          ON depth_captures(json_extract(summary,'$.status'));
-        CREATE TABLE IF NOT EXISTS reservations (
-          id TEXT PRIMARY KEY REFERENCES signals(id), allocation_pennies INTEGER NOT NULL
-          CHECK(allocation_pennies=1000), active INTEGER NOT NULL CHECK(active IN (0,1)),
-          state TEXT NOT NULL, plan TEXT NOT NULL, created_at TEXT NOT NULL);
+        DROP INDEX IF EXISTS depth_capture_status;
         CREATE TABLE IF NOT EXISTS orders (
           reference TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES reservations(id),
           role TEXT NOT NULL CHECK(role IN ('ENTRY','EXIT')), order_id INTEGER NOT NULL UNIQUE,
@@ -79,7 +85,12 @@ class Store:
           PRIMARY KEY(con_id,at));
         CREATE INDEX IF NOT EXISTS bar_market ON bars(market,at);
         """)
-        self.migrate_allocation()
+        if "reservations" in tables:
+            self.migrate_allocation()
+        else:
+            with self.db:
+                self.db.execute(RESERVATIONS.format(table="reservations"))
+                self.db.execute("INSERT INTO futures_meta VALUES('allocation_schema','2')")
         self._economics_cache: tuple[tuple[int, int], float, dict[str, Any]] | None = None
         if self.db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
             raise ValueError("LEDGER_INTEGRITY_FAILURE")
@@ -96,14 +107,7 @@ class Store:
         self.db.execute("PRAGMA foreign_keys=OFF")
         try:
             self.db.execute("BEGIN IMMEDIATE")
-            self.db.execute(f"""CREATE TABLE reservations_new (
-                id TEXT PRIMARY KEY REFERENCES signals(id),
-                allocation_pennies INTEGER NOT NULL,
-                active INTEGER NOT NULL CHECK(active IN (0,1)),
-                state TEXT NOT NULL, plan TEXT NOT NULL, created_at TEXT NOT NULL,
-                policy_pennies INTEGER NOT NULL
-                CHECK(policy_pennies IN (1000,{MAX_PREMIUM_RISK_PENNIES})),
-                CHECK(allocation_pennies=policy_pennies))""")
+            self.db.execute(RESERVATIONS.format(table="reservations_new"))
             self.db.execute(
                 "INSERT INTO reservations_new SELECT *,allocation_pennies FROM reservations"
             )
@@ -193,25 +197,8 @@ class Store:
         return (
             json.loads(row[0])
             if row
-            else {"status": "NOT_RECORDED", "reason": "NO_CAPTURE_METADATA"}
+            else {"state": "NOT_RECORDED", "reason": "NO_CAPTURE_METADATA"}
         )
-
-    def recover_depth(self) -> None:
-        for row in list(
-            self.db.execute(
-                "SELECT id,summary FROM depth_captures "
-                "WHERE json_extract(summary,'$.status')='CAPTURING'"
-            )
-        ):
-            summary = json.loads(row[1])
-            if summary.get("status") == "CAPTURING":
-                summary.update(
-                    status="NOT_RETAINED",
-                    reason="INTERRUPTED_RESTART",
-                    pre_seconds=0,
-                    post_seconds=0,
-                )
-                self.depth_capture(row[0], summary)
 
     def capacity(self) -> dict[str, int]:
         row = self.db.execute(
@@ -256,8 +243,6 @@ class Store:
     def prepare_order(
         self, identity: str, role: str, order_id: int, deadline: str, payload: dict[str, Any]
     ) -> str:
-        import hashlib
-
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             reservation = self.db.execute(
@@ -310,7 +295,7 @@ class Store:
             dict(r)
             for r in self.db.execute(
                 "SELECT f.*,o.role FROM fills f JOIN orders o USING(reference) "
-                "WHERE event_id=? AND superseded=0 ORDER BY at,exec_id",
+                "WHERE event_id=? ORDER BY at,exec_id",
                 (identity,),
             )
         ]
@@ -332,33 +317,14 @@ class Store:
                     if existing[key] != values[key]:
                         raise ValueError("EXECUTION_ID_REUSED_WITH_DIFFERENT_EVIDENCE")
                 return
+            # Saxo corrections arrive as cumulative order evidence (see PaperBroker), so each
+            # execution id is recorded once; `superseded` is a retained, always-zero column.
             self.db.execute(
-                "INSERT OR IGNORE INTO fills"
+                "INSERT INTO fills"
                 "(exec_id,reference,con_id,quantity,price,side,at,fx,fx_at) "
                 "VALUES(:exec_id,:reference,:con_id,:quantity,:price,:side,:at,:fx,:fx_at)",
                 values,
             )
-            base, sep, suffix = values["exec_id"].rpartition(".")
-            if sep and suffix.isdigit():
-                rows = list(
-                    self.db.execute(
-                        "SELECT exec_id,reference,con_id FROM fills WHERE exec_id LIKE ?",
-                        (base + ".%",),
-                    )
-                )
-                revisions = [
-                    (int(r["exec_id"].rpartition(".")[2]), r)
-                    for r in rows
-                    if r["exec_id"].rpartition(".")[2].isdigit()
-                ]
-                latest = max(n for n, _ in revisions)
-                for number, row in revisions:
-                    if row["reference"] != values["reference"] or row["con_id"] != values["con_id"]:
-                        raise ValueError("EXECUTION_CORRECTION_OWNERSHIP_MISMATCH")
-                    self.db.execute(
-                        "UPDATE fills SET superseded=? WHERE exec_id=?",
-                        (int(number < latest), row["exec_id"]),
-                    )
             mode = self.get_meta("provenance", {}).get("execution_mode")
             self.audit(
                 values["reference"],
@@ -417,8 +383,8 @@ class Store:
                 "r.state FROM signals s "
                 "LEFT JOIN reservations r USING(id) WHERE (? IS NULL OR market=?) "
                 "AND (? IS NULL OR substr(signal_at,1,10)=?) AND (? IS NULL OR rule_version=?) "
-                f"ORDER BY signal_at {sort},market,id LIMIT 100 OFFSET ?",
-                (market, market, day, day, version, version, offset),
+                f"ORDER BY signal_at {sort},market,id LIMIT ? OFFSET ?",
+                (market, market, day, day, version, version, PAGE_SIZE, offset),
             )
         ]
 
@@ -460,7 +426,7 @@ class Store:
                 *f.fx-f.commission*(CASE WHEN f.commission_currency='GBP' THEN 1 ELSE f.fx END)
               ) AS pnl
             FROM reservations r LEFT JOIN orders o ON o.event_id=r.id
-            LEFT JOIN fills f ON f.reference=o.reference AND f.superseded=0
+            LEFT JOIN fills f ON f.reference=o.reference
             WHERE r.state='CLOSED' GROUP BY r.id
         """)
         for row in rows:
@@ -489,7 +455,7 @@ class Store:
             "decisions": counts,
             "skip_reasons": reasons,
             "eligible_trades": self.db.execute("SELECT COUNT(*) FROM reservations").fetchone()[0],
-            "fills": self.db.execute("SELECT COUNT(*) FROM fills WHERE superseded=0").fetchone()[0],
+            "fills": self.db.execute("SELECT COUNT(*) FROM fills").fetchone()[0],
             "basis": "INTERNALLY_SIMULATED"
             if self.get_meta("provenance", {}).get("execution_mode") == "INTERNAL_PAPER"
             else "SAXO_SIM_BROKER_EXECUTIONS",

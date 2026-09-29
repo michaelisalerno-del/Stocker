@@ -144,7 +144,9 @@ def test_missing_commission_is_provisional_and_exit_submission_does_not_release(
             (AT.isoformat(),),
         )
     assert s.economics()["realised_net_gbp"] == pytest.approx(2.4)
-    s.record_fill({**fill_record(ref, "exec.2"), "price": 0.11})
+    s.record_fill(fill_record(ref))  # replayed evidence is idempotent
+    with pytest.raises(ValueError, match="EXECUTION_ID_REUSED"):
+        s.record_fill({**fill_record(ref), "price": 0.11})
     assert s.exposure("x") == 0
     assert len(s.fills("x")) == 2
 

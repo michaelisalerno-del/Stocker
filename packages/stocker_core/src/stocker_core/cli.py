@@ -2,17 +2,15 @@
 
 import asyncio
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 from rich.console import Console
 
-from stocker_core.config import (
-    EODHDConfig,
-    ResearchConfig,
-    load_research_config,
-    load_server_config,
-)
+if TYPE_CHECKING:
+    # Research/EODHD settings are imported by the commands that need them, so the
+    # runtime entry point (`futures-run`) does not load them.
+    from stocker_core.config import EODHDConfig, ResearchConfig
 
 console = Console()
 app = typer.Typer(no_args_is_help=True, help="Stocker research and execution utilities.")
@@ -173,22 +171,24 @@ def _check_storage_mode(overwrite: bool, merge: bool) -> None:
         raise typer.BadParameter("Use either --overwrite or --merge, not both.")
 
 
-def _load_research_cli_config(config_path: Path) -> ResearchConfig:
+def _load_research_cli_config(config_path: Path) -> "ResearchConfig":
+    from stocker_core.config import load_research_config
+
     try:
         return load_research_config(config_path)
     except FileNotFoundError as exc:
         raise typer.BadParameter(f"Research config not found: {config_path}") from exc
 
 
-def _resolve_data_dir(config: ResearchConfig, data_dir: Path | None) -> Path:
+def _resolve_data_dir(config: "ResearchConfig", data_dir: Path | None) -> Path:
     return data_dir if data_dir is not None else config.data.data_dir
 
 
-def _resolve_currency(config: ResearchConfig, currency: str | None) -> str:
+def _resolve_currency(config: "ResearchConfig", currency: str | None) -> str:
     return currency if currency is not None else config.data.default_currency
 
 
-def _resolve_save_raw(eodhd_config: EODHDConfig, save_raw: bool | None) -> bool:
+def _resolve_save_raw(eodhd_config: "EODHDConfig", save_raw: bool | None) -> bool:
     return save_raw if save_raw is not None else eodhd_config.save_raw_by_default
 
 
@@ -214,7 +214,7 @@ def _parse_symbol_inputs(
 
 
 def _require_eodhd_enabled(
-    eodhd_config: EODHDConfig,
+    eodhd_config: "EODHDConfig",
     *,
     dry_run: bool,
     enable_disabled_vendor: bool,
@@ -510,7 +510,7 @@ def data_fetch_eodhd_intraday(
 
 
 def _require_vendor_for_live(
-    eodhd_config: EODHDConfig,
+    eodhd_config: "EODHDConfig",
     *,
     dry_run: bool,
     config_path: Path,
@@ -4312,6 +4312,8 @@ def server_dry_run(
 ) -> None:
     """Load server config without connecting to a broker."""
 
+    from stocker_core.config import load_server_config
+
     loaded = load_server_config(config)
     console.print(
         {
@@ -4357,9 +4359,9 @@ def futures_run(
             runtime.web_health = "RUNNING"
             try:
                 await server.serve()
-                if not getattr(server, "started", True):
+                if not server.started:
                     raise RuntimeError("Dashboard stopped before startup completed")
-                if not getattr(server, "should_exit", True):
+                if not server.should_exit:
                     raise RuntimeError("Dashboard stopped unexpectedly")
             except (Exception, SystemExit) as exc:
                 runtime.web_health = "FAILED"

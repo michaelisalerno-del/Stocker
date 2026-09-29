@@ -121,6 +121,7 @@ def test_futures_server_preserves_authenticated_proxy_socket_peer(monkeypatch, t
     class Server:
         def __init__(self, config):
             self.config = config
+            self.started = self.should_exit = True  # a normal, completed uvicorn run
 
         async def serve(self):
             self.config.load()

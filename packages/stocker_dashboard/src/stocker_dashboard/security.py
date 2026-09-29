@@ -20,14 +20,16 @@ class DashboardSecurity:
         if self.password and self.proxy_token:
             raise ValueError("Choose password or authenticated proxy mode, not both")
         self.protected = bool(self.password or self.proxy_token)
+        origin = urlsplit(self.origin)
+        self.origin_host = origin.netloc
         if self.protected and (
             len(self.password or self.proxy_token) < 24
-            or urlsplit(self.origin).scheme != "https"
-            or not urlsplit(self.origin).netloc
-            or urlsplit(self.origin).path
-            or urlsplit(self.origin).query
-            or urlsplit(self.origin).fragment
-            or urlsplit(self.origin).username
+            or origin.scheme != "https"
+            or not origin.netloc
+            or origin.path
+            or origin.query
+            or origin.fragment
+            or origin.username
         ):
             raise ValueError(
                 "Protected dashboard requires a 24+ character credential and HTTPS origin"
@@ -61,7 +63,7 @@ class DashboardSecurity:
                 denied = (401, "Authentication required")
         elif not local:
             denied = (403, "Unauthenticated dashboard is loopback-only")
-        if self.protected and host != urlsplit(self.origin).netloc:
+        if self.protected and host != self.origin_host:
             denied = (403, "Unexpected dashboard host")
         oauth_callback = (
             scope["type"] == "http"
@@ -71,8 +73,7 @@ class DashboardSecurity:
         document_navigation = (
             scope["type"] == "http"
             and scope.get("method") == "GET"
-            and scope.get("path")
-            in {"/", "/markets", "/opportunities", "/execution", "/trades", "/system"}
+            and scope.get("path") in {"/", "/markets", "/opportunities", "/execution", "/system"}
             and headers.get(b"sec-fetch-mode") == b"navigate"
             and headers.get(b"sec-fetch-dest") == b"document"
         )

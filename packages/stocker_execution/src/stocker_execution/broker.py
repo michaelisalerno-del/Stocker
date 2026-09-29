@@ -7,7 +7,11 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from stocker_execution.config import MAX_PREMIUM_RISK_PENNIES, FuturesConfig
+from stocker_execution.config import (
+    MAX_PREMIUM_RISK_PENNIES,
+    QUOTE_MAX_AGE_SECONDS,
+    FuturesConfig,
+)
 from stocker_execution.contracts import (
     budget,
     executable_quote,
@@ -24,6 +28,7 @@ from stocker_execution.store import TERMINAL, Store, encode
 # are reconciled every management cycle. SIM entries require a recent pass.
 RECONCILE_INTERVAL_SECONDS = 30
 RECONCILE_MAX_AGE_SECONDS = 60
+ORDER_DEADLINE_SECONDS = 20  # a working order unconfirmed after this is reconciled/cancelled
 
 
 def now() -> datetime:
@@ -185,7 +190,9 @@ class PaperBroker:
     async def enter(self, event: dict[str, Any], plan: dict[str, Any]) -> str:
         async with self.lock:
             self.validate_order(plan, "ENTRY", event["id"])
-            if now() >= utc(event["signal_at"]) + timedelta(seconds=20):
+            if now() >= utc(event["signal_at"]) + timedelta(
+                seconds=self.config.entry_deadline_seconds
+            ):
                 return "STALE_SIGNAL_NO_REPLAY"
             reason = self.store.reserve(event["id"], plan)
             if reason:
@@ -199,7 +206,7 @@ class PaperBroker:
         order_id = int(
             self.store.db.execute("SELECT COALESCE(MAX(order_id),0)+1 FROM orders").fetchone()[0]
         )
-        deadline = now() + timedelta(seconds=20)
+        deadline = now() + timedelta(seconds=ORDER_DEADLINE_SECONDS)
         if role == "ENTRY":
             signal = self.store.db.execute(
                 "SELECT signal_at FROM signals WHERE id=?", (identity,)
@@ -322,7 +329,7 @@ class PaperBroker:
             ):
                 raise ValueError("PRICE_MOVED_NO_ASSUMED_FILL")
             size_at = state.size_times.get(side)
-            if size_at is None or not 0 <= at.timestamp() - size_at <= 5:
+            if size_at is None or not 0 <= at.timestamp() - size_at <= QUOTE_MAX_AGE_SECONDS:
                 raise ValueError("AVAILABLE_OPTION_SIZE_STALE")
             size = positive(state.sizes().get(side), "AVAILABLE_OPTION_SIZE")
             receipt = size_at

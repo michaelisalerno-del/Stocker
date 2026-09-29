@@ -19,7 +19,11 @@ from stocker_execution.config import (
     MAX_OPEN_POSITIONS,
     MAX_PREMIUM_RISK_GBP,
     MAX_SIMULTANEOUS_ENTRY_RISK_GBP,
+    PAGE_SIZE,
+    QUOTE_MAX_AGE_SECONDS,
+    ROLLING_WINDOW_SECONDS,
     RULE_VERSION,
+    SUBSCRIPTION_LIMIT,
     FuturesConfig,
 )
 from stocker_execution.contracts import key, quote_check, session_state
@@ -28,7 +32,7 @@ from stocker_execution.rules import NY, clocks, eligibility, next_clock, opportu
 from stocker_execution.saxo_auth import OAuth
 from stocker_execution.saxo_client import SaxoClient
 from stocker_execution.saxo_data import DataService
-from stocker_execution.store import Store
+from stocker_execution.store import Store, encode
 
 log = logging.getLogger(__name__)
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
@@ -54,14 +58,12 @@ class Runtime:
         self.config, self.store = config, store
         store.bind(config.data_environment, config.execution_mode)
         self.root = Path(store.db.execute("PRAGMA database_list").fetchone()[2]).parent
-        self.recorder = Recorder(config.recorder, self.root / config.data_environment / "events")
-        self.data = data or DataService(
-            config,
-            SaxoClient(OAuth(config.data_environment, config.saxo, self.root)),
-            self.recorder,
-        )
-        if data:
-            self.recorder = data.recorder
+        if data is None:
+            recorder = Recorder(config.recorder, self.root / config.data_environment / "events")
+            client = SaxoClient(OAuth(config.data_environment, config.saxo, self.root))
+            data = DataService(config, client, recorder)
+        self.data = data
+        self.recorder = data.recorder
         self.broker = PaperBroker(config, store, self.data)
         self.data.owned_options = {json.loads(r["plan"])["option"]["uic"] for r in store.active()}
         self.markets = self.data.markets
@@ -123,7 +125,6 @@ class Runtime:
             },
             "data_environment": self.config.data_environment,
             "execution_mode": self.config.execution_mode,
-            "environment": self.config.data_environment,
             "account": "Verified configured Saxo account"
             if self.data.account_verified
             else "Unverified",
@@ -140,12 +141,6 @@ class Runtime:
             "configuration_hash": self.config_hash,
             "live_available": False,
             "live_orders_disabled": True,
-            "providers": {
-                "SAXO": "ACTIVE",
-                "IBKR": "PARKED",
-                "FMP": "INACTIVE",
-                "EODHD": "INACTIVE",
-            },
             "oauth": self.data.client.oauth.status,
             "oauth_problem": self.data.client.oauth.failure_reason,
             "session": self.data.session,
@@ -156,7 +151,7 @@ class Runtime:
             },
             "market_data": {
                 "owned_lines": len(self.data.subscriptions),
-                "app_budget": 32,
+                "app_budget": SUBSCRIPTION_LIMIT,
                 "option_budget": self.config.option_subscription_budget,
                 "option_lines": len(self.data.options),
                 "candidate_window": self.config.option_candidate_window,
@@ -185,7 +180,7 @@ class Runtime:
             receipt = state.price.receipt
             current = (
                 receipt is not None
-                and 0 <= at.timestamp() - receipt <= 5
+                and 0 <= at.timestamp() - receipt <= QUOTE_MAX_AGE_SECONDS
                 and not state.price.problem
             )
             market_trades = [t for t in trades if t["market"] == market]
@@ -227,13 +222,15 @@ class Runtime:
                 dict(r)
                 for r in self.store.db.execute(
                     "SELECT f.*,o.event_id,o.role FROM fills f JOIN orders o USING(reference) "
-                    "WHERE superseded=0 ORDER BY at DESC,exec_id LIMIT 100"
+                    "ORDER BY at DESC,exec_id LIMIT ?",
+                    (PAGE_SIZE,),
                 )
             ],
             "positions": [
                 dict(r)
                 for r in self.store.db.execute(
-                    "SELECT * FROM positions WHERE quantity<>0 ORDER BY con_id LIMIT 100"
+                    "SELECT * FROM positions WHERE quantity<>0 ORDER BY con_id LIMIT ?",
+                    (PAGE_SIZE,),
                 )
             ],
         }
@@ -242,129 +239,130 @@ class Runtime:
         cards = []
         active = self.store.active()
         recent = self.store.recent_signals(selected)
-        for market, state in self.markets.items():
-            if market != selected:
-                continue
-            last_event = recent[0] if recent else None
-            event_context = (
-                json.loads(
-                    self.store.db.execute(
-                        "SELECT detail FROM signals WHERE id=?", (last_event["id"],)
-                    ).fetchone()[0]
-                ).get("option_context")
-                if last_event
-                else None
-            )
-            reason = state.problem or state.history_problem
-            if not reason and market not in self.config.mappings:
-                reason = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
-            reason = reason or ("ENTRIES_PAUSED" if self.pause else self.broker.entry_reason())
-            value = state.price.value or {}
-            quote = value.get("Quote") or {}
-            current = (
-                state.price.receipt is not None
-                and 0 <= time.time() - state.price.receipt <= 5
-                and not state.price.problem
-            )
-            identity = state.identity
-            depth = state.price.depth(time.time())
-            depth["last_receipt"] = (
-                datetime.fromtimestamp(state.price.depth_receipt, UTC).isoformat()
-                if state.price.depth_receipt
-                else None
-            )
-            recording = (
-                self.recorder.view(key(identity), time.time())
-                if identity
-                else {"state": "UNAVAILABLE", "prehistory_seconds": 0}
-            )
-            depth.update(pre_seconds=recording["prehistory_seconds"], target_pre_seconds=900)
-            features = {}
-            try:
-                if state.bars:
-                    features["rv15"] = prior_rv(
-                        state.bars,
-                        state.bars[-1].at.replace(second=0) + timedelta(minutes=1),
-                    )
-            except ValueError:
-                pass
-            cards.append(
-                {
-                    "market": market,
-                    "contract": identity["symbol"] if identity else None,
-                    "identity": identity,
-                    "market_status": session_state(state.reference, now()),
-                    "data_status": "CURRENT" if current else "STALE_OR_MISSING",
-                    "strategy_state": "MONITOR_ONLY"
-                    if market == "GC" and reason
-                    else "BLOCKED"
-                    if reason
-                    else "MONITORING",
-                    "entry_enabled": not reason,
-                    "block_reason": reason,
-                    "direction": "BUY CALL" if market == "CL" else "BUY PUT",
-                    "conditions": features,
-                    "trades": [self.trade_view(t) for t in active if t["market"] == market],
-                    "l1": {
-                        "status": "CURRENT" if current else "STALE_OR_MISSING",
-                        "quote": quote,
-                        "sizes": {side.lower(): size for side, size in state.price.sizes().items()},
-                        "spread": quote["Ask"] - quote["Bid"]
-                        if isinstance(quote.get("Ask"), (int, float))
-                        and isinstance(quote.get("Bid"), (int, float))
-                        else None,
-                        "delay_minutes": quote.get("DelayedByMinutes"),
-                        "provider_timestamp": value.get("LastUpdated"),
-                        "last_receipt": datetime.fromtimestamp(state.price.receipt, UTC).isoformat()
-                        if state.price.receipt
-                        else None,
-                    },
-                    "l2": depth,
-                    "book_flow": self.recorder.book_flow_view(key(identity), time.time())
-                    if identity
-                    else {"status": "UNAVAILABLE"},
-                    "recorder": recording,
-                    "capabilities": dict(state.capabilities) if diagnostics else None,
-                    "underlying_context": option_context.view(state.price.analytics, time.time()),
-                    "option_context": {
-                        "latest_event": {
-                            "id": last_event["id"],
-                            "signal_at": last_event["signal_at"],
-                            "context": event_context,
-                        }
-                        if last_event and event_context
-                        else None,
-                        "candidate_uic": state.candidate_uic,
-                        "problem": state.candidate_problem,
-                        "candidate_changes": list(state.candidate_changes) if diagnostics else None,
-                        "contracts": [
-                            self.data.option_view(uic, time.time())
-                            for uic, (i, _) in self.data.options.items()
-                            if i["market"] == market
-                        ],
-                    },
-                    "chart": [{"at": b.at.isoformat(), "close": b.close} for b in state.bars[-90:]],
-                    "signals": [
-                        {k: s[k] for k in ("id", "signal_at", "decision", "reason")} for s in recent
-                    ],
-                    "next_time": next_clock(now()).isoformat(),
-                    "next_market_time": None,
-                    "exchange_trade_date": None,
-                    "rule_version": RULE_VERSION,
-                    "diagnostic": "L2 observation only",
-                    "details": {
-                        "signal_contract": identity,
-                        "reference_sessions": len(state.references),
-                        "entry_clocks": "09:00–16:00 America/New_York weekdays; NG 13:00 veto",
-                        "exit_anchor": "Original opportunity + 60 minutes",
-                        "options_block": "Verify actual 0DTE expiry, product and delta tolerance",
-                        "recording": recording,
-                        "option_board": state.option_board,
-                    }
-                    if diagnostics
+        market, state = selected, self.markets[selected]
+        last_event = recent[0] if recent else None
+        event_context = (
+            json.loads(
+                self.store.db.execute(
+                    "SELECT detail FROM signals WHERE id=?", (last_event["id"],)
+                ).fetchone()[0]
+            ).get("option_context")
+            if last_event
+            else None
+        )
+        reason = state.problem or state.history_problem
+        if not reason and market not in self.config.mappings:
+            reason = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
+        reason = reason or ("ENTRIES_PAUSED" if self.pause else self.broker.entry_reason())
+        value = state.price.value or {}
+        quote = value.get("Quote") or {}
+        current = (
+            state.price.receipt is not None
+            and 0 <= time.time() - state.price.receipt <= QUOTE_MAX_AGE_SECONDS
+            and not state.price.problem
+        )
+        identity = state.identity
+        depth = state.price.depth(time.time())
+        depth["last_receipt"] = (
+            datetime.fromtimestamp(state.price.depth_receipt, UTC).isoformat()
+            if state.price.depth_receipt
+            else None
+        )
+        recording = (
+            self.recorder.view(key(identity), time.time())
+            if identity
+            else {"state": "UNAVAILABLE", "prehistory_seconds": 0}
+        )
+        depth.update(
+            pre_seconds=recording["prehistory_seconds"],
+            target_pre_seconds=ROLLING_WINDOW_SECONDS,
+        )
+        features = {}
+        try:
+            if state.bars:
+                features["rv15"] = prior_rv(
+                    state.bars,
+                    state.bars[-1].at.replace(second=0) + timedelta(minutes=1),
+                )
+        except ValueError:
+            pass
+        cards.append(
+            {
+                "market": market,
+                "contract": identity["symbol"] if identity else None,
+                "identity": identity,
+                "market_status": session_state(state.reference, now()),
+                "data_status": "CURRENT" if current else "STALE_OR_MISSING",
+                "strategy_state": "MONITOR_ONLY"
+                if market == "GC" and reason
+                else "BLOCKED"
+                if reason
+                else "MONITORING",
+                "entry_enabled": not reason,
+                "block_reason": reason,
+                "direction": "BUY CALL" if market == "CL" else "BUY PUT",
+                "conditions": features,
+                "trades": [self.trade_view(t) for t in active if t["market"] == market],
+                "l1": {
+                    "status": "CURRENT" if current else "STALE_OR_MISSING",
+                    "quote": quote,
+                    "sizes": {side.lower(): size for side, size in state.price.sizes().items()},
+                    "spread": quote["Ask"] - quote["Bid"]
+                    if isinstance(quote.get("Ask"), (int, float))
+                    and isinstance(quote.get("Bid"), (int, float))
                     else None,
+                    "delay_minutes": quote.get("DelayedByMinutes"),
+                    "provider_timestamp": value.get("LastUpdated"),
+                    "last_receipt": datetime.fromtimestamp(state.price.receipt, UTC).isoformat()
+                    if state.price.receipt
+                    else None,
+                },
+                "l2": depth,
+                "book_flow": self.recorder.book_flow_view(key(identity), time.time())
+                if identity
+                else {"status": "UNAVAILABLE"},
+                "recorder": recording,
+                "capabilities": dict(state.capabilities) if diagnostics else None,
+                "underlying_context": option_context.view(state.price.analytics, time.time()),
+                "option_context": {
+                    "latest_event": {
+                        "id": last_event["id"],
+                        "signal_at": last_event["signal_at"],
+                        "context": event_context,
+                    }
+                    if last_event and event_context
+                    else None,
+                    "candidate_uic": state.candidate_uic,
+                    "problem": state.candidate_problem,
+                    "candidate_changes": list(state.candidate_changes) if diagnostics else None,
+                    "contracts": [
+                        self.data.option_view(uic, time.time())
+                        for uic, (i, _) in self.data.options.items()
+                        if i["market"] == market
+                    ],
+                },
+                "chart": [{"at": b.at.isoformat(), "close": b.close} for b in state.bars[-90:]],
+                "signals": [
+                    {k: s[k] for k in ("id", "signal_at", "decision", "reason")} for s in recent
+                ],
+                "next_time": next_clock(now()).isoformat(),
+                "next_market_time": None,
+                "exchange_trade_date": None,
+                "rule_version": RULE_VERSION,
+                "diagnostic": "L2 observation only",
+                "details": {
+                    "signal_contract": identity,
+                    "reference_sessions": len(state.references),
+                    "entry_clocks": "09:00–16:00 America/New_York weekdays; NG 13:00 veto",
+                    "exit_anchor": "Original opportunity + 60 minutes",
+                    "options_block": "Verify actual 0DTE expiry, product and delta tolerance",
+                    "recording": recording,
+                    "option_board": state.option_board,
                 }
-            )
+                if diagnostics
+                else None,
+            }
+        )
         return {"system": self.status(), "markets": cards}
 
     def trade_view(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -505,7 +503,7 @@ class Runtime:
                     detail = json.loads(row[0])
                     detail["option_context"] = context
                     self.store.db.execute(
-                        "UPDATE signals SET detail=? WHERE id=?", (json.dumps(detail), event["id"])
+                        "UPDATE signals SET detail=? WHERE id=?", (encode(detail), event["id"])
                     )
                 if not reason:
                     reason = "ENTRIES_PAUSED" if self.pause else self.broker.entry_reason()

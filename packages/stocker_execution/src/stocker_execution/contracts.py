@@ -11,6 +11,7 @@ from stocker_execution.config import (
     MARKETS,
     MAX_PREMIUM_RISK_GBP,
     MAX_PREMIUM_RISK_PENNIES,
+    QUOTE_MAX_AGE_SECONDS,
     Environment,
 )
 
@@ -150,7 +151,7 @@ def option_identity(
 
 
 def quote_check(value: dict[str, Any], receipt: float | None, at: datetime) -> dict[str, Any]:
-    if receipt is None or not 0 <= at.timestamp() - receipt <= 5:
+    if receipt is None or not 0 <= at.timestamp() - receipt <= QUOTE_MAX_AGE_SECONDS:
         raise ValueError("QUOTE_STALE_OR_UNAVAILABLE")
     quote = value.get("Quote") or {}
     if quote.get("DelayedByMinutes") != 0:
@@ -197,6 +198,23 @@ def nonnegative(value: Any, name: str) -> float:
     return result
 
 
+def require_one_whole_contract(option: dict[str, Any]) -> None:
+    if option["minimum_quantity"] != 1 or option["lot_size"] != 1 or option["amount_decimals"] != 0:
+        raise ValueError("ONE_WHOLE_CONTRACT_NOT_EXECUTABLE")
+
+
+def all_in_pennies(
+    ask: float, price_factor: float, native_to_gbp: float, fees_gbp: Decimal
+) -> tuple[Decimal, int]:
+    """Premium in GBP and the whole-penny ceiling of premium plus fees (rounded up)."""
+    premium = (
+        Decimal(str(positive(ask, "ASK")))
+        * Decimal(str(positive(price_factor, "PRICE_FACTOR")))
+        * Decimal(str(positive(native_to_gbp, "GBP_CONVERSION")))
+    )
+    return premium, int(((premium + fees_gbp) * 100).to_integral_value(rounding=ROUND_CEILING))
+
+
 def cost_estimate(
     option: dict[str, Any], ask: float, conditions: dict[str, Any], native_to_gbp: float
 ) -> dict[str, Any]:
@@ -212,8 +230,7 @@ def cost_estimate(
         raise ValueError("CONTRACT_OPTION_COST_CURRENCY_MISMATCH")
     if conditions.get("IsTradable") is False:
         raise ValueError("CONTRACT_OPTION_TRADING_NOT_ALLOWED")
-    if option["minimum_quantity"] != 1 or option["lot_size"] != 1 or option["amount_decimals"] != 0:
-        raise ValueError("ONE_WHOLE_CONTRACT_NOT_EXECUTABLE")
+    require_one_whole_contract(option)
     if option.get("tick_size_scheme"):
         raise ValueError("VARIABLE_TICK_SCHEME_REQUIRES_VERIFIED_PRICE_TIER")
     rate = positive(native_to_gbp, "GBP_CONVERSION")
@@ -275,13 +292,7 @@ def cost_estimate(
         if "Maximum" in exchange:
             fee = min(fee, nonnegative(exchange["Maximum"], "EXCHANGE_MAXIMUM"))
         entry += convert(fee, exchange.get("Currency"))
-    premium = (
-        Decimal(str(positive(ask, "ASK")))
-        * Decimal(str(positive(option["price_factor"], "PRICE_FACTOR")))
-        * Decimal(str(rate))
-    )
-    total = premium + Decimal(str(entry)) * 2
-    pennies = int((total * 100).to_integral_value(rounding=ROUND_CEILING))
+    premium, pennies = all_in_pennies(ask, option["price_factor"], rate, Decimal(str(entry)) * 2)
     return {
         "quantity": 1,
         "premium_gbp": float(premium),
@@ -337,19 +348,12 @@ def deadline_instant(value: Any, day: str, zone: str | None = None) -> str | Non
 def budget(
     option: dict[str, Any], ask: float, fee_gbp: float, native_to_gbp: float
 ) -> dict[str, Any]:
+    """Re-price an admitted plan at its actual fill price using the plan's own fees."""
     if option["asset_type"] != "FuturesOption":
         raise ValueError("DIRECT_FUTURES_ORDERS_DISABLED")
-    if option["minimum_quantity"] != 1 or option["lot_size"] != 1 or option["amount_decimals"] != 0:
-        raise ValueError("ONE_WHOLE_CONTRACT_NOT_EXECUTABLE")
-    values = [
-        positive(ask, "ASK"),
-        nonnegative(fee_gbp, "FEES"),
-        positive(native_to_gbp, "FX"),
-        positive(option["price_factor"], "PRICE_FACTOR"),
-    ]
-    premium = Decimal(str(values[0])) * Decimal(str(values[3])) * Decimal(str(values[2]))
-    fees = Decimal(str(values[1]))
-    pennies = int(((premium + fees) * 100).to_integral_value(rounding=ROUND_CEILING))
+    require_one_whole_contract(option)
+    fees = Decimal(str(nonnegative(fee_gbp, "FEES")))
+    premium, pennies = all_in_pennies(ask, option["price_factor"], native_to_gbp, fees)
     if pennies > MAX_PREMIUM_RISK_PENNIES:
         raise ValueError("MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET")
     return {
@@ -357,6 +361,7 @@ def budget(
         "premium_gbp": float(premium),
         "fees_gbp": float(fees),
         "total_gbp": pennies / 100,
+        "remaining_budget_gbp": (MAX_PREMIUM_RISK_PENNIES - pennies) / 100,
         "cash_pennies": pennies,
         "currency": option["currency"],
         "multiplier": option["price_factor"],

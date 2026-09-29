@@ -106,3 +106,18 @@ def test_unexpected_missing_field_is_not_recorded_as_a_trading_reason(tmp_path, 
         runtime.store.db.close()
 
     asyncio.run(scenario())
+
+
+def test_fresh_ledger_is_created_with_the_current_reservation_schema(tmp_path):
+    store = Store(tmp_path / "fresh.sqlite3")
+    (sql,) = store.db.execute("SELECT sql FROM sqlite_master WHERE name='reservations'").fetchone()
+    assert "policy_pennies" in sql and "allocation_pennies=1000" not in sql
+    assert store.get_meta("allocation_schema") == 2
+    assert not store.db.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='depth_capture_status'"
+    ).fetchone()
+    assert store.depth_summary("missing")["state"] == "NOT_RECORDED"
+    store.db.close()
+    reopened = Store(tmp_path / "fresh.sqlite3")  # reopening is a no-op
+    assert reopened.db.execute("SELECT COUNT(*) FROM reservations").fetchone()[0] == 0
+    reopened.db.close()

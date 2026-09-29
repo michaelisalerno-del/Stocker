@@ -1,5 +1,6 @@
 """Authenticated futures views, independent of position management."""
 
+import asyncio
 import json
 import sqlite3
 from datetime import date
@@ -13,7 +14,7 @@ from pydantic import BaseModel, Field
 from starlette.types import Scope
 
 from stocker_dashboard.security import DashboardSecurity
-from stocker_execution.config import MARKETS
+from stocker_execution.config import MARKETS, PAGE_SIZE
 from stocker_execution.runtime import Runtime
 
 # Revalidate page assets so a deploy never pairs a stale script with new markup.
@@ -50,10 +51,6 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
             and not runtime.broker.fatal_error
         )
         return JSONResponse(status_code=200 if ok else 503, content=runtime.status())
-
-    @app.get("/api/status")
-    async def status() -> dict[str, Any]:
-        return runtime.status()
 
     @app.get("/api/overview")
     async def overview() -> dict[str, Any]:
@@ -104,7 +101,8 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         return {
             "rows": rows,
             "offset": offset,
-            "has_more": len(rows) == 100,
+            "page_size": PAGE_SIZE,
+            "has_more": len(rows) == PAGE_SIZE,
             "system": runtime.status(),
         }
 
@@ -233,8 +231,6 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         }
         try:
             # Completed, unreferenced, unprotected records only. Runs off the risk loop.
-            import asyncio
-
             await asyncio.to_thread(runtime.recorder.prune, segment, referenced)
         except (OSError, ValueError):
             raise HTTPException(409, "ACTIVE_REFERENCED_PROTECTED_OR_UNAVAILABLE") from None
@@ -242,7 +238,7 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
 
     @app.get("/{page:path}")
     async def page(page: str) -> Any:
-        if page not in {"", "markets", "opportunities", "execution", "trades", "system"}:
+        if page not in {"", "markets", "opportunities", "execution", "system"}:
             raise HTTPException(404, "No such SLRNO page")
         return FileResponse(static / "index.html", headers=NO_CACHE)
 

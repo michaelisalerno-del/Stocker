@@ -12,7 +12,8 @@ const depthReceipts = new Map();
 const quoteReceipts = new Map();
 const flowExpiry = new Map();
 const route = location.pathname.slice(1) || "overview";
-const page = ["opportunities", "trades"].includes(route) ? "trades" : route === "markets" ? "overview" : route;
+// The Opportunities page renders the "trades" section; Markets reuses the overview cards.
+const page = route === "opportunities" ? "trades" : route === "markets" ? "overview" : route;
 let selectedMarket = sessionStorage.getItem("slrno-market") || "CL";
 if (!markets.includes(selectedMarket)) selectedMarket = "CL";
 let offset = 0,
@@ -22,6 +23,7 @@ let offset = 0,
 let detailRequest = null, controlPending = false, lastRefresh = null, accountSnapshot = null;
 const chartGeometry = new Map();
 let limits = {};
+let pageSize = 100; // replaced by the server's page_size
 const money = (v) =>
   v == null
     ? "Unavailable"
@@ -62,14 +64,7 @@ const explanations = {
 const display = (v) => explanations[v] || String(v || "").replaceAll("_", " ");
 for (const name of ["overview", "trades", "execution", "system"])
   $(name).hidden = name !== page;
-text(
-  "title",
-  page === "trades"
-    ? "Trades & signal history"
-    : page === "system"
-      ? "System"
-      : page === "execution" ? "Paper execution" : route === "markets" ? "Market detail" : "Futures overview",
-);
+text("title", {markets:"Markets", opportunities:"Opportunities", execution:"Execution", system:"System"}[route] || "Futures overview");
 document.querySelectorAll("nav a").forEach((a) => {
   if (a.pathname === location.pathname) a.setAttribute("aria-current", "page");
 });
@@ -136,14 +131,13 @@ function optionContext(m) {
   const analytics = {...(o?.chain_analytics || {}), ...(o?.analytics || {})};
   text(`option-identity-${m.market}`, o ? `${held ? "Owned contract" : uic === eventUic ? "Event-selected contract" : "Current candidate"}: ${id.symbol || id.uic} · ${id.right} ${id.strike} · UIC ${id.uic} · underlying ${id.underlying_symbol || "unknown"} / ${id.underlying_uic}` : `No selected contract · ${context.problem || "UNAVAILABLE"}`);
   text(`option-deadline-${m.market}`, `Expiry ${id.expiry || "unknown"} · last trading ${id.last_trade_at || "UNVERIFIED"} · strategy exit ${held?.exit_at || (uic === eventUic && event?.context?.strategy_exit_at) || "set by event + 60 minutes"}`);
-  text(`option-quote-${m.market}`, `Regular quote ${o?.quote_status || "MISSING"} · bid ${numeric(q.Bid)} × ${numeric(o?.sizes?.Bid)} (${q.PriceTypeBid || "unknown"}) · ask ${numeric(q.Ask)} × ${numeric(o?.sizes?.Ask)} (${q.PriceTypeAsk || "unknown"}) · spread ${numeric(typeof q.Ask === "number" && typeof q.Bid === "number" ? q.Ask-q.Bid : null)} · delay ${q.DelayedByMinutes ?? "unknown"} min`);
+  text(`option-quote-${m.market}`, `Regular quote ${o?.quote_status || "MISSING"} · bid ${numeric(q.Bid)} × ${numeric(o?.sizes?.Bid)} (${q.PriceTypeBid || "unknown"}) · ask ${numeric(q.Ask)} × ${numeric(o?.sizes?.Ask)} (${q.PriceTypeAsk || "unknown"}) · spread ${numeric(typeof q.Ask === "number" && typeof q.Bid === "number" ? q.Ask-q.Bid : null)} · delay ${q.DelayedByMinutes ?? "unknown"} min · bid size ${o?.size_status?.Bid || "UNVERIFIED"} · ask size ${o?.size_status?.Ask || "UNVERIFIED"}`);
   text(`option-analytics-${m.market}`, `Provider delta ${obs("Greeks.Delta", analytics)} · IV ${obs(analytics["Greeks.MidVolatility"] ? "Greeks.MidVolatility" : "Greeks.MidVol", analytics)} · provider units / scaling unverified`);
   text(`option-volume-${m.market}`, `Option volume ${obs("PriceInfoDetails.Volume", analytics)} · OI ${obs("InstrumentPriceDetails.OpenInterest", analytics)}`);
   text(`option-underlying-${m.market}`, `Future volume ${obs("PriceInfoDetails.Volume", m.underlying_context)} · OI ${obs("InstrumentPriceDetails.OpenInterest", m.underlying_context)}`);
   text(`option-cost-${m.market}`, `Minimum purchase ${numeric(cost.minimum_purchase_cost_gbp, " GBP")} · entry fees ${numeric(cost.entry_costs_gbp)} · estimated exit ${numeric(cost.estimated_exit_costs_gbp)} · budget total ${numeric(cost.total_gbp)} / ${money(limits.per_trade_gbp)} · remaining ${numeric(cost.remaining_budget_gbp)} · ${cost.reason || cost.budget_result || "UNVERIFIED"}`);
   text(`option-coverage-${m.market}`, `Actual current option buffer ${Math.floor(o?.coverage_seconds || 0)} / 900s · subscription started ${o?.subscription_started_at ? new Date(o.subscription_started_at*1000).toISOString() : "unknown"} · latest event ${event?.id || "none"}: UIC ${event?.context?.identity?.uic || "unavailable"}, actual pre-trigger ${event ? Math.floor(event.context.pre_trigger_seconds || 0) + " / 900s" : "unavailable"}`);
   text(`option-meta-${m.market}`, $(`option-meta-${m.market}`).closest("details").open ? JSON.stringify(context, null, 2) : "");
-  text(`option-quote-${m.market}`, $(`option-quote-${m.market}`).textContent + ` · bid size ${o?.size_status?.Bid || "UNVERIFIED"} · ask size ${o?.size_status?.Ask || "UNVERIFIED"}`);
 }
 function bookFlow(m, f, rec = {}, identity = {}) {
   if (route !== "markets") return;
@@ -386,7 +380,6 @@ function render(d) {
   text("api-lines", `${a.owned_lines ?? "—"} / ${a.app_budget ?? 32} subscriptions`);
   text("api-allowance", `Saxo session: ${s.session?.TradeLevel || "UNVERIFIED"}`);
   text("api-external", "Session upgrade is explicit; it can downgrade another Saxo application");
-  text("api-depth", `${d.markets.filter(m => m.l2?.status === "L2_AVAILABLE").length} / 5 markets with received depth`);
   text("api-assignments", "CL · GC · NG · NQ · SI · independent server subscriptions");
   text("api-options", `${a.option_lines ?? 0} / ${a.option_budget || 16} regular option quote subscriptions`);
   text("api-pacing", JSON.stringify(a.rate_limits || {}));
@@ -465,12 +458,13 @@ function renderAccount(a) {
   text("account-freshness", `${a.status} · last successful update ${a.last_success_at != null ? time(new Date(a.last_success_at*1000).toISOString()) : "Unavailable"}`);
   if ($("account-detail").open) text("account-json", JSON.stringify({basis:a.basis, ...a.details, problem:a.problem}, null, 2));
 }
-function rows(id, items, columns, key) {
+// Keyed rows keep their DOM nodes (focus, selection, open state) across refreshes.
+function rows(id, items, columns, key, create = () => {}) {
   const body = $(id), known = new Map([...body.children].map(n => [n.dataset.key,n]));
   for (const [index,item] of items.entries()) {
     const identity = String(item[key]);
     let node = known.get(identity); known.delete(identity);
-    if (!node) {node = document.createElement("tr"); node.dataset.key=identity; columns.forEach(() => node.append(document.createElement("td")));}
+    if (!node) {node = document.createElement("tr"); node.dataset.key=identity; columns.forEach(() => node.append(document.createElement("td"))); create(node, item);}
     columns.forEach((f,i) => { const next=String(f(item) ?? "Unavailable"); if(node.children[i].textContent!==next) node.children[i].textContent=next; });
     if (body.children[index] !== node) body.insertBefore(node, body.children[index] || null);
   }
@@ -494,41 +488,21 @@ async function history(signal) {
   ])
     if ($(id).value) q.set(key, $(id).value);
   q.set("sort", $("sort-filter").value);
-  const d = await request(`/api/history?${q}`, {signal}),
-    rows = [...d.rows];
+  const d = await request(`/api/history?${q}`, {signal});
   if (signal.aborted) return;
+  pageSize = d.page_size || pageSize;
   if (d.system) render({system:d.system});
-  const body = $("history"),
-    known = new Map([...body.children].map((n) => [n.dataset.key, n]));
-  for (const [i, r] of rows.entries()) {
-    let tr = known.get(r.id);
-    known.delete(r.id);
-    if (!tr) {
-      tr = document.createElement("tr");
-      tr.dataset.key = r.id;
-      for (let j = 0; j < 6; j++) tr.append(document.createElement("td"));
-      const b = document.createElement("button");
-      b.textContent = "Inspect";
-      b.onclick = () => showDetail(r.id).catch(reportError);
-      tr.children[5].append(b);
-    }
-    [
-      time(r.signal_at),
-      r.market,
-      display(r.state || r.decision),
-      display(r.reason) || "—",
-      r.rule_version,
-    ].forEach((v, j) => {
-      if (tr.children[j].textContent !== v) tr.children[j].textContent = v;
-    });
-    if (body.children[i] !== tr)
-      body.insertBefore(tr, body.children[i] || null);
-  }
-  known.forEach((n) => n.remove());
-  $("history-empty").hidden = rows.length > 0;
+  rows("history", d.rows, [r=>time(r.signal_at), r=>r.market, r=>display(r.state || r.decision), r=>display(r.reason) || "—", r=>r.rule_version], "id", (tr, r) => {
+    const b = document.createElement("button");
+    b.textContent = "Inspect";
+    b.onclick = () => showDetail(r.id).catch(reportError);
+    tr.append(document.createElement("td"));
+    tr.lastChild.append(b);
+  });
+  $("history-empty").hidden = d.rows.length > 0;
   $("prev").disabled = offset === 0;
   $("next").disabled = !d.has_more;
-  text("page-number", `Page ${1 + offset / 100}`);
+  text("page-number", `Page ${1 + offset / pageSize}`);
   if (selectedIdentity && $("trade-detail").open) await showDetail(selectedIdentity, false);
 }
 async function showDetail(id, expand = true) {
@@ -595,8 +569,8 @@ $("pause").onclick = async () => {
 };
 for(const id of ["market-filter","day-filter","version-filter","sort-filter"])
   $(id).addEventListener("change",()=>{offset=0; selectedIdentity=""; detailRequest?.abort(); text("trade-json", "Select an opportunity to view its evidence"); refresh(true);});
-$("prev").onclick=()=>{offset=Math.max(0,offset-100);refresh(true);};
-$("next").onclick=()=>{offset+=100;refresh(true);};
+$("prev").onclick=()=>{offset=Math.max(0,offset-pageSize);refresh(true);};
+$("next").onclick=()=>{offset+=pageSize;refresh(true);};
 document.addEventListener("visibilitychange",()=>{if(document.hidden){pending?.abort(); detailRequest?.abort();}else refresh(true);});
 document.querySelectorAll("details").forEach(el=>el.addEventListener("toggle",()=>{
   if (el.id === "account-detail") {if(accountSnapshot) renderAccount(accountSnapshot);}
@@ -639,6 +613,3 @@ function selectMarket() {
 }
 $("selected-market").addEventListener("change", selectMarket);
 selectMarket();
-if (route === "markets") text("title", "Markets");
-if (route === "opportunities") text("title", "Opportunities");
-if (route === "execution") text("title", "Execution");

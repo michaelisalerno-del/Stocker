@@ -2,7 +2,7 @@
 
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -19,6 +19,12 @@ MAX_OPEN_POSITIONS = 4
 MAX_SIMULTANEOUS_ENTRY_RISK_GBP = MAX_PREMIUM_RISK_GBP * MAX_OPEN_POSITIONS
 MAX_ALLOCATION_PENNIES = MAX_SIMULTANEOUS_ENTRY_RISK_GBP * 100
 MAX_CONTRACTS_PER_TRADE = 1
+QUOTE_MAX_AGE_SECONDS: Final = 5
+ENTRY_DEADLINE_SECONDS: Final = 20
+SUBSCRIPTION_LIMIT = 32  # Saxo streaming subscriptions owned by this application
+ROLLING_WINDOW_SECONDS = 15 * 60  # server-held L1/L2 prehistory per instrument
+OPTION_METADATA_MAX_AGE_SECONDS = 15 * 60
+PAGE_SIZE = 100  # dashboard history/execution rows per request
 
 
 class Strict(BaseModel):
@@ -132,9 +138,11 @@ class FuturesConfig(Strict):
     recorder: RecorderConfig = Field(default_factory=RecorderConfig)
     option_subscription_budget: int = Field(default=16, ge=4, le=16)
     option_candidate_window: int = Field(default=3, ge=1, le=3)
+    # Frozen parameters below are pinned sentinels: a configuration file may restate
+    # them but never change them. The code uses the module constants above.
     refresh_rate_ms: Literal[1000] = 1000
-    quote_max_age_seconds: Literal[5] = 5
-    entry_deadline_seconds: Literal[20] = 20
+    quote_max_age_seconds: Literal[5] = QUOTE_MAX_AGE_SECONDS
+    entry_deadline_seconds: Literal[20] = ENTRY_DEADLINE_SECONDS
     max_premium_risk_gbp: int = Field(
         default=MAX_PREMIUM_RISK_GBP, ge=MAX_PREMIUM_RISK_GBP, le=MAX_PREMIUM_RISK_GBP
     )

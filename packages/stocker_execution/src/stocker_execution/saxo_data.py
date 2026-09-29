@@ -17,7 +17,15 @@ from websockets.asyncio.client import connect
 
 from stocker_execution import option_context
 from stocker_execution.bar_cache import BarCache
-from stocker_execution.config import MARKETS, FuturesConfig, Market
+from stocker_execution.config import (
+    MARKETS,
+    OPTION_METADATA_MAX_AGE_SECONDS,
+    QUOTE_MAX_AGE_SECONDS,
+    ROLLING_WINDOW_SECONDS,
+    SUBSCRIPTION_LIMIT,
+    FuturesConfig,
+    Market,
+)
 from stocker_execution.contracts import (
     cost_estimate,
     deadline_instant,
@@ -412,7 +420,7 @@ class DataService:
     async def _subscribe(
         self, kind: str, arguments: dict[str, Any], target: str, old: str | None
     ) -> str:
-        if len(self.subscriptions) >= 32 and old is None:
+        if len(self.subscriptions) >= SUBSCRIPTION_LIMIT and old is None:
             raise SaxoError("SUBSCRIPTION_LIMIT")
         paths = {
             "PRICE": "/trade/v1/prices/subscriptions",
@@ -436,7 +444,7 @@ class DataService:
         try:
             result = await self.client.request("POST", paths[kind], body=body)
         except Exception:
-            self.pending_bytes -= sum(len(json.dumps(m)) for m in self.pending.pop(ref, []))
+            self.drop_pending(ref)
             raise
         self.subscriptions[ref] = {
             "kind": kind,
@@ -454,7 +462,7 @@ class DataService:
             if not isinstance(snapshot, dict):
                 await self.client.request("DELETE", paths[kind] + f"/{self.context}/{ref}")
                 self.subscriptions.pop(ref, None)
-                self.pending_bytes -= sum(len(json.dumps(m)) for m in self.pending.pop(ref, []))
+                self.drop_pending(ref)
                 raise SaxoError("PRICE_SNAPSHOT_MISSING")
             price, identity = self.price_target(target)
             price.refresh_ms = result.get("RefreshRate")
@@ -473,7 +481,7 @@ class DataService:
         elif kind == "BALANCE":
             if arguments["AccountKey"] != self.client.oauth.account_key:
                 self.balance_problem = "BALANCE_ACCOUNT_CHANGED"
-                self.pending_bytes -= sum(len(json.dumps(m)) for m in self.pending.pop(ref, []))
+                self.drop_pending(ref)
                 raise SaxoError("BALANCE_ACCOUNT_CHANGED")
             self.receive_balance(snapshot, time.time(), snapshot=True)
         elif kind == "SESSION":
@@ -481,11 +489,14 @@ class DataService:
         else:
             self.markets[target].option_board = snapshot or {}
             self.record_board(self.markets[target], snapshot or {}, time.time())
-        pending = self.pending.pop(ref, [])
-        self.pending_bytes -= sum(len(json.dumps(m)) for m in pending)
-        for message in pending:
+        for message in self.drop_pending(ref):
             await self.receive(message["message"], message["receipt"])
         return ref
+
+    def drop_pending(self, ref: str) -> list[dict[str, Any]]:
+        pending = self.pending.pop(ref, [])
+        self.pending_bytes -= sum(len(json.dumps(m)) for m in pending)
+        return pending
 
     def price_target(self, target: str) -> tuple[PriceState, dict[str, Any] | None]:
         if target == "FX":
@@ -614,7 +625,7 @@ class DataService:
     async def option_conditions(self, identity: dict[str, Any], raw: dict[str, Any]) -> None:
         uic, at = identity["uic"], time.time()
         prior = self.option_references.get(uic)
-        if prior and 0 <= at - prior["received_at"] < 900:
+        if prior and 0 <= at - prior["received_at"] < OPTION_METADATA_MAX_AGE_SECONDS:
             return
         entry: dict[str, Any] = {
             "received_at": at,
@@ -883,7 +894,7 @@ class DataService:
         try:
             if reference.get("problem"):
                 raise ValueError(reference["problem"])
-            if not 0 <= at - reference.get("received_at", 0) <= 900:
+            if not 0 <= at - reference.get("received_at", 0) <= OPTION_METADATA_MAX_AGE_SECONDS:
                 raise ValueError("CONTRACT_OPTION_COSTS_STALE_OR_UNAVAILABLE")
             q = executable_quote(
                 identity, price.value or {}, price.receipt, datetime.fromtimestamp(at, UTC)
@@ -921,13 +932,14 @@ class DataService:
             "sizes": price.sizes(),
             "size_status": {
                 side: "OBSERVED"
-                if price.size_times.get(side) is not None and 0 <= at - price.size_times[side] <= 5
+                if price.size_times.get(side) is not None
+                and 0 <= at - price.size_times[side] <= QUOTE_MAX_AGE_SECONDS
                 else "STALE_OR_MISSING"
                 for side in ("Bid", "Ask")
             },
             "size_received_at": dict(price.size_times),
             "quote_status": "STALE_OR_MISSING"
-            if price.receipt is None or not 0 <= at - price.receipt <= 5
+            if price.receipt is None or not 0 <= at - price.receipt <= QUOTE_MAX_AGE_SECONDS
             else "OBSERVED",
             "analytics": option_context.view(price.analytics, at),
             "chain_analytics": option_context.view(
@@ -1043,7 +1055,7 @@ class DataService:
     async def refresh_option_metadata(self) -> None:
         for uic, (identity, _) in list(self.options.items()):
             prior = self.option_references.get(uic, {})
-            if time.time() - prior.get("received_at", 0) < 900:
+            if time.time() - prior.get("received_at", 0) < OPTION_METADATA_MAX_AGE_SECONDS:
                 continue
             try:
                 raw = await self.client.request(
@@ -1117,7 +1129,7 @@ class DataService:
                 continue
             if self.recorder.requires_subscription(instrument, time.time()):
                 continue
-            if not window.rows or window.rows[-1][0] < time.time() - 900:
+            if not window.rows or window.rows[-1][0] < time.time() - ROLLING_WINDOW_SECONDS:
                 self.recorder.windows.pop(instrument)
 
     async def unsubscribe_option(self, uic: int) -> None:

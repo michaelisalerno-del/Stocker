@@ -32,7 +32,8 @@ runtime using the same existing release process.
    If obligations are present, ambiguous or inaccessible, **defer stopping that manager and Gateway**;
    retain their position management and report the cutover block. Never liquidate or globally cancel.
 3. Back up current unit files, timer/cron/supervisor definitions, proxy config, protected app configs,
-   OAuth/legacy credentials and databases using the existing SQLite backup API/process. Preserve
+   OAuth/legacy credentials and databases using the SQLite backup API (for an SLRNO ledger,
+   `scripts/ledger_backup.py --database … --config … --output <new dir>`). Preserve
    ownership/mode and record SHA-256 manifests. Keep all original ledgers/data with their provenance.
    Do not replace a live ledger with an old backup after new activity.
 4. Stage this committed release using the established archive/copy process, then

@@ -160,8 +160,10 @@ use a local fixture server. These measurements do not establish production laten
 No operator action has been performed. For a separately authorized future rollout:
 
 1. Keep execution disabled/unarmed. Verify the selected environment and ledger; use the established
-   deployment procedure. Take a consistent SQLite backup including WAL state (SQLite backup API,
-   or a cleanly stopped ledger), plus the configuration. Do not copy only a live main database file.
+   deployment procedure. Take a consistent SQLite backup including WAL state plus the configuration:
+   `scripts/ledger_backup.py --database <ledger> --config <yaml> --output <new dir>` uses the SQLite
+   backup API, checks integrity/foreign keys and records row counts and hashes (`--verify <dir>`
+   rechecks a bundle). Do not copy only a live main database file.
 2. If a custom configuration explicitly pins `max_premium_risk_gbp: 10`, remove that override or set
    it to `50`. The shipped example inherits 50. Leave `entry_deadline_seconds: 20`, four slots,
    one contract, market selections, mappings, costs, credentials and recording gates unchanged.

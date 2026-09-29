@@ -115,6 +115,11 @@
       "original_path": "scripts/research_smoke_local.sh",
       "archive": "research/operational-history/parked-ibkr-runtime/scripts__research_smoke_local.sh.txt",
       "sha256": "8a68151ecf8af46dd2cbec8fe97149468e0c6bf3d008fcd4bea8e7088f2878f1"
+    },
+    {
+      "original_path": "scripts/backup_state.py",
+      "archive": "research/operational-history/parked-ibkr-runtime/scripts__backup_state.py.txt",
+      "sha256": "4b16d39c83f7536b95a7655d7188fa5eb13b162b36d58b103db2b3ad0ef1f20f"
     }
   ]
 }

@@ -141,6 +141,9 @@ bundles the consistent database snapshot with runs/IBKR configuration, any refer
 named-universe snapshot, frozen artifacts and SHA-256 manifest. Keep control edits
 quiescent during capture; config changes detected during copying fail the operation.
 
+The IBKR-era helper is archived as `parked-ibkr-runtime/scripts__backup_state.py.txt`
+(SLRNO ledgers use `scripts/ledger_backup.py`).
+
 ```bash
 .venv/bin/python scripts/backup_state.py \
   --database /var/lib/stocker/v1/runtime.sqlite3 \

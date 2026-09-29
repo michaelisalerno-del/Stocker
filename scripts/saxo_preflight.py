@@ -13,9 +13,26 @@ from stocker_execution.store import Store
 
 
 async def preflight(config: Path, database: Path, seconds: int) -> dict:
-    runtime = Runtime(load(config), Store(database))
-    runtime.owner = (runtime.root / runtime.config.data_environment / "data.owner.lock").open("a")
-    fcntl.flock(runtime.owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    loaded = load(config)
+    # Take the service's environment ownership lock before opening the ledger, so a
+    # refused run cannot migrate, audit or otherwise write the live ledger.
+    lock = database.resolve().parent / loaded.data_environment / "data.owner.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    owner = lock.open("a")
+    try:
+        fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        owner.close()
+        raise SystemExit("DATA_OWNER_LOCK_HELD: stop the SLRNO service first") from None
+    try:
+        runtime = Runtime(loaded, Store(database))
+    except BaseException:
+        owner.close()
+        raise
+    runtime.owner = owner
+    if runtime.root != lock.parent.parent:
+        await runtime.stop()
+        raise SystemExit("DATA_OWNER_LOCK_PATH_MISMATCH")
     await runtime.recorder.start()
     # Deliberately omit the execution manager and trigger loop, even if this
     # ledger contains obligations. Their owning runtime must keep managing them.

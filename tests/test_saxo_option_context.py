@@ -149,7 +149,7 @@ def test_partial_pretrigger_and_metadata_are_shared_not_repeated(tmp_path):
     assert len(r.active) == 1
     assert capture["events"][1]["prehistory_seconds"]["option"] == 20
     r.ingest("option", "UPDATE", {"Quote": {"Bid": 2}}, 131)
-    rows = [read_row(b) for _, b in r.windows["option"].rows]
+    rows = [read_row(b) for _, b, _ in r.windows["option"].rows]
     assert all(row["metadata_version"] == version for row in rows)
     assert "ContractSize" not in json.dumps(rows)
     sequences = [

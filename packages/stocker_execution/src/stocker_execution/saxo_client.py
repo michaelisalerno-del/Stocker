@@ -28,6 +28,7 @@ READ_PATHS = (
     r"/cs/v1/audit/orderactivities",
     r"/ens/v1/activities",
 )
+REST_QUEUE_LIMIT = 32  # requests waiting for the pacer before new ones are refused
 SUBSCRIPTIONS = (
     "/port/v1/balances/subscriptions",
     "/trade/v1/prices/subscriptions",
@@ -121,7 +122,7 @@ class SaxoClient:
             )
         ):
             raise SaxoError("ONLY_LONG_FUTURES_OPTION_ORDERS")
-        if self.waiters >= 32:
+        if self.waiters >= REST_QUEUE_LIMIT:
             raise SaxoError("REST_QUEUE_LIMIT")
         self.waiters += 1
         try:

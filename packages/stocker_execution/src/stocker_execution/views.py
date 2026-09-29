@@ -33,13 +33,6 @@ def quote_current(state: "MarketState", at: float) -> bool:
     )
 
 
-# Saxo's price-subscription Greeks.MidVol is an annual fraction: a live SIM probe on
-# 2026-09-29 read 0.589 (CL) and 0.523 (NG) at the money against chain ImpliedVolatility
-# of 50.5 and 55.3 (percent). The chain's per-strike MidVolatility is also a fraction; see
-# FuturesConfig.provider_volatility_scale.
-PRICE_MIDVOL_IS_ANNUAL_FRACTION = True
-
-
 def price_problem(price: "PriceState", at: float) -> str:
     """The same check a clock decision applies: fresh, real-time, usable price."""
     if price.problem:
@@ -55,12 +48,14 @@ def quote_problem(state: "MarketState", at: float) -> str:
     return price_problem(state.price, at)
 
 
-def gates(runtime: "Runtime", market: str, state: "MarketState", at: float) -> list[dict[str, Any]]:
+def gates(
+    runtime: "Runtime", market: str, state: "MarketState", at: float, paused: bool
+) -> list[dict[str, Any]]:
     """Ordered readiness checks, mirroring the gates a clock decision applies."""
     oauth = runtime.data.client.oauth.status
     candidate = state.candidate_uic if state.candidate_uic in runtime.data.options else None
     costs = runtime.data.option_view(candidate, at)["costs"] if candidate else {}
-    execution = "ENTRIES_PAUSED" if runtime.pause else runtime.broker.entry_reason()
+    execution = "ENTRIES_PAUSED" if paused else runtime.broker.entry_reason()
     rows = [
         (
             "saxo",
@@ -117,8 +112,17 @@ def setup(runtime: "Runtime") -> list[dict[str, Any]]:
         for s in states
         if s.price.value
     ]
-    realtime = bool(delays) and all(d == 0 for d in delays)
-    delayed = max((d for d in delays if isinstance(d, (int, float))), default=None)
+    known = [d for d in delays if isinstance(d, (int, float))]
+    realtime = bool(delays) and len(known) == len(delays) and all(d == 0 for d in known)
+    delayed = max(known, default=None)
+    realtime_detail = (
+        f"Saxo reports quotes delayed by {delayed:g} min; the strategy needs real-time "
+        "exchange data (entitlement or LIVE data with INTERNAL_PAPER)"
+        if delayed
+        else "Saxo did not report the quote delay; unknown delay blocks entries"
+        if delays
+        else "No futures quote received yet"
+    )
     oauth = data.client.oauth.status
     items = [
         ("oauth", "Saxo login", oauth == "AUTHENTICATED", oauth, False),
@@ -137,16 +141,7 @@ def setup(runtime: "Runtime") -> list[dict[str, Any]]:
             data.fx.problem or "Awaiting the GBPUSD quote",
             False,
         ),
-        (
-            "realtime",
-            "Real-time market data",
-            realtime,
-            f"Saxo reports quotes delayed by {delayed:g} min; the strategy needs real-time "
-            "exchange data (entitlement or LIVE data with INTERNAL_PAPER)"
-            if delayed
-            else "No futures quote received yet",
-            False,
-        ),
+        ("realtime", "Real-time market data", realtime, realtime_detail, False),
         (
             "contracts",
             f"Futures contracts verified {verified}/5",
@@ -336,28 +331,29 @@ def timeline(
     return steps
 
 
-_book_cache: dict[str, tuple[int, float, dict[str, Any]]] = {}
+_book_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
-def book_rows(recorder: "Recorder", instrument: str) -> tuple[int, float | None, list[bytes]]:
+def book_rows(recorder: "Recorder", instrument: str) -> tuple[float | None, list[bytes]]:
     """Snapshot the rolling window on the event loop; decoding happens off-loop."""
     window = recorder.windows.get(instrument)
     if window is None:
-        return 0, None, []
-    return window.sequence, window.identity.get("tick_size"), [b for _, b in window.rows]
+        return None, []
+    return window.identity.get("tick_size"), [b for _, b, _ in window.rows]
 
 
 def book_series(
-    sequence: int, tick: float | None, blobs: list[bytes], instrument: str, bucket: int = 5
+    tick: float | None, blobs: list[bytes], instrument: str, bucket: int = 5
 ) -> dict[str, Any]:
     """Downsampled sampled-book history from the recorder's own rolling rows.
 
     Each bucket keeps the last observation inside it. Levels are tick indices and sizes
     exactly as recorded by book_flow; no cancellations, trades or gaps are inferred.
+    A five-second series is served for five seconds: the window changes with every message.
     """
     cached = _book_cache.get(instrument)
-    if cached and cached[0] == sequence and time.monotonic() - cached[1] < 5:
-        return cached[2]
+    if cached and time.monotonic() - cached[0] < 5:
+        return cached[1]
     buckets: dict[int, dict[str, Any]] = {}
     for blob in blobs:
         record = json.loads(zlib.decompress(blob))
@@ -382,7 +378,7 @@ def book_series(
         "series": [buckets[k] for k in sorted(buckets)],
         "semantics": "Sampled Saxo depth, last observation per bucket; not an execution tape",
     }
-    _book_cache[instrument] = (sequence, time.monotonic(), result)
+    _book_cache[instrument] = (time.monotonic(), result)
     return result
 
 
@@ -485,7 +481,11 @@ def iv_spread(option: dict[str, Any], rv15: float | None) -> dict[str, Any]:
     """Implied (verified price Greeks.MidVol) minus the frozen model's sigma. Context only."""
     raw = ((option.get("analytics") or {}).get("Greeks.MidVol") or {}).get("value")
     sigma = model_sigma(rv15)
-    iv = _number(raw) if PRICE_MIDVOL_IS_ANNUAL_FRACTION else None
+    # Saxo's price-subscription Greeks.MidVol is an annual fraction: a live SIM probe on
+    # 2026-09-29 read 0.589 (CL) and 0.523 (NG) at the money against chain ImpliedVolatility
+    # of 50.5 and 55.3 (percent). The chain's per-strike MidVolatility is also a fraction; see
+    # FuturesConfig.provider_volatility_scale.
+    iv = _number(raw)
     return {
         "implied_volatility": iv,
         "model_sigma": sigma,

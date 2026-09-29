@@ -9,7 +9,6 @@ saxo:
 contracts: {} # Populate only from this environment's returned ContractFutures reference data.
 mappings: {} # Real product/expiry adaptation approval remains required.
 recorder:
-  pre_event_minutes: 15
   minimum_post_event_minutes: 60
   post_close_minutes: 5
   rolling_max_bytes: 33554432

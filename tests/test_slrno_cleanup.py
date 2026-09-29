@@ -242,7 +242,7 @@ def test_balance_subscription_is_shared_scoped_and_never_arms(tmp_path, environm
 def test_derived_flow_matches_raw_replay_and_accounting_is_cached(tmp_path, monkeypatch):
     from stocker_execution.book_flow import observe
     from stocker_execution.config import RecorderConfig
-    from stocker_execution.recorder import Recorder, apply, packed, read_row
+    from stocker_execution.recorder import Recorder, apply, read_row
 
     recorder = Recorder(RecorderConfig(), tmp_path)
     recorder.register("future", IDENTITY)
@@ -258,10 +258,8 @@ def test_derived_flow_matches_raw_replay_and_accounting_is_cached(tmp_path, monk
         history = history[-512:]
     w = recorder.windows["future"]
     assert len(w.flow_history) <= 62
-    for name, size in w.state_bytes.items():
-        assert size == 8 * len(packed(getattr(w, name)))
     rebuilt = w.checkpoint
-    for _, blob in w.rows:
+    for _, blob, _ in w.rows:
         rebuilt = apply(rebuilt, read_row(blob))
     assert rebuilt == w.current
 

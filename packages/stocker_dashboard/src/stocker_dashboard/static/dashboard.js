@@ -12,16 +12,21 @@ const page = route === "opportunities" ? "trades" : route === "markets" ? "overv
 let selectedMarket = sessionStorage.getItem("slrno-market") || "CL";
 if (!markets.includes(selectedMarket)) selectedMarket = "CL";
 let offset = 0, paused = false, pending = null, selectedIdentity = "";
-let detailRequest = null, controlPending = false, lastRefresh = null, accountSnapshot = null;
+let detailRequest = null, detailSignature = null, controlPending = false, lastRefresh = null, accountSnapshot = null;
 let pageSize = 100; // replaced by the server's page_size
 let limits = {};
 let serverOffset = 0, nextClock = null; // countdowns use server time, not the browser clock
 const serverNow = () => Date.now() + serverOffset;
 const chartGeometry = new Map(), depthExpiry = new Map(), quoteReceipts = new Map(), flowExpiry = new Map();
 
-const money = (v) => v == null ? "Unavailable" : new Intl.NumberFormat("en-GB", {style: "currency", currency: "GBP"}).format(v);
-const time = (v, zone = "Europe/London") => v ? new Intl.DateTimeFormat("en-GB", {timeZone: zone, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit"}).format(new Date(v)) : "—";
-const hhmm = (v, zone = "America/New_York") => v ? new Intl.DateTimeFormat("en-GB", {timeZone: zone, hour: "2-digit", minute: "2-digit"}).format(new Date(v)) : "—";
+// Formatters are built once: the pages format hundreds of values per refresh.
+const GBP = new Intl.NumberFormat("en-GB", {style: "currency", currency: "GBP"});
+const NATIVE = new Intl.NumberFormat("en-GB", {maximumFractionDigits: 2, minimumFractionDigits: 2});
+const LONDON = new Intl.DateTimeFormat("en-GB", {timeZone: "Europe/London", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit"});
+const NEW_YORK = new Intl.DateTimeFormat("en-GB", {timeZone: "America/New_York", hour: "2-digit", minute: "2-digit"});
+const money = (v) => v == null ? "Unavailable" : GBP.format(v);
+const time = (v) => v ? LONDON.format(new Date(v)) : "—";
+const hhmm = (v) => v ? NEW_YORK.format(new Date(v)) : "—";
 const numeric = (v, suffix = "") => typeof v === "number" && Number.isFinite(v) ? `${Number(v.toFixed(4))}${suffix}` : "UNAVAILABLE";
 const text = (id, v) => {
   const el = $(id), next = String(v ?? "—");
@@ -42,6 +47,7 @@ const explanations = {
   ENTRIES_PAUSED: "New entries are paused",
   GC_LISTED_EXECUTION_RULE_UNAPPROVED: "Gold is monitor-only; execution is not approved",
   ORDER_STATUS_UNCERTAIN: "Broker order status needs reconciliation",
+  RESERVED: "Reserved · entry order pending",
   EXPOSURE_REQUIRES_RECONCILIATION: "Exposure awaiting reconciliation",
   OPEN: "Open · exposure reconciled with the broker",
   AUTHENTICATION_REQUIRED: "Connect the configured Saxo account",
@@ -151,8 +157,7 @@ function marketCard(m) {
       </details>
       <details id="flow-detail-${m}"><summary>Coverage, fields and observation times</summary><pre id="flow-meta-${m}"></pre></details>
     </section>
-    <p class="diagnostic" id="diagnostic-${m}"></p>
-    <details><summary>Contract, rule &amp; raw state</summary><pre id="details-${m}"></pre></details>`;
+    <details id="raw-state-${m}"><summary>Contract, rule &amp; raw state</summary><pre id="details-${m}"></pre></details>`;
 }
 for (const m of markets) {
   const card = document.createElement("article");
@@ -222,7 +227,7 @@ function ticket(m, {held, uic, o, context}) {
   const iv = o?.analytics?.["Greeks.MidVol"]?.value, sigma = m.model_sigma;
   text(`ticket-iv-${m.market}`, typeof iv === "number" ? `Implied ${(100 * iv).toFixed(1)}% vs frozen model σ ${typeof sigma === "number" ? (100 * sigma).toFixed(1) + "%" : "unavailable"}${typeof sigma === "number" ? ` · ${iv - sigma >= 0 ? "+" : ""}${(100 * (iv - sigma)).toFixed(1)} pts` : ""}` : "Implied volatility not reported");
   text(`ticket-cutoff-${m.market}`, o ? `Last trading ${id.last_trade_at ? hhmm(id.last_trade_at) + " NY" : "UNVERIFIED"} · exit ${held?.exit_at ? hhmm(held.exit_at) + " NY" : "clock + 60 min"}` : "—");
-  const ceiling = limits.per_trade_gbp || 50, total = cost.total_gbp;
+  const ceiling = limits.per_trade_gbp, total = cost.total_gbp;
   const fill = $(`ticket-fill-${m.market}`);
   if (fill) {
     const width = `${Math.min(100, Math.max(0, 100 * (total || 0) / ceiling)).toFixed(1)}%`;
@@ -414,8 +419,8 @@ function heatmap(m, data) {
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   canvas.dataset.columns = String(rows.length);
-  if (!rows.length) { note(data.status === "CONTRACT_NOT_VERIFIED" ? "Needs a verified futures contract" : "No retained depth samples yet"); return; }
   const ticks = rows.flatMap((r) => [...r.bid, ...r.ask].map(([t]) => t));
+  if (!ticks.length) { note(data.status === "CONTRACT_NOT_VERIFIED" ? "Needs a verified futures contract" : "No retained depth samples yet"); return; }
   const last = rows.at(-1), center = ((last.bid[0]?.[0] ?? ticks[0]) + (last.ask[0]?.[0] ?? ticks[0])) / 2;
   const lo = Math.max(Math.min(...ticks), Math.floor(center - 20)), hi = Math.min(Math.max(...ticks), Math.ceil(center + 20));
   const levels = Math.max(1, hi - lo + 1), w = canvas.width / rows.length, h = canvas.height / levels;
@@ -460,7 +465,7 @@ function renderStatus(s) {
   text("global-warning", exceptions || s.problem || s.l2_recording?.paused_reason || "");
   text("auth-state", `OAuth: ${s.oauth || "UNVERIFIED"}${s.oauth_problem ? ` (${s.oauth_problem})` : ""} · stream: ${s.connected ? "connected" : "disconnected"} · session: ${s.session?.TradeLevel || "UNVERIFIED"}`);
   const alerts = s.alerts || {};
-  text("events-state", `Saxo order/position events: ${display(s.activity_events || "NOT_SUBSCRIBED").toLowerCase()}${s.closed_positions_problem ? ` · closed positions: ${s.closed_positions_problem}` : ""}`);
+  text("events-state", `Saxo order/position events: ${display(s.activity_events || "NOT_SUBSCRIBED").toLowerCase()}${s.closed_positions_problem ? ` · closed positions: ${s.closed_positions_problem}` : ""}${s.calendar_problem ? ` · event calendar: ${s.calendar_problem}` : ""}`);
   text("alerts-state", `Alerts: ${alerts.enabled ? `enabled · ${alerts.sent || 0} sent${alerts.last_error ? ` · last error ${alerts.last_error}` : ""}` : alerts.problem ? display(alerts.problem) : "not configured"}${(alerts.active || []).length ? ` · active: ${alerts.active.join(" · ")}` : ""}`);
   if (s.setup) renderSetup(s.setup);
   for (let i = 0; i < 4; i++) {
@@ -487,7 +492,8 @@ function renderSetup(items) {
     if (label.textContent !== labelText) label.textContent = labelText;
     if (detail.textContent !== item.detail) detail.textContent = item.detail;
   });
-  if (route === "overview" && done === required.length) show("setup", false);
+  // The overview hides a completed checklist and shows it again if a step regresses.
+  if (route === "overview") show("setup", done !== required.length);
 }
 function render(d) {
   const s = d.system, p = d.pnl || {skip_reasons: {}};
@@ -548,26 +554,22 @@ function render(d) {
     smileChart(m);
     const trades = m.trades || [];
     text(`position-${m.market}`, trades.length ? trades.map((t) => `${display(t.state)} · ${t.quantity} contract · exit ${hhmm(t.exit_at)} NY${t.quantity ? ` · bid P&L ${t.valuation.fresh ? money(t.valuation.value_gbp) : "unavailable"}` : ""}`).join(" | ") : "No pending or open paper trade");
-    text(`diagnostic-${m.market}`, m.diagnostic);
-    if ($(`details-${m.market}`).closest("details").open) text(`details-${m.market}`, JSON.stringify({...m.details, l1: m.l1, l2: m.l2, recorder: m.recorder, capabilities: m.capabilities, gates: m.gates, chart_context: m.chart_context, sessions_today: m.sessions_today, trades: m.trades}, null, 2));
+    if ($(`raw-state-${m.market}`).open) text(`details-${m.market}`, JSON.stringify({...m.details, l1: m.l1, l2: m.l2, recorder: m.recorder, capabilities: m.capabilities, gates: m.gates, chart_context: m.chart_context, sessions_today: m.sessions_today, trades: m.trades}, null, 2));
     chart(m);
   }
 }
 function renderSystem(d) {
   render({system: d});
   const a = d.market_data || {}, l = d.l2_recording || {};
-  text("api-lines", `${a.owned_lines ?? "—"} / ${a.app_budget ?? 32} subscriptions`);
+  text("api-lines", `${a.owned_lines ?? "—"} / ${a.app_budget ?? "—"} subscriptions`);
   text("api-allowance", `Saxo session: ${d.session?.TradeLevel || "UNVERIFIED"}`);
-  text("api-external", "Session upgrade is explicit; it can downgrade another Saxo application");
   text("api-depth", `${(d.markets || []).filter((m) => m.capabilities?.l2?.status === "L2_AVAILABLE").length} / 5 markets with received depth`);
-  text("api-assignments", "CL · GC · NG · NQ · SI · independent server subscriptions");
-  text("api-options", `${a.option_lines ?? 0} / ${a.option_budget || 16} regular option quote subscriptions`);
-  text("api-pacing", JSON.stringify(a.rate_limits || {}));
-  text("api-queue", `${a.rest_queue ?? 0} / 32 queued REST requests`);
+  text("api-options", `${a.option_lines ?? 0} / ${a.option_budget ?? "—"} regular option quote subscriptions`);
+  text("api-pacing", Object.entries(a.rate_limits || {}).map(([k, v]) => `${k.replace("x-ratelimit-", "")} ${v}`).join(" · ") || "No rate-limit headers received yet");
+  text("api-queue", `${a.rest_queue ?? 0} / ${a.rest_queue_limit ?? "—"} queued REST requests`);
   text("api-storage", `${((l.disk_bytes || 0) / 1048576).toFixed(1)} / ${((l.disk_limit || 0) / 1048576).toFixed(0)} MiB stored`);
   text("api-gaps", `${l.recording_gaps ?? 0} recording gaps · ${l.writer_queue ?? 0} queued batches`);
-  text("api-error", l.paused_reason || a.errors?.at(-1)?.message || "No reported entitlement or capacity errors");
-  text("provider-status", "IBKR PARKED · FMP INACTIVE · EODHD INACTIVE");
+  text("api-error", l.paused_reason || "No reported recording problem");
   for (const m of d.markets || []) text(`capability-${m.market}`, `${m.market} · ${display(m.problem) || "Connected"}`);
   if ($("system-detail").open) text("system-json", JSON.stringify(d, null, 2));
 }
@@ -597,7 +599,7 @@ function renderAccount(a) {
   accountSnapshot = a;
   text("account", `${a.label} · ${a.account} · ${a.currency || "Currency unavailable"}`);
   text("account-note", a.connection_note);
-  const native = (v) => typeof v === "number" && a.currency ? `${new Intl.NumberFormat("en-GB", {maximumFractionDigits: 2, minimumFractionDigits: 2}).format(v)} ${a.currency}` : "Unavailable";
+  const native = (v) => typeof v === "number" && a.currency ? `${NATIVE.format(v)} ${a.currency}` : "Unavailable";
   text("account-value", native(a.total_value));
   text("account-cash", native(a.cash_balance));
   text("account-available", native(a.cash_available_for_trading));
@@ -636,7 +638,7 @@ async function history(signal) {
   rows("history", d.rows, [(r) => time(r.signal_at), (r) => r.market, (r) => display(r.state || r.decision), (r) => display(r.reason) || "—", (r) => r.rule_version], "id", (tr, r) => {
     const b = document.createElement("button");
     b.textContent = "Inspect";
-    b.onclick = () => showDetail(r.id).catch(reportError);
+    b.onclick = () => { detailSignature = JSON.stringify(r); showDetail(r.id).catch(reportError); };
     tr.append(document.createElement("td"));
     tr.lastChild.append(b);
   });
@@ -644,7 +646,12 @@ async function history(signal) {
   $("prev").disabled = offset === 0;
   $("next").disabled = !d.has_more;
   text("page-number", `Page ${1 + offset / pageSize}`);
-  if (selectedIdentity && $("trade-detail").open) await showDetail(selectedIdentity, false);
+  // Evidence is refetched only when the selected row's summary changed.
+  const selected = JSON.stringify(d.rows.find((r) => r.id === selectedIdentity) ?? null);
+  if (selectedIdentity && $("trade-detail").open && selected !== detailSignature) {
+    detailSignature = selected;
+    await showDetail(selectedIdentity, false);
+  }
 }
 function renderTimeline(steps) {
   const list = $("trade-timeline");
@@ -682,7 +689,7 @@ async function refresh(force = false) {
     if (page === "trades") await history(controller.signal);
     else {
       let path = "/api/overview";
-      if (route === "markets") path = `/api/market/${selectedMarket}?diagnostics=${!!$(`card-${selectedMarket}`).querySelector("details[open]")}`;
+      if (route === "markets") path = `/api/market/${selectedMarket}?diagnostics=${$(`raw-state-${selectedMarket}`).open}`;
       if (page === "execution") path = "/api/execution";
       if (page === "system") path = `/api/system?diagnostics=${$("system-detail").open}`;
       const d = await request(path, {signal: controller.signal});
@@ -732,7 +739,7 @@ $("next").onclick = () => { offset += pageSize; refresh(true); };
 document.addEventListener("visibilitychange", () => { if (document.hidden) { pending?.abort(); detailRequest?.abort(); } else refresh(true); });
 document.querySelectorAll("details").forEach((el) => el.addEventListener("toggle", () => {
   if (el.id === "account-detail") { if (accountSnapshot) renderAccount(accountSnapshot); }
-  else if (el.open && el.id !== "setup-detail") refresh(true);
+  else if (el.open && el.id !== "setup-detail" && el.id !== "trade-detail") refresh(true); // Inspect fetches its own evidence
 }));
 function countdown() {
   if (!nextClock) return;
@@ -749,7 +756,7 @@ setInterval(() => {
   if (lastRefresh && Date.now() - Date.parse(lastRefresh) > 15000) text("last-refresh", `Stale · last refresh ${time(lastRefresh)}`);
   for (const [m, expires] of depthExpiry) if (expires && at > expires) depth(m, {status: "L2_UNAVAILABLE", reason: "SUBSCRIPTION_HEALTH_EXPIRED"});
   for (const [m, expires] of flowExpiry) if (expires && at > expires) bookFlow(m, {status: "UNAVAILABLE", quality_flags: ["SUBSCRIPTION_HEALTH_EXPIRED"]});
-  for (const [m, received] of quoteReceipts) if (!received || at - received > 5000) text(`l1-${m}`, "L1 STALE OR MISSING");
+  for (const [m, received] of quoteReceipts) if (!received || at - received > limits.quote_max_age_seconds * 1000) text(`l1-${m}`, "L1 STALE OR MISSING");
 }, 1000);
 setInterval(() => refresh(), 5000);
 

@@ -32,8 +32,8 @@ from stocker_execution.event_calendar import EventCalendar, load_calendar
 from stocker_execution.recorder import Recorder
 from stocker_execution.rules import NY, clocks, eligibility, next_clock, opportunity, prior_rv
 from stocker_execution.saxo_auth import OAuth
-from stocker_execution.saxo_client import SaxoClient
-from stocker_execution.saxo_data import DataService
+from stocker_execution.saxo_client import REST_QUEUE_LIMIT, SaxoClient
+from stocker_execution.saxo_data import DataService, MarketState
 from stocker_execution.store import Store, encode
 
 log = logging.getLogger(__name__)
@@ -156,6 +156,7 @@ class Runtime:
                 "per_trade_gbp": MAX_PREMIUM_RISK_GBP,
                 "slots": MAX_OPEN_POSITIONS,
                 "allocation_gbp": MAX_SIMULTANEOUS_ENTRY_RISK_GBP,
+                "quote_max_age_seconds": QUOTE_MAX_AGE_SECONDS,
             },
             "data_environment": self.config.data_environment,
             "execution_mode": self.config.execution_mode,
@@ -191,6 +192,7 @@ class Runtime:
                 "candidate_window": self.config.option_candidate_window,
                 "rate_limits": self.data.client.rate_headers,
                 "rest_queue": self.data.client.waiters,
+                "rest_queue_limit": REST_QUEUE_LIMIT,
             },
             "l2_recording": self.recorder.status(),
             "bar_storage": {
@@ -202,46 +204,52 @@ class Runtime:
             **self.store.capacity(),
         }
 
+    def block_reason(self, state: MarketState, paused: bool) -> str:
+        """The first display gate a clock decision would hit; the decision re-checks itself."""
+        reason = state.problem or state.history_problem
+        if not reason and state.market not in self.config.mappings:
+            reason = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
+        return reason or ("ENTRIES_PAUSED" if paused else self.broker.entry_reason())
+
+    def market_card(
+        self, state: MarketState, at: datetime, trades: list[dict[str, Any]], paused: bool
+    ) -> dict[str, Any]:
+        """The fields the overview and market pages must agree on."""
+        market, reason = state.market, self.block_reason(state, paused)
+        return {
+            "market": market,
+            "contract": (state.identity or {}).get("symbol"),
+            "strategy_state": trades[0]["state"]
+            if trades
+            else "MONITOR_ONLY"
+            if market == "GC" and reason
+            else "BLOCKED"
+            if reason
+            else "MONITORING",
+            "block_reason": reason,
+            "entry_enabled": not reason,
+            "data_status": "CURRENT"
+            if views.quote_current(state, at.timestamp())
+            else "STALE_OR_MISSING",
+            "last_receipt": state.price.receipt,
+            "candidate_uic": state.candidate_uic,
+            "trades": trades,
+            "next_time": (state.boundary_clock or next_clock(at)).isoformat(),
+            "pending_data": state.boundary_clock is not None,
+            "gates": views.gates(self, market, state, at.timestamp(), paused),
+        }
+
     def overview(self) -> dict[str, Any]:
         trades = [self.trade_view(t) for t in self.store.active()]
-        cards = []
-        at = now()
+        at, paused = now(), self.pause
         clock = next_clock(at)
-        for market, state in self.markets.items():
-            reason = state.problem or state.history_problem
-            if not reason and market not in self.config.mappings:
-                reason = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
-            reason = reason or ("ENTRIES_PAUSED" if self.pause else self.broker.entry_reason())
-            receipt = state.price.receipt
-            current = (
-                receipt is not None
-                and 0 <= at.timestamp() - receipt <= QUOTE_MAX_AGE_SECONDS
-                and not state.price.problem
-            )
-            market_trades = [t for t in trades if t["market"] == market]
-            cards.append(
-                {
-                    "market": market,
-                    "contract": (state.identity or {}).get("symbol"),
-                    "strategy_state": market_trades[0]["state"]
-                    if market_trades
-                    else "MONITOR_ONLY"
-                    if market == "GC" and reason
-                    else "BLOCKED"
-                    if reason
-                    else "MONITORING",
-                    "block_reason": reason,
-                    "entry_enabled": not reason,
-                    "data_status": "CURRENT" if current else "STALE_OR_MISSING",
-                    "last_receipt": receipt,
-                    "candidate_uic": state.candidate_uic,
-                    "trades": market_trades,
-                    "next_time": (state.boundary_clock or clock).isoformat(),
-                    "pending_data": state.boundary_clock is not None,
-                    "gates": views.gates(self, market, state, at.timestamp()),
-                    "events": self.calendar.near(market, clock) if self.calendar else [],
-                }
-            )
+        cards = [
+            {
+                **self.market_card(state, at, [t for t in trades if t["market"] == market], paused),
+                "events": self.calendar.near(market, clock) if self.calendar else [],
+            }
+            for market, state in self.markets.items()
+        ]
         pnl = self.store.economics()
         pnl = {
             **pnl,
@@ -278,7 +286,6 @@ class Runtime:
         }
 
     def market_detail(self, selected: str, *, diagnostics: bool = False) -> dict[str, Any]:
-        cards = []
         active = self.store.active()
         recent = self.store.recent_signals(selected)
         market, state = selected, self.markets[selected]
@@ -292,26 +299,20 @@ class Runtime:
             if last_event
             else None
         )
-        reason = state.problem or state.history_problem
-        if not reason and market not in self.config.mappings:
-            reason = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
-        reason = reason or ("ENTRIES_PAUSED" if self.pause else self.broker.entry_reason())
-        value = state.price.value or {}
-        quote = value.get("Quote") or {}
-        current = (
-            state.price.receipt is not None
-            and 0 <= time.time() - state.price.receipt <= QUOTE_MAX_AGE_SECONDS
-            and not state.price.problem
+        at = now()
+        card = self.market_card(
+            state, at, [self.trade_view(t) for t in active if t["market"] == market], self.pause
         )
+        quote = (state.price.value or {}).get("Quote") or {}
         identity = state.identity
-        depth = state.price.depth(time.time())
+        depth = state.price.depth(at.timestamp())
         depth["last_receipt"] = (
             datetime.fromtimestamp(state.price.depth_receipt, UTC).isoformat()
             if state.price.depth_receipt
             else None
         )
         recording = (
-            self.recorder.view(key(identity), time.time())
+            self.recorder.view(key(identity), at.timestamp())
             if identity
             else {"state": "UNAVAILABLE", "prehistory_seconds": 0}
         )
@@ -328,25 +329,15 @@ class Runtime:
                 )
         except ValueError:
             pass
-        cards.append(
+        day = at.astimezone(NY).date()
+        card.update(
             {
-                "market": market,
-                "contract": identity["symbol"] if identity else None,
                 "identity": identity,
-                "market_status": session_state(state.reference, now()),
-                "data_status": "CURRENT" if current else "STALE_OR_MISSING",
-                "strategy_state": "MONITOR_ONLY"
-                if market == "GC" and reason
-                else "BLOCKED"
-                if reason
-                else "MONITORING",
-                "entry_enabled": not reason,
-                "block_reason": reason,
+                "market_status": session_state(state.reference, at),
                 "direction": "BUY CALL" if market == "CL" else "BUY PUT",
                 "conditions": features,
-                "trades": [self.trade_view(t) for t in active if t["market"] == market],
                 "l1": {
-                    "status": "CURRENT" if current else "STALE_OR_MISSING",
+                    "status": card["data_status"],
                     "quote": quote,
                     "sizes": {side.lower(): size for side, size in state.price.sizes().items()},
                     "spread": quote["Ask"] - quote["Bid"]
@@ -354,18 +345,17 @@ class Runtime:
                     and isinstance(quote.get("Bid"), (int, float))
                     else None,
                     "delay_minutes": quote.get("DelayedByMinutes"),
-                    "provider_timestamp": value.get("LastUpdated"),
                     "last_receipt": datetime.fromtimestamp(state.price.receipt, UTC).isoformat()
                     if state.price.receipt
                     else None,
                 },
                 "l2": depth,
-                "book_flow": self.recorder.book_flow_view(key(identity), time.time())
+                "book_flow": self.recorder.book_flow_view(key(identity), at.timestamp())
                 if identity
                 else {"status": "UNAVAILABLE"},
                 "recorder": recording,
                 "capabilities": dict(state.capabilities) if diagnostics else None,
-                "underlying_context": option_context.view(state.price.analytics, time.time()),
+                "underlying_context": option_context.view(state.price.analytics, at.timestamp()),
                 "option_context": {
                     "latest_event": {
                         "id": last_event["id"],
@@ -378,18 +368,17 @@ class Runtime:
                     "problem": state.candidate_problem,
                     "candidate_changes": list(state.candidate_changes) if diagnostics else None,
                     "contracts": [
-                        self.data.option_view(uic, time.time())
+                        self.data.option_view(uic, at.timestamp())
                         for uic, (i, _) in self.data.options.items()
                         if i["market"] == market
                     ],
                 },
                 "chart": [{"at": b.at.isoformat(), "close": b.close} for b in state.bars[-90:]],
-                "chart_context": views.chart_context(state, now()),
-                "gates": views.gates(self, market, state, time.time()),
-                "sessions_today": views.sessions_today(state, now()),
+                "chart_context": views.chart_context(state, at),
+                "sessions_today": views.sessions_today(state, at),
                 "events_today": [
-                    {"at": at.isoformat(), "name": name}
-                    for at, name in self.calendar.occurrences(market, now().astimezone(NY).date())
+                    {"at": when.isoformat(), "name": name}
+                    for when, name in self.calendar.occurrences(market, day)
                 ]
                 if self.calendar
                 else [],
@@ -397,7 +386,7 @@ class Runtime:
                 "price_context": views.price_context(state),
                 "smile": views.smile(
                     state.option_board,
-                    now().astimezone(NY).date().isoformat(),
+                    day.isoformat(),
                     self.config.provider_volatility_scale,
                     views.model_sigma(features.get("rv15")),
                 ),
@@ -406,11 +395,6 @@ class Runtime:
                 "signals": [
                     {k: s[k] for k in ("id", "signal_at", "decision", "reason")} for s in recent
                 ],
-                "next_time": next_clock(now()).isoformat(),
-                "next_market_time": None,
-                "exchange_trade_date": None,
-                "rule_version": RULE_VERSION,
-                "diagnostic": "L2 observation only",
                 "details": {
                     "signal_contract": identity,
                     "reference_sessions": len(state.references),
@@ -424,7 +408,7 @@ class Runtime:
                 else None,
             }
         )
-        return {"system": self.status(), "markets": cards}
+        return {"system": self.status(), "markets": [card]}
 
     def trade_view(self, row: dict[str, Any]) -> dict[str, Any]:
         plan = json.loads(row["plan"])

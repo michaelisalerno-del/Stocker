@@ -77,27 +77,18 @@ def test_authenticated_proxy_requires_loopback_and_private_credential(monkeypatc
         )
 
 
-def test_websocket_boundary_rejects_before_application(monkeypatch):
-
-    monkeypatch.delenv("STOCKER_DASHBOARD_PROXY_TOKEN", raising=False)
-    monkeypatch.setenv("STOCKER_DASHBOARD_PASSWORD", "test-only-password-0123456789")
-    monkeypatch.setenv("STOCKER_DASHBOARD_ORIGIN", "https://stocker.example")
-
-    async def scenario():
-        async def forbidden(scope, receive, send):
-            pytest.fail("unauthenticated websocket reached application")
-
-        messages = []
-
-        async def send(message):
-            messages.append(message)
-
-        await DashboardSecurity(forbidden)(
-            {"type": "websocket", "headers": [(b"host", b"stocker.example")]}, None, send
+def test_hardening_headers_are_on_every_response(monkeypatch):
+    monkeypatch.delenv("STOCKER_DASHBOARD_PASSWORD", raising=False)
+    with TestClient(app(), base_url="http://127.0.0.1", client=("127.0.0.1", 123)) as client:
+        allowed = client.get("/control")
+        denied = client.get("/control", headers={"Host": "evil.test"})
+    assert allowed.status_code == 200 and denied.status_code == 403
+    for response in (allowed, denied):
+        assert (
+            response.headers["content-security-policy"]
+            == "default-src 'self'; frame-ancestors 'none'"
         )
-        assert messages == [{"type": "websocket.close", "code": 1008}]
-
-    asyncio.run(scenario())
+        assert response.headers["x-content-type-options"] == "nosniff"
 
 
 def test_futures_server_preserves_authenticated_proxy_socket_peer(monkeypatch, tmp_path):

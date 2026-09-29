@@ -32,7 +32,6 @@ class Strict(BaseModel):
 
 
 class RecorderConfig(Strict):
-    pre_event_minutes: Literal[15] = 15
     minimum_post_event_minutes: int = Field(default=60, ge=60, le=1440)
     post_close_minutes: int = Field(default=5, ge=5, le=60)
     rolling_max_bytes: int = Field(default=32 * 1024**2, ge=65536, le=128 * 1024**2)

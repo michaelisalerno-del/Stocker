@@ -88,3 +88,7 @@ command, paths, proxy routes and rollout steps are above). The authenticated rev
 required. Uvicorn uses `proxy_headers=False` so the dashboard's security layer sees the actual
 loopback peer. Execution starts disabled and disarmed on every launch; arming is a separate,
 explicit operator action.
+
+Configuration migration for releases after `21d9077`: remove the `recorder.pre_event_minutes`
+line from `/etc/stocker/v1/saxo.sim.yaml` before switching the release symlink. The key was never
+read (the rolling window is the fixed 15 minutes) and the configuration model rejects unknown keys.

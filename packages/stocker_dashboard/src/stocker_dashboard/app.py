@@ -72,11 +72,11 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         if identity is None:
             return {"series": [], "tick_size": None, "status": "CONTRACT_NOT_VERIFIED"}
         instrument = key(identity)
-        sequence, tick, blobs = views.book_rows(runtime.recorder, instrument)
+        tick, blobs = views.book_rows(runtime.recorder, instrument)
         # Decode the retained rows off the event loop that also runs trading.
         return {
             "status": "AVAILABLE" if blobs else "NO_RETAINED_ROWS",
-            **await asyncio.to_thread(views.book_series, sequence, tick, blobs, instrument),
+            **await asyncio.to_thread(views.book_series, tick, blobs, instrument),
         }
 
     @app.get("/api/execution")
@@ -138,9 +138,11 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
             )
         ]
         fills = runtime.store.fills(identity)
+        signal = dict(row)
         return {
-            "timeline": views.timeline(dict(row), lifecycle, fills),
-            "signal": dict(row),
+            "timeline": views.timeline(signal, lifecycle, fills),
+            # The evidence blob is served once, decoded, as `inputs`.
+            "signal": {k: v for k, v in signal.items() if k != "detail"},
             "orders": runtime.store.orders(identity),
             "fills": fills,
             "inputs": json.loads(row["detail"]),
@@ -250,8 +252,9 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
             for r in runtime.store.db.execute("SELECT summary FROM depth_captures")
         }
         try:
-            # Completed, unreferenced, unprotected records only. Runs off the risk loop.
-            await asyncio.to_thread(runtime.recorder.prune, segment, referenced)
+            # Completed, unreferenced, unprotected records only: two unlinks, on the loop so
+            # the recorder's counters are never touched from two threads.
+            runtime.recorder.prune(segment, referenced)
         except (OSError, ValueError):
             raise HTTPException(409, "ACTIVE_REFERENCED_PROTECTED_OR_UNAVAILABLE") from None
         return {"pruned": segment}

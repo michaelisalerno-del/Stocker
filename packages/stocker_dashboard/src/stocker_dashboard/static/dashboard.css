@@ -79,13 +79,13 @@ h3 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: 
 #markets.single-market { grid-template-columns: minmax(0, 1fr); max-width: 1200px; }
 .market-selector { display: inline-flex; gap: 8px; align-items: center; margin-bottom: 12px; font-size: 12px; color: var(--muted); }
 .market { background: var(--panel); border: 1px solid var(--line); padding: 18px; min-width: 0; border-top: 2px solid #527080; }
-.market[data-state="POSITION_OPEN"] { border-top-color: var(--accent); }
-.market[data-state="ORDER_PENDING"], .market[data-state="EXPOSURE_REQUIRES_RECONCILIATION"] { border-top-color: var(--warn); }
+.market[data-state="OPEN"] { border-top-color: var(--accent); }
+.market[data-state="RESERVED"], .market[data-state="EXPOSURE_REQUIRES_RECONCILIATION"] { border-top-color: var(--warn); }
 .card-head { display: flex; align-items: start; justify-content: space-between; gap: 8px; }
 .card-head h2 { font-size: 24px; margin: 0; font-weight: 600; letter-spacing: -0.7px; }
 .card-head h2 span { font-size: 12px; letter-spacing: 0; color: var(--muted); font-weight: 400; margin-left: 8px; }
 .state { font: 10px monospace; color: var(--warn); padding: 4px 7px; background: #273034; white-space: nowrap; }
-.market[data-state="MONITORING"] .state, .market[data-state="POSITION_OPEN"] .state { color: var(--accent); }
+.market[data-state="MONITORING"] .state, .market[data-state="OPEN"] .state { color: var(--accent); }
 .contract { font: 11px monospace; color: var(--muted); margin: 6px 0 10px; }
 .gates { list-style: none; padding: 0; margin: 10px 0 8px; display: flex; flex-wrap: wrap; gap: 4px; }
 .gates li { font-size: 10px; padding: 3px 7px 3px 18px; border: 1px solid var(--line); border-radius: 10px; position: relative; color: var(--muted); cursor: help; }
@@ -170,8 +170,6 @@ h3 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: 
 /* Shared elements */
 details { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
 summary { font-size: 11px; color: var(--muted); cursor: pointer; }
-.diagnostic { font-size: 10px; color: var(--warn); margin: 8px 0; }
-.diagnostic:empty { display: none; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 400px; overflow: auto; font: 11px/1.6 monospace; color: var(--muted); }
 button, input, select { font: 12px inherit; border: 1px solid var(--line); background: #17272e; color: var(--text); border-radius: 3px; padding: 7px 10px; }
 button { cursor: pointer; }

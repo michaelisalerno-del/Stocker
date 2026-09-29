@@ -116,14 +116,14 @@ def test_book_series_buckets_recorded_depth_without_inferring_anything(tmp_path)
     recorder.ingest("future", "SNAPSHOT", book(), 1000)
     recorder.ingest("future", "UPDATE", {"MarketDepth": {"BidSize": [9] * 10}}, 1001)
     recorder.ingest("future", "UPDATE", {"MarketDepth": {"AskSize": [4] * 10}}, 1007)
-    sequence, tick, blobs = views.book_rows(recorder, "future")
-    result = views.book_series(sequence, tick, blobs, "future")
+    tick, blobs = views.book_rows(recorder, "future")
+    result = views.book_series(tick, blobs, "future")
     assert result["tick_size"] == 0.01 and [r["at"] for r in result["series"]] == [1000, 1005]
     first, second = result["series"]
     assert first["bid"][0] == [7000, 9] and first["ask"][0] == [7001, 1]  # last obs in bucket
     assert second["ask"][0] == [7001, 4] and second["spread_ticks"] == 1
-    assert views.book_series(sequence, tick, blobs, "future") is result  # cached until new rows
-    assert views.book_rows(recorder, "missing") == (0, None, [])
+    assert views.book_series(tick, blobs, "future") is result  # served for five seconds
+    assert views.book_rows(recorder, "missing") == (None, [])
 
 
 def test_book_endpoint_reports_missing_contract_and_retained_rows(tmp_path):

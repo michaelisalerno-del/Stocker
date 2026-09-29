@@ -8,6 +8,7 @@ import asyncio
 import gzip
 import hashlib
 import json
+import logging
 import os
 import shutil
 import zlib
@@ -22,6 +23,11 @@ from stocker_execution.config import ROLLING_WINDOW_SECONDS, SUBSCRIPTION_LIMIT,
 from stocker_execution.contracts import utc
 from stocker_execution.saxo_auth import atomic_json
 from stocker_execution.saxo_stream import merge
+
+log = logging.getLogger(__name__)
+# One queued write: segment, the capture manifest when it changed (None for rows only),
+# zlib-packed rows and the bytes charged against the queue budget.
+Item = tuple[str, dict[str, Any] | None, list[bytes], int]
 
 
 def packed(value: Any) -> bytes:
@@ -46,7 +52,7 @@ def apply(state: Any, record: dict[str, Any]) -> Any:
 @dataclass
 class Window:
     identity: dict[str, Any]
-    rows: deque[tuple[float, bytes]] = field(default_factory=deque)
+    rows: deque[tuple[float, bytes, int]] = field(default_factory=deque)  # receipt, row, sequence
     checkpoint: Any = None
     checkpoint_at: float | None = None
     current: Any = None
@@ -59,29 +65,14 @@ class Window:
     checkpoint_context: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     metadata_version: str | None = None
-
-    state_bytes: dict[str, int] = field(default_factory=dict)
     flow_history: deque[tuple[int, dict[str, Any], int]] = field(default_factory=deque)
     flow_history_bytes: int = 0
 
-    def __post_init__(self) -> None:
-        self.account(
-            "checkpoint",
-            "current",
-            "flow",
-            "checkpoint_flow",
-            "context",
-            "checkpoint_context",
-            "metadata",
-        )
-
-    def account(self, *names: str) -> None:
-        for name in names:
-            self.state_bytes[name] = len(packed(getattr(self, name))) * 8
-
     @property
     def size(self) -> int:
-        return self.row_bytes + sum(self.state_bytes.values()) + self.flow_history_bytes + 2048
+        # Retained rows and the bounded flow history; every other field is derived from them
+        # or capped by count (16 reference versions of at most 64 KiB, 512 flow points).
+        return self.row_bytes + self.flow_history_bytes
 
     def remember_flow(self) -> None:
         assert self.flow is not None
@@ -108,7 +99,7 @@ class Window:
             self.flow_history_bytes -= self.flow_history.popleft()[2]
 
     def evict(self) -> None:
-        at, blob = self.rows.popleft()
+        at, blob, sequence = self.rows.popleft()
         self.row_bytes -= len(blob) + 128  # include bounded Python object overhead
         record = read_row(blob)
         self.checkpoint = apply(self.checkpoint, record)
@@ -120,8 +111,7 @@ class Window:
             ]
         if record["kind"] == "GAP":
             self.checkpoint_context.clear()
-        self.account("checkpoint", "checkpoint_flow", "checkpoint_context")
-        while self.flow_history and self.flow_history[0][0] <= record["local_sequence"]:
+        while self.flow_history and self.flow_history[0][0] <= sequence:
             self.flow_history_bytes -= self.flow_history.popleft()[2]
 
     def coverage(self, at: float) -> float:
@@ -133,13 +123,11 @@ class Window:
         return max(0, at - beginning)
 
     def prefix(self, after_sequence: int | None = None) -> list[bytes]:
-        rows = [zlib.decompress(b) for _, b in self.rows]
+        """Rows to archive, decoded only once selected; this runs on the decision path."""
         # Reused candidates can have an unrecorded interval. Supply a checkpoint
         # when the intervening raw rows have already left the rolling window.
-        if after_sequence is not None and (
-            not rows or json.loads(rows[0])["local_sequence"] <= after_sequence + 1
-        ):
-            return [r for r in rows if json.loads(r)["local_sequence"] > after_sequence]
+        if after_sequence is not None and (not self.rows or self.rows[0][2] <= after_sequence + 1):
+            return [zlib.decompress(b) for _, b, s in self.rows if s > after_sequence]
         return [
             packed(
                 {
@@ -152,7 +140,7 @@ class Window:
                     "reconstruction": "state immediately before retained messages",
                 }
             ),
-            *rows,
+            *(zlib.decompress(b) for _, b, _ in self.rows),
         ]
 
 
@@ -162,9 +150,9 @@ class Recorder:
         self.windows: dict[str, Window] = {}
         self.active: dict[str, dict[str, Any]] = {}
         self.event_ids: set[str] = set()
-        self.queue: asyncio.Queue[tuple[str, dict[str, Any], list[bytes], int]] = asyncio.Queue(
-            config.queue_max_items
-        )
+        self.queue: asyncio.Queue[Item] = asyncio.Queue(config.queue_max_items)
+        self.manifests: dict[str, dict[str, Any]] = {}  # writer thread only: last per segment
+        self.markers_pending: set[str] = set()  # captures ended by queue pressure, unmarked
         self.write_ready = asyncio.Event()
         self.queued_bytes = 0
         self.high_water = 0
@@ -281,14 +269,7 @@ class Recorder:
         if version not in window.metadata:
             if len(blob) > 65536 or len(window.metadata) >= 16:
                 raise ValueError("REFERENCE_CACHE_LIMIT")
-            if self.memory() + len(blob) * 8 > self.config.rolling_max_bytes:
-                raise ValueError("REFERENCE_CACHE_MEMORY_LIMIT")
             window.metadata[version] = {"received_at": received_at, "value": json.loads(blob)}
-            window.account("metadata")
-            if self.memory() > self.config.rolling_max_bytes:
-                del window.metadata[version]
-                window.account("metadata")
-                raise ValueError("REFERENCE_CACHE_MEMORY_LIMIT")
             for segment, capture in self.active.items():
                 if key in capture["instruments"]:
                     capture.setdefault("metadata_versions", {})[version] = window.metadata[version]
@@ -315,24 +296,6 @@ class Recorder:
         while self.memory() > self.config.rolling_max_bytes:
             populated = [w for w in self.windows.values() if w.rows]
             if not populated:
-                # A single provider snapshot can itself exceed the retained-state budget.
-                for w in self.windows.values():
-                    w.current = w.checkpoint = None
-                    w.flow = w.checkpoint_flow = None
-                    w.context.clear()
-                    w.checkpoint_context.clear()
-                    w.continuous_since = None
-                    w.flow_history.clear()
-                    w.flow_history_bytes = 0
-                    w.account(
-                        "current",
-                        "checkpoint",
-                        "flow",
-                        "checkpoint_flow",
-                        "context",
-                        "checkpoint_context",
-                    )
-                self.problem = "ROLLING_STATE_LIMIT"
                 break
             min(populated, key=lambda w: w.rows[0][0]).evict()
         self.high_water = max(self.high_water, self.memory())
@@ -367,27 +330,6 @@ class Recorder:
             "observation_context": observation_context,
             "context_source": context_source,
         }
-        provider_times = {}
-        envelope = (
-            provider_message.get("payload", provider_message)
-            if isinstance(provider_message, dict)
-            else None
-        )
-        sources = [(payload, ("LastUpdated",))]
-        if isinstance(envelope, list):
-            for index, event in enumerate(envelope):
-                if isinstance(event, dict) and "Timestamp" in event:
-                    with suppress(TypeError, ValueError, AttributeError):
-                        provider_times[f"Timestamp[{index}]"] = utc(event["Timestamp"]).isoformat()
-        else:
-            sources.append((envelope, ("Timestamp",)))
-        for source, names in sources:
-            if isinstance(source, dict):
-                for name in names:
-                    if name in source:
-                        with suppress(TypeError, ValueError, AttributeError):
-                            provider_times[name] = utc(source[name]).isoformat()
-        record["provider_timestamps"] = provider_times
         blob = packed(record)
         if len(blob) > self.config.max_message_bytes:
             kind, payload = "GAP", {"reason": "MESSAGE_BYTE_LIMIT"}
@@ -404,12 +346,7 @@ class Recorder:
             self.gaps += 1
         if observation_context and kind != "GAP":
             window.context[context_source] = observation_context
-        previous_state = window.current
         window.current = apply(window.current, record)
-        if previous_state is not window.current:
-            window.account("current")
-        if observation_context or kind == "GAP":
-            window.account("context")
         if window.identity.get("asset_type") == "ContractFutures" and window.identity.get(
             "tick_size"
         ):
@@ -430,12 +367,11 @@ class Recorder:
                     {**context, "problem": "FEATURE_SCHEMA_UNAVAILABLE"},
                     [],
                 )
-            window.account("flow")
             window.remember_flow()
             record["book_flow"] = window.flow
             blob = packed(record)
         retained = zlib.compress(blob, level=1)
-        window.rows.append((at, retained))
+        window.rows.append((at, retained, window.sequence))
         window.row_bytes += len(retained) + 128
         self.expire(at)
         for segment, capture in list(self.active.items()):
@@ -446,23 +382,27 @@ class Recorder:
                     capture["gaps"] += 1
                 if window.flow:
                     capture["book_flow"] = self.flow_metadata(window, at)
-                self.enqueue(segment, capture, [blob])
+                # Rows only: the manifest reaches disk with its next structural change.
+                self.enqueue(segment, None, [blob])
 
-    def enqueue(self, segment: str, manifest: dict[str, Any], rows: list[bytes]) -> bool:
+    def enqueue(self, segment: str, manifest: dict[str, Any] | None, rows: list[bytes]) -> bool:
         if not self.config.persistent_capture or self.problem:
             return False
         # A detached JSON copy prevents later event-loop changes racing the writer.
-        detached = json.loads(packed(manifest))
+        detached = json.loads(packed(manifest)) if manifest is not None else None
         # Prehistory may contain many repeated identities/field names. Queue one
         # lossless batch within the SAME byte/item caps, then expand in the writer.
         if rows:
             compressor = zlib.compressobj(level=1)
             rows = [b"".join(compressor.compress(row) for row in rows) + compressor.flush()]
-        size = len(packed(detached)) + sum(len(b) + 64 for b in rows)
+        size = (len(packed(detached)) if detached else 0) + sum(len(b) + 64 for b in rows)
         if self.queue.full() or self.queued_bytes + size > self.config.queue_max_bytes:
-            self.problem = "WRITE_QUEUE_LIMIT_REACHED"
-            for capture in self.active.values():
-                capture.update(state="INCOMPLETE", reason=self.problem)
+            # Transient pressure ends this capture only; its marker follows from tick()
+            # once the writer has drained. Nothing latches the recorder off.
+            capture = self.active.get(segment)
+            if capture is not None:
+                capture.update(state="INCOMPLETE", reason="WRITE_QUEUE_LIMIT_REACHED")
+                self.markers_pending.add(segment)
             return False
         self.queue.put_nowait((segment, detached, rows, size))
         self.queued_bytes += size
@@ -561,8 +501,7 @@ class Recorder:
                 )
             capture["last_sequences"][instrument] = self.windows[instrument].sequence
         rows.append(packed({"kind": "TRIGGER", "payload": capture["events"][-1]}))
-        if not self.enqueue(segment, capture, rows):
-            capture.update(state="INCOMPLETE", reason=self.problem)
+        self.enqueue(segment, capture, rows)
         return {
             "segment": segment,
             "state": capture["state"],
@@ -702,6 +641,9 @@ class Recorder:
 
     def tick(self, at: float) -> None:
         self.expire(at)
+        for segment in list(self.markers_pending):
+            if segment not in self.active or self.enqueue(segment, self.active[segment], []):
+                self.markers_pending.discard(segment)
         for segment, capture in list(self.active.items()):
             # Keep a completed interval available for a later overlapping pre-window.
             if (
@@ -720,14 +662,17 @@ class Recorder:
                 )
                 self.active.pop(segment)
 
-    def write_batch(self, items: list[tuple[str, dict[str, Any], list[bytes], int]]) -> None:
-        grouped: dict[str, tuple[dict[str, Any], list[bytes]]] = {}
+    def write_batch(self, items: list[Item]) -> None:
+        grouped: dict[str, tuple[dict[str, Any] | None, list[bytes]]] = {}
         for segment, manifest, rows, _ in items:
-            if segment not in grouped:
-                grouped[segment] = (manifest, list(rows))
-            else:
-                grouped[segment] = (manifest, grouped[segment][1] + rows)
-        for segment, (manifest, rows) in grouped.items():
+            previous = grouped.get(segment, (None, []))
+            grouped[segment] = (manifest or previous[0], previous[1] + rows)
+        for segment, (changed, rows) in grouped.items():
+            if changed is not None:
+                self.manifests[segment] = changed
+            manifest = self.manifests.get(segment)
+            if manifest is None:
+                raise ValueError("CAPTURE_MANIFEST_UNKNOWN")
             blob = (
                 gzip.compress(
                     b"".join(zlib.decompress(row) for row in rows), compresslevel=3, mtime=0
@@ -759,8 +704,10 @@ class Recorder:
                     os.fsync(out.fileno())
                 self.disk_bytes += len(blob)
             manifest["committed_bytes"] = data.stat().st_size if data.exists() else 0
-            atomic_json(manifest_path, manifest)
-            self.disk_bytes += manifest_path.stat().st_size - before
+            if changed is not None or not manifest_path.exists():
+                # Rows alone do not rewrite the manifest: restart recovery scans the archive.
+                atomic_json(manifest_path, manifest)
+                self.disk_bytes += manifest_path.stat().st_size - before
 
     async def write_loop(self) -> None:
         while not self.closed or not self.queue.empty():
@@ -782,28 +729,34 @@ class Recorder:
                 await asyncio.to_thread(self.write_batch, items)
             except Exception as exc:
                 self.problem = str(exc) if isinstance(exc, ValueError) else "RECORDER_IO_FAILED"
+                # Coded reason plus the exception class only; paths and errno stay out of logs.
+                log.warning("%s %s", self.problem, type(exc).__name__)
                 for capture in self.active.values():
                     capture.update(state="INCOMPLETE", reason=self.problem)
                 # A bounded metadata reserve is available; never exceed the hard
                 # archive quota even when marking failure. Restart detects stale intents.
-                with suppress(OSError):
-                    await asyncio.to_thread(self.failure_markers, items)
+                try:
+                    await asyncio.to_thread(self.failure_markers, {i[0] for i in items})
+                except Exception as marker_exc:
+                    log.warning("RECORDER_MARKER_FAILED %s", type(marker_exc).__name__)
             finally:
                 for item in items:
                     self.queued_bytes -= item[3]
                     self.queue.task_done()
 
-    def failure_markers(self, items: list[tuple[str, dict[str, Any], list[bytes], int]]) -> None:
-        for segment, manifest in {i[0]: i[1] for i in items}.items():
+    def failure_markers(self, segments: set[str]) -> None:
+        for segment in sorted(segments):
             path = self.directory / (segment + ".manifest.json")
             before = path.stat().st_size if path.exists() else 0
-            marker = (
-                json.loads(path.read_text())
-                if before
-                else {k: manifest[k] for k in ("segment", "key", "start", "end")}
-            )
+            manifest = self.manifests.get(segment)
+            if before:
+                marker = json.loads(path.read_text())
+            elif manifest is not None:
+                marker = {k: manifest[k] for k in ("segment", "key", "start", "end")}
+            else:
+                continue  # nothing durable identifies this segment yet
             marker.update(state="INCOMPLETE", reason=self.problem)
-            if "book_flow" in manifest:
+            if manifest is not None and "book_flow" in manifest:
                 marker["book_flow"] = manifest["book_flow"]
             size = len(packed(marker))
             if (

@@ -115,3 +115,32 @@ def test_page_assets_revalidate_and_arm_rejects_malformed_bodies(tmp_path):
         runtime.store.db.close()
 
     asyncio.run(scenario())
+
+
+def test_overview_and_market_detail_share_one_card_and_evidence_stays_on_demand(tmp_path):
+    async def scenario():
+        runtime = ready_runtime(tmp_path)
+        runtime.markets["GC"].boundary_clock = AT
+        overview = {c["market"]: c for c in runtime.overview()["markets"]}["GC"]
+        detail = runtime.market_detail("GC")["markets"][0]
+        for field in (
+            "strategy_state",
+            "block_reason",
+            "entry_enabled",
+            "data_status",
+            "pending_data",
+        ):
+            assert overview[field] == detail[field], field
+        assert detail["pending_data"] and "diagnostic" not in detail
+        identity = observe(runtime.store, "GC", 1)
+        app = create_dashboard_app(runtime)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="http://127.0.0.1"
+        ) as client:
+            body = (await client.get("/api/detail", params={"identity": identity})).json()
+            assert "detail" not in body["signal"]
+            assert body["inputs"]["inputs"] == {"large": "x" * 2000}
+        await runtime.stop()
+        runtime.store.db.close()
+
+    asyncio.run(scenario())

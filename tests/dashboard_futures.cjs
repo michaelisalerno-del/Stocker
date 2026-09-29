@@ -108,9 +108,9 @@ const state = {
     strategy_state: [
       "BLOCKED",
       "MONITOR_ONLY",
-      "POSITION_OPEN",
+      "OPEN",
       "MONITORING",
-      "ORDER_PENDING",
+      "RESERVED",
     ][i],
     direction: i === 0 ? "BUY CALL" : "BUY PUT",
     block_reason: [
@@ -152,7 +152,7 @@ const state = {
         ? [
             {
               id: "ng-open",
-              state: "POSITION_OPEN",
+              state: "OPEN",
               quantity: 1,
               entry_at: "2026-09-28T14:00:04Z",
               exit_at: "2026-09-28T15:00:00Z",

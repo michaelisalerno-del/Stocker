@@ -221,7 +221,7 @@ def test_five_ordinary_subscriptions_shared_by_consumers_and_heartbeats(
             )
         flow = recorder.windows[key(data.markets[s["target"]].identity)].flow
         recorded = read_row(recorder.windows[key(data.markets[s["target"]].identity)].rows[-1][1])
-        assert recorded["provider_timestamps"]["Timestamp"] == "2026-09-28T10:00:00+00:00"
+        assert recorded["provider_message"]["payload"]["Timestamp"] == "2026-09-28T10:00:00Z"
         assert flow["feed"]["granted_refresh_ms"] == 1500
         assert flow["feed"]["observed_receipt_ms"]["samples"] == 2
         assert not recorder.active and not recorder.event_ids  # flow creates no events
@@ -257,7 +257,7 @@ def test_same_recorder_checkpoint_event_overlap_limits_and_feature_manifest(tmp_
         w = r.windows["future"]
         assert w.coverage(1001) == 900
         rebuilt = w.checkpoint
-        for _, blob in w.rows:
+        for _, blob, _ in w.rows:
             rebuilt = apply(rebuilt, read_row(blob))
         assert rebuilt == w.current and w.checkpoint_flow["version"] == VERSION
         assert r.memory() <= r.config.rolling_max_bytes

@@ -23,8 +23,8 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
 
     @app.exception_handler(sqlite3.Error)
     async def database_unavailable(request: Any, exc: sqlite3.Error) -> JSONResponse:
-        runtime.broker.fatal_error = "LEDGER_UNAVAILABLE"
-        runtime.broker.reconciled = False
+        # A failed display read never changes execution state; the runtime's own
+        # ledger access fails closed and disarms independently.
         return JSONResponse(status_code=503, content={"error": "LEDGER_UNAVAILABLE"})
 
     @app.get("/api/health")

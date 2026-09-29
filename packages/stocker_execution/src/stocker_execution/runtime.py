@@ -32,6 +32,14 @@ from stocker_execution.store import Store
 log = logging.getLogger(__name__)
 
 
+def skip_reason(exc: ValueError | KeyError) -> str:
+    """Trading gates raise coded ValueErrors; a KeyError is a data/code gap, not a reason."""
+    if isinstance(exc, KeyError):
+        log.error("decision input missing field %r", exc.args[0] if exc.args else None)
+        return "UNEXPECTED_MISSING_FIELD"
+    return str(exc)
+
+
 class Runtime:
     def __init__(self, config: FuturesConfig, store: Store, data: DataService | None = None):
         self.config, self.store = config, store
@@ -179,7 +187,7 @@ class Runtime:
                     "strategy_state": market_trades[0]["state"]
                     if market_trades
                     else "MONITOR_ONLY"
-                    if market == "GC"
+                    if market == "GC" and reason
                     else "BLOCKED"
                     if reason
                     else "MONITORING",
@@ -475,7 +483,7 @@ class Runtime:
                             ),
                         )
                     except (ValueError, KeyError) as exc:
-                        context["reason"] = str(exc)
+                        context["reason"] = skip_reason(exc)
                 self.recorder.annotate(str(event["id"]), {"option_context": context})
                 with self.store.db:
                     row = self.store.db.execute(
@@ -493,7 +501,7 @@ class Runtime:
                         plan = await self.broker.prepare(event, state, inputs)
                         reason = await self.broker.enter(event, plan)
                     except (ValueError, KeyError) as exc:
-                        reason = str(exc)
+                        reason = skip_reason(exc)
                 if reason:
                     self.store.decision(str(event["id"]), "SKIPPED", reason)
                 self.recorder.annotate(str(event["id"]), {"skip_reason": reason, "inputs": inputs})

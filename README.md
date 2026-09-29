@@ -24,6 +24,7 @@ listed option products, actual 0DTE expiry clocks or delta tolerances; missing e
 GC remains monitored. No orders were sent or paper execution armed during this migration.
 
 [Focused cleanup, verification and migration](docs/SLRNO-CLEANUP.md) ·
+[Review fixes](docs/SLRNO-REVIEW-FIXES.md) ·
 [Setup and OAuth](docs/SAXO-SETUP.md) · [Cutover and rollback](docs/DEPLOYMENT.md) ·
 [Rules and provenance](docs/FUTURES-RULEBOOK.md) · [Storage and stream policy](docs/MARKET-DATA.md) ·
 [Option context and validation](docs/saxo-option-context-addendum.md) ·

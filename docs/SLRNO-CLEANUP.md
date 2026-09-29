@@ -20,8 +20,9 @@ existing [29 September runtime snapshot](github-sync-runtime-20260929.json) and
 [current deployment record](CURRENT-DEPLOYMENT.md), not a new production measurement.
 
 - New opportunities have a £50 all-in ceiling: premium, entry costs and reserved exit costs under
-  the existing policy. One contract stays one contract. Configuration is authoritative; pence and
-  the £200 concurrent ceiling are derived. Contract costing, broker validation and transactional
+  the existing policy. One contract stays one contract. The limits are code constants in
+  `stocker_execution/config.py`; configuration may restate the pinned £50 value but cannot change
+  it. Pence and the £200 concurrent ceiling are derived. Contract costing, broker validation and transactional
   admission independently enforce the limits. Pending/reserved/open opportunities count once
   toward four slots. Historical £10 records retain their amounts and entry policy.
 - A missing final completed minute keeps the clock pending only inside its original 20 seconds.

@@ -130,6 +130,7 @@ def setup(tmp_path, mode="INTERNAL_PAPER"):
     store.bind("SAXO_SIM", mode)
     broker = PaperBroker(config, store, data)
     broker.armed = broker.reconciled = True
+    broker.last_reconcile = time.monotonic()
     broker.problem = ""
     return broker, data, store
 

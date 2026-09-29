@@ -4332,12 +4332,17 @@ def futures_run(
     port: int = 8765,
 ) -> None:
     """Run the single frozen futures-options PAPER pipeline and existing dashboard."""
+    import logging
+
     import uvicorn
 
     from stocker_dashboard.app import create_dashboard_app
     from stocker_execution.config import load
-    from stocker_execution.runtime import Runtime
+    from stocker_execution.runtime import LOG_FORMAT, Runtime
     from stocker_execution.store import Store
+
+    # Runtime errors reach the service journal as well as the rotating runtime log.
+    logging.basicConfig(level=logging.WARNING, format=LOG_FORMAT)
 
     async def serve() -> None:
         runtime = Runtime(load(config), Store(database))

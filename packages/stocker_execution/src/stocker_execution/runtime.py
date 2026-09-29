@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import json
 import logging
+import re
 import time
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -30,6 +31,14 @@ from stocker_execution.saxo_data import DataService
 from stocker_execution.store import Store
 
 log = logging.getLogger(__name__)
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+
+
+def failure_code(exc: BaseException) -> str:
+    """Coded ValueErrors are the application's own reasons; other text may hold secrets."""
+    if isinstance(exc, ValueError) and re.fullmatch(r"[A-Za-z0-9_]{1,120}", str(exc)):
+        return str(exc)
+    return type(exc).__name__
 
 
 def skip_reason(exc: ValueError | KeyError) -> str:
@@ -67,9 +76,9 @@ class Runtime:
         directory = self.root / config.data_environment
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         handler = RotatingFileHandler(directory / "slrno.log", maxBytes=2 * 1024**2, backupCount=3)
+        handler.setFormatter(logging.Formatter(LOG_FORMAT))
         log.addHandler(handler)
         log.setLevel(logging.INFO)
-        log.propagate = False
         self.log_handler = handler
         for name in ("httpx", "httpcore", "websockets"):
             logging.getLogger(name).setLevel(logging.WARNING)
@@ -96,8 +105,8 @@ class Runtime:
         self.store.set_meta("paused", value)
 
     def report_failure(self, worker: str, exc: BaseException) -> None:
-        # Exception strings can contain request URLs or authorization details.
-        log.error("%s failed (%s)", worker, type(exc).__name__)
+        # Only coded reasons are logged; other exception text can contain URLs or credentials.
+        log.error("%s failed: %s", worker, failure_code(exc))
 
     async def cancel_tasks(self, tasks: set[asyncio.Task[Any]]) -> None:
         for task in tasks:
@@ -508,12 +517,17 @@ class Runtime:
 
     async def manager(self) -> None:
         self.manager_health = "RUNNING"
+        last_failure = ""
         while not self.stopping:
             try:
                 await self.broker.manage()
+                last_failure = ""
             except Exception as exc:
                 self.broker.reconciled = False
-                self.report_failure("management", exc)
+                # Log transitions, not every two-second retry of the same failure.
+                if failure_code(exc) != last_failure:
+                    self.report_failure("management", exc)
+                last_failure = failure_code(exc)
             await asyncio.sleep(2)
 
     async def refresh_histories(self) -> None:

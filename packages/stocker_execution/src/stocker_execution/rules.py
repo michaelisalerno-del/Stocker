@@ -79,9 +79,12 @@ def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:
     }
 
 
-def prior_rv(bars: list[Bar], at: datetime, count: int = 15) -> float:
-    prefix = {b.at: b for b in bars if b.at + timedelta(minutes=1) <= at}
-    needed = [prefix.get(at - timedelta(minutes=i)) for i in range(count + 1, 0, -1)]
+def prior_rv(
+    bars: list[Bar], at: datetime, count: int = 15, index: dict[datetime, Bar] | None = None
+) -> float:
+    # Every looked-up bar starts at least one minute before `at`, so it is completed.
+    by_time = index if index is not None else {b.at: b for b in bars}
+    needed = [by_time.get(at - timedelta(minutes=i)) for i in range(count + 1, 0, -1)]
     if any(b is None or not b.valid() for b in needed):
         raise ValueError("INCOMPLETE_COMPLETED_HISTORY")
     closes = [b.close for b in needed if b is not None]
@@ -185,7 +188,7 @@ def reference_summary(bars: list[Bar]) -> dict[int, dict[str, float]]:
             if bar.at.astimezone(NY).hour != hour:
                 continue
             try:
-                rv = prior_rv(bars, bar.at)
+                rv = prior_rv(bars, bar.at, index=by_time)
                 prior = [by_time[bar.at - timedelta(minutes=i)] for i in range(1, 16)]
             except (KeyError, ValueError):
                 continue

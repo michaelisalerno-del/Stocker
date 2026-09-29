@@ -20,6 +20,11 @@ from stocker_execution.contracts import (
 from stocker_execution.saxo_data import DataService, MarketState
 from stocker_execution.store import TERMINAL, Store, encode
 
+# Idle broker state is re-read on this cadence; pending orders or held exposure
+# are reconciled every management cycle. SIM entries require a recent pass.
+RECONCILE_INTERVAL_SECONDS = 30
+RECONCILE_MAX_AGE_SECONDS = 60
+
 
 def now() -> datetime:
     return datetime.now(UTC)
@@ -49,6 +54,11 @@ class PaperBroker:
             return "RECONCILIATION_REQUIRED"
         if not self.data.connected or self.data.session.get("TradeLevel") != "FullTradingAndChat":
             return "DATA_OR_SESSION_UNAVAILABLE"
+        if (
+            self.config.execution_mode == "SAXO_SIM"
+            and time.monotonic() - self.last_reconcile > RECONCILE_MAX_AGE_SECONDS
+        ):
+            return "RECONCILIATION_STALE"
         return self.problem
 
     async def preflight(self) -> dict[str, Any]:
@@ -426,14 +436,20 @@ class PaperBroker:
                                     order["reference"],
                                 ),
                             )
-                self.store.db.execute("DELETE FROM positions")
-                for uic, quantity in held.items():
-                    self.store.db.execute(
-                        "INSERT INTO positions VALUES(?,?,?)",
-                        (uic, quantity, encode({"internally_simulated": True})),
-                    )
+                current = {
+                    r["con_id"]: r["quantity"]
+                    for r in self.store.db.execute("SELECT con_id,quantity FROM positions")
+                }
+                if current != held:
+                    self.store.db.execute("DELETE FROM positions")
+                    for uic, quantity in held.items():
+                        self.store.db.execute(
+                            "INSERT INTO positions VALUES(?,?,?)",
+                            (uic, quantity, encode({"internally_simulated": True})),
+                        )
             self.reconciled = True
             self.problem = ""
+            self.last_reconcile = time.monotonic()
             return
         if not self.data.account_verified or not self.data.client.sim_account_verified:
             raise ValueError("SIM_ACCOUNT_NOT_VERIFIED")
@@ -573,9 +589,21 @@ class PaperBroker:
         )
         self.store.audit(order["reference"], "SAXO_SIM_ORDER_EVIDENCE", evidence)
 
+    def reconcile_due(self) -> bool:
+        if not self.reconciled:
+            return True
+        if time.monotonic() - self.last_reconcile >= RECONCILE_INTERVAL_SECONDS:
+            return True
+        return any(
+            self.store.exposure(r["id"])
+            or any(o["status"] not in TERMINAL for o in self.store.orders(r["id"]))
+            for r in self.store.active()
+        )
+
     async def manage(self) -> None:
         async with self.lock:
-            await self.reconcile()
+            if self.reconcile_due():
+                await self.reconcile()
             for reservation in self.store.active():
                 identity, plan = reservation["id"], json.loads(reservation["plan"])
                 try:
@@ -640,10 +668,12 @@ class PaperBroker:
                             {"outcome": "VERIFIED_FLAT", "mode": self.config.execution_mode},
                         )
                         self.management_problems.pop(identity, None)
+                    elif identity in self.management_problems:
+                        # Resolved without closure; a recurrence is audited again.
+                        self.management_problems.pop(identity)
                 except Exception as exc:
-                    self.management_problems[identity] = (
-                        str(exc) if isinstance(exc, ValueError) else "MANAGEMENT_EXCEPTION"
-                    )
-                    self.store.decision(
-                        identity, "EXPOSURE_EXCEPTION", self.management_problems[identity]
-                    )
+                    reason = str(exc) if isinstance(exc, ValueError) else "MANAGEMENT_EXCEPTION"
+                    # Audit transitions, not every two-second retry of the same exception.
+                    if self.management_problems.get(identity) != reason:
+                        self.management_problems[identity] = reason
+                        self.store.decision(identity, "EXPOSURE_EXCEPTION", reason)

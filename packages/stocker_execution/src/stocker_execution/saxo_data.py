@@ -42,6 +42,8 @@ from stocker_execution.rules import (
 from stocker_execution.saxo_client import SaxoClient, SaxoError
 from stocker_execution.saxo_stream import Frames, PriceState, merge, merge_board
 
+REFERENCE_RETRY_SECONDS = 900
+
 
 @dataclass
 class MarketState:
@@ -73,6 +75,8 @@ class MarketState:
     boundary_clock: datetime | None = None
     boundary_checked: float = float("-inf")
     reference_day: str = ""
+    reference_retry_at: float = 0.0
+    reference_failure: str = ""
     candidate_uic: int | None = None
     warm_uics: set[int] = field(default_factory=set)
     candidate_problem: str = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
@@ -974,6 +978,10 @@ class DataService:
         day = datetime.now(NY).date()
         if state.reference_day == day.isoformat():
             return
+        if time.monotonic() < state.reference_retry_at:
+            # Entries stay blocked; do not refetch every reference session each minute.
+            state.history_problem = state.reference_failure
+            return
         state.references = []
         if not self.config.reference_selections_file:
             state.history_problem = "REFERENCE_SESSION_CONTRACT_SELECTION_UNVERIFIED"
@@ -1011,6 +1019,8 @@ class DataService:
             state.capabilities["reference_selection_audit_sha256"] = digest
         except (OSError, ValueError):
             state.history_problem = "REFERENCE_SESSION_AUDIT_OR_SAXO_COVERAGE_UNVERIFIED"
+            state.reference_failure = state.history_problem
+            state.reference_retry_at = time.monotonic() + REFERENCE_RETRY_SECONDS
 
     async def restore_option(self, plan: dict[str, Any]) -> None:
         """Owned options keep their original future even after a display roll/restart."""

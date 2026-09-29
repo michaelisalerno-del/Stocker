@@ -2178,15 +2178,17 @@ name = "stocker"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fastapi" },
     { name = "httpx" },
-    { name = "mcp" },
-    { name = "pandas-market-calendars" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
     { name = "rich" },
+    { name = "starlette" },
     { name = "structlog" },
     { name = "typer" },
+    { name = "uvicorn" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -2198,6 +2200,9 @@ dev = [
     { name = "ruff" },
     { name = "types-pyyaml" },
 ]
+mcp = [
+    { name = "mcp" },
+]
 research = [
     { name = "backtesting" },
     { name = "duckdb" },
@@ -2207,6 +2212,7 @@ research = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "pandas-market-calendars" },
     { name = "plotly" },
     { name = "polars" },
     { name = "pyarrow" },
@@ -2215,24 +2221,20 @@ research = [
     { name = "statsmodels" },
     { name = "vectorbt" },
 ]
-server = [
-    { name = "fastapi" },
-    { name = "prometheus-client" },
-    { name = "uvicorn" },
-    { name = "websockets" },
-]
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", specifier = ">=0.111" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", specifier = ">=1.27,<2" },
-    { name = "pandas-market-calendars", specifier = ">=4.4" },
     { name = "pydantic", specifier = ">=2.8" },
     { name = "pydantic-settings", specifier = ">=2.4" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.7" },
+    { name = "starlette" },
     { name = "structlog", specifier = ">=24.1" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "uvicorn", specifier = ">=0.30" },
+    { name = "websockets", specifier = ">=15,<17" },
 ]
 
 [package.metadata.requires-dev]
@@ -2244,6 +2246,7 @@ dev = [
     { name = "ruff", specifier = ">=0.5" },
     { name = "types-pyyaml", specifier = ">=6.0" },
 ]
+mcp = [{ name = "mcp", specifier = ">=1.27,<2" }]
 research = [
     { name = "backtesting", specifier = ">=0.6" },
     { name = "duckdb", specifier = ">=1.0" },
@@ -2253,6 +2256,7 @@ research = [
     { name = "matplotlib", specifier = ">=3.9" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.2" },
+    { name = "pandas-market-calendars", specifier = ">=4.4" },
     { name = "plotly", specifier = ">=5.22" },
     { name = "polars", specifier = ">=1.0" },
     { name = "pyarrow", specifier = ">=16.0" },
@@ -2260,12 +2264,6 @@ research = [
     { name = "scipy", specifier = ">=1.13" },
     { name = "statsmodels", specifier = ">=0.14" },
     { name = "vectorbt", specifier = ">=0.28" },
-]
-server = [
-    { name = "fastapi", specifier = ">=0.111" },
-    { name = "prometheus-client", specifier = ">=0.20" },
-    { name = "uvicorn", specifier = ">=0.30" },
-    { name = "websockets", specifier = ">=15,<17" },
 ]
 
 [[package]]

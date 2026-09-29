@@ -4,7 +4,7 @@ Saxo-only futures data and disarmed options paper trading for **CL, GC, NG, NQ, 
 The existing Python runtime and authenticated dashboard are retained. No LIVE execution mode exists.
 
 ```sh
-uv sync --locked --no-default-groups --group server
+uv sync --locked --no-default-groups
 uv run --no-sync stocker futures-run --config configs/futures.paper.yaml --database .stocker/saxo-sim-disabled.sqlite3
 ```
 

@@ -19,6 +19,7 @@ def smoke() -> None:
     stocker_launcher._ensure_monorepo_src_paths()
     import httpx
 
+    import stocker_core.cli  # noqa: F401 - the deployed `stocker futures-run` entry point
     from stocker_dashboard.app import create_dashboard_app
     from stocker_execution.config import FuturesConfig
     from stocker_execution.runtime import Runtime
@@ -32,6 +33,9 @@ def smoke() -> None:
     assert importlib.util.find_spec("jupyterlab") is None
     assert importlib.util.find_spec("sklearn") is None
     assert importlib.util.find_spec("joblib") is None
+    # Research/MCP libraries are not runtime dependencies.
+    for name in ("pandas", "numpy", "mcp", "pandas_market_calendars"):
+        assert importlib.util.find_spec(name) is None, name
     with tempfile.TemporaryDirectory(prefix="stocker-smoke-state-") as directory:
         root = Path(directory)
         runtime = Runtime(FuturesConfig(), Store(root / "state.sqlite"))
@@ -49,7 +53,7 @@ def smoke() -> None:
                     assert response.status_code == 200, (path, response.text)
 
         asyncio.run(check())
-    print("PASS: server-only imports, futures-options and offline dashboard startup/assets")
+    print("PASS: runtime-only imports, futures-options and offline dashboard startup/assets")
 
 
 def main() -> None:
@@ -68,7 +72,7 @@ def main() -> None:
         ):
             env.pop(key, None)
         subprocess.run(
-            ["uv", "sync", "--locked", "--no-default-groups", "--group", "server"],
+            ["uv", "sync", "--locked", "--no-default-groups"],
             env=env,
             check=True,
         )

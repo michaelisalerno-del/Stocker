@@ -36,7 +36,7 @@ runtime using the same existing release process.
    ownership/mode and record SHA-256 manifests. Keep all original ledgers/data with their provenance.
    Do not replace a live ledger with an old backup after new activity.
 4. Stage this committed release using the established archive/copy process, then
-   `uv sync --locked --no-default-groups --group server`. Run `scripts/server_smoke.py --installed`
+   `uv sync --locked --no-default-groups`. Run `scripts/server_smoke.py --installed`
    in its locked environment. Keep the existing service user, hardening and loopback port. Stage
    `/etc/stocker/v1/saxo.sim.yaml` from the sanitised example, DISABLED/disarmed, and a new
    `/var/lib/stocker/v1/saxo-sim-disabled.sqlite3`. Never repurpose the old futures/FIRST4 database.

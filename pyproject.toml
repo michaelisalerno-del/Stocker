@@ -18,8 +18,11 @@ dependencies = [
   "typer>=0.12",
   "rich>=13.7",
   "httpx>=0.27",
-  "mcp>=1.27,<2",
-  "pandas-market-calendars>=4.4",
+  # SLRNO runtime and dashboard (`stocker futures-run`).
+  "fastapi>=0.111",
+  "starlette",
+  "uvicorn>=0.30",
+  "websockets>=15,<17",
 ]
 
 [project.scripts]
@@ -28,6 +31,7 @@ stocker-mcp = "stocker_launcher:mcp_main"
 
 [dependency-groups]
 research = [
+  "pandas-market-calendars>=4.4",
   "numpy>=1.26",
   "pandas>=2.2",
   "polars>=1.0",
@@ -44,11 +48,8 @@ research = [
   "vectorbt>=0.28",
   "backtesting>=0.6",
 ]
-server = [
-  "prometheus-client>=0.20",
-  "fastapi>=0.111",
-  "uvicorn>=0.30",
-  "websockets>=15,<17",
+mcp = [
+  "mcp>=1.27,<2",
 ]
 dev = [
   "pytest>=8.2",
@@ -125,4 +126,4 @@ packages = [
 ignore_missing_imports = true
 
 [tool.uv]
-default-groups = ["dev", "research"]
+default-groups = ["dev", "research", "mcp"]

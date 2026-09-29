@@ -28,6 +28,26 @@ from stocker_execution.store import TERMINAL, Store, encode
 # are reconciled every management cycle. SIM entries require a recent pass.
 RECONCILE_INTERVAL_SECONDS = 30
 RECONCILE_MAX_AGE_SECONDS = 60
+CLOSED_POSITION_FIELDS = (
+    "Amount",
+    "AssetType",
+    "Uic",
+    "BuyOrSell",
+    "OpenPrice",
+    "ClosingPrice",
+    "ExecutionTimeOpen",
+    "ExecutionTimeClose",
+    "OpeningExternalReferenceId",
+    "ClosingExternalReferenceId",
+    "ProfitLossOnTrade",
+    "ProfitLossOnTradeInBaseCurrency",
+    "ClosedProfitLoss",
+    "ClosedProfitLossInBaseCurrency",
+    "CostOpening",
+    "CostOpeningInBaseCurrency",
+    "CostClosing",
+    "CostClosingInBaseCurrency",
+)
 ORDER_DEADLINE_SECONDS = 20  # a working order unconfirmed after this is reconciled/cancelled
 
 
@@ -47,6 +67,8 @@ class PaperBroker:
         self.last_reconcile = 0.0
         self.preflight_at = 0.0
         self.size_used: dict[tuple[int, float, str], float] = {}
+        self.closed_checked = float("-inf")
+        self.closed_problem = ""
 
     def entry_reason(self) -> str:
         if self.fatal_error:
@@ -416,6 +438,46 @@ class PaperBroker:
                 return rows
         raise ValueError("PORTFOLIO_PAGINATION_LIMIT_RECONCILIATION_INCOMPLETE")
 
+    async def refresh_closed_positions(self) -> None:
+        """SAXO_SIM: keep Saxo's own closed-position figures for SLRNO orders.
+
+        Evidence and display only. Saxo removes intraday closed positions after
+        settlement, so this runs every ten minutes while SIM execution is configured.
+        """
+        if (
+            self.config.execution_mode != "SAXO_SIM"
+            or not self.data.account_verified
+            or time.monotonic() - self.closed_checked < 600
+        ):
+            return
+        self.closed_checked = time.monotonic()
+        references = {r[0] for r in self.store.db.execute("SELECT reference FROM orders")}
+        if not references:
+            return
+        try:
+            rows = await self.portfolio("/port/v1/closedpositions")
+        except ValueError as exc:
+            self.closed_problem = str(exc)
+            return
+        self.closed_problem = ""
+        for row in rows:
+            closed = row.get("ClosedPosition") or {}
+            ids = (
+                closed.get("OpeningExternalReferenceId"),
+                closed.get("ClosingExternalReferenceId"),
+            )
+            matched = sorted(str(r) for r in ids if r in references)
+            unique = str(row.get("ClosedPositionUniqueId") or "")
+            if not matched or not unique or self.store.get_meta("broker_closed:" + unique):
+                continue
+            record = {k: closed.get(k) for k in CLOSED_POSITION_FIELDS}
+            with self.store.db:
+                self.store.db.execute(
+                    "INSERT OR IGNORE INTO futures_meta VALUES(?,?)",
+                    ("broker_closed:" + unique, encode(record)),
+                )
+                self.store.audit(matched[-1], "SAXO_SIM_CLOSED_POSITION", record)
+
     async def reconcile(self) -> None:
         self.reconciled = False
         if self.config.execution_mode != "SAXO_SIM":
@@ -600,6 +662,9 @@ class PaperBroker:
         if not self.reconciled:
             return True
         if time.monotonic() - self.last_reconcile >= RECONCILE_INTERVAL_SECONDS:
+            return True
+        # A Saxo order/position event since the last pass: re-read broker state now.
+        if self.data.last_activity > self.last_reconcile:
             return True
         return any(
             self.store.exposure(r["id"])

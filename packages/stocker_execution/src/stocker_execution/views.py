@@ -5,6 +5,7 @@ re-checks everything itself when it runs.
 """
 
 import json
+import math
 import time
 import zlib
 from datetime import UTC, datetime, timedelta
@@ -335,3 +336,89 @@ def book_series(
     }
     _book_cache[instrument] = (sequence, time.monotonic(), result)
     return result
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+        return None
+    return float(value)
+
+
+def price_context(state: "MarketState") -> dict[str, Any]:
+    """Provider-reported session context for the future. Display only."""
+    value = state.price.value or {}
+    info = value.get("PriceInfo") or {}
+    details = value.get("PriceInfoDetails") or {}
+    instrument = value.get("InstrumentPriceDetails") or {}
+    quote = value.get("Quote") or {}
+    return {
+        "open": _number(details.get("Open")),
+        "high": _number(info.get("High")),
+        "low": _number(info.get("Low")),
+        "last_close": _number(details.get("LastClose")),
+        "net_change": _number(info.get("NetChange")),
+        "percent_change": _number(info.get("PercentChange")),
+        "open_interest": _number(instrument.get("OpenInterest")),
+        "market_state": quote.get("MarketState")
+        if isinstance(quote.get("MarketState"), str)
+        else None,
+        "daily_range": state.daily_range,
+        "daily_problem": state.daily_problem,
+        "basis": "Saxo-reported session fields; NetChange is mid minus last close",
+    }
+
+
+def smile(board: dict[str, Any], day: str) -> dict[str, Any] | None:
+    """Options-chain snapshot for one expiry: provider IV, delta, OI and indications.
+
+    Provider volatility scaling is undocumented, so values stay in provider units. Chain
+    prices are indications, never executable quotes.
+    """
+    expiries = [e for e in board.get("Expiries") or [] if isinstance(e, dict)]
+    expiry = next(
+        (e for e in expiries if str(e.get("Expiry", ""))[:10] == day),
+        expiries[0] if expiries else None,
+    )
+    if expiry is None:
+        return None
+
+    def side(value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        raw_greeks = value.get("Greeks")
+        greeks: dict[str, Any] = raw_greeks if isinstance(raw_greeks, dict) else {}
+        return {
+            "uic": value.get("Uic") if isinstance(value.get("Uic"), int) else None,
+            "bid": _number(value.get("Bid")),
+            "ask": _number(value.get("Ask")),
+            "delta": _number(greeks.get("Delta")),
+            "mid_volatility": _number(greeks.get("MidVolatility")),
+            "open_interest": _number(value.get("OpenInterest")),
+            "volume": _number(value.get("Volume")),
+        }
+
+    strikes = [
+        {
+            "strike": _number(s.get("Strike")),
+            "mid_volatility_pct": _number(s.get("MidVolatilityPct")),
+            "call": side(s.get("Call")),
+            "put": side(s.get("Put")),
+        }
+        for s in expiry.get("Strikes") or []
+        if isinstance(s, dict)
+    ][:25]
+    return {
+        "expiry": expiry.get("Expiry"),
+        "last_trade": expiry.get("LastTradeDate"),
+        "mid_strike_price": _number(expiry.get("MidStrikePrice")),
+        "strikes": sorted(
+            (s for s in strikes if s["strike"] is not None), key=lambda s: s["strike"]
+        ),
+        "scaling": "PROVIDER_NATIVE_UNVERIFIED",
+        "executable": False,
+    }
+
+
+def model_sigma(rv15: float | None) -> float | None:
+    """The frozen model's annualised volatility from RV15 (rules.frozen_strike)."""
+    return rv15 * math.sqrt(525600 / 15) if rv15 else None

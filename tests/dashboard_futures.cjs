@@ -60,6 +60,7 @@ const state = {
   },
   account: {environment:"SIM",label:"SIM · simulated funds",account:"••••1234",currency:"GBP",status:"Current",last_success_at:Date.parse(at)/1000,valid_until:Date.parse(at)/1000+30,total_value:12345.67,cash_balance:10000,cash_available_for_trading:null,connection_note:"Real-money balances are not connected",details:{CalculationReliability:"Ok"}},
   pnl: {
+    broker_reported: {count:1, closed_profit_loss_base:12.5, costs_base:1.5, currency:"EUR"},
     realised_net_gbp: null,
     provisional_closed: 1,
     opportunities: 12,
@@ -185,6 +186,9 @@ for (const m of state.markets) {
   m.target_delta = m.market==="SI" ? 0.2 : 0.1;
   m.sessions_today = [{start:"2026-09-27T22:00:00Z",end:"2026-09-28T21:00:00Z",state:"AutomatedTrading"}];
   m.events_today = m.market==="GC" ? [{at:"2026-09-28T12:30:00Z",name:"US CPI (fixture)"}] : [];
+  m.smile = {expiry:"2026-09-28T00:00:00Z", mid_strike_price:70.2, scaling:"PROVIDER_NATIVE_UNVERIFIED", executable:false,
+    strikes:[66,67,68,69,70,71,72].map((strike,k)=>({strike, mid_volatility_pct:.3, call:null, put:{uic:900+k, mid_volatility:.28+Math.abs(69-strike)*.012, open_interest:[40,120,300,800,500,90,20][k]}}))};
+  m.model_sigma = 0.27;
   m.price_context = {open:2641,high:2660,low:2630,last_close:2638,net_change:12,percent_change:0.45,open_interest:512000,market_state:"Open",daily_range:31.5};
   m.identity = {environment:"SAXO_SIM",uic:100+markets.indexOf(m.market)};
   m.book_flow = {
@@ -312,7 +316,7 @@ async function label(page) {
     assert.match(await page.locator("#allocation").textContent(), /100.00.*200.00/);
     assert.equal(await page.locator("#account-available").textContent(), "Unavailable");
     assert.match(await page.locator("#account-note").textContent(), /Real-money balances are not connected/);
-    assert.match(await page.locator("#pnl-note").textContent(), /provisional/);
+    assert.match(await page.locator("#pnl-note").textContent(), /provisional.*Saxo reports 12\.5 EUR closed P&L \(1 position\)/);
     assert.equal(await page.locator("#entries").textContent(), "Unarmed");
     assert.equal(await page.locator("#overview-slots > div").count(), 4);
     assert.match(await page.locator("#live-badge").textContent(), /LIVE ORDERS DISABLED/);
@@ -354,6 +358,9 @@ async function label(page) {
     assert.match(await page.locator("#sessions-GC").textContent(), /18:00–17:00 AutomatedTrading \(NY\)/);
     assert.match(await page.locator("#events-today-GC").textContent(), /08:30 US CPI/);
     assert.match(await page.locator("#price-context-GC").textContent(), /high 2660.*OI 512000/);
+    assert.equal(await page.locator("#smile-GC rect.oi").count(), 7);
+    assert.equal(await page.locator("#smile-GC circle.selected").count(), 1);
+    assert.match(await page.locator("#smile-note-GC").textContent(), /put IV by strike.*frozen model σ 0\.27/);
     assert.equal(await page.locator("#clocks-GC line").count(), 2); // 13:00 and 14:00 UTC inside the 90-minute chart
     assert(Number(await page.locator("#rv-GC").getAttribute("width")) > 0);
     assert.match(await page.locator("#imbalance-GC").textContent(), /\+0\.50 · bid heavy/);

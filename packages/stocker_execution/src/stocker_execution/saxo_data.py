@@ -91,6 +91,10 @@ class MarketState:
     candidate_changes: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=32))
     # Display only: frozen-model delta per ranked strike at the latest ranking.
     candidate_deltas: dict[int, float] = field(default_factory=dict)
+    # Display only: average completed daily high-low range, refreshed once per NY day.
+    daily_range: float | None = None
+    daily_day: str = ""
+    daily_problem: str = ""
 
 
 def completed_bars(raw: dict[str, Any], at: datetime) -> list[Bar]:
@@ -146,6 +150,10 @@ class DataService:
         self.balance_received_at: float | None = None
         self.balance_problem = "ACCOUNT_BALANCE_UNAVAILABLE"
         self.balance_attempt = float("-inf")
+        # SIM order/position events only prompt an earlier reconcile; never trusted as state.
+        self.last_activity = float("-inf")
+        self.activity_attempt = float("-inf")
+        self.activity_problem = ""
         self.pending: dict[str, list[dict[str, Any]]] = {}
         self.pending_bytes = 0
         self.subscription_lock = asyncio.Lock()
@@ -209,6 +217,30 @@ class DataService:
             )
         except (SaxoError, ValueError, KeyError, TypeError):
             self.balance_problem = "ACCOUNT_BALANCE_UNAVAILABLE"
+
+    async def ensure_activity_subscription(self) -> None:
+        """SAXO_SIM only: order/position events wake reconciliation; evidence stays audited."""
+        if (
+            self.config.execution_mode != "SAXO_SIM"
+            or not self.connected
+            or not self.account_verified
+            or any(s["kind"] == "ACTIVITIES" for s in self.subscriptions.values())
+            or time.monotonic() - self.activity_attempt < 60
+        ):
+            return
+        self.activity_attempt = time.monotonic()
+        try:
+            await self.subscribe(
+                "ACTIVITIES",
+                {
+                    "AccountKey": self.client.oauth.account_key,
+                    "Activities": ["Orders", "Positions"],
+                },
+                "ACTIVITIES",
+            )
+            self.activity_problem = ""
+        except (SaxoError, ValueError, KeyError, TypeError):
+            self.activity_problem = "ACTIVITY_EVENTS_UNAVAILABLE"
 
     def receive_balance(self, data: Any, receipt: float, *, snapshot: bool = False) -> None:
         if not isinstance(data, dict):
@@ -429,6 +461,7 @@ class DataService:
             "BALANCE": "/port/v1/balances/subscriptions",
             "BOARD": "/trade/v1/optionschain/subscriptions",
             "SESSION": "/root/v1/sessions/events/subscriptions",
+            "ACTIVITIES": "/ens/v1/activities/subscriptions",
         }
         ref = "S" + secrets.token_hex(10)
         body: dict[str, Any] = {
@@ -488,6 +521,8 @@ class DataService:
             self.receive_balance(snapshot, time.time(), snapshot=True)
         elif kind == "SESSION":
             self.session = snapshot or {}
+        elif kind == "ACTIVITIES":
+            pass  # event stream only; there is no snapshot
         else:
             self.markets[target].option_board = snapshot or {}
             self.record_board(self.markets[target], snapshot or {}, time.time())
@@ -817,11 +852,11 @@ class DataService:
         )
         if strike:
             selection["StrikeStartIndex"] = max(
-                0, strike["Index"] - self.config.option_candidate_window // 2
+                0, strike["Index"] - self.config.option_chain_strikes // 2
             )
         patch = {
             "Expiries": [selection],
-            "MaxStrikesPerExpiry": self.config.option_candidate_window,
+            "MaxStrikesPerExpiry": self.config.option_chain_strikes,
         }
         if current.get("board_window") == patch:
             return
@@ -962,7 +997,7 @@ class DataService:
             return
         result = await self.client.request(
             "GET",
-            "/chart/v1/charts",
+            "/chart/v3/charts",
             params={
                 "Uic": state.identity["uic"],
                 "AssetType": "ContractFutures",
@@ -1038,6 +1073,33 @@ class DataService:
             state.history_problem = "REFERENCE_SESSION_AUDIT_OR_SAXO_COVERAGE_UNVERIFIED"
             state.reference_failure = state.history_problem
             state.reference_retry_at = time.monotonic() + REFERENCE_RETRY_SECONDS
+
+    async def daily_context(self, state: MarketState) -> None:
+        """Display only: 20-session average daily range from completed Saxo daily samples."""
+        day = datetime.now(NY).date().isoformat()
+        if not state.identity or state.daily_day == day:
+            return
+        state.daily_day = day
+        try:
+            result = await self.client.request(
+                "GET",
+                "/chart/v3/charts",
+                params={
+                    "Uic": state.identity["uic"],
+                    "AssetType": "ContractFutures",
+                    "Horizon": 1440,
+                    "Count": 21,
+                    "FieldGroups": "Data",
+                },
+            )
+            rows = sorted(result.get("Data", []), key=lambda r: r.get("Time", ""))[:-1]
+            ranges = [float(r["High"]) - float(r["Low"]) for r in rows[-20:]]
+            if len(ranges) < 5 or any(not math.isfinite(x) or x < 0 for x in ranges):
+                raise ValueError("DAILY_SAMPLES_INSUFFICIENT")
+            state.daily_range, state.daily_problem = sum(ranges) / len(ranges), ""
+        except (SaxoError, ValueError, KeyError, TypeError) as exc:
+            state.daily_range = None
+            state.daily_problem = str(exc) if isinstance(exc, ValueError) else "DAILY_SCHEMA"
 
     async def restore_option(self, plan: dict[str, Any]) -> None:
         """Owned options keep their original future even after a display roll/restart."""
@@ -1161,7 +1223,7 @@ class DataService:
         for _ in range(min(max_pages, 8)):
             result = await self.client.request(
                 "GET",
-                "/chart/v1/charts",
+                "/chart/v3/charts",
                 params={
                     "Uic": uic,
                     "AssetType": "ContractFutures",
@@ -1211,6 +1273,7 @@ class DataService:
                     "AccountKey": self.client.oauth.account_key,
                     "FieldGroups": [
                         "Quote",
+                        "PriceInfo",
                         "PriceInfoDetails",
                         "MarketDepth",
                         "InstrumentPriceDetails",
@@ -1233,6 +1296,7 @@ class DataService:
                     state.capabilities["depth_request_problem"] = str(exc)
                     arguments["FieldGroups"] = [
                         "Quote",
+                        "PriceInfo",
                         "PriceInfoDetails",
                         "InstrumentPriceDetails",
                     ]
@@ -1249,7 +1313,7 @@ class DataService:
                             "Identifier": state.option_root,
                             "AssetType": "FuturesOption",
                             "AccountKey": self.client.oauth.account_key,
-                            "MaxStrikesPerExpiry": self.config.option_candidate_window,
+                            "MaxStrikesPerExpiry": self.config.option_chain_strikes,
                             "Expiries": [{"Index": 0}],
                         },
                         state.market,
@@ -1377,6 +1441,8 @@ class DataService:
                     self.receive_balance(data, receipt)
                 else:
                     self.balance_problem = "BALANCE_ACCOUNT_CHANGED"
+            elif subscription["kind"] == "ACTIVITIES":
+                self.last_activity = time.monotonic()
             elif subscription["kind"] == "BOARD":
                 state = self.markets[subscription["target"]]
                 self.record_board(state, data, receipt)
@@ -1445,7 +1511,8 @@ class DataService:
                         if any(
                             time.monotonic() - s["contact"] > s["timeout"]
                             for s in self.subscriptions.values()
-                            if s["kind"] != "BALANCE"
+                            # Optional account/event streams must not reset price streams.
+                            if s["kind"] not in {"BALANCE", "ACTIVITIES"}
                         ):
                             raise SaxoError("SUBSCRIPTION_HEARTBEAT_TIMEOUT")
             except asyncio.CancelledError:

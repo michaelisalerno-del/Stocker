@@ -109,6 +109,7 @@ function marketCard(m) {
           <dt>Price</dt><dd id="price-context-${m}">Not reported</dd>
           <dt>Sessions</dt><dd id="sessions-${m}"></dd>
           <dt>Events</dt><dd id="events-today-${m}"></dd>
+          <dt>Vol smile</dt><dd><svg viewBox="0 0 300 90" class="smile" id="smile-${m}" aria-label="${m} provider implied volatility by strike"></svg><span class="muted" id="smile-note-${m}"></span></dd>
           <dt>Recorder</dt><dd class="recorder-line" id="recorder-${m}"></dd>
         </dl>
         <div class="position" id="position-${m}"></div>
@@ -353,6 +354,33 @@ function chart(m) {
   [...group.children].filter((n) => !wanted.has(n.dataset.key)).forEach((n) => n.remove());
 }
 
+function smileChart(m) {
+  const svg = $(`smile-${m.market}`), data = m.smile;
+  if (!svg) return;
+  const right = m.market === "CL" ? "call" : "put";
+  const points = (data?.strikes || []).map((s) => ({strike: s.strike, vol: s[right]?.mid_volatility ?? s.mid_volatility_pct, oi: s[right]?.open_interest})).filter((p) => typeof p.vol === "number");
+  const {o} = optionChoice(m);
+  const signature = JSON.stringify([points, o?.identity?.strike, data?.mid_strike_price]);
+  if (svg.dataset.signature === signature) return;
+  svg.dataset.signature = signature;
+  if (points.length < 2) {
+    svg.replaceChildren(svgNode("text", {x: 150, y: 48, "text-anchor": "middle"}, data ? "Chain window has too few strikes with volatility" : "No options chain received"));
+    text(`smile-note-${m.market}`, "");
+    return;
+  }
+  const lo = Math.min(...points.map((p) => p.strike)), hi = Math.max(...points.map((p) => p.strike));
+  const vlo = Math.min(...points.map((p) => p.vol)), vhi = Math.max(...points.map((p) => p.vol));
+  const x = (v) => 8 + (284 * (v - lo)) / Math.max(1e-9, hi - lo), y = (v) => 60 - (48 * (v - vlo)) / Math.max(1e-9, vhi - vlo);
+  const oiMax = Math.max(1, ...points.map((p) => p.oi || 0));
+  const nodes = points.map((p) => svgNode("rect", {x: x(p.strike) - 3, y: 86 - (20 * (p.oi || 0)) / oiMax, width: 6, height: (20 * (p.oi || 0)) / oiMax, class: "oi"}));
+  nodes.push(svgNode("polyline", {fill: "none", class: "vol", points: points.map((p) => `${x(p.strike).toFixed(1)},${y(p.vol).toFixed(1)}`).join(" ")}));
+  if (typeof data.mid_strike_price === "number" && data.mid_strike_price >= lo && data.mid_strike_price <= hi) nodes.push(svgNode("line", {x1: x(data.mid_strike_price), x2: x(data.mid_strike_price), y1: 4, y2: 86, class: "underlying"}));
+  const strike = o?.identity?.strike;
+  if (typeof strike === "number" && strike >= lo && strike <= hi) nodes.push(svgNode("circle", {cx: x(strike), cy: y(points.find((p) => p.strike === strike)?.vol ?? vlo), r: 3.5, class: "selected"}));
+  nodes.push(svgNode("text", {x: 4, y: 9}, numeric(vhi)), svgNode("text", {x: 4, y: 68}, numeric(vlo)));
+  svg.replaceChildren(...nodes);
+  text(`smile-note-${m.market}`, `${right} IV by strike, expiry ${String(data.expiry || "").slice(0, 10)} · bars: open interest · dashed: underlying · dot: ticket strike · provider units unverified · frozen model σ ${numeric(m.model_sigma)} (annualised RV15)`);
+}
 function spark(id, series, {min, max, zero} = {}) {
   const svg = $(id);
   if (!svg) return;
@@ -419,6 +447,7 @@ function renderStatus(s) {
   text("global-warning", exceptions || s.problem || s.l2_recording?.paused_reason || "");
   text("auth-state", `OAuth: ${s.oauth || "UNVERIFIED"}${s.oauth_problem ? ` (${s.oauth_problem})` : ""} · stream: ${s.connected ? "connected" : "disconnected"} · session: ${s.session?.TradeLevel || "UNVERIFIED"}`);
   const alerts = s.alerts || {};
+  text("events-state", `Saxo order/position events: ${display(s.activity_events || "NOT_SUBSCRIBED").toLowerCase()}${s.closed_positions_problem ? ` · closed positions: ${s.closed_positions_problem}` : ""}`);
   text("alerts-state", `Alerts: ${alerts.enabled ? `enabled · ${alerts.sent || 0} sent${alerts.last_error ? ` · last error ${alerts.last_error}` : ""}` : alerts.problem ? display(alerts.problem) : "not configured"}${(alerts.active || []).length ? ` · active: ${alerts.active.join(" · ")}` : ""}`);
   if (s.setup) renderSetup(s.setup);
   for (let i = 0; i < 4; i++) {
@@ -455,7 +484,9 @@ function render(d) {
   renderStatus(s);
   if (d.pnl) {
     text("realised", money(p.realised_net_gbp));
-    text("pnl-note", p.provisional_closed ? `${p.provisional_closed} closed trade(s) provisional · missing costs/FX` : display(p.basis || "Paper evidence unavailable"));
+    const saxo = p.broker_reported || {};
+    const reported = saxo.count ? ` · Saxo reports ${numeric(saxo.closed_profit_loss_base)} ${saxo.currency || "account currency"} closed P&L (${saxo.count} position${saxo.count === 1 ? "" : "s"})` : "";
+    text("pnl-note", (p.provisional_closed ? `${p.provisional_closed} closed trade(s) provisional · missing costs/FX` : display(p.basis || "Paper evidence unavailable")) + reported);
     const vals = d.markets.flatMap((m) => m.trades || []).filter((t) => t.quantity > 0).map((t) => t.valuation);
     text("unrealised", vals.length && vals.every((v) => v.fresh && v.value_gbp != null) ? money(vals.reduce((a, v) => a + v.value_gbp, 0)) : vals.length ? "Unavailable" : "—");
     text("valuation-note", vals.length ? "Bid estimate before commissions" : "No open paper positions");
@@ -501,6 +532,7 @@ function render(d) {
     depth(m.market, m.l2 || {status: "DISABLED"});
     bookFlow(m.market, m.book_flow || {}, rec, m.identity || {environment: s.data_environment});
     optionContext(m);
+    smileChart(m);
     const trades = m.trades || [];
     text(`position-${m.market}`, trades.length ? trades.map((t) => `${display(t.state)} · ${t.quantity} contract · exit ${hhmm(t.exit_at)} NY${t.quantity ? ` · bid P&L ${t.valuation.fresh ? money(t.valuation.value_gbp) : "unavailable"}` : ""}`).join(" | ") : "No pending or open paper trade");
     text(`diagnostic-${m.market}`, m.diagnostic);

@@ -457,8 +457,9 @@ def test_chain_focus_uses_selected_expiry_strike_and_existing_subscription(tmp_p
         args = data.client.request.call_args
         assert args.args[0] == "PATCH"
         assert args.kwargs["body"] == {
-            "Expiries": [{"Index": 3, "StrikeStartIndex": 89}],
-            "MaxStrikesPerExpiry": 3,
+            # Observation-only chain window: option_chain_strikes centred on the strike.
+            "Expiries": [{"Index": 3, "StrikeStartIndex": 85}],
+            "MaxStrikesPerExpiry": 11,
         }
         store.db.close()
 

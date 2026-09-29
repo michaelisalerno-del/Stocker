@@ -90,6 +90,8 @@ def test_unexpected_missing_field_is_not_recorded_as_a_trading_reason(tmp_path, 
         ).fetchone()
         context = json.loads(detail)["option_context"]
         assert context["reason"] == "UNEXPECTED_MISSING_FIELD"
+        # The chain as seen at the clock is recorded with every observed opportunity.
+        assert "option_chain" in json.loads(detail)
         assert row["reason"] == "EXECUTION_DISABLED"
         await runtime.stop()
         runtime.store.db.close()

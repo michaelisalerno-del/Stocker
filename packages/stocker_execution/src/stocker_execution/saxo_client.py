@@ -16,6 +16,7 @@ READ_PATHS = (
     r"/port/v1/clients/me",
     r"/port/v1/balances",
     r"/port/v1/(orders|positions|netpositions)/me",
+    r"/port/v1/closedpositions",
     r"/ref/v1/instruments",
     r"/ref/v1/instruments/details/[0-9]+/(ContractFutures|FuturesOption|FxSpot)",
     r"/ref/v1/instruments/contractoptionspaces/[0-9]+",
@@ -23,7 +24,7 @@ READ_PATHS = (
     r"/ref/v1/exchanges/[A-Za-z0-9_-]+",
     r"/ref/v1/currencypairs",
     r"/trade/v1/(prices|infoprices)",
-    r"/chart/v1/charts",
+    r"/chart/v3/charts",
     r"/cs/v1/audit/orderactivities",
     r"/ens/v1/activities",
 )
@@ -32,7 +33,8 @@ SUBSCRIPTIONS = (
     "/trade/v1/prices/subscriptions",
     "/trade/v1/optionschain/subscriptions",
     "/root/v1/sessions/events/subscriptions",
-    "/chart/v1/charts/subscriptions",
+    "/chart/v3/charts/subscriptions",
+    "/ens/v1/activities/subscriptions",
 )
 
 

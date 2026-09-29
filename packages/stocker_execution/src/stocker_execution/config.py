@@ -148,6 +148,8 @@ class FuturesConfig(Strict):
     recorder: RecorderConfig = Field(default_factory=RecorderConfig)
     option_subscription_budget: int = Field(default=16, ge=4, le=16)
     option_candidate_window: int = Field(default=3, ge=1, le=3)
+    # Strikes in the observation-only options-chain window (Saxo caps a chain at 100).
+    option_chain_strikes: int = Field(default=11, ge=3, le=25)
     # Frozen parameters below are pinned sentinels: a configuration file may restate
     # them but never change them. The code uses the module constants above.
     refresh_rate_ms: Literal[1000] = 1000

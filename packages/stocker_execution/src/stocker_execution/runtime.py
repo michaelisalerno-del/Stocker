@@ -135,6 +135,13 @@ class Runtime:
             "next_clock": next_clock(at).isoformat(),
             "setup": views.setup(self),
             "alerts": self.alerts.status(),
+            "activity_events": self.data.activity_problem
+            or (
+                "SUBSCRIBED"
+                if any(s["kind"] == "ACTIVITIES" for s in self.data.subscriptions.values())
+                else "NOT_SUBSCRIBED"
+            ),
+            "closed_positions_problem": self.broker.closed_problem,
             "calendar_problem": self.calendar_problem,
             "limits": {
                 "per_trade_gbp": MAX_PREMIUM_RISK_GBP,
@@ -226,11 +233,16 @@ class Runtime:
                     "events": self.calendar.near(market, clock) if self.calendar else [],
                 }
             )
+        pnl = self.store.economics()
+        pnl = {
+            **pnl,
+            "broker_reported": {**pnl["broker_reported"], "currency": self.data.account_currency},
+        }
         return {
             "system": self.status(),
             "account": self.data.balance_view(at.timestamp()),
             "markets": cards,
-            "pnl": self.store.economics(),
+            "pnl": pnl,
         }
 
     def execution_view(self) -> dict[str, Any]:
@@ -373,6 +385,9 @@ class Runtime:
                 if self.calendar
                 else [],
                 "candidate_deltas": {str(k): v for k, v in state.candidate_deltas.items()},
+                "price_context": views.price_context(state),
+                "smile": views.smile(state.option_board, now().astimezone(NY).date().isoformat()),
+                "model_sigma": views.model_sigma(features.get("rv15")),
                 "target_delta": 0.2 if market == "SI" else 0.1,
                 "signals": [
                     {k: s[k] for k in ("id", "signal_at", "decision", "reason")} for s in recent
@@ -537,6 +552,10 @@ class Runtime:
                     ).fetchone()
                     detail = json.loads(row[0])
                     detail["option_context"] = context
+                    # Observation only: the chain as seen at this clock (provider units).
+                    detail["option_chain"] = views.smile(
+                        state.option_board, clock.astimezone(NY).date().isoformat()
+                    )
                     self.store.db.execute(
                         "UPDATE signals SET detail=? WHERE id=?", (encode(detail), event["id"])
                     )
@@ -594,6 +613,7 @@ class Runtime:
                 try:
                     await self.data.history(state)
                     await self.data.warm_candidates(state)
+                    await self.data.daily_context(state)
                 except Exception as exc:
                     state.history_problem = "SAXO_HISTORY_UNAVAILABLE"
                     state.history_checked = time.monotonic()
@@ -620,6 +640,8 @@ class Runtime:
                     if self.data.connected:
                         await self.data.refresh_option_metadata()
                         await self.data.ensure_balance_subscription()
+                        await self.data.ensure_activity_subscription()
+                        await self.broker.refresh_closed_positions()
                 except Exception as exc:
                     self.report_failure("option-subscription-maintenance", exc)
             with suppress(TimeoutError):

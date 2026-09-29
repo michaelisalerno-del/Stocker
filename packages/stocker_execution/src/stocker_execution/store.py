@@ -445,7 +445,28 @@ class Store:
             r[0]: r[1]
             for r in self.db.execute("SELECT reason,COUNT(*) FROM signals GROUP BY reason")
         }
+        reported = [
+            json.loads(r[0])
+            for r in self.db.execute(
+                "SELECT value FROM futures_meta WHERE key LIKE 'broker_closed:%'"
+            )
+        ]
+
+        def reported_total(*names: str) -> float | None:
+            values = [r.get(n) for r in reported for n in names]
+            if not reported or not all(isinstance(v, (int, float)) for v in values):
+                return None
+            return float(sum(values))
+
         return {
+            # Saxo's own figures in the account base currency; never mixed with GBP totals.
+            "broker_reported": {
+                "count": len(reported),
+                "closed_profit_loss_base": reported_total("ClosedProfitLossInBaseCurrency"),
+                "costs_base": reported_total(
+                    "CostOpeningInBaseCurrency", "CostClosingInBaseCurrency"
+                ),
+            },
             "realised_net_gbp": net if closed or not provisional else None,
             "closed_with_complete_costs": closed,
             "wins": wins,

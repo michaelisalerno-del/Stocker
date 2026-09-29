@@ -157,6 +157,12 @@ h3 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: 
 #markets .spark[id^="spark-size"] .s0 { stroke: var(--bid); }
 .spark .zero { stroke: #3a4b53; stroke-dasharray: 2 3; }
 .spark text { font: 9px monospace; fill: var(--muted); }
+.smile { width: 100%; max-width: 320px; height: auto; aspect-ratio: 300 / 90; display: block; background: #0e171c; border: 1px solid var(--line); margin-bottom: 4px; }
+.smile .vol { stroke: #a8c8d0; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.smile .oi { fill: rgba(164, 181, 187, 0.25); }
+.smile .underlying { stroke: var(--warn); stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+.smile .selected { fill: var(--accent); }
+.smile text { font: 8px monospace; fill: var(--muted); }
 .heatmap { width: 100%; height: auto; aspect-ratio: 900 / 260; background: #0b1317; border: 1px solid var(--line); display: block; }
 .flow-table { overflow-x: auto; }
 .flow-table table { min-width: 0; font-size: 11px; }

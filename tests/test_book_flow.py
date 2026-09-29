@@ -184,7 +184,7 @@ def test_five_ordinary_subscriptions_shared_by_consumers_and_heartbeats(
         assert len(prices) == 5
         for _ref, s in prices:
             assert s["path"] == "/trade/v1/prices/subscriptions"
-            assert {"Quote", "PriceInfoDetails", "MarketDepth"} <= set(
+            assert {"Quote", "PriceInfo", "PriceInfoDetails", "MarketDepth"} <= set(
                 s["arguments"]["FieldGroups"]
             )
             assert s["refresh_ms"] == 1500

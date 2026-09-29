@@ -1010,6 +1010,7 @@ class DataService:
             "first_sample": (result.get("ChartInfo") or {}).get("FirstSampleTime"),
             "data_version": result.get("DataVersion"),
             "returned_samples": len(result.get("Data", [])),
+            "delayed_by_minutes": (result.get("ChartInfo") or {}).get("DelayedByMinutes"),
             "semantics": "Saxo chart samples; mutable tail excluded; no quote reconstruction",
         }
         bars = completed_bars(result, datetime.now(UTC))
@@ -1024,6 +1025,12 @@ class DataService:
         state.history_problem = ""
         if not bars:
             state.history_problem = "SAXO_COMPLETED_OHLCV_UNAVAILABLE"
+            return
+        delay = state.capabilities["history"]["delayed_by_minutes"]
+        if isinstance(delay, (int, float)) and delay != 0:
+            # Delayed bars can never supply the final completed minute inside the entry
+            # deadline; name the cause instead of leaving an unexplained skip.
+            state.history_problem = "SAXO_CHART_DATA_DELAYED"
             return
         if boundary:
             return

@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from stocker_execution.config import MARKETS, QUOTE_MAX_AGE_SECONDS
-from stocker_execution.contracts import session_state, utc
+from stocker_execution.contracts import quote_check, session_state, utc
 from stocker_execution.rules import NY, clocks
 
 if TYPE_CHECKING:
@@ -32,6 +32,24 @@ def quote_current(state: "MarketState", at: float) -> bool:
     )
 
 
+# Saxo's price-subscription Greeks.MidVol is an annual fraction: a live SIM probe on
+# 2026-09-29 read 0.589 (CL) and 0.523 (NG) at the money against chain ImpliedVolatility
+# of 50.5 and 55.3 (percent). The chain's per-strike MidVolatility is also a fraction; see
+# FuturesConfig.provider_volatility_scale.
+PRICE_MIDVOL_IS_ANNUAL_FRACTION = True
+
+
+def quote_problem(state: "MarketState", at: float) -> str:
+    """The same quote check a clock decision applies: fresh, real-time, usable price."""
+    if state.price.problem:
+        return state.price.problem
+    try:
+        quote_check(state.price.value or {}, state.price.receipt, datetime.fromtimestamp(at, UTC))
+    except ValueError as exc:
+        return str(exc)
+    return ""
+
+
 def gates(runtime: "Runtime", market: str, state: "MarketState", at: float) -> list[dict[str, Any]]:
     """Ordered readiness checks, mirroring the gates a clock decision applies."""
     oauth = runtime.data.client.oauth.status
@@ -46,7 +64,7 @@ def gates(runtime: "Runtime", market: str, state: "MarketState", at: float) -> l
             runtime.data.problem or oauth,
         ),
         ("contract", "Contract", state.identity is not None, state.problem),
-        ("quote", "Quote", quote_current(state, at), state.price.problem or "STALE_OR_MISSING"),
+        ("quote", "Quote", not (problem := quote_problem(state, at)), problem),
         (
             "history",
             "History",
@@ -88,6 +106,13 @@ def setup(runtime: "Runtime") -> list[dict[str, Any]]:
     verified = sum(s.identity is not None for s in states)
     references = sum(len(s.references) >= 5 for s in states)
     approved = [m for m in MARKETS if m in config.mappings]
+    delays = [
+        ((s.price.value or {}).get("Quote") or {}).get("DelayedByMinutes")
+        for s in states
+        if s.price.value
+    ]
+    realtime = bool(delays) and all(d == 0 for d in delays)
+    delayed = max((d for d in delays if isinstance(d, (int, float))), default=None)
     oauth = data.client.oauth.status
     items = [
         ("oauth", "Saxo login", oauth == "AUTHENTICATED", oauth, False),
@@ -99,6 +124,16 @@ def setup(runtime: "Runtime") -> list[dict[str, Any]]:
             False,
         ),
         ("stream", "Price stream", data.connected, data.problem, False),
+        (
+            "realtime",
+            "Real-time market data",
+            realtime,
+            f"Saxo reports quotes delayed by {delayed:g} min; the strategy needs real-time "
+            "exchange data (entitlement or LIVE data with INTERNAL_PAPER)"
+            if delayed
+            else "No futures quote received yet",
+            False,
+        ),
         (
             "contracts",
             f"Futures contracts verified {verified}/5",
@@ -431,3 +466,15 @@ def smile(
 def model_sigma(rv15: float | None) -> float | None:
     """The frozen model's annualised volatility from RV15 (rules.frozen_strike)."""
     return rv15 * math.sqrt(525600 / 15) if rv15 else None
+
+
+def iv_spread(option: dict[str, Any], rv15: float | None) -> dict[str, Any]:
+    """Implied (verified price Greeks.MidVol) minus the frozen model's sigma. Context only."""
+    raw = ((option.get("analytics") or {}).get("Greeks.MidVol") or {}).get("value")
+    sigma = model_sigma(rv15)
+    iv = _number(raw) if PRICE_MIDVOL_IS_ANNUAL_FRACTION else None
+    return {
+        "implied_volatility": iv,
+        "model_sigma": sigma,
+        "iv_minus_model_sigma": iv - sigma if iv is not None and sigma else None,
+    }

@@ -540,6 +540,7 @@ class Runtime:
                         selected, _ = await self.broker.select_option(event, state, inputs)
                         context = self.data.option_view(selected["uic"], time.time())
                         context.update(
+                            **views.iv_spread(context, inputs.get("rv15")),
                             selection_status="SELECTED",
                             strategy_exit_at=event["exit_at"],
                             pre_trigger_seconds=max(

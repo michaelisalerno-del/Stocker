@@ -62,6 +62,38 @@ user from a copy of this branch, then:
   with realised volatility on that basis (it stays `UNVERIFIED`, with no spread, otherwise);
 - use the option quote's `PriceTypeBid`/`PriceTypeAsk` to settle the Tradable/Indicative policy.
 
+## Live findings — Saxo SIM, 29 September 2026
+
+Two read-only probe runs ([evidence](saxo-field-probe-20260929.json)) established:
+
+- **The SIM feed is delayed by 10 minutes** for every futures and option quote and for charts
+  (`DelayedByMinutes: 10`); prices arrive as `OldIndicative` or `Pending`, and no market depth is
+  provided. The frozen method needs real-time completed bars and quotes, so every clock would be
+  skipped. This is now named explicitly: the Quote gate runs the same check a decision uses
+  (`QUOTE_DELAYED_OR_DELAY_UNKNOWN`), history reports `SAXO_CHART_DATA_DELAYED`, and the setup
+  checklist has a **Real-time market data** step. Paper trading needs real-time exchange data
+  entitlements, or LIVE data feeding INTERNAL_PAPER.
+- **Chart v3 works:** fields Open/High/Low/Close/Volume/Interest/MarketTradingState/Time, minute
+  aligned, with DataVersion; ChartInfo carries the delay.
+- **Session states** observed: AutomatedTrading, Closed, PreTrading (no "Open"), confirming the
+  session-gate fix. Futures `Quote.MarketState` separately reports `Open`.
+- **Volatility scale:** price-subscription `Greeks.MidVol` and chain per-strike
+  `Greeks.MidVolatility` are annual fractions (CL at the money 0.56–0.59, NG 0.523; one NG chain
+  strike 0.651 between bid/ask volatilities 0.645/0.657); the chain summary `ImpliedVolatility`
+  is a percentage (50.5, 55.3). `MidVolatilityPct` is not populated for futures options. The
+  ticket now shows implied volatility against the frozen model's sigma, and each selected
+  option's recorded context includes `iv_minus_model_sigma`. `provider_volatility_scale` now
+  defaults to FRACTION.
+- **Price quality:** a live chain side reported `Indicative`; delayed quotes are `OldIndicative`.
+  The Tradable-only paper-fill rule would therefore reject normal real-time prices; the decision
+  remains yours once real-time data is available.
+- **NQ is not offered** on this account: no ContractFutures match "NQ", "Nasdaq", "Nasdaq 100" or
+  "E-mini Nasdaq".
+- **0DTE expiries exist** for CL (last trade 18:30 UTC = 14:30 New York) and GC (17:30 UTC =
+  13:30 New York) on the probe date. With the existing rule that the exit must precede the cutoff
+  by two minutes, only CL clocks to 13:00 and GC clocks to 12:00 New York could complete a
+  60-minute hold; the frozen research assumed a 17:00 New York expiry.
+
 ## Optional configuration
 
 ```yaml
@@ -71,7 +103,7 @@ alerts:
   stream_down_seconds: 120
   login_warning_hours: 24
 option_chain_strikes: 11
-provider_volatility_scale: UNVERIFIED   # FRACTION or PERCENT, only from probe evidence
+provider_volatility_scale: FRACTION     # verified live; UNVERIFIED hides the IV spread
 ```
 
 The alert file is `{"url": "https://ntfy.sh/<private-topic>"}` (any HTTPS endpoint accepting a

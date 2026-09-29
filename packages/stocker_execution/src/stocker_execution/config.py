@@ -150,9 +150,10 @@ class FuturesConfig(Strict):
     option_candidate_window: int = Field(default=3, ge=1, le=3)
     # Strikes in the observation-only options-chain window (Saxo caps a chain at 100).
     option_chain_strikes: int = Field(default=11, ge=3, le=25)
-    # Scale of the chain's Greeks.MidVolatility, which Saxo does not document. Set it only
-    # from live evidence (scripts/saxo_field_probe.py); until then no IV spread is shown.
-    provider_volatility_scale: Literal["UNVERIFIED", "FRACTION", "PERCENT"] = "UNVERIFIED"
+    # Scale of the chain's Greeks.MidVolatility, which Saxo does not document. A live SIM
+    # probe (docs/saxo-field-probe-20260929.json) read annual fractions, e.g. NG 0.651 between
+    # bid/ask volatilities 0.645/0.657. Set UNVERIFIED to hide the IV spread again.
+    provider_volatility_scale: Literal["UNVERIFIED", "FRACTION", "PERCENT"] = "FRACTION"
     # Frozen parameters below are pinned sentinels: a configuration file may restate
     # them but never change them. The code uses the module constants above.
     refresh_rate_ms: Literal[1000] = 1000

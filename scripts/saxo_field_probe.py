@@ -28,6 +28,13 @@ from stocker_execution.saxo_auth import OAuth, private_read
 from stocker_execution.saxo_client import SaxoClient, SaxoError
 
 MONTHS = "FGHJKMNQUVXZ"
+ALTERNATIVE_KEYWORDS = {
+    "NQ": ("Nasdaq", "Nasdaq 100", "E-mini Nasdaq"),
+    "CL": ("Crude",),
+    "GC": ("Gold",),
+    "NG": ("Natural Gas",),
+    "SI": ("Silver",),
+}
 
 
 class CurrentToken(OAuth):
@@ -72,6 +79,18 @@ async def probe(client: SaxoClient, market: str, account: str, chain: bool) -> d
         if (order := contract_order(market, str(row.get("Symbol", "")), today))
     )
     out["listed_contracts"] = len(ranked)
+    if not ranked:
+        # Report what Saxo does list under broader names so a UIC can be chosen by hand.
+        for words in ALTERNATIVE_KEYWORDS.get(market, ()):
+            found = await client.request(
+                "GET",
+                "/ref/v1/instruments",
+                params={"Keywords": words, "AssetTypes": "ContractFutures", "$top": 20},
+            )
+            out.setdefault("alternative_search", {})[words] = [
+                shape(r, ("Identifier", "Symbol", "Description", "ExchangeId"))
+                for r in found.get("Data", [])[:10]
+            ]
     future = None
     for _, row in ranked[:3]:
         details = await client.request(
@@ -260,29 +279,53 @@ async def probe(client: SaxoClient, market: str, account: str, chain: bool) -> d
             }
         )
     if chain:
-        context, reference = "SLRNOPROBE" + secrets.token_hex(6), "P" + secrets.token_hex(6)
-        path = "/trade/v1/optionschain/subscriptions"
-        try:
-            result = await client.request(
-                "POST",
-                path,
-                body={
-                    "ContextId": context,
-                    "ReferenceId": reference,
-                    "RefreshRate": 2000,
-                    "Format": "application/json",
-                    "Arguments": {
-                        "Identifier": roots[0],
-                        "AssetType": "FuturesOption",
-                        "AccountKey": account,
-                        "MaxStrikesPerExpiry": 5,
-                        "Expiries": [{"Index": 0}],
+
+        async def window(start: int) -> dict[str, Any]:
+            context, reference = "SLRNOPROBE" + secrets.token_hex(6), "P" + secrets.token_hex(6)
+            path = "/trade/v1/optionschain/subscriptions"
+            arguments = {
+                "Identifier": roots[0],
+                "AssetType": "FuturesOption",
+                "AccountKey": account,
+                "MaxStrikesPerExpiry": 5,
+                "Expiries": [{"Index": 0, "StrikeStartIndex": start}],
+            }
+            try:
+                result = await client.request(
+                    "POST",
+                    path,
+                    body={
+                        "ContextId": context,
+                        "ReferenceId": reference,
+                        "RefreshRate": 2000,
+                        "Format": "application/json",
+                        "Arguments": arguments,
                     },
-                },
-            )
-        finally:
-            await client.request("DELETE", f"{path}/{context}/{reference}")
-        snapshot = result.get("Snapshot") or {}
+                )
+            finally:
+                await client.request("DELETE", f"{path}/{context}/{reference}")
+            return dict(result.get("Snapshot") or {})
+
+        # Binary-search the five-strike window onto the underlying price.
+        snapshot = await window(0)
+        first = (snapshot.get("Expiries") or [{}])[0]
+        low, high = 0, max(0, int(first.get("StrikeCount") or 0) - 5)
+        target = first.get("MidStrikePrice") or mid
+        for _ in range(7):
+            if low >= high:
+                break
+            middle = (low + high) // 2
+            attempt = await window(middle)
+            strikes = (attempt.get("Expiries") or [{}])[0].get("Strikes") or []
+            if not strikes:
+                break
+            snapshot = attempt
+            if strikes[-1].get("Strike", 0) < target:
+                low = middle + 1
+            elif strikes[0].get("Strike", 0) > target:
+                high = middle - 1
+            else:
+                break
         first = (snapshot.get("Expiries") or [{}])[0]
         out["chain_snapshot"] = {
             "top_fields": sorted(snapshot),
@@ -313,6 +356,10 @@ async def probe(client: SaxoClient, market: str, account: str, chain: bool) -> d
                             "PriceTypeBid",
                             "PriceTypeAsk",
                         ),
+                    ),
+                    "call": shape(
+                        s.get("Call"),
+                        ("Bid", "Ask", "OpenInterest", "Greeks", "PriceTypeBid", "PriceTypeAsk"),
                     ),
                 }
                 for s in first.get("Strikes") or []

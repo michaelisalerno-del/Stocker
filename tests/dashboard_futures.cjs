@@ -84,7 +84,7 @@ const state = {
       identity: {uic: 1001+i, underlying_uic: 100+i, underlying_symbol: `${market}Z6`, symbol: `${market} fixture option`, right: "Put", strike: 70, expiry: "2026-09-28", last_trade_at: "2026-09-28T20:00:00Z"},
       quote: {Bid: .01, Ask: .02, PriceTypeBid: "Tradable", PriceTypeAsk: "Tradable", DelayedByMinutes: 0}, quote_status: "OBSERVED",
       sizes: {Bid: 2, Ask: 3}, size_status: {Bid: "STALE_OR_MISSING", Ask: "OBSERVED"}, coverage_seconds: 55, subscription_started_at: Date.parse(at)/1000-55,
-      analytics: {"Greeks.Delta": {value: -.1, status: "OBSERVED_UNVERIFIED", age_seconds: 1}, "InstrumentPriceDetails.OpenInterest": {value: 200, status: "AS_OF_EFFECTIVE_TIME_UNKNOWN", age_seconds: 120}},
+      analytics: {"Greeks.Delta": {value: -.1, status: "OBSERVED_UNVERIFIED", age_seconds: 1}, "Greeks.MidVol": {value: .31, status: "OBSERVED_UNVERIFIED", age_seconds: 1}, "InstrumentPriceDetails.OpenInterest": {value: 200, status: "AS_OF_EFFECTIVE_TIME_UNKNOWN", age_seconds: 120}},
       costs: {minimum_purchase_cost_gbp: 20, entry_costs_gbp: .1, estimated_exit_costs_gbp: .1, total_gbp: 20.1, remaining_budget_gbp: -10.1, budget_result: "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET"},
     }]},
     l2: {
@@ -354,6 +354,7 @@ async function label(page) {
     assert.match(await page.locator("#ticket-contract-GC").textContent(), /Candidate · GC fixture option · Put 70/);
     assert.match(await page.locator("#ticket-spread-GC").textContent(), /66\.7% of mid/);
     assert.match(await page.locator("#ticket-delta-GC").textContent(), /model \|Δ\| 0\.1032 vs target 0\.1/);
+    assert.match(await page.locator("#ticket-iv-GC").textContent(), /Implied 31\.0% vs frozen model σ 27\.0% · \+4\.0 pts/);
     assert.match(await page.locator("#ticket-cost-GC").textContent(), /£20\.10 all-in of £50\.00/);
     assert.match(await page.locator("#sessions-GC").textContent(), /18:00–17:00 AutomatedTrading \(NY\)/);
     assert.match(await page.locator("#events-today-GC").textContent(), /08:30 US CPI/);

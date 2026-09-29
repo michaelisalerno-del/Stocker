@@ -286,3 +286,96 @@ def test_iv_spread_appears_only_with_an_operator_verified_scale():
         views.smile(board, "2026-09-30", "PERCENT", None)["strikes"][0]["put"]["iv_minus_model"]
         is None
     )
+
+
+def delayed_quote(delay):
+    price = PriceState()
+    price.snapshot(
+        {
+            "Quote": {
+                "Bid": 90.39,
+                "Ask": 90.41,
+                "PriceTypeBid": "OldIndicative",
+                "PriceTypeAsk": "OldIndicative",
+                "DelayedByMinutes": delay,
+            }
+        },
+        "fixture",
+        time.time(),
+    )
+    return price
+
+
+def test_delayed_saxo_data_is_named_in_gates_setup_and_history(tmp_path):
+    from stocker_execution.config import FuturesConfig
+    from stocker_execution.runtime import Runtime
+    from stocker_execution.store import Store
+
+    runtime = Runtime(FuturesConfig(), Store(tmp_path / "ledger.sqlite3"))
+    state = runtime.markets["CL"]
+    state.identity, state.price = FUTURE, delayed_quote(10)
+    quote_gate = next(g for g in runtime.overview()["markets"][0]["gates"] if g["key"] == "quote")
+    assert quote_gate == {
+        "key": "quote",
+        "label": "Quote",
+        "ok": False,
+        "detail": "QUOTE_DELAYED_OR_DELAY_UNKNOWN",
+    }
+    realtime = next(i for i in runtime.status()["setup"] if i["key"] == "realtime")
+    assert not realtime["done"] and "delayed by 10 min" in realtime["detail"]
+    state.price = delayed_quote(0)
+    quote_gate = next(g for g in runtime.overview()["markets"][0]["gates"] if g["key"] == "quote")
+    assert quote_gate["detail"] == "QUOTE_NOT_USABLE"  # OldIndicative is never usable
+    assert next(i for i in runtime.status()["setup"] if i["key"] == "realtime")["done"]
+    runtime.store.db.close()
+
+
+def test_delayed_chart_data_blocks_history_with_a_named_reason(tmp_path):
+    async def scenario():
+        _, data, store = setup(tmp_path)
+        state = data.markets["CL"]
+        now = datetime.now(UTC).replace(second=0, microsecond=0)
+
+        async def request(method, path, params=None, **kwargs):
+            return {
+                "Data": [
+                    {
+                        "Time": (now - timedelta(minutes=12 - i)).isoformat(),
+                        "Open": 70,
+                        "High": 71,
+                        "Low": 69,
+                        "Close": 70.5,
+                        "Volume": 3,
+                    }
+                    for i in range(3)
+                ],
+                "ChartInfo": {"DelayedByMinutes": 10},
+                "DataVersion": 1,
+            }
+
+        data.client.request = request
+        await data.history(state)
+        assert state.history_problem == "SAXO_CHART_DATA_DELAYED" and len(state.bars) == 2
+        assert state.capabilities["history"]["delayed_by_minutes"] == 10
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_verified_price_midvol_gives_an_implied_minus_model_spread():
+    from stocker_execution import option_context
+
+    fields = option_context.fields({"Greeks": {"MidVol": 0.589}}, 100.0, "REGULAR_PRICE")
+    assert fields["Greeks.MidVol"]["scaling"] == "VERIFIED_LIVE"
+    assert fields["Greeks.MidVol"]["normalised"] == 0.589
+    spread = views.iv_spread({"analytics": {"Greeks.MidVol": {"value": 0.589}}}, 0.002)
+    sigma = 0.002 * (525600 / 15) ** 0.5
+    assert spread["model_sigma"] == sigma
+    assert abs(spread["iv_minus_model_sigma"] - (0.589 - sigma)) < 1e-12
+    assert views.iv_spread({}, 0.002)["iv_minus_model_sigma"] is None
+    assert (
+        views.iv_spread({"analytics": {"Greeks.MidVol": {"value": 0.5}}}, None)[
+            "iv_minus_model_sigma"
+        ]
+        is None
+    )

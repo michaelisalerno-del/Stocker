@@ -54,9 +54,18 @@ def fields(update: dict[str, Any], at: float, source: str) -> dict[str, Any]:
                 "provider_timestamp": update.get("LastUpdated"),
                 "source": source,
                 "availability": "AVAILABLE" if valid else "MISSING" if raw is None else "INVALID",
-                "unit": "contracts" if name == "OpenInterest" else "PROVIDER_NATIVE",
-                "normalised": raw if valid and name == "OpenInterest" else None,
-                "scaling": "DOCUMENTED" if name == "OpenInterest" else "UNVERIFIED",
+                "unit": "contracts"
+                if name == "OpenInterest"
+                else "annual fraction"
+                if name == "MidVol"
+                else "PROVIDER_NATIVE",
+                "normalised": raw if valid and name in ("OpenInterest", "MidVol") else None,
+                # Price-subscription MidVol scale verified against live SIM on 2026-09-29.
+                "scaling": "DOCUMENTED"
+                if name == "OpenInterest"
+                else "VERIFIED_LIVE"
+                if name == "MidVol"
+                else "UNVERIFIED",
             }
     return result
 

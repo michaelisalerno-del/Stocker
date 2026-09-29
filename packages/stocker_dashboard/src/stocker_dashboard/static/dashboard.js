@@ -46,6 +46,10 @@ const explanations = {
   AUTHENTICATION_REQUIRED: "Connect the configured Saxo account",
   NO_CANDIDATE: "No option strike ranked yet", AWAITING_CONTRACT: "Needs a verified futures contract first",
   STALE_OR_MISSING: "No current quote",
+  QUOTE_DELAYED_OR_DELAY_UNKNOWN: "Quote is delayed (the strategy needs real-time data)",
+  QUOTE_NOT_USABLE: "Quote price type is not usable (old indicative, pending or no market)",
+  QUOTE_STALE_OR_UNAVAILABLE: "No quote received in the last 5 seconds",
+  SAXO_CHART_DATA_DELAYED: "Saxo chart data is delayed; completed bars cannot arrive in time",
 };
 const display = (v) => explanations[v] || String(v || "").replaceAll("_", " ");
 
@@ -89,6 +93,7 @@ function marketCard(m) {
           <dt>Quote</dt><dd id="ticket-quote-${m}"></dd>
           <dt>Spread</dt><dd id="ticket-spread-${m}"></dd>
           <dt>Delta</dt><dd id="ticket-delta-${m}"></dd>
+          <dt>Volatility</dt><dd id="ticket-iv-${m}"></dd>
           <dt>Cutoff</dt><dd id="ticket-cutoff-${m}"></dd>
         </dl>
         <div class="cost-meter" aria-label="All-in cost against the per-trade ceiling"><div class="cost-fill" id="ticket-fill-${m}"></div></div>
@@ -213,6 +218,8 @@ function ticket(m, {held, uic, o, context}) {
   text(`ticket-spread-${m.market}`, quoted && mid > 0 ? `${numeric(ask - bid)} · ${(100 * (ask - bid) / mid).toFixed(1)}% of mid` : "—");
   const model = m.candidate_deltas?.[String(uic)], provider = o?.analytics?.["Greeks.Delta"]?.value;
   text(`ticket-delta-${m.market}`, o ? `Frozen model |Δ| ${numeric(model)} vs target ${numeric(m.target_delta)} · provider ${numeric(provider)} (unverified)` : "—");
+  const iv = o?.analytics?.["Greeks.MidVol"]?.value, sigma = m.model_sigma;
+  text(`ticket-iv-${m.market}`, typeof iv === "number" ? `Implied ${(100 * iv).toFixed(1)}% vs frozen model σ ${typeof sigma === "number" ? (100 * sigma).toFixed(1) + "%" : "unavailable"}${typeof sigma === "number" ? ` · ${iv - sigma >= 0 ? "+" : ""}${(100 * (iv - sigma)).toFixed(1)} pts` : ""}` : "Implied volatility not reported");
   text(`ticket-cutoff-${m.market}`, o ? `Last trading ${id.last_trade_at ? hhmm(id.last_trade_at) + " NY" : "UNVERIFIED"} · exit ${held?.exit_at ? hhmm(held.exit_at) + " NY" : "clock + 60 min"}` : "—");
   const ceiling = limits.per_trade_gbp || 50, total = cost.total_gbp;
   const fill = $(`ticket-fill-${m.market}`);

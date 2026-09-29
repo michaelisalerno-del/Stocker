@@ -60,23 +60,52 @@ class Window:
     metadata: dict[str, Any] = field(default_factory=dict)
     metadata_version: str | None = None
 
+    state_bytes: dict[str, int] = field(default_factory=dict)
+    flow_history: deque[tuple[int, dict[str, Any], int]] = field(default_factory=deque)
+    flow_history_bytes: int = 0
+
+    def __post_init__(self) -> None:
+        self.account(
+            "checkpoint",
+            "current",
+            "flow",
+            "checkpoint_flow",
+            "context",
+            "checkpoint_context",
+            "metadata",
+        )
+
+    def account(self, *names: str) -> None:
+        for name in names:
+            self.state_bytes[name] = len(packed(getattr(self, name))) * 8
+
     @property
     def size(self) -> int:
-        # Dict/list/number allocations are larger than their JSON representations.
-        return (
-            self.row_bytes
-            + 8
-            * (
-                len(packed(self.checkpoint))
-                + len(packed(self.current))
-                + len(packed(self.flow))
-                + len(packed(self.checkpoint_flow))
-                + len(packed(self.context))
-                + len(packed(self.checkpoint_context))
-                + len(packed(self.metadata))
+        return self.row_bytes + sum(self.state_bytes.values()) + self.flow_history_bytes + 2048
+
+    def remember_flow(self) -> None:
+        assert self.flow is not None
+        # Only inputs used by temporal calculations; full features stay in compressed evidence.
+        point = {
+            k: self.flow[k]
+            for k in (
+                "at",
+                "status",
+                "delay_minutes",
+                "generation",
+                "valid_until",
+                "depth",
+                "basis",
+                "volume",
             )
-            + 2048
-        )
+        }
+        size = len(packed(point)) * 8 + 128
+        self.flow_history.append((self.sequence, point, size))
+        self.flow_history_bytes += size
+        while len(self.flow_history) > 512 or (
+            len(self.flow_history) > 1 and self.flow_history[1][1]["at"] <= point["at"] - 60
+        ):
+            self.flow_history_bytes -= self.flow_history.popleft()[2]
 
     def evict(self) -> None:
         at, blob = self.rows.popleft()
@@ -91,6 +120,9 @@ class Window:
             ]
         if record["kind"] == "GAP":
             self.checkpoint_context.clear()
+        self.account("checkpoint", "checkpoint_flow", "checkpoint_context")
+        while self.flow_history and self.flow_history[0][0] <= record["local_sequence"]:
+            self.flow_history_bytes -= self.flow_history.popleft()[2]
 
     def coverage(self, at: float) -> float:
         if self.continuous_since is None or self.current is None or not self.rows:
@@ -126,6 +158,7 @@ class Recorder:
         self.queue: asyncio.Queue[tuple[str, dict[str, Any], list[bytes], int]] = asyncio.Queue(
             config.queue_max_items
         )
+        self.write_ready = asyncio.Event()
         self.queued_bytes = 0
         self.high_water = 0
         self.disk_bytes = 0
@@ -240,6 +273,11 @@ class Recorder:
             if self.memory() + len(blob) * 8 > self.config.rolling_max_bytes:
                 raise ValueError("REFERENCE_CACHE_MEMORY_LIMIT")
             window.metadata[version] = {"received_at": received_at, "value": json.loads(blob)}
+            window.account("metadata")
+            if self.memory() > self.config.rolling_max_bytes:
+                del window.metadata[version]
+                window.account("metadata")
+                raise ValueError("REFERENCE_CACHE_MEMORY_LIMIT")
             for segment, capture in self.active.items():
                 if key in capture["instruments"]:
                     capture.setdefault("metadata_versions", {})[version] = window.metadata[version]
@@ -273,6 +311,16 @@ class Recorder:
                     w.context.clear()
                     w.checkpoint_context.clear()
                     w.continuous_since = None
+                    w.flow_history.clear()
+                    w.flow_history_bytes = 0
+                    w.account(
+                        "current",
+                        "checkpoint",
+                        "flow",
+                        "checkpoint_flow",
+                        "context",
+                        "checkpoint_context",
+                    )
                 self.problem = "ROLLING_STATE_LIMIT"
                 break
             min(populated, key=lambda w: w.rows[0][0]).evict()
@@ -345,7 +393,12 @@ class Recorder:
             self.gaps += 1
         if observation_context and kind != "GAP":
             window.context[context_source] = observation_context
+        previous_state = window.current
         window.current = apply(window.current, record)
+        if previous_state is not window.current:
+            window.account("current")
+        if observation_context or kind == "GAP":
+            window.account("context")
         if window.identity.get("asset_type") == "ContractFutures" and window.identity.get(
             "tick_size"
         ):
@@ -353,19 +406,10 @@ class Recorder:
             # Queued deltas can predate the initial REST snapshot's arrival. Keep raw
             # receipt intact, but never backdate a calculation using that later snapshot.
             calculated_at = max(at, window.flow["at"] if window.flow else at)
-            history = []
-            # Bounded computation over the SAME retained rows, not another history store.
-            for index, (_, prior) in enumerate(reversed(window.rows)):
-                if index >= 512:
-                    break
-                point = read_row(prior).get("book_flow")
-                if point is not None:
-                    history.append(point)
-                    if point["at"] <= calculated_at - 60:
-                        break
+            history = [point for _, point, _ in window.flow_history]
             try:
                 window.flow = book_flow.observe(
-                    window.identity, window.current, calculated_at, context, list(reversed(history))
+                    window.identity, window.current, calculated_at, context, history
                 )
             except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
                 window.flow = book_flow.observe(
@@ -375,6 +419,8 @@ class Recorder:
                     {**context, "problem": "FEATURE_SCHEMA_UNAVAILABLE"},
                     [],
                 )
+            window.account("flow")
+            window.remember_flow()
             record["book_flow"] = window.flow
             blob = packed(record)
         retained = zlib.compress(blob, level=1)
@@ -382,7 +428,7 @@ class Recorder:
         window.row_bytes += len(retained) + 128
         self.expire(at)
         for segment, capture in list(self.active.items()):
-            if key in capture["instruments"] and capture["state"] == "CAPTURING":
+            if self.capture_requires(capture, key, at):
                 capture["last_receipt"] = at
                 capture["last_sequences"][key] = window.sequence
                 if kind == "GAP":
@@ -409,6 +455,8 @@ class Recorder:
             return False
         self.queue.put_nowait((segment, detached, rows, size))
         self.queued_bytes += size
+        if self.queue.qsize() >= 64:
+            self.write_ready.set()
         return True
 
     def trigger(
@@ -479,6 +527,8 @@ class Recorder:
             {
                 **event,
                 "detection_receipt": at,
+                "observation_until": end,
+                "instruments": list(keys),
                 "prehistory_seconds": {
                     k: max(0, self.windows[k].coverage(at) - max(0, at - event_at)) for k in keys
                 },
@@ -539,42 +589,59 @@ class Recorder:
             }
         return window.flow
 
+    @staticmethod
+    def capture_requires(capture: dict[str, Any], instrument: str, at: float) -> bool:
+        if capture["state"] != "CAPTURING":
+            return False
+        if instrument == capture["key"]:
+            return True
+        return any(
+            instrument in e.get("instruments", [])
+            and (e["id"] in capture["open_trades"] or at <= e["observation_until"])
+            for e in capture["events"]
+        )
+
+    def requires_subscription(self, instrument: str, at: float) -> bool:
+        return any(self.capture_requires(c, instrument, at) for c in self.active.values())
+
     def attach(self, event_id: str, instrument: str, at: float) -> None:
-        """Selected options may begin streaming after the trigger; report actual history."""
+        """Retain evidence membership separately from each event's subscription obligation."""
         for segment, capture in self.active.items():
-            if (
-                capture["state"] == "CAPTURING"
-                and any(e["id"] == event_id for e in capture["events"])
-                and instrument not in capture["instruments"]
-            ):
-                window = self.windows[instrument]
-                event = next(e for e in capture["events"] if e["id"] == event_id)
-                event_at = (
-                    utc(event["signal_at"]).timestamp()
-                    if event.get("signal_at")
-                    else event["detection_receipt"]
-                )
-                pre = max(0, window.coverage(at) - max(0, at - event_at))
-                event.setdefault("prehistory_seconds", {})[instrument] = pre
-                capture.setdefault("metadata_versions", {}).update(window.metadata)
-                capture["instruments"].append(instrument)
-                capture["last_sequences"][instrument] = window.sequence
-                self.enqueue(
-                    segment,
-                    capture,
-                    [
-                        *window.prefix(),
-                        packed(
-                            {
-                                "kind": "OPTION_ATTACHED",
-                                "event_id": event_id,
-                                "identity": window.identity,
-                                "receipt": at,
-                                "actual_prehistory_seconds": pre,
-                            }
-                        ),
-                    ],
-                )
+            event = next((e for e in capture["events"] if e["id"] == event_id), None)
+            if capture["state"] != "CAPTURING" or event is None:
+                continue
+            if instrument not in event["instruments"]:
+                event["instruments"].append(instrument)
+            if instrument in capture["instruments"]:
+                self.enqueue(segment, capture, [])
+                continue
+            window = self.windows[instrument]
+            event_at = (
+                utc(event["signal_at"]).timestamp()
+                if event.get("signal_at")
+                else event["detection_receipt"]
+            )
+            pre = max(0, window.coverage(at) - max(0, at - event_at))
+            event.setdefault("prehistory_seconds", {})[instrument] = pre
+            capture["metadata_versions"].update(window.metadata)
+            capture["instruments"].append(instrument)
+            capture["last_sequences"][instrument] = window.sequence
+            self.enqueue(
+                segment,
+                capture,
+                [
+                    *window.prefix(),
+                    packed(
+                        {
+                            "kind": "OPTION_ATTACHED",
+                            "event_id": event_id,
+                            "identity": window.identity,
+                            "receipt": at,
+                            "actual_prehistory_seconds": pre,
+                        }
+                    ),
+                ],
+            )
 
     def link_trade(self, event_id: str, is_open: bool, at: float) -> None:
         for segment, capture in self.active.items():
@@ -583,7 +650,10 @@ class Recorder:
                     capture["open_trades"].append(event_id)
                 elif not is_open and event_id in capture["open_trades"]:
                     capture["open_trades"].remove(event_id)
-                    capture["end"] = max(capture["end"], at + self.config.post_close_minutes * 60)
+                    until = at + self.config.post_close_minutes * 60
+                    capture["end"] = max(capture["end"], until)
+                    event = next(e for e in capture["events"] if e["id"] == event_id)
+                    event["observation_until"] = max(event["observation_until"], until)
                 self.enqueue(
                     segment,
                     capture,
@@ -687,7 +757,11 @@ class Recorder:
             except TimeoutError:
                 continue
             items = [first]
-            await asyncio.sleep(0.1)
+            # Keep modest batching at normal cadence; drain promptly during bursts.
+            if self.queue.qsize() < 64:
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(self.write_ready.wait(), 0.1)
+            self.write_ready.clear()
             while not self.queue.empty() and len(items) < 256:
                 items.append(self.queue.get_nowait())
             try:

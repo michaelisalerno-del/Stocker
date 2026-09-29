@@ -394,7 +394,7 @@ def test_l2_fluctuations_do_not_change_frozen_decisions_or_create_events(tmp_pat
             )
             assert not runtime.broker.armed and not store.orders(rows[0]["id"])
             assert (
-                runtime.config.max_open_positions == 4 and runtime.config.max_premium_risk_gbp == 10
+                runtime.config.max_open_positions == 4 and runtime.config.max_premium_risk_gbp == 50
             )
             await runtime.stop()
             store.db.close()

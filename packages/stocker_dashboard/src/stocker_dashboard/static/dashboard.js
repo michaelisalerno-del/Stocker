@@ -17,8 +17,11 @@ let selectedMarket = sessionStorage.getItem("slrno-market") || "CL";
 if (!markets.includes(selectedMarket)) selectedMarket = "CL";
 let offset = 0,
   paused = false,
-  pending = false,
+  pending = null,
   selectedIdentity = "";
+let detailRequest = null, controlPending = false, lastRefresh = null, accountSnapshot = null;
+const chartGeometry = new Map();
+let limits = {};
 const money = (v) =>
   v == null
     ? "Unavailable"
@@ -42,7 +45,21 @@ const text = (id, v) => {
     next = String(v ?? "—");
   if (el && el.textContent !== next) el.textContent = next;
 };
-const display = (v) => String(v || "").replaceAll("_", " ");
+const explanations = {
+  REFERENCE_CONTRACT_SELECTION_REQUIRED: "Select and verify the Saxo futures contract",
+  LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED: "Option product and selection approval required",
+  MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET: "One contract, including entry and reserved exit costs, exceeds the per-trade ceiling",
+  INCOMPLETE_COMPLETED_HISTORY: "Waiting for the final completed-minute bar",
+  STALE_SIGNAL_NO_REPLAY: "The entry deadline passed before this opportunity was ready",
+  EXECUTION_DISABLED: "Paper execution is disabled", PAPER_DISARMED: "Paper entries are not armed",
+  SKIP_CAPACITY_FULL: "All four trade slots are occupied or reserved",
+  RECONCILIATION_REQUIRED: "Broker reconciliation is required", ENTRIES_PAUSED: "New entries are paused",
+  GC_LISTED_EXECUTION_RULE_UNAPPROVED: "Gold is monitor-only; execution is not approved",
+  ORDER_STATUS_UNCERTAIN: "Broker order status needs reconciliation",
+  EXPOSURE_REQUIRES_RECONCILIATION: "Exposure awaiting reconciliation",
+  AUTHENTICATION_REQUIRED: "Connect the configured Saxo account",
+};
+const display = (v) => explanations[v] || String(v || "").replaceAll("_", " ");
 for (const name of ["overview", "trades", "execution", "system"])
   $(name).hidden = name !== page;
 text(
@@ -61,7 +78,7 @@ for (const m of markets) {
   const card = document.createElement("article");
   card.className = "market";
   card.id = `card-${m}`;
-  card.innerHTML = `<div class="card-head"><div><h2>${m} <span>${names[m]}</span></h2><p id="contract-${m}"></p></div><span class="state" id="state-${m}"></span></div>
+  card.innerHTML = route !== "markets" ? `<div class="card-head"><h2>${m} <span>${names[m]}</span></h2><strong id="state-${m}"></strong></div><p id="contract-${m}"></p><p class="block" id="block-${m}"></p><p id="position-${m}"></p><p id="candidate-${m}"></p><div class="next"><span>Next decision · NY</span><strong id="next-${m}"></strong></div><small id="data-${m}"></small><a href="/markets?market=${m}">Market detail</a>` : `<div class="card-head"><div><h2>${m} <span>${names[m]}</span></h2><p id="contract-${m}"></p></div><span class="state" id="state-${m}"></span></div>
  <div class="status-line"><span id="market-${m}"></span><span id="data-${m}"></span></div>
  <div class="feed-line"><span id="l1-${m}"></span><span id="l2-${m}"></span></div>
  <svg class="chart" viewBox="0 0 420 92" role="img" aria-label="${m} completed underlying prices"><path class="chart-grid" d="M0 30H420 M0 62H420"/><polyline id="line-${m}" fill="none"/><g id="markers-${m}"></g><text id="chart-empty-${m}" x="210" y="48" text-anchor="middle">Awaiting completed bars</text></svg>
@@ -123,9 +140,9 @@ function optionContext(m) {
   text(`option-analytics-${m.market}`, `Provider delta ${obs("Greeks.Delta", analytics)} · IV ${obs(analytics["Greeks.MidVolatility"] ? "Greeks.MidVolatility" : "Greeks.MidVol", analytics)} · provider units / scaling unverified`);
   text(`option-volume-${m.market}`, `Option volume ${obs("PriceInfoDetails.Volume", analytics)} · OI ${obs("InstrumentPriceDetails.OpenInterest", analytics)}`);
   text(`option-underlying-${m.market}`, `Future volume ${obs("PriceInfoDetails.Volume", m.underlying_context)} · OI ${obs("InstrumentPriceDetails.OpenInterest", m.underlying_context)}`);
-  text(`option-cost-${m.market}`, `Minimum purchase ${numeric(cost.minimum_purchase_cost_gbp, " GBP")} · entry fees ${numeric(cost.entry_costs_gbp)} · estimated exit ${numeric(cost.estimated_exit_costs_gbp)} · budget total ${numeric(cost.total_gbp)} / £10 · remaining ${numeric(cost.remaining_budget_gbp)} · ${cost.reason || cost.budget_result || "UNVERIFIED"}`);
+  text(`option-cost-${m.market}`, `Minimum purchase ${numeric(cost.minimum_purchase_cost_gbp, " GBP")} · entry fees ${numeric(cost.entry_costs_gbp)} · estimated exit ${numeric(cost.estimated_exit_costs_gbp)} · budget total ${numeric(cost.total_gbp)} / ${money(limits.per_trade_gbp)} · remaining ${numeric(cost.remaining_budget_gbp)} · ${cost.reason || cost.budget_result || "UNVERIFIED"}`);
   text(`option-coverage-${m.market}`, `Actual current option buffer ${Math.floor(o?.coverage_seconds || 0)} / 900s · subscription started ${o?.subscription_started_at ? new Date(o.subscription_started_at*1000).toISOString() : "unknown"} · latest event ${event?.id || "none"}: UIC ${event?.context?.identity?.uic || "unavailable"}, actual pre-trigger ${event ? Math.floor(event.context.pre_trigger_seconds || 0) + " / 900s" : "unavailable"}`);
-  text(`option-meta-${m.market}`, JSON.stringify(context, null, 2));
+  text(`option-meta-${m.market}`, $(`option-meta-${m.market}`).closest("details").open ? JSON.stringify(context, null, 2) : "");
   text(`option-quote-${m.market}`, $(`option-quote-${m.market}`).textContent + ` · bid size ${o?.size_status?.Bid || "UNVERIFIED"} · ask size ${o?.size_status?.Ask || "UNVERIFIED"}`);
 }
 function bookFlow(m, f, rec = {}, identity = {}) {
@@ -148,9 +165,10 @@ function bookFlow(m, f, rec = {}, identity = {}) {
   text(`flow-persistence-${m}`, `Five-level persistence over 60s · ${p.bid_heavy_fraction == null ? "INSUFFICIENT_HISTORY" : `BID_HEAVY ${numeric(p.bid_heavy_fraction * 100, "%")} / ASK_HEAVY ${numeric(p.ask_heavy_fraction * 100, "%")} / BALANCED ${numeric(p.balanced_fraction * 100, "%")}`}`);
   text(`flow-last-${m}`, `Latest-trade observation: ${numeric(f.latest_trade?.price)} × ${numeric(f.latest_trade?.size)} · no inferred execution count`);
   text(`flow-volume-${m}`, `Reported volume ${numeric(f.volume?.value)} · change UNAVAILABLE · ${f.volume?.status || "UNAVAILABLE"}`);
-  text(`flow-meta-${m}`, JSON.stringify({version:f.version, calculated_at:f.at, last_receipt:feed.last_receipt, last_field_change:feed.last_field_change, last_contact:feed.last_contact, cadence, available_fields:f.available_fields, recording:rec, matched_price_changes:f.lookbacks}, null, 2));
+  if ($(`flow-detail-${m}`).open) text(`flow-meta-${m}`, JSON.stringify({version:f.version, calculated_at:f.at, last_receipt:feed.last_receipt, last_field_change:feed.last_field_change, last_contact:feed.last_contact, cadence, available_fields:f.available_fields, recording:rec, matched_price_changes:f.lookbacks}, null, 2));
 }
 function chart(m) {
+  if (route !== "markets") return;
   const bars = m.chart || [],
     line = $(`line-${m.market}`),
     group = $(`markers-${m.market}`);
@@ -159,6 +177,9 @@ function chart(m) {
     line.setAttribute("points", "");
     return;
   }
+  const signature = JSON.stringify(bars);
+  if (chartGeometry.get(m.market) !== signature) {
+  chartGeometry.set(m.market, signature);
   const prices = bars.map((b) => b.close),
     lo = Math.min(...prices),
     span = Math.max(...prices) - lo || 1;
@@ -170,6 +191,7 @@ function chart(m) {
     .join(" ");
   if (line.getAttribute("points") !== points)
     line.setAttribute("points", points);
+  }
   const start = Date.parse(bars[0].at),
     end = Date.parse(bars.at(-1).at),
     wanted = new Set();
@@ -217,7 +239,11 @@ function chart(m) {
 }
 function render(d) {
   const s = d.system,
-    p = d.pnl;
+    p = d.pnl || {skip_reasons:{}};
+  p.skip_reasons ||= {};
+  d.markets ||= [];
+  limits = s.limits || limits;
+  if (d.account) renderAccount(d.account);
   paused = s.paused;
   text("mode-banner", `DATA ENVIRONMENT: ${s.data_environment || "UNVERIFIED"} · EXECUTION MODE: ${s.execution_mode || "DISABLED"} · LIVE ORDERS DISABLED`);
   text("provider-status", "IBKR PARKED · FMP INACTIVE · EODHD INACTIVE");
@@ -229,7 +255,6 @@ function render(d) {
     const label = i < s.reserved_open_trades ? `Slot ${i + 1} · reserved / open` : `Slot ${i + 1} · available`;
     text(`trade-slot-${i}`, label); text(`overview-slot-${i}`, label);
   }
-  text("account", s.account);
   text(
     "connection",
     s.connected
@@ -238,8 +263,9 @@ function render(d) {
         : "Connected · reconciliation required"
       : "Disconnected",
   );
-  text("capacity", `${s.reserved_open_trades} / 4`);
-  text("allocation", `${money(s.allocation_pennies / 100)} / £40`);
+  text("capacity", `${s.reserved_open_trades} / ${limits.slots ?? "—"}`);
+  text("allocation", `${money(s.allocation_pennies / 100)} / ${money(limits.allocation_gbp)}`);
+  if (d.pnl) {
   text("realised", money(p.realised_net_gbp));
   text(
     "pnl-note",
@@ -247,11 +273,15 @@ function render(d) {
       ? `${p.provisional_closed} closed trade(s) provisional · missing costs/FX`
       : display(p.basis || "Paper evidence unavailable"),
   );
+  }
   text(
     "entries",
     s.paused ? "Paused" : s.armed ? "Armed · readiness gates apply" : "Unarmed",
   );
   text("pause", paused ? "Resume entries" : "Pause entries");
+  text("readiness", s.entry_block_reason ? display(s.entry_block_reason) : s.paused ? "New entries paused" : "Execution gates ready · market checks still apply");
+  $("readiness").title = s.entry_block_reason || "";
+  if (d.pnl) {
   const vals = d.markets
     .flatMap((m) => m.trades)
     .filter((t) => t.quantity > 0)
@@ -268,8 +298,20 @@ function render(d) {
       ? "Bid estimate before commissions · quote/FX times in details"
       : "No open paper positions",
   );
+  }
   for (const m of d.markets) {
     if (!markets.includes(m.market)) continue;
+    if (route !== "markets") {
+      text(`state-${m.market}`, display(m.strategy_state));
+      text(`contract-${m.market}`, m.contract || "Contract awaiting verification");
+      text(`block-${m.market}`, m.pending_data ? "Waiting for the completed boundary bar · original entry deadline applies" : display(m.block_reason));
+      $(`block-${m.market}`).title = m.block_reason || "";
+      text(`position-${m.market}`, m.trades?.length ? m.trades.map(t => `${display(t.state)} · ${t.quantity} contract · exit ${time(t.exit_at)}`).join(" · ") : "No pending or open paper trade");
+      text(`candidate-${m.market}`, m.candidate_uic ? `Candidate UIC ${m.candidate_uic}` : "No option candidate available");
+      text(`next-${m.market}`, time(m.next_time, "America/New_York"));
+      text(`data-${m.market}`, `${display(m.data_status)} · last quote ${m.last_receipt ? time(new Date(m.last_receipt*1000).toISOString()) : "Unavailable"}`);
+      continue;
+    }
     quoteReceipts.set(m.market, Date.parse(m.l1?.last_receipt));
     text(`capability-${m.market}`, `${m.market} · ${m.l1?.status || "UNVERIFIED"} · ${m.l2?.status || "L2_UNAVAILABLE"} · ${m.block_reason || "monitoring"}`);
     const q = m.l1?.quote || {}, sizes = m.l1?.sizes || {}, rec = m.recorder || {};
@@ -291,7 +333,7 @@ function render(d) {
     text(`direction-${m.market}`, m.direction);
     text(
       `conditions-${m.market}`,
-      m.conditions.rv15 != null
+      m.conditions?.rv15 != null
         ? `RV15 ${(m.conditions.rv15 * 100).toFixed(4)}% · completed bars`
         : "Waiting for required history",
     );
@@ -314,7 +356,7 @@ function render(d) {
     );
     text(`next-${m.market}`, time(m.next_time, "America/New_York"));
     text(`diagnostic-${m.market}`, m.diagnostic);
-    text(
+    if ($(`details-${m.market}`).closest("details").open) text(
       `details-${m.market}`,
       JSON.stringify(
         {
@@ -322,7 +364,6 @@ function render(d) {
           l1: m.l1,
           l2: m.l2,
           recorder: m.recorder,
-          options: m.option,
           capabilities: m.capabilities,
           exchange_trade_date: m.exchange_trade_date,
           next_market_time: m.next_market_time,
@@ -335,7 +376,7 @@ function render(d) {
     chart(m);
     $(`card-${m.market}`).dataset.state = m.strategy_state;
   }
-  text(
+  if (d.pnl) text(
     "evidence",
     `${p.opportunities} opportunities · ${p.eligible_trades} eligible trades · ${p.skip_reasons.MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET || 0} budget skips · ${p.skip_reasons.SKIP_CAPACITY_FULL || 0} capacity skips · ${p.fills} executions · ${p.win_rate == null ? "Win rate unavailable" : `${(p.win_rate * 100).toFixed(1)}% win rate`} (${p.wins}/${p.closed_with_complete_costs} closed with complete costs)`,
   );
@@ -345,7 +386,7 @@ function render(d) {
   text("api-external", "Session upgrade is explicit; it can downgrade another Saxo application");
   text("api-depth", `${d.markets.filter(m => m.l2?.status === "L2_AVAILABLE").length} / 5 markets with received depth`);
   text("api-assignments", "CL · GC · NG · NQ · SI · independent server subscriptions");
-  text("api-options", `${d.markets.reduce((n,m) => n + (m.option?.quotes?.length || 0),0)} / ${a.option_budget || 16} regular option quote subscriptions`);
+  text("api-options", `${a.option_lines ?? 0} / ${a.option_budget || 16} regular option quote subscriptions`);
   text("api-pacing", JSON.stringify(a.rate_limits || {}));
   text("api-queue", `${a.rest_queue ?? 0} / 32 queued REST requests`);
   text(
@@ -364,6 +405,7 @@ function render(d) {
   );
 }
 function depth(m, d) {
+  if (route !== "markets") return;
   const expires = d.valid_until != null ? d.valid_until * 1000 : Date.parse(d.last_receipt) + 5000;
   depthReceipts.set(m, d.fresh ? expires : 0);
   const covered = Math.floor(d.pre_seconds || 0);
@@ -388,12 +430,60 @@ function depth(m, d) {
     });
   }
 }
-async function get(path) {
-  const r = await fetch(path, { cache: "no-store" });
-  if (!r.ok) throw Error(`Data unavailable (${r.status})`);
-  return r.json();
+async function request(path, {method = "GET", signal, timeout = 8000} = {}) {
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  signal?.addEventListener("abort", cancel, {once:true});
+  if (signal?.aborted) controller.abort();
+  const timer = setTimeout(() => controller.abort("timeout"), timeout);
+  try {
+    const response = await fetch(path, {method, cache:"no-store", credentials:"same-origin",
+      headers:{Accept:"application/json"}, signal:controller.signal});
+    const result = await response.json().catch(error => {if(controller.signal.aborted) throw error; return null;});
+    if (!response.ok) throw Error(result?.detail || result?.error || `Request failed (${response.status})`);
+    if (result == null) throw Error("The server returned an unreadable response");
+    return result;
+  } catch (error) {
+    if (controller.signal.reason === "timeout") throw Error("Request timed out; retrying on the next refresh");
+    if (controller.signal.aborted) throw new DOMException("Request cancelled", "AbortError");
+    throw error instanceof TypeError ? Error("Connection unavailable; checking again shortly") : error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", cancel);
+  }
 }
-async function history() {
+function renderAccount(a) {
+  accountSnapshot = a;
+  text("account", `${a.label} · ${a.account} · ${a.currency || "Currency unavailable"}`);
+  text("account-note", a.connection_note);
+  const native = v => typeof v === "number" && a.currency ? `${new Intl.NumberFormat("en-GB", {maximumFractionDigits:2,minimumFractionDigits:2}).format(v)} ${a.currency}` : "Unavailable";
+  text("account-value", native(a.total_value));
+  text("account-cash", native(a.cash_balance));
+  text("account-available", native(a.cash_available_for_trading));
+  text("account-freshness", `${a.status} · last successful update ${a.last_success_at != null ? time(new Date(a.last_success_at*1000).toISOString()) : "Unavailable"}`);
+  if ($("account-detail").open) text("account-json", JSON.stringify({basis:a.basis, ...a.details, problem:a.problem}, null, 2));
+}
+function rows(id, items, columns, key) {
+  const body = $(id), known = new Map([...body.children].map(n => [n.dataset.key,n]));
+  for (const [index,item] of items.entries()) {
+    const identity = String(item[key]);
+    let node = known.get(identity); known.delete(identity);
+    if (!node) {node = document.createElement("tr"); node.dataset.key=identity; columns.forEach(() => node.append(document.createElement("td")));}
+    columns.forEach((f,i) => { const next=String(f(item) ?? "Unavailable"); if(node.children[i].textContent!==next) node.children[i].textContent=next; });
+    if (body.children[index] !== node) body.insertBefore(node, body.children[index] || null);
+  }
+  known.forEach(n=>n.remove());
+}
+function renderExecution(d) {
+  render({system:d.system});
+  rows("execution-trades", d.trades, [t=>t.market,t=>display(t.state),t=>t.option.symbol || t.option.uic,t=>t.quantity,t=>money(t.allocation_pennies/100),t=>time(t.exit_at)], "id");
+  rows("execution-orders", d.orders, [o=>o.role,o=>o.order_id,o=>display(o.status),o=>o.filled,o=>o.remaining,o=>time(o.deadline)], "reference");
+  rows("execution-fills", d.fills, [f=>time(f.at),f=>f.con_id,f=>f.side,f=>f.quantity,f=>f.price,f=>f.commission == null ? "Unavailable" : `${f.commission} ${f.commission_currency || "currency unverified"}`], "exec_id");
+  rows("execution-positions", d.positions, [p=>p.con_id,p=>p.quantity], "con_id");
+  text("execution-empty", d.trades.length ? "Internal reservations include pending entries and open trades." : "No pending or open SLRNO trades.");
+  if ($("execution-detail").open) text("execution-json", JSON.stringify(d,null,2));
+}
+async function history(signal) {
   const q = new URLSearchParams({ offset: String(offset) });
   for (const [key, id] of [
     ["market", "market-filter"],
@@ -401,9 +491,11 @@ async function history() {
     ["version", "version-filter"],
   ])
     if ($(id).value) q.set(key, $(id).value);
-  const d = await get(`/api/history?${q}`),
+  q.set("sort", $("sort-filter").value);
+  const d = await request(`/api/history?${q}`, {signal}),
     rows = [...d.rows];
-  if ($("sort-filter").value === "asc") rows.reverse();
+  if (signal.aborted) return;
+  if (d.system) render({system:d.system});
   const body = $("history"),
     known = new Map([...body.children].map((n) => [n.dataset.key, n]));
   for (const [i, r] of rows.entries()) {
@@ -415,7 +507,7 @@ async function history() {
       for (let j = 0; j < 6; j++) tr.append(document.createElement("td"));
       const b = document.createElement("button");
       b.textContent = "Inspect";
-      b.onclick = () => showDetail(r.id);
+      b.onclick = () => showDetail(r.id).catch(reportError);
       tr.children[5].append(b);
     }
     [
@@ -435,109 +527,90 @@ async function history() {
   $("prev").disabled = offset === 0;
   $("next").disabled = !d.has_more;
   text("page-number", `Page ${1 + offset / 100}`);
-  if (selectedIdentity) await showDetail(selectedIdentity, false);
+  if (selectedIdentity && $("trade-detail").open) await showDetail(selectedIdentity, false);
 }
 async function showDetail(id, expand = true) {
   selectedIdentity = id;
-  text(
-    "trade-json",
-    JSON.stringify(
-      await get(`/api/detail?identity=${encodeURIComponent(id)}`),
-      null,
-      2,
-    ),
-  );
+  detailRequest?.abort();
+  const controller = new AbortController(); detailRequest=controller;
   if (expand) $("trade-detail").open = true;
+  const d = await request(`/api/detail?identity=${encodeURIComponent(id)}`, {signal:controller.signal});
+  if (!controller.signal.aborted && selectedIdentity === id) text("trade-json", JSON.stringify(d,null,2));
 }
-async function refresh() {
-  if (pending || document.hidden) return;
-  pending = true;
+function reportError(e) {
+  if (e.name !== "AbortError") text("notice", `${e.message} · displayed values are stale`);
+}
+async function refresh(force = false) {
+  if (document.hidden || controlPending || (pending && !force)) return;
+  if (force) pending?.abort();
+  const controller = new AbortController(); pending=controller;
   try {
-    render(await get("/api/overview"));
-    if (page === "trades") await history();
-    if (page === "system")
-      text("system-json", JSON.stringify(await get("/api/system"), null, 2));
-    if (page === "system") {
-      const recordings = await get("/api/recordings");
-      const entries = [...(recordings.active || []), ...(recordings.completed || [])].slice(-132);
-      const wanted = new Set(entries.map(r => `recording-${r.segment}`));
-      for (const node of [...$("recording-list").children]) if (!wanted.has(node.id)) node.remove();
-      for (const rec of entries) {
-        const id = `recording-${rec.segment}`;
-        if (!$(id)) {
-          const link = document.createElement("a"); link.id = id;
-          link.href = `/api/recordings/${encodeURIComponent(rec.segment)}`;
-          $("recording-list").append(link);
+    if (page === "trades") await history(controller.signal);
+    else {
+      let path = "/api/overview";
+      if (route === "markets") path = `/api/market/${selectedMarket}?diagnostics=${!!$(`card-${selectedMarket}`).querySelector("details[open]")}`;
+      if (page === "execution") path = "/api/execution";
+      if (page === "system") path = `/api/system?diagnostics=${$("system-detail").open}`;
+      const d = await request(path, {signal:controller.signal});
+      if (controller.signal.aborted) return;
+      if (page === "execution") renderExecution(d);
+      else if (page === "system") {
+        render({system:d});
+        text("api-depth", `${(d.markets || []).filter(m=>m.capabilities?.l2?.status === "L2_AVAILABLE" || m.l2?.status === "L2_AVAILABLE").length} / 5 markets with received depth`);
+        for (const m of d.markets || []) text(`capability-${m.market}`, `${m.market} · ${display(m.problem) || "Connected"}`);
+        if ($("system-detail").open) text("system-json",JSON.stringify(d,null,2));
+        if ($("recordings-detail").open) {
+          const recordings = await request("/api/recordings", {signal:controller.signal});
+          if (controller.signal.aborted) return;
+          const entries = [...(recordings.active || []), ...(recordings.completed || [])].slice(-132);
+          const wanted = new Set(entries.map(r => `recording-${r.segment}`));
+          for(const node of [...$("recording-list").children]) if(!wanted.has(node.id)) node.remove();
+          for(const rec of entries) {
+            const id=`recording-${rec.segment}`;
+            if(!$(id)) {const a=document.createElement("a"); a.id=id; a.href=`/api/recordings/${encodeURIComponent(rec.segment)}`; $("recording-list").append(a);}
+            text(id,`${rec.state} · ${rec.key} · ${rec.segment.slice(0,10)}`);
+          }
         }
-        text(id, `${rec.state} · ${rec.key} · ${rec.segment.slice(0, 10)}`);
-      }
+      } else render(d);
     }
-    if (page === "execution") text("execution-json", JSON.stringify(await get("/api/history"), null, 2));
-    text("notice", "");
-  } catch (e) {
-    text("notice", `${e.message} · last displayed values may be stale`);
-    for (const m of markets)
-      depth(m, { status: "UNAVAILABLE", reason: "DASHBOARD_DATA_STALE" });
-  } finally {
-    pending = false;
-  }
+    if (!controller.signal.aborted) {
+      lastRefresh = new Date().toISOString(); text("notice", "");
+      text("last-refresh", `Last successful refresh ${time(lastRefresh)}`);
+    }
+  } catch(e) {reportError(e);} finally {if(pending===controller) pending=null;}
 }
-$("saxo-connect").onsubmit = async (event) => {
+$("saxo-connect").onsubmit = async event => {
   event.preventDefault();
-  const button = event.currentTarget.querySelector("button");
-  button.disabled = true;
+  const button=event.currentTarget.querySelector("button"); button.disabled=true;
   text("oauth-notice", "");
-  try {
-    // A native form POST with no-referrer sends Origin: null. Fetch's default
-    // cors mode preserves the Origin for this same-origin authenticated POST.
-    const response = await fetch("/oauth/saxo/start", {
-      method: "POST",
-      headers: { Accept: "application/json" },
-      credentials: "same-origin",
-      signal: AbortSignal.timeout(15000),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || "Saxo connection could not start");
-    window.location.assign(result.authorization_url);
-  } catch (error) {
-    text("oauth-notice", error.message);
-    button.disabled = false;
-  }
+  try {const result=await request("/oauth/saxo/start", {method:"POST",timeout:15000}); window.location.assign(result.authorization_url);}
+  catch(e) {text("oauth-notice",e.message); button.disabled=false;}
 };
 $("pause").onclick = async () => {
-  await fetch(`/api/entries/${paused ? "resume" : "pause"}`, {
-    method: "POST",
-  });
-  await refresh();
+  pending?.abort(); controlPending=true; $("pause").disabled=true;
+  try {const result=await request(`/api/entries/${paused ? "resume" : "pause"}`, {method:"POST"}); render({system:result}); text("notice",result.paused ? "Server confirmed: entries paused" : "Server confirmed: entries resumed; readiness gates still apply");}
+  catch(e) {reportError(e);} finally {controlPending=false; $("pause").disabled=false;}
 };
-for (const id of [
-  "market-filter",
-  "day-filter",
-  "version-filter",
-  "sort-filter",
-])
-  $(id).addEventListener("change", () => {
-    offset = 0;
-    history().catch((e) => text("notice", e.message));
-  });
-$("prev").onclick = () => {
-  offset = Math.max(0, offset - 100);
-  history();
-};
-$("next").onclick = () => {
-  offset += 100;
-  history();
-};
+for(const id of ["market-filter","day-filter","version-filter","sort-filter"])
+  $(id).addEventListener("change",()=>{offset=0; selectedIdentity=""; detailRequest?.abort(); text("trade-json", "Select an opportunity to view its evidence"); refresh(true);});
+$("prev").onclick=()=>{offset=Math.max(0,offset-100);refresh(true);};
+$("next").onclick=()=>{offset+=100;refresh(true);};
+document.addEventListener("visibilitychange",()=>{if(document.hidden){pending?.abort(); detailRequest?.abort();}else refresh(true);});
+document.querySelectorAll("details").forEach(el=>el.addEventListener("toggle",()=>{
+  if (el.id === "account-detail") {if(accountSnapshot) renderAccount(accountSnapshot);}
+  else if (el.open) refresh(true);
+}));
 setInterval(() => {
   text("clock", `${time(new Date().toISOString())} · London`);
+  if (accountSnapshot?.status === "Current" && Date.now() > accountSnapshot.valid_until*1000) renderAccount({...accountSnapshot,status:"Stale"});
+  if (lastRefresh && Date.now()-Date.parse(lastRefresh)>15000) text("last-refresh",`Stale · last successful refresh ${time(lastRefresh)}`);
   for (const [m, at] of depthReceipts)
     if (at && Date.now() > at)
       depth(m, { status: "L2_UNAVAILABLE", reason: "SUBSCRIPTION_HEALTH_EXPIRED" });
   for (const [m, expires] of flowExpiry) if (expires && Date.now() > expires) bookFlow(m, {status:"UNAVAILABLE",quality_flags:["SUBSCRIPTION_HEALTH_EXPIRED"]});
   for (const [m, at] of quoteReceipts) if (!at || Date.now() - at > 5000) text(`l1-${m}`, "L1 STALE OR MISSING");
 }, 1000);
-setInterval(refresh, 5000);
-refresh();
+setInterval(() => refresh(), 5000);
 
 for (let i = 0; i < 4; i++) {
   const slot = document.createElement("div"); slot.id = `trade-slot-${i}`;
@@ -550,11 +623,17 @@ for (const m of markets) {
 }
 $("market-selector").hidden = route !== "markets";
 if (route === "markets") $("markets").classList.add("single-market");
+const linkedMarket = new URLSearchParams(location.search).get("market");
+if (markets.includes(linkedMarket)) selectedMarket = linkedMarket;
 $("selected-market").value = selectedMarket;
+$("account-strip").hidden = route !== "overview";
+$("strategy-summary").hidden = route !== "overview";
+$("overview-slots").hidden = route !== "overview";
 function selectMarket() {
   selectedMarket = $("selected-market").value;
   sessionStorage.setItem("slrno-market", selectedMarket);
   for (const market of markets) $(`card-${market}`).hidden = route === "markets" && market !== selectedMarket;
+  refresh(true);
 }
 $("selected-market").addEventListener("change", selectMarket);
 selectMarket();

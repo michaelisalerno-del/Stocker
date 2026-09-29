@@ -13,9 +13,11 @@ Market = Literal["CL", "GC", "NG", "NQ", "SI"]
 MARKETS: tuple[Market, ...] = ("CL", "GC", "NG", "NQ", "SI")
 Environment = Literal["SAXO_SIM", "SAXO_LIVE"]
 RULE_VERSION = "CLOCK60_NG13_20260927"
-MAX_PREMIUM_RISK_GBP = 10
+MAX_PREMIUM_RISK_GBP = 50
+MAX_PREMIUM_RISK_PENNIES = MAX_PREMIUM_RISK_GBP * 100
 MAX_OPEN_POSITIONS = 4
-MAX_SIMULTANEOUS_ENTRY_RISK_GBP = 40
+MAX_SIMULTANEOUS_ENTRY_RISK_GBP = MAX_PREMIUM_RISK_GBP * MAX_OPEN_POSITIONS
+MAX_ALLOCATION_PENNIES = MAX_SIMULTANEOUS_ENTRY_RISK_GBP * 100
 MAX_CONTRACTS_PER_TRADE = 1
 
 
@@ -133,7 +135,9 @@ class FuturesConfig(Strict):
     refresh_rate_ms: Literal[1000] = 1000
     quote_max_age_seconds: Literal[5] = 5
     entry_deadline_seconds: Literal[20] = 20
-    max_premium_risk_gbp: Literal[10] = 10
+    max_premium_risk_gbp: int = Field(
+        default=MAX_PREMIUM_RISK_GBP, ge=MAX_PREMIUM_RISK_GBP, le=MAX_PREMIUM_RISK_GBP
+    )
     max_open_positions: Literal[4] = 4
     max_contracts_per_trade: Literal[1] = 1
 

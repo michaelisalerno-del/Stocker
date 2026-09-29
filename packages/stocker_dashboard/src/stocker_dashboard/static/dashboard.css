@@ -524,3 +524,18 @@ footer {
 .book-flow .depth { max-width: 42rem; }
 .book-flow pre { max-height: 24rem; overflow: auto; }
 #markets.single-market { grid-template-columns: minmax(0, 1fr); max-width: 1100px; }
+
+.connection-strip { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:12px 0 20px; font-size:.85rem; }
+.account-strip { border:1px solid var(--line, #334155); padding:16px; margin-bottom:16px; border-left:4px solid #d2a853; }
+.account-strip h2 { font-size:1rem; margin:0; }
+.account-strip h2 span { margin-left:12px; }
+.account-strip .summary { margin:12px 0; }
+#strategy-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.market > a { display:inline-block; margin-top:12px; }
+@media(max-width:600px) { .account-strip {padding:12px;} #strategy-summary {grid-template-columns:1fr;} }
+
+#global-warning:empty {display:none;}
+.market > small {display:block; margin-top:12px;}
+.account-strip .summary > div {padding:12px;}
+.account-strip .summary strong {font-size:1.25rem;}
+.trade-slots {margin-bottom:16px;}

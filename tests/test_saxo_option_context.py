@@ -155,15 +155,15 @@ def test_partial_pretrigger_and_metadata_are_shared_not_repeated(tmp_path):
     assert sequences == [1, 2]
 
 
-@pytest.mark.parametrize("factor", [20, 100, 1000, 5000, 10000])
+@pytest.mark.parametrize("factor", [20, 100, 1000, 5000, 10000, 20000])
 def test_contract_conversion_and_separate_fees_budget(factor):
     result = cost_estimate({**OPTION, "price_factor": factor}, 0.005, conditions(), 0.8)
     assert result["premium_gbp"] == pytest.approx(0.005 * factor * 0.8)
     assert result["entry_costs_gbp"] == pytest.approx(0.096)
     assert result["estimated_exit_costs_gbp"] == pytest.approx(0.096)
     assert result["fees_gbp"] == pytest.approx(0.192)
-    assert result["remaining_budget_gbp"] == pytest.approx(10 - result["total_gbp"])
-    assert (result["budget_result"] == "WITHIN_BUDGET") == (factor <= 1000)
+    assert result["remaining_budget_gbp"] == pytest.approx(50 - result["total_gbp"])
+    assert (result["budget_result"] == "WITHIN_BUDGET") == (factor <= 10000)
 
 
 def test_cost_totals_not_added_twice_and_unsupported_conventions_block():

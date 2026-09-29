@@ -27,32 +27,21 @@
       <p id="mode-banner" class="mode-banner">DATA ENVIRONMENT: unverified · EXECUTION MODE: DISABLED · LIVE ORDERS DISABLED</p>
       <div id="notice" role="status" aria-live="polite"></div>
       <p id="global-warning" role="alert" class="block"></p>
-      <section class="summary" aria-label="Account and allocation">
-        <div>
-          <small>Paper account</small><strong id="account">Connecting…</strong
-          ><span id="connection"></span>
-        </div>
-        <div>
-          <small>Open + reserved trades</small
-          ><strong id="capacity">— / 4</strong><span>Concurrent positions</span>
-        </div>
-        <div>
-          <small>Reserved + open allocation</small
-          ><strong id="allocation">— / £40</strong
-          ><span>Concurrent ceiling · not a daily loss limit</span>
-        </div>
-        <div>
-          <small>Realised net P&L</small><strong id="realised">—</strong
-          ><span id="pnl-note">Broker executions + commissions</span>
-        </div>
-        <div>
-          <small>Unrealised estimate</small><strong id="unrealised">—</strong
-          ><span id="valuation-note">Bid-based · freshness required</span>
-        </div>
-        <div>
-          <small>Entries</small><strong id="entries">Unarmed</strong
-          ><button id="pause" type="button">Pause entries</button>
-        </div>
+      <div class="connection-strip"><span id="connection">Disconnected</span><span id="readiness">Checking readiness</span><span id="entries">Unarmed</span><button id="pause" type="button">Pause entries</button><span id="last-refresh">No successful refresh yet</span></div>
+      <section id="account-strip" class="account-strip" aria-label="Saxo account">
+        <h2>Account <span id="account">Unavailable</span></h2><p id="account-note">Account environment unverified</p>
+        <div class="summary">
+          <div><small>Broker total account value</small><strong id="account-value">Unavailable</strong></div>
+          <div><small>Broker cash balance</small><strong id="account-cash">Unavailable</strong></div>
+          <div><small>Broker cash available for trading</small><strong id="account-available">Unavailable</strong></div>
+          <div><small>SLRNO committed / reserved</small><strong id="allocation">Unavailable</strong><span>Concurrent ceiling · not a daily loss limit</span></div>
+          <div><small>Occupied / reserved slots</small><strong id="capacity">Unavailable</strong></div>
+        </div><small id="account-freshness">Unavailable</small>
+        <details id="account-detail"><summary>Balance details</summary><p>Broker cash and internal allocation are separate. Reservations are not subtracted from broker figures. Values remain in the displayed native currency.</p><pre id="account-json"></pre></details>
+      </section>
+      <section id="strategy-summary" class="summary" aria-label="Strategy results">
+        <div><small>Strategy realised net P&amp;L</small><strong id="realised">Unavailable</strong><span id="pnl-note"></span></div>
+        <div><small>Open-trade P&amp;L estimate</small><strong id="unrealised">Unavailable</strong><span id="valuation-note"></span></div>
       </section>
       <section id="overview">
         <div id="overview-slots" class="trade-slots" aria-label="Four concurrent trade slots"></div>
@@ -60,7 +49,12 @@
         <div id="markets" class="markets"></div>
         <p id="evidence" class="evidence"></p>
       </section>
-      <section id="execution" hidden><h2>Four concurrent trade slots</h2><div id="trade-slots" class="trade-slots"></div><p id="execution-warning"></p><pre id="execution-json"></pre></section>
+      <section id="execution" hidden><h2>Four concurrent trade slots</h2><div id="trade-slots" class="trade-slots"></div><p id="execution-warning"></p><p id="execution-empty"></p>
+        <h3>Positions and reservations</h3><div class="table-scroll" tabindex="0"><table><thead><tr><th>Market</th><th>State</th><th>Option</th><th>Quantity</th><th>Allocation</th><th>Exit</th></tr></thead><tbody id="execution-trades"></tbody></table></div>
+        <h3>Orders for active obligations</h3><div class="table-scroll" tabindex="0"><table><thead><tr><th>Role</th><th>Order</th><th>Status</th><th>Filled</th><th>Remaining</th><th>Deadline</th></tr></thead><tbody id="execution-orders"></tbody></table></div>
+        <h3>Broker positions</h3><table><thead><tr><th>Instrument</th><th>Quantity</th></tr></thead><tbody id="execution-positions"></tbody></table>
+        <h3>Recent fills</h3><div class="table-scroll" tabindex="0"><table><thead><tr><th>Time</th><th>Instrument</th><th>Side</th><th>Quantity</th><th>Native price</th><th>Commission</th></tr></thead><tbody id="execution-fills"></tbody></table></div>
+        <details id="execution-detail"><summary>Raw execution evidence</summary><pre id="execution-json"></pre></details></section>
       <section id="trades" hidden>
         <div class="filters">
           <label
@@ -139,12 +133,12 @@
           </div>
         </div>
         <p class="block" id="api-error"></p>
-        <h2>Saved recordings</h2><div id="recording-list"></div><h2>Connectivity and readiness</h2>
+        <details id="recordings-detail"><summary>Saved recordings</summary><div id="recording-list"></div></details><h2>Connectivity and readiness</h2>
         <p>
           Live trading is unavailable. Installation, data readiness and
           execution arming are separate.
         </p>
-        <details>
+        <details id="system-detail">
           <summary>Operational diagnostics</summary>
           <pre id="system-json"></pre>
         </details>

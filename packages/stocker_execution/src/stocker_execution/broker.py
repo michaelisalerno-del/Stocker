@@ -7,7 +7,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from stocker_execution.config import FuturesConfig
+from stocker_execution.config import MAX_PREMIUM_RISK_PENNIES, FuturesConfig
 from stocker_execution.contracts import (
     budget,
     executable_quote,
@@ -131,7 +131,17 @@ class PaperBroker:
         if role == "ENTRY":
             if self.entry_reason():
                 raise ValueError(self.entry_reason())
-            if not 0 < plan["cash_pennies"] <= 1000:
+            if self.store.get_meta("paused", False):
+                raise ValueError("ENTRIES_PAUSED")
+            reservation = self.store.db.execute(
+                "SELECT policy_pennies FROM reservations WHERE id=?", (identity,)
+            ).fetchone()
+            ceiling = (
+                min(MAX_PREMIUM_RISK_PENNIES, reservation[0])
+                if reservation
+                else MAX_PREMIUM_RISK_PENNIES
+            )
+            if not 0 < plan["cash_pennies"] <= ceiling:
                 raise ValueError("MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET")
         elif role == "EXIT":
             if self.store.exposure(identity) != 1:
@@ -180,6 +190,13 @@ class PaperBroker:
             self.store.db.execute("SELECT COALESCE(MAX(order_id),0)+1 FROM orders").fetchone()[0]
         )
         deadline = now() + timedelta(seconds=20)
+        if role == "ENTRY":
+            signal = self.store.db.execute(
+                "SELECT signal_at FROM signals WHERE id=?", (identity,)
+            ).fetchone()
+            deadline = min(
+                deadline, utc(signal[0]) + timedelta(seconds=self.config.entry_deadline_seconds)
+            )
         reference = self.store.prepare_order(
             identity,
             role,
@@ -267,7 +284,10 @@ class PaperBroker:
         fee *= rate if self.data.account_currency == "USD" else 1
         premium = plan["limit"] * plan["option"]["price_factor"] * rate
         total = max(cash, premium + fee) + plan["fee_per_side_gbp"]
-        if math.ceil(total * 100) > 1000 or math.ceil(total * 100) > plan["cash_pennies"]:
+        if (
+            math.ceil(total * 100) > MAX_PREMIUM_RISK_PENNIES
+            or math.ceil(total * 100) > plan["cash_pennies"]
+        ):
             raise ValueError("MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET")
 
     def internal_fill(
@@ -281,6 +301,7 @@ class PaperBroker:
             if role == "ENTRY":
                 revised = budget(option, price, plan["fee_per_side_gbp"] * 2, conversion)
                 plan.update(revised)
+                self.validate_order(plan, role, identity)
             plan.update(fx=conversion, fx_at=self.data.fx.receipt)
             quote = executable_quote(
                 self.data.options[option["uic"]][0], state.value or {}, state.receipt, at

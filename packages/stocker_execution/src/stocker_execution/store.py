@@ -2,10 +2,17 @@
 
 import json
 import sqlite3
+import time
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from stocker_execution.config import (
+    MAX_ALLOCATION_PENNIES,
+    MAX_OPEN_POSITIONS,
+    MAX_PREMIUM_RISK_PENNIES,
+)
 
 TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
 
@@ -72,8 +79,45 @@ class Store:
           PRIMARY KEY(con_id,at));
         CREATE INDEX IF NOT EXISTS bar_market ON bars(market,at);
         """)
+        self.migrate_allocation()
+        self._economics_cache: tuple[tuple[int, int], float, dict[str, Any]] | None = None
         if self.db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
             raise ValueError("LEDGER_INTEGRITY_FAILURE")
+
+    def migrate_allocation(self) -> None:
+        """Rebuild only the old fixed-£10 table; retain every row and its policy amount.
+
+        Foreign keys are disabled outside the transaction solely for SQLite's table
+        rebuild. Validate them before commit and restore enforcement even on failure.
+        """
+        columns = {r[1] for r in self.db.execute("PRAGMA table_info(reservations)")}
+        if "policy_pennies" in columns:
+            return
+        self.db.execute("PRAGMA foreign_keys=OFF")
+        try:
+            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute(f"""CREATE TABLE reservations_new (
+                id TEXT PRIMARY KEY REFERENCES signals(id),
+                allocation_pennies INTEGER NOT NULL,
+                active INTEGER NOT NULL CHECK(active IN (0,1)),
+                state TEXT NOT NULL, plan TEXT NOT NULL, created_at TEXT NOT NULL,
+                policy_pennies INTEGER NOT NULL
+                CHECK(policy_pennies IN (1000,{MAX_PREMIUM_RISK_PENNIES})),
+                CHECK(allocation_pennies=policy_pennies))""")
+            self.db.execute(
+                "INSERT INTO reservations_new SELECT *,allocation_pennies FROM reservations"
+            )
+            self.db.execute("DROP TABLE reservations")
+            self.db.execute("ALTER TABLE reservations_new RENAME TO reservations")
+            if self.db.execute("PRAGMA foreign_key_check").fetchone():
+                raise ValueError("ALLOCATION_MIGRATION_FOREIGN_KEY_FAILURE")
+            self.db.execute("INSERT OR REPLACE INTO futures_meta VALUES('allocation_schema','2')")
+            self.db.commit()
+        except BaseException:
+            self.db.rollback()
+            raise
+        finally:
+            self.db.execute("PRAGMA foreign_keys=ON")
 
     def bind(self, environment: str, execution_mode: str) -> None:
         expected = {
@@ -176,17 +220,17 @@ class Store:
         return {"reserved_open_trades": row[0], "allocation_pennies": row[1]}
 
     def reserve(self, identity: str, plan: dict[str, Any]) -> str:
-        """BEGIN IMMEDIATE serializes admission across tasks/processes; reserve full £10."""
+        """Serialize admission across tasks/processes; reserve the current per-trade ceiling."""
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             if self.db.execute("SELECT 1 FROM reservations WHERE id=?", (identity,)).fetchone():
                 return "DUPLICATE_OPPORTUNITY"
             capacity = self.capacity()
-            if plan["quantity"] != 1 or not 0 < plan["cash_pennies"] <= 1000:
+            if plan["quantity"] != 1 or not 0 < plan["cash_pennies"] <= MAX_PREMIUM_RISK_PENNIES:
                 reason = "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET"
-            elif capacity["reserved_open_trades"] >= 4:
+            elif capacity["reserved_open_trades"] >= MAX_OPEN_POSITIONS:
                 reason = "SKIP_CAPACITY_FULL"
-            elif capacity["allocation_pennies"] + 1000 > 4000:
+            elif capacity["allocation_pennies"] + MAX_PREMIUM_RISK_PENNIES > MAX_ALLOCATION_PENNIES:
                 reason = "SKIP_ALLOCATION_LIMIT"
             else:
                 reason = ""
@@ -197,8 +241,14 @@ class Store:
                 )
                 return reason
             self.db.execute(
-                "INSERT INTO reservations VALUES(?,1000,1,'RESERVED',?,?)",
-                (identity, encode(plan), stamp()),
+                "INSERT INTO reservations VALUES(?,?,1,'RESERVED',?,?,?)",
+                (
+                    identity,
+                    MAX_PREMIUM_RISK_PENNIES,
+                    encode(plan),
+                    stamp(),
+                    MAX_PREMIUM_RISK_PENNIES,
+                ),
             )
             self.db.execute("UPDATE signals SET decision='ORDER_ELIGIBLE' WHERE id=?", (identity,))
         return ""
@@ -350,20 +400,41 @@ class Store:
         return True
 
     def history(
-        self, market: str | None, day: str | None, version: str | None, offset: int = 0
+        self,
+        market: str | None,
+        day: str | None,
+        version: str | None,
+        offset: int = 0,
+        sort: str = "desc",
     ) -> list[dict[str, Any]]:
+        if sort not in {"asc", "desc"}:
+            raise ValueError("INVALID_HISTORY_SORT")
         return [
             dict(r)
             for r in self.db.execute(
                 "SELECT s.*,r.state,r.plan FROM signals s "
                 "LEFT JOIN reservations r USING(id) WHERE (? IS NULL OR market=?) "
                 "AND (? IS NULL OR substr(signal_at,1,10)=?) AND (? IS NULL OR rule_version=?) "
-                "ORDER BY signal_at DESC,market LIMIT 100 OFFSET ?",
+                f"ORDER BY signal_at {sort},market,id LIMIT 100 OFFSET ?",
                 (market, market, day, day, version, version, offset),
             )
         ]
 
     def economics(self) -> dict[str, Any]:
+        # Display only: own writes invalidate immediately; other connections via data_version.
+        revision = (self.db.total_changes, self.db.execute("PRAGMA data_version").fetchone()[0])
+        at = time.monotonic()
+        if (
+            self._economics_cache
+            and self._economics_cache[0] == revision
+            and at - self._economics_cache[1] < 5
+        ):
+            return self._economics_cache[2]
+        result = self._economics()
+        self._economics_cache = (revision, at, result)
+        return result
+
+    def _economics(self) -> dict[str, Any]:
         net, closed, wins, provisional = 0.0, 0, 0, 0
         # One indexed join, not one fills query per historical trade on every UI refresh.
         rows = self.db.execute("""

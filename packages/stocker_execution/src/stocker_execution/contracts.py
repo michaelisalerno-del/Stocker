@@ -7,7 +7,12 @@ from decimal import ROUND_CEILING, Decimal
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from stocker_execution.config import MARKETS, Environment
+from stocker_execution.config import (
+    MARKETS,
+    MAX_PREMIUM_RISK_GBP,
+    MAX_PREMIUM_RISK_PENNIES,
+    Environment,
+)
 
 MULTIPLIERS = {"CL": 1000, "GC": 100, "NG": 10000, "NQ": 20, "SI": 5000}
 
@@ -285,11 +290,11 @@ def cost_estimate(
         "fees_gbp": entry * 2,
         "minimum_purchase_cost_gbp": float(premium) + entry,
         "total_gbp": pennies / 100,
-        "remaining_budget_gbp": (1000 - pennies) / 100,
+        "remaining_budget_gbp": (MAX_PREMIUM_RISK_PENNIES - pennies) / 100,
         "cash_pennies": pennies,
-        "budget_gbp": 10,
+        "budget_gbp": MAX_PREMIUM_RISK_GBP,
         "budget_result": "WITHIN_BUDGET"
-        if pennies <= 1000
+        if pennies <= MAX_PREMIUM_RISK_PENNIES
         else "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET",
         "basis": "ESTIMATE_NOT_BOOKED_CHARGES",
         "policy": "PREMIUM_PLUS_ENTRY_AND_RESERVED_EXIT",
@@ -345,7 +350,7 @@ def budget(
     premium = Decimal(str(values[0])) * Decimal(str(values[3])) * Decimal(str(values[2]))
     fees = Decimal(str(values[1]))
     pennies = int(((premium + fees) * 100).to_integral_value(rounding=ROUND_CEILING))
-    if pennies > 1000:
+    if pennies > MAX_PREMIUM_RISK_PENNIES:
         raise ValueError("MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET")
     return {
         "quantity": 1,

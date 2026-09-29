@@ -17,11 +17,13 @@ The server keeps a bounded 15-minute L1/L2 window independently of browsers. Fro
 preserve available prehistory and at least 60 minutes afterward, including skipped trades. There
 is no permanent full-session raw archive. Missing depth remains L1_ONLY/L2_UNAVAILABLE.
 
-Paper admission means one whole long option, at most £10 including costs, and four concurrent
-reservations/open trades. Ambiguous orders retain capacity. The frozen research does not approve
+Paper admission means one whole long option, at most £50 including entry and reserved exit costs,
+and four concurrent reservations/open trades against a £200 concurrent allocation ceiling.
+Historical £10 reservations retain their original policy amounts. Ambiguous orders retain capacity. The frozen research does not approve
 listed option products, actual 0DTE expiry clocks or delta tolerances; missing evidence blocks entries.
 GC remains monitored. No orders were sent or paper execution armed during this migration.
 
+[Focused cleanup, verification and migration](docs/SLRNO-CLEANUP.md) ·
 [Setup and OAuth](docs/SAXO-SETUP.md) · [Cutover and rollback](docs/DEPLOYMENT.md) ·
 [Rules and provenance](docs/FUTURES-RULEBOOK.md) · [Storage and stream policy](docs/MARKET-DATA.md) ·
 [Option context and validation](docs/saxo-option-context-addendum.md) ·

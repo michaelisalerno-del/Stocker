@@ -10,7 +10,7 @@ const markets = ["CL", "GC", "NG", "NQ", "SI"];
 const staticRoot = path.resolve(
   "packages/stocker_dashboard/src/stocker_dashboard/static",
 );
-const output = path.resolve("docs/saxo-screenshots");
+const output = path.resolve("docs/cleanup-screenshots");
 const state = {
   system: {
     account: "OFFLINE FIXTURE",
@@ -22,7 +22,9 @@ const state = {
     armed: false,
     paused: false,
     reserved_open_trades: 2,
-    allocation_pennies: 2000,
+    allocation_pennies: 10000,
+    limits: {per_trade_gbp:50,allocation_gbp:200,slots:4},
+    entry_block_reason:"PAPER_DISARMED",
     market_data: {
       owned_lines: 24,
       app_budget: 32,
@@ -38,6 +40,7 @@ const state = {
       writer_queue: 0,
     },
   },
+  account: {environment:"SIM",label:"SIM · simulated funds",account:"••••1234",currency:"GBP",status:"Current",last_success_at:Date.parse(at)/1000,valid_until:Date.parse(at)/1000+30,total_value:12345.67,cash_balance:10000,cash_available_for_trading:null,connection_note:"Real-money balances are not connected",details:{CalculationReliability:"Ok"}},
   pnl: {
     realised_net_gbp: null,
     provisional_closed: 1,
@@ -55,6 +58,7 @@ const state = {
     market_status: "OPEN",
     data_status: "CURRENT",
     updated_at: at,
+    last_receipt:Date.parse(at)/1000,
     l1: { status: "CURRENT", last_receipt: at, quote: {Bid: 70 + i, Ask: 70.01 + i}, sizes: {bid: 2, ask: 3}, spread: .01, delay_minutes: 0 },
     recorder: {state: i === 4 ? "STORAGE_LIMIT" : "BUFFERING", prehistory_seconds: [900,42,15,0,0][i], reason: i === 4 ? "STORAGE_LIMIT_REACHED" : ""},
     option_context: {candidate_uic: 1001+i, candidate_changes: [], latest_event: {id: "fixture-event", context: {identity: {uic: 1001+i}, pre_trigger_seconds: 42}}, contracts: [{
@@ -178,10 +182,13 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   let data;
   if (url.pathname === "/api/overview") data = state;
+  else if (url.pathname.startsWith("/api/market/")) data={system:state.system,markets:state.markets.filter(m=>m.market===url.pathname.split("/").at(-1))};
+  else if (url.pathname === "/api/execution") data={system:state.system,trades:[],orders:[],fills:[],positions:[]};
   else if (url.pathname === "/api/recordings") data = {active: [], completed: []};
   else if (url.pathname === "/api/history")
     data = {
-      rows: rows.filter(
+      system:state.system,
+      rows: [...rows].sort((a,b)=>url.searchParams.get("sort")==="asc" ? a.signal_at.localeCompare(b.signal_at) : b.signal_at.localeCompare(a.signal_at)).filter(
         (r) =>
           !url.searchParams.get("market") ||
           r.market === url.searchParams.get("market"),
@@ -192,6 +199,7 @@ const server = http.createServer((req, res) => {
     data = {
       fixture: true,
       ...state.system,
+      markets:state.markets,
       live_available: false,
       mappings: {},
     };
@@ -204,7 +212,7 @@ const server = http.createServer((req, res) => {
     };
   else if (url.pathname.startsWith("/api/entries/")) {
     state.system.paused = url.pathname.endsWith("pause");
-    data = { paused: state.system.paused };
+    data = state.system;
   }
   if (data) {
     res.setHeader("Content-Type", "application/json");
@@ -250,7 +258,7 @@ async function label(page) {
     await page.goto(base);
     await page.waitForFunction(
       () =>
-        document.querySelector("#account").textContent === "OFFLINE FIXTURE",
+        document.querySelector("#account").textContent.includes("SIM · simulated funds"),
     );
     assert.deepEqual(
       await page
@@ -258,10 +266,10 @@ async function label(page) {
         .evaluateAll((nodes) => nodes.map((n) => n.id)),
       markets.map((m) => `card-${m}`),
     );
-    assert.equal(
-      await page.locator("#diagnostic-GC").textContent(),
-      "L2 observation only",
-    );
+    assert.match(await page.locator("#state-GC").textContent(), /MONITOR ONLY/);
+    assert.match(await page.locator("#allocation").textContent(), /100.00.*200.00/);
+    assert.equal(await page.locator("#account-available").textContent(), "Unavailable");
+    assert.match(await page.locator("#account-note").textContent(), /Real-money balances are not connected/);
     assert.match(await page.locator("#pnl-note").textContent(), /provisional/);
     assert.equal(await page.locator("#entries").textContent(), "Unarmed");
     assert.equal(await page.locator("#overview-slots > div").count(), 4);
@@ -271,40 +279,11 @@ async function label(page) {
       path: path.join(output, "overview-desktop-fixture.png"),
       fullPage: true,
     });
-    await page.locator("#card-GC summary").click();
-    await page.locator("#card-GC summary").focus();
-    assert.match(await page.locator("#l2-GC").textContent(), /42 \/ 900s/);
-    assert.equal(await page.locator("#depth-GC-0").isVisible(), true);
-    await page.screenshot({
-      path: path.join(output, "depth-expanded-fixture.png"),
-      fullPage: true,
-    });
-    await page.evaluate(() => {
-      window.savedCard = document.querySelector("#card-GC");
-      window.savedFocus = document.activeElement;
-      window.scrollTo(0, 250);
-    });
-    const y = await page.evaluate(() => scrollY);
-    state.markets[1].chart.at(-1).close += 1;
-    await page.evaluate(() => refresh());
-    assert(
-      await page.evaluate(
-        () =>
-          savedCard === document.querySelector("#card-GC") &&
-          savedFocus === document.activeElement,
-      ),
-    );
-    assert(await page.locator("#card-GC details").evaluate((n) => n.open));
-    assert.equal(await page.evaluate(() => scrollY), y);
-    state.markets[1].l2.fresh = false;
-    await page.evaluate(() => refresh());
-    assert.equal(await page.locator("#depth-GC-0").isVisible(), false);
-    assert(await page.locator("#card-GC details").evaluate((n) => n.open));
     state.markets[1].l2.fresh = true;
     state.markets[1].l2.valid_until = Date.parse(at)/1000+30;
     await page.goto(`${base}/markets`);
     await page.locator("#selected-market").selectOption("GC");
-    await page.evaluate(() => refresh());
+    await page.evaluate(() => refresh(true));
     assert.equal(await page.locator("#card-GC").isVisible(), true);
     assert.equal(await page.locator("#card-CL").isVisible(), false);
     assert.match(await page.locator("#book-flow-GC").textContent(), /Sampled order-book observations; not a complete execution tape/);
@@ -346,7 +325,7 @@ async function label(page) {
     await page.evaluate(() => {
       window.savedRow = document.querySelector("#history tr");
       window.savedFocus = document.activeElement;
-      document.querySelector(".table-scroll").scrollTop = 240;
+      document.querySelector("#trades .table-scroll").scrollTop = 240;
     });
     await page.evaluate(() => refresh());
     assert(
@@ -362,7 +341,7 @@ async function label(page) {
       "CLOCK60_NG13_20260927",
     );
     assert.equal(
-      await page.locator(".table-scroll").evaluate((n) => n.scrollTop),
+      await page.locator("#trades .table-scroll").evaluate((n) => n.scrollTop),
       240,
     );
     await page.screenshot({
@@ -370,19 +349,19 @@ async function label(page) {
       fullPage: true,
     });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.locator(".table-scroll").evaluate((n) => {
+    await page.locator("#trades .table-scroll").evaluate((n) => {
       n.scrollLeft = 220;
       n.scrollTop = 140;
     });
     await page.evaluate(() => refresh());
     assert.equal(
-      await page.locator(".table-scroll").evaluate((n) => n.scrollLeft),
+      await page.locator("#trades .table-scroll").evaluate((n) => n.scrollLeft),
       220,
     );
     await page.goto(base);
     await page.waitForFunction(
       () =>
-        document.querySelector("#account").textContent === "OFFLINE FIXTURE",
+        document.querySelector("#account").textContent.includes("SIM · simulated funds"),
     );
     await label(page);
     assert(
@@ -399,6 +378,7 @@ async function label(page) {
       fullPage: true,
     });
     await page.goto(`${base}/system`);
+    await page.locator("#system-detail summary").click();
     await page.waitForFunction(() =>
       document
         .querySelector("#system-json")

@@ -70,8 +70,11 @@ class MarketState:
     last_clock: datetime | None = None
     live_since: datetime | None = None
     history_checked: float = 0
+    boundary_clock: datetime | None = None
+    boundary_checked: float = float("-inf")
     reference_day: str = ""
     candidate_uic: int | None = None
+    warm_uics: set[int] = field(default_factory=set)
     candidate_problem: str = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
     candidate_changes: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=32))
 
@@ -123,6 +126,11 @@ class DataService:
         self.account_verified = False
         self.account_currency: str | None = None
         self.account_id: str | None = None
+        self.balance: dict[str, Any] = {}
+        self.balance_account_key: str | None = None
+        self.balance_received_at: float | None = None
+        self.balance_problem = "ACCOUNT_BALANCE_UNAVAILABLE"
+        self.balance_attempt = float("-inf")
         self.pending: dict[str, list[dict[str, Any]]] = {}
         self.pending_bytes = 0
         self.subscription_lock = asyncio.Lock()
@@ -143,13 +151,140 @@ class DataService:
         ]
         if len(accounts) != 1:
             raise SaxoError("CONFIGURED_ACCOUNT_NOT_RETURNED_BY_ENVIRONMENT")
-        self.account_verified = True
         self.account_currency = accounts[0].get("Currency")
         self.account_id = accounts[0].get("AccountId")
         if not self.account_id:
             raise SaxoError("ACCOUNT_IDENTIFIER_NOT_VERIFIED")
+        self.account_verified = True
+        if self.balance_account_key != self.client.oauth.account_key:
+            self.balance.clear()
+            self.balance_received_at = None
+            self.balance_account_key = self.client.oauth.account_key
         self.client.sim_account_verified = self.config.data_environment == "SAXO_SIM"
         self.session = await self.client.request("GET", "/root/v1/sessions/capabilities")
+
+    async def ensure_balance_subscription(self) -> None:
+        """One optional account-scoped subscription; consumers only read the snapshot."""
+        if not self.connected or not self.account_verified:
+            return
+        existing = next(
+            ((ref, sub) for ref, sub in self.subscriptions.items() if sub["kind"] == "BALANCE"),
+            None,
+        )
+        if (
+            existing
+            and existing[1]["arguments"].get("AccountKey") == self.client.oauth.account_key
+            and not self.balance_problem
+            and time.monotonic() - existing[1]["contact"] <= existing[1]["timeout"]
+        ):
+            return
+        if time.monotonic() - self.balance_attempt < 60:
+            return
+        self.balance_attempt = time.monotonic()
+        try:
+            await self.subscribe(
+                "BALANCE",
+                {
+                    "AccountKey": self.client.oauth.account_key,
+                    "FieldGroups": ["CalculateCashForTrading"],
+                },
+                "BALANCE",
+                old=existing[0] if existing else None,
+            )
+        except (SaxoError, ValueError, KeyError, TypeError):
+            self.balance_problem = "ACCOUNT_BALANCE_UNAVAILABLE"
+
+    def receive_balance(self, data: Any, receipt: float, *, snapshot: bool = False) -> None:
+        if not isinstance(data, dict):
+            self.balance_problem = "BALANCE_SCHEMA_UNAVAILABLE"
+            return
+        if self.balance_account_key != self.client.oauth.account_key:
+            self.balance.clear()
+            self.balance_received_at = None
+        self.balance_account_key = self.client.oauth.account_key
+        values = {} if snapshot else dict(self.balance)
+        # Do not expose account/client keys or retain an unbounded broker payload.
+        for name in (
+            "TotalValue",
+            "CashBalance",
+            "CashAvailableForTrading",
+            "Currency",
+            "CalculationReliability",
+            "TransactionsNotBooked",
+            "CostToClosePositions",
+        ):
+            if name in data:
+                value = data[name]
+                if name not in {"Currency", "CalculationReliability"}:
+                    value = (
+                        value
+                        if (
+                            isinstance(value, (int, float))
+                            and not isinstance(value, bool)
+                            and math.isfinite(value)
+                        )
+                        else None
+                    )
+                elif not isinstance(value, str):
+                    value = None
+                values[name] = value
+        if values.get("CalculationReliability") != "Ok":
+            self.balance_problem = "BALANCE_CALCULATION_UNVERIFIED"
+            return
+        if values.get("Currency") != self.account_currency:
+            self.balance_problem = "BALANCE_CURRENCY_UNVERIFIED"
+            return
+        self.balance = values
+        self.balance_received_at = receipt
+        self.balance_problem = ""
+
+    def balance_view(self, at: float) -> dict[str, Any]:
+        same_account = (
+            self.balance_account_key is not None
+            and self.balance_account_key == self.client.oauth.account_key
+        )
+        values = self.balance if same_account else {}
+        sub = next((s for s in self.subscriptions.values() if s["kind"] == "BALANCE"), None)
+        remaining = sub["timeout"] - (time.monotonic() - sub["contact"]) if sub else 0
+        currency = values.get("Currency")
+        available = any(
+            values.get(k) is not None
+            for k in ("TotalValue", "CashBalance", "CashAvailableForTrading")
+        )
+        fresh = bool(
+            same_account
+            and self.account_verified
+            and self.connected
+            and not self.balance_problem
+            and remaining > 0
+            and currency
+            and currency == self.account_currency
+        )
+        return {
+            "environment": "SIM" if self.config.data_environment == "SAXO_SIM" else "LIVE",
+            "label": "SIM · simulated funds"
+            if self.config.data_environment == "SAXO_SIM"
+            else "LIVE · real-money account",
+            "connection_note": "Real-money balances are not connected"
+            if self.config.data_environment == "SAXO_SIM"
+            else "Selected authenticated LIVE account · ordering disabled",
+            "account": "••••" + self.account_id[-4:]
+            if same_account and self.account_id
+            else "Unavailable",
+            "currency": currency or self.account_currency,
+            "status": "Unavailable" if not available else "Current" if fresh else "Stale",
+            "last_success_at": self.balance_received_at if same_account else None,
+            "valid_until": at + remaining if fresh else None,
+            "total_value": values.get("TotalValue"),
+            "cash_balance": values.get("CashBalance"),
+            "cash_available_for_trading": values.get("CashAvailableForTrading"),
+            "problem": self.balance_problem,
+            "details": {
+                k: values.get(k)
+                for k in ("CalculationReliability", "TransactionsNotBooked", "CostToClosePositions")
+            },
+            "basis": "Broker-reported native currency; no conversion or strategy P&L added",
+        }
 
     async def discover(self, state: MarketState) -> None:
         result = await self.client.request(
@@ -273,6 +408,7 @@ class DataService:
             raise SaxoError("SUBSCRIPTION_LIMIT")
         paths = {
             "PRICE": "/trade/v1/prices/subscriptions",
+            "BALANCE": "/port/v1/balances/subscriptions",
             "BOARD": "/trade/v1/optionschain/subscriptions",
             "SESSION": "/root/v1/sessions/events/subscriptions",
         }
@@ -281,7 +417,7 @@ class DataService:
             "ContextId": self.context,
             "ReferenceId": ref,
             "Arguments": arguments,
-            "RefreshRate": 2000 if kind == "BOARD" else 1000,
+            "RefreshRate": 10000 if kind == "BALANCE" else 2000 if kind == "BOARD" else 1000,
             "Format": "application/json",
         }
         if old:
@@ -326,6 +462,12 @@ class DataService:
                     provider_message=snapshot,
                     observation_context=price.observation_context(),
                 )
+        elif kind == "BALANCE":
+            if arguments["AccountKey"] != self.client.oauth.account_key:
+                self.balance_problem = "BALANCE_ACCOUNT_CHANGED"
+                self.pending_bytes -= sum(len(json.dumps(m)) for m in self.pending.pop(ref, []))
+                raise SaxoError("BALANCE_ACCOUNT_CHANGED")
+            self.receive_balance(snapshot, time.time(), snapshot=True)
         elif kind == "SESSION":
             self.session = snapshot or {}
         else:
@@ -369,7 +511,7 @@ class DataService:
                     for k, (i, _) in self.options.items()
                     if k not in self.owned_options
                     and self.option_required_at.get(k, 0) <= time.time()
-                    and not any(key(i) in c["instruments"] for c in self.recorder.active.values())
+                    and not self.recorder.requires_subscription(key(i), time.time())
                 ),
                 None,
             )
@@ -568,6 +710,7 @@ class DataService:
             inputs = {"futures_price": state.bars[-1].close, "rv15": prior_rv(state.bars, at)}
             ranked = self.rank_candidates(state, event, inputs)
             wanted = {c[2]["Uic"] for c in ranked[: self.config.option_candidate_window]}
+            state.warm_uics = wanted
             async with self.subscription_lock:
                 for uic, (identity, _) in list(self.options.items()):
                     if (
@@ -609,7 +752,7 @@ class DataService:
         return (
             uic in self.owned_options
             or self.option_required_at.get(uic, 0) > time.time()
-            or any(key(identity) in c["instruments"] for c in self.recorder.active.values())
+            or self.recorder.requires_subscription(key(identity), time.time())
         )
 
     async def focus_board(self, state: MarketState, requested: dict[str, Any]) -> None:
@@ -789,7 +932,7 @@ class DataService:
             "analytics_basis": "PROVIDER_SUPPLIED_UNVERIFIED_NOT_STRATEGY_PROBABILITY",
         }
 
-    async def history(self, state: MarketState) -> None:
+    async def history(self, state: MarketState, *, boundary: bool = False) -> None:
         if not state.identity:
             return
         result = await self.client.request(
@@ -821,6 +964,8 @@ class DataService:
         state.history_problem = ""
         if not bars:
             state.history_problem = "SAXO_COMPLETED_OHLCV_UNAVAILABLE"
+            return
+        if boundary:
             return
         day = datetime.now(NY).date()
         if state.reference_day == day.isoformat():
@@ -942,14 +1087,10 @@ class DataService:
 
     async def release_unused_options(self, owned: set[int]) -> None:
         self.owned_options = owned
-        for uic, (identity, _) in list(self.options.items()):
-            recording = any(
-                key(identity) in c["instruments"] for c in self.recorder.active.values()
-            )
-            if (
-                uic in owned
-                or recording
-                or time.time() - self.option_required_at.get(uic, 0) <= 900
+        for uic in list(self.options):
+            wanted = any(uic in s.warm_uics for s in self.markets.values())
+            if self.option_protected(uic) or (
+                wanted and time.time() - self.option_required_at.get(uic, 0) <= 120
             ):
                 continue
             async with self.subscription_lock:
@@ -960,7 +1101,7 @@ class DataService:
                 continue
             if window.identity["uic"] in self.options:
                 continue
-            if any(instrument in c["instruments"] for c in self.recorder.active.values()):
+            if self.recorder.requires_subscription(instrument, time.time()):
                 continue
             if not window.rows or window.rows[-1][0] < time.time() - 900:
                 self.recorder.windows.pop(instrument)
@@ -1021,6 +1162,7 @@ class DataService:
 
     async def startup(self) -> None:
         await self.subscribe("SESSION", {}, "SESSION")
+        await self.ensure_balance_subscription()
         for state in self.markets.values():
             try:
                 await self.discover(state)
@@ -1146,12 +1288,19 @@ class DataService:
                             self.disabled_targets.add(
                                 (subscription["kind"], subscription["target"])
                             )
+                            if subscription["kind"] == "BALANCE":
+                                self.balance_problem = "BALANCE_SUBSCRIPTION_DISABLED"
                             if subscription["kind"] == "PRICE":
                                 self.mark_gap(
                                     subscription["target"], "SUBSCRIPTION_PERMANENTLY_DISABLED"
                                 )
                             self.subscriptions.pop(heartbeat["OriginatingReferenceId"], None)
                             continue
+                        if (
+                            subscription["kind"] == "BALANCE"
+                            and heartbeat.get("Reason") != "NoNewData"
+                        ):
+                            self.balance_problem = "BALANCE_SUBSCRIPTION_DISABLED"
                         if (
                             heartbeat.get("Reason") != "NoNewData"
                             and subscription["kind"] == "PRICE"
@@ -1192,6 +1341,11 @@ class DataService:
                         self.mark_gap(market, "SESSION_DOWNGRADED")
                     self.problem = "SESSION_DOWNGRADED_EXPLICIT_UPGRADE_REQUIRED"
                     raise SaxoError("SESSION_DOWNGRADED_FRESH_SNAPSHOT_REQUIRED")
+            elif subscription["kind"] == "BALANCE":
+                if subscription["arguments"]["AccountKey"] == self.client.oauth.account_key:
+                    self.receive_balance(data, receipt)
+                else:
+                    self.balance_problem = "BALANCE_ACCOUNT_CHANGED"
             elif subscription["kind"] == "BOARD":
                 state = self.markets[subscription["target"]]
                 self.record_board(state, data, receipt)
@@ -1260,6 +1414,7 @@ class DataService:
                         if any(
                             time.monotonic() - s["contact"] > s["timeout"]
                             for s in self.subscriptions.values()
+                            if s["kind"] != "BALANCE"
                         ):
                             raise SaxoError("SUBSCRIPTION_HEARTBEAT_TIMEOUT")
             except asyncio.CancelledError:
@@ -1317,9 +1472,6 @@ class DataService:
             l2=state.price.depth(time.time()),
             session=self.session,
             refresh_ms=state.price.refresh_ms,
-            book_flow=self.recorder.book_flow_view(key(state.identity), time.time())
-            if state.identity
-            else {"status": "UNAVAILABLE"},
             user_action=(
                 "Review Saxo TradeLevel; upgrading can downgrade another Saxo application"
                 if self.session.get("TradeLevel") != "FullTradingAndChat"

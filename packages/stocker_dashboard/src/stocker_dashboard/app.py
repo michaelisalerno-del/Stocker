@@ -4,7 +4,7 @@ import json
 import sqlite3
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -43,26 +43,32 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
     async def overview() -> dict[str, Any]:
         return runtime.overview()
 
+    @app.get("/api/market/{market}")
+    async def market_detail(market: str, diagnostics: bool = False) -> dict[str, Any]:
+        if market not in MARKETS:
+            raise HTTPException(422, "Unknown futures market")
+        return runtime.market_detail(market, diagnostics=diagnostics)
+
+    @app.get("/api/execution")
+    async def execution() -> dict[str, Any]:
+        return runtime.execution_view()
+
     @app.get("/api/system")
-    async def system() -> dict[str, Any]:
+    async def system(diagnostics: bool = False) -> dict[str, Any]:
         return {
             **runtime.status(),
-            "configuration": runtime.config.model_dump(mode="json", exclude={"saxo"}),
+            "configuration": runtime.config.model_dump(mode="json", exclude={"saxo"})
+            if diagnostics
+            else None,
             "markets": [
                 {
                     "market": s.market,
                     "problem": s.problem,
                     "reference_sessions": len(s.references),
                     "capabilities": runtime.data.capability_view(s),
-                    "candidates": s.candidates,
+                    "candidates": s.candidates if diagnostics else None,
                 }
                 for s in runtime.markets.values()
-            ],
-            "broker_positions": [
-                dict(r)
-                for r in runtime.store.db.execute(
-                    "SELECT * FROM positions WHERE quantity<>0 ORDER BY con_id LIMIT 100"
-                )
             ],
         }
 
@@ -72,11 +78,19 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         day: date | None = None,
         version: str | None = Query(None, max_length=80),
         offset: int = Query(0, ge=0),
+        sort: Literal["asc", "desc"] = "desc",
     ) -> dict[str, Any]:
         if market is not None and market not in MARKETS:
             raise HTTPException(422, "Unknown futures market")
-        rows = runtime.store.history(market, day.isoformat() if day else None, version, offset)
-        return {"rows": rows, "offset": offset, "has_more": len(rows) == 100}
+        rows = runtime.store.history(
+            market, day.isoformat() if day else None, version, offset, sort
+        )
+        return {
+            "rows": rows,
+            "offset": offset,
+            "has_more": len(rows) == 100,
+            "system": runtime.status(),
+        }
 
     @app.get("/api/detail")
     async def detail(identity: str = Query(max_length=250)) -> dict[str, Any]:

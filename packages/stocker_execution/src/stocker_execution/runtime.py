@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import time
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -13,7 +14,13 @@ from typing import Any
 
 from stocker_execution import option_context
 from stocker_execution.broker import PaperBroker, now
-from stocker_execution.config import RULE_VERSION, FuturesConfig
+from stocker_execution.config import (
+    MAX_OPEN_POSITIONS,
+    MAX_PREMIUM_RISK_GBP,
+    MAX_SIMULTANEOUS_ENTRY_RISK_GBP,
+    RULE_VERSION,
+    FuturesConfig,
+)
 from stocker_execution.contracts import key, quote_check, session_state
 from stocker_execution.recorder import Recorder
 from stocker_execution.rules import NY, clocks, eligibility, next_clock, opportunity, prior_rv
@@ -43,6 +50,7 @@ class Runtime:
         self.markets = self.data.markets
         self.worker_health = self.manager_health = self.web_health = "STARTING"
         self.stopping = False
+        self.history_needed = asyncio.Event()
         self.tasks: set[asyncio.Task[Any]] = set()
         self.owner: Any = None
         self.config_hash = hashlib.sha256(config.model_dump_json().encode()).hexdigest()
@@ -91,6 +99,11 @@ class Runtime:
     def status(self) -> dict[str, Any]:
         return {
             "application": "SLRNO",
+            "limits": {
+                "per_trade_gbp": MAX_PREMIUM_RISK_GBP,
+                "slots": MAX_OPEN_POSITIONS,
+                "allocation_gbp": MAX_SIMULTANEOUS_ENTRY_RISK_GBP,
+            },
             "data_environment": self.config.data_environment,
             "execution_mode": self.config.execution_mode,
             "environment": self.config.data_environment,
@@ -144,10 +157,77 @@ class Runtime:
         }
 
     def overview(self) -> dict[str, Any]:
+        trades = [self.trade_view(t) for t in self.store.active()]
+        cards = []
+        at = now()
+        for market, state in self.markets.items():
+            reason = state.problem or state.history_problem
+            if not reason and market not in self.config.mappings:
+                reason = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
+            reason = reason or ("ENTRIES_PAUSED" if self.pause else self.broker.entry_reason())
+            receipt = state.price.receipt
+            current = (
+                receipt is not None
+                and 0 <= at.timestamp() - receipt <= 5
+                and not state.price.problem
+            )
+            market_trades = [t for t in trades if t["market"] == market]
+            cards.append(
+                {
+                    "market": market,
+                    "contract": (state.identity or {}).get("symbol"),
+                    "strategy_state": market_trades[0]["state"]
+                    if market_trades
+                    else "MONITOR_ONLY"
+                    if market == "GC"
+                    else "BLOCKED"
+                    if reason
+                    else "MONITORING",
+                    "block_reason": reason,
+                    "entry_enabled": not reason,
+                    "data_status": "CURRENT" if current else "STALE_OR_MISSING",
+                    "last_receipt": receipt,
+                    "candidate_uic": state.candidate_uic,
+                    "trades": market_trades,
+                    "next_time": (state.boundary_clock or next_clock(at)).isoformat(),
+                    "pending_data": state.boundary_clock is not None,
+                }
+            )
+        return {
+            "system": self.status(),
+            "account": self.data.balance_view(at.timestamp()),
+            "markets": cards,
+            "pnl": self.store.economics(),
+        }
+
+    def execution_view(self) -> dict[str, Any]:
+        rows = self.store.active()
+        return {
+            "system": self.status(),
+            "trades": [self.trade_view(r) for r in rows],
+            "orders": [o for r in rows for o in self.store.orders(r["id"])],
+            "fills": [
+                dict(r)
+                for r in self.store.db.execute(
+                    "SELECT f.*,o.event_id,o.role FROM fills f JOIN orders o USING(reference) "
+                    "WHERE superseded=0 ORDER BY at DESC,exec_id LIMIT 100"
+                )
+            ],
+            "positions": [
+                dict(r)
+                for r in self.store.db.execute(
+                    "SELECT * FROM positions WHERE quantity<>0 ORDER BY con_id LIMIT 100"
+                )
+            ],
+        }
+
+    def market_detail(self, selected: str, *, diagnostics: bool = False) -> dict[str, Any]:
         cards = []
         active = self.store.active()
-        recent = self.store.history(None, None, None)
+        recent = self.store.history(selected, None, None)
         for market, state in self.markets.items():
+            if market != selected:
+                continue
             last_event = next((row for row in recent if row["market"] == market), None)
             event_context = (
                 json.loads(last_event["detail"]).get("option_context") if last_event else None
@@ -221,7 +301,7 @@ class Runtime:
                     if identity
                     else {"status": "UNAVAILABLE"},
                     "recorder": recording,
-                    "capabilities": self.data.capability_view(state),
+                    "capabilities": dict(state.capabilities) if diagnostics else None,
                     "underlying_context": option_context.view(state.price.analytics, time.time()),
                     "option_context": {
                         "latest_event": {
@@ -233,21 +313,11 @@ class Runtime:
                         else None,
                         "candidate_uic": state.candidate_uic,
                         "problem": state.candidate_problem,
-                        "candidate_changes": list(state.candidate_changes),
+                        "candidate_changes": list(state.candidate_changes) if diagnostics else None,
                         "contracts": [
                             self.data.option_view(uic, time.time())
                             for uic, (i, _) in self.data.options.items()
                             if i["market"] == market
-                        ],
-                    },
-                    "option": {
-                        "root": state.option_root,
-                        "discovered": len(state.option_space),
-                        "board": state.option_board,
-                        "quotes": [
-                            {"identity": ident, "price": price.value, "receipt": price.receipt}
-                            for ident, price in self.data.options.values()
-                            if ident["market"] == market
                         ],
                     },
                     "chart": [{"at": b.at.isoformat(), "close": b.close} for b in state.bars[-90:]],
@@ -268,10 +338,13 @@ class Runtime:
                         "exit_anchor": "Original opportunity + 60 minutes",
                         "options_block": "Verify actual 0DTE expiry, product and delta tolerance",
                         "recording": recording,
-                    },
+                        "option_board": state.option_board,
+                    }
+                    if diagnostics
+                    else None,
                 }
             )
-        return {"system": self.status(), "markets": cards, "pnl": self.store.economics()}
+        return {"system": self.status(), "markets": cards}
 
     def trade_view(self, row: dict[str, Any]) -> dict[str, Any]:
         plan = json.loads(row["plan"])
@@ -300,6 +373,9 @@ class Runtime:
             pass
         return {
             "id": row["id"],
+            "market": row["market"],
+            "allocation_pennies": row["allocation_pennies"],
+            "policy_pennies": row["policy_pennies"],
             "state": row["state"],
             "quantity": quantity,
             "entry_at": next((f["at"] for f in fills if f["side"] == "BOT"), None),
@@ -309,9 +385,6 @@ class Runtime:
             "fees_gbp": plan["fees_gbp"],
             "total_gbp": plan["total_gbp"],
             "valuation": valuation,
-            "option_context": self.data.option_view(plan["option"]["uic"], time.time())
-            if plan["option"]["uic"] in self.data.options
-            else {"status": "UNAVAILABLE"},
             "basis": self.config.execution_mode,
         }
 
@@ -339,7 +412,7 @@ class Runtime:
                 inputs: dict[str, float] = {}
                 try:
                     if not reason:
-                        if (at - clock).total_seconds() > 20:
+                        if (at - clock).total_seconds() >= self.config.entry_deadline_seconds:
                             raise ValueError("STALE_SIGNAL_NO_REPLAY")
                         if state.problem or state.history_problem:
                             raise ValueError(state.problem or state.history_problem)
@@ -352,6 +425,24 @@ class Runtime:
                         )
                 except ValueError as exc:
                     reason = str(exc)
+                # Only the final completed-minute boundary may wait. Earlier gaps,
+                # invalid bars, reference failures and other gates remain final skips.
+                by_time = {b.at: b for b in state.bars}
+                if (
+                    reason == "INCOMPLETE_COMPLETED_HISTORY"
+                    and (at - clock).total_seconds() < self.config.entry_deadline_seconds
+                    and clock - timedelta(minutes=1) not in by_time
+                    and all(
+                        (b := by_time.get(clock - timedelta(minutes=i))) is not None and b.valid()
+                        for i in range(2, 32)
+                    )
+                ):
+                    if state.boundary_clock != clock:
+                        state.boundary_clock = clock
+                        state.boundary_checked = float("-inf")
+                        self.history_needed.set()
+                    continue
+                state.boundary_clock = None
                 state.last_clock = clock
                 # Capture an observed frozen clock even for veto, capacity, option or data skips.
                 event["skip_reason"] = reason
@@ -361,7 +452,9 @@ class Runtime:
                 option_keys = [
                     key(i)
                     for i, _ in self.data.options.values()
-                    if i["market"] == state.market and i["underlying_uic"] == state.identity["uic"]
+                    if i["market"] == state.market
+                    and i["underlying_uic"] == state.identity["uic"]
+                    and i["uic"] in state.warm_uics
                 ]
                 capture = self.recorder.trigger(
                     key(state.identity), event, time.time(), option_keys
@@ -415,26 +508,54 @@ class Runtime:
                 self.report_failure("management", exc)
             await asyncio.sleep(2)
 
+    async def refresh_histories(self) -> None:
+        # A small priority pass at the normal five-second worker cadence, woken once
+        # by a newly pending clock. Do not put optional option work ahead of this pass.
+        for state in self.markets.values():
+            clock = state.boundary_clock
+            if (
+                self.data.connected
+                and clock is not None
+                and 0 <= (now() - clock).total_seconds() < self.config.entry_deadline_seconds
+                and time.monotonic() - state.boundary_checked >= 5
+            ):
+                state.boundary_checked = time.monotonic()
+                try:
+                    await self.data.history(state, boundary=True)
+                except Exception as exc:
+                    self.report_failure("boundary-history", exc)
+        for state in self.markets.values():
+            if self.history_needed.is_set():
+                return
+            if (
+                self.data.connected
+                and state.boundary_clock is None
+                and time.monotonic() - state.history_checked >= 60
+            ):
+                try:
+                    await self.data.history(state)
+                    await self.data.warm_candidates(state)
+                except Exception as exc:
+                    state.history_problem = "SAXO_HISTORY_UNAVAILABLE"
+                    state.history_checked = time.monotonic()
+                    self.report_failure("history", exc)
+
     async def history_worker(self) -> None:
         while not self.stopping:
-            try:
-                await self.data.release_unused_options(
-                    {json.loads(r["plan"])["option"]["uic"] for r in self.store.active()}
-                )
-            except Exception as exc:
-                self.report_failure("option-subscription-cleanup", exc)
-            if self.data.connected:
-                await self.data.refresh_option_metadata()
-            for state in self.markets.values():
-                if self.data.connected and time.monotonic() - state.history_checked >= 60:
-                    try:
-                        await self.data.history(state)
-                        await self.data.warm_candidates(state)
-                    except Exception as exc:
-                        state.history_problem = "SAXO_HISTORY_UNAVAILABLE"
-                        state.history_checked = time.monotonic()
-                        self.report_failure("history", exc)
-            await asyncio.sleep(5)
+            self.history_needed.clear()
+            await self.refresh_histories()
+            if not self.history_needed.is_set():
+                try:
+                    await self.data.release_unused_options(
+                        {json.loads(r["plan"])["option"]["uic"] for r in self.store.active()}
+                    )
+                    if self.data.connected:
+                        await self.data.refresh_option_metadata()
+                        await self.data.ensure_balance_subscription()
+                except Exception as exc:
+                    self.report_failure("option-subscription-maintenance", exc)
+            with suppress(TimeoutError):
+                await asyncio.wait_for(self.history_needed.wait(), timeout=5)
 
     async def run(self) -> None:
         # Environment lock prevents another browser/server instance duplicating subscriptions.

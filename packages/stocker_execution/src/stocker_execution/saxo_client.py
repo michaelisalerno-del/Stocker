@@ -14,6 +14,7 @@ READ_PATHS = (
     r"/root/v1/sessions/capabilities",
     r"/port/v1/accounts/me",
     r"/port/v1/clients/me",
+    r"/port/v1/balances",
     r"/port/v1/(orders|positions|netpositions)/me",
     r"/ref/v1/instruments",
     r"/ref/v1/instruments/details/[0-9]+/(ContractFutures|FuturesOption|FxSpot)",
@@ -27,6 +28,7 @@ READ_PATHS = (
     r"/ens/v1/activities",
 )
 SUBSCRIPTIONS = (
+    "/port/v1/balances/subscriptions",
     "/trade/v1/prices/subscriptions",
     "/trade/v1/optionschain/subscriptions",
     "/root/v1/sessions/events/subscriptions",

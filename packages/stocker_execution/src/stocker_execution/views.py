@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from stocker_execution.recorder import Recorder
     from stocker_execution.runtime import Runtime
     from stocker_execution.saxo_data import MarketState
+    from stocker_execution.saxo_stream import PriceState
 
 TRADEABLE = ("CL", "NG", "NQ", "SI")  # GC stays monitor-only until its mapping is approved
 
@@ -39,15 +40,19 @@ def quote_current(state: "MarketState", at: float) -> bool:
 PRICE_MIDVOL_IS_ANNUAL_FRACTION = True
 
 
-def quote_problem(state: "MarketState", at: float) -> str:
-    """The same quote check a clock decision applies: fresh, real-time, usable price."""
-    if state.price.problem:
-        return state.price.problem
+def price_problem(price: "PriceState", at: float) -> str:
+    """The same check a clock decision applies: fresh, real-time, usable price."""
+    if price.problem:
+        return price.problem
     try:
-        quote_check(state.price.value or {}, state.price.receipt, datetime.fromtimestamp(at, UTC))
+        quote_check(price.value or {}, price.receipt, datetime.fromtimestamp(at, UTC))
     except ValueError as exc:
         return str(exc)
     return ""
+
+
+def quote_problem(state: "MarketState", at: float) -> str:
+    return price_problem(state.price, at)
 
 
 def gates(runtime: "Runtime", market: str, state: "MarketState", at: float) -> list[dict[str, Any]]:
@@ -65,6 +70,7 @@ def gates(runtime: "Runtime", market: str, state: "MarketState", at: float) -> l
         ),
         ("contract", "Contract", state.identity is not None, state.problem),
         ("quote", "Quote", not (problem := quote_problem(state, at)), problem),
+        ("fx", "GBP/USD rate", not (fx := price_problem(runtime.data.fx, at)), fx),
         (
             "history",
             "History",
@@ -124,6 +130,13 @@ def setup(runtime: "Runtime") -> list[dict[str, Any]]:
             False,
         ),
         ("stream", "Price stream", data.connected, data.problem, False),
+        (
+            "fx",
+            "GBP/USD conversion rate",
+            data.fx.receipt is not None and not data.fx.problem,
+            data.fx.problem or "Awaiting the GBPUSD quote",
+            False,
+        ),
         (
             "realtime",
             "Real-time market data",

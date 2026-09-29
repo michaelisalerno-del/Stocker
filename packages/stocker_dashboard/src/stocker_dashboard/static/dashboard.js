@@ -43,6 +43,7 @@ const explanations = {
   GC_LISTED_EXECUTION_RULE_UNAPPROVED: "Gold is monitor-only; execution is not approved",
   ORDER_STATUS_UNCERTAIN: "Broker order status needs reconciliation",
   EXPOSURE_REQUIRES_RECONCILIATION: "Exposure awaiting reconciliation",
+  OPEN: "Open · exposure reconciled with the broker",
   AUTHENTICATION_REQUIRED: "Connect the configured Saxo account",
   NO_CANDIDATE: "No option strike ranked yet", AWAITING_CONTRACT: "Needs a verified futures contract first",
   STALE_OR_MISSING: "No current quote",

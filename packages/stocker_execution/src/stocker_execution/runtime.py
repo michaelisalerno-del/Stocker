@@ -117,6 +117,15 @@ class Runtime:
     def pause(self, value: bool) -> None:
         self.store.set_meta("paused", value)
 
+    async def decision_pass(self) -> None:
+        try:
+            await self.decisions()
+        except Exception as exc:
+            # Sticky and alerted: reconciliation must not clear it; an operator restart does.
+            self.broker.armed = False
+            self.broker.fatal_error = "DECISION_WORKER_ERROR_REVIEW_REQUIRED"
+            self.report_failure("decisions", exc)
+
     def report_failure(self, worker: str, exc: BaseException) -> None:
         # Only coded reasons are logged; other exception text can contain URLs or credentials.
         log.error("%s failed: %s", worker, failure_code(exc))
@@ -694,12 +703,7 @@ class Runtime:
                 except Exception as exc:
                     self.recorder.problem = "RECORDER_FAILED"
                     self.report_failure("recorder", exc)
-                try:
-                    await self.decisions()
-                except Exception as exc:
-                    self.broker.armed = False
-                    self.broker.problem = "DECISION_WORKER_ERROR_REVIEW_REQUIRED"
-                    self.report_failure("decisions", exc)
+                await self.decision_pass()
                 for task in self.tasks:
                     if task.done() and not task.cancelled():
                         raise RuntimeError("BACKGROUND_WORKER_STOPPED") from task.exception()

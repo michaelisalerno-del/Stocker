@@ -340,7 +340,25 @@ class Store:
                 "WHERE id=?",
                 (event,),
             )
-            self.db.execute("UPDATE signals SET decision='BROKER_PAPER_FILL' WHERE id=?", (event,))
+            self.db.execute(
+                "UPDATE signals SET decision=? WHERE id=?",
+                (
+                    "INTERNALLY_SIMULATED_FILL"
+                    if mode == "INTERNAL_PAPER"
+                    else "BROKER_PAPER_FILL",
+                    event,
+                ),
+            )
+
+    def mark_reconciled(self) -> None:
+        """Exposure matched the authoritative source: open trades are plainly open.
+
+        Runs inside the caller's transaction.
+        """
+        self.db.execute(
+            "UPDATE reservations SET state='OPEN' "
+            "WHERE active=1 AND state='EXPOSURE_REQUIRES_RECONCILIATION'"
+        )
 
     def confirm_closed(self, identity: str, position: float) -> bool:
         orders = self.orders(identity)

@@ -2,8 +2,10 @@
 
 import asyncio
 import time
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -15,7 +17,7 @@ from stocker_execution.contracts import key
 from stocker_execution.recorder import Recorder, read_row
 from stocker_execution.rules import Bar
 from stocker_execution.runtime import Runtime
-from stocker_execution.saxo_auth import OAuth, atomic_json
+from stocker_execution.saxo_auth import OAuth, SaxoError, atomic_json
 from stocker_execution.saxo_client import SaxoClient
 from stocker_execution.saxo_data import DataService, completed_bars
 from stocker_execution.saxo_stream import merge_board
@@ -466,5 +468,177 @@ def test_stream_loop_survives_a_lost_token(tmp_path):
         with suppress(asyncio.CancelledError):
             await task
         await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_token_renewal_reauthorises_the_open_stream(tmp_path, monkeypatch):
+    """Saxo binds a renewed token to the open context; only a refusal reconnects."""
+
+    class Socket:
+        async def recv(self):
+            await asyncio.sleep(0.01)
+            return b""
+
+    @asynccontextmanager
+    async def connect(*args, **kwargs):
+        yield Socket()
+
+    monkeypatch.setattr("stocker_execution.saxo_data.connect", connect)
+
+    async def scenario():
+        _, data, store = setup(tmp_path)
+        data.recorder.register(key(OPTION), OPTION)
+        data.client.oauth = SimpleNamespace(
+            account_key="fixture-account",
+            generation=1,
+            urls={"stream": "wss://fixture"},
+            access_token=AsyncMock(return_value="fixture-token"),
+        )
+        data.client.authorize_stream = AsyncMock()
+        data.startup = AsyncMock()
+        data.subscriptions = {
+            "s1": {
+                "kind": "PRICE",
+                "target": "CL",
+                "path": "/trade/v1/prices/subscriptions",
+                "arguments": {},
+                "contact": time.monotonic(),
+                "timeout": 30,
+            }
+        }
+        task = asyncio.create_task(data.run())
+        await asyncio.sleep(0.05)
+        assert data.connected and data.reconnects == 1
+        data.client.oauth.generation = 2
+        await asyncio.sleep(0.05)
+        data.client.authorize_stream.assert_awaited_once_with(data.context)
+        assert data.connected and data.reconnects == 1 and "s1" in data.subscriptions
+        data.client.authorize_stream.side_effect = SaxoError("STREAM_REAUTHORISATION_HTTP_401")
+        data.client.oauth.generation = 3
+        await asyncio.sleep(0.05)
+        assert not data.connected and data.problem == "STREAM_REAUTHORISATION_HTTP_401"
+        assert not data.subscriptions
+        data.stopping = True
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_one_paused_or_reset_subscription_does_not_reset_the_others(tmp_path):
+    """Saxo's per-subscription signals stay per-subscription; the socket is kept."""
+
+    async def scenario():
+        _, data, store = setup(tmp_path)
+        gold = {**FUTURE, "market": "GC", "uic": 200}
+        data.markets["GC"].identity = gold
+        data.markets["GC"].price = quote(1900, 1901)
+        data.recorder.register(key(gold), gold)
+        for ref, market in (("cl", "CL"), ("gc", "GC")):
+            data.subscriptions[ref] = {
+                "kind": "PRICE",
+                "target": market,
+                "path": "/trade/v1/prices/subscriptions",
+                "arguments": {"Uic": data.markets[market].identity["uic"]},
+                "contact": time.monotonic(),
+                "timeout": 30,
+            }
+        heartbeat = {"OriginatingReferenceId": "cl", "Reason": "SubscriptionTemporarilyDisabled"}
+        await data.receive(
+            {"reference": "_heartbeat", "message_id": "1", "payload": {"Heartbeats": [heartbeat]}}
+        )
+        assert data.markets["CL"].price.problem == "SUBSCRIPTION_TEMPORARILY_DISABLED"
+        assert data.markets["CL"].price.value is not None and not data.reset_refs
+        await data.receive(
+            {"reference": "cl", "message_id": "2", "payload": {"Data": {"Quote": {"Ask": 72}}}}
+        )
+        assert data.markets["CL"].price.problem == ""
+        await data.receive(
+            {
+                "reference": "_resetsubscriptions",
+                "message_id": "3",
+                "payload": {"TargetReferenceIds": ["gc", "obsolete"]},
+            }
+        )
+        assert data.reset_refs == {"gc"}
+        assert data.markets["GC"].price.value is None
+        assert data.markets["CL"].price.value is not None
+        data.subscribe = AsyncMock()
+        await data.replace_reset_subscriptions()
+        data.subscribe.assert_awaited_once_with("PRICE", {"Uic": 200}, "GC", old="gc")
+        assert not data.reset_refs
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_subscription_posted_across_a_reconnect_is_not_registered(tmp_path):
+    async def scenario():
+        _, data, store = setup(tmp_path)
+        data.subscriptions.clear()
+        data.context = "old"
+        calls = []
+
+        async def request(method, path, **kwargs):
+            calls.append((method, path))
+            data.context = "new"  # the socket reconnected while this POST was in flight
+            return {"Snapshot": {}}
+
+        data.client.request = request
+        with pytest.raises(SaxoError, match="SUBSCRIPTION_CONTEXT_REPLACED"):
+            await data.subscribe("SESSION", {}, "SESSION")
+        assert [c[0] for c in calls] == ["POST", "DELETE"] and "/old/" in calls[1][1]
+        assert not any(s["kind"] == "SESSION" for s in data.subscriptions.values())
+        assert not data.pending
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_fx_instrument_ambiguity_is_named_in_gates_not_silent(tmp_path):
+    async def scenario():
+        _, data, store = setup(tmp_path)
+        pair = {"Symbol": "GBPUSD", "AssetType": "FxSpot"}
+        data.client.request = AsyncMock(
+            return_value={"Data": [{**pair, "Identifier": 1}, {**pair, "Identifier": 2}]}
+        )
+        await data.subscribe_fx()
+        assert data.fx.problem == "GBPUSD_FX_INSTRUMENT_NOT_UNIQUE" and data.fx.value is None
+        store.db.close()
+        runtime = Runtime(FuturesConfig(), Store(tmp_path / "gates.sqlite3"))
+        runtime.data.fx.gap("GBPUSD_FX_INSTRUMENT_NOT_UNIQUE")
+        gate = next(g for g in runtime.overview()["markets"][0]["gates"] if g["key"] == "fx")
+        assert gate == {
+            "key": "fx",
+            "label": "GBP/USD rate",
+            "ok": False,
+            "detail": "GBPUSD_FX_INSTRUMENT_NOT_UNIQUE",
+        }
+        step = next(i for i in runtime.status()["setup"] if i["key"] == "fx")
+        assert not step["done"] and step["detail"] == "GBPUSD_FX_INSTRUMENT_NOT_UNIQUE"
+        await runtime.stop()
+        runtime.store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_internal_fill_is_labelled_internal_and_reconciliation_opens_the_trade(tmp_path):
+    async def scenario():
+        broker, _, store = setup(tmp_path)
+        event = signal(1)
+        store.observe(event, "", {})
+        assert await broker.enter(event, plan()) == ""
+        (row,) = store.active()
+        assert row["state"] == "EXPOSURE_REQUIRES_RECONCILIATION"
+        decision = store.db.execute(
+            "SELECT decision FROM signals WHERE id=?", (event["id"],)
+        ).fetchone()[0]
+        assert decision == "INTERNALLY_SIMULATED_FILL"
+        await broker.reconcile()
+        assert broker.reconciled and store.active()[0]["state"] == "OPEN"
+        store.db.close()
 
     asyncio.run(scenario())

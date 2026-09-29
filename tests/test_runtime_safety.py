@@ -3,9 +3,11 @@
 import asyncio
 import json
 import sqlite3
+import time
 from datetime import timedelta
 
 import httpx
+import pytest
 
 from saxo_support import AT, FUTURE, GC_MAPPING, quote
 from stocker_dashboard.app import create_dashboard_app
@@ -147,3 +149,27 @@ def test_option_session_gate_uses_saxo_session_states():
             executable_quote(option(state), price.value, price.receipt, now)
         with pytest.raises(ValueError, match="EXIT_SESSION_UNVERIFIED"):
             verified_cutoff(option(state), now + timedelta(minutes=60))
+
+
+def test_decision_worker_error_stays_until_restart_and_blocks_arming(tmp_path, monkeypatch):
+    async def scenario():
+        config = FuturesConfig(execution_mode="INTERNAL_PAPER")
+        runtime = Runtime(config, Store(tmp_path / "ledger.sqlite3"))
+        runtime.broker.armed = True
+
+        async def broken():
+            raise RuntimeError("fixture")
+
+        monkeypatch.setattr(runtime, "decisions", broken)
+        await runtime.decision_pass()
+        assert not runtime.broker.armed
+        assert runtime.broker.entry_reason() == "DECISION_WORKER_ERROR_REVIEW_REQUIRED"
+        await runtime.broker.reconcile()  # a routine pass must not clear it
+        assert runtime.broker.entry_reason() == "DECISION_WORKER_ERROR_REVIEW_REQUIRED"
+        assert "DECISION_WORKER_ERROR" in runtime.alerts.conditions(runtime, time.time())["fatal"]
+        with pytest.raises(ValueError, match="DECISION_WORKER_ERROR"):
+            runtime.broker.arm("ENABLE PAPER ONLY")
+        await runtime.stop()
+        runtime.store.db.close()
+
+    asyncio.run(scenario())

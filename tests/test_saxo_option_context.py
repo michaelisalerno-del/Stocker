@@ -541,6 +541,25 @@ def test_transport_failure_during_metadata_refresh_keeps_the_verified_entry(tmp_
     asyncio.run(run())
 
 
+def test_retired_strike_history_yields_its_window_slot_to_a_live_contract(tmp_path):
+    from stocker_execution.config import SUBSCRIPTION_LIMIT
+
+    _, data, store = setup(tmp_path)
+    windows = data.recorder.windows
+    retired = [{**OPTION, "uic": uic} for uic in range(1000, 1000 + SUBSCRIPTION_LIMIT - 1)]
+    for at, identity in enumerate(retired):
+        data.recorder.register(key(identity), identity)
+        data.recorder.ingest(key(identity), "SNAPSHOT", {"Quote": {"Bid": 1}}, float(at))
+    assert len(windows) == SUBSCRIPTION_LIMIT  # the future plus retired strikes
+    data.release_window_slot()
+    assert len(windows) == SUBSCRIPTION_LIMIT - 1 and key(retired[0]) not in windows
+    data.recorder.register(key(retired[0]), retired[0])
+    data.options.update({i["uic"]: (i, quote()) for i in retired})  # every strike is live
+    with pytest.raises(SaxoError, match="RECORDER_INSTRUMENT_LIMIT"):
+        data.release_window_slot()
+    store.db.close()
+
+
 def test_full_candidate_window_rotates_without_mixed_history(tmp_path, monkeypatch):
     async def run():
         config = FuturesConfig()

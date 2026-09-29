@@ -30,6 +30,7 @@ def test_gates_follow_the_decision_order_and_explain_the_first_block(tmp_path):
         "saxo",
         "contract",
         "quote",
+        "fx",
         "history",
         "approval",
         "strike",

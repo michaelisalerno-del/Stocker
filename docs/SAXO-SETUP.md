@@ -120,3 +120,13 @@ These streaming URLs are service bases: the WebSocket handshake must append `/co
 `?contextId=...`, as shown in Saxo's current [streaming guide](https://www.developer.saxo/openapi/learn/streaming).
 The bare base returned HTTP 404 in the authenticated SIM check; `/connect` succeeded without
 subscriptions. Tokens remain in the Authorization header, never the connection URL.
+
+## Stream re-authorisation after token renewal
+
+When the OAuth access token is renewed (about every 18.5 minutes) the runtime sends
+`PUT …/streaming/ws/authorize?contextid=<context>` with the new bearer token instead of
+reconnecting; Saxo answers `202 Accepted` and the open subscriptions continue. Only a refused
+re-authorisation (`STREAM_REAUTHORISATION_HTTP_<status>` or `STREAM_REAUTHORISATION_UNAVAILABLE`
+in System) forces a reconnect with fresh snapshots. After the first rollout of this behaviour,
+confirm on SIM that the stream stays connected across a renewal: `reconnects` stays at 1 in System
+and no `STREAM_REAUTHORISATION_*` problem appears.

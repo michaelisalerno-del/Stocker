@@ -156,6 +156,7 @@ class PriceState:
                         self.field_changes[group + "." + field] = at
                         self.last_field_change = at
         self.value = merged
+        self.problem = ""  # a delivered update ends a temporary pause on this subscription
         self.analytics.update(option_context.fields(value, at, "REGULAR_PRICE"))
         self.touch(value, at)
         return True

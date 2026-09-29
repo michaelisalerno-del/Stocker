@@ -110,6 +110,8 @@ class PaperBroker:
     def arm(self, acknowledgement: str) -> None:
         if acknowledgement != "ENABLE PAPER ONLY" or self.config.execution_mode == "DISABLED":
             raise ValueError("EXPLICIT_PAPER_ARM_REQUIRED")
+        if self.fatal_error:
+            raise ValueError(self.fatal_error)
         if (
             not self.preflight_at
             or time.monotonic() - self.preflight_at > 60
@@ -520,6 +522,7 @@ class PaperBroker:
                             "INSERT INTO positions VALUES(?,?,?)",
                             (uic, quantity, encode({"internally_simulated": True})),
                         )
+                self.store.mark_reconciled()
             self.reconciled = True
             self.problem = ""
             self.last_reconcile = time.monotonic()
@@ -567,8 +570,9 @@ class PaperBroker:
                     or remote.get("BuySell") != ("Buy" if order["role"] == "ENTRY" else "Sell")
                 ):
                     raise ValueError("BROKER_ORDER_IDENTITY_MISMATCH")
-                broker_id = str(remote["OrderId"])
-                self.store.set_meta("broker_order:" + reference, broker_id)
+                if broker_id != str(remote["OrderId"]):
+                    broker_id = str(remote["OrderId"])
+                    self.store.set_meta("broker_order:" + reference, broker_id)
             if not broker_id:
                 self.problem = "AMBIGUOUS_ORDER_REQUIRES_BROKER_AUDIT"
                 return
@@ -597,6 +601,8 @@ class PaperBroker:
         ):
             self.problem = "UNACCOUNTED_BROKER_ORDERS_OR_EXPOSURE"
             return
+        with self.store.db:
+            self.store.mark_reconciled()
         self.problem = ""
         self.reconciled = True
         self.last_reconcile = time.monotonic()
@@ -609,6 +615,12 @@ class PaperBroker:
         if evidence.get("SubStatus") != "Confirmed":
             raise ValueError("ORDER_TERMINAL_STATE_NOT_CONFIRMED")
         filled = float(evidence.get("FilledAmount", 0))
+        seen = {k: evidence.get(k) for k in ("LogId", "Status", "FilledAmount", "AveragePrice")}
+        if (
+            float(order["filled"]) == filled
+            and self.store.get_meta("evidence:" + order["reference"]) == seen
+        ):
+            return  # the same audit entry as the last pass: nothing new to record
         known = [
             f for f in self.store.fills(order["event_id"]) if f["reference"] == order["reference"]
         ]
@@ -661,6 +673,11 @@ class PaperBroker:
             (status, filled, 1 - filled, order["reference"]),
         )
         self.store.audit(order["reference"], "SAXO_SIM_ORDER_EVIDENCE", evidence)
+        # Inside the caller's transaction: Store.set_meta() would commit the fill early.
+        self.store.db.execute(
+            "INSERT OR REPLACE INTO futures_meta VALUES (?,?)",
+            ("evidence:" + order["reference"], encode(seen)),
+        )
 
     def reconcile_due(self) -> bool:
         if not self.reconciled:

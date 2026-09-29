@@ -193,3 +193,35 @@ def test_indexed_reference_summary_matches_previous_quadratic_version():
     assert reference_summary(bars) == old_summary(bars)
     at = start + timedelta(minutes=300)
     assert prior_rv(bars, at) == old_prior_rv(bars, at)
+
+
+def test_unchanged_broker_evidence_is_audited_once(tmp_path):
+    from saxo_support import OPTION
+
+    broker, _, store = setup(tmp_path, "SAXO_SIM")
+    event = signal(1)
+    store.observe(event, "", {})
+    store.reserve(event["id"], plan())
+    store.prepare_order(event["id"], "ENTRY", 1, event["exit_at"], {"option": OPTION})
+    evidence = {
+        "OrderId": "fixture",
+        "LogId": "one",
+        "Status": "Placed",
+        "SubStatus": "Confirmed",
+        "FilledAmount": 0,
+        "AveragePrice": None,
+        "ActivityTime": event["signal_at"],
+    }
+
+    def audited():
+        return store.db.execute(
+            "SELECT COUNT(*) FROM lifecycle WHERE kind='SAXO_SIM_ORDER_EVIDENCE'"
+        ).fetchone()[0]
+
+    for _ in range(3):
+        broker.apply_order_evidence(store.orders(event["id"])[0], evidence)
+    assert audited() == 1
+    filled = {**evidence, "LogId": "two", "Status": "FinalFill", "FilledAmount": 1}
+    broker.apply_order_evidence(store.orders(event["id"])[0], {**filled, "AveragePrice": 0.01})
+    assert audited() == 2 and store.orders(event["id"])[0]["status"] == "Filled"
+    store.db.close()

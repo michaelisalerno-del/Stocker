@@ -136,6 +136,7 @@ class DataService:
         self.option_references: dict[int, dict[str, Any]] = {}
         self.owned_options: set[int] = set()
         self.disabled_targets: set[tuple[str, str]] = set()
+        self.reset_refs: set[str] = set()  # subscriptions the run loop replaces one by one
         self.session: dict[str, Any] = {}
         self.fx = PriceState()
         self.fx_uic: int | None = None
@@ -201,7 +202,9 @@ class DataService:
         if (
             existing
             and existing[1]["arguments"].get("AccountKey") == self.client.oauth.account_key
-            and not self.balance_problem
+            # Replacing a live subscription cannot fix what its own data reports.
+            and self.balance_problem
+            not in {"ACCOUNT_BALANCE_UNAVAILABLE", "BALANCE_SUBSCRIPTION_DISABLED"}
             and time.monotonic() - existing[1]["contact"] <= existing[1]["timeout"]
         ):
             return
@@ -467,8 +470,9 @@ class DataService:
             "ACTIVITIES": "/ens/v1/activities/subscriptions",
         }
         ref = "S" + secrets.token_hex(10)
+        context = self.context
         body: dict[str, Any] = {
-            "ContextId": self.context,
+            "ContextId": context,
             "ReferenceId": ref,
             "Arguments": arguments,
             "RefreshRate": 10000 if kind == "BALANCE" else 2000 if kind == "BOARD" else 1000,
@@ -484,6 +488,12 @@ class DataService:
         except Exception:
             self.drop_pending(ref)
             raise
+        if context != self.context:
+            # The socket reconnected during the POST: never register against a dead context.
+            self.drop_pending(ref)
+            with suppress(SaxoError):
+                await self.client.request("DELETE", paths[kind] + f"/{context}/{ref}")
+            raise SaxoError("SUBSCRIPTION_CONTEXT_REPLACED")
         self.subscriptions[ref] = {
             "kind": kind,
             "arguments": arguments,
@@ -595,6 +605,7 @@ class DataService:
         identity["exercise_at"] = deadline_instant(
             identity.get("exercise_cutoff"), str(identity["expiry"])[:10]
         )
+        self.release_window_slot()
         self.recorder.register(key(identity), identity)
         self.options[uic] = (identity, PriceState())
         self.option_required_at[uic] = max(self.option_required_at.get(uic, 0), time.time())
@@ -1213,6 +1224,23 @@ class DataService:
             if not window.rows or window.rows[-1][0] < time.time() - ROLLING_WINDOW_SECONDS:
                 self.recorder.windows.pop(instrument)
 
+    def release_window_slot(self) -> None:
+        """Retired strikes keep rolling history only while live contracts have window slots."""
+        if len(self.recorder.windows) < SUBSCRIPTION_LIMIT:
+            return
+        at = time.time()
+        retired = [
+            k
+            for k, w in self.recorder.windows.items()
+            if w.identity.get("asset_type") == "FuturesOption"
+            and w.identity["uic"] not in self.options
+            and not self.recorder.requires_subscription(k, at)
+        ]
+        if not retired:
+            raise SaxoError("RECORDER_INSTRUMENT_LIMIT")
+        windows = self.recorder.windows
+        windows.pop(min(retired, key=lambda k: windows[k].rows[-1][0] if windows[k].rows else 0))
+
     async def unsubscribe_option(self, uic: int) -> None:
         identity, _ = self.options[uic]
         for ref, subscription in list(self.subscriptions.items()):
@@ -1335,7 +1363,13 @@ class DataService:
                 except (SaxoError, ValueError) as exc:
                     state.capabilities["options"] = {"problem": str(exc)}
         # Discover this environment's GBPUSD UIC; never reuse a SIM identifier in LIVE.
-        await self.subscribe_fx()
+        # An FX problem blocks entries under its own name; it never resets price streams.
+        try:
+            await self.subscribe_fx()
+        except (SaxoError, ValueError) as exc:
+            self.fx.gap(
+                str(exc) if isinstance(exc, SaxoError) else "FX_REFERENCE_SCHEMA_UNVERIFIED"
+            )
 
     async def subscribe_fx(self) -> None:
         fx = await self.client.request(
@@ -1348,18 +1382,20 @@ class DataService:
             for r in fx.get("Data", [])
             if r.get("Symbol") == "GBPUSD" and r.get("AssetType") == "FxSpot"
         ]
-        if len(matches) == 1:
-            self.fx_uic = int(matches[0]["Identifier"])
-            await self.subscribe(
-                "PRICE",
-                {
-                    "Uic": self.fx_uic,
-                    "AssetType": "FxSpot",
-                    "AccountKey": self.client.oauth.account_key,
-                    "FieldGroups": ["Quote"],
-                },
-                "FX",
-            )
+        if len(matches) != 1:
+            self.fx.gap("GBPUSD_FX_INSTRUMENT_NOT_UNIQUE")
+            return
+        self.fx_uic = int(matches[0]["Identifier"])
+        await self.subscribe(
+            "PRICE",
+            {
+                "Uic": self.fx_uic,
+                "AssetType": "FxSpot",
+                "AccountKey": self.client.oauth.account_key,
+                "FieldGroups": ["Quote"],
+            },
+            "FX",
+        )
 
     def mark_gap(self, target: str, reason: str) -> None:
         price, identity = self.price_target(target)
@@ -1410,15 +1446,13 @@ class DataService:
                             and heartbeat.get("Reason") != "NoNewData"
                         ):
                             self.balance_problem = "BALANCE_SUBSCRIPTION_DISABLED"
-                        if (
-                            heartbeat.get("Reason") != "NoNewData"
-                            and subscription["kind"] == "PRICE"
-                        ):
-                            self.mark_gap(subscription["target"], "SUBSCRIPTION_DISABLED")
-                            raise SaxoError("SUBSCRIPTION_DISABLED_FRESH_SNAPSHOT_REQUIRED")
                         if subscription["kind"] == "PRICE":
                             price, identity = self.price_target(subscription["target"])
                             price.last_contact = receipt
+                            if heartbeat.get("Reason") != "NoNewData":
+                                # Saxo: accept the pause on this subscription alone. The next
+                                # update clears it; quote age blocks entries meanwhile.
+                                price.problem = "SUBSCRIPTION_TEMPORARILY_DISABLED"
                             if identity:
                                 self.recorder.ingest(
                                     key(identity),
@@ -1430,6 +1464,20 @@ class DataService:
                                     provider_message=message,
                                     observation_context=price.observation_context(),
                                 )
+            return
+        if (
+            ref == "_resetsubscriptions"
+            and isinstance(payload, dict)
+            and isinstance(payload.get("TargetReferenceIds"), list)
+            and payload["TargetReferenceIds"]
+        ):
+            # Saxo names the affected subscriptions; only those take fresh snapshots.
+            for target in payload["TargetReferenceIds"]:
+                subscription = self.subscriptions.get(target)
+                if subscription:
+                    if subscription["kind"] == "PRICE":
+                        self.mark_gap(subscription["target"], "SUBSCRIPTION_RESET_BY_PROVIDER")
+                    self.reset_refs.add(target)
             return
         if ref in {"_resetsubscriptions", "_disconnect"}:
             raise SaxoError("STREAM_RESET_FRESH_SNAPSHOTS_REQUIRED")
@@ -1478,6 +1526,16 @@ class DataService:
                     )
         self.changed.set()
 
+    async def replace_reset_subscriptions(self) -> None:
+        """Fresh snapshots for the subscriptions Saxo or a timeout singled out, one at a time."""
+        while self.reset_refs:
+            ref = self.reset_refs.pop()
+            subscription = self.subscriptions.get(ref)
+            if subscription:
+                await self.subscribe(
+                    subscription["kind"], subscription["arguments"], subscription["target"], old=ref
+                )
+
     async def run(self) -> None:
         backoff = 2
         while not self.stopping:
@@ -1519,16 +1577,30 @@ class DataService:
                                 await self.receive(message)
                         await self.client.oauth.access_token()
                         if generation != self.client.oauth.generation:
-                            # Authorize a fresh socket using the new token and take new snapshots.
-                            # No obsolete streamingws/authorize URL or silent continuity claim.
-                            raise SaxoError("TOKEN_RENEWED_STREAM_REAUTHORISATION")
-                        if any(
-                            time.monotonic() - s["contact"] > s["timeout"]
-                            for s in self.subscriptions.values()
+                            # Saxo binds the renewed token to the open context (202 Accepted);
+                            # only a refused re-authorisation forces fresh snapshots.
+                            await self.client.authorize_stream(self.context)
+                            generation = self.client.oauth.generation
+                        silent = [
+                            ref
+                            for ref, s in self.subscriptions.items()
+                            if time.monotonic() - s["contact"] > s["timeout"]
                             # Optional account/event streams must not reset price streams.
-                            if s["kind"] not in {"BALANCE", "ACTIVITIES"}
+                            and s["kind"] not in {"BALANCE", "ACTIVITIES"}
+                        ]
+                        if len(silent) > 1 or any(
+                            self.subscriptions[r]["kind"] == "SESSION" for r in silent
                         ):
+                            # Several feeds or the session went quiet: the socket, not one feed.
                             raise SaxoError("SUBSCRIPTION_HEARTBEAT_TIMEOUT")
+                        for ref in silent:
+                            if self.subscriptions[ref]["kind"] == "PRICE":
+                                self.mark_gap(
+                                    self.subscriptions[ref]["target"],
+                                    "SUBSCRIPTION_HEARTBEAT_TIMEOUT",
+                                )
+                            self.reset_refs.add(ref)
+                        await self.replace_reset_subscriptions()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -1550,6 +1622,9 @@ class DataService:
                             "DELETE", subscription["path"] + f"/{self.context}/{ref}"
                         )
                 self.subscriptions.clear()
+                self.reset_refs.clear()
+                # A new context carries no server-side disables; a repeat just disables again.
+                self.disabled_targets.clear()
                 self.pending.clear()
                 self.pending_bytes = 0
                 await asyncio.sleep(backoff)

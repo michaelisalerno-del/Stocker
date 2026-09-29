@@ -76,6 +76,23 @@ class SaxoClient:
         self.calls = 0
         self.sim_account_verified = False
 
+    async def authorize_stream(self, context: str) -> None:
+        """Bind a renewed access token to the open streaming context (Saxo: 202 Accepted).
+
+        This is the streaming host, not the REST gateway, so it sits outside the allow-list.
+        """
+        token = await self.oauth.access_token()
+        try:
+            response = await self.http.put(
+                self.oauth.urls["stream"].replace("wss://", "https://", 1) + "/authorize",
+                params={"contextid": context},
+                headers={"Authorization": "Bearer " + token},
+            )
+        except httpx.HTTPError:
+            raise SaxoError("STREAM_REAUTHORISATION_UNAVAILABLE") from None
+        if response.status_code != 202:
+            raise SaxoError("STREAM_REAUTHORISATION_HTTP_" + str(response.status_code))
+
     async def request(
         self,
         method: str,

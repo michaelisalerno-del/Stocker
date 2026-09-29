@@ -13,7 +13,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
-from stocker_execution import option_context, views
+from stocker_execution import option_context, saxo_balance, saxo_history, views
 from stocker_execution.alerts import Alerts
 from stocker_execution.broker import PaperBroker, now
 from stocker_execution.config import (
@@ -256,7 +256,7 @@ class Runtime:
         }
         return {
             "system": self.status(),
-            "account": self.data.balance_view(at.timestamp()),
+            "account": saxo_balance.balance_view(self.data, at.timestamp()),
             "markets": cards,
             "pnl": pnl,
         }
@@ -603,7 +603,7 @@ class Runtime:
             ):
                 state.boundary_checked = time.monotonic()
                 try:
-                    await self.data.history(state, boundary=True)
+                    await saxo_history.history(self.data, state, boundary=True)
                 except Exception as exc:
                     self.report_failure("boundary-history", exc)
         for state in self.markets.values():
@@ -615,9 +615,9 @@ class Runtime:
                 and time.monotonic() - state.history_checked >= 60
             ):
                 try:
-                    await self.data.history(state)
+                    await saxo_history.history(self.data, state)
                     await self.data.warm_candidates(state)
-                    await self.data.daily_context(state)
+                    await saxo_history.daily_context(self.data, state)
                 except Exception as exc:
                     state.history_problem = "SAXO_HISTORY_UNAVAILABLE"
                     state.history_checked = time.monotonic()
@@ -643,8 +643,8 @@ class Runtime:
                     )
                     if self.data.connected:
                         await self.data.refresh_option_metadata()
-                        await self.data.ensure_balance_subscription()
-                        await self.data.ensure_activity_subscription()
+                        await saxo_balance.ensure_balance_subscription(self.data)
+                        await saxo_balance.ensure_activity_subscription(self.data)
                         await self.broker.refresh_closed_positions()
                 except Exception as exc:
                     self.report_failure("option-subscription-maintenance", exc)

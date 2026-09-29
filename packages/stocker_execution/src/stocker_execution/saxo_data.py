@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import math
 import secrets
 import time
 from collections import deque
@@ -16,7 +15,7 @@ from urllib.parse import urlencode
 
 from websockets.asyncio.client import connect
 
-from stocker_execution import option_context
+from stocker_execution import option_context, saxo_balance
 from stocker_execution.bar_cache import BarCache
 from stocker_execution.config import (
     MARKETS,
@@ -39,7 +38,6 @@ from stocker_execution.contracts import (
     utc,
 )
 from stocker_execution.recorder import Recorder
-from stocker_execution.reference_sessions import load_selections
 from stocker_execution.rules import (
     NY,
     Bar,
@@ -47,13 +45,10 @@ from stocker_execution.rules import (
     next_clock,
     opportunity,
     prior_rv,
-    reference_summary,
 )
 from stocker_execution.saxo_auth import SaxoError
 from stocker_execution.saxo_client import SaxoClient
 from stocker_execution.saxo_stream import Frames, PriceState, merge, merge_board
-
-REFERENCE_RETRY_SECONDS = 900
 
 
 @dataclass
@@ -98,31 +93,6 @@ class MarketState:
     daily_range: float | None = None
     daily_day: str = ""
     daily_problem: str = ""
-
-
-def completed_bars(raw: dict[str, Any], at: datetime) -> list[Bar]:
-    rows = sorted(raw.get("Data", []), key=lambda b: b.get("Time", ""))
-    result = []
-    # A later sample proves the mutable tail has rolled, even when the wall clock has advanced.
-    for row in rows[:-1]:
-        try:
-            stamp = utc(row["Time"])
-            if stamp + timedelta(minutes=1) > at:
-                continue
-            # Volume absence is a strategy block, not a synthetic zero.
-            b = Bar(
-                stamp,
-                float(row["Open"]),
-                float(row["High"]),
-                float(row["Low"]),
-                float(row["Close"]),
-                float(row["Volume"]),
-            )
-            if b.valid():
-                result.append(b)
-        except (KeyError, TypeError, ValueError):
-            continue
-    return result
 
 
 class DataService:
@@ -188,157 +158,6 @@ class DataService:
             self.balance_account_key = self.client.oauth.account_key
         self.client.sim_account_verified = self.config.data_environment == "SAXO_SIM"
         self.session = await self.client.request("GET", "/root/v1/sessions/capabilities")
-
-    async def ensure_balance_subscription(self) -> None:
-        """One optional account-scoped subscription; consumers only read the snapshot."""
-        if not self.connected or not self.account_verified:
-            return
-        existing = next(
-            ((ref, sub) for ref, sub in self.subscriptions.items() if sub["kind"] == "BALANCE"),
-            None,
-        )
-        if (
-            existing
-            and existing[1]["arguments"].get("AccountKey") == self.client.oauth.account_key
-            # Replacing a live subscription cannot fix what its own data reports.
-            and self.balance_problem
-            not in {"ACCOUNT_BALANCE_UNAVAILABLE", "BALANCE_SUBSCRIPTION_DISABLED"}
-            and time.monotonic() - existing[1]["contact"] <= existing[1]["timeout"]
-        ):
-            return
-        if time.monotonic() - self.balance_attempt < 60:
-            return
-        self.balance_attempt = time.monotonic()
-        try:
-            await self.subscribe(
-                "BALANCE",
-                {
-                    "AccountKey": self.client.oauth.account_key,
-                    "FieldGroups": ["CalculateCashForTrading"],
-                },
-                "BALANCE",
-                old=existing[0] if existing else None,
-            )
-        except (SaxoError, ValueError, KeyError, TypeError):
-            self.balance_problem = "ACCOUNT_BALANCE_UNAVAILABLE"
-
-    async def ensure_activity_subscription(self) -> None:
-        """SAXO_SIM only: order/position events wake reconciliation; evidence stays audited."""
-        if (
-            self.config.execution_mode != "SAXO_SIM"
-            or not self.connected
-            or not self.account_verified
-            or any(s["kind"] == "ACTIVITIES" for s in self.subscriptions.values())
-            or time.monotonic() - self.activity_attempt < 60
-        ):
-            return
-        self.activity_attempt = time.monotonic()
-        try:
-            await self.subscribe(
-                "ACTIVITIES",
-                {
-                    "AccountKey": self.client.oauth.account_key,
-                    "Activities": ["Orders", "Positions"],
-                },
-                "ACTIVITIES",
-            )
-            self.activity_problem = ""
-        except (SaxoError, ValueError, KeyError, TypeError):
-            self.activity_problem = "ACTIVITY_EVENTS_UNAVAILABLE"
-
-    def receive_balance(self, data: Any, receipt: float, *, snapshot: bool = False) -> None:
-        if not isinstance(data, dict):
-            self.balance_problem = "BALANCE_SCHEMA_UNAVAILABLE"
-            return
-        if self.balance_account_key != self.client.oauth.account_key:
-            self.balance.clear()
-            self.balance_stream.clear()
-            self.balance_received_at = None
-        self.balance_account_key = self.client.oauth.account_key
-        values = {} if snapshot else dict(self.balance_stream)
-        # Do not expose account/client keys or retain an unbounded broker payload.
-        for name in (
-            "TotalValue",
-            "CashBalance",
-            "CashAvailableForTrading",
-            "Currency",
-            "CalculationReliability",
-            "TransactionsNotBooked",
-            "CostToClosePositions",
-        ):
-            if name in data:
-                value = data[name]
-                if name not in {"Currency", "CalculationReliability"}:
-                    value = (
-                        value
-                        if (
-                            isinstance(value, (int, float))
-                            and not isinstance(value, bool)
-                            and math.isfinite(value)
-                        )
-                        else None
-                    )
-                elif not isinstance(value, str):
-                    value = None
-                values[name] = value
-        self.balance_stream = values
-        if values.get("CalculationReliability") != "Ok":
-            self.balance_problem = "BALANCE_CALCULATION_UNVERIFIED"
-            return
-        if values.get("Currency") != self.account_currency:
-            self.balance_problem = "BALANCE_CURRENCY_UNVERIFIED"
-            return
-        self.balance = values
-        self.balance_received_at = receipt
-        self.balance_problem = ""
-
-    def balance_view(self, at: float) -> dict[str, Any]:
-        same_account = (
-            self.balance_account_key is not None
-            and self.balance_account_key == self.client.oauth.account_key
-        )
-        values = self.balance if same_account else {}
-        sub = next((s for s in self.subscriptions.values() if s["kind"] == "BALANCE"), None)
-        remaining = sub["timeout"] - (time.monotonic() - sub["contact"]) if sub else 0
-        currency = values.get("Currency")
-        available = any(
-            values.get(k) is not None
-            for k in ("TotalValue", "CashBalance", "CashAvailableForTrading")
-        )
-        fresh = bool(
-            same_account
-            and self.account_verified
-            and self.connected
-            and not self.balance_problem
-            and remaining > 0
-            and currency
-            and currency == self.account_currency
-        )
-        return {
-            "environment": "SIM" if self.config.data_environment == "SAXO_SIM" else "LIVE",
-            "label": "SIM · simulated funds"
-            if self.config.data_environment == "SAXO_SIM"
-            else "LIVE · real-money account",
-            "connection_note": "Real-money balances are not connected"
-            if self.config.data_environment == "SAXO_SIM"
-            else "Selected authenticated LIVE account · ordering disabled",
-            "account": "••••" + self.account_id[-4:]
-            if same_account and self.account_id
-            else "Unavailable",
-            "currency": currency or self.account_currency,
-            "status": "Unavailable" if not available else "Current" if fresh else "Stale",
-            "last_success_at": self.balance_received_at if same_account else None,
-            "valid_until": at + remaining if fresh else None,
-            "total_value": values.get("TotalValue"),
-            "cash_balance": values.get("CashBalance"),
-            "cash_available_for_trading": values.get("CashAvailableForTrading"),
-            "problem": self.balance_problem,
-            "details": {
-                k: values.get(k)
-                for k in ("CalculationReliability", "TransactionsNotBooked", "CostToClosePositions")
-            },
-            "basis": "Broker-reported native currency; no conversion or strategy P&L added",
-        }
 
     async def discover(self, state: MarketState) -> None:
         result = await self.client.request(
@@ -531,7 +350,7 @@ class DataService:
                 self.balance_problem = "BALANCE_ACCOUNT_CHANGED"
                 self.drop_pending(ref)
                 raise SaxoError("BALANCE_ACCOUNT_CHANGED")
-            self.receive_balance(snapshot, time.time(), snapshot=True)
+            saxo_balance.receive_balance(self, snapshot, time.time(), snapshot=True)
         elif kind == "SESSION":
             self.session = snapshot or {}
         elif kind == "ACTIVITIES":
@@ -1006,126 +825,6 @@ class DataService:
             "analytics_basis": "PROVIDER_SUPPLIED_UNVERIFIED_NOT_STRATEGY_PROBABILITY",
         }
 
-    async def history(self, state: MarketState, *, boundary: bool = False) -> None:
-        if not state.identity:
-            return
-        result = await self.client.request(
-            "GET",
-            "/chart/v3/charts",
-            params={
-                "Uic": state.identity["uic"],
-                "AssetType": "ContractFutures",
-                "Horizon": 1,
-                "Count": 1200,
-                "FieldGroups": "Data,ChartInfo",
-            },
-        )
-        state.capabilities["history"] = {
-            "first_sample": (result.get("ChartInfo") or {}).get("FirstSampleTime"),
-            "data_version": result.get("DataVersion"),
-            "returned_samples": len(result.get("Data", [])),
-            "delayed_by_minutes": (result.get("ChartInfo") or {}).get("DelayedByMinutes"),
-            "semantics": "Saxo chart samples; mutable tail excluded; no quote reconstruction",
-        }
-        bars = completed_bars(result, datetime.now(UTC))
-        state.bars = bars
-        state.history_checked = time.monotonic()
-        try:
-            await asyncio.to_thread(
-                self.bar_cache.save, state.identity, bars, result.get("DataVersion")
-            )
-        except (OSError, ValueError):
-            self.bar_cache.problem = "BAR_STORAGE_UNAVAILABLE"
-        state.history_problem = ""
-        if not bars:
-            state.history_problem = "SAXO_COMPLETED_OHLCV_UNAVAILABLE"
-            return
-        delay = state.capabilities["history"]["delayed_by_minutes"]
-        if delay != 0:
-            # Delayed bars can never supply the final completed minute inside the entry
-            # deadline; an unreported delay is unknown, and unknown blocks (as for quotes).
-            state.history_problem = (
-                "SAXO_CHART_DATA_DELAYED"
-                if isinstance(delay, (int, float))
-                else "SAXO_CHART_DELAY_UNKNOWN"
-            )
-            return
-        if boundary:
-            return
-        day = datetime.now(NY).date()
-        if state.reference_day == day.isoformat():
-            return
-        if time.monotonic() < state.reference_retry_at:
-            # Entries stay blocked; do not refetch every reference session each minute.
-            state.history_problem = state.reference_failure
-            return
-        state.references = []
-        if not self.config.reference_selections_file:
-            state.history_problem = "REFERENCE_SESSION_CONTRACT_SELECTION_UNVERIFIED"
-            return
-        try:
-            audit, digest = load_selections(
-                self.config.reference_selections_file,
-                self.config.data_environment,
-                state.market,
-                day,
-                state.identity["uic"],
-            )
-            references = []
-            for selected in audit.sessions:
-                raw = await self.client.request(
-                    "GET",
-                    f"/ref/v1/instruments/details/{selected.contract.uic}/ContractFutures",
-                    params={"AccountKey": self.client.oauth.account_key},
-                )
-                identity = future_identity(state.market, self.config.data_environment, raw)
-                if (
-                    identity["symbol"] != selected.contract.symbol
-                    or identity["exchange"] != selected.contract.exchange
-                    or identity["contract_month"] != selected.contract.contract_month
-                ):
-                    raise ValueError("REFERENCE_SESSION_IDENTITY_MISMATCH")
-                start = datetime.combine(selected.day, datetime.min.time(), NY) + timedelta(hours=8)
-                prior = await self.history_range(
-                    selected.contract.uic, start, start + timedelta(hours=9)
-                )
-                if len(prior) != 540:
-                    raise ValueError("REFERENCE_SESSION_OHLCV_COVERAGE_INCOMPLETE")
-                references.append(reference_summary(prior))
-            state.references, state.reference_day = references, day.isoformat()
-            state.capabilities["reference_selection_audit_sha256"] = digest
-        except (OSError, ValueError):
-            state.history_problem = "REFERENCE_SESSION_AUDIT_OR_SAXO_COVERAGE_UNVERIFIED"
-            state.reference_failure = state.history_problem
-            state.reference_retry_at = time.monotonic() + REFERENCE_RETRY_SECONDS
-
-    async def daily_context(self, state: MarketState) -> None:
-        """Display only: 20-session average daily range from completed Saxo daily samples."""
-        day = datetime.now(NY).date().isoformat()
-        if not state.identity or state.daily_day == day:
-            return
-        state.daily_day = day
-        try:
-            result = await self.client.request(
-                "GET",
-                "/chart/v3/charts",
-                params={
-                    "Uic": state.identity["uic"],
-                    "AssetType": "ContractFutures",
-                    "Horizon": 1440,
-                    "Count": 21,
-                    "FieldGroups": "Data",
-                },
-            )
-            rows = sorted(result.get("Data", []), key=lambda r: r.get("Time", ""))[:-1]
-            ranges = [float(r["High"]) - float(r["Low"]) for r in rows[-20:]]
-            if len(ranges) < 5 or any(not math.isfinite(x) or x < 0 for x in ranges):
-                raise ValueError("DAILY_SAMPLES_INSUFFICIENT")
-            state.daily_range, state.daily_problem = sum(ranges) / len(ranges), ""
-        except (SaxoError, ValueError, KeyError, TypeError) as exc:
-            state.daily_range = None
-            state.daily_problem = str(exc) if isinstance(exc, ValueError) else "DAILY_SCHEMA"
-
     async def restore_option(self, plan: dict[str, Any]) -> None:
         """Owned options keep their original future even after a display roll/restart."""
         option = plan["option"]
@@ -1256,50 +955,9 @@ class DataService:
         self.option_references.pop(uic, None)
         self.recorder.ingest(key(identity), "GAP", {"reason": "OPTION_UNSUBSCRIBED"}, time.time())
 
-    async def history_range(
-        self,
-        uic: int,
-        start: datetime,
-        end: datetime,
-    ) -> list[Bar]:
-        samples: dict[str, dict[str, Any]] = {}
-        cursor, version = start, None
-        for _ in range(8):  # pages of 1,200 minutes: more than a full session
-            result = await self.client.request(
-                "GET",
-                "/chart/v3/charts",
-                params={
-                    "Uic": uic,
-                    "AssetType": "ContractFutures",
-                    "Horizon": 1,
-                    "Count": 1200,
-                    "Mode": "From",
-                    "Time": cursor.isoformat(),
-                    "FieldGroups": "Data,ChartInfo",
-                },
-            )
-            if version is not None and result.get("DataVersion") != version:
-                raise SaxoError("CHART_VERSION_CHANGED_REFETCH_REQUIRED")
-            version = result.get("DataVersion")
-            rows = result.get("Data", [])
-            if not rows:
-                break
-            samples.update({r["Time"]: r for r in rows})
-            newest = max(utc(r["Time"]) for r in rows)
-            if newest >= end:
-                break
-            if newest <= cursor:
-                raise SaxoError("CHART_PAGINATION_DID_NOT_ADVANCE")
-            cursor = newest
-        return [
-            b
-            for b in completed_bars({"Data": list(samples.values())}, end + timedelta(minutes=1))
-            if start <= b.at < end
-        ]
-
     async def startup(self) -> None:
         await self.subscribe("SESSION", {}, "SESSION")
-        await self.ensure_balance_subscription()
+        await saxo_balance.ensure_balance_subscription(self)
         for state in self.markets.values():
             try:
                 await self.discover(state)
@@ -1501,7 +1159,7 @@ class DataService:
                     raise SaxoError("SESSION_DOWNGRADED_FRESH_SNAPSHOT_REQUIRED")
             elif subscription["kind"] == "BALANCE":
                 if subscription["arguments"]["AccountKey"] == self.client.oauth.account_key:
-                    self.receive_balance(data, receipt)
+                    saxo_balance.receive_balance(self, data, receipt)
                 else:
                     self.balance_problem = "BALANCE_ACCOUNT_CHANGED"
             elif subscription["kind"] == "ACTIVITIES":

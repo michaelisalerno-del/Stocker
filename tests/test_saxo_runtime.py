@@ -19,7 +19,8 @@ from stocker_execution.rules import Bar
 from stocker_execution.runtime import Runtime
 from stocker_execution.saxo_auth import OAuth, SaxoError, atomic_json
 from stocker_execution.saxo_client import SaxoClient
-from stocker_execution.saxo_data import DataService, completed_bars
+from stocker_execution.saxo_data import DataService
+from stocker_execution.saxo_history import completed_bars, history_range
 from stocker_execution.saxo_stream import merge_board
 from stocker_execution.store import Store
 
@@ -158,7 +159,7 @@ def test_history_completed_tail_missing_volume_and_gap_pagination(tmp_path):
 
         data.client.request = get
         with pytest.raises(ValueError, match="PAGINATION_DID_NOT_ADVANCE"):
-            await data.history_range(100, at, at + timedelta(hours=1))
+            await history_range(data, 100, at, at + timedelta(hours=1))
         store.db.close()
 
     asyncio.run(scenario())

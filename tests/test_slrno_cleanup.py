@@ -23,6 +23,11 @@ from stocker_execution.config import FuturesConfig
 from stocker_execution.contracts import budget, key
 from stocker_execution.rules import Bar
 from stocker_execution.runtime import Runtime
+from stocker_execution.saxo_balance import (
+    balance_view,
+    ensure_balance_subscription,
+    receive_balance,
+)
 from stocker_execution.store import Store
 
 
@@ -183,11 +188,11 @@ def test_balance_subscription_is_shared_scoped_and_never_arms(tmp_path, environm
         data.account_verified = data.connected = True
         data.account_id = "private-account-1234"
         data.account_currency = "GBP"
-        assert data.balance_view(time.time())["status"] == "Unavailable"
-        await asyncio.gather(*(data.ensure_balance_subscription() for _ in range(4)))
+        assert balance_view(data, time.time())["status"] == "Unavailable"
+        await asyncio.gather(*(ensure_balance_subscription(data) for _ in range(4)))
         assert len(calls) == 1
         assert calls[0][2]["body"]["Arguments"]["AccountKey"] == "selected-key"
-        view = data.balance_view(time.time())
+        view = balance_view(data, time.time())
         assert view["status"] == "Current" and view["cash_balance"] == 0
         assert view["cash_available_for_trading"] is None
         assert view["environment"] == environment.removeprefix("SAXO_")
@@ -197,26 +202,26 @@ def test_balance_subscription_is_shared_scoped_and_never_arms(tmp_path, environm
         assert view["account"] == "••••1234" and "selected-key" not in json.dumps(view)
         ref = next(iter(data.subscriptions))
         await data.receive({"reference": ref, "message_id": "1", "payload": {"CashBalance": None}})
-        assert data.balance_view(time.time())["cash_balance"] is None
-        assert data.balance_view(time.time())["total_value"] == 123.4
+        assert balance_view(data, time.time())["cash_balance"] is None
+        assert balance_view(data, time.time())["total_value"] == 123.4
         updated = data.balance_received_at
-        data.receive_balance({"TotalValue": 999, "CalculationReliability": "Approximated"}, 999)
-        assert data.balance_view(time.time())["status"] == "Stale"
-        assert data.balance_view(time.time())["total_value"] == 123.4
+        receive_balance(data, {"TotalValue": 999, "CalculationReliability": "Approximated"}, 999)
+        assert balance_view(data, time.time())["status"] == "Stale"
+        assert balance_view(data, time.time())["total_value"] == 123.4
         assert data.balance_received_at == updated
-        data.receive_balance({"CashBalance": 30}, 1000)
+        receive_balance(data, {"CashBalance": 30}, 1000)
         assert data.balance_problem == "BALANCE_CALCULATION_UNVERIFIED"
         assert data.balance_received_at == updated
-        data.receive_balance({"CalculationReliability": "Ok"}, updated)
-        assert data.balance_view(time.time())["total_value"] == 999
-        assert data.balance_view(time.time())["cash_balance"] == 30
-        data.receive_balance({"Currency": "USD", "TotalValue": 200}, 1001)
-        assert data.balance_view(time.time())["currency"] == "GBP"
-        data.receive_balance({"CashBalance": 10}, 1002)
+        receive_balance(data, {"CalculationReliability": "Ok"}, updated)
+        assert balance_view(data, time.time())["total_value"] == 999
+        assert balance_view(data, time.time())["cash_balance"] == 30
+        receive_balance(data, {"Currency": "USD", "TotalValue": 200}, 1001)
+        assert balance_view(data, time.time())["currency"] == "GBP"
+        receive_balance(data, {"CashBalance": 10}, 1002)
         assert data.balance_problem == "BALANCE_CURRENCY_UNVERIFIED"
         assert data.balance_received_at == updated
-        data.receive_balance({"Currency": "GBP"}, updated)
-        assert data.balance_view(time.time())["total_value"] == 200
+        receive_balance(data, {"Currency": "GBP"}, updated)
+        assert balance_view(data, time.time())["total_value"] == 200
         await data.receive(
             {
                 "reference": "_heartbeat",
@@ -228,10 +233,10 @@ def test_balance_subscription_is_shared_scoped_and_never_arms(tmp_path, environm
         )
         assert data.balance_received_at == updated
         data.connected = False
-        assert data.balance_view(time.time())["status"] == "Stale"
-        assert data.balance_view(time.time())["last_success_at"] == updated
+        assert balance_view(data, time.time())["status"] == "Stale"
+        assert balance_view(data, time.time())["last_success_at"] == updated
         client.oauth.account_key = "another-account"
-        assert data.balance_view(time.time())["total_value"] is None
+        assert balance_view(data, time.time())["total_value"] is None
         assert config.execution_mode == "DISABLED" and not config.armed
         assert allowed("POST", "/port/v1/balances/subscriptions")
         assert not allowed("POST", "/trade/v2/orders")
@@ -365,13 +370,13 @@ def test_boundary_refresh_runs_before_routine_history_and_never_retries_expired(
         state.boundary_clock = AT
         calls = []
 
-        async def history(state, *, boundary=False):
+        async def history(data, state, *, boundary=False):
             calls.append((state.market, boundary))
 
         async def warm(state):
             pass
 
-        monkeypatch.setattr(runtime.data, "history", history)
+        monkeypatch.setattr("stocker_execution.saxo_history.history", history)
         monkeypatch.setattr(runtime.data, "warm_candidates", warm)
         await runtime.refresh_histories()
         assert calls[0] == ("SI", True)

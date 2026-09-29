@@ -7,7 +7,9 @@ from datetime import UTC, datetime, timedelta
 
 from saxo_support import FUTURE, record_entry, setup
 from stocker_execution import views
+from stocker_execution.saxo_balance import ensure_activity_subscription
 from stocker_execution.saxo_client import allowed
+from stocker_execution.saxo_history import daily_context, history, history_range
 from stocker_execution.saxo_stream import PriceState
 
 
@@ -22,9 +24,9 @@ def test_bars_use_chart_v3_and_v1_is_no_longer_allowed(tmp_path):
             return {"Data": [], "DataVersion": 1}
 
         data.client.request = request
-        await data.history(data.markets["CL"])
-        await data.history_range(
-            100, datetime(2026, 9, 28, 12, tzinfo=UTC), datetime(2026, 9, 28, 13, tzinfo=UTC)
+        await history(data, data.markets["CL"])
+        await history_range(
+            data, 100, datetime(2026, 9, 28, 12, tzinfo=UTC), datetime(2026, 9, 28, 13, tzinfo=UTC)
         )
         store.db.close()
 
@@ -73,8 +75,8 @@ def test_daily_range_averages_completed_sessions_once_per_day(tmp_path):
             }
 
         data.client.request = request
-        await data.daily_context(state)
-        await data.daily_context(state)
+        await daily_context(data, state)
+        await daily_context(data, state)
         assert calls[0]["Horizon"] == 1440 and len(calls) == 1
         # The newest (possibly incomplete) sample is excluded from the 20 averaged.
         assert state.daily_range == sum(1 + i % 3 for i in range(20)) / 20
@@ -84,7 +86,7 @@ def test_daily_range_averages_completed_sessions_once_per_day(tmp_path):
             return {"Data": [{"Time": "2026-09-01T00:00:00Z", "High": 1, "Low": 0}] * 3}
 
         data.client.request = short
-        await data.daily_context(state)
+        await daily_context(data, state)
         assert state.daily_range is None and state.daily_problem == "DAILY_SAMPLES_INSUFFICIENT"
         store.db.close()
 
@@ -167,8 +169,8 @@ def test_sim_activity_events_wake_reconciliation_and_never_reset_the_stream(tmp_
             return {"InactivityTimeout": 30}
 
         data.client.request = request
-        await data.ensure_activity_subscription()
-        await data.ensure_activity_subscription()  # already subscribed
+        await ensure_activity_subscription(data)
+        await ensure_activity_subscription(data)  # already subscribed
         assert len(posted) == 1
         method, path, body = posted[0]
         assert (method, path) == ("POST", "/ens/v1/activities/subscriptions")
@@ -192,7 +194,7 @@ def test_activity_events_are_sim_execution_only(tmp_path):
     async def scenario():
         _, data, store = setup(tmp_path)  # INTERNAL_PAPER
         data.subscriptions.clear()
-        await data.ensure_activity_subscription()
+        await ensure_activity_subscription(data)
         assert not data.subscriptions and not data.client.calls
         store.db.close()
 
@@ -354,7 +356,7 @@ def test_delayed_chart_data_blocks_history_with_a_named_reason(tmp_path):
             }
 
         data.client.request = request
-        await data.history(state)
+        await history(data, state)
         assert state.history_problem == "SAXO_CHART_DATA_DELAYED" and len(state.bars) == 2
         assert state.capabilities["history"]["delayed_by_minutes"] == 10
         store.db.close()

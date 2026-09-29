@@ -10,6 +10,7 @@ from stocker_execution.recorder import Recorder
 from stocker_execution.rules import Bar, prior_rv, reference_summary
 from stocker_execution.runtime import Runtime, failure_code
 from stocker_execution.saxo_data import DataService
+from stocker_execution.saxo_history import history
 from stocker_execution.store import Store
 
 PORTFOLIO = {"/port/v1/positions/me", "/port/v1/orders/me"}
@@ -109,7 +110,7 @@ def test_runtime_log_has_timestamps_and_only_coded_reasons(tmp_path):
 
 
 def test_failed_reference_sessions_are_not_refetched_every_minute(tmp_path, monkeypatch):
-    import stocker_execution.saxo_data as module
+    import stocker_execution.saxo_history as module
 
     at = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=10)
     rows = [
@@ -137,12 +138,12 @@ def test_failed_reference_sessions_are_not_refetched_every_minute(tmp_path, monk
         state = data.markets["CL"]
         state.identity = FUTURE
         for _ in range(3):
-            await data.history(state)
+            await history(data, state)
             assert state.history_problem == "REFERENCE_SESSION_AUDIT_OR_SAXO_COVERAGE_UNVERIFIED"
             assert state.bars and not state.references
         assert len(loads) == 1
         state.reference_retry_at = 0
-        await data.history(state)
+        await history(data, state)
         assert len(loads) == 2
 
     asyncio.run(scenario())

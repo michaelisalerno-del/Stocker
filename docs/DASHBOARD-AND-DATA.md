@@ -48,6 +48,20 @@ which is why that fetch runs through the trading day while SIM execution is conf
 Not available from Saxo OpenAPI: a full trade tape, order-by-order depth, historical L2, news or
 an economic calendar, and exchange holidays (sessions come from instrument TradingSessions).
 
+## Live verification
+
+`scripts/saxo_field_probe.py` checks these fields against the live Saxo environment without
+disturbing the service: it uses the service's current access token without refreshing it, stays
+inside the SaxoClient allow-list, deletes its single options-chain subscription and prints no
+keys. It reports Chart v3 minute/daily samples (including minute alignment and realised
+volatility), futures quote price types, market state, PriceInfo and depth, session states, an
+at-the-money futures option's quote and Greeks, and a chain snapshot. Run it as the service
+user from a copy of this branch, then:
+
+- set `provider_volatility_scale` to `FRACTION` or `PERCENT` if the option volatilities line up
+  with realised volatility on that basis (it stays `UNVERIFIED`, with no spread, otherwise);
+- use the option quote's `PriceTypeBid`/`PriceTypeAsk` to settle the Tradable/Indicative policy.
+
 ## Optional configuration
 
 ```yaml
@@ -57,6 +71,7 @@ alerts:
   stream_down_seconds: 120
   login_warning_hours: 24
 option_chain_strikes: 11
+provider_volatility_scale: UNVERIFIED   # FRACTION or PERCENT, only from probe evidence
 ```
 
 The alert file is `{"url": "https://ntfy.sh/<private-topic>"}` (any HTTPS endpoint accepting a

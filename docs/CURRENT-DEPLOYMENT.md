@@ -1,6 +1,13 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `a70f2442a3d6391796bbe5e2492224bc2f57b964`, deployed 2026-09-30 23:06 UTC
+Current application release: `a65b52e22fa6bdd8436c48a7be3c96dfa408eb60`, deployed 2026-09-30 23:19 UTC and
+re-armed: a header chip and a line under the button show Real-time ON / ON but Saxo still delayed / OFF.
+The session was made primary at 23:15 UTC (FullTradingAndChat, DataLevel Premium; it survived the restart),
+yet fresh subscriptions and charts still report DelayedByMinutes 10: Saxo is not yet granting real-time CME
+data to the API (Open API Access market data in SaxoTraderGO, or the subscription itself). Backup
+`/var/lib/stocker/backups/realtime-chip-20260930`. Rollback: symlink to `a70f244…`, restart.
+
+Previous release `a70f2442a3d6391796bbe5e2492224bc2f57b964`, deployed 2026-09-30 23:06 UTC
 and re-armed after preflight. A repeat real-time click now renews the price streams too (a click made
 before the data subscription starts would otherwise leave them delayed), and the market card rounds the
 futures spread and change. Verified backup `/var/lib/stocker/backups/repeat-click-20260930`; CI green;

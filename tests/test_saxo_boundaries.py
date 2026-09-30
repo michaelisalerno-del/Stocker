@@ -411,3 +411,25 @@ def test_atomic_capacity_and_provenance(tmp_path):
     with pytest.raises(ValueError, match="SEPARATE"):
         store.bind("SAXO_SIM", "SAXO_SIM")
     store.db.close()
+
+
+def test_a_rate_limit_waits_for_the_exhausted_limit_to_reset():
+    import httpx
+
+    from stocker_execution.saxo_client import retry_after
+
+    refdata = httpx.Headers(
+        {
+            "X-RateLimit-RefDataInstrumentsMinute-Remaining": "0",
+            "X-RateLimit-RefDataInstrumentsMinute-Reset": "42",
+            "X-RateLimit-AppDay-Remaining": "9999000",
+            "X-RateLimit-AppDay-Reset": "80000",
+        }
+    )
+    assert retry_after(refdata) == 42  # not the day limit, which still has plenty left
+    assert retry_after(httpx.Headers({"x-ratelimit-session-reset": "7"})) == 7
+    assert retry_after(httpx.Headers({})) == 5
+    assert (
+        retry_after(httpx.Headers({"x-ratelimit-x-remaining": "0", "x-ratelimit-x-reset": "900"}))
+        == 60
+    )

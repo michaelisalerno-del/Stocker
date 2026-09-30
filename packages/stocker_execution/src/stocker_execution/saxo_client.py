@@ -66,6 +66,29 @@ def allowed(method: str, path: str, *, sim_orders: bool = False) -> bool:
     )
 
 
+def retry_after(headers: Any) -> float:
+    """Seconds until the exhausted Saxo limit resets, 1-60 s.
+
+    Saxo names each limit (for example RefDataInstrumentsMinute, 60 a minute, shared by reference
+    details and option spaces); the one whose remaining count is zero decides the wait. The session
+    limit's reset applies when none is named.
+    """
+    names = [
+        k.lower().removesuffix("-remaining") + "-reset"
+        for k, v in headers.items()
+        if k.lower().startswith("x-ratelimit-")
+        and k.lower().endswith("-remaining")
+        and str(v).strip() == "0"
+    ] or ["x-ratelimit-session-reset"]
+    waits = []
+    for name in names:
+        try:
+            waits.append(float(headers.get(name, "5")))
+        except ValueError:
+            waits.append(5.0)
+    return min(60.0, max(1.0, max(waits)))
+
+
 class SaxoClient:
     def __init__(self, oauth: OAuth, transport: httpx.AsyncBaseTransport | None = None):
         self.oauth = oauth
@@ -158,11 +181,7 @@ class SaxoClient:
                     k: v for k, v in headers.items() if k.lower().startswith("x-ratelimit-")
                 }
                 if status == 429:
-                    reset = headers.get("x-ratelimit-session-reset", "5")
-                    try:
-                        seconds = min(60.0, max(1.0, float(reset)))
-                    except ValueError:
-                        seconds = 5.0
+                    seconds = retry_after(headers)
                     self.next_request = max(self.next_request, time.monotonic() + seconds)
                     if method == "GET" and attempt < 2:  # reads retry twice; writes never
                         attempt += 1

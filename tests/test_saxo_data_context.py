@@ -250,11 +250,14 @@ def test_saxo_closed_positions_are_kept_as_evidence_in_base_currency(tmp_path):
     asyncio.run(scenario())
 
 
-def test_market_view_carries_smile_price_context_and_model_sigma(tmp_path):
+def test_market_view_carries_smile_price_context_and_model_sigma(tmp_path, monkeypatch):
+    import stocker_execution.runtime as module
     from stocker_execution.config import FuturesConfig
     from stocker_execution.runtime import Runtime
     from stocker_execution.store import Store
 
+    # A fixed day with no expiry in the chain window; the real date made this test expire.
+    monkeypatch.setattr(module, "now", lambda: datetime(2026, 12, 1, 15, tzinfo=UTC))
     runtime = Runtime(FuturesConfig(), Store(tmp_path / "ledger.sqlite3"))
     state = runtime.markets["CL"]
     state.identity = FUTURE

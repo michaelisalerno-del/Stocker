@@ -760,3 +760,24 @@ def test_a_series_expiring_the_same_day_at_another_time_is_never_a_candidate(tmp
         state, opportunity("CL", 100, at), {"futures_price": 70, "rv15": 0.01}
     )
     assert [r[2]["Uic"] for r in ranked] == [302]
+
+
+def test_a_failed_daily_option_refresh_stays_with_the_options_and_waits_to_retry(tmp_path):
+    async def run():
+        config = FuturesConfig()
+        data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
+        state = data.markets["CL"]
+        state.identity = FUTURE
+        calls = []
+
+        async def request(method, path, **_):
+            calls.append(path)
+            raise SaxoError("RateLimitExceeded")
+
+        data.client.request = request
+        await data.refresh_options(state)  # does not raise into the history pass
+        await data.refresh_options(state)  # and does not retry straight away
+        assert len(calls) == 1
+        assert state.capabilities["options"] == {"problem": "RateLimitExceeded"}
+
+    asyncio.run(run())

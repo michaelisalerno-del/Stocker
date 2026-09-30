@@ -92,6 +92,7 @@ class MarketState:
     option_roots: tuple[int, ...] = ()  # approved roots found for the pinned future
     expiry_instants: dict[str, datetime] = field(default_factory=dict)
     option_space_day: str = ""
+    options_retry_at: float = 0.0
     problem: str = "AUTHENTICATION_REQUIRED"
     history_problem: str = "SAXO_HISTORY_NOT_VERIFIED"
     last_clock: datetime | None = None
@@ -277,7 +278,8 @@ class DataService:
                 for option in expiry.get("SpecificOptions", [])
                 if option.get("UnderlyingUic") == state.identity["uic"]
             ]
-            if len(rows) > 1000:
+            # Live monthly roots carry several expiries (gold's held 3,060 options on 2026-09-30).
+            if len(rows) > 5000 or len(space_rows) + len(rows) > 20000:
                 raise SaxoError("OPTION_SPACE_TOO_LARGE")
             space_rows += rows
         instants: dict[str, datetime] = {}
@@ -325,18 +327,33 @@ class DataService:
         )
 
     async def refresh_options(self, state: MarketState) -> None:
-        """Once per New York day: new weekly listings appear and the board moves to today's root."""
-        if not state.identity or state.option_space_day == datetime.now(NY).date().isoformat():
+        """Once per New York day: new weekly listings appear and the board moves to today's root.
+
+        A failure is kept to the options (candidates then report their own reason) and is retried
+        after 15 minutes, never on every history pass.
+        """
+        if (
+            not state.identity
+            or state.option_space_day == datetime.now(NY).date().isoformat()
+            or time.monotonic() < state.options_retry_at
+        ):
             return
-        raw = await self.client.request(
-            "GET",
-            f"/ref/v1/instruments/details/{state.identity['uic']}/ContractFutures",
-            params={"AccountKey": self.client.oauth.account_key, "FieldGroups": "TradingSessions"},
-        )
-        if raw.get("Uic") != state.identity["uic"]:
-            raise SaxoError("CONFIGURED_REFERENCE_IDENTITY_MISMATCH")
-        await self.load_options(state, raw)
-        await self.subscribe_board(state)
+        try:
+            raw = await self.client.request(
+                "GET",
+                f"/ref/v1/instruments/details/{state.identity['uic']}/ContractFutures",
+                params={
+                    "AccountKey": self.client.oauth.account_key,
+                    "FieldGroups": "TradingSessions",
+                },
+            )
+            if raw.get("Uic") != state.identity["uic"]:
+                raise SaxoError("CONFIGURED_REFERENCE_IDENTITY_MISMATCH")
+            await self.load_options(state, raw)
+            await self.subscribe_board(state)
+        except (SaxoError, ValueError, KeyError, TypeError) as exc:
+            state.options_retry_at = time.monotonic() + 900
+            state.capabilities["options"] = {"problem": str(exc)}
 
     async def subscribe_board(self, state: MarketState) -> None:
         """Observation-only chain window on the root of the nearest expiry."""

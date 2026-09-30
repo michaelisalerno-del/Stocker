@@ -1,0 +1,45 @@
+{
+ "at": "2026-09-30T19:30:00+00:00",
+ "release": "2c2a6e96c78b3dd8425556f55be8d8d425563591",
+ "previous_release": "82577e0471331aaf1e73b81a9ce961f334957951",
+ "branch": "codex/live-paper-l2-observation",
+ "change": "GC treated like the other four markets: warms/records option candidates; BLOCKED/MONITORING labels; common approval reason; cost gate label follows the \u00a31,000 ceiling",
+ "ci": {
+  "all_jobs": "success",
+  "note": "first run failed the frontend fixture (GC expected MONITOR ONLY); fixed in 2c2a6e9"
+ },
+ "pre_deploy": {
+  "active_reservations": 0,
+  "orders": 0,
+  "nonzero_positions": 0,
+  "fills": 0,
+  "execution_mode": "DISABLED"
+ },
+ "backup": "/var/lib/stocker/backups/unblock-gc-20260930",
+ "backup_verified": true,
+ "configuration_credentials_tokens_unchanged": true,
+ "installed_smoke_as_stocker": "PASS",
+ "service": {
+  "ActiveState": "active",
+  "SubState": "running",
+  "NRestarts": 0
+ },
+ "routes_loopback_authenticated": "all 200",
+ "anonymous_https_status": 401,
+ "gc_after": {
+  "strategy_state": "BLOCKED",
+  "block_reason": "REFERENCE_CONTRACT_SELECTION_REQUIRED",
+  "approval_gate": "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
+ },
+ "runtime": {
+  "data_environment": "SAXO_SIM",
+  "execution_mode": "DISABLED",
+  "armed": false,
+  "live_orders_disabled": true,
+  "oauth": "AUTHENTICATED",
+  "connected": true,
+  "reconciled": true,
+  "reserved_open_trades": 0
+ },
+ "orders_sent": 0
+}

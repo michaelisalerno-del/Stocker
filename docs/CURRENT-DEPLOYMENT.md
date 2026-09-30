@@ -1,6 +1,15 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `82577e0471331aaf1e73b81a9ce961f334957951` (branch
+Current application release: `2c2a6e96c78b3dd8425556f55be8d8d425563591` (branch
+`codex/live-paper-l2-observation`), deployed on **2026-09-30 at about 19:30 UTC**, replacing `82577e0`.
+It unblocks GC: gold now warms and records option candidates and is labelled like the other four
+markets, entering only once its listed mapping is approved like any market. [Postflight](unblock-gc-deployment-20260930.json):
+flat ledger, verified backup `/var/lib/stocker/backups/unblock-gc-20260930`, installed smoke, all loopback
+routes 200, anonymous HTTPS 401, GC now `BLOCKED` by `REFERENCE_CONTRACT_SELECTION_REQUIRED` like the others,
+runtime unchanged (SIM authenticated, connected, DISABLED/disarmed, no orders). Rollback: symlink to
+`/opt/stocker/releases/82577e0…` and restart.
+
+Previous release `82577e0471331aaf1e73b81a9ce961f334957951` (branch
 `codex/live-paper-l2-observation`), deployed on **2026-09-30 at 19:08:30 UTC** through the existing
 immutable-release process, replacing `bd2d7a0`. Changes: every observed clock records `book_flow` and
 `observation` (see [the experiment](LIVE-PAPER-EXPERIMENT.md)); paper admission buys one contract up to a

@@ -40,7 +40,12 @@ SUBSCRIPTIONS = (
 )
 
 
-def allowed(method: str, path: str, *, sim_orders: bool = False) -> bool:
+PRIMARY_SESSION = {"TradeLevel": "FullTradingAndChat"}
+
+
+def allowed(
+    method: str, path: str, *, sim_orders: bool = False, primary_session: bool = False
+) -> bool:
     # Accept canonical local paths only; no URL, traversal, escaping or query ambiguity.
     if not re.fullmatch(r"/[A-Za-z0-9/%=_-]+", path) or "//" in path:
         return False
@@ -56,7 +61,10 @@ def allowed(method: str, path: str, *, sim_orders: bool = False) -> bool:
         re.fullmatch(re.escape(p) + r"/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", path) for p in SUBSCRIPTIONS
     ):
         return True
-    # Session upgrade is intentionally absent. Reconnect explicitly in Saxo's UI if needed.
+    if primary_session:
+        # Only the user's System-page click: one primary session per user, so this can delay or
+        # log off SaxoTraderGO. Never automatic.
+        return method == "PATCH" and path == "/root/v1/sessions/capabilities"
     return sim_orders and (
         (method == "POST" and path in {"/trade/v2/orders", "/trade/v2/orders/precheck"})
         or (
@@ -126,10 +134,13 @@ class SaxoClient:
         params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
         execution: bool = False,
+        primary_session: bool = False,
     ) -> dict[str, Any]:
         sim_orders = execution and self.environment == "SAXO_SIM" and self.sim_account_verified
-        if not allowed(method, path, sim_orders=sim_orders):
+        if not allowed(method, path, sim_orders=sim_orders, primary_session=primary_session):
             raise SaxoError("ENDPOINT_BLOCKED_LIVE_ORDERS_DISABLED")
+        if primary_session and (body != PRIMARY_SESSION or params or execution):
+            raise SaxoError("ONLY_PRIMARY_SESSION_REQUEST")
         if execution and (
             not sim_orders or (body or params or {}).get("AccountKey") != self.oauth.account_key
         ):

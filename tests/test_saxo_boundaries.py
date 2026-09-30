@@ -55,6 +55,10 @@ def test_live_default_deny_and_subscription_lifecycle():
     assert allowed("GET", "/root/v2/user")
     assert not allowed("GET", "/root/v1/user")
     assert not allowed("POST", "/trade/v2/orders", sim_orders=False)
+    # Only the user's explicit real-time click may change the session, and nothing else with it.
+    assert allowed("PATCH", "/root/v1/sessions/capabilities", primary_session=True)
+    assert not allowed("POST", "/trade/v2/orders", primary_session=True)
+    assert not allowed("PATCH", "/root/v1/sessions/events", primary_session=True)
 
 
 def oauth_fixture(tmp_path, env="SAXO_SIM", handler=None):

@@ -38,8 +38,9 @@ Do not paste secrets into chat, Git, browser payloads, screenshots or the record
    requires an OAuth connection without pinned contracts; then edit local config and restart
    **while disarmed and after accounting for any existing obligations**. No root-only recording keys.
 5. Request/verify account market-data permission in Saxo yourself if reported unavailable. An
-   OrdersOnly session may provide delayed prices. Upgrading to FullTradingAndChat can downgrade
-   another Saxo application. SLRNO never automatically upgrades or fights another session.
+   OrdersOnly session receives delayed prices only. Upgrading to FullTradingAndChat can downgrade
+   another Saxo application. SLRNO never automatically upgrades or fights another session; the
+   System page's **Use real-time in SLRNO** button upgrades on the user's click only.
    Verify L1 delay, actual granted cadence, real received L2 fields and option quotes per market.
    A MarketDepth schema is not proof of your entitlement. Missing depth keeps L1 monitoring alive.
 6. Obtain and retain the applicable Saxo/exchange permission for your intended raw recording,

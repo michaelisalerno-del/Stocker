@@ -47,7 +47,7 @@ from stocker_execution.rules import (
     prior_rv,
 )
 from stocker_execution.saxo_auth import SaxoError
-from stocker_execution.saxo_client import SaxoClient
+from stocker_execution.saxo_client import PRIMARY_SESSION, SaxoClient
 from stocker_execution.saxo_stream import Frames, PriceState, merge, merge_board
 
 # Reference details and option spaces share Saxo's 60-a-minute RefDataInstrumentsMinute limit;
@@ -182,6 +182,40 @@ class DataService:
             self.balance_account_key = self.client.oauth.account_key
         self.client.sim_account_verified = self.config.data_environment == "SAXO_SIM"
         self.session = await self.client.request("GET", "/root/v1/sessions/capabilities")
+
+    async def take_primary_session(self) -> None:
+        """The user's System-page click: make this Saxo's primary session for real-time prices.
+
+        Saxo sends real-time prices only to a user's one FullTradingAndChat session, so this can
+        delay or log off SaxoTraderGO, and a later SaxoTraderGO login takes the slot back.
+        """
+        if not self.connected:
+            raise SaxoError("SAXO_NOT_CONNECTED")
+        await self.client.request(
+            "PATCH",
+            "/root/v1/sessions/capabilities",
+            body=PRIMARY_SESSION,
+            primary_session=True,
+        )
+        self.update_session(await self.client.request("GET", "/root/v1/sessions/capabilities"))
+
+    def update_session(self, data: dict[str, Any]) -> None:
+        prior = self.session.get("TradeLevel")
+        self.session = merge(self.session, data)
+        level = self.session.get("TradeLevel")
+        if prior == "FullTradingAndChat" and level != prior:
+            for market in self.markets:
+                self.mark_gap(market, "SESSION_DOWNGRADED")
+            self.problem = "SESSION_DOWNGRADED_EXPLICIT_UPGRADE_REQUIRED"
+            raise SaxoError("SESSION_DOWNGRADED_FRESH_SNAPSHOT_REQUIRED")
+        if level == "FullTradingAndChat" and prior != level:
+            # Subscriptions made under OrdersOnly carried delayed prices; take fresh ones rather
+            # than assume Saxo switches them.
+            for ref, subscription in self.subscriptions.items():
+                if subscription["kind"] == "PRICE":
+                    self.mark_gap(subscription["target"], "SESSION_UPGRADED")
+                if subscription["kind"] in {"PRICE", "BOARD"}:
+                    self.reset_refs.add(ref)
 
     async def discover(self, state: MarketState) -> None:
         result = await self.client.request(
@@ -1275,13 +1309,7 @@ class DataService:
                 raise SaxoError("PARTITIONED_UPDATE_REQUIRES_FRESH_SNAPSHOT")
             data = envelope.get("Data", envelope)
             if subscription["kind"] == "SESSION":
-                prior = self.session.get("TradeLevel")
-                self.session = merge(self.session, data)
-                if prior == "FullTradingAndChat" and self.session.get("TradeLevel") != prior:
-                    for market in self.markets:
-                        self.mark_gap(market, "SESSION_DOWNGRADED")
-                    self.problem = "SESSION_DOWNGRADED_EXPLICIT_UPGRADE_REQUIRED"
-                    raise SaxoError("SESSION_DOWNGRADED_FRESH_SNAPSHOT_REQUIRED")
+                self.update_session(data)
             elif subscription["kind"] == "BALANCE":
                 if subscription["arguments"]["AccountKey"] == self.client.oauth.account_key:
                     saxo_balance.receive_balance(self, data, receipt)
@@ -1449,7 +1477,7 @@ class DataService:
             session=self.session,
             refresh_ms=state.price.refresh_ms,
             user_action=(
-                "Review Saxo TradeLevel; upgrading can downgrade another Saxo application"
+                "Delayed until you click 'Use real-time in SLRNO' on System"
                 if self.session.get("TradeLevel") != "FullTradingAndChat"
                 else ""
             ),

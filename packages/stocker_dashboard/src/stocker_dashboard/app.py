@@ -18,6 +18,7 @@ from stocker_execution import views
 from stocker_execution.config import MARKETS, PAGE_SIZE
 from stocker_execution.contracts import key
 from stocker_execution.runtime import Runtime
+from stocker_execution.saxo_auth import SaxoError
 
 # Revalidate page assets so a deploy never pairs a stale script with new markup.
 NO_CACHE = {"Cache-Control": "no-cache"}
@@ -178,6 +179,14 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
     @app.post("/api/paper/disarm")
     async def disarm() -> dict[str, Any]:
         runtime.broker.armed = False
+        return runtime.status()
+
+    @app.post("/api/session/primary")
+    async def primary_session() -> dict[str, Any]:
+        try:
+            await runtime.data.take_primary_session()
+        except SaxoError as exc:
+            raise HTTPException(409, str(exc)) from None
         return runtime.status()
 
     @app.post("/oauth/saxo/start")

@@ -30,8 +30,11 @@ against a bad quote (was £50).
 1. **User:** create a LIVE Saxo OpenAPI application with the redirect URI
    `https://139.59.178.164/oauth/saxo/callback`; keep the client id and secret off chat and Git.
 2. **User:** subscribe the Saxo account to real-time CME Group data (CME, NYMEX, COMEX) including
-   Level 2 / market depth, and enable it for API use. An OrdersOnly session may still see delayed
-   prices; SLRNO never upgrades a session itself.
+   Level 2 / market depth, and enable it for API use. Saxo sends real-time prices only to the
+   user's one FullTradingAndChat ("primary") session, and entries need it. SLRNO never takes it
+   itself: the user clicks **Use real-time in SLRNO** on System (`POST /api/session/primary`),
+   which renews the price streams. It can delay or log off SaxoTraderGO, and a SaxoTraderGO login
+   takes it back, so click again after each one.
 3. Server: write `/etc/stocker/v1/saxo.live.credentials.json` (0600, owned by the service user,
    `"environment": "SAXO_LIVE"`), copy `configs/saxo.live.paper.example.yaml` to
    `/etc/stocker/v1/saxo.live.paper.yaml`, and point the unit at a **new** ledger
@@ -43,7 +46,8 @@ against a bad quote (was £50).
    evidence and expiry-time evidence. Unapproved markets stay monitor-only but are still recorded.
 7. **User:** put the actual recording-permission record in `recording_permission_evidence` and set
    `persistent_capture: true`.
-8. Verify on System that L1 is real-time (`DelayedByMinutes` 0), depth fields arrive and option
+8. **User:** click **Use real-time in SLRNO**. Verify on System that the session is
+   FullTradingAndChat, L1 is real-time (`DelayedByMinutes` 0), depth fields arrive and option
    quotes update; run `POST /api/paper/preflight`; arm with `ENABLE PAPER ONLY`. Every restart
    disarms.
 

@@ -133,6 +133,46 @@ def test_session_downgrade_reset_and_provider_envelopes(tmp_path):
     asyncio.run(scenario())
 
 
+def test_real_time_click_takes_primary_session_and_renews_delayed_streams(tmp_path):
+    async def scenario():
+        _, data, store = setup(tmp_path)
+        data.session = {"TradeLevel": "OrdersOnly"}
+        data.subscriptions = {
+            "session": {"kind": "SESSION", "target": "SESSION"},
+            "cl": {"kind": "PRICE", "target": "CL"},
+            "board": {"kind": "BOARD", "target": "CL"},
+            "balance": {"kind": "BALANCE", "target": "BALANCE"},
+        }
+        await data.take_primary_session()
+        assert data.client.calls == [
+            (
+                "PATCH",
+                "/root/v1/sessions/capabilities",
+                {"body": {"TradeLevel": "FullTradingAndChat"}, "primary_session": True},
+            ),
+            ("GET", "/root/v1/sessions/capabilities", {}),
+        ]
+        assert data.session["TradeLevel"] == "FullTradingAndChat"
+        assert data.reset_refs == {"cl", "board"}
+        assert data.markets["CL"].price.value is None  # the delayed snapshot is not reused
+        # The session stream reporting the same upgrade does not renew twice.
+        data.reset_refs.clear()
+        await data.receive(
+            {
+                "reference": "session",
+                "message_id": "4",
+                "payload": {"TradeLevel": "FullTradingAndChat"},
+            }
+        )
+        assert not data.reset_refs
+        data.connected = False
+        with pytest.raises(ValueError, match="NOT_CONNECTED"):
+            await data.take_primary_session()
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
 def test_history_completed_tail_missing_volume_and_gap_pagination(tmp_path):
     at = datetime(2026, 9, 28, 13, tzinfo=UTC)
     rows = [

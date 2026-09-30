@@ -731,6 +731,12 @@ $("pause").onclick = async () => {
   try { const result = await request(`/api/entries/${paused ? "resume" : "pause"}`, {method: "POST"}); renderStatus(result); text("notice", result.paused ? "Server confirmed: entries paused" : "Server confirmed: entries resumed; readiness gates still apply"); }
   catch (e) { reportError(e); } finally { controlPending = false; $("pause").disabled = false; }
 };
+$("primary-session").onclick = async () => {
+  if (!window.confirm("Make SLRNO Saxo's real-time session? SaxoTraderGO may go delayed or log off.")) return;
+  pending?.abort(); controlPending = true; $("primary-session").disabled = true;
+  try { renderStatus(await request("/api/session/primary", {method: "POST"})); text("notice", "Server confirmed: real-time requested; price streams renew"); }
+  catch (e) { reportError(e); } finally { controlPending = false; $("primary-session").disabled = false; }
+};
 for (const id of ["market-filter", "day-filter", "version-filter", "sort-filter"])
   $(id).addEventListener("change", () => { offset = 0; selectedIdentity = ""; detailRequest?.abort(); text("trade-json", "Select an opportunity to view its evidence"); $("trade-timeline").replaceChildren(); refresh(true); });
 $("prev").onclick = () => { offset = Math.max(0, offset - pageSize); refresh(true); };

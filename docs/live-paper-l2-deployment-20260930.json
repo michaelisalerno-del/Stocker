@@ -1,0 +1,64 @@
+{
+ "at": "2026-09-30T19:08:30+00:00",
+ "release": "82577e0471331aaf1e73b81a9ce961f334957951",
+ "previous_release": "bd2d7a0d7def351d583e8b85d57b8c236babb427",
+ "branch": "codex/live-paper-l2-observation",
+ "ci": {
+  "run": 36763126022,
+  "format": "success",
+  "lint": "success",
+  "typing": "success",
+  "python": "success",
+  "frontend": "success",
+  "server": "success"
+ },
+ "pre_deploy": {
+  "active_reservations": 0,
+  "orders": 0,
+  "nonzero_positions": 0,
+  "fills": 0,
+  "execution_mode": "DISABLED"
+ },
+ "backup": "/var/lib/stocker/backups/live-paper-l2-20260930",
+ "backup_verified": true,
+ "migration_rehearsed_on_backup_copy": "reservation policy check IN (1000,5000) -> IN (1000,5000,100000); rows and foreign keys intact",
+ "configuration_unchanged": true,
+ "credentials_and_tokens_unchanged": true,
+ "installed_smoke_as_stocker": "PASS",
+ "service": {
+  "ActiveState": "active",
+  "SubState": "running",
+  "NRestarts": 0
+ },
+ "routes_loopback_authenticated": {
+  "pages": 200,
+  "api_health": 200,
+  "api_system": 200,
+  "api_overview": 200,
+  "api_history": 200,
+  "api_execution": 200,
+  "api_market": 200
+ },
+ "anonymous_https_status": 401,
+ "runtime": {
+  "data_environment": "SAXO_SIM",
+  "execution_mode": "DISABLED",
+  "armed": false,
+  "live_orders_disabled": true,
+  "oauth": "AUTHENTICATED",
+  "connected": true,
+  "reconciled": true,
+  "reserved_open_trades": 0,
+  "problem": ""
+ },
+ "limits": {
+  "per_trade_gbp": 1000,
+  "slots": 4,
+  "allocation_gbp": 4000,
+  "quote_max_age_seconds": 5
+ },
+ "ledger_reservation_check_after_start": "IN (1000,5000,100000)",
+ "orders_sent": 0,
+ "data_verified": false,
+ "l2_verified": false
+}

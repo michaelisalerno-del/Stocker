@@ -1,6 +1,20 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `bd2d7a0d7def351d583e8b85d57b8c236babb427` (branch
+Current application release: `82577e0471331aaf1e73b81a9ce961f334957951` (branch
+`codex/live-paper-l2-observation`), deployed on **2026-09-30 at 19:08:30 UTC** through the existing
+immutable-release process, replacing `bd2d7a0`. Changes: every observed clock records `book_flow` and
+`observation` (see [the experiment](LIVE-PAPER-EXPERIMENT.md)); paper admission buys one contract up to a
+£1,000 guard (was £50). The [sanitised postflight](live-paper-l2-deployment-20260930.json) records a flat
+ledger before the switch, the verified backup `/var/lib/stocker/backups/live-paper-l2-20260930`, the
+reservation-check migration rehearsed on a copy and then applied at start (`IN (1000,5000,100000)`),
+installed smoke, all loopback routes 200, anonymous HTTPS 401 and an unchanged runtime state (SIM
+authenticated, stream connected, DISABLED/disarmed, no orders). Configuration, credentials and tokens
+are unchanged. Rollback: restore the symlink to `/opt/stocker/releases/bd2d7a0…` and restart; the
+migrated reservation check also accepts every earlier amount.
+
+LIVE data and paper arming remain user actions: see [LIVE-PAPER-EXPERIMENT.md](LIVE-PAPER-EXPERIMENT.md).
+
+Previous release `bd2d7a0d7def351d583e8b85d57b8c236babb427` (branch
 `codex/audit-fixes`), deployed on **2026-09-29 at 18:19:57 UTC** through the existing
 immutable-release process, replacing `98a772c`. [Audit fixes](SLRNO-AUDIT-20260929.md) describe the
 changes; the [sanitised postflight](saxo-audit-fixes-deployment-20260929.json) records a flat ledger

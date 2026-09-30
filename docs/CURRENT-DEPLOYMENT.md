@@ -1,6 +1,14 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `ebb2665e9d2c32addf599ab8e7d62d634d2bbe58` (branch
+Current application release: `49c9390144af3570cf1e08a2e8d90b6afc6594e9` (branch
+`codex/live-paper-l2-observation`), deployed 2026-09-30 22:4x UTC, **armed** (INTERNAL_PAPER, re-armed with
+`ENABLE PAPER ONLY` after preflight). It adds the System page's **Use real-time in SLRNO** button: Saxo
+sends real-time prices only to the user's one FullTradingAndChat session, the LIVE session is OrdersOnly,
+and entries require it. The user chose an explicit click over automatic re-taking (SaxoTraderGO shares the
+slot). Verified backup `/var/lib/stocker/backups/primary-session-20260930`; installed smoke passed; all
+five option families loaded after restart. Rollback: symlink to `/opt/stocker/releases/ebb2665…`, restart.
+
+Previous release `ebb2665e9d2c32addf599ab8e7d62d634d2bbe58` (branch
 `codex/live-paper-l2-observation`), **LIVE market data with internal paper fills**, disarmed, since
 2026-09-30 21:37 UTC. Approved by the user: pins CLX6/GCZ6/NGX6/NQZ6/SIZ6, option-root families with
 per-day expiries from Saxo timestamps at the exchange clock, delta tolerance 0.03, persistent recording,

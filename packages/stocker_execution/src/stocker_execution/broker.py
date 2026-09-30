@@ -23,7 +23,7 @@ from stocker_execution.contracts import (
     utc,
     verified_cutoff,
 )
-from stocker_execution.saxo_data import DataService, MarketState
+from stocker_execution.saxo_data import DataService, MarketState, roots_verified
 from stocker_execution.store import TERMINAL, Store, encode
 
 # Idle broker state is re-read on this cadence; pending orders or held exposure
@@ -126,7 +126,7 @@ class PaperBroker:
         mapping = self.config.mappings.get(state.market)
         if mapping is None:
             raise ValueError("LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED")
-        if state.identity is None or state.option_root != mapping.option_root_id:
+        if not roots_verified(state, mapping.option_root_ids):
             raise ValueError("OPTION_ROOT_NOT_VERIFIED")
         option, distance = await self.select_option(event, state, inputs)
         exit_at = utc(event["exit_at"])

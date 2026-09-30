@@ -108,7 +108,9 @@ class ContractSelection(Strict):
 
 class OptionApproval(Strict):
     environment: Environment
-    option_root_id: int = Field(gt=0)
+    # The exchange lists one root per weekday and week (for example crude "Mon Weekly (1)"),
+    # each with a single expiry, so a same-day option every weekday needs the approved family.
+    option_root_ids: tuple[int, ...] = Field(min_length=1, max_length=32)
     delta_tolerance: float = Field(ge=0, lt=0.1)
     source: str = Field(min_length=10)
     approval: str = Field(min_length=10)
@@ -117,13 +119,23 @@ class OptionApproval(Strict):
     # Actual cutoff comes from verified option-specific reference evidence, never this config.
     selection: Literal["NEAREST_FROZEN_MODEL_DELTA"] = "NEAREST_FROZEN_MODEL_DELTA"
     # ExpiryDate is a date, not the model's expiry instant. Evidence is specific
-    # to this approved root and date; never infer it from exercise time.
+    # to this approved root and date; never infer it from exercise time. Either list the
+    # instants, or approve the exchange's New York clock time: an expiry day then counts only
+    # when Saxo's timestamped LastTradeDate falls on that day at exactly that time.
     expiry_instants: dict[str, AwareDatetime] = Field(default_factory=dict)
+    expiry_clock_new_york: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     expiry_time_evidence: str | None = Field(default=None, min_length=10)
 
     @model_validator(mode="after")
     def expiry_evidence(self) -> "OptionApproval":
-        if self.expiry_instants and not self.expiry_time_evidence:
+        if (
+            len(set(self.option_root_ids)) != len(self.option_root_ids)
+            or min(self.option_root_ids) <= 0
+        ):
+            raise ValueError("OPTION_ROOTS_MUST_BE_UNIQUE_POSITIVE_IDS")
+        if self.expiry_instants and self.expiry_clock_new_york:
+            raise ValueError("ONE_EXPIRY_TIME_SOURCE_ONLY")
+        if (self.expiry_instants or self.expiry_clock_new_york) and not self.expiry_time_evidence:
             raise ValueError("OPTION_EXPIRY_INSTANT_EVIDENCE_REQUIRED")
         for day, instant in self.expiry_instants.items():
             if (

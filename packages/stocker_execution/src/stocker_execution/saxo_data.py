@@ -51,6 +51,22 @@ from stocker_execution.saxo_client import SaxoClient
 from stocker_execution.saxo_stream import Frames, PriceState, merge, merge_board
 
 
+def same_instant(option: dict[str, Any], instant: datetime) -> bool:
+    try:
+        return utc(str(option.get("LastTradeDate"))) == instant
+    except ValueError:
+        return False
+
+
+def roots_verified(state: "MarketState", approved: tuple[int, ...]) -> bool:
+    """The pinned future's option space was loaded only from approved roots."""
+    return (
+        state.identity is not None
+        and bool(state.option_roots)
+        and set(state.option_roots) <= set(approved)
+    )
+
+
 @dataclass
 class MarketState:
     market: Market
@@ -72,7 +88,10 @@ class MarketState:
     )
     option_space: list[dict[str, Any]] = field(default_factory=list)
     option_board: dict[str, Any] = field(default_factory=dict)
-    option_root: int | None = None
+    option_root: int | None = None  # the chain board's root: the nearest expiry from today
+    option_roots: tuple[int, ...] = ()  # approved roots found for the pinned future
+    expiry_instants: dict[str, datetime] = field(default_factory=dict)
+    option_space_day: str = ""
     problem: str = "AUTHENTICATION_REQUIRED"
     history_problem: str = "SAXO_HISTORY_NOT_VERIFIED"
     last_clock: datetime | None = None
@@ -210,47 +229,140 @@ class DataService:
             },
             time.time(),
         )
+        await self.load_options(state, raw)
+        state.problem = ""
+
+    async def load_options(self, state: MarketState, raw: dict[str, Any]) -> None:
+        """The approved option roots of the pinned future, their options, and each day's expiry.
+
+        Without an approval a single related root is still shown for observation, as before.
+        An expiry instant comes from the approval's listed instants, or from Saxo's timestamped
+        LastTradeDate only when it falls on that expiry day at the approved New York clock time.
+        The chain board follows the root of the nearest expiry from today.
+        """
+        assert state.identity is not None
         roots = [
             r["OptionRootId"]
             for r in raw.get("RelatedOptionRootsEnhanced", [])
             if r.get("AssetType") == "FuturesOption"
         ]
         mapping = self.config.mappings.get(state.market)
-        root = (
-            mapping.option_root_id
-            if mapping and mapping.option_root_id in roots
-            else (roots[0] if len(roots) == 1 else None)
+        chosen = (
+            [r for r in roots if r in mapping.option_root_ids]
+            if mapping
+            else (roots if len(roots) == 1 else [])
         )
-        state.option_root = root
-        state.capabilities["options"] = "OPTION_ROOT_AMBIGUOUS_OR_UNAVAILABLE"
-        if root:
+        space_rows: list[dict[str, Any]] = []
+        for root in chosen:
             space = await self.client.request(
                 "GET",
                 f"/ref/v1/instruments/contractoptionspaces/{root}",
-                params={"OptionSpaceSegment": "UnderlyingUic", "UnderlyingUic": identity["uic"]},
+                params={
+                    "OptionSpaceSegment": "UnderlyingUic",
+                    "UnderlyingUic": state.identity["uic"],
+                },
             )
             if space.get("AssetType") != "FuturesOption":
                 raise SaxoError("WRONG_OPTION_ROOT_ASSET_TYPE")
-            state.option_space = [
+            rows = [
                 {
                     **option,
                     "Expiry": expiry.get("Expiry"),
                     "LastTradeDate": expiry.get("LastTradeDate"),
                     "ExerciseStyle": space.get("ExerciseStyle"),
                     "TickSizeScheme": expiry.get("TickSizeScheme"),
+                    "OptionRootId": root,
                 }
                 for expiry in space.get("OptionSpace", [])
                 for option in expiry.get("SpecificOptions", [])
-                if option.get("UnderlyingUic") == identity["uic"]
+                if option.get("UnderlyingUic") == state.identity["uic"]
             ]
-            if len(state.option_space) > 1000:
+            if len(rows) > 1000:
                 raise SaxoError("OPTION_SPACE_TOO_LARGE")
-            state.capabilities["options"] = {
-                "discovered": len(state.option_space),
+            space_rows += rows
+        instants: dict[str, datetime] = {}
+        if mapping and mapping.expiry_instants:
+            instants = {d: utc(i.isoformat()) for d, i in mapping.expiry_instants.items()}
+        elif mapping and mapping.expiry_clock_new_york:
+            conflicts: set[str] = set()
+            for row in space_rows:
+                day = str(row.get("Expiry", ""))[:10]
+                try:
+                    stamp = utc(str(row.get("LastTradeDate")))
+                except ValueError:
+                    continue
+                local = stamp.astimezone(NY)
+                if (
+                    local.date().isoformat() != day
+                    or local.strftime("%H:%M") != mapping.expiry_clock_new_york
+                ):
+                    continue
+                if instants.get(day, stamp) != stamp:
+                    conflicts.add(day)
+                instants[day] = stamp
+            for day in conflicts:
+                instants.pop(day)
+        today = datetime.now(NY).date().isoformat()
+        upcoming = sorted(
+            (str(r.get("Expiry", ""))[:10], r["OptionRootId"])
+            for r in space_rows
+            if str(r.get("Expiry", ""))[:10] >= today
+        )
+        state.option_roots = tuple(chosen)
+        state.option_space, state.expiry_instants = space_rows, instants
+        state.option_root = upcoming[0][1] if upcoming else None
+        state.option_space_day = today
+        state.capabilities["options"] = (
+            {
+                "discovered": len(space_rows),
+                "roots": len(chosen),
                 "quote": "UNVERIFIED",
-                "root": root,
+                "root": state.option_root,
+                "expiry_days": sorted(d for d in instants if d >= today)[:10],
             }
-        state.problem = ""
+            if chosen
+            else "OPTION_ROOT_AMBIGUOUS_OR_UNAVAILABLE"
+        )
+
+    async def refresh_options(self, state: MarketState) -> None:
+        """Once per New York day: new weekly listings appear and the board moves to today's root."""
+        if not state.identity or state.option_space_day == datetime.now(NY).date().isoformat():
+            return
+        raw = await self.client.request(
+            "GET",
+            f"/ref/v1/instruments/details/{state.identity['uic']}/ContractFutures",
+            params={"AccountKey": self.client.oauth.account_key, "FieldGroups": "TradingSessions"},
+        )
+        if raw.get("Uic") != state.identity["uic"]:
+            raise SaxoError("CONFIGURED_REFERENCE_IDENTITY_MISMATCH")
+        await self.load_options(state, raw)
+        await self.subscribe_board(state)
+
+    async def subscribe_board(self, state: MarketState) -> None:
+        """Observation-only chain window on the root of the nearest expiry."""
+        if not state.option_root:
+            return
+        arguments = {
+            "Identifier": state.option_root,
+            "AssetType": "FuturesOption",
+            "AccountKey": self.client.oauth.account_key,
+            "MaxStrikesPerExpiry": self.config.option_chain_strikes,
+            "Expiries": [{"Index": 0}],
+        }
+        current = next(
+            (
+                (ref, s)
+                for ref, s in self.subscriptions.items()
+                if s["kind"] == "BOARD" and s["target"] == state.market
+            ),
+            None,
+        )
+        if current and current[1]["arguments"].get("Identifier") == state.option_root:
+            return
+        try:
+            await self.subscribe("BOARD", arguments, state.market, current[0] if current else None)
+        except (SaxoError, ValueError) as exc:
+            state.capabilities["options"] = {"problem": str(exc)}
 
     async def subscribe(
         self,
@@ -385,7 +497,7 @@ class DataService:
     async def _option_subscribe(
         self, state: MarketState, selected: dict[str, Any]
     ) -> dict[str, Any]:
-        assert state.identity is not None and state.option_root is not None
+        assert state.identity is not None
         uic = selected["Uic"]
         if uic in self.options and any(
             s["target"] == str(uic) for s in self.subscriptions.values()
@@ -412,13 +524,10 @@ class DataService:
             params={"AccountKey": self.client.oauth.account_key, "FieldGroups": "TradingSessions"},
         )
         try:
-            identity = option_identity(state.identity, raw, state.option_root, selected)
+            identity = option_identity(state.identity, raw, selected["OptionRootId"], selected)
         except (TypeError, AttributeError) as exc:
             raise SaxoError("OPTION_REFERENCE_SCHEMA_UNVERIFIED") from exc
-        mapping = self.config.mappings.get(state.market)
-        expiry_instant = (
-            mapping.expiry_instants.get(str(identity["expiry"])[:10]) if mapping else None
-        )
+        expiry_instant = state.expiry_instants.get(str(identity["expiry"])[:10])
         identity["expiry_instant"] = expiry_instant.isoformat() if expiry_instant else None
         self.release_window_slot()
         self.recorder.register(key(identity), identity)
@@ -543,7 +652,7 @@ class DataService:
         mapping = self.config.mappings.get(state.market)
         if mapping is None:
             raise ValueError("LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED")
-        if state.identity is None or state.option_root != mapping.option_root_id:
+        if state.identity is None or not roots_verified(state, mapping.option_root_ids):
             raise ValueError("OPTION_ROOT_NOT_VERIFIED")
         at = utc(event["signal_at"])
         candidates = []
@@ -556,9 +665,11 @@ class DataService:
             day = str(selected.get("Expiry", ""))[:10]
             if day != at.astimezone(NY).date().isoformat():
                 continue
-            expiry = mapping.expiry_instants.get(day)
+            expiry = state.expiry_instants.get(day)
             if expiry is None or expiry <= at:
                 continue
+            if mapping.expiry_clock_new_york and not same_instant(selected, expiry):
+                continue  # another series expiring that day at a different time (AM-settled)
             delta = model_delta(
                 inputs["futures_price"],
                 float(selected["StrikePrice"]),
@@ -828,11 +939,9 @@ class DataService:
     async def restore_option(self, plan: dict[str, Any]) -> None:
         """Owned options keep their original future even after a display roll/restart."""
         option = plan["option"]
-        state = MarketState(
-            market=option["market"],
-            identity=plan["underlying"],
-            option_root=option["option_root_id"],
-        )
+        state = MarketState(market=option["market"], identity=plan["underlying"])
+        if option.get("expiry_instant"):
+            state.expiry_instants = {str(option["expiry"])[:10]: utc(option["expiry_instant"])}
         await self.option_subscribe(
             state,
             {
@@ -840,6 +949,7 @@ class DataService:
                 "UnderlyingUic": option["underlying_uic"],
                 "PutCall": option["right"],
                 "StrikePrice": option["strike"],
+                "OptionRootId": option["option_root_id"],
             },
         )
 
@@ -1007,21 +1117,7 @@ class DataService:
                 state.last_clock = state.last_clock or state.live_since
             except (SaxoError, ValueError) as exc:
                 state.problem = str(exc)
-            if state.option_root:
-                try:
-                    await self.subscribe(
-                        "BOARD",
-                        {
-                            "Identifier": state.option_root,
-                            "AssetType": "FuturesOption",
-                            "AccountKey": self.client.oauth.account_key,
-                            "MaxStrikesPerExpiry": self.config.option_chain_strikes,
-                            "Expiries": [{"Index": 0}],
-                        },
-                        state.market,
-                    )
-                except (SaxoError, ValueError) as exc:
-                    state.capabilities["options"] = {"problem": str(exc)}
+            await self.subscribe_board(state)
         # Discover this environment's GBPUSD UIC; never reuse a SIM identifier in LIVE.
         # An FX problem blocks entries under its own name; it never resets price streams.
         try:

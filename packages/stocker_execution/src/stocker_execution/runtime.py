@@ -628,6 +628,7 @@ class Runtime:
             ):
                 try:
                     await saxo_history.history(self.data, state)
+                    await self.data.refresh_options(state)
                     await self.data.warm_candidates(state)
                     await saxo_history.daily_context(self.data, state)
                 except Exception as exc:

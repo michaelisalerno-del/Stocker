@@ -235,7 +235,7 @@ def test_config_budgets_and_exact_expiry_evidence_required():
     with pytest.raises(ValidationError):
         OptionApproval(
             environment="SAXO_SIM",
-            option_root_id=50,
+            option_root_ids=(50,),
             delta_tolerance=0.02,
             source="frozen source",
             approval="explicit approval",
@@ -250,7 +250,7 @@ def test_frozen_model_ranking_preserved_and_provider_delta_not_substituted(tmp_p
         mappings={
             "CL": {
                 "environment": "SAXO_SIM",
-                "option_root_id": 50,
+                "option_root_ids": [50],
                 "delta_tolerance": 0.01,
                 "source": "frozen source",
                 "approval": "explicit approval",
@@ -263,9 +263,10 @@ def test_frozen_model_ranking_preserved_and_provider_delta_not_substituted(tmp_p
     )
     data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
     state = data.markets["CL"]
-    state.identity, state.option_root = FUTURE, 50
+    state.identity, state.option_roots = FUTURE, (50,)
     at = datetime(2026, 9, 28, 14, tzinfo=UTC)
     expiry = at.replace(hour=20)
+    state.expiry_instants = {"2026-09-28": expiry}
     strike = frozen_strike(70, 0.01, at, expiry, "C", 0.1)
     state.option_space = [
         {
@@ -317,7 +318,7 @@ def test_owned_and_captured_options_not_evicted_at_budget(tmp_path):
         config = FuturesConfig(option_subscription_budget=4)
         data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
         state = data.markets["CL"]
-        state.identity, state.option_root = FUTURE, 50
+        state.identity, state.option_roots = FUTURE, (50,)
         for uic in range(101, 105):
             data.options[uic] = ({**OPTION, "uic": uic}, quote())
         data.owned_options = set(data.options)
@@ -384,7 +385,7 @@ def test_optional_cost_failure_does_not_stop_regular_observation(tmp_path):
         config = FuturesConfig()
         data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
         state = data.markets["CL"]
-        state.identity, state.option_root = FUTURE, 50
+        state.identity, state.option_roots = FUTURE, (50,)
         data.client.request = AsyncMock(
             side_effect=[
                 reference(),
@@ -400,6 +401,7 @@ def test_optional_cost_failure_does_not_stop_regular_observation(tmp_path):
                 "PutCall": "Call",
                 "StrikePrice": 70,
                 "Expiry": OPTION["expiry"],
+                "OptionRootId": 50,
             },
         )
         assert data.options[101][1].value["Quote"]["Ask"] == 0.009
@@ -412,7 +414,7 @@ def test_optional_cost_failure_does_not_stop_regular_observation(tmp_path):
 def test_event_pins_one_contract_and_detaches_decision_evidence(tmp_path, monkeypatch):
     async def run():
         broker, data, store = setup(tmp_path)
-        data.markets["CL"].option_root = 50
+        data.markets["CL"].option_roots = (50,)
         event = signal(1)
         data.recorder = Recorder(
             RecorderConfig(
@@ -423,7 +425,9 @@ def test_event_pins_one_contract_and_detaches_decision_evidence(tmp_path, monkey
         data.recorder.register(key(OPTION), OPTION)
         data.recorder.register(key(FUTURE), FUTURE)
         data.recorder.trigger(key(FUTURE), event, time.time(), [key(OPTION)])
-        monkeypatch.setattr(data, "rank_candidates", lambda *_: [(0.001, 70, {"Uic": 101})])
+        monkeypatch.setattr(
+            data, "rank_candidates", lambda *_: [(0.001, 70, {"Uic": 101, "OptionRootId": 50})]
+        )
         monkeypatch.setattr(
             data,
             "focus_board",
@@ -565,7 +569,7 @@ def test_full_candidate_window_rotates_without_mixed_history(tmp_path, monkeypat
         config = FuturesConfig()
         data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
         state = data.markets["CL"]
-        state.identity, state.option_root = FUTURE, 50
+        state.identity, state.option_roots = FUTURE, (50,)
         state.bars = [SimpleNamespace(at=datetime.now(UTC) - timedelta(minutes=1), close=70)]
         data.recorder.register(key(FUTURE), FUTURE)
         for uic in range(101, 113):
@@ -607,3 +611,152 @@ def test_malformed_optional_metadata_does_not_stop_other_market_observation(tmp_
         store.db.close()
 
     asyncio.run(run())
+
+
+def weekly_space(day, stamp, uic):
+    return {
+        "AssetType": "FuturesOption",
+        "ExerciseStyle": "American",
+        "OptionSpace": [
+            {
+                "Expiry": day,
+                "LastTradeDate": stamp,
+                "SpecificOptions": [
+                    {"Uic": uic, "UnderlyingUic": 100, "PutCall": "Call", "StrikePrice": 70}
+                ],
+            }
+        ],
+    }
+
+
+def family_mapping(**extra):
+    return {
+        "environment": "SAXO_SIM",
+        "option_root_ids": [51, 52, 53],
+        "delta_tolerance": 0.03,
+        "source": "weekly family fixture",
+        "approval": "explicit approval",
+        "fee_per_side_gbp": 2.7,
+        "fee_evidence": "fixture fee evidence",
+        "expiry_time_evidence": "exchange rule fixture",
+        "expiry_clock_new_york": "14:30",
+        **extra,
+    }
+
+
+def ny_stamp(day, hour, minute, second=0):
+    from stocker_execution.rules import NY
+
+    y, m, d = map(int, day.split("-"))
+    local = datetime(y, m, d, hour, minute, second, tzinfo=NY)
+    return local.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def family_service(tmp_path, spaces):
+    config = FuturesConfig(mappings={"CL": family_mapping()})
+    data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
+
+    async def request(method, path, params=None, **_):
+        return spaces[int(path.rsplit("/", 1)[1])]
+
+    data.client.request = request
+    state = data.markets["CL"]
+    state.identity = FUTURE
+    raw = {
+        "RelatedOptionRootsEnhanced": [
+            {"AssetType": "FuturesOption", "OptionRootId": r} for r in (51, 52, 53, 54)
+        ]
+    }
+    return data, state, raw
+
+
+def test_weekly_family_loads_today_root_and_saxo_timestamps_at_the_approved_clock(tmp_path):
+    from stocker_execution.rules import NY
+
+    today = datetime.now(NY).date()
+    d = [(today + timedelta(days=i)).isoformat() for i in range(3)]
+    spaces = {
+        51: weekly_space(d[0], ny_stamp(d[0], 14, 30), 201),
+        52: weekly_space(d[1], ny_stamp(d[1], 14, 30), 202),
+        53: weekly_space(d[2], ny_stamp(d[2], 13, 0), 203),  # not the approved clock
+    }
+    data, state, raw = family_service(tmp_path, spaces)
+    asyncio.run(data.load_options(state, raw))
+    assert state.option_roots == (51, 52, 53)  # 54 is related but not approved
+    assert {o["OptionRootId"] for o in state.option_space} == {51, 52, 53}
+    assert sorted(state.expiry_instants) == d[:2]
+    assert state.expiry_instants[d[0]].astimezone(NY).strftime("%Y-%m-%d %H:%M") == d[0] + " 14:30"
+    assert state.option_root == 51  # today's expiry drives the chain board
+
+
+def test_conflicting_saxo_timestamps_leave_that_day_unverified(tmp_path):
+    from stocker_execution.rules import NY
+
+    day = datetime.now(NY).date().isoformat()
+    spaces = {
+        51: weekly_space(day, ny_stamp(day, 14, 30), 201),
+        52: weekly_space(day, ny_stamp(day, 14, 30, 30), 202),
+        53: {"AssetType": "FuturesOption", "OptionSpace": []},
+    }
+    data, state, raw = family_service(tmp_path, spaces)
+    asyncio.run(data.load_options(state, raw))
+    assert day not in state.expiry_instants
+
+
+def test_board_moves_to_a_new_root_by_replacing_its_subscription(tmp_path):
+    async def run():
+        config = FuturesConfig()
+        data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
+        state = data.markets["CL"]
+        state.identity, state.option_root = FUTURE, 51
+        calls = []
+
+        async def subscribe(kind, arguments, target, old=None):
+            calls.append((arguments["Identifier"], old))
+            data.subscriptions["S1"] = {"kind": kind, "arguments": arguments, "target": target}
+            return "S1"
+
+        data.subscribe = subscribe
+        await data.subscribe_board(state)
+        await data.subscribe_board(state)  # same root: nothing to do
+        state.option_root = 52
+        await data.subscribe_board(state)
+        assert calls == [(51, None), (52, "S1")]
+
+    asyncio.run(run())
+
+
+def test_family_approval_needs_one_time_source_evidence_and_unique_roots():
+    OptionApproval(**family_mapping())
+    for bad in (
+        {"expiry_time_evidence": None},
+        {"expiry_instants": {"2026-09-28": "2026-09-28T20:00:00Z"}},
+        {"option_root_ids": [51, 51]},
+        {"option_root_ids": []},
+        {"expiry_clock_new_york": "2:30pm"},
+    ):
+        with pytest.raises(ValidationError):
+            OptionApproval(**family_mapping(**bad))
+
+
+def test_a_series_expiring_the_same_day_at_another_time_is_never_a_candidate(tmp_path):
+    from stocker_execution.rules import NY
+
+    at = datetime(2026, 12, 18, 14, tzinfo=UTC)  # 09:00 New York
+    day = at.astimezone(NY).date().isoformat()
+    config = FuturesConfig(mappings={"CL": family_mapping()})
+    data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
+    state = data.markets["CL"]
+    state.identity, state.option_roots = FUTURE, (51, 52)
+    instant = datetime.fromisoformat(ny_stamp(day, 14, 30).replace("Z", "+00:00"))
+    state.expiry_instants = {day: instant}
+    strike = frozen_strike(70, 0.01, at, instant, "C", 0.1)
+    row = {"UnderlyingUic": 100, "PutCall": "Call", "StrikePrice": strike, "Expiry": day}
+    state.option_space = [
+        {**row, "Uic": 301, "OptionRootId": 51, "LastTradeDate": ny_stamp(day, 9, 30)},
+        {**row, "Uic": 302, "OptionRootId": 52, "LastTradeDate": ny_stamp(day, 14, 30)},
+    ]
+    ranked = data.rank_candidates(
+        state, opportunity("CL", 100, at), {"futures_price": 70, "rv15": 0.01}
+    )
+    assert [r[2]["Uic"] for r in ranked] == [302]

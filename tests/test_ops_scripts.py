@@ -58,3 +58,69 @@ def test_preflight_refuses_a_held_owner_lock_before_opening_the_ledger(tmp_path)
         with pytest.raises(SystemExit, match="DATA_OWNER_LOCK_HELD"):
             asyncio.run(preflight.preflight(config, database, 5))
     assert not database.exists()
+
+
+def test_reference_audit_picks_prior_session_volume_leader_and_loads_as_the_runtime_does(tmp_path):
+    from datetime import date
+
+    from stocker_execution.config import ContractSelection
+    from stocker_execution.reference_sessions import load_selections
+
+    audit = script("reference_audit")
+    pinned = ContractSelection(
+        environment="SAXO_LIVE",
+        uic=1,
+        symbol="CLX6",
+        exchange="NYMEX",
+        contract_month="2026-11",
+        approval="fixture pin approval",
+    )
+    nearby = [
+        {
+            "uic": 1,
+            "symbol": "CLX6",
+            "exchange": "NYMEX",
+            "contract_month": "2026-11",
+            "expiry": "2026-10-20",
+        },
+        {
+            "uic": 2,
+            "symbol": "CLZ6",
+            "exchange": "NYMEX",
+            "contract_month": "2026-12",
+            "expiry": "2026-11-20",
+        },
+    ]
+    days = [
+        "2026-09-22",
+        "2026-09-23",
+        "2026-09-24",
+        "2026-09-25",
+        "2026-09-28",
+        "2026-09-29",
+        "2026-09-30",
+    ]
+    volumes = {1: {d: 300000.0 for d in days}, 2: {d: 200000.0 for d in days}}
+    volumes[2]["2026-09-24"] = 400000.0  # December led on the 24th, so it is the 25th's reference
+    book = audit.build_audit(
+        "CL", "SAXO_LIVE", pinned, nearby, volumes, "2026-09-30", "fixture standing approval"
+    )
+    assert [s.day.isoformat() for s in book.sessions] == days[
+        1:6
+    ]  # today's partial sample excluded
+    assert [s.contract.symbol for s in book.sessions] == ["CLX6", "CLX6", "CLZ6", "CLX6", "CLX6"]
+    assert "CLZ6 400,000" in book.sessions[2].prior_session_volume_evidence
+    path = tmp_path / "selections.json"
+    path.write_text(json.dumps([json.loads(book.model_dump_json())]))
+    loaded, _ = load_selections(path, "SAXO_LIVE", "CL", date(2026, 9, 30), 1)
+    assert loaded.current_uic == 1
+    with pytest.raises(ValueError, match="FEWER_THAN_SIX"):
+        audit.build_audit(
+            "CL",
+            "SAXO_LIVE",
+            pinned,
+            nearby,
+            {1: {d: 1.0 for d in days[:5]}},
+            "2026-09-30",
+            "x" * 20,
+        )

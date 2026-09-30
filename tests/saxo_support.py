@@ -241,7 +241,7 @@ def book(n=10, bid_size=3, ask_size=1, shift=0):
 
 GC_MAPPING = {
     "environment": "SAXO_SIM",
-    "option_root_id": 60,
+    "option_root_ids": [60],
     "delta_tolerance": 0.01,
     "source": "fixture frozen source",
     "approval": "fixture explicit approval",

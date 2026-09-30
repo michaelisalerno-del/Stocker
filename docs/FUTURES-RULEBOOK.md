@@ -59,3 +59,19 @@ internally simulated. SAXO_SIM uses verified SIM account orders and confirmed br
 are required, disclaimers block, timeouts are never blindly retried, and unknown exposure blocks entries.
 Confirmed positions and terminal order/fill states govern capacity release. Costs/FX absent from SIM
 execution evidence leave P&L provisional, never zero-filled. Failed closure is a prominent exception.
+
+## Listed option families and daily expiries (2026-09-30)
+
+CME lists a separate option root for each weekday of each week (crude "Mon Weekly (1)", "Tue Weekly (1)" ...,
+gold, NQ likewise), each with one expiry. A mapping therefore approves the **family** of roots on the pinned
+future (`option_root_ids`). The runtime loads every approved root's options, re-reads them once per New York
+day (new weekly listings), points the observation chain at the root of the nearest expiry, and ranks only
+options expiring today. An expiry instant is either listed in `expiry_instants`, or derived per day from
+Saxo's timestamped `LastTradeDate` only when it falls on that expiry day at the approved
+`expiry_clock_new_york` (evidence required); conflicting timestamps leave the day unverified, and a series
+expiring the same day at another time (for example AM-settled) is never a candidate. Live listings on
+2026-09-30: CL, GC and NQ have a same-day expiry every weekday; NG only Mondays and Fridays; SI only Fridays.
+
+Reference sessions: `scripts/reference_audit.py` writes the daily selection audit before the session (a
+systemd timer at 07:30 New York) under the user's standing approval of the prior-session volume rule, using
+Saxo daily-chart volume. It reads the service's current access token and never refreshes it.

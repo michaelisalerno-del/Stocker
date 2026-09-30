@@ -191,6 +191,7 @@ class DataService:
         """
         if not self.connected:
             raise SaxoError("SAXO_NOT_CONNECTED")
+        already = self.session.get("TradeLevel") == "FullTradingAndChat"
         await self.client.request(
             "PATCH",
             "/root/v1/sessions/capabilities",
@@ -198,6 +199,18 @@ class DataService:
             primary_session=True,
         )
         self.update_session(await self.client.request("GET", "/root/v1/sessions/capabilities"))
+        if already:
+            # A repeat click (for example once a data subscription starts) renews streams too.
+            self.renew_streams()
+
+    def renew_streams(self) -> None:
+        # Subscriptions made before real-time applied carried delayed prices; take fresh ones
+        # rather than assume Saxo switches them.
+        for ref, subscription in self.subscriptions.items():
+            if subscription["kind"] == "PRICE":
+                self.mark_gap(subscription["target"], "SESSION_UPGRADED")
+            if subscription["kind"] in {"PRICE", "BOARD"}:
+                self.reset_refs.add(ref)
 
     def update_session(self, data: dict[str, Any]) -> None:
         prior = self.session.get("TradeLevel")
@@ -209,13 +222,7 @@ class DataService:
             self.problem = "SESSION_DOWNGRADED_EXPLICIT_UPGRADE_REQUIRED"
             raise SaxoError("SESSION_DOWNGRADED_FRESH_SNAPSHOT_REQUIRED")
         if level == "FullTradingAndChat" and prior != level:
-            # Subscriptions made under OrdersOnly carried delayed prices; take fresh ones rather
-            # than assume Saxo switches them.
-            for ref, subscription in self.subscriptions.items():
-                if subscription["kind"] == "PRICE":
-                    self.mark_gap(subscription["target"], "SESSION_UPGRADED")
-                if subscription["kind"] in {"PRICE", "BOARD"}:
-                    self.reset_refs.add(ref)
+            self.renew_streams()
 
     async def discover(self, state: MarketState) -> None:
         result = await self.client.request(

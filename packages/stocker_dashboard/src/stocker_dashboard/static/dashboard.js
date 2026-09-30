@@ -533,7 +533,7 @@ function render(d) {
     quoteReceipts.set(m.market, Date.parse(m.l1?.last_receipt));
     text(`capability-${m.market}`, `${m.market} · ${m.l1?.status || "UNVERIFIED"} · ${m.l2?.status || "L2_UNAVAILABLE"} · ${m.block_reason || "monitoring"}`);
     const q = m.l1?.quote || {}, sizes = m.l1?.sizes || {}, rec = m.recorder || {};
-    text(`quote-${m.market}`, `Bid ${q.Bid ?? "—"} × ${sizes.bid ?? "—"} · Ask ${q.Ask ?? "—"} × ${sizes.ask ?? "—"} · spread ${m.l1?.spread ?? "—"} · delay ${m.l1?.delay_minutes ?? "unknown"} min`);
+    text(`quote-${m.market}`, `Bid ${q.Bid ?? "—"} × ${sizes.bid ?? "—"} · Ask ${q.Ask ?? "—"} × ${sizes.ask ?? "—"} · spread ${m.l1?.spread != null ? numeric(m.l1.spread) : "—"} · delay ${m.l1?.delay_minutes ?? "unknown"} min`);
     text(`recorder-${m.market}`, `${rec.state || "UNAVAILABLE"} · ${Math.floor(rec.prehistory_seconds || 0)} / 900s prehistory${rec.reason ? " · " + display(rec.reason) : ""}`);
     text(`contract-${m.market}`, m.contract || "");
     text(`market-${m.market}`, display(m.market_status));
@@ -542,7 +542,7 @@ function render(d) {
     text(`direction-${m.market}`, m.direction);
     text(`conditions-${m.market}`, m.conditions?.rv15 != null ? `RV15 ${(m.conditions.rv15 * 100).toFixed(4)}% · completed bars` : "Waiting for required history");
     const pc = m.price_context;
-    text(`price-context-${m.market}`, pc ? [pc.open != null && `open ${pc.open}`, pc.high != null && `high ${pc.high}`, pc.low != null && `low ${pc.low}`, pc.last_close != null && `prev close ${pc.last_close}`, pc.net_change != null && `change ${pc.net_change}${pc.percent_change != null ? ` (${Number(pc.percent_change).toFixed(2)}%)` : ""}`, pc.open_interest != null && `OI ${pc.open_interest}`, pc.market_state && pc.market_state, pc.daily_range != null && `20-day avg range ${numeric(pc.daily_range)}`].filter(Boolean).join(" · ") || "Not reported" : "Not reported");
+    text(`price-context-${m.market}`, pc ? [pc.open != null && `open ${pc.open}`, pc.high != null && `high ${pc.high}`, pc.low != null && `low ${pc.low}`, pc.last_close != null && `prev close ${pc.last_close}`, pc.net_change != null && `change ${numeric(pc.net_change)}${pc.percent_change != null ? ` (${Number(pc.percent_change).toFixed(2)}%)` : ""}`, pc.open_interest != null && `OI ${pc.open_interest}`, pc.market_state && pc.market_state, pc.daily_range != null && `20-day avg range ${numeric(pc.daily_range)}`].filter(Boolean).join(" · ") || "Not reported" : "Not reported");
     const sessions = m.sessions_today || [];
     text(`sessions-${m.market}`, sessions.length ? sessions.map((x) => `${hhmm(x.start)}–${hhmm(x.end)} ${x.state}`).join(" · ") + " (NY)" : "Session schedule unverified");
     const events = m.events_today || [];

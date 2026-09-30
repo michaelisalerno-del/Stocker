@@ -165,6 +165,9 @@ def test_real_time_click_takes_primary_session_and_renews_delayed_streams(tmp_pa
             }
         )
         assert not data.reset_refs
+        # A repeat click, for example once a data subscription starts, still renews the streams.
+        await data.take_primary_session()
+        assert data.reset_refs == {"cl", "board"}
         data.connected = False
         with pytest.raises(ValueError, match="NOT_CONNECTED"):
             await data.take_primary_session()

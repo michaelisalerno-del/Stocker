@@ -312,7 +312,7 @@ async function label(page) {
         .evaluateAll((nodes) => nodes.map((n) => n.id)),
       markets.map((m) => `card-${m}`),
     );
-    assert.match(await page.locator("#state-GC").textContent(), /MONITOR ONLY/);
+    assert.match(await page.locator("#state-GC").textContent(), /BLOCKED/);
     assert.match(await page.locator("#allocation").textContent(), /100.00.*200.00/);
     assert.equal(await page.locator("#account-available").textContent(), "Unavailable");
     assert.match(await page.locator("#account-note").textContent(), /Real-money balances are not connected/);

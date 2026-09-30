@@ -50,6 +50,10 @@ from stocker_execution.saxo_auth import SaxoError
 from stocker_execution.saxo_client import SaxoClient
 from stocker_execution.saxo_stream import Frames, PriceState, merge, merge_board
 
+# Reference details and option spaces share Saxo's 60-a-minute RefDataInstrumentsMinute limit;
+# loading an option family one root per 1.05 s keeps a whole family inside it.
+OPTION_SPACE_GAP_SECONDS = 1.05
+
 
 def same_instant(option: dict[str, Any], instant: datetime) -> bool:
     try:
@@ -260,7 +264,9 @@ class DataService:
             else (roots if len(roots) == 1 else [])
         )
         space_rows: list[dict[str, Any]] = []
-        for root in chosen:
+        for i, root in enumerate(chosen):
+            if i:
+                await asyncio.sleep(OPTION_SPACE_GAP_SECONDS)
             space = await self.client.request(
                 "GET",
                 f"/ref/v1/instruments/contractoptionspaces/{root}",

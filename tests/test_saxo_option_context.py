@@ -653,6 +653,9 @@ def ny_stamp(day, hour, minute, second=0):
 
 
 def family_service(tmp_path, spaces):
+    import stocker_execution.saxo_data as module
+
+    module.OPTION_SPACE_GAP_SECONDS = 0
     config = FuturesConfig(mappings={"CL": family_mapping()})
     data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
 

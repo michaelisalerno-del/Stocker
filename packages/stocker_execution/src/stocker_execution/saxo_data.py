@@ -230,7 +230,13 @@ class DataService:
             },
             time.time(),
         )
-        await self.load_options(state, raw)
+        try:
+            await self.load_options(state, raw)
+        except SaxoError as exc:
+            # The future is verified; an options problem (a rate limit at connect, say) stays with
+            # the options, and the next history pass retries through refresh_options.
+            state.options_retry_at = time.monotonic() + 60
+            state.capabilities["options"] = {"problem": str(exc)}
         state.problem = ""
 
     async def load_options(self, state: MarketState, raw: dict[str, Any]) -> None:

@@ -781,3 +781,49 @@ def test_a_failed_daily_option_refresh_stays_with_the_options_and_waits_to_retry
         assert state.capabilities["options"] == {"problem": "RateLimitExceeded"}
 
     asyncio.run(run())
+
+
+def test_an_options_problem_at_connect_does_not_block_the_verified_future(tmp_path):
+    async def run():
+        config = FuturesConfig(
+            contracts={
+                "CL": {
+                    "environment": "SAXO_SIM",
+                    "uic": 100,
+                    "symbol": FUTURE["symbol"],
+                    "exchange": FUTURE["exchange"],
+                    "contract_month": FUTURE["contract_month"],
+                    "approval": "fixture pin approval",
+                }
+            },
+            mappings={"CL": family_mapping()},
+        )
+        data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
+        state = data.markets["CL"]
+        details = {
+            "AssetType": "ContractFutures",
+            "Uic": 100,
+            "Symbol": FUTURE["symbol"],
+            "ContractSize": 1000,
+            "ExpiryDate": "2026-10-20",
+            "CurrencyCode": "USD",
+            "Exchange": {"ExchangeId": FUTURE["exchange"]},
+            "TickSize": 0.01,
+            "PriceToContractFactor": 1000,
+            "RelatedOptionRootsEnhanced": [{"AssetType": "FuturesOption", "OptionRootId": 51}],
+        }
+
+        async def request(method, path, **_):
+            if path == "/ref/v1/instruments":
+                return {"Data": []}
+            if path.startswith("/ref/v1/instruments/details/"):
+                return details
+            raise SaxoError("RateLimitExceeded")
+
+        data.client.request = request
+        await data.discover(state)
+        assert state.identity["uic"] == 100 and state.problem == ""
+        assert state.capabilities["options"] == {"problem": "RateLimitExceeded"}
+        assert state.option_space_day == ""  # the daily refresh will retry
+
+    asyncio.run(run())

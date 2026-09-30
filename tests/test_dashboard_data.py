@@ -39,7 +39,7 @@ def test_gates_follow_the_decision_order_and_explain_the_first_block(tmp_path):
     ]
     assert not any(g["ok"] for g in gates)
     by_key = {g["key"]: g for g in gates}
-    assert by_key["approval"]["detail"] == "GC_MONITOR_ONLY_UNTIL_APPROVED"
+    assert by_key["approval"]["detail"] == "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
     assert by_key["execution"]["detail"] == "EXECUTION_DISABLED"
     assert by_key["strike"]["detail"] == "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
     assert by_key["cost"]["detail"] == "NO_CANDIDATE"

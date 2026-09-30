@@ -228,8 +228,6 @@ class Runtime:
             "contract": (state.identity or {}).get("symbol"),
             "strategy_state": trades[0]["state"]
             if trades
-            else "MONITOR_ONLY"
-            if market == "GC" and reason
             else "BLOCKED"
             if reason
             else "MONITORING",

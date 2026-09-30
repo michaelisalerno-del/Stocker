@@ -589,7 +589,7 @@ class DataService:
             if identity["market"] == state.market and self.option_protected(uic):
                 await self.focus_board(state, identity)
                 break
-        if not state.identity or not state.bars or state.market == "GC":
+        if not state.identity or not state.bars:
             return
         try:
             at = state.bars[-1].at + timedelta(minutes=1)

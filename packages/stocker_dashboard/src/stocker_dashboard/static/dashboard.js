@@ -36,7 +36,6 @@ const show = (id, visible) => { const el = $(id); if (el && el.hidden === visibl
 const explanations = {
   REFERENCE_CONTRACT_SELECTION_REQUIRED: "Select and verify the Saxo futures contract",
   LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED: "Option product and selection approval required",
-  GC_MONITOR_ONLY_UNTIL_APPROVED: "Gold is monitor-only until its option mapping is approved",
   MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET: "One contract, including entry and reserved exit costs, exceeds the per-trade ceiling",
   WITHIN_BUDGET: "One contract fits the per-trade ceiling",
   INCOMPLETE_COMPLETED_HISTORY: "Waiting for the final completed-minute bar",

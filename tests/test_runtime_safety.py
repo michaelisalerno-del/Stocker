@@ -54,12 +54,27 @@ def test_approved_gc_is_labelled_like_any_approved_market(tmp_path):
     detail = runtime.market_detail("GC")["markets"][0]
     assert overview["GC"]["strategy_state"] == detail["strategy_state"] == "MONITORING"
     assert overview["GC"]["entry_enabled"] and detail["entry_enabled"]
-    # Unapproved GC remains monitor-only on both pages.
+    # Unapproved GC is blocked on both pages, like any unapproved market.
     runtime.markets["GC"].problem = "REFERENCE_CONTRACT_SELECTION_REQUIRED"
     overview = {c["market"]: c for c in runtime.overview()["markets"]}
     detail = runtime.market_detail("GC")["markets"][0]
-    assert overview["GC"]["strategy_state"] == detail["strategy_state"] == "MONITOR_ONLY"
+    assert overview["GC"]["strategy_state"] == detail["strategy_state"] == "BLOCKED"
     runtime.store.db.close()
+
+
+def test_gc_warms_candidates_like_any_market(tmp_path):
+    async def scenario():
+        runtime = Runtime(FuturesConfig(), Store(tmp_path / "ledger.sqlite3"))
+        state = runtime.markets["GC"]
+        state.identity = {**FUTURE, "market": "GC"}
+        # Stale bars stop warming inside the ranking step, which GC used to skip entirely.
+        state.bars = [Bar(AT - timedelta(minutes=5), 70, 71, 69, 70, 10)]
+        await runtime.data.warm_candidates(state)
+        assert state.candidate_problem == "CANDIDATE_UNDERLYING_HISTORY_STALE"
+        await runtime.stop()
+        runtime.store.db.close()
+
+    asyncio.run(scenario())
 
 
 def test_unexpected_missing_field_is_not_recorded_as_a_trading_reason(tmp_path, monkeypatch):

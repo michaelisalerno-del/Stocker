@@ -11,7 +11,7 @@ import zlib
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from stocker_execution.config import MARKETS, QUOTE_MAX_AGE_SECONDS
+from stocker_execution.config import MARKETS, MAX_PREMIUM_RISK_GBP, QUOTE_MAX_AGE_SECONDS
 from stocker_execution.contracts import quote_check, session_state, utc
 from stocker_execution.rules import NY, clocks
 
@@ -76,9 +76,7 @@ def gates(
             "approval",
             "Option approval",
             market in runtime.config.mappings,
-            "GC_MONITOR_ONLY_UNTIL_APPROVED"
-            if market == "GC"
-            else "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED",
+            "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED",
         ),
         (
             "strike",
@@ -88,7 +86,7 @@ def gates(
         ),
         (
             "cost",
-            "Cost ≤ £50",
+            f"Cost ≤ £{MAX_PREMIUM_RISK_GBP:,}",
             costs.get("budget_result") == "WITHIN_BUDGET",
             costs.get("reason") or costs.get("budget_result") or "NO_CANDIDATE",
         ),

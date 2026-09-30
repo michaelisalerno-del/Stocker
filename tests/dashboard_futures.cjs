@@ -107,7 +107,7 @@ const state = {
     entry_enabled: false,
     strategy_state: [
       "BLOCKED",
-      "MONITOR_ONLY",
+      "BLOCKED",
       "OPEN",
       "MONITORING",
       "RESERVED",
@@ -177,9 +177,9 @@ const state = {
           : [],
   })),
 };
-const gateLabels = [["saxo","Saxo"],["contract","Contract"],["quote","Quote"],["history","History"],["approval","Option approval"],["strike","Strike"],["cost","Cost ≤ £50"],["execution","Execution"]];
+const gateLabels = [["saxo","Saxo"],["contract","Contract"],["quote","Quote"],["history","History"],["approval","Option approval"],["strike","Strike"],["cost","Cost ≤ £1,000"],["execution","Execution"]];
 for (const m of state.markets) {
-  m.gates = gateLabels.map(([key,label],i)=>({key,label,ok:i<4 || (m.market==="NQ" && i<6),detail:i<4?"":i===4?(m.market==="GC"?"GC_MONITOR_ONLY_UNTIL_APPROVED":"LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"):i===6?"MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET":"PAPER_DISARMED"}));
+  m.gates = gateLabels.map(([key,label],i)=>({key,label,ok:i<4 || (m.market==="NQ" && i<6),detail:i<4?"":i===4?"LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED":i===6?"MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET":"PAPER_DISARMED"}));
   m.events = m.market==="CL" ? [{name:"EIA Weekly Petroleum Status",at:"2026-09-28T14:30:00Z",relation:"DURING_HOLDING_WINDOW"}] : [];
   m.chart_context = {clocks:[13,14,15].map(h=>({at:`2026-09-28T${h}:00:00Z`,session:"AutomatedTrading"})), rv_window:["2026-09-28T14:05:00Z","2026-09-28T14:20:00Z"]};
   m.candidate_deltas = {[String(1001+markets.indexOf(m.market))]: 0.1032};
@@ -325,8 +325,8 @@ async function label(page) {
     assert.match(await page.locator("#countdown").textContent(), /Next clock 11:00 NY · in 39:5\d/);
     assert.match(await page.locator("#setup-progress").textContent(), /3 of 5 required steps done/);
     assert.equal(await page.locator("#gates-NQ li.ok").count(), 6);
-    assert.match(await page.locator("#gates-GC li.fail").first().getAttribute("title"), /monitor-only until its option mapping is approved/);
-    assert.match(await page.locator("#block-GC").textContent(), /Option approval: Gold is monitor-only/);
+    assert.match(await page.locator("#gates-GC li.fail").first().getAttribute("title"), /Option product and selection approval required/);
+    assert.match(await page.locator("#block-GC").textContent(), /Option approval: Option product and selection approval required/);
     assert.match(await page.locator("#events-CL").textContent(), /EIA Weekly Petroleum Status 10:30 NY/);
     assert(await page.locator("#events-GC").isHidden());
     assert(await page.locator("#position-NG").isVisible() && await page.locator("#position-CL").isHidden());

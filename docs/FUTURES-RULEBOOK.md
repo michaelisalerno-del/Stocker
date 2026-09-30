@@ -49,8 +49,9 @@ is insufficient. Exercise cutoff text is retained but is never silently interpre
 Missing option-specific timing blocks admission. Never substitute a cheaper strike, micro contract,
 next expiry, CFD, direct future or fractional quantity to manufacture an affordable trade.
 
-GC has a frozen research primary, but no unambiguous approved **listed execution mapping**. It is
-MONITOR_ONLY until that approval exists; no experimental GC management rule is adopted.
+GC is treated like the other four markets (unblocked 2026-09-30 at the user's request): it warms and
+records option candidates, and enters once its listed execution mapping is approved like any market. No
+experimental GC management rule is adopted.
 
 INTERNAL_PAPER consumes no broker orders. Entry fills use ask plus one tick, exits bid minus one tick,
 with fresh displayed size and verified fee assumptions; no midpoint fills. All fills/P&L are labelled

@@ -321,6 +321,8 @@ async function label(page) {
     assert.equal(await page.locator("#overview-slots > div").count(), 4);
     assert.match(await page.locator("#live-badge").textContent(), /LIVE ORDERS DISABLED/);
     assert.match(await page.locator("#exec-chip").textContent(), /Execution SAXO_SIM/);
+    // Primary session without a verified real-time feed must not read as fully on.
+    assert.equal(await page.locator("#realtime-chip").textContent(), "Real-time ON · Saxo still delayed");
     await page.clock.fastForward(1100);
     assert.match(await page.locator("#countdown").textContent(), /Next clock 11:00 NY · in 39:5\d/);
     assert.match(await page.locator("#setup-progress").textContent(), /3 of 5 required steps done/);

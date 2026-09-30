@@ -462,6 +462,13 @@ function renderStatus(s) {
   const exceptions = Object.values(s.management_problems || {}).join(" · ");
   text("execution-warning", exceptions || "No reported exposure exceptions");
   text("global-warning", exceptions || s.problem || s.l2_recording?.paused_reason || "");
+  const primary = s.session?.TradeLevel === "FullTradingAndChat";
+  const live = (s.setup || []).find((item) => item.key === "realtime")?.done;
+  text("realtime-chip", primary ? (live ? "Real-time ON" : "Real-time ON · Saxo still delayed") : "Real-time OFF");
+  $("realtime-chip").classList.toggle("bad", !(primary && live));
+  text("primary-state", !primary ? "OFF: prices are delayed. Click to give SLRNO Saxo's real-time slot."
+    : live ? "ON: SLRNO holds Saxo's real-time slot and prices are real-time."
+    : "ON, but Saxo still sends delayed prices. In SaxoTraderGO check My Profile → Other → Open API Access is enabled; that login turns this OFF, so click again after it.");
   text("auth-state", `OAuth: ${s.oauth || "UNVERIFIED"}${s.oauth_problem ? ` (${s.oauth_problem})` : ""} · stream: ${s.connected ? "connected" : "disconnected"} · session: ${s.session?.TradeLevel || "UNVERIFIED"}`);
   const alerts = s.alerts || {};
   text("events-state", `Saxo order/position events: ${display(s.activity_events || "NOT_SUBSCRIBED").toLowerCase()}${s.closed_positions_problem ? ` · closed positions: ${s.closed_positions_problem}` : ""}${s.calendar_problem ? ` · event calendar: ${s.calendar_problem}` : ""}`);

@@ -1,7 +1,13 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `49c9390144af3570cf1e08a2e8d90b6afc6594e9` (branch
-`codex/live-paper-l2-observation`), deployed 2026-09-30 22:4x UTC, **armed** (INTERNAL_PAPER, re-armed with
+Current application release: `a70f2442a3d6391796bbe5e2492224bc2f57b964`, deployed 2026-09-30 23:06 UTC
+and re-armed after preflight. A repeat real-time click now renews the price streams too (a click made
+before the data subscription starts would otherwise leave them delayed), and the market card rounds the
+futures spread and change. Verified backup `/var/lib/stocker/backups/repeat-click-20260930`; CI green;
+installed smoke passed; all five option families reloaded. Rollback: symlink to `49c9390…`, restart.
+
+Previous release `49c9390144af3570cf1e08a2e8d90b6afc6594e9` (branch
+`codex/live-paper-l2-observation`), deployed 2026-09-30 22:40 UTC, **armed** (INTERNAL_PAPER, re-armed with
 `ENABLE PAPER ONLY` after preflight). It adds the System page's **Use real-time in SLRNO** button: Saxo
 sends real-time prices only to the user's one FullTradingAndChat session, the LIVE session is OrdersOnly,
 and entries require it. The user chose an explicit click over automatic re-taking (SaxoTraderGO shares the

@@ -12,14 +12,16 @@ from typing import Any
 from stocker_execution.config import MAX_OPEN_POSITIONS, MAX_PREMIUM_RISK_PENNIES, PAGE_SIZE
 
 TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
-# Historical £10 (1,000p) reservations keep their policy amount; new ones use the current ceiling.
+# Historical £10 (1,000p) and £50 (5,000p) reservations keep their policy amount;
+# new ones use the current ceiling.
+POLICIES = ",".join(str(p) for p in (1000, 5000, MAX_PREMIUM_RISK_PENNIES))
 RESERVATIONS = f"""CREATE TABLE {{table}} (
     id TEXT PRIMARY KEY REFERENCES signals(id),
     allocation_pennies INTEGER NOT NULL,
     active INTEGER NOT NULL CHECK(active IN (0,1)),
     state TEXT NOT NULL, plan TEXT NOT NULL, created_at TEXT NOT NULL,
     policy_pennies INTEGER NOT NULL
-    CHECK(policy_pennies IN (1000,{MAX_PREMIUM_RISK_PENNIES})),
+    CHECK(policy_pennies IN ({POLICIES})),
     CHECK(allocation_pennies=policy_pennies))"""
 
 
@@ -87,21 +89,25 @@ class Store:
             raise ValueError("LEDGER_INTEGRITY_FAILURE")
 
     def migrate_allocation(self) -> None:
-        """Rebuild only the old fixed-£10 table; retain every row and its policy amount.
+        """Rebuild an older reservation table (fixed £10, or the £50 ceiling's policy check);
+        retain every row and its policy amount.
 
         Foreign keys are disabled outside the transaction solely for SQLite's table
         rebuild. Validate them before commit and restore enforcement even on failure.
         """
         columns = {r[1] for r in self.db.execute("PRAGMA table_info(reservations)")}
-        if "policy_pennies" in columns:
+        (sql,) = self.db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='reservations'"
+        ).fetchone()
+        if "policy_pennies" in columns and f"IN ({POLICIES})" in sql:
             return
+        # The fixed-£10 table predates the policy column; later tables already carry it.
+        rows = "*" if "policy_pennies" in columns else "*,allocation_pennies"
         self.db.execute("PRAGMA foreign_keys=OFF")
         try:
             self.db.execute("BEGIN IMMEDIATE")
             self.db.execute(RESERVATIONS.format(table="reservations_new"))
-            self.db.execute(
-                "INSERT INTO reservations_new SELECT *,allocation_pennies FROM reservations"
-            )
+            self.db.execute(f"INSERT INTO reservations_new SELECT {rows} FROM reservations")
             self.db.execute("DROP TABLE reservations")
             self.db.execute("ALTER TABLE reservations_new RENAME TO reservations")
             if self.db.execute("PRAGMA foreign_key_check").fetchone():

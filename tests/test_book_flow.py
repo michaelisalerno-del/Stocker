@@ -365,7 +365,7 @@ def test_l2_fluctuations_do_not_change_frozen_decisions_or_create_events(tmp_pat
                 (rows[0]["decision"], rows[0]["reason"], rows[0]["signal_at"], rows[0]["exit_at"])
             )
             assert not runtime.broker.armed and not store.orders(rows[0]["id"])
-            assert MAX_OPEN_POSITIONS == 4 and MAX_PREMIUM_RISK_GBP == 50
+            assert MAX_OPEN_POSITIONS == 4 and MAX_PREMIUM_RISK_GBP == 1000
             await runtime.stop()
             store.db.close()
         assert len(set(decisions)) == 1

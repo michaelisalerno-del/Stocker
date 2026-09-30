@@ -13,7 +13,10 @@ Market = Literal["CL", "GC", "NG", "NQ", "SI"]
 MARKETS: tuple[Market, ...] = ("CL", "GC", "NG", "NQ", "SI")
 Environment = Literal["SAXO_SIM", "SAXO_LIVE"]
 RULE_VERSION = "CLOCK60_NG13_20260927"
-MAX_PREMIUM_RISK_GBP = 50
+# One whole contract per trade, whatever it costs up to this ceiling. The ceiling guards against
+# a bad quote; it is not a budget (2026-09-30: "the lowest possible amount, whether it's 200 or
+# more"). Earlier policies were £10 and then £50; their reservations keep those amounts.
+MAX_PREMIUM_RISK_GBP = 1000
 MAX_PREMIUM_RISK_PENNIES = MAX_PREMIUM_RISK_GBP * 100
 MAX_OPEN_POSITIONS = 4
 MAX_SIMULTANEOUS_ENTRY_RISK_GBP = MAX_PREMIUM_RISK_GBP * MAX_OPEN_POSITIONS

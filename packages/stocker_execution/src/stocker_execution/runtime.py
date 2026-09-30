@@ -30,7 +30,15 @@ from stocker_execution.config import (
 from stocker_execution.contracts import key, quote_check, session_state
 from stocker_execution.event_calendar import EventCalendar, load_calendar
 from stocker_execution.recorder import Recorder
-from stocker_execution.rules import NY, clocks, eligibility, next_clock, opportunity, prior_rv
+from stocker_execution.rules import (
+    NY,
+    clocks,
+    eligibility,
+    next_clock,
+    observation,
+    opportunity,
+    prior_rv,
+)
 from stocker_execution.saxo_auth import OAuth
 from stocker_execution.saxo_client import REST_QUEUE_LIMIT, SaxoClient
 from stocker_execution.saxo_data import DataService, MarketState
@@ -553,6 +561,12 @@ class Runtime:
                     ).fetchone()
                     detail = json.loads(row[0])
                     detail["option_context"] = context
+                    # Observation only, never an entry rule: the futures book at this clock and
+                    # the volatility ingredients needed to judge vetoes afterwards.
+                    detail["book_flow"] = self.recorder.book_flow_view(
+                        key(state.identity), time.time()
+                    )
+                    detail["observation"] = observation(state.bars, clock, state.references)
                     # Observation only: the chain as seen at this clock (provider units).
                     detail["option_chain"] = views.smile(
                         state.option_board,

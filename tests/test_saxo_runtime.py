@@ -285,7 +285,7 @@ def test_internal_fill_revalidates_fx_and_rejects_budget_overrun(tmp_path):
         store.observe(event, "", {})
         stale_plan = plan()
         stale_plan["fx_at"] = time.time() - 60
-        data.fx = quote(0.19, 0.2)  # real cost now exceeds £50; do not use old cheap FX
+        data.fx = quote(0.009, 0.0095)  # real cost now exceeds £1,000; do not use old cheap FX
         await broker.enter(event, stale_plan)
         assert not store.fills(event["id"])
         assert (

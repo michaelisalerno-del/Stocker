@@ -101,6 +101,57 @@ def test_unexpected_missing_field_is_not_recorded_as_a_trading_reason(tmp_path, 
     asyncio.run(scenario())
 
 
+def test_every_clock_records_the_book_and_volatility_observations(tmp_path, monkeypatch):
+    import stocker_execution.runtime as module
+
+    monkeypatch.setattr(module, "now", lambda: AT + timedelta(seconds=5))
+
+    async def scenario():
+        runtime = Runtime(FuturesConfig(), Store(tmp_path / "ledger.sqlite3"))
+        runtime.started_at = AT - timedelta(seconds=1)
+        state = runtime.markets["CL"]
+        state.identity = FUTURE
+        state.problem = state.history_problem = ""
+        state.references = [{9: {"rv15": 0.01, "range15": 0.01, "volume15": 150}} for _ in range(5)]
+        state.bars = [
+            Bar(AT - timedelta(minutes=70 - i), 70 + i * 0.01, 71 + i * 0.01, 69, 70 + i * 0.01, 10)
+            for i in range(70)
+        ]
+        state.price = quote(70, 71, AT.timestamp() + 5)
+        runtime.recorder.register(key(FUTURE), FUTURE)
+        await runtime.decisions()
+        (row,) = runtime.store.history(None, None, None)
+        (detail,) = runtime.store.db.execute(
+            "SELECT detail FROM signals WHERE id=?", (row["id"],)
+        ).fetchone()
+        detail = json.loads(detail)
+        # No depth has arrived, so the book is honestly unavailable, never zero-filled.
+        assert detail["book_flow"]["status"] == "UNAVAILABLE"
+        seen = detail["observation"]
+        assert seen["rv60"] > 0
+        assert seen["hour_reference_rv15_median"] == 0.01
+        # Recording is observation only: the entry decision is unchanged.
+        assert row["reason"] == "EXECUTION_DISABLED"
+        await runtime.stop()
+        runtime.store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_observation_never_bridges_a_gap_and_never_raises():
+    from stocker_execution.rules import observation
+
+    bars = [
+        Bar(AT - timedelta(minutes=70 - i), 70, 71, 69, 70 + (i % 2) * 0.1, 10) for i in range(70)
+    ]
+    del bars[40]  # one missing minute inside the last hour
+    seen = observation(bars, AT, [])
+    assert seen["rv60"] is None
+    assert seen["hour_reference_rv15_median"] is None
+    # 08:00-08:59 New York less 08:30: 59 bars, 58 neighbours, one spanning the gap.
+    assert seen["session_minutes_counted"] == 57
+
+
 def test_fresh_ledger_is_created_with_the_current_reservation_schema(tmp_path):
     store = Store(tmp_path / "fresh.sqlite3")
     (sql,) = store.db.execute("SELECT sql FROM sqlite_master WHERE name='reservations'").fetchone()

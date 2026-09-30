@@ -36,7 +36,7 @@ def test_ledger_backup_is_consistent_verifiable_and_never_overwrites(tmp_path):
     assert manifest["provenance"]["execution_mode"] == "INTERNAL_PAPER"
     assert backup.verify(tmp_path / "bundle")["files"] == manifest["files"]
     copy = sqlite3.connect(tmp_path / "bundle" / "ledger.sqlite3")
-    assert copy.execute("SELECT allocation_pennies FROM reservations").fetchall() == [(5000,)]
+    assert copy.execute("SELECT allocation_pennies FROM reservations").fetchall() == [(100000,)]
     copy.close()
     with pytest.raises(FileExistsError):
         backup.backup(database, config, tmp_path / "bundle")

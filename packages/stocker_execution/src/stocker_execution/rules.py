@@ -167,6 +167,50 @@ def eligibility(
     }
 
 
+def observation(
+    bars: list[Bar], at: datetime, references: list[dict[int, dict[str, float]]]
+) -> dict[str, float | int | None]:
+    """Observation only, never a gate: the ingredients for judging each clock afterwards.
+
+    rv60 and the session's travel use completed one-minute bars only; a gap leaves rv60 unset
+    and is never bridged. The hour's reference rv15 is the median of the reference sessions.
+    """
+    by_time = {b.at: b for b in bars}
+    try:
+        rv60: float | None = prior_rv(bars, at, 60, by_time)
+    except ValueError:
+        rv60 = None
+    day = at.astimezone(NY).date()
+    session = sorted(
+        (
+            b
+            for b in bars
+            if b.at < at and b.valid() and (s := b.at.astimezone(NY)).date() == day and s.hour >= 8
+        ),
+        key=lambda b: b.at,
+    )
+    pairs = [
+        (a, b)
+        for a, b in zip(session, session[1:], strict=False)
+        if b.at - a.at == timedelta(minutes=1)
+    ]
+    medians = [
+        v
+        for r in references[-5:]
+        if math.isfinite(v := r.get(at.astimezone(NY).hour, {}).get("rv15", math.nan))
+    ]
+    return {
+        "rv60": rv60,
+        "session_travel_since_0800": math.sqrt(
+            sum(math.log(b.close / a.close) ** 2 for a, b in pairs)
+        )
+        if pairs
+        else None,
+        "session_minutes_counted": len(pairs),
+        "hour_reference_rv15_median": median(medians) if medians else None,
+    }
+
+
 def reference_summary(bars: list[Bar]) -> dict[int, dict[str, float]]:
     result: dict[int, dict[str, float]] = {}
     by_time = {b.at: b for b in bars}

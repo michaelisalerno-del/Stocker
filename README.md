@@ -17,9 +17,9 @@ The server keeps a bounded 15-minute L1/L2 window independently of browsers. Fro
 preserve available prehistory and at least 60 minutes afterward, including skipped trades. There
 is no permanent full-session raw archive. Missing depth remains L1_ONLY/L2_UNAVAILABLE.
 
-Paper admission means one whole long option, at most £50 including entry and reserved exit costs,
-and four concurrent reservations/open trades against a £200 concurrent allocation ceiling.
-Historical £10 reservations retain their original policy amounts. Ambiguous orders retain capacity. The frozen research does not approve
+Paper admission means one whole long option, whatever it costs up to a £1,000 guard including entry
+and reserved exit costs, and four concurrent reservations/open trades (£4,000 allocation ceiling).
+Historical £10 and £50 reservations retain their original policy amounts. Ambiguous orders retain capacity. The frozen research does not approve
 listed option products, actual 0DTE expiry clocks or delta tolerances; missing evidence blocks entries.
 GC remains monitored. No orders were sent or paper execution armed during this migration.
 

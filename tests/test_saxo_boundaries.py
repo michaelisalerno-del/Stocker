@@ -349,7 +349,7 @@ def test_budget_real_contract_not_ten_contracts_and_no_fractional():
     }
     assert budget(option, 0.01, 1, 0.75)["cash_pennies"] == 850
     with pytest.raises(ValueError, match="MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET"):
-        budget(option, 0.066, 1, 0.75)
+        budget(option, 1.334, 1, 0.75)  # £1,001.50 all in, one contract
     with pytest.raises(ValueError, match="WHOLE"):
         budget({**option, "lot_size": 0.1}, 0.01, 1, 0.75)
     with pytest.raises(ValueError, match="DIRECT_FUTURES"):

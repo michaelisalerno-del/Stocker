@@ -1,0 +1,26 @@
+# LIVE market data with internal paper fills: no broker order can be sent in this mode.
+# Use a new ledger for it (for example /var/lib/stocker/v1/saxo-live-internal-paper.sqlite3);
+# the store refuses to relabel an existing SIM ledger. See docs/LIVE-PAPER-EXPERIMENT.md.
+data_environment: SAXO_LIVE
+execution_mode: INTERNAL_PAPER
+armed: false
+markets: [CL, GC, NG, NQ, SI]
+saxo:
+  credentials_file: /etc/stocker/v1/saxo.live.credentials.json # mode 0600, environment SAXO_LIVE
+  redirect_uri: https://139.59.178.164/oauth/saxo/callback # must match the LIVE app registration
+contracts: {} # Pin from this environment's returned ContractFutures reference data after login.
+mappings: {} # Per-market option approvals; see docs/FUTURES-RULEBOOK.md.
+recorder:
+  minimum_post_event_minutes: 60
+  post_close_minutes: 5
+  rolling_max_bytes: 33554432
+  queue_max_bytes: 8388608
+  queue_max_items: 512
+  archive_max_bytes: 2147483648
+  disk_reserve_bytes: 2147483648
+  bar_max_bytes: 134217728
+  # Set both together, with the actual permission record (who granted it, when, and its scope):
+  # persistent_capture: true
+  # recording_permission_evidence: "..."
+  persistent_capture: false
+  recording_permission_evidence: null

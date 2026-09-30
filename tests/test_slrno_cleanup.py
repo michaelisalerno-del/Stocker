@@ -31,24 +31,24 @@ from stocker_execution.saxo_balance import (
 from stocker_execution.store import Store
 
 
-def test_new_allocation_is_fifty_all_in_and_four_unique_slots(tmp_path):
+def test_new_allocation_is_one_contract_up_to_the_ceiling_and_four_unique_slots(tmp_path):
     broker, _, store = setup(tmp_path)
     for i in range(4):
         event = signal(i)
         store.observe(event, "", {})
-        p = {**plan(), "cash_pennies": 5000}
+        p = {**plan(), "cash_pennies": 100000}
         broker.validate_order(p, "ENTRY", event["id"])
         assert store.reserve(event["id"], p) == ""
         assert store.reserve(event["id"], p) == "DUPLICATE_OPPORTUNITY"
-    assert store.capacity() == {"reserved_open_trades": 4, "allocation_pennies": 20000}
+    assert store.capacity() == {"reserved_open_trades": 4, "allocation_pennies": 400000}
     fifth = signal(5)
     store.observe(fifth, "", {})
     assert store.reserve(fifth["id"], plan()) == "SKIP_CAPACITY_FULL"
     with pytest.raises(ValueError, match="EXCEEDS_BUDGET"):
-        broker.validate_order({**plan(), "cash_pennies": 5001}, "ENTRY", fifth["id"])
-    assert budget(plan()["option"], 0.049, 1, 1)["cash_pennies"] == 5000
+        broker.validate_order({**plan(), "cash_pennies": 100001}, "ENTRY", fifth["id"])
+    assert budget(plan()["option"], 0.999, 1, 1)["cash_pennies"] == 100000
     with pytest.raises(ValueError, match="EXCEEDS_BUDGET"):
-        budget(plan()["option"], 0.04901, 1, 1)
+        budget(plan()["option"], 0.99901, 1, 1)
     assert budget(plan()["option"], 0.009, 1, 1)["quantity"] == 1
     store.db.close()
 
@@ -151,11 +151,43 @@ def test_migration_keeps_old_allocation_policy_orders_and_fills(tmp_path):
     event = signal("new")
     migrated.observe(event, "", {})
     assert migrated.reserve(event["id"], {**plan(), "cash_pennies": 5000}) == ""
-    assert migrated.capacity() == {"reserved_open_trades": 2, "allocation_pennies": 6000}
+    assert migrated.capacity() == {"reserved_open_trades": 2, "allocation_pennies": 101000}
     migrated.db.close()
     reopened = Store(path)
-    assert reopened.capacity()["allocation_pennies"] == 6000
+    assert reopened.capacity()["allocation_pennies"] == 101000
     reopened.db.close()
+
+
+def test_fifty_pound_ledger_migrates_and_keeps_its_reservations(tmp_path):
+    path = tmp_path / "fifty.sqlite"
+    store = Store(path)
+    event = signal("fifty")
+    store.observe(event, "", {})
+    # Reconstruct the deployed £50 schema: policy check IN (1000,5000).
+    store.db.execute("PRAGMA foreign_keys=OFF")
+    store.db.executescript("""
+      BEGIN IMMEDIATE;
+      DROP TABLE reservations;
+      CREATE TABLE reservations (id TEXT PRIMARY KEY REFERENCES signals(id),
+        allocation_pennies INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)),
+        state TEXT NOT NULL, plan TEXT NOT NULL, created_at TEXT NOT NULL,
+        policy_pennies INTEGER NOT NULL CHECK(policy_pennies IN (1000,5000)),
+        CHECK(allocation_pennies=policy_pennies));
+      COMMIT;
+    """)
+    store.db.execute(
+        "INSERT INTO reservations VALUES(?,5000,1,'RESERVED','{}','then',5000)", (event["id"],)
+    )
+    store.db.commit()
+    store.db.close()
+    migrated = Store(path)
+    assert migrated.capacity() == {"reserved_open_trades": 1, "allocation_pennies": 5000}
+    newer = signal("newer")
+    migrated.observe(newer, "", {})
+    assert migrated.reserve(newer["id"], {**plan(), "cash_pennies": 90000}) == ""
+    assert migrated.capacity() == {"reserved_open_trades": 2, "allocation_pennies": 105000}
+    assert not list(migrated.db.execute("PRAGMA foreign_key_check"))
+    migrated.db.close()
 
 
 @pytest.mark.parametrize("environment", ["SAXO_SIM", "SAXO_LIVE"])
@@ -464,7 +496,7 @@ def test_page_scopes_and_display_cache_never_drive_admission(tmp_path, monkeypat
         runtime.store.observe(event, "fixture", {})
         assert runtime.store.economics()["opportunities"] == 1
         assert runtime.store.reserve(event["id"], plan()) == ""
-        assert runtime.store.capacity()["allocation_pennies"] == 5000
+        assert runtime.store.capacity()["allocation_pennies"] == 100000
         await runtime.stop()
         runtime.store.db.close()
 

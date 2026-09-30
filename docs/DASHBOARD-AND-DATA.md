@@ -14,10 +14,10 @@ observation context: none of it feeds admission, sizing or management.
   reference sessions n/5, option approvals (GC optional), execution mode, armed; recording and
   alerts are marked optional. It hides on Overview once every required step is done.
 - **Readiness gates** on every market: Saxo · Contract · Quote · History · Option approval ·
-  Strike · Cost ≤ £50 · Execution, in decision order, with the first block explained. They
+  Strike · Cost ≤ £1,000 · Execution, in decision order, with the first block explained. They
   summarise the last refresh; the clock decision still re-checks everything itself.
 - **Markets page:** a trade ticket (quote and sizes, spread as % of mid, frozen-model |Δ| against
-  the target, provider delta, last trading time, all-in cost bar against £50); a chart with price
+  the target, provider delta, last trading time, all-in cost bar against the £1,000 guard); a chart with price
   and time axes, today's clock marks (closed sessions in red), the 15-minute RV window and the
   open-trade band; a market-context panel (session high/low/change, open interest, today's
   sessions, scheduled releases, the options-chain smile); a bar-style depth ladder and a

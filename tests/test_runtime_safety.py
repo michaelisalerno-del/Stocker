@@ -145,6 +145,8 @@ def test_every_clock_records_the_book_and_volatility_observations(tmp_path, monk
         seen = detail["observation"]
         assert seen["rv60"] > 0
         assert seen["hour_reference_rv15_median"] == 0.01
+        # The look14 forecast is recorded too; no option was selected, so no price check.
+        assert detail["forecast"]["status"] == "OBSERVED" and "option" not in detail["forecast"]
         # Recording is observation only: the entry decision is unchanged.
         assert row["reason"] == "EXECUTION_DISABLED"
         await runtime.stop()

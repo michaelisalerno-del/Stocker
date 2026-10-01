@@ -13,7 +13,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
-from stocker_execution import option_context, saxo_balance, saxo_history, views
+from stocker_execution import forecast, option_context, saxo_balance, saxo_history, views
 from stocker_execution.alerts import Alerts
 from stocker_execution.broker import PaperBroker, now
 from stocker_execution.config import (
@@ -335,6 +335,11 @@ class Runtime:
         except ValueError:
             pass
         day = at.astimezone(NY).date()
+        contracts = [
+            self.data.option_view(uic, at.timestamp())
+            for uic, (i, _) in self.data.options.items()
+            if i["market"] == market
+        ]
         card.update(
             {
                 "identity": identity,
@@ -372,12 +377,18 @@ class Runtime:
                     "candidate_uic": state.candidate_uic,
                     "problem": state.candidate_problem,
                     "candidate_changes": list(state.candidate_changes) if diagnostics else None,
-                    "contracts": [
-                        self.data.option_view(uic, at.timestamp())
-                        for uic, (i, _) in self.data.options.items()
-                        if i["market"] == market
-                    ],
+                    "contracts": contracts,
                 },
+                "forecast": self.forecast_view(
+                    state,
+                    state.bars[-1].at + timedelta(minutes=1),
+                    next(
+                        (c for c in contracts if c["identity"]["uic"] == state.candidate_uic),
+                        None,
+                    ),
+                )
+                if state.bars
+                else None,
                 "chart": [{"at": b.at.isoformat(), "close": b.close} for b in state.bars[-90:]],
                 "chart_context": views.chart_context(state, at),
                 "sessions_today": views.sessions_today(state, at),
@@ -414,6 +425,17 @@ class Runtime:
             }
         )
         return {"system": self.status(), "markets": [card]}
+
+    def forecast_view(
+        self, state: MarketState, at: datetime, option: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        # Observation only: a failure here is recorded and never reaches the entry decision.
+        try:
+            return forecast.observe(
+                state.bars, at, state.market, option, (state.price.value or {}).get("Quote") or {}
+            )
+        except (ArithmeticError, KeyError, TypeError, ValueError) as exc:
+            return {"version": forecast.VERSION, "status": "UNAVAILABLE", "reason": repr(exc)}
 
     def trade_view(self, row: dict[str, Any]) -> dict[str, Any]:
         plan = json.loads(row["plan"])
@@ -567,6 +589,13 @@ class Runtime:
                         key(state.identity), time.time()
                     )
                     detail["observation"] = observation(state.bars, clock, state.references)
+                    # Observation only: the look14 forecast and, for the selected option, the
+                    # movement its price implies against the forecast's.
+                    detail["forecast"] = self.forecast_view(
+                        state,
+                        clock,
+                        context if context.get("selection_status") == "SELECTED" else None,
+                    )
                     # Observation only: the chain as seen at this clock (provider units).
                     detail["option_chain"] = views.smile(
                         state.option_board,

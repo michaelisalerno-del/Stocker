@@ -18,6 +18,18 @@ Every observed clock, including vetoed, unaffordable and capacity-skipped ones, 
 - `observation`: `rv60`, `session_travel_since_0800` with `session_minutes_counted`, and
   `hour_reference_rv15_median`. `rv15` is in `inputs` when the eligibility gate passed. Gaps leave a
   value unset rather than bridging it.
+- `forecast` (from 2026-10-02, `LOOK14_FORECAST_V1`): the look14 forecast from the 2026-09-30 bar
+  research, 0.97 × (today so far)^0.19 × (last hour)^0.36 × (last 15 minutes)^0.13, each movement
+  against its normal for the time of day. The normal is a frozen per-minute profile
+  (`stocker_execution/look14_profile.json`: days 1-40 of the cached IBKR bars, the profile the
+  weights were fitted with; its sha256 is stored with each record). `next_hour_move` is the forecast
+  standard deviation of the log price over the hold. For the selected option, `option` sets the
+  movement to expiry implied by the mid (undiscounted Black) against the forecast's
+  (`implied_over_forecast`; above 1, the option is priced for more movement than forecast) and the
+  ask against the forecast's fair price. Spans to a later expiry add the profile's full session for
+  each weekday between (holidays unknown). Saxo's 1,200 chart bars can begin after the 18:00 open;
+  `today_minutes_counted` says how much of the session "today so far" covered. The trade ticket shows
+  the same values live for the current candidate.
 
 With persistent capture enabled, the existing recorder also keeps every delivered futures and
 candidate-option message from 15 minutes before to at least 60 minutes after each clock. The option

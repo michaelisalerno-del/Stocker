@@ -100,6 +100,7 @@ function marketCard(m) {
           <dt>Spread</dt><dd id="ticket-spread-${m}"></dd>
           <dt>Delta</dt><dd id="ticket-delta-${m}"></dd>
           <dt>Volatility</dt><dd id="ticket-iv-${m}"></dd>
+          <dt>Forecast</dt><dd id="ticket-forecast-${m}"></dd>
           <dt>Cutoff</dt><dd id="ticket-cutoff-${m}"></dd>
         </dl>
         <div class="cost-meter" aria-label="All-in cost against the per-trade ceiling"><div class="cost-fill" id="ticket-fill-${m}"></div></div>
@@ -225,6 +226,9 @@ function ticket(m, {held, uic, o, context}) {
   text(`ticket-delta-${m.market}`, o ? `Frozen model |Δ| ${numeric(model)} vs target ${numeric(m.target_delta)} · provider ${numeric(provider)} (unverified)` : "—");
   const iv = o?.analytics?.["Greeks.MidVol"]?.value, sigma = m.model_sigma;
   text(`ticket-iv-${m.market}`, typeof iv === "number" ? `Implied ${(100 * iv).toFixed(1)}% vs frozen model σ ${typeof sigma === "number" ? (100 * sigma).toFixed(1) + "%" : "unavailable"}${typeof sigma === "number" ? ` · ${iv - sigma >= 0 ? "+" : ""}${(100 * (iv - sigma)).toFixed(1)} pts` : ""}` : "Implied volatility not reported");
+  // look14, observation only: the option's price against the movement the forecast expects.
+  const f = m.forecast, fo = f?.option?.uic === uic ? f.option : null;
+  text(`ticket-forecast-${m.market}`, f?.status === "OBSERVED" ? `Movement ${f.level.toFixed(2)}× normal for the time of day · next hour ±${(100 * f.next_hour_move).toFixed(2)}%${typeof fo?.implied_over_forecast === "number" ? ` · priced for ${fo.implied_over_forecast.toFixed(2)}× the forecast move to expiry (${(100 * fo.implied_move_to_expiry).toFixed(2)}% vs ${(100 * fo.forecast_move_to_expiry).toFixed(2)}%)` : ""}` : `Forecast unavailable · ${display(f?.reason) || "no bars"}`);
   text(`ticket-cutoff-${m.market}`, o ? `Last trading ${id.last_trade_at ? hhmm(id.last_trade_at) + " NY" : "UNVERIFIED"} · exit ${held?.exit_at ? hhmm(held.exit_at) + " NY" : "clock + 60 min"}` : "—");
   const ceiling = limits.per_trade_gbp, total = cost.total_gbp;
   const fill = $(`ticket-fill-${m.market}`);

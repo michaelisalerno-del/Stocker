@@ -189,6 +189,7 @@ for (const m of state.markets) {
   m.smile = {expiry:"2026-09-28T00:00:00Z", mid_strike_price:70.2, scaling:"PROVIDER_NATIVE_UNVERIFIED", executable:false,
     strikes:[66,67,68,69,70,71,72].map((strike,k)=>({strike, mid_volatility_pct:.3, call:null, put:{uic:900+k, mid_volatility:.28+Math.abs(69-strike)*.012, open_interest:[40,120,300,800,500,90,20][k]}}))};
   m.model_sigma = 0.27;
+  m.forecast = {status:"OBSERVED", level:0.82, next_hour_move:0.0031, option:{uic:1001+markets.indexOf(m.market), implied_over_forecast:1.29, implied_move_to_expiry:0.0062, forecast_move_to_expiry:0.0048}};
   m.price_context = {open:2641,high:2660,low:2630,last_close:2638,net_change:12,percent_change:0.45,open_interest:512000,market_state:"Open",daily_range:31.5};
   m.identity = {environment:"SAXO_SIM",uic:100+markets.indexOf(m.market)};
   m.book_flow = {
@@ -361,6 +362,7 @@ async function label(page) {
     assert.match(await page.locator("#ticket-spread-GC").textContent(), /66\.7% of mid/);
     assert.match(await page.locator("#ticket-delta-GC").textContent(), /model \|Δ\| 0\.1032 vs target 0\.1/);
     assert.match(await page.locator("#ticket-iv-GC").textContent(), /Implied 31\.0% vs frozen model σ 27\.0% · \+4\.0 pts/);
+    assert.match(await page.locator("#ticket-forecast-GC").textContent(), /0\.82× normal .* ±0\.31% · priced for 1\.29× the forecast move to expiry \(0\.62% vs 0\.48%\)/);
     assert.match(await page.locator("#ticket-cost-GC").textContent(), /£20\.10 all-in of £50\.00/);
     assert.match(await page.locator("#sessions-GC").textContent(), /18:00–17:00 AutomatedTrading \(NY\)/);
     assert.match(await page.locator("#events-today-GC").textContent(), /08:30 US CPI/);

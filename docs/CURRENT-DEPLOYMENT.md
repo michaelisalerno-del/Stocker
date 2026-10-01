@@ -1,6 +1,11 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `8dbc6df3267aa985a6a55280a213513bf342c6d2`, deployed 2026-10-01 20:51 UTC and re-armed
+Current application release: `f0cbd06d95689f308c3e370a98b1aa9c2524f8ab`, deployed 2026-10-01 21:08 UTC and re-armed
+(session stayed FullTradingAndChat): the market page's L1 label follows the server's standing-quote time
+(`l1.standing_receipt`) instead of the last price change, so a quiet market no longer flickers between
+STALE OR MISSING and CURRENT on every refresh (user's report). Backup `l1-label-20261001`. Rollback: `8dbc6df…`.
+
+Previous release `8dbc6df3267aa985a6a55280a213513bf342c6d2`, deployed 2026-10-01 20:51 UTC and re-armed
 (session stayed FullTradingAndChat): the phone-first dashboard (user's priorities: overview, trades view, Market and
 System tidy; see DASHBOARD-AND-DATA.md), per-trade results from the ledger, and the LIVE balance fix (the balance
 subscription now sends the ClientKey; Saxo LIVE answered 400 without it). Verified after the restart: balance Current

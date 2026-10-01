@@ -1,6 +1,12 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `2555819e914d9ce4a3b98cd0d546e881fbcea02d`, deployed 2026-10-01 07:28 UTC with
+Current application release: `acd47794caa03de5df0efbd6e332c936cc3d7ef1`, deployed 2026-10-01 10:23 UTC, re-armed.
+At the user's request an unchanged quote now stands while Saxo confirms its feed (see the rulebook). Measured
+before (06:16 New York): options current in 0-8% of samples except NQ (61-68%). After (06:29 New York, 90 s):
+CL 88-100%, GC 99%, NQ 99%, SI 96-99%, while their last price changes were typically 3-65 s old. Backup
+`standing-quotes-20261001`. Rollback: `2555819…`.
+
+Previous release `2555819e914d9ce4a3b98cd0d546e881fbcea02d`, deployed 2026-10-01 07:28 UTC with
 a config change, re-armed. At the user's request NG and SI mappings use `expiry_rule:
 SAME_DAY_OR_NEXT_LISTED` (same-day option when one trades past the exit, otherwise the next listed expiry;
 see the rulebook); CL, GC and NQ stay same-day. `option_candidate_window: 2` (07:33 UTC) so all five

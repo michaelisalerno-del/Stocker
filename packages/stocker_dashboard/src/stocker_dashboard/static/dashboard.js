@@ -284,7 +284,8 @@ function depth(m, d) {
     const visible = Boolean(bid || ask);
     if (row.hidden === visible) row.hidden = !visible;
     const cells = row.children;
-    [[0, ask?.size], [2, ask?.price], [3, bid?.price], [5, bid?.size]]  // sellers left, buyers right, as the imbalance bar.forEach(([j, v]) => {
+    // Sellers left, buyers right, the same way round as the imbalance bar.
+    [[0, ask?.size], [2, ask?.price], [3, bid?.price], [5, bid?.size]].forEach(([j, v]) => {
       const value = String(v ?? "—");
       if (cells[j].textContent !== value) cells[j].textContent = value;
     });

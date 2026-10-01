@@ -30,7 +30,7 @@ const state = {
     paused: false,
     reserved_open_trades: 2,
     allocation_pennies: 10000,
-    limits: {per_trade_gbp:50,allocation_gbp:200,slots:4},
+    limits: {per_trade_gbp:50,allocation_gbp:200,slots:4,quote_max_age_seconds:5},
     entry_block_reason:"PAPER_DISARMED",
     server_time: Date.parse(at)/1000,
     next_clock: "2026-09-28T15:00:00Z",
@@ -78,7 +78,7 @@ const state = {
     data_status: "CURRENT",
     updated_at: at,
     last_receipt:Date.parse(at)/1000,
-    l1: { status: "CURRENT", last_receipt: at, quote: {Bid: 70 + i, Ask: 70.01 + i}, sizes: {bid: 2, ask: 3}, spread: .01, delay_minutes: 0 },
+    l1: { status: "CURRENT", last_receipt: new Date(Date.parse(at) - 60000).toISOString(), standing_receipt: at, quote: {Bid: 70 + i, Ask: 70.01 + i}, sizes: {bid: 2, ask: 3}, spread: .01, delay_minutes: 0 },
     recorder: {state: i === 4 ? "STORAGE_LIMIT" : "BUFFERING", prehistory_seconds: [900,42,15,0,0][i], reason: i === 4 ? "STORAGE_LIMIT_REACHED" : ""},
     option_context: {candidate_uic: 1001+i, candidate_changes: [], latest_event: {id: "fixture-event", context: {identity: {uic: 1001+i}, pre_trigger_seconds: 42}}, contracts: [{
       identity: {uic: 1001+i, underlying_uic: 100+i, underlying_symbol: `${market}Z6`, symbol: `${market} fixture option`, right: "Put", strike: 70, expiry: "2026-09-28", last_trade_at: "2026-09-28T20:00:00Z"},
@@ -417,6 +417,14 @@ async function label(page) {
     await page.screenshot({path:path.join(output,"book-flow-desktop-fixture.png"),fullPage:true});
     await page.clock.fastForward(6000);
     assert(await page.locator("#depth-GC-0").isVisible()); // unchanged, healthy book
+    // An unchanged quote on a live feed stays current (the server's standing time, a minute after
+    // its last change); the page degrades it only once that is older than the limit plus a refresh.
+    assert.equal(await page.locator("#l1-GC").textContent(), "L1 CURRENT");
+    state.markets[1].l1.standing_receipt = new Date(Date.parse(at) - 60000).toISOString();
+    await page.evaluate(() => refresh(true));
+    await page.clock.fastForward(1100);
+    assert.equal(await page.locator("#l1-GC").textContent(), "L1 STALE OR MISSING");
+    state.markets[1].l1.standing_receipt = at;
     await page.setViewportSize({width:390,height:844});
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     await page.screenshot({path:path.join(output,"book-flow-mobile-fixture.png"),fullPage:true});

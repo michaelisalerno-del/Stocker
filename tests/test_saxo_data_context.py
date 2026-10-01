@@ -398,3 +398,29 @@ def test_verified_price_midvol_gives_an_implied_minus_model_spread():
         ]
         is None
     )
+
+
+def test_market_page_reports_when_an_unchanged_quote_was_last_known_current(tmp_path):
+    """The page's L1 label follows the server's standing time, not the last price change."""
+    from stocker_execution.config import FuturesConfig
+    from stocker_execution.runtime import Runtime
+    from stocker_execution.store import Store
+
+    runtime = Runtime(FuturesConfig(), Store(tmp_path / "ledger.sqlite3"))
+    state = runtime.markets["CL"]
+    state.identity, state.price = FUTURE, PriceState()
+    changed = time.time() - 120  # a quiet market: the quote last changed two minutes ago
+    state.price.snapshot(
+        {"Quote": {"Bid": 90.39, "Ask": 90.41, "PriceTypeBid": "Firm", "PriceTypeAsk": "Firm"}},
+        "fixture",
+        changed,
+    )
+    state.price.inactivity_timeout = 30
+    state.price.last_contact = runtime.data.stream_at = time.time()  # the feed is alive
+    l1 = runtime.market_detail("CL")["markets"][0]["l1"]
+    assert l1["status"] == "CURRENT"
+    assert l1["last_receipt"] < l1["standing_receipt"]  # ISO strings: changed < now
+    runtime.data.stream_at = None  # no socket: the quote stands no longer than its change
+    l1 = runtime.market_detail("CL")["markets"][0]["l1"]
+    assert l1["standing_receipt"] == l1["last_receipt"]
+    runtime.store.db.close()

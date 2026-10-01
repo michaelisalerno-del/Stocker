@@ -376,6 +376,11 @@ class Runtime:
                     "last_receipt": datetime.fromtimestamp(state.price.receipt, UTC).isoformat()
                     if state.price.receipt
                     else None,
+                    # When the quote was last known current: its last change, or later while it
+                    # stands on a live feed (the rulebook's standing-quote rule).
+                    "standing_receipt": datetime.fromtimestamp(standing, UTC).isoformat()
+                    if (standing := self.data.quote_receipt(state.price)) is not None
+                    else None,
                 },
                 "l2": depth,
                 "book_flow": self.recorder.book_flow_view(key(identity), at.timestamp())

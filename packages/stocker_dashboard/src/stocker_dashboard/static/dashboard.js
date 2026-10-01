@@ -15,6 +15,7 @@ let offset = 0, paused = false, pending = null, selectedIdentity = "";
 let detailRequest = null, detailSignature = null, controlPending = false, lastRefresh = null, accountSnapshot = null;
 let pageSize = 100; // replaced by the server's page_size
 let setupShown = false;
+const REFRESH_SECONDS = 5;
 let limits = {};
 let serverOffset = 0, nextClock = null; // countdowns use server time, not the browser clock
 const serverNow = () => Date.now() + serverOffset;
@@ -72,6 +73,7 @@ const explanations = {
   UNSUPPORTED_EXIT_BEFORE_CONTRACT_CUTOFF: "Too late today: the option stops trading before the hour would end",
   NG_CLOCK_13: "Natural gas skips 13:00 NY by rule",
   SKIPPED: "Skipped", CLOSED_PAPER_TRADE: "Traded", INTERNALLY_SIMULATED_FILL: "Traded · open",
+  L2_AVAILABLE: "available", L2_UNAVAILABLE: "unavailable", DISCONNECTED: "disconnected",
 };
 const display = (v) => explanations[v] || String(v || "").replaceAll("_", " ");
 
@@ -587,7 +589,7 @@ function render(d) {
       text(`data-${m.market}`, `Quote ${display(m.data_status).toLowerCase()} · ${m.last_receipt ? london(new Date(m.last_receipt * 1000).toISOString()) : "no receipt"}`);
       continue;
     }
-    quoteReceipts.set(m.market, Date.parse(m.l1?.last_receipt));
+    quoteReceipts.set(m.market, Date.parse(m.l1?.standing_receipt || m.l1?.last_receipt));
     text(`capability-${m.market}`, `${m.market} · ${m.l1?.status || "UNVERIFIED"} · ${m.l2?.status || "L2_UNAVAILABLE"} · ${m.block_reason || "monitoring"}`);
     const q = m.l1?.quote || {}, sizes = m.l1?.sizes || {}, rec = m.recorder || {};
     text(`quote-${m.market}`, `Bid ${q.Bid ?? "—"} × ${sizes.bid ?? "—"} · Ask ${q.Ask ?? "—"} × ${sizes.ask ?? "—"} · spread ${m.l1?.spread != null ? numeric(m.l1.spread) : "—"} · delay ${m.l1?.delay_minutes ?? "unknown"} min`);
@@ -876,9 +878,11 @@ setInterval(() => {
   if (lastRefresh && Date.now() - Date.parse(lastRefresh) > 15000) text("last-refresh", `Stale · last refresh ${time(lastRefresh)}`);
   for (const [m, expires] of depthExpiry) if (expires && at > expires) depth(m, {status: "L2_UNAVAILABLE", reason: "SUBSCRIPTION_HEALTH_EXPIRED"});
   for (const [m, expires] of flowExpiry) if (expires && at > expires) bookFlow(m, {status: "UNAVAILABLE", quality_flags: ["SUBSCRIPTION_HEALTH_EXPIRED"]});
-  for (const [m, received] of quoteReceipts) if (!received || at - received > limits.quote_max_age_seconds * 1000) text(`l1-${m}`, "L1 STALE OR MISSING");
+  // The server judges the quote (standing rule); the page only degrades its label when that
+  // judgement, at most one refresh old, has aged past the quote limit plus the refresh interval.
+  for (const [m, received] of quoteReceipts) if (!received || at - received > (limits.quote_max_age_seconds + REFRESH_SECONDS) * 1000) text(`l1-${m}`, "L1 STALE OR MISSING");
 }, 1000);
-setInterval(() => refresh(), 5000);
+setInterval(() => refresh(), REFRESH_SECONDS * 1000);
 
 for (let i = 0; i < 4; i++) {
   const slot = document.createElement("div"); slot.id = `trade-slot-${i}`;

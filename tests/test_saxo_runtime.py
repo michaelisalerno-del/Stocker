@@ -191,8 +191,18 @@ def test_history_completed_tail_missing_volume_and_gap_pagination(tmp_path):
     ]
     del rows[1]["Volume"]
     bars = completed_bars({"Data": rows}, at + timedelta(hours=1))
-    assert [b.at.minute for b in bars] == [0, 2]
+    assert [b.at.minute for b in bars] == [0, 2]  # a sent but invalid sample is never filled
     assert bars[0].average is None
+    # Minutes Saxo omits (nothing traded): up to five in a row are unchanged, longer gaps stay.
+    quiet = [rows[0], rows[2], rows[3]]  # minute 1 omitted
+    quiet += [{**rows[3], "Time": (at + timedelta(minutes=m)).isoformat()} for m in (9, 16, 17)]
+    bars = completed_bars({"Data": quiet}, at + timedelta(hours=1))
+    # 1 and 4-8 filled; 10-15 is six minutes, too long, so it stays missing; 17 is the tail.
+    assert [b.at.minute for b in bars] == list(range(10)) + [16]
+    filled = bars[1]
+    assert (filled.open, filled.high, filled.low, filled.close, filled.volume) == (70.5,) * 4 + (
+        0.0,
+    )
 
     async def scenario():
         _, data, store = setup(tmp_path)

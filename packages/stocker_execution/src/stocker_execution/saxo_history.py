@@ -17,15 +17,18 @@ if TYPE_CHECKING:
     from stocker_execution.saxo_data import DataService, MarketState
 
 REFERENCE_RETRY_SECONDS = 900
+MAX_FILLED_GAP_MINUTES = 5  # longest run of no-trade minutes counted as unchanged
 
 
 def completed_bars(raw: dict[str, Any], at: datetime) -> list[Bar]:
     rows = sorted(raw.get("Data", []), key=lambda b: b.get("Time", ""))
     result = []
+    sent = set()  # minutes Saxo did send, valid or not: only omitted minutes may be filled
     # A later sample proves the mutable tail has rolled, even when the wall clock has advanced.
     for row in rows[:-1]:
         try:
             stamp = utc(row["Time"])
+            sent.add(stamp)
             if stamp + timedelta(minutes=1) > at:
                 continue
             # Volume absence is a strategy block, not a synthetic zero.
@@ -41,7 +44,25 @@ def completed_bars(raw: dict[str, Any], at: datetime) -> list[Bar]:
                 result.append(b)
         except (KeyError, TypeError, ValueError):
             continue
-    return result
+    return fill_short_gaps(result, sent)
+
+
+def fill_short_gaps(bars: list[Bar], sent: set[datetime]) -> list[Bar]:
+    """Saxo omits minutes in which nothing traded. The user's rule (2026-10-01): a gap of at most
+    MAX_FILLED_GAP_MINUTES between two real bars, with no sample sent for those minutes, is that
+    many unchanged minutes (the previous close, zero volume). A longer gap may be an outage, and a
+    sent-but-invalid sample is bad data, so both stay missing and still block."""
+    out: list[Bar] = []
+    for bar in bars:
+        if out:
+            prior = out[-1]
+            missing = int((bar.at - prior.at).total_seconds() // 60) - 1
+            minutes = [prior.at + timedelta(minutes=k) for k in range(1, missing + 1)]
+            if 1 <= missing <= MAX_FILLED_GAP_MINUTES and not sent.intersection(minutes):
+                c = prior.close
+                out.extend(Bar(m, c, c, c, c, 0.0) for m in minutes)
+        out.append(bar)
+    return out
 
 
 async def history(data: DataService, state: MarketState, *, boundary: bool = False) -> None:

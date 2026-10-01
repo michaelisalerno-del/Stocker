@@ -25,6 +25,11 @@ source-session hourly medians, original opening/session windows and the underlyi
 Saxo historical samples supply actual OHLCV; missing volume is not zero. No VWAP, open interest or
 volume is fabricated from last-price snapshots. Missing samples and mutable chart tails cannot enter
 completed-bar calculations. Gap requests are bounded and DataVersion changes require a fresh fetch.
+One dated exception (2026-10-01, the user's decision): Saxo's one-minute charts omit minutes in which
+nothing traded, which blocked GC, NG and SI reference sessions (1-8 quiet minutes, mostly after 14:00 New
+York). A run of at most five minutes for which Saxo sent no sample, between two real bars, is filled as
+that many unchanged minutes (the previous close, zero volume). Longer runs (possible outages) and samples
+Saxo sent but that fail validation (for example missing volume) stay missing and still block.
 
 Actual display contracts must be explicitly pinned from the selected environment's ContractFutures
 reference data. The standard CL/GC/NG/NQ/SI family, exchange, symbol/month and multiplier are verified.

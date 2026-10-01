@@ -89,7 +89,12 @@ class FakeClient:
         if path == "/port/v1/accounts/me":
             return {
                 "Data": [
-                    {"AccountKey": "fixture-account", "AccountId": "fixture-id", "Currency": "GBP"}
+                    {
+                        "AccountKey": "fixture-account",
+                        "AccountId": "fixture-id",
+                        "ClientKey": "fixture-client",
+                        "Currency": "GBP",
+                    }
                 ]
             }
         if path == "/root/v1/sessions/capabilities":

@@ -220,10 +220,13 @@ def test_balance_subscription_is_shared_scoped_and_never_arms(tmp_path, environm
         data.account_verified = data.connected = True
         data.account_id = "private-account-1234"
         data.account_currency = "GBP"
+        data.client_key = "selected-client"
         assert balance_view(data, time.time())["status"] == "Unavailable"
         await asyncio.gather(*(ensure_balance_subscription(data) for _ in range(4)))
         assert len(calls) == 1
         assert calls[0][2]["body"]["Arguments"]["AccountKey"] == "selected-key"
+        # LIVE answers 400 to an AccountKey without its ClientKey (2026-10-01).
+        assert calls[0][2]["body"]["Arguments"]["ClientKey"] == "selected-client"
         view = balance_view(data, time.time())
         assert view["status"] == "Current" and view["cash_balance"] == 0
         assert view["cash_available_for_trading"] is None

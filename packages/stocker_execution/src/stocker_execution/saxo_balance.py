@@ -39,6 +39,9 @@ async def ensure_balance_subscription(data: DataService) -> None:
             "BALANCE",
             {
                 "AccountKey": data.client.oauth.account_key,
+                # LIVE rejects an AccountKey without its ClientKey (400 InvalidModelState,
+                # read-only probe 2026-10-01); SIM accepted it alone.
+                **({"ClientKey": data.client_key} if data.client_key else {}),
                 "FieldGroups": ["CalculateCashForTrading"],
             },
             "BALANCE",

@@ -142,6 +142,7 @@ class DataService:
         self.account_verified = False
         self.account_currency: str | None = None
         self.account_id: str | None = None
+        self.client_key: str | None = None  # LIVE balances need it with the AccountKey
         self.balance: dict[str, Any] = {}
         self.balance_stream: dict[str, Any] = {}
         self.balance_account_key: str | None = None
@@ -173,6 +174,7 @@ class DataService:
             raise SaxoError("CONFIGURED_ACCOUNT_NOT_RETURNED_BY_ENVIRONMENT")
         self.account_currency = accounts[0].get("Currency")
         self.account_id = accounts[0].get("AccountId")
+        self.client_key = accounts[0].get("ClientKey")
         if not self.account_id:
             raise SaxoError("ACCOUNT_IDENTIFIER_NOT_VERIFIED")
         self.account_verified = True

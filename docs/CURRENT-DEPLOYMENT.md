@@ -1,6 +1,11 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `792e3cf9c732152153cc98ed470f8cbee5db9d05`, deployed 2026-10-01 20:12 UTC by the
+Current application release: `0732d9584fcc9a22a555f99d365f4d6557d580ef`, deployed 2026-10-01 20:23 UTC and re-armed
+(session stayed FullTradingAndChat): the depth table drops the order-count imbalance column, which Saxo LIVE never
+fills (`UsingOrders: false`, order fields repeat the sizes), and says why. Backup `depth-table-20261001`. Rollback:
+`792e3cf…` (same config).
+
+Previous release `792e3cf9c732152153cc98ed470f8cbee5db9d05`, deployed 2026-10-01 20:12 UTC by the
 one-shot timer after the session (no open trades) and re-armed; the session stayed FullTradingAndChat. It carries
 `ea1695e` (two-tap real-time confirm), `c902219` (an unsellable paper option is written off at zero after 60 s with
 no bid), `587812f` (no-trade runs of up to 5 minutes filled at the last close), `462605f` (smile near the money,

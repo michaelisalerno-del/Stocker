@@ -284,7 +284,10 @@ class DataService:
             time.time(),
         )
         try:
-            await self.load_options(state, raw)
+            # A reconnect keeps today's option spaces (refresh_options reloads them each New York
+            # day): reloading ~70 roots a second apart held each market's price feed back 1-4 min.
+            if state.option_space_day != datetime.now(NY).date().isoformat():
+                await self.load_options(state, raw)
         except SaxoError as exc:
             # The future is verified; an options problem (a rate limit at connect, say) stays with
             # the options, and the next history pass retries through refresh_options.

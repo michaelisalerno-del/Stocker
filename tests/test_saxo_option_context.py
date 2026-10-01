@@ -941,5 +941,22 @@ def test_an_options_problem_at_connect_does_not_block_the_verified_future(tmp_pa
         assert state.identity["uic"] == 100 and state.problem == ""
         assert state.capabilities["options"] == {"problem": "RateLimitExceeded"}
         assert state.option_space_day == ""  # the daily refresh will retry
+        # A reconnect on the same New York day re-verifies the future but keeps today's
+        # option spaces, so its price feed is not held back behind ~70 option-space requests.
+        from stocker_execution.rules import NY
+
+        calls = []
+
+        async def counted(method, path, **kwargs):
+            calls.append(path)
+            return await request(method, path, **kwargs)
+
+        data.client.request = counted
+        state.option_space_day = datetime.now(NY).date().isoformat()
+        await data.discover(state)
+        assert calls and not any("contractoptionspaces" in p for p in calls)
+        state.option_space_day = "2026-09-30"  # a new day still loads them
+        await data.discover(state)
+        assert any("contractoptionspaces" in p for p in calls)
 
     asyncio.run(run())

@@ -209,12 +209,15 @@ class Recorder:
                 try:
                     while blob:
                         decoder.decompress(blob, 1024**2)
-                        if decoder.unconsumed_tail:
-                            blob = decoder.unconsumed_tail
-                        elif decoder.eof:
+                        # End of member first: when a member ends in an output-limited tail, CPython
+                        # leaves the leftover in unconsumed_tail as well as unused_data, and feeding
+                        # the stale tail back looped forever (2026-10-01 restart).
+                        if decoder.eof:
                             blob = decoder.unused_data
                             good = read_at - len(blob)
                             decoder = zlib.decompressobj(31)
+                        elif decoder.unconsumed_tail:
+                            blob = decoder.unconsumed_tail
                         else:
                             break
                 except zlib.error:

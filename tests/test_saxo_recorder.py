@@ -93,6 +93,23 @@ def test_atomic_overlap_skips_and_incremental_crash_evidence(tmp_path):
     asyncio.run(scenario())
 
 
+def test_restart_recovery_finishes_when_a_member_ends_after_the_output_limit(tmp_path):
+    """2026-10-01: a member ending in an output-limited tail looped recovery forever at start-up.
+
+    A separate process with a hard limit, because the old loop also starved the test's own thread.
+    """
+    import subprocess
+    import sys
+
+    path = tmp_path / "segment.jsonl.gz"
+    whole = gzip.compress(b"x" * (5 * 1024**2)) + gzip.compress(b'{"kind": "UPDATE"}\n')
+    path.write_bytes(whole + b"\x1f\x8b\x08\x00truncated")  # an interrupted, uncommitted tail
+    code = "import sys; from pathlib import Path; from stocker_execution.recorder import Recorder; "
+    code += "Recorder.recover_members(Path(sys.argv[1]))"
+    subprocess.run([sys.executable, "-c", code, str(path)], check=True, timeout=20)
+    assert path.read_bytes() == whole  # both complete members kept, only the partial one cut
+
+
 def test_capture_holds_through_close_plus_five_minutes(tmp_path):
     r = recorder(tmp_path)
     r.ingest("CL-contract", "SNAPSHOT", {}, 0)

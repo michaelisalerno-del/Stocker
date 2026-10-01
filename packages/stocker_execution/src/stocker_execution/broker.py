@@ -16,6 +16,7 @@ from stocker_execution.config import (
 from stocker_execution.contracts import (
     budget,
     executable_quote,
+    fill_conversion,
     key,
     option_price,
     positive,
@@ -343,7 +344,9 @@ class PaperBroker:
         state = self.data.options[option["uic"]][1]
         try:
             fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, at)
-            conversion = 1 / float(fx["Bid" if role == "ENTRY" else "Ask"])
+            conversion = fill_conversion(
+                1 / float(fx["Bid" if role == "ENTRY" else "Ask"]), plan["fx_markup"], role
+            )
             if role == "ENTRY":
                 revised = budget(option, price, plan["fee_per_side_gbp"] * 2, conversion)
                 plan.update(revised)
@@ -733,7 +736,10 @@ class PaperBroker:
                             raise ValueError("OWNED_OPTION_QUOTE_UNAVAILABLE")
                         q = quote_check(state[1].value or {}, state[1].receipt, now())
                         fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, now())
-                        plan["fx"], plan["fx_at"] = 1 / float(fx["Ask"]), self.data.fx.receipt
+                        plan["fx"] = fill_conversion(
+                            1 / float(fx["Ask"]), plan["fx_markup"], "EXIT"
+                        )
+                        plan["fx_at"] = self.data.fx.receipt
                         # Internal sale includes one tick adverse slippage.
                         price = option_price(
                             plan["option"],

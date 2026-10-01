@@ -20,6 +20,7 @@ from stocker_execution.contracts import (
     cost_estimate,
     deadline_instant,
     executable_quote,
+    fill_conversion,
     key,
     option_identity,
     option_price,
@@ -193,6 +194,27 @@ def test_cost_totals_not_added_twice_and_unsupported_conventions_block():
         cost_estimate(OPTION, 0.001, c, 1)
     with pytest.raises(ValueError, match="TRADING_NOT_ALLOWED"):
         cost_estimate(OPTION, 0.001, {**conditions(), "IsTradable": False}, 1)
+    # LIVE returns overnight financing for every option; Saxo applies it to short options only.
+    carrying = {"InterbankRate": {"AskRate": 1e-06, "BidRate": 1e-06}, "MarkUpRate": 2.5}
+    with_carrying = {**conditions(), "CarryingCost": carrying}
+    assert cost_estimate(OPTION, 0.001, with_carrying, 0.8) == cost_estimate(
+        OPTION, 0.001, conditions(), 0.8
+    )
+    with pytest.raises(ValueError, match="COST_RULE_UNVERIFIED_HOLDINGFEE"):
+        cost_estimate(OPTION, 0.001, {**with_carrying, "HoldingFee": {"Rate": 1}}, 0.8)
+
+
+def test_gbp_account_pays_saxo_conversion_markup_both_ways():
+    # LIVE GBP account, USD option (2026-10-01): Markup 0.6 per cent on each conversion.
+    gbp = {**conditions(), "AccountCurrency": "GBP", "CurrencyConversion": {"Markup": 0.6}}
+    plain = cost_estimate(OPTION, 0.005, conditions(), 0.75)
+    marked = cost_estimate(OPTION, 0.005, gbp, 0.75)
+    assert marked["fx_markup"] == pytest.approx(0.006) and plain["fx_markup"] == 0
+    assert marked["premium_gbp"] == pytest.approx(plain["premium_gbp"] * 1.006)
+    assert fill_conversion(0.75, 0.006, "ENTRY") == pytest.approx(0.7545)
+    assert fill_conversion(0.75, 0.006, "EXIT") == pytest.approx(0.7455)
+    with pytest.raises(ValueError, match="MISSING_BROKER_FX_MARKUP"):
+        cost_estimate(OPTION, 0.005, {**gbp, "CurrencyConversion": {}}, 0.75)
 
 
 def test_deadlines_distinct_timezone_dst_and_missing_never_invented():

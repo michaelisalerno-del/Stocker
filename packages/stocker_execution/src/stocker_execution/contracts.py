@@ -290,7 +290,13 @@ def cost_estimate(
     if conditions.get("IsTradable") is False:
         raise ValueError("CONTRACT_OPTION_TRADING_NOT_ALLOWED")
     require_one_whole_contract(option)
-    rate = positive(native_to_gbp, "GBP_CONVERSION")
+    markup = 0.0
+    if conditions.get("AccountCurrency") != option["currency"]:
+        # Saxo converts each leg at its rate plus Markup per cent (LIVE GBP account 2026-10-01:
+        # 0.6, its AskRate/BidRate exactly 0.6% either side of mid). Entry pays the dearer side.
+        conversion = conditions.get("CurrencyConversion") or {}
+        markup = nonnegative(conversion.get("Markup"), "BROKER_FX_MARKUP") / 100
+    rate = positive(native_to_gbp, "GBP_CONVERSION") * (1 + markup)
 
     def convert(amount: float, currency: Any) -> float:
         if currency == "GBP":
@@ -299,12 +305,12 @@ def cost_estimate(
             return amount * rate
         raise ValueError("FEE_CURRENCY_CONVERSION_UNVERIFIED")
 
-    for name in ("Taxes", "ScheduledContractOptionTradingConditions", "HoldingFee", "CarryingCost"):
+    # CarryingCost is left out: Saxo charges it only on short contract options held overnight
+    # (home.saxo listed-options commissions, 2026-10-01), never on one long contract sold the
+    # same session. LIVE returns it for every option (interbank rate + 2.5% mark-up).
+    for name in ("Taxes", "ScheduledContractOptionTradingConditions", "HoldingFee"):
         if conditions.get(name):
             raise ValueError("CONTRACT_OPTION_COST_RULE_UNVERIFIED_" + name.upper())
-    conversion = conditions.get("CurrencyConversion") or {}
-    if conditions.get("AccountCurrency") != option["currency"] and conversion.get("Markup") != 0:
-        raise ValueError("BROKER_FX_MARKUP_UNVERIFIED")
     limits = [
         r for r in conditions.get("CommissionLimits", []) if r.get("OrderAction") == "ExecuteOrder"
     ]
@@ -373,7 +379,15 @@ def cost_estimate(
         "option": option,
         "limit": ask,
         "fx": rate,
+        "fx_markup": markup,
     }
+
+
+def fill_conversion(native_to_gbp: float, markup: float, role: str) -> float:
+    """GBP per instrument-currency unit for a paper fill: dearer to buy, cheaper to sell."""
+    return positive(native_to_gbp, "GBP_CONVERSION") * (
+        1 + (markup if role == "ENTRY" else -markup)
+    )
 
 
 def deadline_instant(value: Any, day: str, zone: str | None = None) -> str | None:

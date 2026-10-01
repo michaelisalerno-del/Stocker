@@ -157,6 +157,7 @@ def plan():
         "multiplier": 1000,
         "price_unit_factor": 1,
         "fx": 1 / 1.3,
+        "fx_markup": 0.0,
         "fx_at": time.time(),
         "cutoff": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
     }

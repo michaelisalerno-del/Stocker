@@ -286,7 +286,12 @@ class PaperBroker:
             # Revalidate after awaited I/O; disconnect/disarm/stale data cannot race admission.
             self.validate_order(plan, role, identity)
             current_option, price_state = self.data.options[plan["option"]["uic"]]
-            executable_quote(current_option, price_state.value or {}, price_state.receipt, now())
+            executable_quote(
+                current_option,
+                price_state.value or {},
+                self.data.quote_receipt(price_state),
+                now(),
+            )
             if now() >= deadline:
                 raise ValueError("ENTRY_PREFLIGHT_EXPIRED")
             transmitted = True  # durable SUBMITTING intent already exists
@@ -324,7 +329,7 @@ class PaperBroker:
         currency = result.get("EstimatedCashRequiredCurrency")
         if currency not in {"GBP", "USD"} or self.data.account_currency not in {"GBP", "USD"}:
             raise ValueError("BROKER_COST_CURRENCY_UNVERIFIED")
-        fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, now())
+        fx = quote_check(self.data.fx.value or {}, self.data.quote_receipt(self.data.fx), now())
         rate = 1 / float(fx["Bid"])
         cash = positive(result.get("EstimatedCashRequired"), "BROKER_REQUIRED_CASH")
         cash *= rate if currency == "USD" else 1
@@ -344,7 +349,7 @@ class PaperBroker:
         option, at = plan["option"], now()
         state = self.data.options[option["uic"]][1]
         try:
-            fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, at)
+            fx = quote_check(self.data.fx.value or {}, self.data.quote_receipt(self.data.fx), at)
             conversion = fill_conversion(
                 1 / float(fx["Bid" if role == "ENTRY" else "Ask"]), plan["fx_markup"], role
             )
@@ -354,7 +359,10 @@ class PaperBroker:
                 self.validate_order(plan, role, identity)
             plan.update(fx=conversion, fx_at=self.data.fx.receipt)
             quote = executable_quote(
-                self.data.options[option["uic"]][0], state.value or {}, state.receipt, at
+                self.data.options[option["uic"]][0],
+                state.value or {},
+                self.data.quote_receipt(state),
+                at,
             )
             side = "Ask" if role == "ENTRY" else "Bid"
             touch = float(quote[side])
@@ -363,7 +371,12 @@ class PaperBroker:
             ):
                 raise ValueError("PRICE_MOVED_NO_ASSUMED_FILL")
             size_at = state.size_times.get(side)
-            if size_at is None or not 0 <= at.timestamp() - size_at <= QUOTE_MAX_AGE_SECONDS:
+            standing = self.data.size_receipt(state, side)
+            if (
+                size_at is None
+                or standing is None
+                or not 0 <= at.timestamp() - standing <= QUOTE_MAX_AGE_SECONDS
+            ):
                 raise ValueError("AVAILABLE_OPTION_SIZE_STALE")
             size = positive(state.sizes().get(side), "AVAILABLE_OPTION_SIZE")
             receipt = size_at
@@ -735,8 +748,12 @@ class PaperBroker:
                         state = self.data.options.get(plan["option"]["uic"])
                         if not state:
                             raise ValueError("OWNED_OPTION_QUOTE_UNAVAILABLE")
-                        q = quote_check(state[1].value or {}, state[1].receipt, now())
-                        fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, now())
+                        q = quote_check(
+                            state[1].value or {}, self.data.quote_receipt(state[1]), now()
+                        )
+                        fx = quote_check(
+                            self.data.fx.value or {}, self.data.quote_receipt(self.data.fx), now()
+                        )
                         plan["fx"] = fill_conversion(
                             1 / float(fx["Ask"]), plan["fx_markup"], "EXIT"
                         )

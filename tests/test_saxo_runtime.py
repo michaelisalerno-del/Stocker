@@ -397,6 +397,62 @@ def test_real_time_indicative_quote_can_fill_internal_paper(tmp_path):
     asyncio.run(scenario())
 
 
+def test_an_unchanged_quote_stands_while_the_stream_and_its_subscription_are_alive(tmp_path):
+    """Saxo sends a price only when it changes; a quiet option's last quote still stands while
+    the socket delivers and the subscription is heartbeated, never through a pause or gap."""
+
+    async def scenario():
+        broker, data, store = setup(tmp_path)
+        old = time.time() - 120
+        for _, price in [data.options[101], (None, data.fx)]:
+            price.snapshot(price.value, "fixture", old)  # quote and sizes last changed 2 min ago
+            price.inactivity_timeout = 30
+        _, option = data.options[101]
+        event = signal(1)
+        store.observe(event, "", {})
+        assert await broker.enter(event, plan()) == ""  # nothing confirms it still stands
+        assert not store.fills(event["id"])
+        assert store.history(None, None, None)[0]["reason"] == "QUOTE_STALE_OR_UNAVAILABLE"
+        # A NoNewData heartbeat for each feed and a live socket: the quote is current again.
+        data.recorder.register(key(OPTION), OPTION)
+        data.subscriptions = {
+            "opt": {"kind": "PRICE", "target": "101", "contact": 0},
+            "fx": {"kind": "PRICE", "target": "FX", "contact": 0},
+        }
+        await data.receive(
+            {
+                "reference": "_heartbeat",
+                "message_id": "hb",
+                "payload": [
+                    {
+                        "Heartbeats": [
+                            {"OriginatingReferenceId": "opt", "Reason": "NoNewData"},
+                            {"OriginatingReferenceId": "fx", "Reason": "NoNewData"},
+                        ]
+                    }
+                ],
+            }
+        )
+        assert data.quote_receipt(option) == data.stream_at
+        assert data.option_view(101, time.time())["quote_status"] == "OBSERVED"
+        event = signal(2)
+        store.observe(event, "", {})
+        assert await broker.enter(event, plan()) == ""
+        (fill,) = store.fills(event["id"])
+        assert fill["side"] == "BOT"
+        # A paused subscription, or a socket silent for over 5 s, never stands.
+        option.problem = "SUBSCRIPTION_TEMPORARILY_DISABLED"
+        assert data.quote_receipt(option) == option.receipt
+        option.problem = ""
+        data.stream_at = time.time() - 6
+        assert data.option_view(101, time.time())["quote_status"] == "STALE_OR_MISSING"
+        option.last_contact = data.stream_at - 31  # beyond Saxo's inactivity timeout
+        assert data.quote_receipt(option) == option.receipt
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
 def test_broker_audit_replay_is_idempotent_across_crash_boundary(tmp_path, monkeypatch):
     broker, _, store = setup(tmp_path, "SAXO_SIM")
     event = signal(1)

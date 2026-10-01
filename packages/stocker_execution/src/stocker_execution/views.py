@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 TRADEABLE = ("CL", "NG", "NQ", "SI")  # GC stays monitor-only until its mapping is approved
 
 
-def quote_current(state: "MarketState", at: float) -> bool:
-    receipt = state.price.receipt
+def quote_current(state: "MarketState", at: float, stream_at: float | None) -> bool:
+    receipt = state.price.standing(state.price.receipt, stream_at)
     return (
         receipt is not None
         and 0 <= at - receipt <= QUOTE_MAX_AGE_SECONDS
@@ -33,19 +33,20 @@ def quote_current(state: "MarketState", at: float) -> bool:
     )
 
 
-def price_problem(price: "PriceState", at: float) -> str:
-    """The same check a clock decision applies: fresh, real-time, usable price."""
+def price_problem(price: "PriceState", at: float, stream_at: float | None) -> str:
+    """The same check a clock decision applies: current, real-time, usable price."""
     if price.problem:
         return price.problem
     try:
-        quote_check(price.value or {}, price.receipt, datetime.fromtimestamp(at, UTC))
+        receipt = price.standing(price.receipt, stream_at)
+        quote_check(price.value or {}, receipt, datetime.fromtimestamp(at, UTC))
     except ValueError as exc:
         return str(exc)
     return ""
 
 
-def quote_problem(state: "MarketState", at: float) -> str:
-    return price_problem(state.price, at)
+def quote_problem(state: "MarketState", at: float, stream_at: float | None) -> str:
+    return price_problem(state.price, at, stream_at)
 
 
 def gates(
@@ -56,6 +57,7 @@ def gates(
     candidate = state.candidate_uic if state.candidate_uic in runtime.data.options else None
     costs = runtime.data.option_view(candidate, at)["costs"] if candidate else {}
     execution = "ENTRIES_PAUSED" if paused else runtime.broker.entry_reason()
+    stream = runtime.data.stream_at
     rows = [
         (
             "saxo",
@@ -64,8 +66,8 @@ def gates(
             runtime.data.problem or oauth,
         ),
         ("contract", "Contract", state.identity is not None, state.problem),
-        ("quote", "Quote", not (problem := quote_problem(state, at)), problem),
-        ("fx", "GBP/USD rate", not (fx := price_problem(runtime.data.fx, at)), fx),
+        ("quote", "Quote", not (problem := quote_problem(state, at, stream)), problem),
+        ("fx", "GBP/USD rate", not (fx := price_problem(runtime.data.fx, at, stream)), fx),
         (
             "history",
             "History",

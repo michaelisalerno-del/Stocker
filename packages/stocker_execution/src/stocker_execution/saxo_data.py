@@ -138,6 +138,7 @@ class DataService:
         self.stopping = False
         self.reconnects = 0
         self.last_message_id: str | None = None
+        self.stream_at: float | None = None  # receipt of the latest message of any kind
         self.account_verified = False
         self.account_currency: str | None = None
         self.account_id: str | None = None
@@ -182,6 +183,13 @@ class DataService:
             self.balance_account_key = self.client.oauth.account_key
         self.client.sim_account_verified = self.config.data_environment == "SAXO_SIM"
         self.session = await self.client.request("GET", "/root/v1/sessions/capabilities")
+
+    def quote_receipt(self, price: PriceState) -> float | None:
+        """When this quote was last known current: its last change, or later while it stands."""
+        return price.standing(price.receipt, self.stream_at)
+
+    def size_receipt(self, price: PriceState, side: str) -> float | None:
+        return price.standing(price.size_times.get(side), self.stream_at)
 
     async def take_primary_session(self) -> None:
         """The user's System-page click: make this Saxo's primary session for real-time prices.
@@ -960,14 +968,19 @@ class DataService:
             if not 0 <= at - reference.get("received_at", 0) <= OPTION_METADATA_MAX_AGE_SECONDS:
                 raise ValueError("CONTRACT_OPTION_COSTS_STALE_OR_UNAVAILABLE")
             q = executable_quote(
-                identity, price.value or {}, price.receipt, datetime.fromtimestamp(at, UTC)
+                identity,
+                price.value or {},
+                self.quote_receipt(price),
+                datetime.fromtimestamp(at, UTC),
             )
             rate = 1.0
             if identity["currency"] != "GBP":
                 if identity["currency"] != "USD":
                     raise ValueError("CURRENCY_CONVERSION_PAIR_UNVERIFIED")
                 fx = quote_check(
-                    self.fx.value or {}, self.fx.receipt, datetime.fromtimestamp(at, UTC)
+                    self.fx.value or {},
+                    self.quote_receipt(self.fx),
+                    datetime.fromtimestamp(at, UTC),
                 )
                 rate = 1 / float(fx["Bid"])
             limit = option_price(identity, float(q["Ask"]), ROUND_CEILING, 1)
@@ -995,14 +1008,15 @@ class DataService:
             "sizes": price.sizes(),
             "size_status": {
                 side: "OBSERVED"
-                if price.size_times.get(side) is not None
-                and 0 <= at - price.size_times[side] <= QUOTE_MAX_AGE_SECONDS
+                if (standing := self.size_receipt(price, side)) is not None
+                and 0 <= at - standing <= QUOTE_MAX_AGE_SECONDS
                 else "STALE_OR_MISSING"
                 for side in ("Bid", "Ask")
             },
             "size_received_at": dict(price.size_times),
             "quote_status": "STALE_OR_MISSING"
-            if price.receipt is None or not 0 <= at - price.receipt <= QUOTE_MAX_AGE_SECONDS
+            if (standing := self.quote_receipt(price)) is None
+            or not 0 <= at - standing <= QUOTE_MAX_AGE_SECONDS
             else "OBSERVED",
             "analytics": option_context.view(price.analytics, at),
             "chain_analytics": option_context.view(
@@ -1248,6 +1262,7 @@ class DataService:
         receipt = time.time() if received_at is None else received_at
         ref, payload = message["reference"], message["payload"]
         self.last_message_id = message["message_id"]
+        self.stream_at = max(self.stream_at or receipt, receipt)
         if ref in self.pending:
             queued = {"message": message, "receipt": receipt}
             size = len(json.dumps(queued))
@@ -1467,7 +1482,7 @@ class DataService:
         for identity, price in self.options.values():
             if identity["market"] == state.market:
                 with suppress(ValueError):
-                    quote_check(price.value or {}, price.receipt, datetime.now(UTC))
+                    quote_check(price.value or {}, self.quote_receipt(price), datetime.now(UTC))
                     usable += 1
         recorded = result.get("options")  # the root, or the problem discovery/board hit
         result["options"] = {

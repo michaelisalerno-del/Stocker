@@ -165,6 +165,25 @@ class PriceState:
         self.touch(value, at)
         return True
 
+    def standing(self, changed_at: float | None, stream_at: float | None) -> float | None:
+        """When a value received at `changed_at` was last known to still stand.
+
+        Saxo sends a price only when it changes and heartbeats a quiet subscription. While the
+        socket keeps delivering (`stream_at`, the latest message of any kind) and this
+        subscription has had contact within its inactivity timeout with no pause or gap, the
+        last value is still the standing one (as depth() already treats L2).
+        """
+        if (
+            changed_at is None
+            or stream_at is None
+            or self.value is None
+            or self.problem
+            or self.last_contact is None
+            or not 0 <= stream_at - self.last_contact <= self.inactivity_timeout
+        ):
+            return changed_at
+        return max(changed_at, stream_at)
+
     def gap(self, reason: str) -> None:
         self.value = None
         self.analytics.clear()

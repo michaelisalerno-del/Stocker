@@ -20,6 +20,9 @@ MAX_PREMIUM_RISK_GBP = 1000
 MAX_PREMIUM_RISK_PENNIES = MAX_PREMIUM_RISK_GBP * 100
 MAX_OPEN_POSITIONS = 4
 MAX_SIMULTANEOUS_ENTRY_RISK_GBP = MAX_PREMIUM_RISK_GBP * MAX_OPEN_POSITIONS
+# A quote counts as current for this long after it was last known to stand: its last change, or
+# (2026-10-01, the user's request) any later moment the socket delivered while its subscription
+# was heartbeated, unpaused and gap-free, since Saxo sends a price only when it changes.
 QUOTE_MAX_AGE_SECONDS: Final = 5
 SUBSCRIPTION_LIMIT = 32  # Saxo streaming subscriptions owned by this application
 ROLLING_WINDOW_SECONDS = 15 * 60  # server-held L1/L2 prehistory per instrument

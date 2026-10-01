@@ -234,7 +234,7 @@ class Runtime:
             "block_reason": reason,
             "entry_enabled": not reason,
             "data_status": "CURRENT"
-            if views.quote_current(state, at.timestamp())
+            if views.quote_current(state, at.timestamp(), self.data.stream_at)
             else "STALE_OR_MISSING",
             "last_receipt": state.price.receipt,
             "candidate_uic": state.candidate_uic,
@@ -426,8 +426,8 @@ class Runtime:
         }
         try:
             _, price = self.data.options[plan["option"]["uic"]]
-            q = quote_check(price.value or {}, price.receipt, now())
-            fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, now())
+            q = quote_check(price.value or {}, self.data.quote_receipt(price), now())
+            fx = quote_check(self.data.fx.value or {}, self.data.quote_receipt(self.data.fx), now())
             entries = [f for f in fills if f["side"] == "BOT"]
             if quantity and entries and all(f["fx"] is not None for f in entries):
                 cost = sum(f["quantity"] * f["price"] * f["fx"] for f in entries)
@@ -491,7 +491,9 @@ class Runtime:
                             raise ValueError("STALE_SIGNAL_NO_REPLAY")
                         if state.problem or state.history_problem:
                             raise ValueError(state.problem or state.history_problem)
-                        quote_check(state.price.value or {}, state.price.receipt, at)
+                        quote_check(
+                            state.price.value or {}, self.data.quote_receipt(state.price), at
+                        )
                         inputs = eligibility(
                             state.bars,
                             clock,

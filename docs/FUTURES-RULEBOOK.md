@@ -55,7 +55,11 @@ records option candidates, and enters once its listed execution mapping is appro
 experimental GC management rule is adopted.
 
 INTERNAL_PAPER consumes no broker orders. Entry fills use ask plus one tick, exits bid minus one tick,
-with fresh displayed size and verified fee assumptions; no midpoint fills. All fills/P&L are labelled
+with fresh displayed size and verified fee assumptions; no midpoint fills. Fresh means known current within
+5 seconds: Saxo sends a price only when it changes, so since 2026-10-01 (the user's request, after cheap
+options were measured unchanged for minutes) an unchanged quote or size stands while the socket has delivered
+in the last 5 seconds and its own subscription has a Saxo heartbeat within its inactivity timeout, with no
+pause or gap. A paused, gapped or silent subscription never stands. All fills/P&L are labelled
 internally simulated. SAXO_SIM uses verified SIM account orders and confirmed broker evidence. Prechecks
 are required, disclaimers block, timeouts are never blindly retried, and unknown exposure blocks entries.
 Confirmed positions and terminal order/fill states govern capacity release. Costs/FX absent from SIM

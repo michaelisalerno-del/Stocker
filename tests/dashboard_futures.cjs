@@ -221,6 +221,7 @@ const rows = Array.from({ length: 80 }, (_, i) => ({
   reason: i % 3 ? "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET" : "",
   state: null,
 }));
+let primaryRequests = 0;
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   let data;
@@ -258,6 +259,9 @@ const server = http.createServer((req, res) => {
     };
   else if (url.pathname.startsWith("/api/entries/")) {
     state.system.paused = url.pathname.endsWith("pause");
+    data = state.system;
+  } else if (url.pathname === "/api/session/primary" && req.method === "POST") {
+    primaryRequests += 1;
     data = state.system;
   }
   if (data) {
@@ -462,6 +466,14 @@ async function label(page) {
       fullPage: true,
     });
     await page.goto(`${base}/system`);
+    // Real-time is confirmed on the page (no window.confirm): the first tap only asks.
+    await page.locator("#primary-session").click();
+    assert.match(await page.locator("#primary-session").textContent(), /Tap again to confirm/);
+    assert.equal(primaryRequests, 0);
+    await page.locator("#primary-session").click();
+    await page.waitForFunction(() => document.querySelector("#notice").textContent.includes("real-time requested"));
+    assert.equal(primaryRequests, 1);
+    assert.equal(await page.locator("#primary-session").textContent(), "Use real-time in SLRNO");
     await page.locator("#system-detail summary").click();
     await page.waitForFunction(() =>
       document

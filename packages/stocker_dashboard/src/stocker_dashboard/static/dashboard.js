@@ -738,8 +738,17 @@ $("pause").onclick = async () => {
   try { const result = await request(`/api/entries/${paused ? "resume" : "pause"}`, {method: "POST"}); renderStatus(result); text("notice", result.paused ? "Server confirmed: entries paused" : "Server confirmed: entries resumed; readiness gates still apply"); }
   catch (e) { reportError(e); } finally { controlPending = false; $("pause").disabled = false; }
 };
+// Confirmed on the page with a second tap: some phone browsers silently block window.confirm (2026-10-01).
+let primaryConfirmUntil = 0;
 $("primary-session").onclick = async () => {
-  if (!window.confirm("Make SLRNO Saxo's real-time session? SaxoTraderGO may go delayed or log off.")) return;
+  if (Date.now() > primaryConfirmUntil) {
+    primaryConfirmUntil = Date.now() + 5000;
+    text("primary-session", "Tap again to confirm (SaxoTraderGO may go delayed)");
+    setTimeout(() => { if (Date.now() > primaryConfirmUntil) text("primary-session", "Use real-time in SLRNO"); }, 5100);
+    return;
+  }
+  primaryConfirmUntil = 0;
+  text("primary-session", "Use real-time in SLRNO");
   pending?.abort(); controlPending = true; $("primary-session").disabled = true;
   try { renderStatus(await request("/api/session/primary", {method: "POST"})); text("notice", "Server confirmed: real-time requested; price streams renew"); }
   catch (e) { reportError(e); } finally { controlPending = false; $("primary-session").disabled = false; }

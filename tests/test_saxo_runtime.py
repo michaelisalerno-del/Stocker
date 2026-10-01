@@ -232,6 +232,59 @@ def test_internal_paper_never_transmits_and_capacity_releases_after_flat(tmp_pat
     asyncio.run(scenario())
 
 
+def test_unsellable_paper_option_is_written_off_at_zero_only_on_a_current_quote(tmp_path):
+    """2026-10-01: a 94 crude call lost its bid before the exit; it must not stay open forever."""
+
+    async def scenario():
+        broker, data, store = setup(tmp_path)
+        _, price = data.options[101]
+
+        def trade(i, exit_seconds_ago, cutoff_minutes=120):
+            event = signal(i)
+            store.observe(event, "", {})
+            p = plan()
+            p["cutoff"] = (datetime.now(UTC) + timedelta(minutes=cutoff_minutes)).isoformat()
+            return event, p
+
+        event, p = trade(1, 0)
+        assert await broker.enter(event, p) == ""
+
+        def exit_ago(seconds):
+            with store.db:
+                store.db.execute(
+                    "UPDATE signals SET exit_at=? WHERE id=?",
+                    ((datetime.now(UTC) - timedelta(seconds=seconds)).isoformat(), event["id"]),
+                )
+
+        price.update({"Quote": {"Bid": None, "PriceTypeBid": "NoMarket"}}, "no-bid", time.time())
+        exit_ago(10)  # within the grace period: keeps retrying
+        await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        exit_ago(61)
+        old = time.time() - 30
+        price.quote_times, price.receipt = {"Bid": old, "Ask": old}, old
+        await broker.manage()  # a stale quote is unknown, never "no bid"
+        assert store.exposure(event["id"]) == 1
+        price.update({"Quote": {"Bid": None, "Ask": 0.002}}, "current", time.time())
+        await broker.manage()
+        assert store.exposure(event["id"]) == 0
+        sold = [f for f in store.fills(event["id"]) if f["side"] == "SLD"]
+        assert len(sold) == 1 and sold[0]["price"] == 0 and sold[0]["commission"] == 0
+        assert store.capacity()["reserved_open_trades"] == 0
+        # A one-tick bid sells at zero too; past the last trade nothing can be sold.
+        price.update({"Quote": {"Bid": 0.001, "PriceTypeBid": "Tradable"}}, "tick", time.time())
+        assert broker.write_off_reason(p, datetime.now(UTC) - timedelta(seconds=61)) == (
+            "WRITTEN_OFF_ONE_TICK_BID"
+        )
+        past = {**p, "cutoff": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()}
+        assert broker.write_off_reason(past, datetime.now(UTC)) == "WRITTEN_OFF_AFTER_LAST_TRADE"
+        price.update({"Quote": {"Bid": 0.008}}, "bid-back", time.time())
+        assert broker.write_off_reason(p, datetime.now(UTC) - timedelta(seconds=61)) == ""
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
 def test_no_naked_short_futures_or_stale_size_fill(tmp_path):
     async def scenario():
         broker, data, store = setup(tmp_path)

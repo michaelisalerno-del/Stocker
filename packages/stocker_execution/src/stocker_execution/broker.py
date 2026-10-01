@@ -53,6 +53,7 @@ CLOSED_POSITION_FIELDS = (
     "CostClosingInBaseCurrency",
 )
 ORDER_DEADLINE_SECONDS = 20  # a working order unconfirmed after this is reconciled/cancelled
+NO_BID_GRACE_SECONDS = 60  # a current quote with no sellable bid this long after the exit: zero
 
 
 def now() -> datetime:
@@ -396,6 +397,22 @@ class PaperBroker:
                 identity, "SKIPPED" if role == "ENTRY" else "EXIT_EXCEPTION", str(exc)
             )
             return
+        self.book_internal_fill(
+            identity, reference, plan, role, price, at, plan["fee_per_side_gbp"]
+        )
+
+    def book_internal_fill(
+        self,
+        identity: str,
+        reference: str,
+        plan: dict[str, Any],
+        role: str,
+        price: float,
+        at: datetime,
+        fees_gbp: float,
+        reason: str = "",
+    ) -> None:
+        option = plan["option"]
         with self.store.db:
             self.store.record_fill(
                 {
@@ -413,7 +430,7 @@ class PaperBroker:
             )
             self.store.db.execute(
                 "UPDATE fills SET commission=?,commission_currency='GBP' WHERE reference=?",
-                (plan["fee_per_side_gbp"], reference),
+                (fees_gbp, reference),
             )
             self.store.db.execute(
                 "UPDATE orders SET status='Filled',filled=1,remaining=0 WHERE reference=?",
@@ -431,7 +448,7 @@ class PaperBroker:
             self.store.db.execute(
                 "UPDATE reservations SET plan=? WHERE id=?", (encode(plan), identity)
             )
-        self.store.decision(identity, "INTERNALLY_SIMULATED_FILL")
+        self.store.decision(identity, "INTERNALLY_SIMULATED_FILL", reason)
         self.data.recorder.annotate(
             identity,
             {
@@ -439,12 +456,61 @@ class PaperBroker:
                     "role": role,
                     "quantity": 1,
                     "price": price,
-                    "fees_gbp": plan["fee_per_side_gbp"],
+                    "fees_gbp": fees_gbp,
                     "at": at.isoformat(),
                     "basis": "INTERNALLY_SIMULATED",
+                    **({"write_off": reason} if reason else {}),
                 },
             },
         )
+
+    def write_off_reason(self, plan: dict[str, Any], exit_at: datetime) -> str:
+        """INTERNAL_PAPER only: why an owed exit cannot be sold and is booked at zero, or "".
+
+        Far-out same-day options often lose their bid before expiry; selling one tick below a
+        one-tick bid is zero too. Unknown is never "no bid": a missing, stale, delayed or paused
+        quote keeps the exit retrying. Past the last trading time nothing can be sold.
+        """
+        if self.config.execution_mode != "INTERNAL_PAPER":
+            return ""
+        at = now()
+        if at >= utc(plan["cutoff"]):
+            return "WRITTEN_OFF_AFTER_LAST_TRADE"
+        if at < exit_at + timedelta(seconds=NO_BID_GRACE_SECONDS):
+            return ""
+        state = self.data.options.get(plan["option"]["uic"])
+        if not state:
+            return ""
+        price = state[1]
+        quote = (price.value or {}).get("Quote") or {}
+        receipt = self.data.quote_receipt(price)
+        if (
+            receipt is None
+            or not 0 <= at.timestamp() - receipt <= QUOTE_MAX_AGE_SECONDS
+            or price.problem
+            or quote.get("DelayedByMinutes") != 0
+        ):
+            return ""
+        bid = quote.get("Bid")
+        if quote.get("PriceTypeBid") == "NoMarket" or not isinstance(bid, (int, float)) or bid <= 0:
+            return "WRITTEN_OFF_NO_BID"
+        if option_price(plan["option"], float(bid), ROUND_FLOOR, -1) <= 0:
+            return "WRITTEN_OFF_ONE_TICK_BID"
+        return ""
+
+    def write_off(self, identity: str, plan: dict[str, Any], reason: str) -> None:
+        """Close an unsellable paper option at zero; no exit fee, as no trade takes place."""
+        order_id = int(
+            self.store.db.execute("SELECT COALESCE(MAX(order_id),0)+1 FROM orders").fetchone()[0]
+        )
+        reference = self.store.prepare_order(
+            identity,
+            "EXIT",
+            order_id,
+            (now() + timedelta(seconds=ORDER_DEADLINE_SECONDS)).isoformat(),
+            {"option": plan["option"], "role": "EXIT", "limit": 0.0, "mode": "INTERNAL_PAPER"},
+        )
+        self.book_internal_fill(identity, reference, plan, "EXIT", 0.0, now(), 0.0, reason)
 
     async def portfolio(self, path: str) -> list[dict[str, Any]]:
         rows = []
@@ -742,7 +808,15 @@ class PaperBroker:
                                     execution=True,
                                 )
                             raise ValueError("PENDING_ORDER_RECONCILIATION_REQUIRED")
-                    if self.store.exposure(identity) > 0 and now() >= utc(reservation["exit_at"]):
+                    exit_at = utc(reservation["exit_at"])
+                    reason = (
+                        self.write_off_reason(plan, exit_at)
+                        if self.store.exposure(identity) > 0 and now() >= exit_at
+                        else ""
+                    )
+                    if reason:
+                        self.write_off(identity, plan, reason)
+                    elif self.store.exposure(identity) > 0 and now() >= exit_at:
                         if now() >= utc(plan["cutoff"]):
                             raise ValueError("FAILED_CLOSURE_EXPIRY_EXPOSURE_EXCEPTION")
                         state = self.data.options.get(plan["option"]["uic"])

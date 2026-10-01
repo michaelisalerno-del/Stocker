@@ -31,9 +31,9 @@ from stocker_execution.contracts import (
     deadline_instant,
     executable_quote,
     future_identity,
-    grid_price,
     key,
     option_identity,
+    option_price,
     quote_check,
     utc,
 )
@@ -961,7 +961,7 @@ class DataService:
                     self.fx.value or {}, self.fx.receipt, datetime.fromtimestamp(at, UTC)
                 )
                 rate = 1 / float(fx["Bid"])
-            limit = grid_price(float(q["Ask"]), identity["tick_size"], ROUND_CEILING, 1)
+            limit = option_price(identity, float(q["Ask"]), ROUND_CEILING, 1)
             costs = cost_estimate(identity, limit, reference["conditions"], rate)
             costs["minimum_purchase_cost_gbp"] = cost_estimate(
                 identity, float(q["Ask"]), reference["conditions"], rate

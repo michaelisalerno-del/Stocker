@@ -16,10 +16,11 @@ from stocker_execution.config import (
 from stocker_execution.contracts import (
     budget,
     executable_quote,
-    grid_price,
     key,
+    option_price,
     positive,
     quote_check,
+    tick_at,
     utc,
     verified_cutoff,
 )
@@ -352,8 +353,9 @@ class PaperBroker:
                 self.data.options[option["uic"]][0], state.value or {}, state.receipt, at
             )
             side = "Ask" if role == "ENTRY" else "Bid"
-            if (role == "ENTRY" and price < float(quote[side]) + option["tick_size"] - 1e-10) or (
-                role == "EXIT" and price > float(quote[side]) - option["tick_size"] + 1e-10
+            touch = float(quote[side])
+            if (role == "ENTRY" and price < touch + tick_at(option, touch, 1) - 1e-10) or (
+                role == "EXIT" and price > touch - tick_at(option, touch, -1) + 1e-10
             ):
                 raise ValueError("PRICE_MOVED_NO_ASSUMED_FILL")
             size_at = state.size_times.get(side)
@@ -733,9 +735,9 @@ class PaperBroker:
                         fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, now())
                         plan["fx"], plan["fx_at"] = 1 / float(fx["Ask"]), self.data.fx.receipt
                         # Internal sale includes one tick adverse slippage.
-                        price = grid_price(
+                        price = option_price(
+                            plan["option"],
                             float(q["Bid"]),
-                            plan["option"]["tick_size"],
                             ROUND_FLOOR,
                             -1 if self.config.execution_mode == "INTERNAL_PAPER" else 0,
                         )

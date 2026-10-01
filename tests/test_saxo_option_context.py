@@ -6,6 +6,7 @@ import json
 import time
 import zlib
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_CEILING, ROUND_FLOOR
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -21,6 +22,9 @@ from stocker_execution.contracts import (
     executable_quote,
     key,
     option_identity,
+    option_price,
+    require_one_whole_contract,
+    tick_at,
     verified_cutoff,
 )
 from stocker_execution.recorder import Recorder, read_row
@@ -360,6 +364,46 @@ def test_option_reference_cross_underlying_and_expiry_are_rejected():
         option_identity(FUTURE, raw, 50, {**space, "UnderlyingUic": 999})
 
 
+def test_live_option_schema_one_contract_and_tiered_ticks():
+    # Observed LIVE NQ option details (2026-10-01): no TickSize, a price-tiered scheme only.
+    space = {
+        "Uic": 101,
+        "UnderlyingUic": 100,
+        "PutCall": "Call",
+        "StrikePrice": 70,
+        "Expiry": OPTION["expiry"],
+    }
+    raw = {k: v for k, v in reference().items() if k != "TickSize"}
+    raw["TickSizeScheme"] = {
+        "DefaultTickSize": 1.0,
+        "Elements": [
+            {"HighPrice": 100.0, "TickSize": 0.25},
+            {"HighPrice": 5.0, "TickSize": 0.05},
+            {"HighPrice": 500.0, "TickSize": 0.5},
+        ],
+    }
+    nq = option_identity(FUTURE, raw, 50, space)
+    assert nq["tick_size"] is None
+    assert (nq["minimum_quantity"], nq["lot_size"]) == (1, 1)
+    require_one_whole_contract(nq)
+    # A boundary lies on both grids; only the step away from it changes tier.
+    assert option_price(nq, 4.95, ROUND_CEILING, 1) == 5.0
+    assert option_price(nq, 5.0, ROUND_CEILING, 1) == 5.25
+    assert option_price(nq, 5.03, ROUND_CEILING, 0) == 5.25
+    assert option_price(nq, 100.0, ROUND_CEILING, 1) == 100.5
+    assert option_price(nq, 5.0, ROUND_FLOOR, -1) == 4.95
+    assert option_price(nq, 100.5, ROUND_FLOOR, -1) == 100.0
+    assert option_price(nq, 600.0, ROUND_FLOOR, -1) == 599.0
+    assert (tick_at(nq, 5.0, 1), tick_at(nq, 5.0, -1)) == (0.25, 0.05)
+    cl = option_identity(FUTURE, reference(), 50, space)
+    assert cl["tick_size"] == 0.001 and cl["tick_size_scheme"] is None
+    assert option_price(cl, 1.2345, ROUND_CEILING, 1) == 1.236
+    with pytest.raises(ValueError, match="MISSING_INCREMENT_SIZE"):
+        option_identity(FUTURE, {**raw, "IncrementSize": None}, 50, space)
+    with pytest.raises(ValueError, match="MISSING_TICK_SIZE"):
+        option_identity(FUTURE, {**raw, "TickSizeScheme": None}, 50, space)
+
+
 def reference():
     return {
         "Uic": 101,
@@ -372,8 +416,9 @@ def reference():
         "ContractSize": 1000,
         "PriceToContractFactor": 1000,
         "TickSize": 0.001,
-        "MinimumTradeSize": 1,
-        "LotSize": 1,
+        # LIVE schema (2026-10-01): IncrementSize is the amount step, MinimumLotSize 0 = none.
+        "IncrementSize": 1.0,
+        "MinimumLotSize": 0.0,
         "AmountDecimals": 0,
         "IsTradable": True,
         "TradingSessions": OPTION["trading_sessions"],

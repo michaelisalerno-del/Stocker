@@ -125,6 +125,11 @@ def option_identity(
         raise ValueError("OPTION_STRIKE_MISMATCH")
     if space.get("Expiry") and str(raw.get("ExpiryDate", ""))[:10] != str(space["Expiry"])[:10]:
         raise ValueError("OPTION_EXPIRY_MISMATCH")
+    # LIVE reports the amount step as IncrementSize and MinimumLotSize 0 for no further minimum
+    # (2026-10-01 CL/GC/NQ details); the smallest order is one step or the minimum, if larger.
+    step = positive(raw.get("IncrementSize"), "INCREMENT_SIZE")
+    scheme = tick_scheme(raw.get("TickSizeScheme", space.get("TickSizeScheme")))
+    tick = raw.get("TickSizeLimitOrder", raw.get("TickSize"))
     return {
         "provider": "SAXO",
         "environment": future["environment"],
@@ -143,16 +148,17 @@ def option_identity(
         "contract_month": future["contract_month"],
         "multiplier": positive(raw.get("ContractSize"), "MULTIPLIER"),
         "price_factor": positive(raw.get("PriceToContractFactor"), "PRICE_FACTOR"),
-        "tick_size": positive(raw.get("TickSizeLimitOrder", raw.get("TickSize")), "TICK_SIZE"),
-        "minimum_quantity": positive(raw.get("MinimumTradeSize"), "MINIMUM_QUANTITY"),
-        "lot_size": positive(raw.get("LotSize"), "LOT_SIZE"),
+        # NQ options give only a price-tiered scheme; tick_at() applies it.
+        "tick_size": None if scheme and tick is None else positive(tick, "TICK_SIZE"),
+        "minimum_quantity": max(step, nonnegative(raw.get("MinimumLotSize"), "MINIMUM_LOT_SIZE")),
+        "lot_size": step,
         "amount_decimals": raw.get("AmountDecimals"),
         "exercise_cutoff": raw.get("ExerciseCutOffTime"),
         "last_trade_at": space.get("LastTradeDate"),
         "settlement_style": raw.get("SettlementStyle"),
         "exercise_style": space.get("ExerciseStyle"),
         "notice_date": raw.get("NoticeDate"),
-        "tick_size_scheme": raw.get("TickSizeScheme", space.get("TickSizeScheme")),
+        "tick_size_scheme": scheme,
         "trading_sessions": raw.get("TradingSessions"),
         "is_tradable": raw.get("IsTradable"),
     }
@@ -211,6 +217,46 @@ def grid_price(price: float, tick: float, rounding: str, ticks: int) -> float:
     return float((steps + ticks) * grid)
 
 
+def tick_scheme(value: Any) -> dict[str, Any] | None:
+    if not value:
+        return None
+    elements = [
+        {
+            "HighPrice": positive(e.get("HighPrice"), "TICK_TIER_PRICE"),
+            "TickSize": positive(e.get("TickSize"), "TICK_SIZE"),
+        }
+        for e in value.get("Elements") or []
+    ]
+    return {
+        "DefaultTickSize": positive(value.get("DefaultTickSize"), "TICK_SIZE"),
+        "Elements": sorted(elements, key=lambda e: e["HighPrice"]),
+    }
+
+
+def tick_at(option: dict[str, Any], price: float, side: int) -> float:
+    """The option's tick for prices just above (side 1) or just below (side -1) `price`.
+
+    Saxo gives each scheme tick "for prices up to HighPrice". A tier boundary lies on both
+    grids, so only the step away from it depends on the side, never on boundary ownership.
+    """
+    scheme = option.get("tick_size_scheme")
+    if not scheme:
+        return positive(option["tick_size"], "TICK_SIZE")
+    for element in scheme["Elements"]:
+        if price < element["HighPrice"] or (side < 0 and price == element["HighPrice"]):
+            return float(element["TickSize"])
+    return float(scheme["DefaultTickSize"])
+
+
+def option_price(option: dict[str, Any], price: float, rounding: str, ticks: int) -> float:
+    """Snap to the option's grid at `price`, then move at most one tick the rounding way."""
+    if ticks not in (-1, 0, 1):
+        raise ValueError("ONE_TICK_STEP_ONLY")
+    side = 1 if rounding == ROUND_CEILING else -1
+    snapped = grid_price(price, tick_at(option, price, side), rounding, 0)
+    return grid_price(snapped, tick_at(option, snapped, side), rounding, ticks)
+
+
 def require_one_whole_contract(option: dict[str, Any]) -> None:
     if option["minimum_quantity"] != 1 or option["lot_size"] != 1 or option["amount_decimals"] != 0:
         raise ValueError("ONE_WHOLE_CONTRACT_NOT_EXECUTABLE")
@@ -244,8 +290,6 @@ def cost_estimate(
     if conditions.get("IsTradable") is False:
         raise ValueError("CONTRACT_OPTION_TRADING_NOT_ALLOWED")
     require_one_whole_contract(option)
-    if option.get("tick_size_scheme"):
-        raise ValueError("VARIABLE_TICK_SCHEME_REQUIRES_VERIFIED_PRICE_TIER")
     rate = positive(native_to_gbp, "GBP_CONVERSION")
 
     def convert(amount: float, currency: Any) -> float:

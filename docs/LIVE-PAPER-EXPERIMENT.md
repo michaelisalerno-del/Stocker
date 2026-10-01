@@ -73,4 +73,5 @@ cost with t > 2. The bar-based research expectation is that they will not; this 
 
 The exact candidates, periods and pass bar were frozen on 2026-10-01 in
 [L2-VETO-EXIT-PROTOCOL.md](L2-VETO-EXIT-PROTOCOL.md) (seven entry vetoes, six exits; discovery 1-30 October,
-holdout 2-27 November); that file governs the analysis.
+holdout 2-27 November); that file governs the analysis, with
+[Amendment 1](L2-VETO-EXIT-PROTOCOL-AMENDMENT-1.md) (also 2026-10-01: V7 and X1 use the recorded `forecast`).

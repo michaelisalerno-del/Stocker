@@ -79,4 +79,5 @@ test, [RELEASE-EXIT-PROTOCOL.md](RELEASE-EXIT-PROTOCOL.md), judges selling a min
 falls on the exit; its calendar `release-calendar-2026-10-11.yaml` is also the app's `event_calendar_file` from
 2026-10-02, so each recorded clock lists the releases near it. [MINUTE-EARLY-EXIT-PROTOCOL.md](MINUTE-EARLY-EXIT-PROTOCOL.md)
 judges selling one minute before the hour on all other exits. [RELEASE-ENTRY-PROTOCOL.md](RELEASE-ENTRY-PROTOCOL.md) judges
-deciding and buying one minute before a release that falls on the clock.
+deciding and buying one minute before a release that falls on the clock. [RELEASE-LATE-ENTRY-PROTOCOL.md](RELEASE-LATE-ENTRY-PROTOCOL.md)
+judges keeping the decision and buying one minute after that release.

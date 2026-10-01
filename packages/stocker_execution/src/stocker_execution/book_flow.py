@@ -9,7 +9,7 @@ from typing import Any
 
 from stocker_execution.contracts import USABLE_PRICE_TYPES
 
-VERSION = "SAXO_SAMPLED_BOOK_FLOW_V1"
+VERSION = "SAXO_SAMPLED_BOOK_FLOW_V2"  # V2 (2026-10-01): volume change
 LEVELS = (1, 3, 5, 10)
 LOOKBACKS = (5, 30, 60)
 FIELDS = {
@@ -226,10 +226,13 @@ def observe(
             "price": number(details.get("LastTraded")),
             "size": number(details.get("LastTradedSize"), 0),
         },
+        # Verified on LIVE 2026-10-01: Saxo's Volume is the contracts traded since the 18:00 New
+        # York session open (the summed one-minute chart volumes), so a change is traded volume.
         "volume": {
             "value": number(details.get("Volume"), 0),
             "change": None,
-            "status": "SEMANTICS_UNVERIFIED",
+            "changes": {},
+            "status": "SESSION_CUMULATIVE",
         },
         "feed": context,
     }
@@ -274,4 +277,16 @@ def observe(
     result["lookbacks"] = (
         temporal(history, result) if status != "UNAVAILABLE" else temporal([], result)
     )
+    if result["volume"]["status"] == "SESSION_CUMULATIVE" and status != "UNAVAILABLE":
+        for seconds in LOOKBACKS:
+            points = interval(history, result, seconds)
+            values = [p["volume"]["value"] for p in points]
+            # Any fall inside the window is a session reset or a correction: no change then.
+            if (
+                values
+                and None not in values
+                and all(a <= b for a, b in zip(values, values[1:], strict=False))
+            ):
+                result["volume"]["changes"][str(seconds)] = values[-1] - values[0]
+        result["volume"]["change"] = result["volume"]["changes"].get("60")
     return result

@@ -1,6 +1,10 @@
 # Observation-only book flow — incremental Saxo addendum
 
-Feature version: `SAXO_SAMPLED_BOOK_FLOW_V1`. Baseline: `b066386` on `codex/saxo-only`.
+Feature version: `SAXO_SAMPLED_BOOK_FLOW_V2` (2026-10-01; V1 before). V2 adds `volume.changes` (traded volume over
+5/30/60 s) and `volume.change` (60 s): Saxo's Volume was verified on LIVE as the contracts traded since the 18:00
+New York session open; a fall inside a window (session reset or correction) leaves that change unset.
+Order-count imbalance stays unset: LIVE sends `UsingOrders: false` with order arrays equal to the sizes.
+Baseline: `b066386` on `codex/saxo-only`.
 The work extends the existing Prices consumer, recorder and Markets view. No second data pipeline,
 new service, strategy rule, capture trigger or execution control is introduced.
 

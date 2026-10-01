@@ -91,9 +91,25 @@ def test_repeated_last_trade_and_volume_resets_never_create_tape():
     reset["PriceInfoDetails"]["Volume"] = 9
     assert point(reset, 3, [corrected])["volume"]["change"] is None
     assert (
-        point(reset, 3, [corrected], generation="new")["volume"]["status"] == "SEMANTICS_UNVERIFIED"
+        point(reset, 3, [corrected], generation="new")["volume"]["status"] == "SESSION_CUMULATIVE"
     )
     assert "executions" not in repeated and "aggressor" not in repeated
+
+
+def test_volume_change_is_traded_volume_over_each_lookback_and_never_spans_a_fall():
+    # Saxo's Volume is the session's cumulative traded volume (verified on LIVE 2026-10-01).
+    history = []
+    for t in range(61):
+        value = book()
+        value["PriceInfoDetails"]["Volume"] = 1000 + 2 * t
+        history.append(point(value, t, history))
+    last = history[-1]
+    assert last["volume"]["changes"] == {"5": 10, "30": 60, "60": 120}
+    assert last["volume"]["change"] == 120
+    value = book()
+    value["PriceInfoDetails"]["Volume"] = 1050  # a fall: the session reset or a correction
+    fallen = point(value, 61, history)
+    assert fallen["volume"]["change"] is None and fallen["volume"]["changes"] == {}
 
 
 def test_price_shifts_match_tick_prices_and_gaps_invalidate_lookbacks():

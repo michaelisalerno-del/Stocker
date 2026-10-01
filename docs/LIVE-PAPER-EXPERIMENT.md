@@ -13,7 +13,7 @@ Every observed clock, including vetoed, unaffordable and capacity-skipped ones, 
   (existing).
 - `book_flow`: the futures book at the clock — spread, depth at 1/3/5/10 levels, depth and
   order-count imbalance, size-weighted midpoint displacement, depth changes over 5/30/60 seconds and
-  imbalance persistence (`SAXO_SAMPLED_BOOK_FLOW_V1`). `UNAVAILABLE` when no depth has arrived;
+  imbalance persistence (`SAXO_SAMPLED_BOOK_FLOW_V1`; V2 from 2026-10-01 adds traded volume over 5/30/60 s). `UNAVAILABLE` when no depth has arrived;
   never zero-filled.
 - `observation`: `rv60`, `session_travel_since_0800` with `session_minutes_counted`, and
   `hour_reference_rv15_median`. `rv15` is in `inputs` when the eligibility gate passed. Gaps leave a

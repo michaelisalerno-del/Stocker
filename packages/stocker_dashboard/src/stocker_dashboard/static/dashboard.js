@@ -265,7 +265,7 @@ function bookFlow(m, f, rec = {}, identity = {}) {
   const p = f.lookbacks?.[60]?.[5] || {};
   text(`flow-persistence-${m}`, p.bid_heavy_fraction == null ? "INSUFFICIENT_HISTORY" : `60s · BID_HEAVY ${numeric(p.bid_heavy_fraction * 100, "%")} / ASK_HEAVY ${numeric(p.ask_heavy_fraction * 100, "%")} / BALANCED ${numeric(p.balanced_fraction * 100, "%")}`);
   text(`flow-last-${m}`, `${numeric(f.latest_trade?.price)} × ${numeric(f.latest_trade?.size)} · no inferred execution count`);
-  text(`flow-volume-${m}`, `Reported ${numeric(f.volume?.value)} · change UNAVAILABLE · ${f.volume?.status || "UNAVAILABLE"}`);
+  text(`flow-volume-${m}`, `Reported ${numeric(f.volume?.value)} · ${typeof f.volume?.change === "number" ? `traded in the last 60 s ${numeric(f.volume.change)}` : "change UNAVAILABLE"} · ${f.volume?.status || "UNAVAILABLE"}`);
   if ($(`flow-detail-${m}`).open) text(`flow-meta-${m}`, JSON.stringify({version: f.version, calculated_at: f.at, last_receipt: feed.last_receipt, last_field_change: feed.last_field_change, last_contact: feed.last_contact, cadence, available_fields: f.available_fields, recording: rec, matched_price_changes: f.lookbacks}, null, 2));
 }
 

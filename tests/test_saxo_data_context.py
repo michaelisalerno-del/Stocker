@@ -155,6 +155,20 @@ def test_chain_smile_picks_todays_expiry_sorted_in_provider_units():
     assert views.smile(BOARD, "2026-12-01")["expiry"].startswith("2026-09-29")
     assert views.smile({}, "2026-09-30") is None
     assert abs(views.model_sigma(0.001) - 0.001 * (525600 / 15) ** 0.5) < 1e-12
+    # LIVE (2026-10-01): the first snapshot's 25 lowest strikes stay on the board ahead of the
+    # focused window; the smile shows the strikes nearest the money, not the first 25 indices.
+    low = [{"Index": i, "Strike": 50.0 + i} for i in range(25)]
+    window = [
+        {"Index": 140 + i, "Strike": 90.0 + 0.25 * i, "Call": {"Uic": 900 + i, "Bid": 0.1}}
+        for i in range(11)
+    ]
+    live = {
+        "Expiries": [
+            {"Index": 0, "Expiry": "2026-10-01", "MidStrikePrice": 91.25, "Strikes": low + window}
+        ]
+    }
+    shown = [s["strike"] for s in views.smile(live, "2026-10-01")["strikes"]]
+    assert all(90.0 <= s <= 92.5 for s in shown[-11:]) and 92.5 in shown and 90.0 in shown
 
 
 def test_sim_activity_events_wake_reconciliation_and_never_reset_the_stream(tmp_path):

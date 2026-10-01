@@ -449,6 +449,17 @@ def smile(
             "volume": _number(value.get("Volume")),
         }
 
+    rows = [s for s in expiry.get("Strikes") or [] if isinstance(s, dict)]
+    # The board keeps every strike Saxo has sent, keyed by index: the first snapshot's lowest
+    # strikes stay ahead of the focused window, so show the strikes nearest the money (2026-10-01).
+    mid = _number(expiry.get("MidStrikePrice"))
+    if mid is not None:
+
+        def distance(row: dict[str, Any]) -> float:
+            strike = _number(row.get("Strike"))
+            return abs(strike - mid) if strike is not None else math.inf
+
+        rows.sort(key=distance)
     strikes = [
         {
             "strike": _number(s.get("Strike")),
@@ -456,9 +467,8 @@ def smile(
             "call": side(s.get("Call")),
             "put": side(s.get("Put")),
         }
-        for s in expiry.get("Strikes") or []
-        if isinstance(s, dict)
-    ][:25]
+        for s in rows[:25]
+    ]
     return {
         "expiry": expiry.get("Expiry"),
         "last_trade": expiry.get("LastTradeDate"),

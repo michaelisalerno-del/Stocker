@@ -1,6 +1,17 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `c15d937f8f19a1ad6d7bf36bdaf71e34ad8c781c`, deployed 2026-10-01 15:46 UTC and re-armed.
+Current application release: `792e3cf9c732152153cc98ed470f8cbee5db9d05`, deployed 2026-10-01 20:12 UTC by the
+one-shot timer after the session (no open trades) and re-armed; the session stayed FullTradingAndChat. It carries
+`ea1695e` (two-tap real-time confirm), `c902219` (an unsellable paper option is written off at zero after 60 s with
+no bid), `587812f` (no-trade runs of up to 5 minutes filled at the last close), `462605f` (smile near the money,
+traded-volume change), `942d2bd`/`ababf6d` (ladder bids on the right) and `792e3cf` (the look14 forecast and the
+option's implied move against it, recorded at every clock and shown on the ticket). Config change at the same restart:
+`event_calendar_file: /etc/stocker/v1/event-calendar.yaml`, the frozen `docs/release-calendar-2026-10-11.yaml`
+(sha256 `43ae308b…`); previous config `saxo.live.paper.yaml.bak-20261001-calendar`. Verified after the restart: all
+five option roots loaded, quotes DelayedByMinutes 0, calendar loaded, forecast OBSERVED in all five markets. Backup
+`evening-fixes-20261001`. Rollback: `c15d937…` with the previous config.
+
+Previous release `c15d937f8f19a1ad6d7bf36bdaf71e34ad8c781c`, deployed 2026-10-01 15:46 UTC and re-armed.
 It carries `e33b6d4` (a stream reconnect keeps today's option spaces instead of reloading ~70 roots before the price
 feeds) and fixes the start-up recording repair: `recover_members` looped forever when a gzip member ended inside an
 output-limited tail, so the 15:17 UTC restart of `e33b6d4` hung at 100% CPU before the stream started (service stopped

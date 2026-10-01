@@ -139,11 +139,11 @@ h3 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: 
 .ladder-head { color: var(--muted); font-size: 10px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
 .ladder-row { padding: 3px 0; border-bottom: 1px solid #1c2b32; }
 .ladder-row .size:first-child, .ladder-head span:first-child, .ladder-head span:nth-child(3) { text-align: right; }
-.ladder-row .price:nth-child(3) { text-align: right; color: var(--bid); }
-.ladder-row .price:nth-child(4) { color: var(--ask); }
+.ladder-row .price.ask { text-align: right; color: var(--ask); }
+.ladder-row .price.bid { color: var(--bid); }
 .bar { display: flex; height: 12px; }
 .bar i { display: block; height: 100%; }
-.bar.bid { justify-content: flex-end; }
+.bar.ask { justify-content: flex-end; }
 .bar.bid i { background: rgba(111, 207, 151, 0.55); }
 .bar.ask i { background: rgba(235, 138, 122, 0.55); }
 .flow-facts { margin-top: 14px; font-size: 11px; }

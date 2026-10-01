@@ -372,6 +372,12 @@ async function label(page) {
     assert(Number(await page.locator("#rv-GC").getAttribute("width")) > 0);
     assert.match(await page.locator("#imbalance-GC").textContent(), /\+0\.50 · bid heavy/);
     assert(Number(await page.locator("#depth-GC-0 .bar.bid i").evaluate(n=>parseFloat(n.style.width))) > 0);
+    // Sellers on the left, buyers on the right, the same way round as the imbalance bar (2026-10-01).
+    assert.match(await page.locator("#ladder-GC .ladder-head").textContent(), /^Ask size\s*Ask\s*Bid\s*Bid size$/);
+    assert.equal(await page.locator("#depth-GC-0 span").first().textContent(), "10");
+    assert.equal(await page.locator("#depth-GC-0 .price.ask").textContent(), "2651");
+    assert.equal(await page.locator("#depth-GC-0 .price.bid").textContent(), "2650");
+    assert.equal(await page.locator("#depth-GC-0 span").last().textContent(), "12");
     await page.locator("#book-history-GC summary").click();
     await page.waitForFunction(() => document.querySelector("#heatmap-GC").dataset.columns === "120");
     assert.match(await page.locator("#heatmap-note-GC").textContent(), /120 × 5s buckets/);

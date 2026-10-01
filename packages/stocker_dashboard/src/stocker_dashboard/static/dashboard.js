@@ -131,8 +131,8 @@ function marketCard(m) {
       <div class="imbalance" aria-label="Five-level size imbalance"><div class="imbalance-scale"><span>Ask-heavy</span><span>Balanced</span><span>Bid-heavy</span></div>
         <div class="imbalance-track"><div class="imbalance-mark" id="imbalance-mark-${m}"></div></div><p id="imbalance-${m}"></p></div>
       <div class="ladder" id="ladder-${m}" aria-label="${m} displayed depth">
-        <div class="ladder-head"><span>Bid size</span><span></span><span>Bid</span><span>Ask</span><span></span><span>Ask size</span></div>
-        ${Array.from({length: 10}, (_, i) => `<div class="ladder-row" id="depth-${m}-${i}" hidden><span class="size"></span><span class="bar bid"><i></i></span><span class="price"></span><span class="price"></span><span class="bar ask"><i></i></span><span class="size"></span></div>`).join("")}
+        <div class="ladder-head"><span>Ask size</span><span></span><span>Ask</span><span>Bid</span><span></span><span>Bid size</span></div>
+        ${Array.from({length: 10}, (_, i) => `<div class="ladder-row" id="depth-${m}-${i}" hidden><span class="size"></span><span class="bar ask"><i></i></span><span class="price ask"></span><span class="price bid"></span><span class="bar bid"><i></i></span><span class="size"></span></div>`).join("")}
       </div>
       <p class="muted" id="depth-note-${m}"></p>
       <dl class="flow-facts">
@@ -284,11 +284,11 @@ function depth(m, d) {
     const visible = Boolean(bid || ask);
     if (row.hidden === visible) row.hidden = !visible;
     const cells = row.children;
-    [[0, bid?.size], [2, bid?.price], [3, ask?.price], [5, ask?.size]].forEach(([j, v]) => {
+    [[0, ask?.size], [2, ask?.price], [3, bid?.price], [5, bid?.size]]  // sellers left, buyers right, as the imbalance bar.forEach(([j, v]) => {
       const value = String(v ?? "—");
       if (cells[j].textContent !== value) cells[j].textContent = value;
     });
-    [[1, bid?.size], [4, ask?.size]].forEach(([j, v]) => {
+    [[1, ask?.size], [4, bid?.size]].forEach(([j, v]) => {
       const width = `${(100 * (v || 0) / largest).toFixed(1)}%`;
       const bar = cells[j].firstElementChild;
       if (bar.style.width !== width) bar.style.width = width;

@@ -72,7 +72,7 @@ const server=http.createServer((req,res)=>{
   stalled=false;await page.evaluate(()=>refresh(true));
   assert.equal(await page.locator("#notice").textContent(),"");
   await page.goto(base+"/markets");
-  await page.locator("#selected-market").selectOption("NG");
+  await page.locator("#tab-NG").click();
   await page.waitForFunction(()=>document.querySelector("#contract-NG").textContent==="NG");
   await new Promise(r=>setTimeout(r,250));
   assert.equal(await page.locator("#contract-CL").textContent(),"");

@@ -14,6 +14,7 @@ if (!markets.includes(selectedMarket)) selectedMarket = "CL";
 let offset = 0, paused = false, pending = null, selectedIdentity = "";
 let detailRequest = null, detailSignature = null, controlPending = false, lastRefresh = null, accountSnapshot = null;
 let pageSize = 100; // replaced by the server's page_size
+let setupShown = false;
 let limits = {};
 let serverOffset = 0, nextClock = null; // countdowns use server time, not the browser clock
 const serverNow = () => Date.now() + serverOffset;
@@ -24,9 +25,15 @@ const GBP = new Intl.NumberFormat("en-GB", {style: "currency", currency: "GBP"})
 const NATIVE = new Intl.NumberFormat("en-GB", {maximumFractionDigits: 2, minimumFractionDigits: 2});
 const LONDON = new Intl.DateTimeFormat("en-GB", {timeZone: "Europe/London", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit"});
 const NEW_YORK = new Intl.DateTimeFormat("en-GB", {timeZone: "America/New_York", hour: "2-digit", minute: "2-digit"});
+const LONDON_HM = new Intl.DateTimeFormat("en-GB", {timeZone: "Europe/London", hour: "2-digit", minute: "2-digit"});
 const money = (v) => v == null ? "Unavailable" : GBP.format(v);
 const time = (v) => v ? LONDON.format(new Date(v)) : "—";
 const hhmm = (v) => v ? NEW_YORK.format(new Date(v)) : "—";
+const london = (v) => v ? LONDON_HM.format(new Date(v)) : "—";
+// A result with its sign, and the class that colours it.
+const signed = (v) => typeof v === "number" ? `${v < 0 ? "−" : "+"}${GBP.format(Math.abs(v))}` : "—";
+const tone = (v) => typeof v === "number" && v !== 0 ? (v > 0 ? "pos" : "neg") : "";
+const price = (v) => typeof v === "number" && Number.isFinite(v) ? String(Number(v.toFixed(4))) : "—";
 const numeric = (v, suffix = "") => typeof v === "number" && Number.isFinite(v) ? `${Number(v.toFixed(4))}${suffix}` : "UNAVAILABLE";
 const text = (id, v) => {
   const el = $(id), next = String(v ?? "—");
@@ -56,6 +63,15 @@ const explanations = {
   QUOTE_NOT_USABLE: "Quote price type is not usable (old indicative, pending or no market)",
   QUOTE_STALE_OR_UNAVAILABLE: "No quote received in the last 5 seconds",
   SAXO_CHART_DATA_DELAYED: "Saxo chart data is delayed; completed bars cannot arrive in time",
+  NO_VERIFIED_REAL_0DTE_EXPIRY_TIME: "No same-day option listed yet",
+  NO_VERIFIED_LISTED_EXPIRY_TIME: "No later option expiry listed yet",
+  REFERENCE_SESSION_AUDIT_OR_SAXO_COVERAGE_UNVERIFIED: "Waiting for the daily check of earlier sessions' bars",
+  CANDIDATE_UNDERLYING_HISTORY_STALE: "Waiting for fresh price bars",
+  SAXO_HISTORY_UNAVAILABLE: "Saxo price history unavailable",
+  SAXO_COMPLETED_OHLCV_UNAVAILABLE: "No completed price bars from Saxo yet",
+  UNSUPPORTED_EXIT_BEFORE_CONTRACT_CUTOFF: "Too late today: the option stops trading before the hour would end",
+  NG_CLOCK_13: "Natural gas skips 13:00 NY by rule",
+  SKIPPED: "Skipped", CLOSED_PAPER_TRADE: "Traded", INTERNALLY_SIMULATED_FILL: "Traded · open",
 };
 const display = (v) => explanations[v] || String(v || "").replaceAll("_", " ");
 
@@ -66,32 +82,26 @@ show("setup", route === "overview" || route === "system");
 show("strategy-strip", route === "overview");
 show("account-strip", route === "overview");
 show("market-selector", route === "markets");
+show("today-trades", route === "overview");
 
 // Stable card nodes. Templates below are constant strings; server data is written later
 // with text() or attributes only.
 function overviewCard(m) {
   return `<div class="card-head"><h2>${m} <span>${names[m]}</span></h2><strong class="state" id="state-${m}"></strong></div>
-    <p class="contract" id="contract-${m}"></p>
-    <ol class="gates" id="gates-${m}" aria-label="${m} readiness at last refresh"></ol>
-    <p class="block" id="block-${m}"></p>
+    <p class="price-line"><strong id="price-${m}">—</strong><span id="change-${m}"></span><span class="contract" id="contract-${m}"></span></p>
     <p class="position" id="position-${m}" hidden></p>
-    <p class="candidate" id="candidate-${m}" hidden></p>
+    <p class="block" id="block-${m}"></p>
+    <p class="today-line" id="today-${m}" hidden></p>
     <p class="events" id="events-${m}" hidden></p>
-    <small class="data-line" id="data-${m}"></small>
-    <a class="detail-link" href="/markets?market=${m}">Market detail →</a>`;
+    <details class="checks"><summary id="checks-${m}">Checks</summary><ol class="gates" id="gates-${m}" aria-label="${m} readiness at last refresh"></ol></details>
+    <div class="card-foot"><small class="data-line" id="data-${m}"></small><a class="detail-link" href="/markets?market=${m}">Market detail →</a></div>`;
 }
 function marketCard(m) {
   return `<div class="card-head"><div><h2>${m} <span>${names[m]}</span></h2><p class="contract" id="contract-${m}"></p></div><span class="state" id="state-${m}"></span></div>
     <div class="status-line"><span id="market-${m}"></span><span id="l1-${m}"></span><span id="l2-${m}"></span><span id="data-${m}"></span></div>
-    <ol class="gates" id="gates-${m}" aria-label="${m} readiness at last refresh"></ol>
+    <p class="position" id="position-${m}" hidden></p>
     <p class="block" id="block-${m}"></p>
-    <svg class="chart" viewBox="0 0 640 210" role="img" aria-label="${m} completed underlying prices with frozen clock marks">
-      <g id="axis-${m}" class="axis"></g><rect id="rv-${m}" class="rv-window" x="0" y="10" width="0" height="170"/>
-      <g id="clocks-${m}" class="clock-marks"></g><g id="band-${m}" class="trade-band"></g>
-      <polyline id="line-${m}" fill="none"/><g id="markers-${m}"></g>
-      <text id="chart-empty-${m}" x="320" y="100" text-anchor="middle">Awaiting completed bars</text>
-    </svg>
-    <p class="chart-key">Grey marks: frozen clocks (NY) · shaded: 15-minute RV window · green band: open trade to exit</p>
+    <details class="checks"><summary id="checks-${m}">Checks</summary><ol class="gates" id="gates-${m}" aria-label="${m} readiness at last refresh"></ol></details>
     <div class="market-grid">
       <section class="panel ticket" aria-label="${m} option trade ticket"><h3>Trade ticket</h3>
         <p class="ticket-contract" id="ticket-contract-${m}"></p>
@@ -124,9 +134,15 @@ function marketCard(m) {
           <dt>Vol smile</dt><dd><svg viewBox="0 0 300 90" class="smile" id="smile-${m}" aria-label="${m} provider implied volatility by strike"></svg><span class="muted" id="smile-note-${m}"></span></dd>
           <dt>Recorder</dt><dd class="recorder-line" id="recorder-${m}"></dd>
         </dl>
-        <div class="position" id="position-${m}"></div>
       </section>
     </div>
+    <svg class="chart" viewBox="0 0 640 210" role="img" aria-label="${m} completed underlying prices with frozen clock marks">
+      <g id="axis-${m}" class="axis"></g><rect id="rv-${m}" class="rv-window" x="0" y="10" width="0" height="170"/>
+      <g id="clocks-${m}" class="clock-marks"></g><g id="band-${m}" class="trade-band"></g>
+      <polyline id="line-${m}" fill="none"/><g id="markers-${m}"></g>
+      <text id="chart-empty-${m}" x="320" y="100" text-anchor="middle">Awaiting completed bars</text>
+    </svg>
+    <p class="chart-key">Grey marks: frozen clocks (NY) · shaded: 15-minute RV window · green band: open trade to exit</p>
     <section class="book-flow" id="book-flow-${m}"><h3>Book · sampled L2</h3>
       <p class="muted">Sampled order-book observations; not a complete execution tape. Observation only — never an entry rule.</p>
       <div class="imbalance" aria-label="Five-level size imbalance"><div class="imbalance-scale"><span>Ask-heavy</span><span>Balanced</span><span>Bid-heavy</span></div>
@@ -182,6 +198,14 @@ function renderGates(m) {
     if (li.title !== title) li.title = title;
   });
   while (list.children.length > items.length) list.lastChild.remove();
+  const ok = items.filter((g) => g.ok).length;
+  text(`checks-${m.market}`, items.length ? `${ok} of ${items.length} checks pass` : "Checks unavailable");
+}
+// Ready in green; a wait more than an hour before the next clock is muted, not a warning.
+function blockTone(m) {
+  const failing = (m.gates || []).some((g) => !g.ok) || m.block_reason;
+  if (!failing && m.entry_enabled) return "ready";
+  return nextClock && Date.parse(nextClock) - serverNow() > 3600000 ? "quiet" : "";
 }
 function firstBlock(m) {
   const failing = (m.gates || []).find((g) => !g.ok);
@@ -475,6 +499,13 @@ function renderStatus(s) {
   text("primary-state", !primary ? "OFF: prices are delayed. Click to give SLRNO Saxo's real-time slot."
     : live ? "ON: SLRNO holds Saxo's real-time slot and prices are real-time."
     : "ON, but Saxo still sends delayed prices. In SaxoTraderGO check My Profile → Other → Open API Access is enabled; that login turns this OFF, so click again after it.");
+  const issues = [
+    !s.connected && "Disconnected", s.connected && !s.reconciled && "Reconciliation required",
+    exceptions && "Exposure exception", !(primary && live) && (primary ? "Saxo still delayed" : "Real-time OFF"),
+    s.paused && "Entries paused", !s.paused && !s.armed && "Not armed",
+  ].filter(Boolean);
+  text("status-text", issues.length ? issues.join(" · ") : "All normal");
+  $("status-dot").className = `dot ${!s.connected || exceptions ? "bad" : issues.length ? "warn" : "ok"}`;
   text("auth-state", `OAuth: ${s.oauth || "UNVERIFIED"}${s.oauth_problem ? ` (${s.oauth_problem})` : ""} · stream: ${s.connected ? "connected" : "disconnected"} · session: ${s.session?.TradeLevel || "UNVERIFIED"}`);
   const alerts = s.alerts || {};
   text("events-state", `Saxo order/position events: ${display(s.activity_events || "NOT_SUBSCRIBED").toLowerCase()}${s.closed_positions_problem ? ` · closed positions: ${s.closed_positions_problem}` : ""}${s.calendar_problem ? ` · event calendar: ${s.calendar_problem}` : ""}`);
@@ -504,8 +535,10 @@ function renderSetup(items) {
     if (label.textContent !== labelText) label.textContent = labelText;
     if (detail.textContent !== item.detail) detail.textContent = item.detail;
   });
-  // The overview hides a completed checklist and shows it again if a step regresses.
+  // The overview hides a completed checklist and shows it again if a step regresses; System
+  // starts it folded when complete and then leaves it as the user sets it.
   if (route === "overview") show("setup", done !== required.length);
+  if (!setupShown) { setupShown = true; $("setup-detail").open = done !== required.length; }
 }
 function render(d) {
   const s = d.system, p = d.pnl || {skip_reasons: {}};
@@ -515,6 +548,7 @@ function render(d) {
   renderStatus(s);
   if (d.pnl) {
     text("realised", money(p.realised_net_gbp));
+    $("realised").className = tone(p.realised_net_gbp);
     const saxo = p.broker_reported || {};
     const reported = saxo.count ? ` · Saxo reports ${numeric(saxo.closed_profit_loss_base)} ${saxo.currency || "account currency"} closed P&L (${saxo.count} position${saxo.count === 1 ? "" : "s"})` : "";
     text("pnl-note", (p.provisional_closed ? `${p.provisional_closed} closed trade(s) provisional · missing costs/FX` : display(p.basis || "Paper evidence unavailable")) + reported);
@@ -523,6 +557,7 @@ function render(d) {
     text("valuation-note", vals.length ? "Bid estimate before commissions" : "No open paper positions");
     text("evidence", `${p.opportunities ?? 0} opportunities · ${p.eligible_trades ?? 0} eligible · ${p.skip_reasons.MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET || 0} budget skips · ${p.skip_reasons.SKIP_CAPACITY_FULL || 0} capacity skips · ${p.fills ?? 0} executions · ${p.win_rate == null ? "win rate unavailable" : `${(p.win_rate * 100).toFixed(1)}% win rate`} (${p.wins ?? 0}/${p.closed_with_complete_costs ?? 0} closed with complete costs)`);
   }
+  if (d.today) renderToday(d.today, d.markets);
   for (const m of d.markets) {
     if (!markets.includes(m.market)) continue;
     renderGates(m);
@@ -530,17 +565,26 @@ function render(d) {
     $(`card-${m.market}`).dataset.state = m.strategy_state || "";
     text(`block-${m.market}`, firstBlock(m));
     $(`block-${m.market}`).title = m.block_reason || "";
+    const blockClass = `block ${blockTone(m)}`.trim();
+    if ($(`block-${m.market}`).className !== blockClass) $(`block-${m.market}`).className = blockClass;
+    const trades = m.trades || [];
+    show(`position-${m.market}`, trades.length > 0);
+    text(`position-${m.market}`, trades.map(position).join(" | "));
     if (route !== "markets") {
       text(`contract-${m.market}`, m.contract || "Contract awaiting verification");
-      const trades = m.trades || [];
-      show(`position-${m.market}`, trades.length > 0);
-      text(`position-${m.market}`, trades.map((t) => `${display(t.state)} · ${t.quantity} contract · exit ${hhmm(t.exit_at)} NY`).join(" · "));
-      show(`candidate-${m.market}`, Boolean(m.candidate_uic));
-      text(`candidate-${m.market}`, m.candidate_uic ? `Candidate strike UIC ${m.candidate_uic}` : "");
+      const q = m.quote || {}, pc = m.price_context || {};
+      text(`price-${m.market}`, typeof q.Bid === "number" && typeof q.Ask === "number" ? price((q.Bid + q.Ask) / 2) : "—");
+      const change = typeof pc.net_change === "number" ? `${pc.net_change >= 0 ? "+" : "−"}${price(Math.abs(pc.net_change))}${typeof pc.percent_change === "number" ? ` (${pc.percent_change >= 0 ? "+" : "−"}${Math.abs(pc.percent_change).toFixed(2)}%)` : ""}` : "";
+      text(`change-${m.market}`, change);
+      $(`change-${m.market}`).className = tone(pc.net_change);
+      const mine = (d.today?.trades || []).filter((t) => t.market === m.market);
+      const net = mine.filter((t) => t.net_gbp != null);
+      show(`today-${m.market}`, mine.length > 0);
+      text(`today-${m.market}`, `Today: ${mine.length} trade${mine.length === 1 ? "" : "s"}${net.length ? ` · ${signed(net.reduce((a, t) => a + t.net_gbp, 0))}` : ""}`);
       const events = m.events || [];
       show(`events-${m.market}`, events.length > 0);
       text(`events-${m.market}`, events.map((e) => `${e.name} ${hhmm(e.at)} NY · ${display(e.relation).toLowerCase()}`).join(" · "));
-      text(`data-${m.market}`, `Quote ${display(m.data_status).toLowerCase()} · ${m.last_receipt ? time(new Date(m.last_receipt * 1000).toISOString()) : "no receipt"}`);
+      text(`data-${m.market}`, `Quote ${display(m.data_status).toLowerCase()} · ${m.last_receipt ? london(new Date(m.last_receipt * 1000).toISOString()) : "no receipt"}`);
       continue;
     }
     quoteReceipts.set(m.market, Date.parse(m.l1?.last_receipt));
@@ -564,11 +608,38 @@ function render(d) {
     bookFlow(m.market, m.book_flow || {}, rec, m.identity || {environment: s.data_environment});
     optionContext(m);
     smileChart(m);
-    const trades = m.trades || [];
-    text(`position-${m.market}`, trades.length ? trades.map((t) => `${display(t.state)} · ${t.quantity} contract · exit ${hhmm(t.exit_at)} NY${t.quantity ? ` · bid P&L ${t.valuation.fresh ? money(t.valuation.value_gbp) : "unavailable"}` : ""}`).join(" | ") : "No pending or open paper trade");
     if ($(`raw-state-${m.market}`).open) text(`details-${m.market}`, JSON.stringify({...m.details, l1: m.l1, l2: m.l2, recorder: m.recorder, capabilities: m.capabilities, gates: m.gates, chart_context: m.chart_context, sessions_today: m.sessions_today, trades: m.trades}, null, 2));
     chart(m);
   }
+}
+// An open or pending trade in one line: what, how it stands, when it exits.
+function position(t) {
+  const option = t.option?.right ? `${t.option.right} ${t.option.strike}` : "Option";
+  const value = t.quantity ? ` · bid estimate ${t.valuation?.fresh ? signed(t.valuation.value_gbp) : "unavailable"}` : "";
+  return `${t.quantity ? "Open" : display(t.state)}: ${option}${value} · exits ${hhmm(t.exit_at)} NY (${london(t.exit_at)})`;
+}
+function renderToday(t, cards = []) {
+  const trades = t.trades || [];
+  const open = trades.filter((x) => x.state !== "CLOSED").length;
+  text("today-pnl", t.net_gbp != null ? signed(t.net_gbp) : trades.length ? "Open" : "—");
+  const cls = tone(t.net_gbp);
+  if ($("today-pnl").className !== cls) $("today-pnl").className = cls;
+  text("today-note", trades.length ? `${trades.length} trade${trades.length === 1 ? "" : "s"} · ${t.wins} of ${t.closed} closed in profit${open ? ` · ${open} open` : ""}` : "No trades yet today");
+  const live = new Map(cards.flatMap((c) => c.trades || []).map((x) => [x.id, x.valuation]));
+  const list = $("today-list"), known = new Map([...list.children].map((n) => [n.dataset.key, n]));
+  for (const [index, x] of [...trades].reverse().entries()) {
+    let li = known.get(x.id); known.delete(x.id);
+    if (!li) { li = document.createElement("li"); li.dataset.key = x.id; for (let i = 0; i < 4; i++) li.append(document.createElement("span")); }
+    const valuation = live.get(x.id);
+    const result = x.net_gbp != null ? signed(x.net_gbp) : x.state === "CLOSED" ? "costs pending" : valuation?.fresh ? `open · ${signed(valuation.value_gbp)}` : "open";
+    const cells = [london(x.signal_at), `${x.market} ${x.option || ""}`.trim(), `${price(x.bought)} → ${x.sold == null ? "…" : price(x.sold)}`, result];
+    cells.forEach((v, i) => { if (li.children[i].textContent !== v) li.children[i].textContent = v; });
+    const cls = tone(x.net_gbp ?? (valuation?.fresh ? valuation.value_gbp : null));
+    if (li.children[3].className !== cls) li.children[3].className = cls;
+    if (list.children[index] !== li) list.insertBefore(li, list.children[index] || null);
+  }
+  known.forEach((n) => n.remove());
+  show("today-empty", trades.length === 0);
 }
 function renderSystem(d) {
   render({system: d});
@@ -582,6 +653,7 @@ function renderSystem(d) {
   text("api-storage", `${((l.disk_bytes || 0) / 1048576).toFixed(1)} / ${((l.disk_limit || 0) / 1048576).toFixed(0)} MiB stored`);
   text("api-gaps", `${l.recording_gaps ?? 0} recording gaps · ${l.writer_queue ?? 0} queued batches`);
   text("api-error", l.paused_reason || "No reported recording problem");
+  $("api-error").className = l.paused_reason ? "block" : "block quiet";
   for (const m of d.markets || []) text(`capability-${m.market}`, `${m.market} · ${display(m.problem) || "Connected"}`);
   if ($("system-detail").open) text("system-json", JSON.stringify(d, null, 2));
 }
@@ -618,42 +690,62 @@ function renderAccount(a) {
   text("account-freshness", `${a.status} · last successful update ${a.last_success_at != null ? time(new Date(a.last_success_at * 1000).toISOString()) : "Unavailable"}`);
   if ($("account-detail").open) text("account-json", JSON.stringify({basis: a.basis, ...a.details, problem: a.problem}, null, 2));
 }
-// Keyed rows keep their DOM nodes (focus, selection, open state) across refreshes.
-function rows(id, items, columns, key, create = () => {}) {
+// Keyed rows keep their DOM nodes (focus, selection, open state) across refreshes. Each cell
+// carries its column name, which phone layouts show as a label beside the value.
+function rows(id, items, columns, key, create = () => {}, classes = {}) {
   const body = $(id), known = new Map([...body.children].map((n) => [n.dataset.key, n]));
+  const labels = [...body.closest("table").querySelectorAll("thead th")].map((th) => th.textContent);
   for (const [index, item] of items.entries()) {
     const identity = String(item[key]);
     let node = known.get(identity); known.delete(identity);
-    if (!node) { node = document.createElement("tr"); node.dataset.key = identity; columns.forEach(() => node.append(document.createElement("td"))); create(node, item); }
-    columns.forEach((f, i) => { const next = String(f(item) ?? "Unavailable"); if (node.children[i].textContent !== next) node.children[i].textContent = next; });
+    if (!node) {
+      node = document.createElement("tr"); node.dataset.key = identity;
+      columns.forEach((_, i) => { const td = document.createElement("td"); td.dataset.label = labels[i] || ""; node.append(td); });
+      create(node, item);
+    }
+    columns.forEach((f, i) => {
+      const cell = node.children[i], next = String(f(item) ?? "Unavailable");
+      const cls = [classes[i]?.(item), next === "—" && "empty"].filter(Boolean).join(" ");
+      if (cell.textContent !== next) cell.textContent = next;
+      if (cell.className !== cls) cell.className = cls;
+    });
     if (body.children[index] !== node) body.insertBefore(node, body.children[index] || null);
   }
   known.forEach((n) => n.remove());
+  // An empty table shows a short note instead of bare headings.
+  const note = $(`${id}-empty`);
+  if (note) { show(`${id}-empty`, items.length === 0); body.closest(".table-scroll").hidden = items.length === 0; }
 }
+const fillsTrade = (f) => f.market ? `${f.market} ${f.option_right || ""} ${f.option_strike ?? ""}`.trim() : f.con_id;
+const outcome = (r) => r.trade ? (r.trade.state === "CLOSED" ? "Traded" : `Traded · ${display(r.trade.state).toLowerCase()}`) : display(r.state || r.decision);
+const tradeResult = (t) => !t ? "—" : t.net_gbp != null ? signed(t.net_gbp) : t.state === "CLOSED" ? "costs pending" : "open";
 function renderExecution(d) {
   render({system: d.system});
+  rows("execution-results", d.recent_trades || [], [(t) => time(t.signal_at), (t) => t.market, (t) => t.option || "—", (t) => price(t.bought), (t) => t.sold == null ? "—" : price(t.sold), (t) => t.paid_gbp == null ? "—" : money(t.paid_gbp), tradeResult], "id", undefined, {6: (t) => tone(t.net_gbp)});
   rows("execution-trades", d.trades, [(t) => t.market, (t) => display(t.state), (t) => t.option.symbol || t.option.uic, (t) => t.quantity, (t) => money(t.allocation_pennies / 100), (t) => time(t.exit_at)], "id");
   rows("execution-orders", d.orders, [(o) => o.role, (o) => o.order_id, (o) => display(o.status), (o) => o.filled, (o) => o.remaining, (o) => time(o.deadline)], "reference");
-  rows("execution-fills", d.fills, [(f) => time(f.at), (f) => f.con_id, (f) => f.side, (f) => f.quantity, (f) => f.price, (f) => f.commission == null ? "Unavailable" : `${f.commission} ${f.commission_currency || "currency unverified"}`], "exec_id");
+  rows("execution-fills", d.fills, [(f) => time(f.at), fillsTrade, (f) => f.role === "EXIT" ? "Exit" : f.role === "ENTRY" ? "Entry" : f.role, (f) => f.side, (f) => f.quantity, (f) => f.price, (f) => f.commission == null ? "Unavailable" : `${f.commission} ${f.commission_currency || "currency unverified"}`], "exec_id");
   rows("execution-positions", d.positions, [(p) => p.con_id, (p) => p.quantity], "con_id");
   text("execution-empty", d.trades.length ? "Internal reservations include pending entries and open trades." : "No pending or open SLRNO trades.");
   if ($("execution-detail").open) text("execution-json", JSON.stringify(d, null, 2));
 }
-async function history(signal) {
+async function loadHistory(signal) {
   const q = new URLSearchParams({offset: String(offset)});
   for (const [key, id] of [["market", "market-filter"], ["day", "day-filter"], ["version", "version-filter"]]) if ($(id).value) q.set(key, $(id).value);
   q.set("sort", $("sort-filter").value);
+  if ($("trades-filter").checked) q.set("trades", "true");
   const d = await request(`/api/history?${q}`, {signal});
   if (signal.aborted) return;
   pageSize = d.page_size || pageSize;
   if (d.system) render({system: d.system});
-  rows("history", d.rows, [(r) => time(r.signal_at), (r) => r.market, (r) => display(r.state || r.decision), (r) => display(r.reason) || "—", (r) => r.rule_version], "id", (tr, r) => {
+  rows("history", d.rows, [(r) => time(r.signal_at), (r) => r.market, outcome, (r) => r.trade?.option || "—", (r) => r.trade ? `${price(r.trade.bought)} → ${r.trade.sold == null ? "…" : price(r.trade.sold)}` : "—", (r) => tradeResult(r.trade), (r) => display(r.reason) || "—", (r) => r.rule_version], "id", (tr, r) => {
     const b = document.createElement("button");
     b.textContent = "Inspect";
     b.onclick = () => { detailSignature = JSON.stringify(r); showDetail(r.id).catch(reportError); };
     tr.append(document.createElement("td"));
+    tr.lastChild.className = "inspect";
     tr.lastChild.append(b);
-  });
+  }, {5: (r) => tone(r.trade?.net_gbp), 2: (r) => r.trade ? "traded" : "", 7: () => "minor"});
   $("history-empty").hidden = d.rows.length > 0;
   $("prev").disabled = offset === 0;
   $("next").disabled = !d.has_more;
@@ -698,7 +790,7 @@ async function refresh(force = false) {
   if (force) pending?.abort();
   const controller = new AbortController(); pending = controller;
   try {
-    if (page === "trades") await history(controller.signal);
+    if (page === "trades") await loadHistory(controller.signal);
     else {
       let path = "/api/overview";
       if (route === "markets") path = `/api/market/${selectedMarket}?diagnostics=${$(`raw-state-${selectedMarket}`).open}`;
@@ -759,7 +851,7 @@ $("primary-session").onclick = async () => {
   try { renderStatus(await request("/api/session/primary", {method: "POST"})); text("notice", "Server confirmed: real-time requested; price streams renew"); }
   catch (e) { reportError(e); } finally { controlPending = false; $("primary-session").disabled = false; }
 };
-for (const id of ["market-filter", "day-filter", "version-filter", "sort-filter"])
+for (const id of ["market-filter", "day-filter", "version-filter", "sort-filter", "trades-filter"])
   $(id).addEventListener("change", () => { offset = 0; selectedIdentity = ""; detailRequest?.abort(); text("trade-json", "Select an opportunity to view its evidence"); $("trade-timeline").replaceChildren(); refresh(true); });
 $("prev").onclick = () => { offset = Math.max(0, offset - pageSize); refresh(true); };
 $("next").onclick = () => { offset += pageSize; refresh(true); };
@@ -773,7 +865,8 @@ function countdown() {
   const left = Math.max(0, Math.round((Date.parse(nextClock) - serverNow()) / 1000));
   const hours = Math.floor(left / 3600), minutes = Math.floor((left % 3600) / 60), seconds = left % 60;
   const span = hours ? `${hours}h ${String(minutes).padStart(2, "0")}m` : `${minutes}:${String(seconds).padStart(2, "0")}`;
-  text("countdown", `Next clock ${hhmm(nextClock)} NY · in ${span}`);
+  text("countdown", `Next clock ${hhmm(nextClock)} NY (${london(nextClock)} London) · in ${span}`);
+  text("status-next", ` · next ${hhmm(nextClock)} NY in ${span}`);
 }
 setInterval(() => {
   text("clock", `${time(new Date().toISOString())} · London`);
@@ -799,12 +892,21 @@ for (const m of markets) {
 if (route === "markets") $("markets").classList.add("single-market");
 const linkedMarket = new URLSearchParams(location.search).get("market");
 if (markets.includes(linkedMarket)) selectedMarket = linkedMarket;
-$("selected-market").value = selectedMarket;
-function selectMarket() {
-  selectedMarket = $("selected-market").value;
+function selectMarket(market) {
+  selectedMarket = market;
   sessionStorage.setItem("slrno-market", selectedMarket);
-  for (const market of markets) $(`card-${market}`).hidden = route === "markets" && market !== selectedMarket;
+  for (const m of markets) {
+    $(`card-${m}`).hidden = route === "markets" && m !== selectedMarket;
+    $(`tab-${m}`).setAttribute("aria-selected", String(m === selectedMarket));
+  }
+  if (route === "markets") window.history.replaceState(null, "", `/markets?market=${selectedMarket}`);
   refresh(true);
 }
-$("selected-market").addEventListener("change", selectMarket);
-selectMarket();
+for (const m of markets) $(`tab-${m}`).onclick = () => selectMarket(m);
+selectMarket(selectedMarket);
+// Phones show one status line; a tap opens the full status, controls included.
+$("status-toggle").onclick = () => {
+  const open = !$("mode-banner").classList.contains("open");
+  $("mode-banner").classList.toggle("open", open);
+  $("status-toggle").setAttribute("aria-expanded", String(open));
+};

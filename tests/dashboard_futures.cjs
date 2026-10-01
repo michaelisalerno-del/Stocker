@@ -189,6 +189,7 @@ for (const m of state.markets) {
   m.smile = {expiry:"2026-09-28T00:00:00Z", mid_strike_price:70.2, scaling:"PROVIDER_NATIVE_UNVERIFIED", executable:false,
     strikes:[66,67,68,69,70,71,72].map((strike,k)=>({strike, mid_volatility_pct:.3, call:null, put:{uic:900+k, mid_volatility:.28+Math.abs(69-strike)*.012, open_interest:[40,120,300,800,500,90,20][k]}}))};
   m.model_sigma = 0.27;
+  m.quote = {Bid: 2638, Ask: 2638.5};
   m.forecast = {status:"OBSERVED", level:0.82, next_hour_move:0.0031, option:{uic:1001+markets.indexOf(m.market), implied_over_forecast:1.29, implied_move_to_expiry:0.0062, forecast_move_to_expiry:0.0048}};
   m.price_context = {open:2641,high:2660,low:2630,last_close:2638,net_change:12,percent_change:0.45,open_interest:512000,market_state:"Open",daily_range:31.5};
   m.identity = {environment:"SAXO_SIM",uic:100+markets.indexOf(m.market)};
@@ -206,6 +207,10 @@ const bookSeries = {status:"AVAILABLE",tick_size:0.1,bucket_seconds:5,semantics:
   series:Array.from({length:120},(_,i)=>({at:Date.parse(at)/1000-600+i*5,status:"CURRENT",spread_ticks:1+(i%7===0),imbalance1:Math.sin(i/9),imbalance5:Math.sin(i/15)*.6,
     bid:Array.from({length:10},(_,n)=>[26500-n-Math.round(Math.sin(i/20)*3),5+n*2+(n===4?40:0)]),
     ask:Array.from({length:10},(_,n)=>[26501+n-Math.round(Math.sin(i/20)*3),4+n*2+(n===6?35:0)])}))};
+state.today = {day:"2026-09-28", closed:1, wins:0, net_gbp:-27.77, trades:[
+  {id:"t-nq", market:"NQ", signal_at:"2026-09-28T13:00:00Z", exit_at:"2026-09-28T14:00:00Z", state:"CLOSED", option:"Put 30650", bought:46.25, sold:45.25, paid_gbp:705.39, net_gbp:-27.77},
+  {id:"ng-open", market:"NG", signal_at:"2026-09-28T14:00:00Z", exit_at:"2026-09-28T15:00:00Z", state:"OPEN", option:"Put 3", bought:0.05, sold:null, paid_gbp:22.4, net_gbp:null}]};
+const recentTrades = state.today.trades.map((t) => ({...t}));
 const timeline = [
   {at:"2026-09-28T14:00:00Z",kind:"CLOCK",ok:true,title:"Frozen clock · NG",detail:"rule CLOCK60_NG13_20260927 · exit anchor 2026-09-28T15:00:00Z"},
   {at:"2026-09-28T14:00:00Z",kind:"CHECKS",ok:true,title:"Data and eligibility checks",detail:"rv15 0.0012 · futures_price 3.1"},
@@ -221,17 +226,18 @@ const rows = Array.from({ length: 80 }, (_, i) => ({
   decision: i % 3 ? "SKIPPED" : "BROKER_PAPER_FILL",
   reason: i % 3 ? "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET" : "",
   state: null,
+  trade: i % 3 ? null : {state:"CLOSED", option:"Put 3", bought:0.05, sold:0.08, paid_gbp:22.4, net_gbp:i ? 6.5 : -4.25},
 }));
-let primaryRequests = 0;
+let primaryRequests = 0, lastHistoryQuery = "";
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   let data;
   if (url.pathname === "/api/overview") data = state;
   else if (url.pathname.endsWith("/book")) data = bookSeries;
   else if (url.pathname.startsWith("/api/market/")) data={system:state.system,markets:state.markets.filter(m=>m.market===url.pathname.split("/").at(-1))};
-  else if (url.pathname === "/api/execution") data={system:state.system,trades:[],orders:[],fills:[],positions:[]};
+  else if (url.pathname === "/api/execution") data={system:state.system,trades:[],orders:[],fills:[{exec_id:"f1",at:"2026-09-28T13:00:01Z",con_id:1003,market:"NG",option_right:"Put",option_strike:3,role:"ENTRY",side:"BOT",quantity:1,price:0.05,commission:2,commission_currency:"USD"}],positions:[],recent_trades:recentTrades};
   else if (url.pathname === "/api/recordings") data = {active: [], completed: []};
-  else if (url.pathname === "/api/history")
+  else if (url.pathname === "/api/history" && (lastHistoryQuery = url.search) !== null)
     data = {
       system:state.system,
       rows: [...rows].sort((a,b)=>url.searchParams.get("sort")==="asc" ? a.signal_at.localeCompare(b.signal_at) : b.signal_at.localeCompare(a.signal_at)).filter(
@@ -329,7 +335,7 @@ async function label(page) {
     // Primary session without a verified real-time feed must not read as fully on.
     assert.equal(await page.locator("#realtime-chip").textContent(), "Real-time ON · Saxo still delayed");
     await page.clock.fastForward(1100);
-    assert.match(await page.locator("#countdown").textContent(), /Next clock 11:00 NY · in 39:5\d/);
+    assert.match(await page.locator("#countdown").textContent(), /Next clock 11:00 NY \(16:00 London\) · in 39:5\d/);
     assert.match(await page.locator("#setup-progress").textContent(), /3 of 5 required steps done/);
     assert.equal(await page.locator("#gates-NQ li.ok").count(), 6);
     assert.match(await page.locator("#gates-GC li.fail").first().getAttribute("title"), /Option product and selection approval required/);
@@ -337,6 +343,15 @@ async function label(page) {
     assert.match(await page.locator("#events-CL").textContent(), /EIA Weekly Petroleum Status 10:30 NY/);
     assert(await page.locator("#events-GC").isHidden());
     assert(await page.locator("#position-NG").isVisible() && await page.locator("#position-CL").isHidden());
+    assert.equal(await page.locator("#price-GC").textContent(), "2638.25");
+    assert.match(await page.locator("#change-GC").textContent(), /^\+12 \(\+0\.45%\)$/);
+    assert.equal(await page.locator("#today-pnl").textContent(), "−£27.77");
+    assert.match(await page.locator("#today-note").textContent(), /2 trades · 0 of 1 closed in profit · 1 open/);
+    assert.deepEqual(await page.locator("#today-list li").first().locator("span").allTextContents(), ["15:00", "NG Put 3", "0.05 → …", "open · −£0.80"]); // the card's live bid estimate
+    assert.equal(await page.locator("#today-list li").nth(1).locator("span").last().getAttribute("class"), "neg");
+    assert.match(await page.locator("#today-NQ").textContent(), /Today: 1 trade · −£27\.77/);
+    assert.match(await page.locator("#checks-NQ").textContent(), /6 of \d+ checks pass/);
+    assert(await page.locator("#status-toggle").isHidden()); // desktop shows the full status row
     await label(page);
     await page.screenshot({
       path: path.join(output, "overview-desktop-fixture.png"),
@@ -345,7 +360,7 @@ async function label(page) {
     state.markets[1].l2.fresh = true;
     state.markets[1].l2.valid_until = Date.parse(at)/1000+30;
     await page.goto(`${base}/markets`);
-    await page.locator("#selected-market").selectOption("GC");
+    await page.locator("#tab-GC").click();
     await page.evaluate(() => refresh(true));
     assert.equal(await page.locator("#card-GC").isVisible(), true);
     assert.equal(await page.locator("#card-CL").isVisible(), false);
@@ -407,7 +422,7 @@ async function label(page) {
     await page.screenshot({path:path.join(output,"book-flow-mobile-fixture.png"),fullPage:true});
     await page.setViewportSize({width:1440,height:1080});
     await page.goto(`${base}/markets`);
-    assert.equal(await page.locator("#selected-market").inputValue(), "GC");
+    assert.equal(await page.locator("#tab-GC").getAttribute("aria-selected"), "true");
     await page.goto(`${base}/opportunities`);
     await page.waitForFunction(
       () => document.querySelectorAll("#history tr").length === 80,
@@ -438,6 +453,14 @@ async function label(page) {
       await page.locator("#trades .table-scroll").evaluate((n) => n.scrollTop),
       240,
     );
+    const traded = page.locator('#history tr[data-key="fixture-0"] td');
+    assert.equal(await traded.nth(5).textContent(), "−£4.25");
+    assert.equal(await traded.nth(5).getAttribute("class"), "neg");
+    assert.equal(await traded.nth(4).textContent(), "0.05 → 0.08");
+    await page.locator("#trades-filter").check();
+    for (let i = 0; i < 50 && !lastHistoryQuery.includes("trades=true"); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.match(lastHistoryQuery, /trades=true/);
+    await page.locator("#trades-filter").uncheck();
     await page.locator("#history tr button").first().click();
     await page.waitForFunction(() => document.querySelectorAll("#trade-timeline li").length === 5);
     assert.equal(await page.locator("#trade-timeline li.ok").count(), 4);
@@ -447,15 +470,12 @@ async function label(page) {
       fullPage: true,
     });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.locator("#trades .table-scroll").evaluate((n) => {
-      n.scrollLeft = 220;
-      n.scrollTop = 140;
-    });
+    // Phones read each opportunity as a card: no sideways scrolling, every value labelled.
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    assert.equal(await page.locator("#history tr").first().locator("td").nth(1).getAttribute("data-label"), "Market");
+    await page.evaluate(() => window.scrollTo(0, 600));
     await page.evaluate(() => refresh());
-    assert.equal(
-      await page.locator("#trades .table-scroll").evaluate((n) => n.scrollLeft),
-      220,
-    );
+    assert.equal(await page.evaluate(() => scrollY), 600);
     await page.goto(base);
     await page.waitForFunction(
       () =>
@@ -467,6 +487,11 @@ async function label(page) {
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     );
+    // Phones show one status line; a tap opens the chips and the Pause control.
+    assert(await page.locator("#status-chips").isHidden());
+    assert.match(await page.locator("#status-text").textContent(), /Saxo still delayed · Not armed/);
+    await page.locator("#status-toggle").click();
+    assert(await page.locator("#pause").isVisible());
     const boxes = await page
       .locator(".market")
       .evaluateAll((nodes) => nodes.map((n) => n.getBoundingClientRect().x));
@@ -502,6 +527,12 @@ async function label(page) {
       path: path.join(output, "system-api-fixture.png"),
       fullPage: true,
     });
+    // Execution: one row per trade with its result; fills name the option, not a UIC.
+    await page.goto(`${base}/execution`);
+    await page.waitForFunction(() => document.querySelectorAll("#execution-results tr").length === 2);
+    assert.deepEqual(await page.locator('#execution-results tr[data-key="t-nq"] td').allTextContents(), ["28 Sept, 14:00:00", "NQ", "Put 30650", "46.25", "45.25", "£705.39", "−£27.77"]);
+    assert.deepEqual((await page.locator("#execution-fills tr td").allTextContents()).slice(1, 3), ["NG Put 3", "Entry"]);
+    assert(await page.locator("#execution-orders-empty").isVisible());
     assert.deepEqual(errors, []);
     console.log(
       "PASS: five fixed cards, signal/fill markers, provisional P&L, refresh identity/focus/scroll/filter retention, mobile layout and System",

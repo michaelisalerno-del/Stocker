@@ -29,6 +29,26 @@ observation context: none of it feeds admission, sizing or management.
   order intent, fills, decisions, closure, current state); raw JSON remains one click away.
 - The Playwright fixture now covers each of these with production-shaped data.
 
+### Phone-first update — 1 October 2026 (user's choice of priorities)
+Display only; no trading rule or broker request changed.
+- **Status:** phones show one line (a dot, "All normal" or the problems, and the next clock); a
+  tap opens the full chips and Pause. Desktop keeps the chip row. The countdown also gives the
+  London time.
+- **Overview:** Today (net after costs, trades, wins, open), the open-trade estimate, realised
+  since start and slots; today's trades one per line (London time, option, bought → sold, result
+  or the live bid estimate); each card shows the future's mid and change, any open trade with its
+  estimate and exit, the first failing check in plain English (muted while the next clock is more
+  than an hour away), today's trades in that market and releases, with the gates folded into
+  "n of m checks pass".
+- **Opportunities:** each row has its option, bought → sold and result after costs; a "Trades
+  only" filter; on phones each row is a labelled card without empty values.
+- **Execution:** recent trades one row each (paid and result); fills name the market and option
+  with Entry/Exit; empty tables say "None."
+- **Markets:** tabs instead of the dropdown; open trade, block and folded checks first, then the
+  ticket and context, then the chart and the book. **System:** real-time first; API counters
+  folded into "Saxo API usage".
+- Per-trade figures come from `Store.trade_results`, the same sums as the realised total.
+
 ## Additional Saxo data
 
 | Feature | Source | Use |

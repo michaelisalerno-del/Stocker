@@ -25,6 +25,8 @@
         <div class="clock" id="clock"></div>
       </div>
       <div class="status-bar" id="mode-banner" aria-label="Runtime status">
+        <button type="button" class="status-summary" id="status-toggle" aria-expanded="false" aria-controls="status-chips"><span class="dot" id="status-dot"></span><span id="status-text">Checking…</span><span id="status-next"></span></button>
+        <div class="status-chips" id="status-chips">
         <span class="chip" id="env-chip">Data unverified</span>
         <span class="chip" id="exec-chip">Execution DISABLED</span>
         <span class="chip" id="realtime-chip">Real-time unverified</span>
@@ -33,6 +35,7 @@
         <span class="chip countdown" id="countdown">Next clock —</span>
         <button id="pause" type="button">Pause entries</button>
         <span class="refresh" id="last-refresh">No successful refresh yet</span>
+        </div>
       </div>
       <div id="notice" role="status" aria-live="polite"></div>
       <p id="global-warning" role="alert" class="exceptions"></p>
@@ -42,14 +45,19 @@
           <ol id="setup-list"></ol>
         </details>
       </section>
-      <section id="strategy-strip" class="strategy-strip" aria-label="Strategy capacity and results">
-        <div class="slots-cell"><small>Trade slots</small><div id="overview-slots" class="slot-bar" aria-label="Four concurrent trade slots"></div><strong id="capacity">Unavailable</strong></div>
-        <div><small>Committed / ceiling</small><strong id="allocation">Unavailable</strong><span id="allocation-policy">Concurrent ceiling · not a daily loss limit</span></div>
-        <div><small>Realised net P&amp;L</small><strong id="realised">Unavailable</strong><span id="pnl-note"></span></div>
+      <section id="strategy-strip" class="strategy-strip" aria-label="Results and capacity">
+        <div><small>Today</small><strong id="today-pnl">—</strong><span id="today-note">No trades yet today</span></div>
         <div><small>Open-trade estimate</small><strong id="unrealised">Unavailable</strong><span id="valuation-note"></span></div>
+        <div><small>Realised since start</small><strong id="realised">Unavailable</strong><span id="pnl-note"></span></div>
+        <div class="slots-cell"><small>Trade slots</small><div id="overview-slots" class="slot-bar" aria-label="Four concurrent trade slots"></div><strong id="capacity">Unavailable</strong><span>Committed <b id="allocation">Unavailable</b></span><span id="allocation-policy">Concurrent ceiling · not a daily loss limit</span></div>
+      </section>
+      <section id="today-trades" class="today-trades" aria-label="Today's trades">
+        <h2>Today's trades <span>London time</span></h2>
+        <ol id="today-list"></ol>
+        <p id="today-empty" class="muted">No trades yet today.</p>
       </section>
       <section id="overview">
-        <label id="market-selector" class="market-selector" hidden>Market <select id="selected-market"><option>CL</option><option>GC</option><option>NG</option><option>NQ</option><option>SI</option></select></label>
+        <div id="market-selector" class="market-tabs" role="tablist" aria-label="Market" hidden><button type="button" role="tab" id="tab-CL">CL</button><button type="button" role="tab" id="tab-GC">GC</button><button type="button" role="tab" id="tab-NG">NG</button><button type="button" role="tab" id="tab-NQ">NQ</button><button type="button" role="tab" id="tab-SI">SI</button></div>
         <div id="markets" class="markets"></div>
         <p id="evidence" class="evidence"></p>
       </section>
@@ -62,11 +70,13 @@
         </div><small id="account-freshness">Unavailable</small>
         <details id="account-detail"><summary>Balance details</summary><p>Broker cash and internal allocation are separate. Reservations are not subtracted from broker figures. Values remain in the displayed native currency.</p><pre id="account-json"></pre></details>
       </section>
-      <section id="execution" hidden><h2>Four concurrent trade slots</h2><div id="trade-slots" class="trade-slots"></div><p id="execution-warning"></p><p id="execution-empty"></p>
-        <h3>Positions and reservations</h3><div class="table-scroll" tabindex="0"><table><thead><tr><th>Market</th><th>State</th><th>Option</th><th>Quantity</th><th>Allocation</th><th>Exit</th></tr></thead><tbody id="execution-trades"></tbody></table></div>
-        <h3>Orders for active obligations</h3><div class="table-scroll" tabindex="0"><table><thead><tr><th>Role</th><th>Order</th><th>Status</th><th>Filled</th><th>Remaining</th><th>Deadline</th></tr></thead><tbody id="execution-orders"></tbody></table></div>
-        <h3>Broker positions</h3><div class="table-scroll" tabindex="0"><table><thead><tr><th>Instrument</th><th>Quantity</th></tr></thead><tbody id="execution-positions"></tbody></table></div>
-        <h3>Recent fills</h3><div class="table-scroll" tabindex="0"><table><thead><tr><th>Time</th><th>Instrument</th><th>Side</th><th>Quantity</th><th>Native price</th><th>Commission</th></tr></thead><tbody id="execution-fills"></tbody></table></div>
+      <section id="execution" hidden>
+        <h3>Recent trades</h3><div class="table-scroll cards" tabindex="0"><table><thead><tr><th>Time · London</th><th>Market</th><th>Option</th><th>Bought</th><th>Sold</th><th>Paid</th><th>Result</th></tr></thead><tbody id="execution-results"></tbody></table></div><p class="muted" id="execution-results-empty" hidden>No trades yet.</p>
+        <h3>Trade slots</h3><div id="trade-slots" class="trade-slots"></div><p id="execution-warning"></p><p id="execution-empty"></p>
+        <h3>Positions and reservations</h3><div class="table-scroll cards" tabindex="0"><table><thead><tr><th>Market</th><th>State</th><th>Option</th><th>Quantity</th><th>Allocation</th><th>Exit</th></tr></thead><tbody id="execution-trades"></tbody></table></div><p class="muted" id="execution-trades-empty" hidden>None.</p>
+        <h3>Orders for active obligations</h3><div class="table-scroll cards" tabindex="0"><table><thead><tr><th>Role</th><th>Order</th><th>Status</th><th>Filled</th><th>Remaining</th><th>Deadline</th></tr></thead><tbody id="execution-orders"></tbody></table></div><p class="muted" id="execution-orders-empty" hidden>None.</p>
+        <h3>Broker positions</h3><div class="table-scroll cards" tabindex="0"><table><thead><tr><th>Instrument</th><th>Quantity</th></tr></thead><tbody id="execution-positions"></tbody></table></div><p class="muted" id="execution-positions-empty" hidden>None.</p>
+        <h3>Recent fills</h3><div class="table-scroll cards" tabindex="0"><table><thead><tr><th>Time · London</th><th>Trade</th><th>Role</th><th>Side</th><th>Quantity</th><th>Native price</th><th>Commission</th></tr></thead><tbody id="execution-fills"></tbody></table></div><p class="muted" id="execution-fills-empty" hidden>None.</p>
         <details id="execution-detail"><summary>Raw execution evidence</summary><pre id="execution-json"></pre></details></section>
       <section id="trades" hidden>
         <div class="filters">
@@ -74,10 +84,11 @@
           <label>Date (UTC)<input type="date" id="day-filter" /></label>
           <label>Rule version<input id="version-filter" placeholder="All versions" maxlength="80" /></label>
           <label>Sort<select id="sort-filter"><option value="desc">Newest first</option><option value="asc">Oldest first</option></select></label>
+          <label class="check"><input type="checkbox" id="trades-filter" /> Trades only</label>
         </div>
-        <div class="table-scroll" tabindex="0" aria-label="Signal and trade history">
+        <div class="table-scroll cards" tabindex="0" aria-label="Signal and trade history">
           <table>
-            <thead><tr><th>Opportunity · London</th><th>Market</th><th>State</th><th>Reason</th><th>Rule</th><th>Evidence</th></tr></thead>
+            <thead><tr><th>Time · London</th><th>Market</th><th>Outcome</th><th>Option</th><th>Bought → sold</th><th>Result</th><th>Reason</th><th>Rule</th><th>Evidence</th></tr></thead>
             <tbody id="history"></tbody>
           </table>
         </div>
@@ -90,17 +101,18 @@
         </details>
       </section>
       <section id="system" hidden>
-        <h2>Saxo connection</h2><form id="saxo-connect" action="/oauth/saxo/start" method="post"><button>Connect configured Saxo environment</button></form><p id="oauth-notice" role="alert"></p><p>Connecting data never arms execution. A session upgrade can downgrade another Saxo application; SLRNO never upgrades automatically.</p><p id="auth-state"></p><button id="primary-session" type="button">Use real-time in SLRNO</button><p id="primary-state"></p><p>Saxo sends real-time prices to one session only: this can delay or log off SaxoTraderGO, and logging in to SaxoTraderGO takes it back. Click again after each SaxoTraderGO login.</p><p id="alerts-state"></p><p id="events-state"></p><p id="provider-status">Saxo is the only data and execution provider; retired providers are not installed.</p><div id="capability-list"></div><h2>Market data &amp; API</h2>
+        <h2>Real-time prices</h2><p id="primary-state"></p><button id="primary-session" type="button">Use real-time in SLRNO</button><p class="muted">Saxo sends real-time prices to one session only: this can delay or log off SaxoTraderGO, and logging in to SaxoTraderGO takes it back. Tap again after each SaxoTraderGO login.</p>
+        <h2>Saxo connection</h2><p id="auth-state"></p><div id="capability-list" class="capability-list"></div><p id="alerts-state"></p><p id="events-state"></p><form id="saxo-connect" action="/oauth/saxo/start" method="post"><button>Connect configured Saxo environment</button></form><p id="oauth-notice" role="alert"></p><p class="muted">Connecting data never arms execution. A session upgrade can downgrade another Saxo application; SLRNO never upgrades automatically.</p><p id="provider-status" class="muted">Saxo is the only data and execution provider; retired providers are not installed.</p><h2>Market data &amp; recording</h2>
         <div class="api-panel">
           <div><small>Application subscriptions</small><strong id="api-lines"></strong><span id="api-allowance"></span><span id="api-external">Session upgrade is explicit; it can downgrade another Saxo application</span></div>
           <div class="research-slots"><small>Actual received depth · observation only</small><strong id="api-depth"></strong><span id="api-assignments">CL · GC · NG · NQ · SI · independent server subscriptions</span></div>
           <div><small>Option preparation</small><strong id="api-options"></strong><span>Shared pool · unused quotes released</span></div>
-          <div><small>Outbound traffic</small><strong id="api-pacing"></strong><span id="api-queue"></span></div>
           <div><small>Optional recording</small><strong id="api-storage"></strong><span id="api-gaps"></span></div>
         </div>
         <p class="block" id="api-error"></p>
-        <details id="recordings-detail"><summary>Saved recordings</summary><div id="recording-list"></div></details><h2>Connectivity and readiness</h2>
-        <p>Live trading is unavailable. Installation, data readiness and execution arming are separate.</p>
+        <details id="api-usage"><summary>Saxo API usage</summary><p class="api-pacing" id="api-pacing"></p><p class="muted" id="api-queue"></p></details>
+        <details id="recordings-detail"><summary>Saved recordings</summary><div id="recording-list"></div></details><h2>Readiness</h2>
+        <p>Real-money orders are disabled: SLRNO only paper-trades and records. Installation, data readiness and arming are separate.</p>
         <details id="system-detail"><summary>Operational diagnostics</summary><pre id="system-json"></pre></details>
       </section>
       <footer>Saxo data · paper execution mode labelled separately · historical synthetic research is excluded · times in Europe/London unless marked NY</footer>

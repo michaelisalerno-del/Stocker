@@ -1,6 +1,15 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `ebb47197e80f652579c65977ffd42d7eca4c18dd`, deployed 2026-10-01 06:51 UTC
+Current application release: `2555819e914d9ce4a3b98cd0d546e881fbcea02d`, deployed 2026-10-01 07:28 UTC with
+a config change, re-armed. At the user's request NG and SI mappings use `expiry_rule:
+SAME_DAY_OR_NEXT_LISTED` (same-day option when one trades past the exit, otherwise the next listed expiry;
+see the rulebook); CL, GC and NQ stay same-day. `option_candidate_window: 2` (07:33 UTC) so all five
+markets' warm candidates fit the option subscription budget (with 3, GC was crowded out). Verified: SI now
+warms Friday 2 Oct puts with real-time quotes; NG's Friday strikes are 0.05 apart and none was within the
+approved 0.03 of the frozen 0.10 delta at 03:30 New York (2.85 at 0.04, 2.90 at 0.15). Backup
+`expiry-rule-20261001` (with both previous configs). Rollback: `ebb4719…` with `saxo.live.paper.yaml.before`.
+
+Previous release `ebb47197e80f652579c65977ffd42d7eca4c18dd`, deployed 2026-10-01 06:51 UTC
 and re-armed. Real-time CME data arrived overnight (quotes, charts and 10x10 depth, DelayedByMinutes 0).
 LIVE option reference data then exposed three SIM-era assumptions, fixed in `1cbe226` and `ebb4719`:
 lot fields (IncrementSize/MinimumLotSize, not MinimumTradeSize/LotSize), NQ's price-tiered

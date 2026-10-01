@@ -1,6 +1,14 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `acd47794caa03de5df0efbd6e332c936cc3d7ef1`, deployed 2026-10-01 10:23 UTC, re-armed.
+Current application release: `c15d937f8f19a1ad6d7bf36bdaf71e34ad8c781c`, deployed 2026-10-01 15:46 UTC and re-armed.
+It carries `e33b6d4` (a stream reconnect keeps today's option spaces instead of reloading ~70 roots before the price
+feeds) and fixes the start-up recording repair: `recover_members` looped forever when a gzip member ended inside an
+output-limited tail, so the 15:17 UTC restart of `e33b6d4` hung at 100% CPU before the stream started (service stopped
+at about 15:31 UTC; no open trades). Every capture segment was dry-run on copies first (all complete, nothing cut).
+After the restart the session came back OrdersOnly (the real-time slot must be taken again) and entries remain paused
+as they were. Backup `recorder-fix-20261001`. Rollback: `2555819…` / `acd4779…` (both have the old repair loop).
+
+Previous release `acd47794caa03de5df0efbd6e332c936cc3d7ef1`, deployed 2026-10-01 10:23 UTC, re-armed.
 At the user's request an unchanged quote now stands while Saxo confirms its feed (see the rulebook). Measured
 before (06:16 New York): options current in 0-8% of samples except NQ (61-68%). After (06:29 New York, 90 s):
 CL 88-100%, GC 99%, NQ 99%, SI 96-99%, while their last price changes were typically 3-65 s old. Backup

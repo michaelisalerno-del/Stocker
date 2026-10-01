@@ -152,8 +152,9 @@ function marketCard(m) {
         <p class="muted" id="heatmap-note-${m}">Open to load the retained window.</p>
       </details>
       <details><summary>Depth totals by level</summary>
-        <div class="flow-table"><table aria-label="${m} book-flow depth totals"><thead><tr><th>Levels</th><th>Bid depth</th><th>Ask depth</th><th>Imbalance</th><th>Order imbalance</th><th>Observed state</th></tr></thead>
-        <tbody>${[1, 3, 5, 10].map((n) => `<tr id="flow-depth-${m}-${n}"><th>${n}</th><td></td><td></td><td></td><td></td><td></td></tr>`).join("")}</tbody></table></div>
+        <div class="flow-table"><table aria-label="${m} book-flow depth totals"><thead><tr><th>Levels</th><th>Bid depth</th><th>Ask depth</th><th>Size imbalance</th><th>Observed state</th></tr></thead>
+        <tbody>${[1, 3, 5, 10].map((n) => `<tr id="flow-depth-${m}-${n}"><th>${n}</th><td></td><td></td><td></td><td></td></tr>`).join("")}</tbody></table></div>
+        <p class="muted">No order-count imbalance: Saxo sends no order counts on this feed (UsingOrders false; its order fields repeat the sizes).</p>
       </details>
       <details id="flow-detail-${m}"><summary>Coverage, fields and observation times</summary><pre id="flow-meta-${m}"></pre></details>
     </section>
@@ -251,7 +252,7 @@ function bookFlow(m, f, rec = {}, identity = {}) {
   text(`flow-spread-${m}`, `${numeric(f.spread_ticks, " ticks")} · usable depth ${f.available_levels?.bid ?? 0} bid / ${f.available_levels?.ask ?? 0} ask levels`);
   for (const n of [1, 3, 5, 10]) {
     const d = f.depth?.[n] || {}, row = $(`flow-depth-${m}-${n}`);
-    [numeric(d.bid), numeric(d.ask), numeric(d.imbalance), numeric(d.order_imbalance), d.label || "UNAVAILABLE"].forEach((v, i) => { if (row.children[i + 1].textContent !== v) row.children[i + 1].textContent = v; });
+    [numeric(d.bid), numeric(d.ask), numeric(d.imbalance), d.label || "UNAVAILABLE"].forEach((v, i) => { if (row.children[i + 1].textContent !== v) row.children[i + 1].textContent = v; });
   }
   const imbalance = f.depth?.[5]?.imbalance;
   const mark = $(`imbalance-mark-${m}`);

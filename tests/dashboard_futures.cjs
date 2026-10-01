@@ -351,6 +351,8 @@ async function label(page) {
     assert.equal(await page.locator("#card-CL").isVisible(), false);
     assert.match(await page.locator("#book-flow-GC").textContent(), /Sampled order-book observations; not a complete execution tape/);
     assert.match(await page.locator("#flow-depth-GC-10").textContent(), /UNAVAILABLE/);
+    assert.deepEqual(await page.locator("#flow-depth-GC-5 td").allTextContents(), ["15", "5", "0.5", "BID_HEAVY"]);
+    assert.match(await page.locator("#book-flow-GC").textContent(), /Saxo sends no order counts/);
     assert.match(await page.locator("#flow-volume-GC").textContent(), /change UNAVAILABLE/);
     assert.match(await page.locator("#flow-feed-GC").textContent(), /granted 1500 ms.*mean 1800 ms/);
     assert.match(await page.locator("#option-identity-GC").textContent(), /UIC 1002.*underlying GCZ6 \/ 101/);

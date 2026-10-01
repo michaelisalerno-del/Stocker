@@ -1,6 +1,15 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `a65b52e22fa6bdd8436c48a7be3c96dfa408eb60`, deployed 2026-09-30 23:19 UTC and
+Current application release: `ebb47197e80f652579c65977ffd42d7eca4c18dd`, deployed 2026-10-01 06:51 UTC
+and re-armed. Real-time CME data arrived overnight (quotes, charts and 10x10 depth, DelayedByMinutes 0).
+LIVE option reference data then exposed three SIM-era assumptions, fixed in `1cbe226` and `ebb4719`:
+lot fields (IncrementSize/MinimumLotSize, not MinimumTradeSize/LotSize), NQ's price-tiered
+TickSizeScheme, and cost conditions (CarryingCost, short-overnight only, is not charged; the GBP
+account's 0.6% conversion markup is priced into costs and fills). Offline on the real LIVE CL/GC/NQ data
+every check passes; on the server NQ waits only for the reference audit, CL/GC also for a fresh
+option quote. Backups `live-option-schema-20261001`, `live-costs-20261001`. Rollback: `a65b52e…`.
+
+Previous release `a65b52e22fa6bdd8436c48a7be3c96dfa408eb60`, deployed 2026-09-30 23:19 UTC and
 re-armed: a header chip and a line under the button show Real-time ON / ON but Saxo still delayed / OFF.
 The session was made primary at 23:15 UTC (FullTradingAndChat, DataLevel Premium; it survived the restart),
 yet fresh subscriptions and charts still report DelayedByMinutes 10: Saxo is not yet granting real-time CME

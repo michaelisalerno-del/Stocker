@@ -15,6 +15,17 @@ TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
 # Historical £10 (1,000p) and £50 (5,000p) reservations keep their policy amount;
 # new ones use the current ceiling.
 POLICIES = ",".join(str(p) for p in (1000, 5000, MAX_PREMIUM_RISK_PENNIES))
+# Per-trade GBP sums over a reservation's fills (r, f), shared by the totals and the trade rows.
+INCOMPLETE = """SUM(CASE WHEN f.exec_id IS NOT NULL AND (f.commission IS NULL OR f.fx IS NULL
+    OR f.commission_currency IS NULL
+    OR f.commission_currency NOT IN (json_extract(r.plan,'$.currency'),'GBP'))
+    THEN 1 ELSE 0 END)"""
+VALUE_GBP = """f.quantity*f.price*json_extract(r.plan,'$.multiplier')
+    *json_extract(r.plan,'$.price_unit_factor')*f.fx"""
+FEE_GBP = "f.commission*(CASE WHEN f.commission_currency='GBP' THEN 1 ELSE f.fx END)"
+NET_GBP = f"SUM((CASE WHEN f.side='SLD' THEN 1 ELSE -1 END)*{VALUE_GBP}-{FEE_GBP})"
+PAID_GBP = f"SUM(CASE WHEN f.side='BOT' THEN {VALUE_GBP}+{FEE_GBP} END)"
+
 RESERVATIONS = f"""CREATE TABLE {{table}} (
     id TEXT PRIMARY KEY REFERENCES signals(id),
     allocation_pennies INTEGER NOT NULL,
@@ -387,21 +398,81 @@ class Store:
         version: str | None,
         offset: int = 0,
         sort: str = "desc",
+        trades_only: bool = False,
     ) -> list[dict[str, Any]]:
         if sort not in {"asc", "desc"}:
             raise ValueError("INVALID_HISTORY_SORT")
         # Summary columns only; evidence blobs are fetched per opportunity on demand.
-        return [
+        rows = [
             dict(r)
             for r in self.db.execute(
                 "SELECT s.id,s.market,s.rule_version,s.signal_at,s.exit_at,s.decision,s.reason,"
                 "r.state FROM signals s "
                 "LEFT JOIN reservations r USING(id) WHERE (? IS NULL OR market=?) "
                 "AND (? IS NULL OR substr(signal_at,1,10)=?) AND (? IS NULL OR rule_version=?) "
+                f"{'AND r.id IS NOT NULL ' if trades_only else ''}"
                 f"ORDER BY signal_at {sort},market,id LIMIT ? OFFSET ?",
                 (market, market, day, day, version, version, PAGE_SIZE, offset),
             )
         ]
+        results = self.trade_results([r["id"] for r in rows if r["state"]])
+        for row in rows:
+            row["trade"] = results.get(row["id"])
+        return rows
+
+    def trade_results(self, ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Display only: each trade's option, average fill prices and GBP result after costs.
+
+        `net_gbp` (the same sum as the realised total) and `paid_gbp` stay unset until every fill
+        has its commission and conversion; `net_gbp` also until the trade is closed.
+        """
+        if not ids:
+            return {}
+        result = {}
+        for row in self.db.execute(
+            f"""
+            SELECT r.id,r.state,json_extract(r.plan,'$.option.right') AS right,
+              json_extract(r.plan,'$.option.strike') AS strike,
+              SUM(CASE WHEN f.side='BOT' THEN f.quantity*f.price END)
+                /SUM(CASE WHEN f.side='BOT' THEN f.quantity END) AS bought,
+              SUM(CASE WHEN f.side='SLD' THEN f.quantity*f.price END)
+                /SUM(CASE WHEN f.side='SLD' THEN f.quantity END) AS sold,
+              MIN(CASE WHEN f.side='BOT' THEN f.at END) AS bought_at,
+              MAX(CASE WHEN f.side='SLD' THEN f.at END) AS sold_at,
+              COUNT(f.exec_id) AS executions,{INCOMPLETE} AS incomplete,
+              {PAID_GBP} AS paid,{NET_GBP} AS net
+            FROM reservations r LEFT JOIN orders o ON o.event_id=r.id
+            LEFT JOIN fills f ON f.reference=o.reference
+            WHERE r.id IN ({",".join("?" * len(ids))}) GROUP BY r.id
+            """,
+            ids,
+        ):
+            complete = row["executions"] > 0 and not row["incomplete"]
+            result[row["id"]] = {
+                "state": row["state"],
+                "option": f"{row['right']} {row['strike']:g}" if row["right"] else None,
+                "bought": row["bought"],
+                "sold": row["sold"],
+                "bought_at": row["bought_at"],
+                "sold_at": row["sold_at"],
+                "paid_gbp": row["paid"] if complete else None,
+                "net_gbp": row["net"] if complete and row["state"] == "CLOSED" else None,
+            }
+        return result
+
+    def day_trades(self, day: str) -> list[dict[str, Any]]:
+        """Display only: the trades whose clock fell on a UTC day, oldest first."""
+        rows = [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT s.id,s.market,s.signal_at,s.exit_at FROM reservations r "
+                "JOIN signals s USING(id) WHERE substr(s.signal_at,1,10)=? "
+                "ORDER BY s.signal_at,s.market",
+                (day,),
+            )
+        ]
+        results = self.trade_results([r["id"] for r in rows])
+        return [{**r, **results[r["id"]]} for r in rows]
 
     def recent_signals(self, market: str, limit: int = 8) -> list[dict[str, Any]]:
         return [
@@ -430,16 +501,8 @@ class Store:
     def _economics(self) -> dict[str, Any]:
         net, closed, wins, provisional = 0.0, 0, 0, 0
         # One indexed join, not one fills query per historical trade on every UI refresh.
-        rows = self.db.execute("""
-            SELECT r.id,COUNT(f.exec_id) AS executions,
-              SUM(CASE WHEN f.exec_id IS NOT NULL AND (f.commission IS NULL OR f.fx IS NULL
-                OR f.commission_currency IS NULL
-                OR f.commission_currency NOT IN (json_extract(r.plan,'$.currency'),'GBP'))
-                THEN 1 ELSE 0 END) AS incomplete,
-              SUM((CASE WHEN f.side='SLD' THEN 1 ELSE -1 END)*f.quantity*f.price
-                *json_extract(r.plan,'$.multiplier')*json_extract(r.plan,'$.price_unit_factor')
-                *f.fx-f.commission*(CASE WHEN f.commission_currency='GBP' THEN 1 ELSE f.fx END)
-              ) AS pnl
+        rows = self.db.execute(f"""
+            SELECT r.id,COUNT(f.exec_id) AS executions,{INCOMPLETE} AS incomplete,{NET_GBP} AS pnl
             FROM reservations r LEFT JOIN orders o ON o.event_id=r.id
             LEFT JOIN fills f ON f.reference=o.reference
             WHERE r.state='CLOSED' GROUP BY r.id

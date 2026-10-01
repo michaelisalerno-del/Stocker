@@ -106,6 +106,18 @@ def test_missing_commission_is_provisional_and_exit_submission_does_not_release(
             (AT.isoformat(),),
         )
     assert s.economics()["realised_net_gbp"] == pytest.approx(2.4)
+    # The per-trade rows the pages show agree with the realised total.
+    with s.db:
+        s.db.execute(
+            "UPDATE reservations SET plan=json_set(plan,'$.option.right','Put',"
+            "'$.option.strike',2650.0)"
+        )
+    (row,) = s.day_trades(AT.date().isoformat())
+    assert (row["option"], row["bought"], row["sold"]) == ("Put 2650", 0.1, 0.15)
+    assert row["net_gbp"] == pytest.approx(2.4)
+    assert row["paid_gbp"] == pytest.approx(0.1 * 100 * 0.8 + 1 * 0.8)
+    assert [r["id"] for r in s.history(None, None, None, trades_only=True)] == ["x"]
+    assert s.history(None, None, None)[0]["trade"]["net_gbp"] == pytest.approx(2.4)
     s.record_fill(fill_record(ref))  # replayed evidence is idempotent
     with pytest.raises(ValueError, match="EXECUTION_ID_REUSED"):
         s.record_fill({**fill_record(ref), "price": 0.11})

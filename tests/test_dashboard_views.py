@@ -5,8 +5,9 @@ import json
 from datetime import timedelta
 
 import httpx
+import pytest
 
-from saxo_support import AT, GC_MAPPING
+from saxo_support import AT, GC_MAPPING, fill_record, record_entry
 from stocker_dashboard.app import create_dashboard_app
 from stocker_execution.config import FuturesConfig
 from stocker_execution.runtime import Runtime
@@ -56,6 +57,37 @@ def test_paused_ready_market_says_paused_on_every_page(tmp_path):
     runtime.store.db.close()
 
 
+def test_overview_and_execution_show_each_trade_with_its_result(tmp_path, monkeypatch):
+    import stocker_execution.runtime as module
+
+    monkeypatch.setattr(module, "now", lambda: AT + timedelta(hours=2))
+    runtime = ready_runtime(tmp_path)
+    s = runtime.store
+    ref = record_entry(s)
+    s.record_fill(fill_record(ref))
+    with s.db:
+        s.db.execute(
+            "UPDATE orders SET status='Filled',filled=1,remaining=0 WHERE reference=?", (ref,)
+        )
+    exit_ref = s.prepare_order("x", "EXIT", 900, AT.isoformat(), {"con_id": 100})
+    s.record_fill({**fill_record(exit_ref, "exit.1", "SLD"), "price": 0.15})
+    with s.db:
+        s.db.execute(
+            "UPDATE orders SET status='Filled',filled=1,remaining=0 WHERE reference=?", (exit_ref,)
+        )
+        s.db.execute("UPDATE fills SET commission=1,commission_currency='USD'")
+    assert s.confirm_closed("x", 0)
+    today = runtime.overview()["today"]
+    assert (today["closed"], today["wins"]) == (1, 1)
+    assert today["net_gbp"] == pytest.approx(s.economics()["realised_net_gbp"])
+    assert [(t["market"], t["bought"], t["sold"]) for t in today["trades"]] == [("GC", 0.1, 0.15)]
+    view = runtime.execution_view()
+    assert view["recent_trades"][0]["net_gbp"] == pytest.approx(2.4)
+    assert {(f["market"], f["role"]) for f in view["fills"]} == {("GC", "ENTRY"), ("GC", "EXIT")}
+    assert "price_context" in runtime.overview()["markets"][0]
+    runtime.store.db.close()
+
+
 def test_market_detail_reads_only_its_recent_signals_and_latest_context(tmp_path):
     runtime = ready_runtime(tmp_path)
     for minute in range(12):
@@ -85,7 +117,9 @@ def test_history_rows_are_summaries_and_evidence_stays_on_demand(tmp_path):
                 "decision",
                 "reason",
                 "state",
+                "trade",  # None unless the opportunity was traded
             }
+            assert row["trade"] is None
             detail = (await client.get("/api/detail", params={"identity": identity})).json()
             assert detail["inputs"]["inputs"] == {"large": "x" * 2000}
         await runtime.stop()

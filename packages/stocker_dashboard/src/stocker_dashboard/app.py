@@ -110,11 +110,12 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         version: str | None = Query(None, max_length=80),
         offset: int = Query(0, ge=0),
         sort: Literal["asc", "desc"] = "desc",
+        trades: bool = False,
     ) -> dict[str, Any]:
         if market is not None and market not in MARKETS:
             raise HTTPException(422, "Unknown futures market")
         rows = runtime.store.history(
-            market, day.isoformat() if day else None, version, offset, sort
+            market, day.isoformat() if day else None, version, offset, sort, trades_only=trades
         )
         return {
             "rows": rows,

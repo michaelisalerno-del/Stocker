@@ -252,9 +252,14 @@ class Runtime:
             {
                 **self.market_card(state, at, [t for t in trades if t["market"] == market], paused),
                 "events": self.calendar.near(market, clock) if self.calendar else [],
+                # Display only: where the future is, for the phone overview.
+                "quote": (state.price.value or {}).get("Quote") or {},
+                "price_context": views.price_context(state),
             }
             for market, state in self.markets.items()
         ]
+        today = self.store.day_trades(at.date().isoformat())
+        closed = [t for t in today if t["net_gbp"] is not None]
         pnl = self.store.economics()
         pnl = {
             **pnl,
@@ -265,6 +270,13 @@ class Runtime:
             "account": saxo_balance.balance_view(self.data, at.timestamp()),
             "markets": cards,
             "pnl": pnl,
+            "today": {
+                "day": at.date().isoformat(),
+                "trades": today,
+                "closed": len(closed),
+                "wins": sum(t["net_gbp"] > 0 for t in closed),
+                "net_gbp": sum(t["net_gbp"] for t in closed) if closed else None,
+            },
         }
 
     def execution_view(self) -> dict[str, Any]:
@@ -276,11 +288,17 @@ class Runtime:
             "fills": [
                 dict(r)
                 for r in self.store.db.execute(
-                    "SELECT f.*,o.event_id,o.role FROM fills f JOIN orders o USING(reference) "
+                    "SELECT f.*,o.event_id,o.role,s.market,"
+                    "json_extract(r.plan,'$.option.right') AS option_right,"
+                    "json_extract(r.plan,'$.option.strike') AS option_strike "
+                    "FROM fills f JOIN orders o USING(reference) "
+                    "LEFT JOIN reservations r ON r.id=o.event_id "
+                    "LEFT JOIN signals s ON s.id=o.event_id "
                     "ORDER BY at DESC,exec_id LIMIT ?",
                     (PAGE_SIZE,),
                 )
             ],
+            "recent_trades": self.recent_trades(),
             "positions": [
                 dict(r)
                 for r in self.store.db.execute(
@@ -425,6 +443,19 @@ class Runtime:
             }
         )
         return {"system": self.status(), "markets": [card]}
+
+    def recent_trades(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Display only: the latest trades, newest first, one row each with their result."""
+        rows = [
+            dict(r)
+            for r in self.store.db.execute(
+                "SELECT s.id,s.market,s.signal_at,s.exit_at FROM reservations r "
+                "JOIN signals s USING(id) ORDER BY s.signal_at DESC,s.market LIMIT ?",
+                (limit,),
+            )
+        ]
+        results = self.store.trade_results([r["id"] for r in rows])
+        return [{**r, **results[r["id"]]} for r in rows]
 
     def forecast_view(
         self, state: MarketState, at: datetime, option: dict[str, Any] | None

@@ -1,6 +1,13 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `0732d9584fcc9a22a555f99d365f4d6557d580ef`, deployed 2026-10-01 20:23 UTC and re-armed
+Current application release: `8dbc6df3267aa985a6a55280a213513bf342c6d2`, deployed 2026-10-01 20:51 UTC and re-armed
+(session stayed FullTradingAndChat): the phone-first dashboard (user's priorities: overview, trades view, Market and
+System tidy; see DASHBOARD-AND-DATA.md), per-trade results from the ledger, and the LIVE balance fix (the balance
+subscription now sends the ClientKey; Saxo LIVE answered 400 without it). Verified after the restart: balance Current
+with all three figures, today's 9 trades and net -£673.99 on the overview, trades-only history, labelled fills.
+Backup `dashboard-20261001`. Rollback: `0732d95…` (same config).
+
+Previous release `0732d9584fcc9a22a555f99d365f4d6557d580ef`, deployed 2026-10-01 20:23 UTC and re-armed
 (session stayed FullTradingAndChat): the depth table drops the order-count imbalance column, which Saxo LIVE never
 fills (`UsingOrders: false`, order fields repeat the sizes), and says why. Backup `depth-table-20261001`. Rollback:
 `792e3cf…` (same config).

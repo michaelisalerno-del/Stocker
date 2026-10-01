@@ -125,6 +125,10 @@ class OptionApproval(Strict):
     expiry_instants: dict[str, AwareDatetime] = Field(default_factory=dict)
     expiry_clock_new_york: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     expiry_time_evidence: str | None = Field(default=None, min_length=10)
+    # SAME_DAY is the frozen method. SAME_DAY_OR_NEXT_LISTED (the user's choice 2026-10-01 for NG
+    # and SI, which list same-day options only on some weekdays) takes the nearest listed expiry
+    # still trading after the 60-minute exit: today's when there is one, otherwise the next.
+    expiry_rule: Literal["SAME_DAY", "SAME_DAY_OR_NEXT_LISTED"] = "SAME_DAY"
 
     @model_validator(mode="after")
     def expiry_evidence(self) -> "OptionApproval":

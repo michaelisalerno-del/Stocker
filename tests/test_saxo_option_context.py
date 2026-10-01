@@ -832,6 +832,52 @@ def test_a_series_expiring_the_same_day_at_another_time_is_never_a_candidate(tmp
     assert [r[2]["Uic"] for r in ranked] == [302]
 
 
+def test_next_listed_expiry_only_where_approved_and_only_without_a_usable_same_day(tmp_path):
+    from stocker_execution.rules import NY
+
+    # Thursday 09:00 New York: silver lists Fridays only; the 14:00 clock exits after a 14:30
+    # same-day expiry would be too late (exit + 2 minutes must come before it).
+    thursday, friday = "2026-10-01", "2026-10-02"
+
+    def ranked_days(rule, at, days):
+        mapping = family_mapping(expiry_rule=rule) if rule else family_mapping()
+        config = FuturesConfig(mappings={"CL": mapping})
+        data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
+        state = data.markets["CL"]
+        state.identity, state.option_roots = FUTURE, (51, 52)
+        state.expiry_instants, state.option_space = {}, []
+        for uic, day in enumerate(days, 400):
+            instant = datetime.fromisoformat(ny_stamp(day, 14, 30).replace("Z", "+00:00"))
+            state.expiry_instants[day] = instant
+            strike = frozen_strike(70, 0.01, at, instant, "C", 0.1)
+            state.option_space.append(
+                {
+                    "Uic": uic,
+                    "UnderlyingUic": 100,
+                    "PutCall": "Call",
+                    "StrikePrice": strike,
+                    "Expiry": day,
+                    "OptionRootId": 51,
+                    "LastTradeDate": ny_stamp(day, 14, 30),
+                }
+            )
+        event = opportunity("CL", 100, at)
+        ranked = data.rank_candidates(state, event, {"futures_price": 70, "rv15": 0.01})
+        return {r[2]["Expiry"] for r in ranked}
+
+    nine = datetime(2026, 10, 1, 13, tzinfo=UTC)  # 09:00 New York
+    two = datetime(2026, 10, 1, 18, tzinfo=UTC)  # 14:00 New York, exit 15:00
+    with pytest.raises(ValueError, match="NO_VERIFIED_REAL_0DTE_EXPIRY_TIME"):
+        ranked_days(None, nine, [friday])  # frozen same-day rule is unchanged
+    nxt = "SAME_DAY_OR_NEXT_LISTED"
+    assert ranked_days(nxt, nine, [friday]) == {friday}
+    assert ranked_days(nxt, nine, [thursday, friday]) == {thursday}  # same day still first
+    assert ranked_days(nxt, two, [thursday, friday]) == {friday}  # same day ends before exit
+    with pytest.raises(ValueError, match="NO_VERIFIED_LISTED_EXPIRY_TIME"):
+        ranked_days(nxt, two, [thursday])
+    assert two.astimezone(NY).hour == 14
+
+
 def test_a_failed_daily_option_refresh_stays_with_the_options_and_waits_to_retry(tmp_path):
     async def run():
         config = FuturesConfig()

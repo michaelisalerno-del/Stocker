@@ -143,6 +143,7 @@ class PaperBroker:
             exit_at=event["exit_at"],
             fee_evidence=self.data.option_references[option["uic"]]["version"],
             delta_distance=distance,
+            expiry_rule=mapping.expiry_rule,
             underlying=state.identity,
             simulated=self.config.execution_mode == "INTERNAL_PAPER",
         )

@@ -725,6 +725,11 @@ class DataService:
         if state.identity is None or not roots_verified(state, mapping.option_root_ids):
             raise ValueError("OPTION_ROOT_NOT_VERIFIED")
         at = utc(event["signal_at"])
+        wanted = at.astimezone(NY).date().isoformat()
+        if mapping.expiry_rule == "SAME_DAY_OR_NEXT_LISTED":
+            # verified_cutoff needs the exit two minutes before the option stops trading.
+            last_exit = utc(event["exit_at"]) + timedelta(seconds=120)
+            wanted = min((d for d, i in state.expiry_instants.items() if i > last_exit), default="")
         candidates = []
         deltas: dict[int, float] = {}
         for selected in state.option_space:
@@ -733,7 +738,7 @@ class DataService:
             if selected.get("PutCall") != ("Call" if event["right"] == "C" else "Put"):
                 continue
             day = str(selected.get("Expiry", ""))[:10]
-            if day != at.astimezone(NY).date().isoformat():
+            if day != wanted:
                 continue
             expiry = state.expiry_instants.get(day)
             if expiry is None or expiry <= at:
@@ -758,7 +763,11 @@ class DataService:
             )
         state.candidate_deltas = deltas
         if not candidates:
-            raise ValueError("NO_VERIFIED_REAL_0DTE_EXPIRY_TIME")
+            raise ValueError(
+                "NO_VERIFIED_REAL_0DTE_EXPIRY_TIME"
+                if mapping.expiry_rule == "SAME_DAY"
+                else "NO_VERIFIED_LISTED_EXPIRY_TIME"
+            )
         candidates.sort(key=lambda x: (x[0], x[1], x[2]["Uic"]))
         if candidates[0][0] > mapping.delta_tolerance:
             raise ValueError("FROZEN_DELTA_OUTSIDE_APPROVED_TOLERANCE")

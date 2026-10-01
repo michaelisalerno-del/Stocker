@@ -58,3 +58,7 @@ option bid/ask at the clock and at +60 minutes from the capture archive, the rec
 and `observation`. Choose any veto on the first half of the weeks only, judge it once on the second
 half, and count a veto as useful only if the kept trades beat all trades by more than their round-trip
 cost with t > 2. The bar-based research expectation is that they will not; this records the evidence.
+
+The exact candidates, periods and pass bar were frozen on 2026-10-01 in
+[L2-VETO-EXIT-PROTOCOL.md](L2-VETO-EXIT-PROTOCOL.md) (seven entry vetoes, six exits; discovery 1-30 October,
+holdout 2-27 November); that file governs the analysis.

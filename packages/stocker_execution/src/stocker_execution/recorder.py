@@ -22,9 +22,10 @@ from stocker_execution import book_flow
 from stocker_execution.config import ROLLING_WINDOW_SECONDS, SUBSCRIPTION_LIMIT, RecorderConfig
 from stocker_execution.contracts import utc
 from stocker_execution.saxo_auth import atomic_json
-from stocker_execution.saxo_stream import merge
+from stocker_execution.saxo_stream import merge, merge_board
 
 log = logging.getLogger(__name__)
+CHAIN = "OptionsChain"  # a market's observation-only chain window, recorded like an instrument
 # One queued write: segment, the capture manifest when it changed (None for rows only),
 # zlib-packed rows and the bytes charged against the queue budget.
 Item = tuple[str, dict[str, Any] | None, list[bytes], int]
@@ -40,12 +41,14 @@ def read_row(blob: bytes) -> dict[str, Any]:
 
 
 def apply(state: Any, record: dict[str, Any]) -> Any:
+    # Chain boards key Expiries/Strikes by Index; prices replace whole arrays.
+    combine = merge_board if (record.get("identity") or {}).get("asset_type") == CHAIN else merge
     if record["kind"] == "SNAPSHOT":
-        return merge({}, record["payload"])
+        return combine({}, record["payload"])
     if record["kind"] == "GAP":
         return None
     if record["kind"] == "UPDATE" and not record.get("dropped") and state is not None:
-        return merge(state, record["payload"])
+        return combine(state, record["payload"])
     return state
 
 

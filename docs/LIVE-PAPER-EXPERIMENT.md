@@ -37,6 +37,16 @@ bid/ask at the 60-minute exit therefore exists for every opportunity, traded or 
 limit does not reduce the sample. Paper trades buy one contract whatever it costs, up to a £1,000 guard
 against a bad quote (was £50).
 
+From 2026-10-02 (the user's request, to study other strikes) the observation-only option chain window
+holds the 25 strikes nearest the money (`option_chain_strikes: 25`) on the held or candidate option's
+expiry, moving once the money leaves its middle half, and every chain message (calls and puts: bid, ask,
+sizes, Saxo's Greeks and bid/ask/mid volatility, volume, open interest) is recorded as its own instrument
+(`asset_type` `OptionsChain`, keyed by the future's UIC) in each clock's capture, with a checkpoint of the
+merged chain (rows keyed by `Index`) before its retained messages. The candidate's regular quote stream is
+unchanged; its per-option `CHAIN_CONTEXT` rows now appear only while its strike is inside that window. The
+capture allowance is 20 GiB (`archive_max_bytes`; was 2 GiB, about a week) and the shared 15-minute memory
+64 MiB.
+
 ## Operator steps (user actions are marked)
 
 1. **User:** create a LIVE Saxo OpenAPI application with the redirect URI

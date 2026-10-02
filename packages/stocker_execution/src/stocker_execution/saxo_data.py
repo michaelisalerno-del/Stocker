@@ -37,7 +37,7 @@ from stocker_execution.contracts import (
     quote_check,
     utc,
 )
-from stocker_execution.recorder import Recorder
+from stocker_execution.recorder import CHAIN, Recorder
 from stocker_execution.rules import (
     NY,
     Bar,
@@ -60,6 +60,11 @@ def same_instant(option: dict[str, Any], instant: datetime) -> bool:
         return utc(str(option.get("LastTradeDate"))) == instant
     except ValueError:
         return False
+
+
+def chain_identity(future: dict[str, Any]) -> dict[str, Any]:
+    """The recorder instrument for a future's chain window (observation only, never traded)."""
+    return {**future, "asset_type": CHAIN}
 
 
 def roots_verified(state: "MarketState", approved: tuple[int, ...]) -> bool:
@@ -553,6 +558,7 @@ class DataService:
         else:
             self.markets[target].option_board = snapshot or {}
             self.record_board(self.markets[target], snapshot or {}, time.time())
+            self.record_chain(self.markets[target], "SNAPSHOT", snapshot or {}, time.time())
         for message in self.drop_pending(ref):
             await self.receive(message["message"], message["receipt"])
         return ref
@@ -851,7 +857,9 @@ class DataService:
         )
 
     async def focus_board(self, state: MarketState, requested: dict[str, Any]) -> None:
-        """Move the existing small chain window; regular pinned quotes never change UIC."""
+        """Keep the chain window on the strikes nearest the money, on the held or candidate
+        option's expiry (2026-10-02: recorded so other strikes can be studied). Regular pinned
+        quotes never change UIC; the window moves once the money leaves its middle half."""
         subscription = next(
             (
                 (r, s)
@@ -881,19 +889,23 @@ class DataService:
         if not expiry:
             state.capabilities["option_chain_problem"] = "SELECTED_EXPIRY_NOT_IN_CHAIN"
             return
+        mid = expiry.get("MidStrikePrice")
+        strikes = [
+            s for s in expiry.get("Strikes", []) or [] if isinstance(s.get("Strike"), (int, float))
+        ]
+        size = self.config.option_chain_strikes
         selection = {"Index": expiry["Index"]}
-        strike = next(
-            (s for s in expiry.get("Strikes", []) or [] if s.get("Strike") == identity["strike"]),
-            None,
-        )
-        if strike:
-            selection["StrikeStartIndex"] = max(
-                0, strike["Index"] - self.config.option_chain_strikes // 2
-            )
-        patch = {
-            "Expiries": [selection],
-            "MaxStrikesPerExpiry": self.config.option_chain_strikes,
-        }
+        if isinstance(mid, (int, float)) and strikes:
+            money = min(strikes, key=lambda s: (abs(s["Strike"] - mid), s["Index"]))
+            selection["StrikeStartIndex"] = max(0, money["Index"] - size // 2)
+            held = (current.get("board_window") or {}).get("Expiries", [{}])[0]
+            if (
+                held.get("Index") == expiry["Index"]
+                and "StrikeStartIndex" in held
+                and abs(held["StrikeStartIndex"] - selection["StrikeStartIndex"]) <= size // 4
+            ):
+                return
+        patch = {"Expiries": [selection], "MaxStrikesPerExpiry": size}
         if current.get("board_window") == patch:
             return
         try:
@@ -902,10 +914,22 @@ class DataService:
             )
             current["board_window"] = patch
             state.capabilities["option_chain_problem"] = (
-                "" if strike else "AWAITING_SELECTED_EXPIRY_STRIKES"
+                "" if "StrikeStartIndex" in selection else "AWAITING_CHAIN_STRIKES"
             )
         except SaxoError as exc:
             state.capabilities["option_chain_problem"] = str(exc)
+
+    def record_chain(self, state: MarketState, kind: str, data: dict[str, Any], at: float) -> None:
+        """Observation only: every chain-window message joins the future's captures."""
+        if not state.identity:
+            return
+        identity = chain_identity(state.identity)
+        try:
+            self.recorder.register(key(identity), identity)
+            self.recorder.ingest(key(identity), kind, data, at, context_source="OPTIONS_CHAIN")
+            state.capabilities["chain_recording_problem"] = ""
+        except ValueError as exc:
+            state.capabilities["chain_recording_problem"] = str(exc)
 
     def record_board(self, state: MarketState, update: dict[str, Any], at: float) -> None:
         for expiry in update.get("Expiries", []) or []:
@@ -1356,6 +1380,7 @@ class DataService:
             elif subscription["kind"] == "BOARD":
                 state = self.markets[subscription["target"]]
                 self.record_board(state, data, receipt)
+                self.record_chain(state, "UPDATE", data, receipt)
                 state.option_board = merge_board(state.option_board, data)
             else:
                 price, identity = self.price_target(subscription["target"])

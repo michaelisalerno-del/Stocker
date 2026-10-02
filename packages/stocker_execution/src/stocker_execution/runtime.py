@@ -41,7 +41,7 @@ from stocker_execution.rules import (
 )
 from stocker_execution.saxo_auth import OAuth
 from stocker_execution.saxo_client import REST_QUEUE_LIMIT, SaxoClient
-from stocker_execution.saxo_data import DataService, MarketState
+from stocker_execution.saxo_data import DataService, MarketState, chain_identity
 from stocker_execution.store import Store, encode
 
 log = logging.getLogger(__name__)
@@ -591,6 +591,8 @@ class Runtime:
                     and i["underlying_uic"] == state.identity["uic"]
                     and i["uic"] in state.warm_uics
                 ]
+                # The chain window near the money is evidence too (observation only).
+                option_keys.append(key(chain_identity(state.identity)))
                 capture = self.recorder.trigger(
                     key(state.identity), event, time.time(), option_keys
                 )

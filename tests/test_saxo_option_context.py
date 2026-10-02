@@ -32,7 +32,7 @@ from stocker_execution.recorder import Recorder, read_row
 from stocker_execution.rules import opportunity
 from stocker_execution.saxo_auth import SaxoError
 from stocker_execution.saxo_client import allowed
-from stocker_execution.saxo_data import DataService
+from stocker_execution.saxo_data import DataService, chain_identity
 from stocker_execution.saxo_stream import PriceState, merge_board
 
 
@@ -515,13 +515,20 @@ def test_event_pins_one_contract_and_detaches_decision_evidence(tmp_path, monkey
     asyncio.run(run())
 
 
-def test_chain_focus_uses_selected_expiry_strike_and_existing_subscription(tmp_path):
+def test_chain_focus_centres_on_the_money_of_the_selected_expiry(tmp_path):
     async def run():
         _, data, store = setup(tmp_path)
         state = data.markets["CL"]
+        strikes = [{"Index": i, "Strike": 60 + i * 0.5} for i in range(80)]  # 60.0 .. 99.5
         state.option_board = {
             "Expiries": [
-                {"Index": 3, "Expiry": OPTION["expiry"], "Strikes": [{"Index": 90, "Strike": 70}]}
+                {"Index": 0, "Expiry": "2026-09-27", "MidStrikePrice": 50, "Strikes": []},
+                {
+                    "Index": 3,
+                    "Expiry": OPTION["expiry"],
+                    "MidStrikePrice": 70.1,
+                    "Strikes": strikes,
+                },
             ]
         }
         data.subscriptions["chain"] = {
@@ -530,19 +537,68 @@ def test_chain_focus_uses_selected_expiry_strike_and_existing_subscription(tmp_p
             "path": "/trade/v1/optionschain/subscriptions",
         }
         data.client.request = AsyncMock(return_value={})
-        await data.focus_board(state, OPTION)
+        await data.focus_board(state, OPTION)  # the candidate's strike is elsewhere
         await data.focus_board(state, OPTION)
         data.client.request.assert_awaited_once()
         args = data.client.request.call_args
         assert args.args[0] == "PATCH"
         assert args.kwargs["body"] == {
-            # Observation-only chain window: option_chain_strikes centred on the strike.
-            "Expiries": [{"Index": 3, "StrikeStartIndex": 85}],
+            # Observation-only window: option_chain_strikes centred on the strike nearest
+            # the money (70.0, index 20), on the selected option's expiry.
+            "Expiries": [{"Index": 3, "StrikeStartIndex": 15}],
             "MaxStrikesPerExpiry": 11,
         }
+        state.option_board["Expiries"][1]["MidStrikePrice"] = 71.0  # two strikes: kept
+        await data.focus_board(state, OPTION)
+        data.client.request.assert_awaited_once()
+        state.option_board["Expiries"][1]["MidStrikePrice"] = 72.0  # four strikes: moved
+        await data.focus_board(state, OPTION)
+        assert data.client.request.call_args.kwargs["body"]["Expiries"] == [
+            {"Index": 3, "StrikeStartIndex": 19}
+        ]
         store.db.close()
 
     asyncio.run(run())
+
+
+def test_chain_window_is_recorded_merged_by_index_and_joins_the_capture(tmp_path):
+    _, data, store = setup(tmp_path)
+    state = data.markets["CL"]
+    data.recorder = Recorder(
+        RecorderConfig(persistent_capture=True, recording_permission_evidence="OFFLINE FIXTURE"),
+        tmp_path / "chain",
+    )
+    data.recorder.register(key(FUTURE), FUTURE)
+    chain = key(chain_identity(FUTURE))
+    snapshot = {
+        "Expiries": [
+            {
+                "Index": 0,
+                "MidStrikePrice": 70,
+                "Strikes": [
+                    {"Index": 0, "Strike": 69, "Call": {"Bid": 1.2, "Ask": 1.3}},
+                    {"Index": 1, "Strike": 70, "Call": {"Bid": 0.6, "Ask": 0.7}},
+                ],
+            }
+        ]
+    }
+    data.record_chain(state, "SNAPSHOT", snapshot, 100)
+    data.record_chain(
+        state,
+        "UPDATE",
+        {"Expiries": [{"Index": 0, "Strikes": [{"Index": 1, "Call": {"Bid": 0.65}}]}]},
+        101,
+    )
+    strikes = data.recorder.windows[chain].current["Expiries"][0]["Strikes"]
+    assert strikes[0]["Call"] == {"Bid": 1.2, "Ask": 1.3}
+    assert strikes[1]["Call"] == {"Bid": 0.65, "Ask": 0.7}
+    assert data.recorder.windows[chain].identity["asset_type"] == "OptionsChain"
+    # The future's book flow ignores chain rows: they live under their own instrument.
+    assert data.recorder.windows[key(FUTURE)].sequence == 0
+    capture = data.recorder.trigger(key(FUTURE), signal(1), time.time(), [chain])
+    assert chain in data.recorder.active[capture["segment"]]["instruments"]
+    assert not state.capabilities["chain_recording_problem"]
+    store.db.close()
 
 
 def test_permanently_disabled_chain_does_not_disable_future_price(tmp_path):

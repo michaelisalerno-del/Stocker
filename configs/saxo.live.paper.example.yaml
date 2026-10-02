@@ -10,13 +10,15 @@ saxo:
   redirect_uri: https://139.59.178.164/oauth/saxo/callback # must match the LIVE app registration
 contracts: {} # Pin from this environment's returned ContractFutures reference data after login.
 mappings: {} # Per-market option approvals; see docs/FUTURES-RULEBOOK.md.
+# Observation-only chain window: 25 strikes nearest the money, recorded with every capture.
+option_chain_strikes: 25
 recorder:
   minimum_post_event_minutes: 60
   post_close_minutes: 5
-  rolling_max_bytes: 33554432
+  rolling_max_bytes: 67108864 # 64 MiB: the five chain windows share the 15-minute memory
   queue_max_bytes: 8388608
   queue_max_items: 512
-  archive_max_bytes: 2147483648
+  archive_max_bytes: 21474836480 # 20 GiB, the most allowed: about 0.3-0.5 GB per trading day
   disk_reserve_bytes: 2147483648
   bar_max_bytes: 134217728
   # Set both together, with the actual permission record (who granted it, when, and its scope):

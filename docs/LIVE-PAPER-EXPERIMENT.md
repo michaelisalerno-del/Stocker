@@ -93,4 +93,6 @@ falls on the exit; its calendar `release-calendar-2026-10-11.yaml` is also the a
 judges selling one minute before the hour on all other exits. [RELEASE-ENTRY-PROTOCOL.md](RELEASE-ENTRY-PROTOCOL.md) judges
 deciding and buying one minute before a release that falls on the clock. [RELEASE-LATE-ENTRY-PROTOCOL.md](RELEASE-LATE-ENTRY-PROTOCOL.md)
 judges keeping the decision and buying one minute after that release. [QUOTE-LEAN-PROTOCOL.md](QUOTE-LEAN-PROTOCOL.md) judges
-whether the side a blown-out option quote leans to (bid falling or ask jumping) points the future's next 5 minutes.
+whether the side a blown-out option quote leans to (bid falling or ask jumping) points the future's next 5 minutes. [EXIT-SET-2-PROTOCOL.md](EXIT-SET-2-PROTOCOL.md)
+judges a futures trailing exit (E1) and a buyers-and-sellers-turn exit (E2) on 5-16 October, and selling into the
+09:30/10:00 New York burst (E3) by 27 November.

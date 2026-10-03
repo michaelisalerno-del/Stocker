@@ -99,3 +99,5 @@ judges a futures trailing exit (E1) and a buyers-and-sellers-turn exit (E2) on 5
 resting orders in the futures book make their price less likely to be reached within 5 minutes, on 5-16 October.
 [INTRADAY-MOMENTUM-PROTOCOL.md](INTRADAY-MOMENTUM-PROTOCOL.md) judges, on paper from the app's NQ minute bars, betting the
 last half hour in the direction of the first (Gao, Han, Li & Zhou), on 5 October 2026 to 15 January 2027.
+[NOISE-AREA-PROTOCOL.md](NOISE-AREA-PROTOCOL.md) judges, the same way, Zarattini, Aziz & Barbon's half-hourly "noise area"
+breakout rule on NQ from 5 October 2026 (abandon check 31 March 2027, verdict 30 September 2027).

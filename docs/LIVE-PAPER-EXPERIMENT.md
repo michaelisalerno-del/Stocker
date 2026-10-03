@@ -95,4 +95,5 @@ deciding and buying one minute before a release that falls on the clock. [RELEAS
 judges keeping the decision and buying one minute after that release. [QUOTE-LEAN-PROTOCOL.md](QUOTE-LEAN-PROTOCOL.md) judges
 whether the side a blown-out option quote leans to (bid falling or ask jumping) points the future's next 5 minutes. [EXIT-SET-2-PROTOCOL.md](EXIT-SET-2-PROTOCOL.md)
 judges a futures trailing exit (E1) and a buyers-and-sellers-turn exit (E2) on 5-16 October, and selling into the
-09:30/10:00 New York burst (E3) by 27 November.
+09:30/10:00 New York burst (E3) by 27 November. [WALL-PROTOCOL.md](WALL-PROTOCOL.md) judges whether big
+resting orders in the futures book make their price less likely to be reached within 5 minutes, on 5-16 October.

@@ -101,3 +101,6 @@ resting orders in the futures book make their price less likely to be reached wi
 last half hour in the direction of the first (Gao, Han, Li & Zhou), on 5 October 2026 to 15 January 2027.
 [NOISE-AREA-PROTOCOL.md](NOISE-AREA-PROTOCOL.md) judges, the same way, Zarattini, Aziz & Barbon's half-hourly "noise area"
 breakout rule on NQ from 5 October 2026 (abandon check 31 March 2027, verdict 30 September 2027).
+[PRICED-BELOW-PROTOCOL.md](PRICED-BELOW-PROTOCOL.md) judges five conditions under which options might be priced below the
+movement that follows (after bursts, look14 above the price, dealers short gamma, the cheapest hours, below yesterday),
+on the hourly ledger built from these recordings, clocks 5 October to 27 November 2026.

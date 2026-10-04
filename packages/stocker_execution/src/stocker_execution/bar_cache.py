@@ -42,6 +42,8 @@ class BarCache:
                         "low": b.low,
                         "close": b.close,
                         "volume": b.volume,
+                        "interest": b.interest,
+                        "state": b.state,
                     }
                     for b in bars
                     if b.at.date().isoformat() == day

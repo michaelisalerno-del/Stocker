@@ -89,6 +89,15 @@ required. Uvicorn uses `proxy_headers=False` so the dashboard's security layer s
 loopback peer. Execution starts disabled and disarmed on every launch; arming is a separate,
 explicit operator action.
 
+**Restart window (2026-10-04).** With a frozen clock every hour of the CME session the recorder
+keeps each market's capture open from 18:00 New York to 17:00 the next day, and any restart marks
+every open capture `INTERRUPTED_RESTART` (every capture of 1–2 October was cut that way by a
+deploy). Restart the service only between 17:00 and 18:00 New York on a weekday, or at the
+weekend before Sunday 18:00 New York; the deploy scripts refuse other times unless `FORCE=1`.
+Reloading the option spaces after a restart takes 5–20 minutes (Saxo rate limits), so start early
+in the window. The System page shows the archive's measured growth and the days left before
+`recorder.archive_max_bytes` stops captures; the status bar warns under 14 days.
+
 Configuration migration for releases after `21d9077`: remove the `recorder.pre_event_minutes`
 line from `/etc/stocker/v1/saxo.sim.yaml` before switching the release symlink. The key was never
 read (the rolling window is the fixed 15 minutes) and the configuration model rejects unknown keys.

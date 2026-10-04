@@ -32,6 +32,7 @@ def completed_bars(raw: dict[str, Any], at: datetime) -> list[Bar]:
             if stamp + timedelta(minutes=1) > at:
                 continue
             # Volume absence is a strategy block, not a synthetic zero.
+            interest, state = row.get("Interest"), row.get("MarketTradingState")
             b = Bar(
                 stamp,
                 float(row["Open"]),
@@ -39,6 +40,8 @@ def completed_bars(raw: dict[str, Any], at: datetime) -> list[Bar]:
                 float(row["Low"]),
                 float(row["Close"]),
                 float(row["Volume"]),
+                interest=float(interest) if isinstance(interest, (int, float)) else None,
+                state=state if isinstance(state, str) else None,
             )
             if b.valid():
                 result.append(b)

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import shutil
+import time
 import zlib
 from collections import deque
 from contextlib import suppress
@@ -166,6 +167,9 @@ class Recorder:
         self.closed = False
         self.worker: asyncio.Task[None] | None = None
         self.catalog: list[dict[str, Any]] = []
+        # (time, disk_bytes) about once a minute over the last day: the System page shows the
+        # archive's growth and the days left before archive_max_bytes stops captures.
+        self.growth: deque[tuple[float, int]] = deque(maxlen=1441)
 
     async def start(self) -> None:
         await asyncio.to_thread(self.recover)
@@ -647,6 +651,8 @@ class Recorder:
 
     def tick(self, at: float) -> None:
         self.expire(at)
+        if not self.growth or at - self.growth[-1][0] >= 60:
+            self.growth.append((at, self.disk_bytes))
         for segment in list(self.markers_pending):
             if segment not in self.active or self.enqueue(segment, self.active[segment], []):
                 self.markers_pending.discard(segment)
@@ -814,7 +820,15 @@ class Recorder:
             "recording_gaps": self.gaps,
             "paused_reason": self.problem,
             "persistent_capture": self.config.persistent_capture,
+            "archive_growth": self.archive_growth(time.time()),
         }
+
+    def archive_growth(self, at: float) -> dict[str, Any] | None:
+        """Bytes archived over the sampled span within the last day; None until two samples."""
+        recent = [s for s in self.growth if s[0] >= at - 86400]
+        if len(recent) < 2:
+            return None
+        return {"bytes": self.disk_bytes - recent[0][1], "seconds": at - recent[0][0]}
 
     async def close(self) -> None:
         for segment, capture in self.active.items():

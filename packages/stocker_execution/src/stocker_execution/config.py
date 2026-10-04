@@ -43,9 +43,10 @@ class RecorderConfig(Strict):
     max_message_bytes: int = Field(default=256 * 1024, ge=1024, le=1024**2)
     queue_max_bytes: int = Field(default=8 * 1024**2, ge=65536, le=32 * 1024**2)
     queue_max_items: int = Field(default=512, ge=2, le=4096)
-    # 2026-10-04: clocks every hour of the CME session record almost continuously; 60 GiB keeps the
-    # frozen tests' data to the end of November on the 116 GB server disk.
-    archive_max_bytes: int = Field(default=2 * 1024**3, ge=65536, le=60 * 1024**3)
+    # 2026-10-04: clocks every hour of the CME session record almost continuously, and the chain
+    # window grew to 61 strikes the same day; 80 GiB is the most the 116 GB server disk can hold
+    # for the frozen tests' data to the end of November. The System page shows the measured rate.
+    archive_max_bytes: int = Field(default=2 * 1024**3, ge=65536, le=80 * 1024**3)
     disk_reserve_bytes: int = Field(default=2 * 1024**3, ge=0)
     bar_max_bytes: int = Field(default=128 * 1024**2, ge=65536)
     max_open_captures: int = Field(default=32, ge=5, le=64)
@@ -172,8 +173,10 @@ class FuturesConfig(Strict):
     recorder: RecorderConfig = Field(default_factory=RecorderConfig)
     option_subscription_budget: int = Field(default=16, ge=4, le=16)
     option_candidate_window: int = Field(default=3, ge=1, le=3)
-    # Strikes in the observation-only options-chain window (Saxo caps a chain at 100).
-    option_chain_strikes: int = Field(default=11, ge=3, le=25)
+    # Strikes in the observation-only options-chain window (Saxo caps a chain at 100). 25 strikes
+    # spanned about one expected move, too narrow for the open-interest gamma and wall columns, so
+    # the bound was lifted on 2026-10-04 (live: 61); the recorder's archive rate pays for it.
+    option_chain_strikes: int = Field(default=11, ge=3, le=100)
     # Scale of the chain's Greeks.MidVolatility, which Saxo does not document. A live SIM
     # probe (docs/saxo-field-probe-20260929.json) read annual fractions, e.g. NG 0.651 between
     # bid/ask volatilities 0.645/0.657. Set UNVERIFIED to hide the IV spread again.

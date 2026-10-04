@@ -35,6 +35,21 @@ def trigger(i, **kwargs):
     }
 
 
+def test_archive_growth_reports_the_sampled_rate(tmp_path):
+    r = recorder(tmp_path)
+    assert r.status()["archive_growth"] is None
+    r.disk_bytes = 1000
+    r.tick(0)
+    r.disk_bytes = 4000
+    r.tick(30)  # inside the same minute: not a new sample
+    r.tick(3600)
+    assert r.archive_growth(3600) == {"bytes": 3000, "seconds": 3600}
+    # Samples older than a day leave the rate.
+    r.disk_bytes = 5000
+    r.tick(90000)
+    assert r.archive_growth(90000) == {"bytes": 1000, "seconds": 86400}
+
+
 def test_window_expiry_keeps_valid_advancing_checkpoint(tmp_path):
     r = recorder(tmp_path)
     r.ingest("CL-contract", "SNAPSHOT", {"Quote": {"Bid": 10, "Ask": 11}}, 0)

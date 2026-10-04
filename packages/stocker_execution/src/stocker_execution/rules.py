@@ -22,6 +22,10 @@ class Bar:
     close: float
     volume: float
     average: float | None = None  # not supplied by Saxo charts; never fabricate VWAP
+    # Kept for the record only (Saxo's per-minute open interest and trading state; the price
+    # stream carries no futures open interest). Nothing frozen reads them.
+    interest: float | None = None
+    state: str | None = None
 
     def valid(self) -> bool:
         return (
@@ -31,6 +35,7 @@ class Bar:
                 math.isfinite(x) and x > 0 for x in (self.open, self.high, self.low, self.close)
             )
             and (self.average is None or math.isfinite(self.average) and self.average > 0)
+            and (self.interest is None or math.isfinite(self.interest) and self.interest >= 0)
             and math.isfinite(self.volume)
             and self.volume >= 0
             and self.low <= min(self.open, self.close) <= max(self.open, self.close) <= self.high

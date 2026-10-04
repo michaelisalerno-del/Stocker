@@ -186,6 +186,8 @@ def test_history_completed_tail_missing_volume_and_gap_pagination(tmp_path):
             "Low": 69,
             "Close": 70.5,
             "Volume": 20,
+            "Interest": 512000,
+            "MarketTradingState": "Open",
         }
         for i in range(4)
     ]
@@ -193,6 +195,7 @@ def test_history_completed_tail_missing_volume_and_gap_pagination(tmp_path):
     bars = completed_bars({"Data": rows}, at + timedelta(hours=1))
     assert [b.at.minute for b in bars] == [0, 2]  # a sent but invalid sample is never filled
     assert bars[0].average is None
+    assert (bars[0].interest, bars[0].state) == (512000.0, "Open")  # kept for the record
     # Minutes Saxo omits (nothing traded): up to five in a row are unchanged, longer gaps stay.
     quiet = [rows[0], rows[2], rows[3]]  # minute 1 omitted
     quiet += [{**rows[3], "Time": (at + timedelta(minutes=m)).isoformat()} for m in (9, 16, 17)]
@@ -203,6 +206,7 @@ def test_history_completed_tail_missing_volume_and_gap_pagination(tmp_path):
     assert (filled.open, filled.high, filled.low, filled.close, filled.volume) == (70.5,) * 4 + (
         0.0,
     )
+    assert filled.interest is None and filled.state is None  # nothing was sent for that minute
 
     async def scenario():
         _, data, store = setup(tmp_path)

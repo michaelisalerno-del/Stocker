@@ -79,6 +79,19 @@ const explanations = {
   L2_AVAILABLE: "available", L2_UNAVAILABLE: "unavailable", DISCONNECTED: "disconnected",
 };
 const display = (v) => explanations[v] || String(v || "").replaceAll("_", " ");
+// Archive runway from the recorder's sampled growth: days until archive_max_bytes stops captures.
+const archiveDays = (l) => {
+  const g = l?.archive_growth;
+  if (!g || g.seconds < 3600 || g.bytes <= 0) return null;
+  return ((l.disk_limit || 0) - (l.disk_bytes || 0)) / (g.bytes / g.seconds) / 86400;
+};
+const archiveRunway = (l) => {
+  const g = l?.archive_growth, days = archiveDays(l);
+  if (days != null) return ` · ≈${(g.bytes / g.seconds * 86400 / 1073741824).toFixed(2)} GiB/day · ≈${Math.floor(days)} days of archive left`;
+  return g ? " · archive rate: measuring" : "";
+};
+const mib = (bytes) => (bytes || 0) / 1048576;
+const stored = (l) => mib(l.disk_limit) >= 1024 ? `${(mib(l.disk_bytes) / 1024).toFixed(2)} / ${(mib(l.disk_limit) / 1024).toFixed(0)} GiB stored` : `${mib(l.disk_bytes).toFixed(1)} / ${mib(l.disk_limit).toFixed(0)} MiB stored`;
 // Card pills stay one word; the full explanation is the pill's tooltip.
 const stateLabel = (v) => v === "EXPOSURE_REQUIRES_RECONCILIATION" ? "RECONCILE" : String(v || "").replaceAll("_", " ");
 
@@ -522,10 +535,12 @@ function renderStatus(s) {
   text("primary-state", !primary ? "OFF: prices are delayed. Click to give SLRNO Saxo's real-time slot."
     : live ? "ON: SLRNO holds Saxo's real-time slot and prices are real-time."
     : "ON, but Saxo still sends delayed prices. In SaxoTraderGO check My Profile → Other → Open API Access is enabled; that login turns this OFF, so click again after it.");
+  const archive = archiveDays(s.l2_recording);
   const issues = [
     !s.connected && "Disconnected", s.connected && !s.reconciled && "Reconciliation required",
     exceptions && "Exposure exception", !(primary && live) && (primary ? "Saxo still delayed" : "Real-time OFF"),
     s.paused && "Entries paused", !s.paused && !s.armed && "Not armed",
+    archive != null && archive < 14 && `Archive ${Math.floor(archive)} days left`,
   ].filter(Boolean);
   text("status-text", issues.length ? issues.join(" · ") : "All normal");
   const health = !s.connected || exceptions ? "bad" : issues.length ? "warn" : "ok";
@@ -676,8 +691,8 @@ function renderSystem(d) {
   text("api-options", `${a.option_lines ?? 0} / ${a.option_budget ?? "—"} regular option quote subscriptions`);
   text("api-pacing", Object.entries(a.rate_limits || {}).map(([k, v]) => `${k.replace("x-ratelimit-", "")} ${v}`).join(" · ") || "No rate-limit headers received yet");
   text("api-queue", `${a.rest_queue ?? 0} / ${a.rest_queue_limit ?? "—"} queued REST requests`);
-  text("api-storage", `${((l.disk_bytes || 0) / 1048576).toFixed(1)} / ${((l.disk_limit || 0) / 1048576).toFixed(0)} MiB stored`);
-  text("api-gaps", `${l.recording_gaps ?? 0} recording gaps · ${l.writer_queue ?? 0} queued batches`);
+  text("api-storage", stored(l));
+  text("api-gaps", `${l.recording_gaps ?? 0} recording gaps · ${l.writer_queue ?? 0} queued batches${archiveRunway(l)}`);
   text("api-error", l.paused_reason || "No reported recording problem");
   $("api-error").className = l.paused_reason ? "block" : "block quiet";
   for (const m of d.markets || []) text(`capability-${m.market}`, `${m.market} · ${display(m.problem) || "Connected"}`);

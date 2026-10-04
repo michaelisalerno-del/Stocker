@@ -38,7 +38,11 @@ const price = (v) => typeof v === "number" && Number.isFinite(v) ? String(Number
 const numeric = (v, suffix = "") => typeof v === "number" && Number.isFinite(v) ? `${Number(v.toFixed(4))}${suffix}` : "UNAVAILABLE";
 const text = (id, v) => {
   const el = $(id), next = String(v ?? "—");
-  if (el && el.textContent !== next) el.textContent = next;
+  if (!el || el.textContent === next) return;
+  // A price (data-flash) that changes lights up briefly: re-adding the class restarts the animation.
+  const flash = "flash" in el.dataset && el.textContent !== "—";
+  el.textContent = next;
+  if (flash) { el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
 };
 const show = (id, visible) => { const el = $(id); if (el && el.hidden === visible) el.hidden = !visible; };
 const explanations = {
@@ -76,6 +80,8 @@ const explanations = {
   L2_AVAILABLE: "available", L2_UNAVAILABLE: "unavailable", DISCONNECTED: "disconnected",
 };
 const display = (v) => explanations[v] || String(v || "").replaceAll("_", " ");
+// Card pills stay one word; the full explanation is the pill's tooltip.
+const stateLabel = (v) => v === "EXPOSURE_REQUIRES_RECONCILIATION" ? "RECONCILE" : String(v || "").replaceAll("_", " ");
 
 for (const name of ["overview", "trades", "execution", "system"]) $(name).hidden = name !== page;
 text("title", {markets: "Markets", opportunities: "Opportunities", execution: "Execution", system: "System"}[route] || "Futures overview");
@@ -90,20 +96,21 @@ show("today-trades", route === "overview");
 // with text() or attributes only.
 function overviewCard(m) {
   return `<div class="card-head"><h2>${m} <span>${names[m]}</span></h2><strong class="state" id="state-${m}"></strong></div>
-    <p class="price-line"><strong id="price-${m}">—</strong><span id="change-${m}"></span><span class="contract" id="contract-${m}"></span></p>
+    <p class="price-line"><strong id="price-${m}" data-flash>—</strong><span id="change-${m}"></span><span class="contract" id="contract-${m}"></span></p>
     <p class="position" id="position-${m}" hidden></p>
     <p class="block" id="block-${m}"></p>
     <p class="today-line" id="today-${m}" hidden></p>
     <p class="events" id="events-${m}" hidden></p>
-    <details class="checks"><summary id="checks-${m}">Checks</summary><ol class="gates" id="gates-${m}" aria-label="${m} readiness at last refresh"></ol></details>
+    <details class="checks"><summary><span id="checks-${m}">Checks</span><span class="dots" id="dots-${m}" aria-hidden="true"></span></summary><ol class="gates" id="gates-${m}" aria-label="${m} readiness at last refresh"></ol></details>
     <div class="card-foot"><small class="data-line" id="data-${m}"></small><a class="detail-link" href="/markets?market=${m}">Market detail →</a></div>`;
 }
 function marketCard(m) {
   return `<div class="card-head"><div><h2>${m} <span>${names[m]}</span></h2><p class="contract" id="contract-${m}"></p></div><span class="state" id="state-${m}"></span></div>
+    <p class="price-line"><strong id="price-${m}" data-flash>—</strong><span id="change-${m}"></span></p>
     <div class="status-line"><span id="market-${m}"></span><span id="l1-${m}"></span><span id="l2-${m}"></span><span id="data-${m}"></span></div>
     <p class="position" id="position-${m}" hidden></p>
     <p class="block" id="block-${m}"></p>
-    <details class="checks"><summary id="checks-${m}">Checks</summary><ol class="gates" id="gates-${m}" aria-label="${m} readiness at last refresh"></ol></details>
+    <details class="checks"><summary><span id="checks-${m}">Checks</span><span class="dots" id="dots-${m}" aria-hidden="true"></span></summary><ol class="gates" id="gates-${m}" aria-label="${m} readiness at last refresh"></ol></details>
     <div class="market-grid">
       <section class="panel ticket" aria-label="${m} option trade ticket"><h3>Trade ticket</h3>
         <p class="ticket-contract" id="ticket-contract-${m}"></p>
@@ -139,9 +146,10 @@ function marketCard(m) {
       </section>
     </div>
     <svg class="chart" viewBox="0 0 640 210" role="img" aria-label="${m} completed underlying prices with frozen clock marks">
+      <defs><linearGradient id="grad-${m}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9ecbff" stop-opacity="0.28"/><stop offset="1" stop-color="#9ecbff" stop-opacity="0"/></linearGradient></defs>
       <g id="axis-${m}" class="axis"></g><rect id="rv-${m}" class="rv-window" x="0" y="10" width="0" height="170"/>
       <g id="clocks-${m}" class="clock-marks"></g><g id="band-${m}" class="trade-band"></g>
-      <polyline id="line-${m}" fill="none"/><g id="markers-${m}"></g>
+      <polygon id="area-${m}" class="area" fill="url(#grad-${m})" points=""/><polyline id="line-${m}" fill="none"/><g id="markers-${m}"></g>
       <text id="chart-empty-${m}" x="320" y="100" text-anchor="middle">Awaiting completed bars</text>
     </svg>
     <p class="chart-key">Grey marks: frozen clocks (NY) · shaded: 15-minute RV window · green band: open trade to exit</p>
@@ -200,6 +208,13 @@ function renderGates(m) {
     if (li.title !== title) li.title = title;
   });
   while (list.children.length > items.length) list.lastChild.remove();
+  // The folded summary shows one dot per gate.
+  const dots = $(`dots-${m.market}`);
+  if (dots) {
+    while (dots.children.length < items.length) dots.append(document.createElement("i"));
+    while (dots.children.length > items.length) dots.lastChild.remove();
+    items.forEach((g, i) => { const cls = g.ok ? "ok" : "fail"; if (dots.children[i].className !== cls) dots.children[i].className = cls; });
+  }
   const ok = items.filter((g) => g.ok).length;
   text(`checks-${m.market}`, items.length ? `${ok} of ${items.length} checks pass` : "Checks unavailable");
 }
@@ -336,29 +351,36 @@ function svgNode(tag, attrs, label) {
 }
 function chart(m) {
   if (route !== "markets") return;
-  const bars = m.chart || [], line = $(`line-${m.market}`), group = $(`markers-${m.market}`);
+  const bars = m.chart || [], line = $(`line-${m.market}`), area = $(`area-${m.market}`), group = $(`markers-${m.market}`);
   text(`chart-empty-${m.market}`, bars.length ? "" : "Awaiting completed bars");
+  // Phones draw in a narrower coordinate space so the axis text stays legible.
+  const W = matchMedia("(max-width: 650px)").matches ? 400 : 640, L = 46, R = W - 10;
+  const svg = line.ownerSVGElement, viewBox = `0 0 ${W} 210`;
+  if (svg.getAttribute("viewBox") !== viewBox) { svg.setAttribute("viewBox", viewBox); $(`chart-empty-${m.market}`).setAttribute("x", W / 2); chartGeometry.delete(m.market); }
   if (!bars.length) {
     line.setAttribute("points", "");
+    area.setAttribute("points", "");
     for (const id of [`axis-${m.market}`, `clocks-${m.market}`, `band-${m.market}`]) $(id).replaceChildren();
     $(`rv-${m.market}`).setAttribute("width", "0");
     chartGeometry.delete(m.market);
     return;
   }
   const start = Date.parse(bars[0].at), end = Date.parse(bars.at(-1).at) + 60000;
-  const x = (t) => 50 + (580 * (t - start)) / Math.max(1, end - start);
+  const x = (t) => L + ((R - L) * (t - start)) / Math.max(1, end - start);
   const inRange = (t) => t >= start && t <= end;
   const signature = JSON.stringify([bars, m.chart_context, (m.trades || []).map((t) => [t.entry_at, t.exit_at])]);
   if (chartGeometry.get(m.market) !== signature) {
     chartGeometry.set(m.market, signature);
     const prices = bars.map((b) => b.close), lo = Math.min(...prices), hi = Math.max(...prices), span = hi - lo || 1;
     const y = (p) => 176 - ((p - lo) * 160) / span;
-    line.setAttribute("points", bars.map((b) => `${x(Date.parse(b.at) + 60000).toFixed(1)},${y(b.close).toFixed(1)}`).join(" "));
+    const points = bars.map((b) => `${x(Date.parse(b.at) + 60000).toFixed(1)},${y(b.close).toFixed(1)}`);
+    line.setAttribute("points", points.join(" "));
+    area.setAttribute("points", `${points[0].split(",")[0]},180 ${points.join(" ")} ${points.at(-1).split(",")[0]},180`);
     const axis = $(`axis-${m.market}`);
     axis.replaceChildren(
-      ...[hi, (hi + lo) / 2, lo].flatMap((p) => [svgNode("line", {x1: 50, x2: 630, y1: y(p), y2: y(p), class: "grid"}), svgNode("text", {x: 44, y: y(p) + 4, "text-anchor": "end"}, Number(p.toPrecision(6)))]),
-      svgNode("text", {x: 50, y: 204, "text-anchor": "start"}, `${hhmm(start)} NY`),
-      svgNode("text", {x: 630, y: 204, "text-anchor": "end"}, `${hhmm(end)} NY`),
+      ...[hi, (hi + lo) / 2, lo].flatMap((p) => [svgNode("line", {x1: L, x2: R, y1: y(p), y2: y(p), class: "grid"}), svgNode("text", {x: L - 6, y: y(p) + 4, "text-anchor": "end"}, Number(p.toPrecision(6)))]),
+      svgNode("text", {x: L, y: 204, "text-anchor": "start"}, `${hhmm(start)} NY`),
+      svgNode("text", {x: R, y: 204, "text-anchor": "end"}, `${hhmm(end)} NY`),
     );
     const marks = (m.chart_context?.clocks || []).filter((c) => inRange(Date.parse(c.at)));
     $(`clocks-${m.market}`).replaceChildren(...marks.flatMap((c) => {
@@ -507,7 +529,9 @@ function renderStatus(s) {
     s.paused && "Entries paused", !s.paused && !s.armed && "Not armed",
   ].filter(Boolean);
   text("status-text", issues.length ? issues.join(" · ") : "All normal");
-  $("status-dot").className = `dot ${!s.connected || exceptions ? "bad" : issues.length ? "warn" : "ok"}`;
+  const health = !s.connected || exceptions ? "bad" : issues.length ? "warn" : "ok";
+  $("status-dot").className = `dot ${health}`;
+  $("mode-banner").dataset.tone = health;
   text("auth-state", `OAuth: ${s.oauth || "UNVERIFIED"}${s.oauth_problem ? ` (${s.oauth_problem})` : ""} · stream: ${s.connected ? "connected" : "disconnected"} · session: ${s.session?.TradeLevel || "UNVERIFIED"}`);
   const alerts = s.alerts || {};
   text("events-state", `Saxo order/position events: ${display(s.activity_events || "NOT_SUBSCRIBED").toLowerCase()}${s.closed_positions_problem ? ` · closed positions: ${s.closed_positions_problem}` : ""}${s.calendar_problem ? ` · event calendar: ${s.calendar_problem}` : ""}`);
@@ -563,7 +587,8 @@ function render(d) {
   for (const m of d.markets) {
     if (!markets.includes(m.market)) continue;
     renderGates(m);
-    text(`state-${m.market}`, display(m.strategy_state));
+    text(`state-${m.market}`, stateLabel(m.strategy_state));
+    $(`state-${m.market}`).title = display(m.strategy_state);
     $(`card-${m.market}`).dataset.state = m.strategy_state || "";
     text(`block-${m.market}`, firstBlock(m));
     $(`block-${m.market}`).title = m.block_reason || "";
@@ -572,13 +597,14 @@ function render(d) {
     const trades = m.trades || [];
     show(`position-${m.market}`, trades.length > 0);
     text(`position-${m.market}`, trades.map(position).join(" | "));
+    // Both pages lead with the future's mid and session change.
+    const quote = m.quote || m.l1?.quote || {}, ctx = m.price_context || {};
+    text(`price-${m.market}`, typeof quote.Bid === "number" && typeof quote.Ask === "number" ? price((quote.Bid + quote.Ask) / 2) : "—");
+    const change = typeof ctx.net_change === "number" ? `${ctx.net_change >= 0 ? "+" : "−"}${price(Math.abs(ctx.net_change))}${typeof ctx.percent_change === "number" ? ` (${ctx.percent_change >= 0 ? "+" : "−"}${Math.abs(ctx.percent_change).toFixed(2)}%)` : ""}` : "";
+    text(`change-${m.market}`, change);
+    $(`change-${m.market}`).className = tone(ctx.net_change);
     if (route !== "markets") {
       text(`contract-${m.market}`, m.contract || "Contract awaiting verification");
-      const q = m.quote || {}, pc = m.price_context || {};
-      text(`price-${m.market}`, typeof q.Bid === "number" && typeof q.Ask === "number" ? price((q.Bid + q.Ask) / 2) : "—");
-      const change = typeof pc.net_change === "number" ? `${pc.net_change >= 0 ? "+" : "−"}${price(Math.abs(pc.net_change))}${typeof pc.percent_change === "number" ? ` (${pc.percent_change >= 0 ? "+" : "−"}${Math.abs(pc.percent_change).toFixed(2)}%)` : ""}` : "";
-      text(`change-${m.market}`, change);
-      $(`change-${m.market}`).className = tone(pc.net_change);
       const mine = (d.today?.trades || []).filter((t) => t.market === m.market);
       const net = mine.filter((t) => t.net_gbp != null);
       show(`today-${m.market}`, mine.length > 0);
@@ -631,7 +657,7 @@ function renderToday(t, cards = []) {
   const list = $("today-list"), known = new Map([...list.children].map((n) => [n.dataset.key, n]));
   for (const [index, x] of [...trades].reverse().entries()) {
     let li = known.get(x.id); known.delete(x.id);
-    if (!li) { li = document.createElement("li"); li.dataset.key = x.id; for (let i = 0; i < 4; i++) li.append(document.createElement("span")); }
+    if (!li) { li = document.createElement("li"); li.dataset.key = x.id; li.dataset.market = x.market; for (let i = 0; i < 4; i++) li.append(document.createElement("span")); }
     const valuation = live.get(x.id);
     const result = x.net_gbp != null ? signed(x.net_gbp) : x.state === "CLOSED" ? "costs pending" : valuation?.fresh ? `open · ${signed(valuation.value_gbp)}` : "open";
     const cells = [london(x.signal_at), `${x.market} ${x.option || ""}`.trim(), `${price(x.bought)} → ${x.sold == null ? "…" : price(x.sold)}`, result];
@@ -868,7 +894,7 @@ function countdown() {
   const hours = Math.floor(left / 3600), minutes = Math.floor((left % 3600) / 60), seconds = left % 60;
   const span = hours ? `${hours}h ${String(minutes).padStart(2, "0")}m` : `${minutes}:${String(seconds).padStart(2, "0")}`;
   text("countdown", `Next clock ${hhmm(nextClock)} NY (${london(nextClock)} London) · in ${span}`);
-  text("status-next", ` · next ${hhmm(nextClock)} NY in ${span}`);
+  text("status-next", `next ${hhmm(nextClock)} NY in ${span}`);
 }
 setInterval(() => {
   text("clock", `${time(new Date().toISOString())} · London`);

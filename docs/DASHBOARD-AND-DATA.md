@@ -49,6 +49,28 @@ Display only; no trading rule or broker request changed.
   folded into "Saxo API usage".
 - Per-trade figures come from `Store.trade_results`, the same sums as the realised total.
 
+### Visual refresh — 4 October 2026 (user: "it's got to look incredible")
+Display only; every element id, control and test hook is unchanged, so the Playwright suite and
+the server are untouched.
+- **Design system in `dashboard.css`:** colour, radius, shadow and type tokens on `:root`; layered
+  surfaces with hairlines instead of uniform boxes; semantic green / amber / red kept separate from
+  the lime brand accent; a colour per market (CL amber, ES blue, GC gold, NQ violet) on card
+  stripes, tabs and today's trade tags; system fonts (SF Pro / SF Mono on Apple devices) because
+  the CSP forbids CDN fonts and nothing needs downloading.
+- **Header** is sticky and translucent with the London clock; on phones the nav becomes a fixed
+  bottom tab bar (safe-area aware) and the header keeps only the brand and the PAPER badge.
+- **Status bar** carries its health in a coloured dot on the bar itself (`data-tone` ok / warn /
+  bad set beside the existing `#status-dot`); the next-clock chip is the prominent element.
+- **Overview cards** are four across on wide screens, equal height, with a 28px tabular mid price
+  that flashes briefly when it changes (`data-flash`), a short state pill (full explanation in its
+  tooltip), and the folded checks summary now shows one dot per gate.
+- **Markets page** leads with the same price hero; the chart has an area fill, a lighter grid and,
+  on phones, a narrower coordinate space (viewBox 400) so axis text stays legible; the ladder,
+  imbalance meter and sparklines are restyled, not changed.
+- Tables: uppercase sticky heads, right-aligned results, hover rows; phones keep the card-per-row
+  layout and use 16px inputs so iOS does not zoom.
+- Favicon `static/favicon.svg`. Screenshots regenerated from the same fixture.
+
 ## Additional Saxo data
 
 | Feature | Source | Use |

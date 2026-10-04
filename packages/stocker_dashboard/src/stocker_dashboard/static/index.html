@@ -2,8 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0f13" />
     <title>SLRNO · Futures PAPER</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/static/dashboard.css" />
     <script src="/static/dashboard.js" defer></script>
   </head>
@@ -14,7 +16,7 @@
       <nav aria-label="Main navigation">
         <a href="/">Overview</a><a href="/markets">Markets</a><a href="/opportunities">Opportunities</a><a href="/execution">Execution</a><a href="/system">System</a>
       </nav>
-      <span class="paper" id="live-badge">LIVE ORDERS DISABLED</span>
+      <div class="header-tools"><span class="clock" id="clock"></span><span class="paper" id="live-badge">LIVE ORDERS DISABLED</span></div>
     </header>
     <main id="main">
       <div class="heading">
@@ -22,7 +24,6 @@
           <p class="eyebrow">FOUR MARKETS · ONE FROZEN METHOD</p>
           <h1 id="title">Futures overview</h1>
         </div>
-        <div class="clock" id="clock"></div>
       </div>
       <div class="status-bar" id="mode-banner" aria-label="Runtime status">
         <button type="button" class="status-summary" id="status-toggle" aria-expanded="false" aria-controls="status-chips"><span class="dot" id="status-dot"></span><span id="status-text">Checking…</span><span id="status-next"></span></button>
@@ -101,7 +102,7 @@
         </details>
       </section>
       <section id="system" hidden>
-        <h2>Real-time prices</h2><p id="primary-state"></p><button id="primary-session" type="button">Use real-time in SLRNO</button><p class="muted">Saxo sends real-time prices to one session only: this can delay or log off SaxoTraderGO, and logging in to SaxoTraderGO takes it back. Tap again after each SaxoTraderGO login.</p>
+        <h2>Real-time prices</h2><p id="primary-state"></p><button id="primary-session" type="button" class="primary">Use real-time in SLRNO</button><p class="muted">Saxo sends real-time prices to one session only: this can delay or log off SaxoTraderGO, and logging in to SaxoTraderGO takes it back. Tap again after each SaxoTraderGO login.</p>
         <h2>Saxo connection</h2><p id="auth-state"></p><div id="capability-list" class="capability-list"></div><p id="alerts-state"></p><p id="events-state"></p><form id="saxo-connect" action="/oauth/saxo/start" method="post"><button>Connect configured Saxo environment</button></form><p id="oauth-notice" role="alert"></p><p class="muted">Connecting data never arms execution. A session upgrade can downgrade another Saxo application; SLRNO never upgrades automatically.</p><p id="provider-status" class="muted">Saxo is the only data and execution provider; retired providers are not installed.</p><h2>Market data &amp; recording</h2>
         <div class="api-panel">
           <div><small>Application subscriptions</small><strong id="api-lines"></strong><span id="api-allowance"></span><span id="api-external">Session upgrade is explicit; it can downgrade another Saxo application</span></div>

@@ -57,8 +57,10 @@ def allowed(
         r"/trade/v1/optionschain/subscriptions/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", path
     ):
         return True
+    # One subscription (.../{ContextId}/{ReferenceId}) or every subscription of a context.
     if method == "DELETE" and any(
-        re.fullmatch(re.escape(p) + r"/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", path) for p in SUBSCRIPTIONS
+        re.fullmatch(re.escape(p) + r"/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?", path)
+        for p in SUBSCRIPTIONS
     ):
         return True
     if primary_session:

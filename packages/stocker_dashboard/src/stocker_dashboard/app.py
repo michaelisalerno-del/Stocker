@@ -97,7 +97,6 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
                     "problem": s.problem,
                     "reference_sessions": len(s.references),
                     "capabilities": runtime.data.capability_view(s),
-                    "candidates": s.candidates if diagnostics else None,
                 }
                 for s in runtime.markets.values()
             ],

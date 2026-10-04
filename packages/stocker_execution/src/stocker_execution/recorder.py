@@ -277,8 +277,12 @@ class Recorder:
         blob = packed(raw)
         version = hashlib.sha256(blob).hexdigest()
         if version not in window.metadata:
-            if len(blob) > 65536 or len(window.metadata) >= 16:
+            if len(blob) > 65536:
                 raise ValueError("REFERENCE_CACHE_LIMIT")
+            # Session schedules and trading status change daily, so a long-lived process sees a
+            # new version per reconnect: the oldest gives way rather than blocking the market.
+            while len(window.metadata) >= 16:
+                window.metadata.pop(next(iter(window.metadata)))
             window.metadata[version] = {"received_at": received_at, "value": json.loads(blob)}
             for segment, capture in self.active.items():
                 if key in capture["instruments"]:

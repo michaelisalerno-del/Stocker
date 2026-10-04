@@ -814,6 +814,7 @@ class Runtime:
             await self.refresh_histories()
             if not self.history_needed.is_set():
                 try:
+                    await self.data.retry_failed_startups()
                     await self.data.release_unused_options(
                         {json.loads(r["plan"])["option"]["uic"] for r in self.store.active()}
                     )

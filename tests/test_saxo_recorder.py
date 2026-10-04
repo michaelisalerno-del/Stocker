@@ -35,6 +35,16 @@ def trigger(i, **kwargs):
     }
 
 
+def test_reference_versions_evict_the_oldest_instead_of_blocking(tmp_path):
+    # Session schedules change daily, so a long-lived process sees a new reference version per
+    # reconnect; the seventeenth used to raise REFERENCE_CACHE_LIMIT and block the market.
+    r = recorder(tmp_path)
+    versions = [r.metadata_version("CL-contract", {"n": n}, float(n)) for n in range(20)]
+    window = r.windows["CL-contract"]
+    assert list(window.metadata) == versions[-16:]
+    assert window.metadata_version == versions[-1]
+
+
 def test_archive_growth_reports_the_sampled_rate(tmp_path):
     r = recorder(tmp_path)
     assert r.status()["archive_growth"] is None

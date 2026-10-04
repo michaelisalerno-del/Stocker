@@ -29,7 +29,7 @@ from stocker_execution.contracts import (
     verified_cutoff,
 )
 from stocker_execution.recorder import Recorder, read_row
-from stocker_execution.rules import opportunity
+from stocker_execution.rules import opportunity, session_day
 from stocker_execution.saxo_auth import SaxoError
 from stocker_execution.saxo_client import allowed
 from stocker_execution.saxo_data import DataService, chain_identity
@@ -799,7 +799,7 @@ def family_service(tmp_path, spaces):
 def test_weekly_family_loads_today_root_and_saxo_timestamps_at_the_approved_clock(tmp_path):
     from stocker_execution.rules import NY
 
-    today = datetime.now(NY).date()
+    today = session_day(datetime.now(NY))  # the app's day: the CME session's
     d = [(today + timedelta(days=i)).isoformat() for i in range(3)]
     spaces = {
         51: weekly_space(d[0], ny_stamp(d[0], 14, 30), 201),
@@ -818,7 +818,7 @@ def test_weekly_family_loads_today_root_and_saxo_timestamps_at_the_approved_cloc
 def test_conflicting_saxo_timestamps_leave_that_day_unverified(tmp_path):
     from stocker_execution.rules import NY
 
-    day = datetime.now(NY).date().isoformat()
+    day = session_day(datetime.now(NY)).isoformat()
     spaces = {
         51: weekly_space(day, ny_stamp(day, 14, 30), 201),
         52: weekly_space(day, ny_stamp(day, 14, 30, 30), 202),
@@ -1008,7 +1008,7 @@ def test_an_options_problem_at_connect_does_not_block_the_verified_future(tmp_pa
             return await request(method, path, **kwargs)
 
         data.client.request = counted
-        state.option_space_day = datetime.now(NY).date().isoformat()
+        state.option_space_day = session_day(datetime.now(NY)).isoformat()
         await data.discover(state)
         assert calls and not any("contractoptionspaces" in p for p in calls)
         state.option_space_day = "2026-09-30"  # a new day still loads them

@@ -14,7 +14,6 @@ if (!markets.includes(selectedMarket)) selectedMarket = "CL";
 let offset = 0, paused = false, pending = null, selectedIdentity = "";
 let detailRequest = null, detailSignature = null, controlPending = false, lastRefresh = null, accountSnapshot = null;
 let pageSize = 100; // replaced by the server's page_size
-let setupShown = false;
 const REFRESH_SECONDS = 5;
 let limits = {};
 let serverOffset = 0, nextClock = null; // countdowns use server time, not the browser clock
@@ -561,10 +560,9 @@ function renderSetup(items) {
     if (label.textContent !== labelText) label.textContent = labelText;
     if (detail.textContent !== item.detail) detail.textContent = item.detail;
   });
-  // The overview hides a completed checklist and shows it again if a step regresses; System
-  // starts it folded when complete and then leaves it as the user sets it.
+  // The overview shows the checklist only while a required step is missing. It starts folded
+  // everywhere (the summary carries the count) and stays as the user sets it.
   if (route === "overview") show("setup", done !== required.length);
-  if (!setupShown) { setupShown = true; $("setup-detail").open = done !== required.length; }
 }
 function render(d) {
   const s = d.system, p = d.pnl || {skip_reasons: {}};

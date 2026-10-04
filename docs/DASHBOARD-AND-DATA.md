@@ -70,6 +70,9 @@ the server are untouched.
 - Tables: uppercase sticky heads, right-aligned results, hover rows; phones keep the card-per-row
   layout and use 16px inputs so iOS does not zoom.
 - Favicon `static/favicon.svg`. Screenshots regenerated from the same fixture.
+- Setup checklist (user's follow-up): it starts folded on every page — the summary line carries
+  "n of m required steps done" — and the markup no longer ships it `open`. Overview still shows
+  the (folded) section only while a required step is missing.
 
 ## Additional Saxo data
 

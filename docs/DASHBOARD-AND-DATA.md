@@ -79,6 +79,9 @@ the server are untouched.
   the days left before `archive_max_bytes` stops captures, and the status bar lists
   "Archive n days left" under 14 days. The same change widened the chain window to 61 strikes and
   the cap to 70 GiB on the server.
+- Chart stream (same day; MARKET-DATA.md): System's per-market lines show the chart stream's
+  state, how many boundary bars decisions took from it and how many REST confirmed; the status
+  bar says "Chart stream fell back to REST" once the tripwire has fired.
 
 ## Additional Saxo data
 

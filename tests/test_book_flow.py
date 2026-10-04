@@ -201,10 +201,15 @@ def test_one_ordinary_subscription_per_market_shared_by_consumers_and_heartbeats
         monkeypatch.setattr(data, "subscribe_fx", no_fx)
         await data.startup()
         await data.startup()
-        # One ordinary price per market plus the session, no duplicate consumers.
-        assert len(calls) == len(MARKETS) + 1
+        # One ordinary price and one chart stream per market plus the session, no duplicates.
+        assert len(calls) == 2 * len(MARKETS) + 1
         prices = [(ref, s) for ref, s in data.subscriptions.items() if s["kind"] == "PRICE"]
         assert len(prices) == len(MARKETS)
+        charts = [s for s in data.subscriptions.values() if s["kind"] == "CHART"]
+        assert len(charts) == len(MARKETS) and all(
+            s["path"] == "/chart/v3/charts/subscriptions" and s["arguments"]["Horizon"] == 1
+            for s in charts
+        )
         for _ref, s in prices:
             assert s["path"] == "/trade/v1/prices/subscriptions"
             assert {"Quote", "PriceInfo", "PriceInfoDetails", "MarketDepth"} <= set(
@@ -214,7 +219,7 @@ def test_one_ordinary_subscription_per_market_shared_by_consumers_and_heartbeats
             await asyncio.gather(
                 *(data.subscribe("PRICE", s["arguments"], s["target"]) for _ in range(4))
             )
-        assert len(calls) == len(MARKETS) + 1
+        assert len(calls) == 2 * len(MARKETS) + 1  # repeated consumers share the subscription
         assert not allowed("POST", "/trade/v1/infoprices/subscriptions")
         ref, s = prices[0]
         p = data.markets[s["target"]].price

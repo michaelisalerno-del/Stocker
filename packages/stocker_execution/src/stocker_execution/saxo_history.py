@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import time
 from datetime import UTC, datetime, timedelta
@@ -12,12 +13,36 @@ from stocker_execution.contracts import future_identity, utc
 from stocker_execution.reference_sessions import load_selections
 from stocker_execution.rules import NY, Bar, reference_summary, session_day
 from stocker_execution.saxo_auth import SaxoError
+from stocker_execution.saxo_stream import ChartState
 
 if TYPE_CHECKING:
     from stocker_execution.saxo_data import DataService, MarketState
 
+log = logging.getLogger(__name__)
 REFERENCE_RETRY_SECONDS = 900
 MAX_FILLED_GAP_MINUTES = 5  # longest run of no-trade minutes counted as unchanged
+
+
+def bar_from_sample(row: dict[str, Any]) -> Bar:
+    """One Saxo chart sample as a Bar; KeyError/TypeError/ValueError for an unusable sample.
+
+    Volume absence is a strategy block, not a synthetic zero.
+    """
+    interest, state = row.get("Interest"), row.get("MarketTradingState")
+    return Bar(
+        utc(row["Time"]),
+        float(row["Open"]),
+        float(row["High"]),
+        float(row["Low"]),
+        float(row["Close"]),
+        float(row["Volume"]),
+        interest=float(interest) if isinstance(interest, (int, float)) else None,
+        state=state if isinstance(state, str) else None,
+    )
+
+
+def bar_fields(bar: Bar) -> dict[str, float]:
+    return {k: getattr(bar, k) for k in ("open", "high", "low", "close", "volume")}
 
 
 def completed_bars(raw: dict[str, Any], at: datetime) -> list[Bar]:
@@ -31,23 +56,66 @@ def completed_bars(raw: dict[str, Any], at: datetime) -> list[Bar]:
             sent.add(stamp)
             if stamp + timedelta(minutes=1) > at:
                 continue
-            # Volume absence is a strategy block, not a synthetic zero.
-            interest, state = row.get("Interest"), row.get("MarketTradingState")
-            b = Bar(
-                stamp,
-                float(row["Open"]),
-                float(row["High"]),
-                float(row["Low"]),
-                float(row["Close"]),
-                float(row["Volume"]),
-                interest=float(interest) if isinstance(interest, (int, float)) else None,
-                state=state if isinstance(state, str) else None,
-            )
+            b = bar_from_sample(row)
             if b.valid():
                 result.append(b)
         except (KeyError, TypeError, ValueError):
             continue
     return fill_short_gaps(result, sent)
+
+
+def streamed_bar(chart: ChartState, minute: datetime, at: datetime) -> Bar | None:
+    """The completed streamed sample for `minute`, or None.
+
+    Complete means a later sample has started (Saxo opens the next sample when the minute ends)
+    and the minute has ended on the wall clock: the rule that drops the REST read's newest
+    sample. The stream must be current: a snapshot, no gap or delay, contact inside its timeout.
+    """
+    if (
+        chart.problem
+        or chart.last_contact is None
+        or not 0 <= at.timestamp() - chart.last_contact <= chart.inactivity_timeout
+        or minute + timedelta(minutes=1) > at
+    ):
+        return None
+    try:
+        by_time = {utc(t): s for t, s in chart.samples.items()}
+        sample = by_time.get(minute)
+        if sample is None or not any(t > minute for t in by_time):
+            return None
+        bar = bar_from_sample(sample)
+    except (KeyError, TypeError, ValueError):
+        return None
+    return bar if bar.valid() else None
+
+
+def confirm_streamed_bars(data: DataService, state: MarketState, bars: list[Bar]) -> None:
+    """Every boundary bar a decision took from the stream is checked against the next REST read
+    of that minute. Any difference trips the stream until a restart: decisions use REST alone
+    and the clock's evidence records both bars."""
+    if not state.stream_bars:
+        return
+    by_time = {b.at: b for b in bars}
+    newest = max(by_time) if by_time else None
+    for minute, (streamed, event_id) in list(state.stream_bars.items()):
+        rest = by_time.get(minute)
+        if rest is None and (newest is None or newest <= minute):
+            continue  # the REST read has not reached that minute yet
+        del state.stream_bars[minute]
+        evidence = {
+            "market": state.market,
+            "minute": minute.isoformat(),
+            "event_id": event_id,
+            "streamed": bar_fields(streamed),
+            "rest": bar_fields(rest) if rest else None,
+        }
+        if rest is not None and bar_fields(rest) == bar_fields(streamed):
+            state.chart_confirmed += 1
+            continue
+        data.chart_stream_problem = "CHART_STREAM_MISMATCH"
+        data.chart_mismatch = evidence
+        data.chart_audits.append((event_id, evidence))
+        log.warning("CHART_STREAM_MISMATCH %s %s", state.market, minute.isoformat())
 
 
 def fill_short_gaps(bars: list[Bar], sent: set[datetime]) -> list[Bar]:
@@ -90,6 +158,7 @@ async def history(data: DataService, state: MarketState, *, boundary: bool = Fal
         "semantics": "Saxo chart samples; mutable tail excluded; no quote reconstruction",
     }
     bars = completed_bars(result, datetime.now(UTC))
+    confirm_streamed_bars(data, state, bars)
     state.bars = bars
     state.history_checked = time.monotonic()
     try:

@@ -541,6 +541,7 @@ function renderStatus(s) {
     exceptions && "Exposure exception", !(primary && live) && (primary ? "Saxo still delayed" : "Real-time OFF"),
     s.paused && "Entries paused", !s.paused && !s.armed && "Not armed",
     archive != null && archive < 14 && `Archive ${Math.floor(archive)} days left`,
+    s.chart_stream_problem && "Chart stream fell back to REST",
   ].filter(Boolean);
   text("status-text", issues.length ? issues.join(" · ") : "All normal");
   const health = !s.connected || exceptions ? "bad" : issues.length ? "warn" : "ok";
@@ -695,7 +696,11 @@ function renderSystem(d) {
   text("api-gaps", `${l.recording_gaps ?? 0} recording gaps · ${l.writer_queue ?? 0} queued batches${archiveRunway(l)}`);
   text("api-error", l.paused_reason || "No reported recording problem");
   $("api-error").className = l.paused_reason ? "block" : "block quiet";
-  for (const m of d.markets || []) text(`capability-${m.market}`, `${m.market} · ${display(m.problem) || "Connected"}`);
+  for (const m of d.markets || []) {
+    const cs = m.capabilities?.chart_stream || {};
+    const used = cs.boundary_bars_used ? ` · ${cs.boundary_bars_used} boundary bar${cs.boundary_bars_used === 1 ? "" : "s"} from the stream, ${cs.confirmed || 0} confirmed by REST` : "";
+    text(`capability-${m.market}`, `${m.market} · ${display(m.problem) || "Connected"} · chart stream ${display(cs.status || "UNVERIFIED").toLowerCase()}${cs.problem ? ` (${display(cs.problem)})` : ""}${used}`);
+  }
   if ($("system-detail").open) text("system-json", JSON.stringify(d, null, 2));
 }
 

@@ -6,6 +6,17 @@ Price/depth subscriptions request 1,000 ms; the option discovery board requests 
 2,000 ms minimum. Actual returned RefreshRate is reported. The selected option receives a regular
 price subscription for its account and intended quantity of one. Board quotes are not executable prices.
 
+Chart stream (2026-10-04): each pinned future also has a `/chart/v3/charts` subscription on the
+same connection (Horizon 1, ten samples, RefreshRate 1,000 ms). On 1–2 October a fifth of the
+clocks were skipped `INCOMPLETE_COMPLETED_HISTORY` because the final minute's bar reached the
+five-second REST poll after the 20-second entry deadline. Saxo opens the next sample when a
+minute ends and sends the closed bar with it, so a clock whose only missing bar is that minute
+now decides on the streamed sample; the clock's evidence says `boundary_bar.source: CHART_STREAM`.
+REST stays the record (bar cache, references) and the check: the next REST read of that minute
+must equal the streamed bar, and any difference trips the stream until a restart
+(`chart_stream_problem`, a `CHART_STREAM_MISMATCH` lifecycle row on the clock, the status bar's
+"Chart stream fell back to REST"). Delayed, paused, reset or silent streams supply nothing.
+
 The bounded binary parser handles initial snapshots, field patches, null clears, price-array
 replacement, indexed option-board updates, heartbeats and duplicate opaque message IDs. A separate
 local ingest sequence is retained. Conflicting replays, reset/disabled subscriptions, session downgrade,

@@ -49,7 +49,7 @@ from stocker_execution.rules import (
 )
 from stocker_execution.saxo_auth import SaxoError
 from stocker_execution.saxo_client import PRIMARY_SESSION, SaxoClient
-from stocker_execution.saxo_stream import Frames, PriceState, merge, merge_board
+from stocker_execution.saxo_stream import ChartState, Frames, PriceState, merge, merge_board
 
 # Reference details and option spaces share Saxo's 60-a-minute RefDataInstrumentsMinute limit;
 # loading an option family one root per 1.05 s keeps a whole family inside it.
@@ -85,6 +85,13 @@ class MarketState:
     candidates: list[dict[str, Any]] = field(default_factory=list)
     price: PriceState = field(default_factory=PriceState)
     bars: list[Bar] = field(default_factory=list)
+    # Streamed one-minute samples: the boundary bar at a clock before the REST read has it.
+    chart: ChartState = field(default_factory=ChartState)
+    # Boundary bars a decision took from the stream, until the REST read of that minute
+    # confirms them: minute -> (bar, clock event id).
+    stream_bars: dict[datetime, tuple[Bar, str]] = field(default_factory=dict)
+    chart_used: int = 0
+    chart_confirmed: int = 0
     references: list[dict[int, dict[str, float]]] = field(default_factory=list)
     capabilities: dict[str, Any] = field(
         default_factory=lambda: {
@@ -164,6 +171,15 @@ class DataService:
         self.subscription_lock = asyncio.Lock()
         self.subscribe_lock = asyncio.Lock()
         self.bar_cache = BarCache(recorder.directory.parent / "bars", config.recorder)
+        # The chart stream's tripwire: set by the first streamed bar a REST read contradicts,
+        # cleared only by a restart. Decisions then wait for REST as before.
+        self.chart_stream_problem = ""
+        self.chart_mismatch: dict[str, Any] | None = None
+        self.chart_audits: list[tuple[str, dict[str, Any]]] = []
+
+    def drain_chart_audits(self) -> list[tuple[str, dict[str, Any]]]:
+        audits, self.chart_audits = self.chart_audits, []
+        return audits
 
     async def verify_account(self) -> None:
         self.account_verified = self.client.sim_account_verified = False
@@ -225,7 +241,9 @@ class DataService:
         for ref, subscription in self.subscriptions.items():
             if subscription["kind"] == "PRICE":
                 self.mark_gap(subscription["target"], "SESSION_UPGRADED")
-            if subscription["kind"] in {"PRICE", "BOARD"}:
+            if subscription["kind"] == "CHART":
+                self.markets[subscription["target"]].chart.gap("SESSION_UPGRADED")
+            if subscription["kind"] in {"PRICE", "BOARD", "CHART"}:
                 self.reset_refs.add(ref)
 
     def update_session(self, data: dict[str, Any]) -> None:
@@ -235,6 +253,7 @@ class DataService:
         if prior == "FullTradingAndChat" and level != prior:
             for market in self.markets:
                 self.mark_gap(market, "SESSION_DOWNGRADED")
+                self.markets[market].chart.gap("SESSION_DOWNGRADED")
             self.problem = "SESSION_DOWNGRADED_EXPLICIT_UPGRADE_REQUIRED"
             raise SaxoError("SESSION_DOWNGRADED_FRESH_SNAPSHOT_REQUIRED")
         if level == "FullTradingAndChat" and prior != level:
@@ -490,6 +509,7 @@ class DataService:
             "BOARD": "/trade/v1/optionschain/subscriptions",
             "SESSION": "/root/v1/sessions/events/subscriptions",
             "ACTIVITIES": "/ens/v1/activities/subscriptions",
+            "CHART": "/chart/v3/charts/subscriptions",
         }
         ref = "S" + secrets.token_hex(10)
         context = self.context
@@ -558,6 +578,15 @@ class DataService:
             self.session = snapshot or {}
         elif kind == "ACTIVITIES":
             pass  # event stream only; there is no snapshot
+        elif kind == "CHART":
+            if not isinstance(snapshot, dict):
+                await self.client.request("DELETE", paths[kind] + f"/{self.context}/{ref}")
+                self.subscriptions.pop(ref, None)
+                self.drop_pending(ref)
+                raise SaxoError("CHART_SNAPSHOT_MISSING")
+            chart = self.markets[target].chart
+            chart.inactivity_timeout = self.subscriptions[ref]["timeout"]
+            chart.snapshot(snapshot, ref, time.time())
         else:
             self.markets[target].option_board = snapshot or {}
             self.record_board(self.markets[target], snapshot or {}, time.time())
@@ -1243,6 +1272,7 @@ class DataService:
             except (SaxoError, ValueError) as exc:
                 state.problem = str(exc)
             await self.subscribe_board(state)
+            await self.subscribe_chart(state)
         # Discover this environment's GBPUSD UIC; never reuse a SIM identifier in LIVE.
         # An FX problem blocks entries under its own name; it never resets price streams.
         try:
@@ -1251,6 +1281,28 @@ class DataService:
             self.fx.gap(
                 str(exc) if isinstance(exc, SaxoError) else "FX_REFERENCE_SCHEMA_UNVERIFIED"
             )
+
+    async def subscribe_chart(self, state: MarketState) -> None:
+        """Streamed one-minute samples of the pinned future (2026-10-04): the final minute's bar
+        reaches a clock decision as soon as the next sample starts instead of after a REST poll.
+        REST stays the record and checks every bar taken from here; a failure here changes
+        nothing but the stream's own status."""
+        if not state.identity:
+            return
+        try:
+            await self.subscribe(
+                "CHART",
+                {
+                    "Uic": state.identity["uic"],
+                    "AssetType": "ContractFutures",
+                    "Horizon": 1,
+                    "Count": 10,
+                    "FieldGroups": ["Data", "ChartInfo"],
+                },
+                state.market,
+            )
+        except (SaxoError, ValueError) as exc:
+            state.chart.gap(str(exc))
 
     async def subscribe_fx(self) -> None:
         fx = await self.client.request(
@@ -1320,6 +1372,10 @@ class DataService:
                                 self.mark_gap(
                                     subscription["target"], "SUBSCRIPTION_PERMANENTLY_DISABLED"
                                 )
+                            if subscription["kind"] == "CHART":
+                                self.markets[subscription["target"]].chart.gap(
+                                    "SUBSCRIPTION_PERMANENTLY_DISABLED"
+                                )
                             self.subscriptions.pop(heartbeat["OriginatingReferenceId"], None)
                             continue
                         if (
@@ -1345,6 +1401,13 @@ class DataService:
                                     provider_message=message,
                                     observation_context=price.observation_context(),
                                 )
+                        if subscription["kind"] == "CHART":
+                            chart = self.markets[subscription["target"]].chart
+                            chart.last_contact = receipt
+                            if heartbeat.get("Reason") != "NoNewData":
+                                # A pause may have skipped samples: a fresh snapshot is needed.
+                                chart.gap("SUBSCRIPTION_TEMPORARILY_DISABLED")
+                                self.reset_refs.add(heartbeat["OriginatingReferenceId"])
             return
         if (
             ref == "_resetsubscriptions"
@@ -1358,6 +1421,10 @@ class DataService:
                 if subscription:
                     if subscription["kind"] == "PRICE":
                         self.mark_gap(subscription["target"], "SUBSCRIPTION_RESET_BY_PROVIDER")
+                    elif subscription["kind"] == "CHART":
+                        self.markets[subscription["target"]].chart.gap(
+                            "SUBSCRIPTION_RESET_BY_PROVIDER"
+                        )
                     self.reset_refs.add(target)
             return
         if ref in {"_resetsubscriptions", "_disconnect"}:
@@ -1385,6 +1452,8 @@ class DataService:
                 self.record_board(state, data, receipt)
                 self.record_chain(state, "UPDATE", data, receipt)
                 state.option_board = merge_board(state.option_board, data)
+            elif subscription["kind"] == "CHART":
+                self.markets[subscription["target"]].chart.update(data, receipt)
             else:
                 price, identity = self.price_target(subscription["target"])
                 accepted = price.update(data, message["message_id"] + f":{index}", receipt)
@@ -1474,6 +1543,10 @@ class DataService:
                                     self.subscriptions[ref]["target"],
                                     "SUBSCRIPTION_HEARTBEAT_TIMEOUT",
                                 )
+                            elif self.subscriptions[ref]["kind"] == "CHART":
+                                self.markets[self.subscriptions[ref]["target"]].chart.gap(
+                                    "SUBSCRIPTION_HEARTBEAT_TIMEOUT"
+                                )
                             self.reset_refs.add(ref)
                         await self.replace_reset_subscriptions()
             except Exception as exc:
@@ -1485,6 +1558,7 @@ class DataService:
                 self.problem = str(exc) if isinstance(exc, SaxoError) else "SAXO_RECONNECT_REQUIRED"
                 for market in self.markets:
                     self.mark_gap(market, self.problem)
+                    self.markets[market].chart.gap(self.problem)
                 for uic in self.options:
                     self.mark_gap(str(uic), self.problem)
                 self.fx.gap(self.problem)
@@ -1538,6 +1612,12 @@ class DataService:
                 "access": quote.get("PriceTypeAsk", "UNVERIFIED"),
             },
             l2=state.price.depth(time.time()),
+            chart_stream={
+                **state.chart.view(time.time()),
+                "boundary_bars_used": state.chart_used,
+                "confirmed": state.chart_confirmed,
+                "tripped": self.chart_stream_problem,
+            },
             session=self.session,
             refresh_ms=state.price.refresh_ms,
             user_action=(

@@ -159,6 +159,8 @@ class Runtime:
             ),
             "closed_positions_problem": self.broker.closed_problem,
             "calendar_problem": self.calendar_problem,
+            "chart_stream_problem": self.data.chart_stream_problem,
+            "chart_mismatch": self.data.chart_mismatch,
             "limits": {
                 "per_trade_gbp": MAX_PREMIUM_RISK_GBP,
                 "slots": MAX_OPEN_POSITIONS,
@@ -560,6 +562,31 @@ class Runtime:
                         )
                 except ValueError as exc:
                     reason = str(exc)
+                if reason == "INCOMPLETE_COMPLETED_HISTORY" and not self.data.chart_stream_problem:
+                    # The chart stream may already hold the final minute (the REST read drops
+                    # its newest sample): decide on it now; the next REST read confirms it.
+                    streamed = saxo_history.streamed_bar(
+                        state.chart, clock - timedelta(minutes=1), at
+                    )
+                    if streamed is not None and all(b.at < streamed.at for b in state.bars):
+                        state.bars = [*state.bars, streamed]
+                        state.stream_bars[streamed.at] = (streamed, str(event["id"]))
+                        state.chart_used += 1
+                        event["boundary_bar"] = {
+                            "source": "CHART_STREAM",
+                            "minute": streamed.at.isoformat(),
+                            "seconds_after_clock": round((at - clock).total_seconds(), 3),
+                        }
+                        try:
+                            inputs = eligibility(
+                                state.bars,
+                                clock,
+                                datetime.fromisoformat(state.identity["expiry"][:10]).date(),
+                                state.references,
+                            )
+                            reason = ""
+                        except ValueError as exc:
+                            reason = str(exc)
                 # Only the final completed-minute boundary may wait. Earlier gaps,
                 # invalid bars, reference failures and other gates remain final skips.
                 by_time = {b.at: b for b in state.bars}
@@ -704,6 +731,14 @@ class Runtime:
                     state.history_problem = "SAXO_HISTORY_UNAVAILABLE"
                     state.history_checked = time.monotonic()
                     self.report_failure("history", exc)
+        self.record_chart_audits()
+
+    def record_chart_audits(self) -> None:
+        """A REST read contradicted a streamed boundary bar: the clock's evidence says so."""
+        for event_id, evidence in self.data.drain_chart_audits():
+            with self.store.db:
+                self.store.audit(event_id, "CHART_STREAM_MISMATCH", evidence)
+            self.recorder.annotate(event_id, {"chart_stream_mismatch": evidence})
 
     async def alert_worker(self) -> None:
         # Isolated: an alert failure is recorded in alerts.status() and never stops trading.

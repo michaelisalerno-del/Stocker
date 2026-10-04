@@ -696,7 +696,7 @@ def test_full_candidate_window_rotates_without_mixed_history(tmp_path, monkeypat
         state.bars = [SimpleNamespace(at=datetime.now(UTC) - timedelta(minutes=1), close=70)]
         data.recorder.register(key(FUTURE), FUTURE)
         for uic in range(101, 113):
-            identity = {**OPTION, "uic": uic, "market": "CL" if uic < 104 else "NG"}
+            identity = {**OPTION, "uic": uic, "market": "CL" if uic < 104 else "ES"}
             data.options[uic] = (identity, quote())
             data.recorder.register(key(identity), identity)
             data.recorder.ingest(key(identity), "SNAPSHOT", {"Quote": {"Bid": uic}}, time.time())

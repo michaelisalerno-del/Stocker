@@ -45,6 +45,7 @@ from stocker_execution.rules import (
     next_clock,
     opportunity,
     prior_rv,
+    session_day,
 )
 from stocker_execution.saxo_auth import SaxoError
 from stocker_execution.saxo_client import PRIMARY_SESSION, SaxoClient
@@ -291,9 +292,10 @@ class DataService:
             time.time(),
         )
         try:
-            # A reconnect keeps today's option spaces (refresh_options reloads them each New York
-            # day): reloading ~70 roots a second apart held each market's price feed back 1-4 min.
-            if state.option_space_day != datetime.now(NY).date().isoformat():
+            # A reconnect keeps today's option spaces (refresh_options reloads them each CME
+            # session, at the 18:00 open since 2026-10-04): reloading ~70 roots a second apart held
+            # each market's price feed back 1-4 min.
+            if state.option_space_day != session_day(datetime.now(NY)).isoformat():
                 await self.load_options(state, raw)
         except SaxoError as exc:
             # The future is verified; an options problem (a rate limit at connect, say) stays with
@@ -375,7 +377,7 @@ class DataService:
                 instants[day] = stamp
             for day in conflicts:
                 instants.pop(day)
-        today = datetime.now(NY).date().isoformat()
+        today = session_day(datetime.now(NY)).isoformat()
         upcoming = sorted(
             (str(r.get("Expiry", ""))[:10], r["OptionRootId"])
             for r in space_rows
@@ -398,14 +400,15 @@ class DataService:
         )
 
     async def refresh_options(self, state: MarketState) -> None:
-        """Once per New York day: new weekly listings appear and the board moves to today's root.
+        """Once per CME session (18:00 New York): new weekly listings appear and the board moves to
+        the root of the session's expiry.
 
         A failure is kept to the options (candidates then report their own reason) and is retried
         after 15 minutes, never on every history pass.
         """
         if (
             not state.identity
-            or state.option_space_day == datetime.now(NY).date().isoformat()
+            or state.option_space_day == session_day(datetime.now(NY)).isoformat()
             or time.monotonic() < state.options_retry_at
         ):
             return

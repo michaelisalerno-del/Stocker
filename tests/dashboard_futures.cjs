@@ -7,7 +7,9 @@ const http = require("node:http");
 const { chromium } = require("playwright");
 
 const at = "2026-09-28T14:20:00Z";
-const markets = ["CL", "GC", "NG", "NQ", "SI"];
+// Fixture roles go by position (index 2, once gas, is now E-mini S&P); the cards render in cardOrder.
+const markets = ["CL", "GC", "ES", "NQ"];
+const cardOrder = ["CL", "ES", "GC", "NQ"];
 const staticRoot = path.resolve(
   "packages/stocker_dashboard/src/stocker_dashboard/static",
 );
@@ -129,7 +131,7 @@ const state = {
       fixture: true,
       mapping: null,
       entry_timezone: "America/New_York",
-      entry_clocks: "09:00–16:00 weekdays; NG 13:00 veto",
+      entry_clocks: "Hourly through the CME session: 18:00-16:00 NY",
       volume: "Observation only",
       exit_anchor: "Original opportunity + 60 minutes",
     },
@@ -148,10 +150,10 @@ const state = {
       },
     ],
     trades:
-      market === "NG"
+      market === "ES"
         ? [
             {
-              id: "ng-open",
+              id: "es-open",
               state: "OPEN",
               quantity: 1,
               entry_at: "2026-09-28T14:00:04Z",
@@ -164,17 +166,7 @@ const state = {
               },
             },
           ]
-        : market === "SI"
-          ? [
-              {
-                id: "si-pending",
-                state: "EXPOSURE_REQUIRES_RECONCILIATION",
-                quantity: 0,
-                exit_at: "2026-09-28T15:00:00Z",
-                valuation: { value_gbp: null, fresh: false },
-              },
-            ]
-          : [],
+        : [],
   })),
 };
 const gateLabels = [["saxo","Saxo"],["contract","Contract"],["quote","Quote"],["history","History"],["approval","Option approval"],["strike","Strike"],["cost","Cost ≤ £1,000"],["execution","Execution"]];
@@ -183,7 +175,7 @@ for (const m of state.markets) {
   m.events = m.market==="CL" ? [{name:"EIA Weekly Petroleum Status",at:"2026-09-28T14:30:00Z",relation:"DURING_HOLDING_WINDOW"}] : [];
   m.chart_context = {clocks:[13,14,15].map(h=>({at:`2026-09-28T${h}:00:00Z`,session:"AutomatedTrading"})), rv_window:["2026-09-28T14:05:00Z","2026-09-28T14:20:00Z"]};
   m.candidate_deltas = {[String(1001+markets.indexOf(m.market))]: 0.1032};
-  m.target_delta = m.market==="SI" ? 0.2 : 0.1;
+  m.target_delta = 0.1;
   m.sessions_today = [{start:"2026-09-27T22:00:00Z",end:"2026-09-28T21:00:00Z",state:"AutomatedTrading"}];
   m.events_today = m.market==="GC" ? [{at:"2026-09-28T12:30:00Z",name:"US CPI (fixture)"}] : [];
   m.smile = {expiry:"2026-09-28T00:00:00Z", mid_strike_price:70.2, scaling:"PROVIDER_NATIVE_UNVERIFIED", executable:false,
@@ -209,10 +201,10 @@ const bookSeries = {status:"AVAILABLE",tick_size:0.1,bucket_seconds:5,semantics:
     ask:Array.from({length:10},(_,n)=>[26501+n-Math.round(Math.sin(i/20)*3),4+n*2+(n===6?35:0)])}))};
 state.today = {day:"2026-09-28", closed:1, wins:0, net_gbp:-27.77, trades:[
   {id:"t-nq", market:"NQ", signal_at:"2026-09-28T13:00:00Z", exit_at:"2026-09-28T14:00:00Z", state:"CLOSED", option:"Put 30650", bought:46.25, sold:45.25, paid_gbp:705.39, net_gbp:-27.77},
-  {id:"ng-open", market:"NG", signal_at:"2026-09-28T14:00:00Z", exit_at:"2026-09-28T15:00:00Z", state:"OPEN", option:"Put 3", bought:0.05, sold:null, paid_gbp:22.4, net_gbp:null}]};
+  {id:"es-open", market:"ES", signal_at:"2026-09-28T14:00:00Z", exit_at:"2026-09-28T15:00:00Z", state:"OPEN", option:"Put 3", bought:0.05, sold:null, paid_gbp:22.4, net_gbp:null}]};
 const recentTrades = state.today.trades.map((t) => ({...t}));
 const timeline = [
-  {at:"2026-09-28T14:00:00Z",kind:"CLOCK",ok:true,title:"Frozen clock · NG",detail:"rule CLOCK60_NG13_20260927 · exit anchor 2026-09-28T15:00:00Z"},
+  {at:"2026-09-28T14:00:00Z",kind:"CLOCK",ok:true,title:"Frozen clock · ES",detail:"rule CLOCK60_23H_ES_20261004 · exit anchor 2026-09-28T15:00:00Z"},
   {at:"2026-09-28T14:00:00Z",kind:"CHECKS",ok:true,title:"Data and eligibility checks",detail:"rv15 0.0012 · futures_price 3.1"},
   {at:"2026-09-28T14:00:00Z",kind:"OPTION",ok:true,title:"Option selection",detail:"Put 3 · UIC 1003"},
   {at:"2026-09-28T14:00:02Z",kind:"ADMISSION",ok:true,title:"Admission",detail:"reserved · cost £22.4"},
@@ -235,7 +227,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === "/api/overview") data = state;
   else if (url.pathname.endsWith("/book")) data = bookSeries;
   else if (url.pathname.startsWith("/api/market/")) data={system:state.system,markets:state.markets.filter(m=>m.market===url.pathname.split("/").at(-1))};
-  else if (url.pathname === "/api/execution") data={system:state.system,trades:[],orders:[],fills:[{exec_id:"f1",at:"2026-09-28T13:00:01Z",con_id:1003,market:"NG",option_right:"Put",option_strike:3,role:"ENTRY",side:"BOT",quantity:1,price:0.05,commission:2,commission_currency:"USD"}],positions:[],recent_trades:recentTrades};
+  else if (url.pathname === "/api/execution") data={system:state.system,trades:[],orders:[],fills:[{exec_id:"f1",at:"2026-09-28T13:00:01Z",con_id:1003,market:"ES",option_right:"Put",option_strike:3,role:"ENTRY",side:"BOT",quantity:1,price:0.05,commission:2,commission_currency:"USD"}],positions:[],recent_trades:recentTrades};
   else if (url.pathname === "/api/recordings") data = {active: [], completed: []};
   else if (url.pathname === "/api/history" && (lastHistoryQuery = url.search) !== null)
     data = {
@@ -321,7 +313,7 @@ async function label(page) {
       await page
         .locator(".market")
         .evaluateAll((nodes) => nodes.map((n) => n.id)),
-      markets.map((m) => `card-${m}`),
+      cardOrder.map((m) => `card-${m}`),
     );
     assert.match(await page.locator("#state-GC").textContent(), /BLOCKED/);
     assert.match(await page.locator("#allocation").textContent(), /100.00.*200.00/);
@@ -342,12 +334,12 @@ async function label(page) {
     assert.match(await page.locator("#block-GC").textContent(), /Option approval: Option product and selection approval required/);
     assert.match(await page.locator("#events-CL").textContent(), /EIA Weekly Petroleum Status 10:30 NY/);
     assert(await page.locator("#events-GC").isHidden());
-    assert(await page.locator("#position-NG").isVisible() && await page.locator("#position-CL").isHidden());
+    assert(await page.locator("#position-ES").isVisible() && await page.locator("#position-CL").isHidden());
     assert.equal(await page.locator("#price-GC").textContent(), "2638.25");
     assert.match(await page.locator("#change-GC").textContent(), /^\+12 \(\+0\.45%\)$/);
     assert.equal(await page.locator("#today-pnl").textContent(), "−£27.77");
     assert.match(await page.locator("#today-note").textContent(), /2 trades · 0 of 1 closed in profit · 1 open/);
-    assert.deepEqual(await page.locator("#today-list li").first().locator("span").allTextContents(), ["15:00", "NG Put 3", "0.05 → …", "open · −£0.80"]); // the card's live bid estimate
+    assert.deepEqual(await page.locator("#today-list li").first().locator("span").allTextContents(), ["15:00", "ES Put 3", "0.05 → …", "open · −£0.80"]); // the card's live bid estimate
     assert.equal(await page.locator("#today-list li").nth(1).locator("span").last().getAttribute("class"), "neg");
     assert.match(await page.locator("#today-NQ").textContent(), /Today: 1 trade · −£27\.77/);
     assert.match(await page.locator("#checks-NQ").textContent(), /6 of \d+ checks pass/);
@@ -528,7 +520,7 @@ async function label(page) {
     assert.match(await page.locator("#api-lines").textContent(), /24 \/ 32/);
     assert.match(
       await page.locator("#api-depth").textContent(),
-      /2 \/ 5 markets with received depth/,
+      /2 \/ 4 markets with received depth/,
     );
     assert.match(await page.locator("#api-external").textContent(), /explicit/);
     await page.screenshot({
@@ -539,11 +531,11 @@ async function label(page) {
     await page.goto(`${base}/execution`);
     await page.waitForFunction(() => document.querySelectorAll("#execution-results tr").length === 2);
     assert.deepEqual(await page.locator('#execution-results tr[data-key="t-nq"] td').allTextContents(), ["28 Sept, 14:00:00", "NQ", "Put 30650", "46.25", "45.25", "£705.39", "−£27.77"]);
-    assert.deepEqual((await page.locator("#execution-fills tr td").allTextContents()).slice(1, 3), ["NG Put 3", "Entry"]);
+    assert.deepEqual((await page.locator("#execution-fills tr td").allTextContents()).slice(1, 3), ["ES Put 3", "Entry"]);
     assert(await page.locator("#execution-orders-empty").isVisible());
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: five fixed cards, signal/fill markers, provisional P&L, refresh identity/focus/scroll/filter retention, mobile layout and System",
+      "PASS: four fixed cards, signal/fill markers, provisional P&L, refresh identity/focus/scroll/filter retention, mobile layout and System",
     );
   } finally {
     await browser.close();

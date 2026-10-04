@@ -15,7 +15,7 @@ from stocker_execution.config import (
     Environment,
 )
 
-MULTIPLIERS = {"CL": 1000, "GC": 100, "NG": 10000, "NQ": 20, "SI": 5000}
+MULTIPLIERS = {"CL": 1000, "ES": 50, "GC": 100, "NQ": 20}
 # Saxo InstrumentSessionState for continuous trading. Saxo documents no "Open" state;
 # auctions, breaks, halts, pre/post sessions and unknown values all stay blocked.
 TRADING_SESSION_STATES = {"AUTOMATEDTRADING"}

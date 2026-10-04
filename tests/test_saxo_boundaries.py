@@ -21,7 +21,7 @@ from stocker_execution.store import Store
 
 
 def test_no_live_mode_or_crypto_configuration():
-    assert MARKETS == ("CL", "GC", "NG", "NQ", "SI")
+    assert MARKETS == ("CL", "ES", "GC", "NQ")
     for config in (
         {"execution_mode": "LIVE"},
         {"data_environment": "IBKR"},

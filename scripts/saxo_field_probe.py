@@ -32,8 +32,7 @@ ALTERNATIVE_KEYWORDS = {
     "NQ": ("Nasdaq", "Nasdaq 100", "E-mini Nasdaq"),
     "CL": ("Crude",),
     "GC": ("Gold",),
-    "NG": ("Natural Gas",),
-    "SI": ("Silver",),
+    "ES": ("E-mini S&P 500", "S&P 500"),
 }
 
 

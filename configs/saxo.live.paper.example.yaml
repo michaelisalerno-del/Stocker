@@ -4,7 +4,7 @@
 data_environment: SAXO_LIVE
 execution_mode: INTERNAL_PAPER
 armed: false
-markets: [CL, GC, NG, NQ, SI]
+markets: [CL, ES, GC, NQ]
 saxo:
   credentials_file: /etc/stocker/v1/saxo.live.credentials.json # mode 0600, environment SAXO_LIVE
   redirect_uri: https://139.59.178.164/oauth/saxo/callback # must match the LIVE app registration
@@ -15,10 +15,10 @@ option_chain_strikes: 25
 recorder:
   minimum_post_event_minutes: 60
   post_close_minutes: 5
-  rolling_max_bytes: 67108864 # 64 MiB: the five chain windows share the 15-minute memory
+  rolling_max_bytes: 67108864 # 64 MiB: the four chain windows share the 15-minute memory
   queue_max_bytes: 8388608
   queue_max_items: 512
-  archive_max_bytes: 21474836480 # 20 GiB, the most allowed: about 0.3-0.5 GB per trading day
+  archive_max_bytes: 53687091200 # 50 GiB: clocks every session hour record ~0.6-0.9 GB per day
   disk_reserve_bytes: 2147483648
   bar_max_bytes: 134217728
   # Set both together, with the actual permission record (who granted it, when, and its scope):

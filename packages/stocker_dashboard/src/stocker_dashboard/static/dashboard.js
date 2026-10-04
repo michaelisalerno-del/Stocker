@@ -3,8 +3,8 @@
 // attributes (never innerHTML with server data) and keyed nodes, so refreshes keep focus,
 // open panels and scroll positions.
 const $ = (id) => document.getElementById(id);
-const markets = ["CL", "GC", "NG", "NQ", "SI"];
-const names = {CL: "Crude oil", GC: "Gold", NG: "Natural gas", NQ: "Nasdaq 100", SI: "Silver"};
+const markets = ["CL", "ES", "GC", "NQ"];
+const names = {CL: "Crude oil", ES: "E-mini S&P 500", GC: "Gold", NQ: "Nasdaq 100"};
 const SVG = "http://www.w3.org/2000/svg";
 const route = location.pathname.slice(1) || "overview";
 // The Opportunities page renders the "trades" section; Markets reuses the overview cards.
@@ -648,7 +648,7 @@ function renderSystem(d) {
   const a = d.market_data || {}, l = d.l2_recording || {};
   text("api-lines", `${a.owned_lines ?? "—"} / ${a.app_budget ?? "—"} subscriptions`);
   text("api-allowance", `Saxo session: ${d.session?.TradeLevel || "UNVERIFIED"}`);
-  text("api-depth", `${(d.markets || []).filter((m) => m.capabilities?.l2?.status === "L2_AVAILABLE").length} / 5 markets with received depth`);
+  text("api-depth", `${(d.markets || []).filter((m) => m.capabilities?.l2?.status === "L2_AVAILABLE").length} / ${markets.length} markets with received depth`);
   text("api-options", `${a.option_lines ?? 0} / ${a.option_budget ?? "—"} regular option quote subscriptions`);
   text("api-pacing", Object.entries(a.rate_limits || {}).map(([k, v]) => `${k.replace("x-ratelimit-", "")} ${v}`).join(" · ") || "No rate-limit headers received yet");
   text("api-queue", `${a.rest_queue ?? 0} / ${a.rest_queue_limit ?? "—"} queued REST requests`);

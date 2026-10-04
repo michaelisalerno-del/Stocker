@@ -2,7 +2,7 @@
 data_environment: SAXO_SIM
 execution_mode: DISABLED
 armed: false
-markets: [CL, GC, NG, NQ, SI]
+markets: [CL, ES, GC, NQ]
 saxo:
   credentials_file: null
   redirect_uri: http://127.0.0.1:8765/oauth/saxo/callback

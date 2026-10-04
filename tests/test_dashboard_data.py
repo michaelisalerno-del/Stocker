@@ -234,7 +234,7 @@ def test_event_calendar_flags_releases_around_clocks(tmp_path):
     ]
     assert calendar.near("CL", wednesday + timedelta(hours=1))[0]["relation"] == "HOUR_BEFORE_CLOCK"
     assert calendar.near("CL", wednesday + timedelta(hours=2)) == []
-    assert calendar.near("NG", wednesday) == []
+    assert calendar.near("ES", wednesday) == []
     assert [n for _, n in calendar.occurrences("GC", datetime(2026, 10, 14).date())] == ["US CPI"]
     with pytest.raises(ValueError):
         EventCalendar.model_validate(
@@ -254,15 +254,15 @@ def test_event_calendar_flags_releases_around_clocks(tmp_path):
 def test_runtime_reports_calendar_on_cards_and_tolerates_a_bad_file(tmp_path):
     path = tmp_path / "events.yaml"
     path.write_text(
-        "events:\n  - {name: Mon, markets: [NG], weekly: {weekday: MON, time: '09:30'}}\n"
-        "  - {name: Tue, markets: [NG], weekly: {weekday: TUE, time: '09:30'}}\n"
-        "  - {name: Wed, markets: [NG], weekly: {weekday: WED, time: '09:30'}}\n"
-        "  - {name: Thu, markets: [NG], weekly: {weekday: THU, time: '09:30'}}\n"
-        "  - {name: Fri, markets: [NG], weekly: {weekday: FRI, time: '09:30'}}\n"
+        "events:\n  - {name: Mon, markets: [ES], weekly: {weekday: MON, time: '09:30'}}\n"
+        "  - {name: Tue, markets: [ES], weekly: {weekday: TUE, time: '09:30'}}\n"
+        "  - {name: Wed, markets: [ES], weekly: {weekday: WED, time: '09:30'}}\n"
+        "  - {name: Thu, markets: [ES], weekly: {weekday: THU, time: '09:30'}}\n"
+        "  - {name: Fri, markets: [ES], weekly: {weekday: FRI, time: '09:30'}}\n"
     )
     runtime = runtime_for(tmp_path, event_calendar_file=path)
     assert runtime.calendar is not None and not runtime.calendar_problem
-    detail = runtime.market_detail("NG")["markets"][0]
+    detail = runtime.market_detail("ES")["markets"][0]
     today = datetime.now(UTC).astimezone(views.NY).weekday()
     assert len(detail["events_today"]) == (1 if today < 5 else 0)
     runtime.store.db.close()

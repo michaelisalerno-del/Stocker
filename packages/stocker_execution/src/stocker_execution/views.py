@@ -21,7 +21,8 @@ if TYPE_CHECKING:
     from stocker_execution.saxo_data import MarketState
     from stocker_execution.saxo_stream import PriceState
 
-TRADEABLE = ("CL", "NG", "NQ", "SI")  # GC stays monitor-only until its mapping is approved
+# GC is optional: its options are reduce-only on the account (temporary, Saxo 2026-10-04).
+TRADEABLE = ("CL", "ES", "NQ")
 
 
 def quote_current(state: "MarketState", at: float, stream_at: float | None) -> bool:
@@ -160,7 +161,7 @@ def setup(runtime: "Runtime") -> list[dict[str, Any]]:
         ),
         (
             "approvals",
-            f"Option approvals {len(approved)}/5",
+            f"Option approvals {len(approved)}/{len(MARKETS)}",
             all(m in config.mappings for m in TRADEABLE),
             "Approve product, delta tolerance, fees and expiry times (GC optional)",
             False,

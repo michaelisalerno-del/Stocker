@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from stocker_execution.contracts import future_identity, utc
 from stocker_execution.reference_sessions import load_selections
-from stocker_execution.rules import NY, Bar, reference_summary
+from stocker_execution.rules import NY, Bar, reference_summary, session_day
 from stocker_execution.saxo_auth import SaxoError
 
 if TYPE_CHECKING:
@@ -111,7 +111,7 @@ async def history(data: DataService, state: MarketState, *, boundary: bool = Fal
         return
     if boundary:
         return
-    day = datetime.now(NY).date()
+    day = session_day(datetime.now(NY))
     if state.reference_day == day.isoformat():
         return
     if time.monotonic() < state.reference_retry_at:
@@ -150,7 +150,14 @@ async def history(data: DataService, state: MarketState, *, boundary: bool = Fal
             )
             if len(prior) != 540:
                 raise ValueError("REFERENCE_SESSION_OHLCV_COVERAGE_INCOMPLETE")
-            references.append(reference_summary(prior))
+            # The same session's overnight part (18:00 the evening before to 08:00) feeds only
+            # the overnight hours' medians: a gap there leaves those hours without a median (their
+            # clocks stay blocked) and never blocks the 08:00-17:00 part above (2026-10-04).
+            evening = datetime.combine(
+                selected.day - timedelta(days=1), datetime.min.time(), NY
+            ) + timedelta(hours=18)
+            overnight = await history_range(data, selected.contract.uic, evening, start)
+            references.append(reference_summary(overnight + prior))
         state.references, state.reference_day = references, day.isoformat()
         state.capabilities["reference_selection_audit_sha256"] = digest
     except (OSError, ValueError):

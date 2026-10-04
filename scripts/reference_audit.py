@@ -1,4 +1,7 @@
-"""Write today's reference-session selection audit for every pinned market. Read-only Saxo access.
+"""Write the reference-session selection audit for every pinned market. Read-only Saxo access.
+
+It is for today's CME session, or, from 17:00 New York (after the close), for the next weekday's,
+which opens at 18:00 (2026-10-04: clocks run through the whole session).
 
 Rule (the user's standing approval, 2026-09-30): for each of the previous five completed sessions,
 the reference contract is the standard nearby future with the greatest Saxo daily-chart volume on
@@ -25,6 +28,7 @@ import httpx
 from stocker_execution.config import ContractSelection, FuturesConfig, load
 from stocker_execution.contracts import future_identity
 from stocker_execution.reference_sessions import SelectedSession, SelectionAudit
+from stocker_execution.rules import next_weekday
 
 NY = ZoneInfo("America/New_York")
 BASES = {
@@ -32,6 +36,12 @@ BASES = {
     "SAXO_LIVE": "https://gateway.saxobank.com/openapi",
 }
 NEARBY = 4
+
+
+def audit_day(now: datetime) -> str:
+    """Today's CME session, or from 17:00 New York (after the close) the next weekday's."""
+    local = now.astimezone(NY)
+    return (next_weekday(local.date()) if local.hour >= 17 else local.date()).isoformat()
 
 
 def build_audit(
@@ -148,7 +158,7 @@ def main() -> None:
     ):
         raise SystemExit("SERVICE_ACCESS_TOKEN_NOT_CURRENT")
     account_key = json.loads(config.saxo.credentials_file.read_text())["account_key"]
-    today = datetime.now(NY).date().isoformat()
+    today = audit_day(datetime.now(NY))
     books = []
     for market, pinned in config.contracts.items():
         nearby, volumes = fetch(config, tokens["access_token"], account_key, market)

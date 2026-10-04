@@ -104,6 +104,9 @@ breakout rule on NQ from 5 October 2026 (abandon check 31 March 2027, verdict 30
 [PRICED-BELOW-PROTOCOL.md](PRICED-BELOW-PROTOCOL.md) judges five conditions under which options might be priced below the
 movement that follows (after bursts, look14 above the price, dealers short gamma, the cheapest hours, below yesterday),
 on the hourly ledger built from these recordings, clocks 5 October to 27 November 2026.
+[MARKET-CHANGE-AMENDMENT-20261004.md](MARKET-CHANGE-AMENDMENT-20261004.md): from 5 October the app trades CL, ES, GC
+and NQ at every hour of the CME session (gas and silver removed, their data deleted); every protocol above is judged
+on its original 09:00-16:00 clocks and markets.
 [EXECUTION-PROTOCOL.md](EXECUTION-PROTOCOL.md) judges two ways of paying less of the spread on the same option (waiting
 up to 30 s for the option's own queue to stop leaning against you, and resting a limit at the mid for up to 60 s), on
 the same ledger and clocks.

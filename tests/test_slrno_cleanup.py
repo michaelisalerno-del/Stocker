@@ -401,7 +401,7 @@ def test_boundary_refresh_runs_before_routine_history_and_never_retries_expired(
     async def scenario():
         runtime = Runtime(FuturesConfig(), Store(tmp_path / "priority.sqlite"))
         runtime.data.connected = True
-        state = runtime.markets["SI"]
+        state = runtime.markets["ES"]
         state.boundary_clock = AT
         calls = []
 
@@ -414,14 +414,14 @@ def test_boundary_refresh_runs_before_routine_history_and_never_retries_expired(
         monkeypatch.setattr("stocker_execution.saxo_history.history", history)
         monkeypatch.setattr(runtime.data, "warm_candidates", warm)
         await runtime.refresh_histories()
-        assert calls[0] == ("SI", True)
+        assert calls[0] == ("ES", True)
         calls.clear()
         await runtime.refresh_histories()
-        assert ("SI", True) not in calls
+        assert ("ES", True) not in calls
         clock[0] = AT + timedelta(seconds=20)
         state.boundary_checked = float("-inf")
         await runtime.refresh_histories()
-        assert ("SI", True) not in calls
+        assert ("ES", True) not in calls
         await runtime.stop()
         runtime.store.db.close()
 
@@ -484,12 +484,12 @@ def test_page_scopes_and_display_cache_never_drive_admission(tmp_path, monkeypat
                         "/api/history?sort=asc",
                         "/api/execution",
                         "/api/system",
-                        "/api/market/NG",
+                        "/api/market/ES",
                     )
                 )
             )
             assert all(r.status_code == 200 for r in responses)
-            assert [m["market"] for m in responses[-1].json()["markets"]] == ["NG"]
+            assert [m["market"] for m in responses[-1].json()["markets"]] == ["ES"]
             assert responses[-1].json()["markets"][0]["details"] is None
             assert (await client.get("/api/history?sort=sql")).status_code == 422
             assert runtime.data.client.calls == 0

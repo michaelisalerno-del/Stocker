@@ -36,6 +36,8 @@ def session_open(at: datetime) -> datetime:
 
 
 def level(bars: list[Bar], at: datetime, market: str) -> dict[str, Any]:
+    if market not in PROFILES:  # E-mini S&P (added 2026-10-04) has no research clock profile yet
+        return {"status": "UNAVAILABLE", "reason": "NO_CLOCK_PROFILE"}
     profile = PROFILES[market]
     start = session_open(at)
     now_k = int((at - start).total_seconds() // 60)

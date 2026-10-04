@@ -6,11 +6,8 @@ events:
   - name: EIA Weekly Petroleum Status Report
     markets: [CL]
     weekly: {weekday: WED, time: "10:30"}
-  - name: EIA Weekly Natural Gas Storage Report
-    markets: [NG]
-    weekly: {weekday: THU, time: "10:30"}
   # Dated releases: copy exact dates from the official calendars (BLS for CPI,
   # the Federal Reserve for FOMC). Example format only — not a real date:
   # - name: US CPI
-  #   markets: [NQ, GC, SI]
+  #   markets: [NQ, ES, GC]
   #   at: "2026-01-01T08:30:00-05:00"

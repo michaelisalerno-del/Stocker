@@ -369,7 +369,7 @@ def test_dashboard_defaults_do_not_leak_secrets_or_create_subscriptions(tmp_path
         ) as client:
             for _ in range(3):
                 result = (await client.get("/api/overview")).json()
-                assert [m["market"] for m in result["markets"]] == ["CL", "GC", "NG", "NQ", "SI"]
+                assert [m["market"] for m in result["markets"]] == ["CL", "ES", "GC", "NQ"]
                 assert result["system"]["live_orders_disabled"]
                 assert not runtime.data.subscriptions
             system = (await client.get("/api/system")).text

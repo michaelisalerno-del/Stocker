@@ -1,7 +1,7 @@
 """Preserved provider-independent frozen mathematics and durable-obligation regressions."""
 
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from pathlib import Path
 
@@ -11,12 +11,17 @@ from saxo_support import AT, fill_record, frozen_strike, record_entry
 from stocker_execution.config import MARKETS
 from stocker_execution.contracts import grid_price
 from stocker_execution.rules import (
+    NY,
     Bar,
     clocks,
     eligibility,
     model_delta,
     opportunity,
     prior_rv,
+    reference_summary,
+    session_day,
+    session_start,
+    us_clock,
 )
 from stocker_execution.store import Store
 
@@ -47,17 +52,27 @@ def test_source_fixture_rv_clocks_and_original_exit_anchor():
             prior_rv(bars[:-1], at)
 
 
-def test_dst_weekends_and_only_approved_veto():
-    assert clocks(date(2026, 3, 9))[0].hour == 13  # US DST precedes UK
-    assert clocks(date(2026, 3, 2))[0].hour == 14
-    assert clocks(date(2026, 10, 26))[0].hour == 13  # UK reverts before US
-    assert clocks(date(2026, 11, 2))[0].hour == 14
-    assert clocks(date(2026, 9, 27)) == []
+def test_session_clocks_dst_weekends_and_no_veto():
+    def nine(day):  # the original first clock, 09:00 New York, in UTC
+        return next(c for c in clocks(day) if us_clock(c)).hour
+
+    assert nine(date(2026, 3, 9)) == 13  # US DST precedes UK
+    assert nine(date(2026, 3, 2)) == 14
+    assert nine(date(2026, 10, 26)) == 13  # UK reverts before US
+    assert nine(date(2026, 11, 2)) == 14
+    hours = lambda day: [c.astimezone(NY).hour for c in clocks(day)]  # noqa: E731
+    assert hours(date(2026, 10, 3)) == []  # Saturday
+    assert hours(date(2026, 9, 27)) == list(range(18, 24))  # Sunday: the session opens at 18:00
+    assert hours(date(2026, 10, 2)) == list(range(17))  # Friday: no evening session
+    assert hours(date(2026, 9, 28)) == list(range(17)) + list(range(18, 24))
+    assert [c for c in clocks(date(2026, 9, 28)) if us_clock(c)] == [
+        datetime.combine(date(2026, 9, 28), time(h), NY).astimezone(UTC) for h in range(9, 17)
+    ]
     for market in MARKETS:
         for at in clocks(date(2026, 9, 28)):
-            event = opportunity(market, 1, at)
-            assert bool(event["veto"]) == (market == "NG" and at.hour == 17)
-    assert opportunity("GC", 1, AT + timedelta(hours=7))["veto"] == ""
+            assert opportunity(market, 1, at)["veto"] == ""
+    assert session_start(datetime(2026, 9, 28, 2, tzinfo=UTC)).astimezone(NY).hour == 18
+    assert session_day(datetime(2026, 10, 2, 22, tzinfo=UTC)) == date(2026, 10, 5)  # Fri 18:00 NY
 
 
 def test_cancel_uncertainty_and_late_fill_keep_obligation(tmp_path):
@@ -140,6 +155,31 @@ def test_inherited_feature_gate_rejects_flat_last_five_returns():
     assert prior_rv(bars(prices), AT) > 0
     with pytest.raises(ValueError, match="FEATURE_AVAILABILITY"):
         eligibility(bars(prices), AT, date(2026, 12, 1), references)
+
+
+def test_overnight_clocks_gate_on_the_cme_session_since_18_00():
+    # Monday 2026-09-28: the session opened at 18:00 New York (22:00 UTC); 02:00 is Tuesday.
+    open_ = datetime(2026, 9, 28, 22, tzinfo=UTC)
+    at = open_ + timedelta(hours=8)
+
+    def bars(start, minutes):
+        return [
+            Bar(start + timedelta(minutes=i), p, p + 0.01, p - 0.01, p, 10, p)
+            for i, p in enumerate(100 + j * 0.01 for j in range(minutes))
+        ]
+
+    references = [
+        {h: {"rv15": 0.01, "range15": 0.01, "volume15": 150} for h in (2, 19)} for _ in range(5)
+    ]
+    assert eligibility(bars(open_, 480), at, date(2026, 12, 1), references)["rv15"] > 0
+    assert eligibility(bars(open_, 60), open_ + timedelta(hours=1), date(2026, 12, 1), references)
+    with pytest.raises(ValueError, match="INCOMPLETE"):  # 18:00: nothing since the 17:00 close
+        eligibility(bars(open_ - timedelta(hours=2), 60), open_, date(2026, 12, 1), references)
+    with pytest.raises(ValueError, match="FEATURE_AVAILABILITY"):  # no reference median at 03:00
+        eligibility(bars(open_, 540), at + timedelta(hours=1), date(2026, 12, 1), references)
+    summary = reference_summary(bars(open_ + timedelta(hours=7), 120))  # 01:00-03:00 New York
+    assert set(summary) == set(range(8, 17)) | {1, 2}  # US hours as before, plus hours seen
+    assert summary[2]["rv15"] > 0 and summary[9] == {}
 
 
 @pytest.mark.parametrize(

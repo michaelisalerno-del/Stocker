@@ -19,7 +19,7 @@
     <main id="main">
       <div class="heading">
         <div>
-          <p class="eyebrow">FIVE MARKETS · ONE FROZEN METHOD</p>
+          <p class="eyebrow">FOUR MARKETS · ONE FROZEN METHOD</p>
           <h1 id="title">Futures overview</h1>
         </div>
         <div class="clock" id="clock"></div>
@@ -57,7 +57,7 @@
         <p id="today-empty" class="muted">No trades yet today.</p>
       </section>
       <section id="overview">
-        <div id="market-selector" class="market-tabs" role="tablist" aria-label="Market" hidden><button type="button" role="tab" id="tab-CL">CL</button><button type="button" role="tab" id="tab-GC">GC</button><button type="button" role="tab" id="tab-NG">NG</button><button type="button" role="tab" id="tab-NQ">NQ</button><button type="button" role="tab" id="tab-SI">SI</button></div>
+        <div id="market-selector" class="market-tabs" role="tablist" aria-label="Market" hidden><button type="button" role="tab" id="tab-CL">CL</button><button type="button" role="tab" id="tab-ES">ES</button><button type="button" role="tab" id="tab-GC">GC</button><button type="button" role="tab" id="tab-NQ">NQ</button></div>
         <div id="markets" class="markets"></div>
         <p id="evidence" class="evidence"></p>
       </section>
@@ -80,7 +80,7 @@
         <details id="execution-detail"><summary>Raw execution evidence</summary><pre id="execution-json"></pre></details></section>
       <section id="trades" hidden>
         <div class="filters">
-          <label>Market<select id="market-filter"><option value="">All five</option><option>CL</option><option>GC</option><option>NG</option><option>NQ</option><option>SI</option></select></label>
+          <label>Market<select id="market-filter"><option value="">All four</option><option>CL</option><option>ES</option><option>GC</option><option>NQ</option></select></label>
           <label>Date (UTC)<input type="date" id="day-filter" /></label>
           <label>Rule version<input id="version-filter" placeholder="All versions" maxlength="80" /></label>
           <label>Sort<select id="sort-filter"><option value="desc">Newest first</option><option value="asc">Oldest first</option></select></label>
@@ -105,7 +105,7 @@
         <h2>Saxo connection</h2><p id="auth-state"></p><div id="capability-list" class="capability-list"></div><p id="alerts-state"></p><p id="events-state"></p><form id="saxo-connect" action="/oauth/saxo/start" method="post"><button>Connect configured Saxo environment</button></form><p id="oauth-notice" role="alert"></p><p class="muted">Connecting data never arms execution. A session upgrade can downgrade another Saxo application; SLRNO never upgrades automatically.</p><p id="provider-status" class="muted">Saxo is the only data and execution provider; retired providers are not installed.</p><h2>Market data &amp; recording</h2>
         <div class="api-panel">
           <div><small>Application subscriptions</small><strong id="api-lines"></strong><span id="api-allowance"></span><span id="api-external">Session upgrade is explicit; it can downgrade another Saxo application</span></div>
-          <div class="research-slots"><small>Actual received depth · observation only</small><strong id="api-depth"></strong><span id="api-assignments">CL · GC · NG · NQ · SI · independent server subscriptions</span></div>
+          <div class="research-slots"><small>Actual received depth · observation only</small><strong id="api-depth"></strong><span id="api-assignments">CL · ES · GC · NQ · independent server subscriptions</span></div>
           <div><small>Option preparation</small><strong id="api-options"></strong><span>Shared pool · unused quotes released</span></div>
           <div><small>Optional recording</small><strong id="api-storage"></strong><span id="api-gaps"></span></div>
         </div>

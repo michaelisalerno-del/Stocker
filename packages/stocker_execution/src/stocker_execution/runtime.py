@@ -430,14 +430,14 @@ class Runtime:
                     views.model_sigma(features.get("rv15")),
                 ),
                 "model_sigma": views.model_sigma(features.get("rv15")),
-                "target_delta": 0.2 if market == "SI" else 0.1,
+                "target_delta": 0.1,
                 "signals": [
                     {k: s[k] for k in ("id", "signal_at", "decision", "reason")} for s in recent
                 ],
                 "details": {
                     "signal_contract": identity,
                     "reference_sessions": len(state.references),
-                    "entry_clocks": "09:00–16:00 America/New_York weekdays; NG 13:00 veto",
+                    "entry_clocks": "Hourly through the CME session: 18:00-16:00 America/New_York",
                     "exit_anchor": "Original opportunity + 60 minutes",
                     "options_block": "Verify actual 0DTE expiry, product and delta tolerance",
                     "recording": recording,

@@ -169,7 +169,7 @@ def test_queued_delta_does_not_backdate_calculation_using_later_snapshot(tmp_pat
 
 
 @pytest.mark.parametrize("heartbeat_array", [False, True])
-def test_five_ordinary_subscriptions_shared_by_consumers_and_heartbeats(
+def test_one_ordinary_subscription_per_market_shared_by_consumers_and_heartbeats(
     tmp_path, monkeypatch, heartbeat_array
 ):
     async def scenario():
@@ -201,9 +201,10 @@ def test_five_ordinary_subscriptions_shared_by_consumers_and_heartbeats(
         monkeypatch.setattr(data, "subscribe_fx", no_fx)
         await data.startup()
         await data.startup()
-        assert len(calls) == 6  # five ordinary prices plus session, no duplicate consumers
+        # One ordinary price per market plus the session, no duplicate consumers.
+        assert len(calls) == len(MARKETS) + 1
         prices = [(ref, s) for ref, s in data.subscriptions.items() if s["kind"] == "PRICE"]
-        assert len(prices) == 5
+        assert len(prices) == len(MARKETS)
         for _ref, s in prices:
             assert s["path"] == "/trade/v1/prices/subscriptions"
             assert {"Quote", "PriceInfo", "PriceInfoDetails", "MarketDepth"} <= set(
@@ -213,7 +214,7 @@ def test_five_ordinary_subscriptions_shared_by_consumers_and_heartbeats(
             await asyncio.gather(
                 *(data.subscribe("PRICE", s["arguments"], s["target"]) for _ in range(4))
             )
-        assert len(calls) == 6
+        assert len(calls) == len(MARKETS) + 1
         assert not allowed("POST", "/trade/v1/infoprices/subscriptions")
         ref, s = prices[0]
         p = data.markets[s["target"]].price

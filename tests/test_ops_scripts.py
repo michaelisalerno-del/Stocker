@@ -124,3 +124,13 @@ def test_reference_audit_picks_prior_session_volume_leader_and_loads_as_the_runt
             "2026-09-30",
             "x" * 20,
         )
+
+
+def test_reference_audit_targets_the_next_session_after_the_close():
+    from datetime import datetime
+
+    audit = script("reference_audit")
+    day = lambda *a: audit.audit_day(datetime(*a, tzinfo=audit.NY))  # noqa: E731
+    assert day(2026, 10, 5, 7, 30) == "2026-10-05"  # Monday morning: today's session
+    assert day(2026, 10, 8, 17, 10) == "2026-10-09"  # Thursday after the close: Friday's
+    assert day(2026, 10, 9, 17, 10) == "2026-10-12"  # Friday after the close: Monday's

@@ -5,20 +5,55 @@ import json
 import math
 import time
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_FLOOR
 from typing import Any
 
-from stocker_execution.config import FuturesConfig
+from stocker_execution.config import (
+    MAX_PREMIUM_RISK_PENNIES,
+    QUOTE_MAX_AGE_SECONDS,
+    FuturesConfig,
+)
 from stocker_execution.contracts import (
     budget,
     executable_quote,
+    fill_conversion,
     key,
+    option_price,
     positive,
     quote_check,
+    tick_at,
     utc,
     verified_cutoff,
 )
-from stocker_execution.saxo_data import DataService, MarketState
+from stocker_execution.saxo_data import DataService, MarketState, roots_verified
 from stocker_execution.store import TERMINAL, Store, encode
+
+# Idle broker state is re-read on this cadence; pending orders or held exposure
+# are reconciled every management cycle. SIM entries require a recent pass.
+RECONCILE_INTERVAL_SECONDS = 30
+RECONCILE_MAX_AGE_SECONDS = 60
+CLOSED_POSITION_FIELDS = (
+    "Amount",
+    "AssetType",
+    "Uic",
+    "BuyOrSell",
+    "OpenPrice",
+    "ClosingPrice",
+    "ExecutionTimeOpen",
+    "ExecutionTimeClose",
+    "OpeningExternalReferenceId",
+    "ClosingExternalReferenceId",
+    "ProfitLossOnTrade",
+    "ProfitLossOnTradeInBaseCurrency",
+    "ClosedProfitLoss",
+    "ClosedProfitLossInBaseCurrency",
+    "CostOpening",
+    "CostOpeningInBaseCurrency",
+    "CostClosing",
+    "CostClosingInBaseCurrency",
+)
+ORDER_DEADLINE_SECONDS = 20  # a working order unconfirmed after this is reconciled/cancelled
+NO_BID_GRACE_SECONDS = 60  # a current quote with no sellable bid this long after the exit: zero
 
 
 def now() -> datetime:
@@ -37,6 +72,8 @@ class PaperBroker:
         self.last_reconcile = 0.0
         self.preflight_at = 0.0
         self.size_used: dict[tuple[int, float, str], float] = {}
+        self.closed_checked = float("-inf")
+        self.closed_problem = ""
 
     def entry_reason(self) -> str:
         if self.fatal_error:
@@ -49,13 +86,20 @@ class PaperBroker:
             return "RECONCILIATION_REQUIRED"
         if not self.data.connected or self.data.session.get("TradeLevel") != "FullTradingAndChat":
             return "DATA_OR_SESSION_UNAVAILABLE"
+        if (
+            self.config.execution_mode == "SAXO_SIM"
+            and time.monotonic() - self.last_reconcile > RECONCILE_MAX_AGE_SECONDS
+        ):
+            return "RECONCILIATION_STALE"
         return self.problem
 
     async def preflight(self) -> dict[str, Any]:
         # Only reference/portfolio reads. Never precheck or send a test order here.
-        await self.data.verify_account()
-        await self.reconcile()
-        self.preflight_at = time.monotonic() if self.reconciled else 0
+        # Same lock as manage(): a reconcile must not interleave with position management.
+        async with self.lock:
+            await self.data.verify_account()
+            await self.reconcile()
+            self.preflight_at = time.monotonic() if self.reconciled else 0
         return {
             "non_transmitting": True,
             "execution_mode": self.config.execution_mode,
@@ -69,6 +113,8 @@ class PaperBroker:
     def arm(self, acknowledgement: str) -> None:
         if acknowledgement != "ENABLE PAPER ONLY" or self.config.execution_mode == "DISABLED":
             raise ValueError("EXPLICIT_PAPER_ARM_REQUIRED")
+        if self.fatal_error:
+            raise ValueError(self.fatal_error)
         if (
             not self.preflight_at
             or time.monotonic() - self.preflight_at > 60
@@ -83,7 +129,7 @@ class PaperBroker:
         mapping = self.config.mappings.get(state.market)
         if mapping is None:
             raise ValueError("LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED")
-        if state.identity is None or state.option_root != mapping.option_root_id:
+        if not roots_verified(state, mapping.option_root_ids):
             raise ValueError("OPTION_ROOT_NOT_VERIFIED")
         option, distance = await self.select_option(event, state, inputs)
         exit_at = utc(event["exit_at"])
@@ -98,6 +144,7 @@ class PaperBroker:
             exit_at=event["exit_at"],
             fee_evidence=self.data.option_references[option["uic"]]["version"],
             delta_distance=distance,
+            expiry_rule=mapping.expiry_rule,
             underlying=state.identity,
             simulated=self.config.execution_mode == "INTERNAL_PAPER",
         )
@@ -131,7 +178,17 @@ class PaperBroker:
         if role == "ENTRY":
             if self.entry_reason():
                 raise ValueError(self.entry_reason())
-            if not 0 < plan["cash_pennies"] <= 1000:
+            if self.store.get_meta("paused", False):
+                raise ValueError("ENTRIES_PAUSED")
+            reservation = self.store.db.execute(
+                "SELECT policy_pennies FROM reservations WHERE id=?", (identity,)
+            ).fetchone()
+            ceiling = (
+                min(MAX_PREMIUM_RISK_PENNIES, reservation[0])
+                if reservation
+                else MAX_PREMIUM_RISK_PENNIES
+            )
+            if not 0 < plan["cash_pennies"] <= ceiling:
                 raise ValueError("MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET")
         elif role == "EXIT":
             if self.store.exposure(identity) != 1:
@@ -165,7 +222,9 @@ class PaperBroker:
     async def enter(self, event: dict[str, Any], plan: dict[str, Any]) -> str:
         async with self.lock:
             self.validate_order(plan, "ENTRY", event["id"])
-            if now() >= utc(event["signal_at"]) + timedelta(seconds=20):
+            if now() >= utc(event["signal_at"]) + timedelta(
+                seconds=self.config.entry_deadline_seconds
+            ):
                 return "STALE_SIGNAL_NO_REPLAY"
             reason = self.store.reserve(event["id"], plan)
             if reason:
@@ -179,7 +238,14 @@ class PaperBroker:
         order_id = int(
             self.store.db.execute("SELECT COALESCE(MAX(order_id),0)+1 FROM orders").fetchone()[0]
         )
-        deadline = now() + timedelta(seconds=20)
+        deadline = now() + timedelta(seconds=ORDER_DEADLINE_SECONDS)
+        if role == "ENTRY":
+            signal = self.store.db.execute(
+                "SELECT signal_at FROM signals WHERE id=?", (identity,)
+            ).fetchone()
+            deadline = min(
+                deadline, utc(signal[0]) + timedelta(seconds=self.config.entry_deadline_seconds)
+            )
         reference = self.store.prepare_order(
             identity,
             role,
@@ -221,7 +287,12 @@ class PaperBroker:
             # Revalidate after awaited I/O; disconnect/disarm/stale data cannot race admission.
             self.validate_order(plan, role, identity)
             current_option, price_state = self.data.options[plan["option"]["uic"]]
-            executable_quote(current_option, price_state.value or {}, price_state.receipt, now())
+            executable_quote(
+                current_option,
+                price_state.value or {},
+                self.data.quote_receipt(price_state),
+                now(),
+            )
             if now() >= deadline:
                 raise ValueError("ENTRY_PREFLIGHT_EXPIRED")
             transmitted = True  # durable SUBMITTING intent already exists
@@ -259,7 +330,7 @@ class PaperBroker:
         currency = result.get("EstimatedCashRequiredCurrency")
         if currency not in {"GBP", "USD"} or self.data.account_currency not in {"GBP", "USD"}:
             raise ValueError("BROKER_COST_CURRENCY_UNVERIFIED")
-        fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, now())
+        fx = quote_check(self.data.fx.value or {}, self.data.quote_receipt(self.data.fx), now())
         rate = 1 / float(fx["Bid"])
         cash = positive(result.get("EstimatedCashRequired"), "BROKER_REQUIRED_CASH")
         cash *= rate if currency == "USD" else 1
@@ -267,7 +338,10 @@ class PaperBroker:
         fee *= rate if self.data.account_currency == "USD" else 1
         premium = plan["limit"] * plan["option"]["price_factor"] * rate
         total = max(cash, premium + fee) + plan["fee_per_side_gbp"]
-        if math.ceil(total * 100) > 1000 or math.ceil(total * 100) > plan["cash_pennies"]:
+        if (
+            math.ceil(total * 100) > MAX_PREMIUM_RISK_PENNIES
+            or math.ceil(total * 100) > plan["cash_pennies"]
+        ):
             raise ValueError("MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET")
 
     def internal_fill(
@@ -276,22 +350,34 @@ class PaperBroker:
         option, at = plan["option"], now()
         state = self.data.options[option["uic"]][1]
         try:
-            fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, at)
-            conversion = 1 / float(fx["Bid" if role == "ENTRY" else "Ask"])
+            fx = quote_check(self.data.fx.value or {}, self.data.quote_receipt(self.data.fx), at)
+            conversion = fill_conversion(
+                1 / float(fx["Bid" if role == "ENTRY" else "Ask"]), plan["fx_markup"], role
+            )
             if role == "ENTRY":
                 revised = budget(option, price, plan["fee_per_side_gbp"] * 2, conversion)
                 plan.update(revised)
+                self.validate_order(plan, role, identity)
             plan.update(fx=conversion, fx_at=self.data.fx.receipt)
             quote = executable_quote(
-                self.data.options[option["uic"]][0], state.value or {}, state.receipt, at
+                self.data.options[option["uic"]][0],
+                state.value or {},
+                self.data.quote_receipt(state),
+                at,
             )
             side = "Ask" if role == "ENTRY" else "Bid"
-            if (role == "ENTRY" and price < float(quote[side]) + option["tick_size"] - 1e-10) or (
-                role == "EXIT" and price > float(quote[side]) - option["tick_size"] + 1e-10
+            touch = float(quote[side])
+            if (role == "ENTRY" and price < touch + tick_at(option, touch, 1) - 1e-10) or (
+                role == "EXIT" and price > touch - tick_at(option, touch, -1) + 1e-10
             ):
                 raise ValueError("PRICE_MOVED_NO_ASSUMED_FILL")
             size_at = state.size_times.get(side)
-            if size_at is None or not 0 <= at.timestamp() - size_at <= 5:
+            standing = self.data.size_receipt(state, side)
+            if (
+                size_at is None
+                or standing is None
+                or not 0 <= at.timestamp() - standing <= QUOTE_MAX_AGE_SECONDS
+            ):
                 raise ValueError("AVAILABLE_OPTION_SIZE_STALE")
             size = positive(state.sizes().get(side), "AVAILABLE_OPTION_SIZE")
             receipt = size_at
@@ -311,6 +397,22 @@ class PaperBroker:
                 identity, "SKIPPED" if role == "ENTRY" else "EXIT_EXCEPTION", str(exc)
             )
             return
+        self.book_internal_fill(
+            identity, reference, plan, role, price, at, plan["fee_per_side_gbp"]
+        )
+
+    def book_internal_fill(
+        self,
+        identity: str,
+        reference: str,
+        plan: dict[str, Any],
+        role: str,
+        price: float,
+        at: datetime,
+        fees_gbp: float,
+        reason: str = "",
+    ) -> None:
+        option = plan["option"]
         with self.store.db:
             self.store.record_fill(
                 {
@@ -328,7 +430,7 @@ class PaperBroker:
             )
             self.store.db.execute(
                 "UPDATE fills SET commission=?,commission_currency='GBP' WHERE reference=?",
-                (plan["fee_per_side_gbp"], reference),
+                (fees_gbp, reference),
             )
             self.store.db.execute(
                 "UPDATE orders SET status='Filled',filled=1,remaining=0 WHERE reference=?",
@@ -346,7 +448,7 @@ class PaperBroker:
             self.store.db.execute(
                 "UPDATE reservations SET plan=? WHERE id=?", (encode(plan), identity)
             )
-        self.store.decision(identity, "INTERNALLY_SIMULATED_FILL")
+        self.store.decision(identity, "INTERNALLY_SIMULATED_FILL", reason)
         self.data.recorder.annotate(
             identity,
             {
@@ -354,12 +456,61 @@ class PaperBroker:
                     "role": role,
                     "quantity": 1,
                     "price": price,
-                    "fees_gbp": plan["fee_per_side_gbp"],
+                    "fees_gbp": fees_gbp,
                     "at": at.isoformat(),
                     "basis": "INTERNALLY_SIMULATED",
+                    **({"write_off": reason} if reason else {}),
                 },
             },
         )
+
+    def write_off_reason(self, plan: dict[str, Any], exit_at: datetime) -> str:
+        """INTERNAL_PAPER only: why an owed exit cannot be sold and is booked at zero, or "".
+
+        Far-out same-day options often lose their bid before expiry; selling one tick below a
+        one-tick bid is zero too. Unknown is never "no bid": a missing, stale, delayed or paused
+        quote keeps the exit retrying. Past the last trading time nothing can be sold.
+        """
+        if self.config.execution_mode != "INTERNAL_PAPER":
+            return ""
+        at = now()
+        if at >= utc(plan["cutoff"]):
+            return "WRITTEN_OFF_AFTER_LAST_TRADE"
+        if at < exit_at + timedelta(seconds=NO_BID_GRACE_SECONDS):
+            return ""
+        state = self.data.options.get(plan["option"]["uic"])
+        if not state:
+            return ""
+        price = state[1]
+        quote = (price.value or {}).get("Quote") or {}
+        receipt = self.data.quote_receipt(price)
+        if (
+            receipt is None
+            or not 0 <= at.timestamp() - receipt <= QUOTE_MAX_AGE_SECONDS
+            or price.problem
+            or quote.get("DelayedByMinutes") != 0
+        ):
+            return ""
+        bid = quote.get("Bid")
+        if quote.get("PriceTypeBid") == "NoMarket" or not isinstance(bid, (int, float)) or bid <= 0:
+            return "WRITTEN_OFF_NO_BID"
+        if option_price(plan["option"], float(bid), ROUND_FLOOR, -1) <= 0:
+            return "WRITTEN_OFF_ONE_TICK_BID"
+        return ""
+
+    def write_off(self, identity: str, plan: dict[str, Any], reason: str) -> None:
+        """Close an unsellable paper option at zero; no exit fee, as no trade takes place."""
+        order_id = int(
+            self.store.db.execute("SELECT COALESCE(MAX(order_id),0)+1 FROM orders").fetchone()[0]
+        )
+        reference = self.store.prepare_order(
+            identity,
+            "EXIT",
+            order_id,
+            (now() + timedelta(seconds=ORDER_DEADLINE_SECONDS)).isoformat(),
+            {"option": plan["option"], "role": "EXIT", "limit": 0.0, "mode": "INTERNAL_PAPER"},
+        )
+        self.book_internal_fill(identity, reference, plan, "EXIT", 0.0, now(), 0.0, reason)
 
     async def portfolio(self, path: str) -> list[dict[str, Any]]:
         rows = []
@@ -377,6 +528,46 @@ class PaperBroker:
             if not result.get("__next"):
                 return rows
         raise ValueError("PORTFOLIO_PAGINATION_LIMIT_RECONCILIATION_INCOMPLETE")
+
+    async def refresh_closed_positions(self) -> None:
+        """SAXO_SIM: keep Saxo's own closed-position figures for SLRNO orders.
+
+        Evidence and display only. Saxo removes intraday closed positions after
+        settlement, so this runs every ten minutes while SIM execution is configured.
+        """
+        if (
+            self.config.execution_mode != "SAXO_SIM"
+            or not self.data.account_verified
+            or time.monotonic() - self.closed_checked < 600
+        ):
+            return
+        self.closed_checked = time.monotonic()
+        references = {r[0] for r in self.store.db.execute("SELECT reference FROM orders")}
+        if not references:
+            return
+        try:
+            rows = await self.portfolio("/port/v1/closedpositions")
+        except ValueError as exc:
+            self.closed_problem = str(exc)
+            return
+        self.closed_problem = ""
+        for row in rows:
+            closed = row.get("ClosedPosition") or {}
+            ids = (
+                closed.get("OpeningExternalReferenceId"),
+                closed.get("ClosingExternalReferenceId"),
+            )
+            matched = sorted(str(r) for r in ids if r in references)
+            unique = str(row.get("ClosedPositionUniqueId") or "")
+            if not matched or not unique or self.store.get_meta("broker_closed:" + unique):
+                continue
+            record = {k: closed.get(k) for k in CLOSED_POSITION_FIELDS}
+            with self.store.db:
+                self.store.db.execute(
+                    "INSERT OR IGNORE INTO futures_meta VALUES(?,?)",
+                    ("broker_closed:" + unique, encode(record)),
+                )
+                self.store.audit(matched[-1], "SAXO_SIM_CLOSED_POSITION", record)
 
     async def reconcile(self) -> None:
         self.reconciled = False
@@ -405,14 +596,21 @@ class PaperBroker:
                                     order["reference"],
                                 ),
                             )
-                self.store.db.execute("DELETE FROM positions")
-                for uic, quantity in held.items():
-                    self.store.db.execute(
-                        "INSERT INTO positions VALUES(?,?,?)",
-                        (uic, quantity, encode({"internally_simulated": True})),
-                    )
+                current = {
+                    r["con_id"]: r["quantity"]
+                    for r in self.store.db.execute("SELECT con_id,quantity FROM positions")
+                }
+                if current != held:
+                    self.store.db.execute("DELETE FROM positions")
+                    for uic, quantity in held.items():
+                        self.store.db.execute(
+                            "INSERT INTO positions VALUES(?,?,?)",
+                            (uic, quantity, encode({"internally_simulated": True})),
+                        )
+                self.store.mark_reconciled()
             self.reconciled = True
             self.problem = ""
+            self.last_reconcile = time.monotonic()
             return
         if not self.data.account_verified or not self.data.client.sim_account_verified:
             raise ValueError("SIM_ACCOUNT_NOT_VERIFIED")
@@ -457,8 +655,9 @@ class PaperBroker:
                     or remote.get("BuySell") != ("Buy" if order["role"] == "ENTRY" else "Sell")
                 ):
                     raise ValueError("BROKER_ORDER_IDENTITY_MISMATCH")
-                broker_id = str(remote["OrderId"])
-                self.store.set_meta("broker_order:" + reference, broker_id)
+                if broker_id != str(remote["OrderId"]):
+                    broker_id = str(remote["OrderId"])
+                    self.store.set_meta("broker_order:" + reference, broker_id)
             if not broker_id:
                 self.problem = "AMBIGUOUS_ORDER_REQUIRES_BROKER_AUDIT"
                 return
@@ -487,6 +686,8 @@ class PaperBroker:
         ):
             self.problem = "UNACCOUNTED_BROKER_ORDERS_OR_EXPOSURE"
             return
+        with self.store.db:
+            self.store.mark_reconciled()
         self.problem = ""
         self.reconciled = True
         self.last_reconcile = time.monotonic()
@@ -499,6 +700,12 @@ class PaperBroker:
         if evidence.get("SubStatus") != "Confirmed":
             raise ValueError("ORDER_TERMINAL_STATE_NOT_CONFIRMED")
         filled = float(evidence.get("FilledAmount", 0))
+        seen = {k: evidence.get(k) for k in ("LogId", "Status", "FilledAmount", "AveragePrice")}
+        if (
+            float(order["filled"]) == filled
+            and self.store.get_meta("evidence:" + order["reference"]) == seen
+        ):
+            return  # the same audit entry as the last pass: nothing new to record
         known = [
             f for f in self.store.fills(order["event_id"]) if f["reference"] == order["reference"]
         ]
@@ -551,10 +758,30 @@ class PaperBroker:
             (status, filled, 1 - filled, order["reference"]),
         )
         self.store.audit(order["reference"], "SAXO_SIM_ORDER_EVIDENCE", evidence)
+        # Inside the caller's transaction: Store.set_meta() would commit the fill early.
+        self.store.db.execute(
+            "INSERT OR REPLACE INTO futures_meta VALUES (?,?)",
+            ("evidence:" + order["reference"], encode(seen)),
+        )
+
+    def reconcile_due(self) -> bool:
+        if not self.reconciled:
+            return True
+        if time.monotonic() - self.last_reconcile >= RECONCILE_INTERVAL_SECONDS:
+            return True
+        # A Saxo order/position event since the last pass: re-read broker state now.
+        if self.data.last_activity > self.last_reconcile:
+            return True
+        return any(
+            self.store.exposure(r["id"])
+            or any(o["status"] not in TERMINAL for o in self.store.orders(r["id"]))
+            for r in self.store.active()
+        )
 
     async def manage(self) -> None:
         async with self.lock:
-            await self.reconcile()
+            if self.reconcile_due():
+                await self.reconcile()
             for reservation in self.store.active():
                 identity, plan = reservation["id"], json.loads(reservation["plan"])
                 try:
@@ -581,22 +808,37 @@ class PaperBroker:
                                     execution=True,
                                 )
                             raise ValueError("PENDING_ORDER_RECONCILIATION_REQUIRED")
-                    if self.store.exposure(identity) > 0 and now() >= utc(reservation["exit_at"]):
+                    exit_at = utc(reservation["exit_at"])
+                    reason = (
+                        self.write_off_reason(plan, exit_at)
+                        if self.store.exposure(identity) > 0 and now() >= exit_at
+                        else ""
+                    )
+                    if reason:
+                        self.write_off(identity, plan, reason)
+                    elif self.store.exposure(identity) > 0 and now() >= exit_at:
                         if now() >= utc(plan["cutoff"]):
                             raise ValueError("FAILED_CLOSURE_EXPIRY_EXPOSURE_EXCEPTION")
                         state = self.data.options.get(plan["option"]["uic"])
                         if not state:
                             raise ValueError("OWNED_OPTION_QUOTE_UNAVAILABLE")
-                        q = quote_check(state[1].value or {}, state[1].receipt, now())
-                        fx = quote_check(self.data.fx.value or {}, self.data.fx.receipt, now())
-                        plan["fx"], plan["fx_at"] = 1 / float(fx["Ask"]), self.data.fx.receipt
-                        # Internal sale includes one tick adverse slippage.
-                        price = (
-                            math.floor(float(q["Bid"]) / plan["option"]["tick_size"])
-                            * plan["option"]["tick_size"]
+                        q = quote_check(
+                            state[1].value or {}, self.data.quote_receipt(state[1]), now()
                         )
-                        if self.config.execution_mode == "INTERNAL_PAPER":
-                            price -= plan["option"]["tick_size"]
+                        fx = quote_check(
+                            self.data.fx.value or {}, self.data.quote_receipt(self.data.fx), now()
+                        )
+                        plan["fx"] = fill_conversion(
+                            1 / float(fx["Ask"]), plan["fx_markup"], "EXIT"
+                        )
+                        plan["fx_at"] = self.data.fx.receipt
+                        # Internal sale includes one tick adverse slippage.
+                        price = option_price(
+                            plan["option"],
+                            float(q["Bid"]),
+                            ROUND_FLOOR,
+                            -1 if self.config.execution_mode == "INTERNAL_PAPER" else 0,
+                        )
                         positive(price, "EXIT_BID")
                         exits = [o for o in self.store.orders(identity) if o["role"] == "EXIT"]
                         if len(exits) >= 3:
@@ -619,10 +861,12 @@ class PaperBroker:
                             {"outcome": "VERIFIED_FLAT", "mode": self.config.execution_mode},
                         )
                         self.management_problems.pop(identity, None)
+                    elif identity in self.management_problems:
+                        # Resolved without closure; a recurrence is audited again.
+                        self.management_problems.pop(identity)
                 except Exception as exc:
-                    self.management_problems[identity] = (
-                        str(exc) if isinstance(exc, ValueError) else "MANAGEMENT_EXCEPTION"
-                    )
-                    self.store.decision(
-                        identity, "EXPOSURE_EXCEPTION", self.management_problems[identity]
-                    )
+                    reason = str(exc) if isinstance(exc, ValueError) else "MANAGEMENT_EXCEPTION"
+                    # Audit transitions, not every two-second retry of the same exception.
+                    if self.management_problems.get(identity) != reason:
+                        self.management_problems[identity] = reason
+                        self.store.decision(identity, "EXPOSURE_EXCEPTION", reason)

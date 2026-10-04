@@ -21,7 +21,7 @@ from stocker_execution.store import Store
 
 
 def test_no_live_mode_or_crypto_configuration():
-    assert MARKETS == ("CL", "GC", "NG", "NQ", "SI")
+    assert MARKETS == ("CL", "ES", "GC", "NQ")
     for config in (
         {"execution_mode": "LIVE"},
         {"data_environment": "IBKR"},
@@ -55,6 +55,10 @@ def test_live_default_deny_and_subscription_lifecycle():
     assert allowed("GET", "/root/v2/user")
     assert not allowed("GET", "/root/v1/user")
     assert not allowed("POST", "/trade/v2/orders", sim_orders=False)
+    # Only the user's explicit real-time click may change the session, and nothing else with it.
+    assert allowed("PATCH", "/root/v1/sessions/capabilities", primary_session=True)
+    assert not allowed("POST", "/trade/v2/orders", primary_session=True)
+    assert not allowed("PATCH", "/root/v1/sessions/events", primary_session=True)
 
 
 def oauth_fixture(tmp_path, env="SAXO_SIM", handler=None):
@@ -349,7 +353,7 @@ def test_budget_real_contract_not_ten_contracts_and_no_fractional():
     }
     assert budget(option, 0.01, 1, 0.75)["cash_pennies"] == 850
     with pytest.raises(ValueError, match="MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET"):
-        budget(option, 0.013, 1, 0.75)
+        budget(option, 1.334, 1, 0.75)  # £1,001.50 all in, one contract
     with pytest.raises(ValueError, match="WHOLE"):
         budget({**option, "lot_size": 0.1}, 0.01, 1, 0.75)
     with pytest.raises(ValueError, match="DIRECT_FUTURES"):
@@ -411,3 +415,25 @@ def test_atomic_capacity_and_provenance(tmp_path):
     with pytest.raises(ValueError, match="SEPARATE"):
         store.bind("SAXO_SIM", "SAXO_SIM")
     store.db.close()
+
+
+def test_a_rate_limit_waits_for_the_exhausted_limit_to_reset():
+    import httpx
+
+    from stocker_execution.saxo_client import retry_after
+
+    refdata = httpx.Headers(
+        {
+            "X-RateLimit-RefDataInstrumentsMinute-Remaining": "0",
+            "X-RateLimit-RefDataInstrumentsMinute-Reset": "42",
+            "X-RateLimit-AppDay-Remaining": "9999000",
+            "X-RateLimit-AppDay-Reset": "80000",
+        }
+    )
+    assert retry_after(refdata) == 42  # not the day limit, which still has plenty left
+    assert retry_after(httpx.Headers({"x-ratelimit-session-reset": "7"})) == 7
+    assert retry_after(httpx.Headers({})) == 5
+    assert (
+        retry_after(httpx.Headers({"x-ratelimit-x-remaining": "0", "x-ratelimit-x-reset": "900"}))
+        == 60
+    )

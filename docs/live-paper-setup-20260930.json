@@ -1,0 +1,43 @@
+{
+ "at": "2026-09-30T21:37:27+00:00",
+ "release": "ebb2665e9d2c32addf599ab8e7d62d634d2bbe58",
+ "previous_releases_today": [
+  "6c4d20d",
+  "2b589c3",
+  "5d08811",
+  "8d19e41"
+ ],
+ "branch": "codex/live-paper-l2-observation",
+ "mode": {
+  "data_environment": "SAXO_LIVE",
+  "execution_mode": "INTERNAL_PAPER",
+  "armed": false,
+  "live_orders_disabled": true
+ },
+ "service_override": "/etc/systemd/system/stocker-v1.service.d/50-live-paper.conf (delete + daemon-reload + restart to return to SIM)",
+ "config": "/etc/stocker/v1/saxo.live.paper.yaml (root:stocker 640): pins CLX6/GCZ6/NGX6/NQZ6/SIZ6, option families 22/21/7/17/5 roots, delta tolerance 0.03, expiry clocks 14:30/13:30/14:30/16:00/13:25 New York, persistent capture on",
+ "reference_audit": {
+  "file": "/var/lib/stocker/v1/SAXO_LIVE/reference-selections.json",
+  "timer": "stocker-reference-audit.timer, Mon-Fri 07:30 America/New_York",
+  "first_run": "2026-09-30 as_of 2026-09-30"
+ },
+ "backups": [
+  "/var/lib/stocker/backups/before-live-paper-20260930",
+  "/var/lib/stocker/backups/option-families-20260930"
+ ],
+ "ci": "success on every release",
+ "installed_smoke_as_stocker": "PASS",
+ "anonymous_https_status": 401,
+ "after_start": {
+  "all_five_option_families_loaded": true,
+  "expiry_days": {
+   "CL": "every weekday",
+   "GC": "every weekday",
+   "NQ": "every weekday",
+   "NG": "Mon and Fri",
+   "SI": "Fri"
+  },
+  "blocked_until_real_time_data": "SAXO_CHART_DATA_DELAYED (subscriptions start 2026-10-01)"
+ },
+ "orders_sent": 0
+}

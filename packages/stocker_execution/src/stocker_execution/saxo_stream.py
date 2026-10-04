@@ -1,7 +1,6 @@
 """Bounded binary framing and Saxo price-field reconstruction, independent of transport."""
 
 import copy
-import hashlib
 import json
 import struct
 from collections import OrderedDict, deque
@@ -14,16 +13,18 @@ from stocker_execution.book_flow import FIELDS
 def merge(previous: Any, update: Any) -> Any:
     """Missing properties survive; explicit null clears; price arrays replace in full.
 
-    Options-board indexed arrays and chart samples use their own reducers, not this function.
+    Only the groups the update names are rebuilt; untouched groups are shared with the
+    previous state, which is never mutated. Options-board indexed arrays and chart
+    samples use their own reducers, not this function.
     """
     if not isinstance(update, dict):
         return copy.deepcopy(update)
-    result = copy.deepcopy(previous) if isinstance(previous, dict) else {}
+    result = dict(previous) if isinstance(previous, dict) else {}
     for key, value in update.items():
         result[key] = merge(result.get(key), value)
     # Explicit zero depth counts also invalidate any prior price/size arrays.
-    if isinstance(result.get("MarketDepth"), dict):
-        depth = result["MarketDepth"]
+    if "MarketDepth" in update and isinstance(result.get("MarketDepth"), dict):
+        depth = result["MarketDepth"]  # rebuilt above, so mutating it is local
         for count, side in (("NoOfBids", "Bid"), ("NoOfOffers", "Ask")):
             if depth.get(count) == 0:
                 for suffix in ("", "Size", "Orders"):
@@ -72,7 +73,9 @@ class PriceState:
         self.value: dict[str, Any] | None = None
         self.analytics: dict[str, Any] = {}
         self.subscription_started_at: float | None = None
-        self.seen: OrderedDict[str, bytes] = OrderedDict()
+        # Recent message ids with their updates: a replayed id is ignored, a replayed id
+        # carrying different content is a provider fault. Compared only on an id match.
+        self.seen: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.last_message_id: str | None = None
         self.generation = ""
         self.receipt: float | None = None
@@ -135,20 +138,21 @@ class PriceState:
         if self.last_receipt is not None and at > self.last_receipt:
             self.intervals.append((at - self.last_receipt) * 1000)
         self.last_receipt = at
-        digest = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).digest()
         if message_id in self.seen:
-            if self.seen[message_id] != digest:
+            if self.seen[message_id] != value:
                 self.gap("REPLAY_CONTENT_CONFLICT")
                 raise ValueError("REPLAY_CONTENT_CONFLICT")
             return False
-        self.seen[message_id] = digest
+        self.seen[message_id] = value
         if len(self.seen) > 2048:
             self.seen.popitem(last=False)
         self.last_message_id = message_id  # opaque: never subtract or order IDs
         if self.value is None:
-            return False
+            return False  # gapped: only a fresh snapshot restores a usable state
         merged = merge(self.value, value)
         for group, fields in FIELDS.items():
+            if group not in value:
+                continue  # merge() shares untouched groups: nothing there changed
             prior, current = self.value.get(group) or {}, merged.get(group) or {}
             if isinstance(prior, dict) and isinstance(current, dict):
                 for field in fields:
@@ -156,9 +160,29 @@ class PriceState:
                         self.field_changes[group + "." + field] = at
                         self.last_field_change = at
         self.value = merged
+        self.problem = ""  # a delivered update ends a temporary pause on this subscription
         self.analytics.update(option_context.fields(value, at, "REGULAR_PRICE"))
         self.touch(value, at)
         return True
+
+    def standing(self, changed_at: float | None, stream_at: float | None) -> float | None:
+        """When a value received at `changed_at` was last known to still stand.
+
+        Saxo sends a price only when it changes and heartbeats a quiet subscription. While the
+        socket keeps delivering (`stream_at`, the latest message of any kind) and this
+        subscription has had contact within its inactivity timeout with no pause or gap, the
+        last value is still the standing one (as depth() already treats L2).
+        """
+        if (
+            changed_at is None
+            or stream_at is None
+            or self.value is None
+            or self.problem
+            or self.last_contact is None
+            or not 0 <= stream_at - self.last_contact <= self.inactivity_timeout
+        ):
+            return changed_at
+        return max(changed_at, stream_at)
 
     def gap(self, reason: str) -> None:
         self.value = None
@@ -248,6 +272,93 @@ class PriceState:
         elif depth and not fresh:
             result["status"] = "L2_UNAVAILABLE"
         return result
+
+
+class ChartState:
+    """Streamed one-minute chart samples for one future, keyed by sample start time.
+
+    Saxo inserts a sample when its minute starts and updates it until the next one starts, so a
+    sample is complete once a later sample exists: the same rule as the REST read, which drops
+    its newest (mutable) sample. A DataVersion change, a pause or a delay clears the state; only
+    a fresh snapshot restores it. The REST read stays the record and the check of every sample
+    a decision took from here.
+    """
+
+    KEEP = 64
+
+    def __init__(self) -> None:
+        self.samples: dict[str, dict[str, Any]] = {}
+        self.data_version: Any = None
+        self.delay: Any = None
+        self.generation = ""
+        self.subscribed_at: float | None = None
+        self.receipt: float | None = None
+        self.last_contact: float | None = None
+        self.inactivity_timeout = 30
+        self.updates = 0
+        self.problem = "AWAITING_SNAPSHOT"
+
+    def snapshot(self, value: dict[str, Any], generation: str, at: float) -> None:
+        self.generation, self.subscribed_at = generation, at
+        self.receipt = self.last_contact = at
+        self.updates = 0
+        self.samples = {}
+        self.data_version = value.get("DataVersion")
+        self.delay = (value.get("ChartInfo") or {}).get("DelayedByMinutes")
+        self.problem = ""
+        if self.delay != 0:
+            # Delayed samples cannot supply a boundary bar; unknown blocks, as for quotes.
+            self.problem = (
+                "SAXO_CHART_DATA_DELAYED"
+                if isinstance(self.delay, (int, float))
+                else "SAXO_CHART_DELAY_UNKNOWN"
+            )
+            return
+        self.absorb(value.get("Data"))
+
+    def absorb(self, samples: Any) -> int:
+        if not isinstance(samples, list):
+            return 0
+        count = 0
+        for sample in samples:
+            if isinstance(sample, dict) and isinstance(sample.get("Time"), str):
+                self.samples[sample["Time"]] = merge(self.samples.get(sample["Time"]), sample)
+                count += 1
+        for stale in sorted(self.samples)[: -self.KEEP]:
+            del self.samples[stale]
+        return count
+
+    def update(self, value: Any, at: float) -> None:
+        self.last_contact = at
+        if not isinstance(value, dict):
+            return
+        if "DataVersion" in value and value["DataVersion"] != self.data_version:
+            self.gap("CHART_DATA_VERSION_CHANGED")
+            return
+        if self.problem:
+            return  # gapped or delayed: only a fresh snapshot restores a usable state
+        if self.absorb(value.get("Data")):
+            self.receipt = at
+            self.updates += 1
+
+    def gap(self, reason: str) -> None:
+        self.samples.clear()
+        self.problem = reason
+
+    def view(self, at: float) -> dict[str, Any]:
+        current = (
+            self.last_contact is not None and 0 <= at - self.last_contact <= self.inactivity_timeout
+        )
+        return {
+            "status": "UNAVAILABLE" if self.problem else "CURRENT" if current else "SILENT",
+            "problem": self.problem,
+            "delay_minutes": self.delay,
+            "data_version": self.data_version,
+            "samples": len(self.samples),
+            "newest_sample": max(self.samples) if self.samples else None,
+            "last_receipt": self.receipt,
+            "updates": self.updates,
+        }
 
 
 def merge_board(previous: Any, update: Any) -> Any:

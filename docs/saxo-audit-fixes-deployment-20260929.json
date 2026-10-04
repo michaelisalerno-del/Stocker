@@ -1,0 +1,34 @@
+{
+  "at": "2026-09-29T18:19:57+00:00",
+  "release": "bd2d7a0d7def351d583e8b85d57b8c236babb427",
+  "previous_release": "98a772c2e1b22988fadaa67a64bc2dcc640788f1",
+  "branch": "codex/audit-fixes",
+  "ci": {"run": 36611020784, "format": "success", "lint": "success", "typing": "success", "python": "success", "frontend": "success", "server": "success"},
+  "pre_deploy": {"active_reservations": 0, "non_terminal_orders": 0, "nonzero_positions": 0, "fills": 0, "execution_mode": "DISABLED"},
+  "backup": "/var/lib/stocker/backups/audit-fixes-20260929",
+  "backup_verified": true,
+  "configuration_migration": "removed recorder.pre_event_minutes; migrated file loads under both bd2d7a0 and 98a772c; mode 0640 root:stocker kept",
+  "credentials_and_tokens_unchanged": true,
+  "installed_smoke_as_stocker": "PASS",
+  "runtime_packages": ["annotated_doc", "annotated_types", "anyio", "certifi", "click", "fastapi", "h11", "httpcore", "httpx", "idna", "pydantic", "pydantic_core", "starlette", "typing_extensions", "typing_inspection", "uvicorn", "websockets", "yaml"],
+  "service": {"ActiveState": "active", "SubState": "running", "NRestarts": 0, "MemoryCurrent_after_start": 48709632},
+  "routes_loopback_authenticated": {"pages": 200, "api_health": 200, "api_system": 200, "api_overview": 200, "api_history": 200, "api_execution": 200, "api_market": 200, "api_market_book": 200, "static_assets": 200},
+  "served_assets_match_release": {"dashboard.js": true, "dashboard.css": true, "index.html": true},
+  "security_headers": {"content-security-policy": "default-src 'self'; frame-ancestors 'none'", "x-content-type-options": "nosniff"},
+  "anonymous_https_status": 401,
+  "runtime": {
+    "data_environment": "SAXO_SIM", "execution_mode": "DISABLED", "armed": false, "live_orders_disabled": true,
+    "oauth": "AUTHENTICATED", "connected": true, "reconciled": true, "reconnects": 1, "subscriptions": 2,
+    "session": {"AuthenticationLevel": "Authenticated", "DataLevel": "Standard", "TradeLevel": "OrdersOnly"},
+    "fx_setup_step": "done", "reserved_open_trades": 0
+  },
+  "stream_reauthorisation_on_token_renewal": {
+    "token_renewed_at": "2026-09-29T18:25:49+00:00",
+    "checked_at": "2026-09-29T18:26:13+00:00",
+    "connected": true, "reconnects": 1, "problem": "", "subscriptions": 2,
+    "result": "VERIFIED: the open context was re-authorised; no reconnect"
+  },
+  "orders_sent": 0,
+  "data_verified": false,
+  "l2_verified": false
+}

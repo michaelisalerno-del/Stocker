@@ -1,0 +1,292 @@
+{
+ "source": "scripts/saxo_field_probe.py against Saxo SIM (read-only; no orders; keys omitted)",
+ "runs": [
+  "2026-09-29T16:03:37.521280+00:00",
+  "2026-09-29T16:07:53.613783+00:00"
+ ],
+ "markets": {
+  "CL": {
+   "listed_futures": 16,
+   "problem": null,
+   "future": {
+    "Symbol": "CLX6",
+    "ExpiryDate": "2026-10-20",
+    "session_states": [
+     "AutomatedTrading",
+     "Closed",
+     "PreTrading"
+    ],
+    "current_session": "AutomatedTrading"
+   },
+   "chart_v3": {
+    "sample_fields": [
+     "Close",
+     "High",
+     "Interest",
+     "Low",
+     "MarketTradingState",
+     "Open",
+     "Time",
+     "Volume"
+    ],
+    "all_on_minute_boundaries": true,
+    "delayed_by_minutes": 10,
+    "has_data_version": true
+   },
+   "future_quote": {
+    "PriceTypeBid": "OldIndicative",
+    "PriceTypeAsk": "OldIndicative",
+    "MarketState": "Open",
+    "DelayedByMinutes": 10
+   },
+   "future_price_info_fields": [
+    "High",
+    "Low",
+    "NetChange",
+    "PercentChange"
+   ],
+   "future_depth_levels": {
+    "bid": 0,
+    "ask": 0
+   },
+   "options": [
+    {
+     "right": "Put",
+     "price_type": "Pending",
+     "delayed_by_minutes": 10,
+     "greeks_MidVol": null
+    },
+    {
+     "right": "Call",
+     "price_type": "OldIndicative",
+     "delayed_by_minutes": 10,
+     "greeks_MidVol": 0.58909081780521
+    }
+   ],
+   "chain_implied_volatility_summary_percent": 50.5065589326133,
+   "chain_first_expiry": {
+    "Expiry": "2026-09-29T18:30:00.000000Z",
+    "LastTradeDate": "2026-09-29T18:30:00.000000Z",
+    "StrikeCount": 133
+   },
+   "chain_strikes_with_greeks": []
+  },
+  "GC": {
+   "listed_futures": 5,
+   "problem": null,
+   "future": {
+    "Symbol": "GCZ6",
+    "ExpiryDate": "2026-12-29",
+    "session_states": [
+     "AutomatedTrading",
+     "Closed",
+     "PreTrading"
+    ],
+    "current_session": "AutomatedTrading"
+   },
+   "chart_v3": {
+    "sample_fields": [
+     "Close",
+     "High",
+     "Interest",
+     "Low",
+     "MarketTradingState",
+     "Open",
+     "Time",
+     "Volume"
+    ],
+    "all_on_minute_boundaries": true,
+    "delayed_by_minutes": 10,
+    "has_data_version": true
+   },
+   "future_quote": {
+    "PriceTypeBid": "OldIndicative",
+    "PriceTypeAsk": "OldIndicative",
+    "MarketState": "Open",
+    "DelayedByMinutes": 10
+   },
+   "future_price_info_fields": [
+    "High",
+    "Low",
+    "NetChange",
+    "PercentChange"
+   ],
+   "future_depth_levels": {
+    "bid": 0,
+    "ask": 0
+   },
+   "options": [
+    {
+     "right": "Put",
+     "price_type": "Pending",
+     "delayed_by_minutes": 10,
+     "greeks_MidVol": null
+    },
+    {
+     "right": "Call",
+     "price_type": "Pending",
+     "delayed_by_minutes": 10,
+     "greeks_MidVol": null
+    }
+   ],
+   "chain_implied_volatility_summary_percent": 20.9073072868259,
+   "chain_first_expiry": {
+    "Expiry": "2026-09-29T17:30:00.000000Z",
+    "LastTradeDate": "2026-09-29T17:30:00.000000Z",
+    "StrikeCount": 234
+   },
+   "chain_strikes_with_greeks": []
+  },
+  "NG": {
+   "listed_futures": 7,
+   "problem": null,
+   "future": {
+    "Symbol": "NGX6",
+    "ExpiryDate": "2026-10-28",
+    "session_states": [
+     "AutomatedTrading",
+     "Closed",
+     "PreTrading"
+    ],
+    "current_session": "AutomatedTrading"
+   },
+   "chart_v3": {
+    "sample_fields": [
+     "Close",
+     "High",
+     "Interest",
+     "Low",
+     "MarketTradingState",
+     "Open",
+     "Time",
+     "Volume"
+    ],
+    "all_on_minute_boundaries": true,
+    "delayed_by_minutes": 10,
+    "has_data_version": true
+   },
+   "future_quote": {
+    "PriceTypeBid": "OldIndicative",
+    "PriceTypeAsk": "OldIndicative",
+    "MarketState": "Open",
+    "DelayedByMinutes": 10
+   },
+   "future_price_info_fields": [
+    "High",
+    "Low",
+    "NetChange",
+    "PercentChange"
+   ],
+   "future_depth_levels": {
+    "bid": 0,
+    "ask": 0
+   },
+   "options": [
+    {
+     "right": "Put",
+     "price_type": "Pending",
+     "delayed_by_minutes": 10,
+     "greeks_MidVol": null
+    },
+    {
+     "right": "Call",
+     "price_type": "OldIndicative",
+     "delayed_by_minutes": 10,
+     "greeks_MidVol": 0.523242268649564
+    }
+   ],
+   "chain_implied_volatility_summary_percent": 55.2560097612887,
+   "chain_first_expiry": {
+    "Expiry": "2026-10-27T18:30:00.000000Z",
+    "LastTradeDate": "2026-10-27T18:30:00.000000Z",
+    "StrikeCount": 129
+   },
+   "chain_strikes_with_greeks": [
+    {
+     "strike": 3.85,
+     "call": {
+      "MidVolatility": 0.65110107491615,
+      "BidVolatility": 0.645388196977021,
+      "AskVolatility": 0.656737655073271
+     },
+     "call_price_type": "Indicative"
+    }
+   ]
+  },
+  "NQ": {
+   "listed_futures": 0,
+   "problem": "NO_UNEXPIRED_CONTRACT_FOUND",
+   "alternative_search_results": {
+    "Nasdaq": 0,
+    "Nasdaq 100": 0,
+    "E-mini Nasdaq": 0
+   }
+  },
+  "SI": {
+   "listed_futures": 6,
+   "problem": null,
+   "future": {
+    "Symbol": "SIZ6",
+    "ExpiryDate": "2026-12-29",
+    "session_states": [
+     "AutomatedTrading",
+     "Closed",
+     "PreTrading"
+    ],
+    "current_session": "AutomatedTrading"
+   },
+   "chart_v3": {
+    "sample_fields": [
+     "Close",
+     "High",
+     "Interest",
+     "Low",
+     "MarketTradingState",
+     "Open",
+     "Time",
+     "Volume"
+    ],
+    "all_on_minute_boundaries": true,
+    "delayed_by_minutes": 10,
+    "has_data_version": true
+   },
+   "future_quote": {
+    "PriceTypeBid": "OldIndicative",
+    "PriceTypeAsk": "OldIndicative",
+    "MarketState": "Open",
+    "DelayedByMinutes": 10
+   },
+   "future_price_info_fields": [
+    "High",
+    "Low",
+    "NetChange",
+    "PercentChange"
+   ],
+   "future_depth_levels": {
+    "bid": 0,
+    "ask": 0
+   },
+   "options": [
+    {
+     "right": "Put",
+     "price_type": "Pending",
+     "delayed_by_minutes": 10,
+     "greeks_MidVol": null
+    },
+    {
+     "right": "Call",
+     "price_type": "Pending",
+     "delayed_by_minutes": 10,
+     "greeks_MidVol": null
+    }
+   ],
+   "chain_implied_volatility_summary_percent": 34.6658011654926,
+   "chain_first_expiry": {
+    "Expiry": "2026-10-02T17:25:00.000000Z",
+    "LastTradeDate": "2026-10-02T17:25:00.000000Z",
+    "StrikeCount": 186
+   },
+   "chain_strikes_with_greeks": []
+  }
+ }
+}

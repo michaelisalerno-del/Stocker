@@ -26,12 +26,11 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Syncing research, server, and dev dependencies with uv..."
-uv sync --all-groups
+echo "Syncing runtime and dev dependencies with uv..."
+uv sync --locked
 
 echo
 echo "Bootstrap complete."
 echo "Next steps:"
-echo "  uv run pytest"
-echo "  uv run stocker check"
-echo "  uv run jupyter lab apps/desktop/notebooks"
+echo "  bash scripts/check.sh"
+echo "  uv run --no-sync stocker futures-run --config configs/futures.paper.yaml --database .stocker/saxo-sim-disabled.sqlite3"

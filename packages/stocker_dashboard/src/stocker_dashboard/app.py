@@ -1,30 +1,50 @@
 """Authenticated futures views, independent of position management."""
 
+import asyncio
 import json
 import sqlite3
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from starlette.types import Scope
 
 from stocker_dashboard.security import DashboardSecurity
-from stocker_execution.config import MARKETS
+from stocker_execution import views
+from stocker_execution.config import MARKETS, PAGE_SIZE
+from stocker_execution.contracts import key
 from stocker_execution.runtime import Runtime
+from stocker_execution.saxo_auth import SaxoError
+
+# Revalidate page assets so a deploy never pairs a stale script with new markup.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers.update(NO_CACHE)
+        return response
+
+
+class ArmRequest(BaseModel):
+    acknowledgement: str = Field("", max_length=64)
 
 
 def create_dashboard_app(runtime: Runtime) -> FastAPI:
     app = FastAPI(title="SLRNO — Futures PAPER")
     app.add_middleware(DashboardSecurity)
     static = Path(__file__).with_name("static")
-    app.mount("/static", StaticFiles(directory=static), name="static")
+    app.mount("/static", RevalidatedStaticFiles(directory=static), name="static")
 
     @app.exception_handler(sqlite3.Error)
     async def database_unavailable(request: Any, exc: sqlite3.Error) -> JSONResponse:
-        runtime.broker.fatal_error = "LEDGER_UNAVAILABLE"
-        runtime.broker.reconciled = False
+        # A failed display read never changes execution state; the runtime's own
+        # ledger access fails closed and disarms independently.
         return JSONResponse(status_code=503, content={"error": "LEDGER_UNAVAILABLE"})
 
     @app.get("/api/health")
@@ -35,34 +55,51 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         )
         return JSONResponse(status_code=200 if ok else 503, content=runtime.status())
 
-    @app.get("/api/status")
-    async def status() -> dict[str, Any]:
-        return runtime.status()
-
     @app.get("/api/overview")
     async def overview() -> dict[str, Any]:
         return runtime.overview()
 
+    @app.get("/api/market/{market}")
+    async def market_detail(market: str, diagnostics: bool = False) -> dict[str, Any]:
+        if market not in MARKETS:
+            raise HTTPException(422, "Unknown futures market")
+        return runtime.market_detail(market, diagnostics=diagnostics)
+
+    @app.get("/api/market/{market}/book")
+    async def market_book(market: str) -> dict[str, Any]:
+        if market not in MARKETS:
+            raise HTTPException(422, "Unknown futures market")
+        identity = runtime.markets[market].identity
+        if identity is None:
+            return {"series": [], "tick_size": None, "status": "CONTRACT_NOT_VERIFIED"}
+        instrument = key(identity)
+        tick, blobs = views.book_rows(runtime.recorder, instrument)
+        # Decode the retained rows off the event loop that also runs trading.
+        return {
+            "status": "AVAILABLE" if blobs else "NO_RETAINED_ROWS",
+            **await asyncio.to_thread(views.book_series, tick, blobs, instrument),
+        }
+
+    @app.get("/api/execution")
+    async def execution() -> dict[str, Any]:
+        return runtime.execution_view()
+
     @app.get("/api/system")
-    async def system() -> dict[str, Any]:
+    async def system(diagnostics: bool = False) -> dict[str, Any]:
         return {
             **runtime.status(),
-            "configuration": runtime.config.model_dump(mode="json", exclude={"saxo"}),
+            "configuration": runtime.config.model_dump(mode="json", exclude={"saxo"})
+            if diagnostics
+            else None,
             "markets": [
                 {
                     "market": s.market,
                     "problem": s.problem,
                     "reference_sessions": len(s.references),
                     "capabilities": runtime.data.capability_view(s),
-                    "candidates": s.candidates,
+                    "candidates": s.candidates if diagnostics else None,
                 }
                 for s in runtime.markets.values()
-            ],
-            "broker_positions": [
-                dict(r)
-                for r in runtime.store.db.execute(
-                    "SELECT * FROM positions WHERE quantity<>0 ORDER BY con_id LIMIT 100"
-                )
             ],
         }
 
@@ -72,32 +109,47 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         day: date | None = None,
         version: str | None = Query(None, max_length=80),
         offset: int = Query(0, ge=0),
+        sort: Literal["asc", "desc"] = "desc",
+        trades: bool = False,
     ) -> dict[str, Any]:
         if market is not None and market not in MARKETS:
             raise HTTPException(422, "Unknown futures market")
-        rows = runtime.store.history(market, day.isoformat() if day else None, version, offset)
-        return {"rows": rows, "offset": offset, "has_more": len(rows) == 100}
+        rows = runtime.store.history(
+            market, day.isoformat() if day else None, version, offset, sort, trades_only=trades
+        )
+        return {
+            "rows": rows,
+            "offset": offset,
+            "page_size": PAGE_SIZE,
+            "has_more": len(rows) == PAGE_SIZE,
+            "system": runtime.status(),
+        }
 
     @app.get("/api/detail")
     async def detail(identity: str = Query(max_length=250)) -> dict[str, Any]:
         row = runtime.store.db.execute("SELECT * FROM signals WHERE id=?", (identity,)).fetchone()
         if not row:
             raise HTTPException(404, "Opportunity not found")
+        lifecycle = [
+            dict(r)
+            for r in runtime.store.db.execute(
+                "SELECT * FROM lifecycle WHERE reference=? OR reference IN "
+                "(SELECT reference FROM orders WHERE event_id=?) "
+                "ORDER BY sequence DESC LIMIT 100",
+                (identity, identity),
+            )
+        ]
+        fills = runtime.store.fills(identity)
+        signal = dict(row)
         return {
-            "signal": dict(row),
+            "timeline": views.timeline(signal, lifecycle, fills),
+            # The evidence blob is served once, decoded, as `inputs`.
+            "signal": {k: v for k, v in signal.items() if k != "detail"},
             "orders": runtime.store.orders(identity),
-            "fills": runtime.store.fills(identity),
+            "fills": fills,
             "inputs": json.loads(row["detail"]),
             "l2_observation": runtime.store.depth_summary(identity),
-            "lifecycle": [
-                dict(r)
-                for r in runtime.store.db.execute(
-                    "SELECT * FROM lifecycle WHERE reference=? OR reference IN "
-                    "(SELECT reference FROM orders WHERE event_id=?) "
-                    "ORDER BY sequence DESC LIMIT 100",
-                    (identity, identity),
-                )
-            ],
+            "lifecycle": lifecycle,
         }
 
     @app.post("/api/entries/pause")
@@ -118,10 +170,9 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
             raise HTTPException(409, str(exc)) from None
 
     @app.post("/api/paper/arm")
-    async def arm(request: Request) -> dict[str, Any]:
-        payload = await request.json()
+    async def arm(body: ArmRequest) -> dict[str, Any]:
         try:
-            runtime.broker.arm(payload.get("acknowledgement", ""))
+            runtime.broker.arm(body.acknowledgement)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
         return runtime.status()
@@ -129,6 +180,14 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
     @app.post("/api/paper/disarm")
     async def disarm() -> dict[str, Any]:
         runtime.broker.armed = False
+        return runtime.status()
+
+    @app.post("/api/session/primary")
+    async def primary_session() -> dict[str, Any]:
+        try:
+            await runtime.data.take_primary_session()
+        except SaxoError as exc:
+            raise HTTPException(409, str(exc)) from None
         return runtime.status()
 
     @app.post("/oauth/saxo/start")
@@ -203,18 +262,17 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
             for r in runtime.store.db.execute("SELECT summary FROM depth_captures")
         }
         try:
-            # Completed, unreferenced, unprotected records only. Runs off the risk loop.
-            import asyncio
-
-            await asyncio.to_thread(runtime.recorder.prune, segment, referenced)
+            # Completed, unreferenced, unprotected records only: two unlinks, on the loop so
+            # the recorder's counters are never touched from two threads.
+            runtime.recorder.prune(segment, referenced)
         except (OSError, ValueError):
             raise HTTPException(409, "ACTIVE_REFERENCED_PROTECTED_OR_UNAVAILABLE") from None
         return {"pruned": segment}
 
     @app.get("/{page:path}")
     async def page(page: str) -> Any:
-        if page not in {"", "markets", "opportunities", "execution", "trades", "system"}:
+        if page not in {"", "markets", "opportunities", "execution", "system"}:
             raise HTTPException(404, "No such SLRNO page")
-        return FileResponse(static / "index.html")
+        return FileResponse(static / "index.html", headers=NO_CACHE)
 
     return app

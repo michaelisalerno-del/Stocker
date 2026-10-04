@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -5,7 +6,7 @@ run_check() {
   case "$1" in
     format) uv run --no-sync ruff format --check . ;;
     lint) uv run --no-sync ruff check . ;;
-    typing) uv run --no-sync mypy packages apps ;;
+    typing) uv run --no-sync mypy ;;
     python) uv run --no-sync pytest ;;
     frontend) npm test ;;
     server) uv run --no-sync python scripts/server_smoke.py ;;

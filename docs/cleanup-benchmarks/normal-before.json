@@ -1,0 +1,60 @@
+{
+  "evidence": "OFFLINE_GENERATED_SIMULATION",
+  "feature_version": "SAXO_SAMPLED_BOOK_FLOW_V1",
+  "markets": [
+    "CL",
+    "GC",
+    "NG",
+    "NQ",
+    "SI"
+  ],
+  "option_count": 5,
+  "virtual_seconds": 7200,
+  "requested_delivered_cadence_ms": 1000,
+  "messages": 90010,
+  "option_chain_cadence_ms": 2000,
+  "events": 3,
+  "simultaneous_five_market_triggers": false,
+  "queue_peak_bytes": 561995,
+  "shared_segments": 2,
+  "wall_seconds": 277.795,
+  "cpu_seconds": 274.882,
+  "cpu_percent_of_one_core": 98.95,
+  "archived_message_rows": 24755,
+  "duplicate_message_rows_within_segment": 0,
+  "archived_message_sha256": "d0dc61471c126ffed6cff0caef1fc4ca79b082278c26cf11b4d632cd8851a4e6",
+  "capture_states": [
+    "COMPLETE",
+    "COMPLETE"
+  ],
+  "process_peak_rss_bytes": 91144192,
+  "ingest_p99_ms": 11.528,
+  "ingest_max_ms": 92.293,
+  "event_loop_max_delay_ms": 336.899,
+  "buffer_coverage_seconds": {
+    "CL": 900,
+    "GC": 900,
+    "NG": 900,
+    "NQ": 900,
+    "SI": 900
+  },
+  "option_coverage_seconds": {
+    "option-0": 900,
+    "option-1": 900,
+    "option-2": 900,
+    "option-3": 900,
+    "option-4": 900
+  },
+  "memory_bytes": 13620535,
+  "memory_limit": 33554432,
+  "memory_high_water": 13631838,
+  "queue_bytes": 0,
+  "writer_queue": 0,
+  "disk_bytes": 7393902,
+  "disk_limit": 2147483648,
+  "disk_free": 239279800320,
+  "disk_reserve": 2147483648,
+  "recording_gaps": 0,
+  "paused_reason": "",
+  "persistent_capture": true
+}

@@ -17,7 +17,9 @@ No evidence below proves a Saxo entitlement, broker fill or exchange recording p
 - Ruff format/lint and Mypy over `packages apps` pass; 115 source files type-checked at this stage.
   Ruff checked formatting for 196 files. Review regressions cover atomic audit/fill recovery,
   current FX budget revalidation, independent bid/ask size freshness, original buffered receipt
-  timestamps and rejection of indicative/out-of-session/unpermissioned paper fills.
+  timestamps and rejection of indicative/out-of-session/unpermissioned paper fills. (Superseded on
+  2026-09-29: real-time `Indicative` is accepted; stale, delayed and non-price qualities are not.
+  See [DASHBOARD-AND-DATA.md](DASHBOARD-AND-DATA.md).)
 - Locked server-only install/import/dashboard smoke passes with all socket connections forbidden.
   It installs no `ib-async`, pytest, notebook or research-model dependencies.
 - Browser tests with locked Playwright dependencies pass five fixed cards, provisional P&L, stable

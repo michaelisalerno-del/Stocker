@@ -2,8 +2,6 @@
 .env
 .env.*
 !.env.example
-configs/ibkr.local.yaml
-configs/runs.local.yaml
 
 .venv/
 __pycache__/
@@ -15,31 +13,6 @@ __pycache__/
 .coverage
 htmlcov/
 
-.ipynb_checkpoints/
-data_smoke/
-
-# Broker-supplied raw bars stay local; commit measured and derived research artifacts only.
-research/realized_m_20_ibkr_fast_v0/artifacts/raw/*_ibkr_1m.csv
-universes/generated/*
-!universes/generated/.gitkeep
-data/universes/
-data/reports/universes/
-
-data/raw/*
-!data/raw/.gitkeep
-data/catalog.json
-data/processed/*
-!data/processed/.gitkeep
-data/features/*
-!data/features/.gitkeep
-data/reports/*
-!data/reports/.gitkeep
-
-*.parquet
-# Preserve previously tracked source evidence outside the execution runtime.
-!research/operational-history/retired-stock-runtime/source-fixtures/**/*.parquet
-*.feather
-*.duckdb
 *.db
 *.sqlite
 *.sqlite3

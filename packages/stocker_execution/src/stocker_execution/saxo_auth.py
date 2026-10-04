@@ -29,6 +29,10 @@ ENDPOINTS = {
 }
 
 
+class SaxoError(ValueError):
+    """Coded transport or authentication failure; never carries provider text."""
+
+
 def private_read(path: Path) -> dict[str, Any]:
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.getuid():
@@ -99,7 +103,7 @@ class OAuth:
 
     def begin(self) -> tuple[str, str]:
         if not self.credentials:
-            raise ValueError("SAXO_CREDENTIALS_NOT_CONFIGURED")
+            raise SaxoError("SAXO_CREDENTIALS_NOT_CONFIGURED")
         state, binding = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         self.pending = (state, binding, time.monotonic() + 600)
         return self.urls["auth"] + "/authorize?" + urlencode(
@@ -122,7 +126,7 @@ class OAuth:
                 or not code
                 or len(code) > 4096
             ):
-                raise ValueError("OAUTH_STATE_INVALID_OR_EXPIRED")
+                raise SaxoError("OAUTH_STATE_INVALID_OR_EXPIRED")
             await self.exchange({"grant_type": "authorization_code", "code": code})
 
     async def exchange(self, form: dict[str, str]) -> None:
@@ -153,19 +157,19 @@ class OAuth:
                     "temporarily_unavailable",
                 }:
                     reason = "OAUTH_" + code.upper()
-                raise ValueError(reason)
+                raise SaxoError(reason)
             reason = "OAUTH_TOKEN_RESPONSE_INVALID"
             raw = response.json()
             if not isinstance(raw, dict):
-                raise ValueError(reason)
+                raise SaxoError(reason)
             reason = "OAUTH_TOKEN_RESPONSE_INCOMPLETE"
             if not raw.get("access_token") or not raw.get("refresh_token"):
-                raise ValueError(reason)
+                raise SaxoError(reason)
             reason = "OAUTH_LIFETIME_INVALID"
             expires = float(raw["expires_in"])
             refresh_expires = float(raw["refresh_token_expires_in"])
             if not 0 < expires <= 86400 or not 0 < refresh_expires <= 86400 * 365:
-                raise ValueError("OAUTH_LIFETIME_INVALID")
+                raise SaxoError("OAUTH_LIFETIME_INVALID")
             tokens = {
                 "environment": self.environment,
                 "access_token": raw["access_token"],
@@ -180,21 +184,32 @@ class OAuth:
             self.generation += 1
             self.status = "AUTHENTICATED"
             self.failure_reason = ""
+        except httpx.HTTPError:
+            # The request never completed, so the refresh token cannot have rotated:
+            # keep it for the next attempt inside the pre-expiry window.
+            self.failure_reason = reason
+            raise SaxoError(reason) from None
         except Exception:
             self.status = "AUTHENTICATION_EXPIRED_RECONNECT_REQUIRED"
             self.failure_reason = reason
             self.tokens = {}
             # Never render transport errors, request bodies or token responses.
-            raise ValueError(reason) from None
+            raise SaxoError(reason) from None
+
+    def expire(self) -> None:
+        """The server rejected the current access token: refresh on the next call."""
+        if self.tokens:
+            self.tokens["expires_at"] = 0
+        self.status = "AUTHENTICATION_EXPIRED_RECONNECT_REQUIRED"
 
     async def access_token(self) -> str:
         async with self.lock:
             if not self.credentials or not self.tokens:
-                raise ValueError(self.status)
+                raise SaxoError(self.status)
             if float(self.tokens.get("expires_at", 0)) <= time.time() + 90:
                 if float(self.tokens.get("refresh_expires_at", 0)) <= time.time() + 10:
                     self.status = "AUTHENTICATION_EXPIRED_RECONNECT_REQUIRED"
-                    raise ValueError(self.status)
+                    raise SaxoError(self.status)
                 await self.exchange(
                     {"grant_type": "refresh_token", "refresh_token": self.tokens["refresh_token"]}
                 )

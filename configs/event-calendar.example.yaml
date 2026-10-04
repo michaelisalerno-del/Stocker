@@ -1,0 +1,13 @@
+# Scheduled releases shown on market cards and recorded with each opportunity.
+# Observation and display context only: it never blocks, delays or triggers an entry.
+# Weekly rules use America/New_York time. Holiday shifts are NOT inferred; when a
+# publisher moves a release, add a dated `at:` entry and adjust as announced.
+events:
+  - name: EIA Weekly Petroleum Status Report
+    markets: [CL]
+    weekly: {weekday: WED, time: "10:30"}
+  # Dated releases: copy exact dates from the official calendars (BLS for CPI,
+  # the Federal Reserve for FOMC). Example format only — not a real date:
+  # - name: US CPI
+  #   markets: [NQ, ES, GC]
+  #   at: "2026-01-01T08:30:00-05:00"

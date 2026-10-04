@@ -32,11 +32,12 @@ runtime using the same existing release process.
    If obligations are present, ambiguous or inaccessible, **defer stopping that manager and Gateway**;
    retain their position management and report the cutover block. Never liquidate or globally cancel.
 3. Back up current unit files, timer/cron/supervisor definitions, proxy config, protected app configs,
-   OAuth/legacy credentials and databases using the existing SQLite backup API/process. Preserve
+   OAuth/legacy credentials and databases using the SQLite backup API (for an SLRNO ledger,
+   `scripts/ledger_backup.py --database … --config … --output <new dir>`). Preserve
    ownership/mode and record SHA-256 manifests. Keep all original ledgers/data with their provenance.
    Do not replace a live ledger with an old backup after new activity.
 4. Stage this committed release using the established archive/copy process, then
-   `uv sync --locked --no-default-groups --group server`. Run `scripts/server_smoke.py --installed`
+   `uv sync --locked --no-default-groups`. Run `scripts/server_smoke.py --installed`
    in its locked environment. Keep the existing service user, hardening and loopback port. Stage
    `/etc/stocker/v1/saxo.sim.yaml` from the sanitised example, DISABLED/disarmed, and a new
    `/var/lib/stocker/v1/saxo-sim-disabled.sqlite3`. Never repurpose the old futures/FIRST4 database.
@@ -79,3 +80,27 @@ recoverable deployment while required obligations remain managed. No automatic p
 A reviewed current inventory is required to make stop/mask commands concrete. The 2026-09-28
 deployment report records the 13 parked units and protected original definitions. Reinspect before
 future changes; repository changes alone cannot guarantee a server supervisor remains parked.
+
+## Server runtime
+
+The server runs `stocker futures-run` (console script for `stocker_execution.__main__`; the exact
+command, paths, proxy routes and rollout steps are above). The authenticated reverse proxy remains
+required. Uvicorn uses `proxy_headers=False` so the dashboard's security layer sees the actual
+loopback peer. Execution starts disabled and disarmed on every launch; arming is a separate,
+explicit operator action.
+
+**Restart window (2026-10-04).** With a frozen clock every hour of the CME session the recorder
+keeps each market's capture open from 18:00 New York to 17:00 the next day, and any restart marks
+every open capture `INTERRUPTED_RESTART` (every capture of 1–2 October was cut that way by a
+deploy). Restart the service only between 17:00 and 18:00 New York on a weekday, or at the
+weekend before Sunday 18:00 New York; the deploy scripts refuse other times unless `FORCE=1`.
+Reloading the option spaces after a restart takes 5–20 minutes (Saxo rate limits), so start early
+in the window. The System page shows the archive's measured growth and the days left before
+`recorder.archive_max_bytes` stops captures; the status bar warns under 14 days.
+
+Configuration migration for releases after `21d9077`: remove the `recorder.pre_event_minutes`
+line from `/etc/stocker/v1/saxo.sim.yaml` before switching the release symlink. The key was never
+read (the rolling window is the fixed 15 minutes) and the configuration model rejects unknown keys.
+The same applies to the never-read pinned sentinels `refresh_rate_ms`, `quote_max_age_seconds`,
+`max_premium_risk_gbp`, `max_open_positions` and `max_contracts_per_trade` if the server
+configuration restates them; `entry_deadline_seconds` remains accepted (and must stay 20).

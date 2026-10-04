@@ -10,7 +10,7 @@ from stocker_execution.config import RULE_VERSION
 from stocker_execution.frozen_sources import FROZEN, SOURCE_HASHES
 
 NY = ZoneInfo("America/New_York")
-RIGHTS = {"CL": "C", "GC": "P", "NG": "P", "NQ": "P", "SI": "P"}
+RIGHTS = {"CL": "C", "ES": "P", "GC": "P", "NQ": "P"}
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,10 @@ class Bar:
     close: float
     volume: float
     average: float | None = None  # not supplied by Saxo charts; never fabricate VWAP
+    # Kept for the record only (Saxo's per-minute open interest and trading state; the price
+    # stream carries no futures open interest). Nothing frozen reads them.
+    interest: float | None = None
+    state: str | None = None
 
     def valid(self) -> bool:
         return (
@@ -31,6 +35,7 @@ class Bar:
                 math.isfinite(x) and x > 0 for x in (self.open, self.high, self.low, self.close)
             )
             and (self.average is None or math.isfinite(self.average) and self.average > 0)
+            and (self.interest is None or math.isfinite(self.interest) and self.interest >= 0)
             and math.isfinite(self.volume)
             and self.volume >= 0
             and self.low <= min(self.open, self.close) <= max(self.open, self.close) <= self.high
@@ -44,10 +49,34 @@ def next_weekday(day: date) -> date:
     return day
 
 
+def session_day(now: datetime) -> date:
+    """The CME session date: after the 18:00 New York open, and at weekends, the next weekday's."""
+    local = now.astimezone(NY)
+    return next_weekday(local.date()) if local.hour >= 18 or local.weekday() > 4 else local.date()
+
+
 def clocks(day: date) -> list[datetime]:
-    if day.weekday() > 4:
-        return []
-    return [datetime.combine(day, time(h), NY).astimezone(UTC) for h in range(9, 17)]
+    """Every hour the CME session trades (the user's decision, 2026-10-04): it opens at 18:00 New
+    York Sunday to Thursday and runs to 17:00 the next weekday, so the clocks are 18:00-23:00 on
+    those evenings and 00:00-16:00 on weekdays (a 16:00 clock exits at the close). The original
+    09:00-16:00 clocks are among them, unchanged."""
+    weekday = day.weekday()
+    hours = list(range(0, 17)) if weekday <= 4 else []
+    if weekday == 6 or weekday <= 3:
+        hours += range(18, 24)
+    return [datetime.combine(day, time(h), NY).astimezone(UTC) for h in hours]
+
+
+def us_clock(at: datetime) -> bool:
+    """The original clocks (09:00-16:00 New York) keep the inherited US-session definitions."""
+    return 9 <= at.astimezone(NY).hour <= 16
+
+
+def session_start(at: datetime) -> datetime:
+    """The 18:00 New York open of the CME session containing `at`."""
+    local = at.astimezone(NY)
+    day = local.date() if local.hour >= 18 else local.date() - timedelta(days=1)
+    return datetime.combine(day, time(18), NY).astimezone(UTC)
 
 
 def next_clock(now: datetime) -> datetime:
@@ -72,32 +101,23 @@ def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:
         "purchase_at": at.isoformat(),
         "exit_at": (at + timedelta(minutes=60)).isoformat(),
         "right": RIGHTS[market],
-        "target_delta": 0.2 if market == "SI" else 0.1,
-        "veto": "NG_CLOCK_13" if market == "NG" and local.hour == 13 else "",
+        "target_delta": 0.1,
+        "veto": "",
         "frozen_definition": FROZEN[market],
         "source_hashes": SOURCE_HASHES,
     }
 
 
-def prior_rv(bars: list[Bar], at: datetime, count: int = 15) -> float:
-    prefix = {b.at: b for b in bars if b.at + timedelta(minutes=1) <= at}
-    needed = [prefix.get(at - timedelta(minutes=i)) for i in range(count + 1, 0, -1)]
+def prior_rv(
+    bars: list[Bar], at: datetime, count: int = 15, index: dict[datetime, Bar] | None = None
+) -> float:
+    # Every looked-up bar starts at least one minute before `at`, so it is completed.
+    by_time = index if index is not None else {b.at: b for b in bars}
+    needed = [by_time.get(at - timedelta(minutes=i)) for i in range(count + 1, 0, -1)]
     if any(b is None or not b.valid() for b in needed):
         raise ValueError("INCOMPLETE_COMPLETED_HISTORY")
     closes = [b.close for b in needed if b is not None]
     return math.sqrt(sum(math.log(b / a) ** 2 for a, b in zip(closes, closes[1:], strict=False)))
-
-
-def frozen_strike(
-    futures: float, rv15: float, at: datetime, expiry: datetime, right: str, delta: float
-) -> float:
-    years = (expiry - at).total_seconds() / (365 * 86400)
-    if not (years > 0 and rv15 > 0 and futures > 0 and right in {"C", "P"}):
-        raise ValueError("INVALID_FROZEN_PRICING_INPUT")
-    sigma = rv15 * math.sqrt(525600 / 15)
-    v = sigma * math.sqrt(years)
-    sign = 1 if right == "C" else -1
-    return futures * math.exp(0.5 * v * v - sign * NormalDist().inv_cdf(delta) * v)
 
 
 def model_delta(
@@ -140,14 +160,20 @@ def eligibility(
     def span(items: list[Bar]) -> float:
         return max(b.high for b in items) - min(b.low for b in items)
 
-    session = [
-        b
-        for b in prefix
-        if b.at.astimezone(NY).date() == at.astimezone(NY).date() and b.at.astimezone(NY).hour >= 8
-    ]
-    opening = [
-        b for b in session if b.at.astimezone(NY).hour == 8 and b.at.astimezone(NY).minute < 30
-    ]
+    if us_clock(at):
+        session = [
+            b
+            for b in prefix
+            if b.at.astimezone(NY).date() == at.astimezone(NY).date()
+            and b.at.astimezone(NY).hour >= 8
+        ]
+        opening = [
+            b for b in session if b.at.astimezone(NY).hour == 8 and b.at.astimezone(NY).minute < 30
+        ]
+    else:  # the other clocks: the CME session since its 18:00 open, opening = its first 30 minutes
+        start = session_start(at)
+        session = [b for b in prefix if b.at >= start]
+        opening = [b for b in session if b.at < start + timedelta(minutes=30)]
     denominators = [
         rv15,
         prior_rv(prefix, at, 5),
@@ -176,16 +202,69 @@ def eligibility(
     }
 
 
+def observation(
+    bars: list[Bar], at: datetime, references: list[dict[int, dict[str, float]]]
+) -> dict[str, float | int | str | None]:
+    """Observation only, never a gate: the ingredients for judging each clock afterwards.
+
+    rv60 and the session's travel use completed one-minute bars only; a gap leaves rv60 unset
+    and is never bridged. The hour's reference rv15 is the median of the reference sessions.
+    """
+    by_time = {b.at: b for b in bars}
+    try:
+        rv60: float | None = prior_rv(bars, at, 60, by_time)
+    except ValueError:
+        rv60 = None
+    day = at.astimezone(NY).date()
+    start = session_start(at)
+    session = sorted(
+        (
+            b
+            for b in bars
+            if b.at < at
+            and b.valid()
+            and (
+                ((s := b.at.astimezone(NY)).date() == day and s.hour >= 8)
+                if us_clock(at)
+                else b.at >= start
+            )
+        ),
+        key=lambda b: b.at,
+    )
+    pairs = [
+        (a, b)
+        for a, b in zip(session, session[1:], strict=False)
+        if b.at - a.at == timedelta(minutes=1)
+    ]
+    medians = [
+        v
+        for r in references[-5:]
+        if math.isfinite(v := r.get(at.astimezone(NY).hour, {}).get("rv15", math.nan))
+    ]
+    return {
+        "rv60": rv60,
+        "session_travel_since_0800": math.sqrt(
+            sum(math.log(b.close / a.close) ** 2 for a, b in pairs)
+        )
+        if pairs
+        else None,
+        "session_minutes_counted": len(pairs),
+        # Travel counts from 08:00 at the original clocks, from the 18:00 session open otherwise.
+        "session_travel_from": "08:00" if us_clock(at) else "18:00",
+        "hour_reference_rv15_median": median(medians) if medians else None,
+    }
+
+
 def reference_summary(bars: list[Bar]) -> dict[int, dict[str, float]]:
     result: dict[int, dict[str, float]] = {}
     by_time = {b.at: b for b in bars}
-    for hour in range(8, 17):
+    for hour in [h for h in range(24) if h != 17]:  # every session hour (17:00-18:00 is the break)
         samples: dict[str, list[float]] = {k: [] for k in ("rv15", "range15", "volume15")}
         for bar in bars:
             if bar.at.astimezone(NY).hour != hour:
                 continue
             try:
-                rv = prior_rv(bars, bar.at)
+                rv = prior_rv(bars, bar.at, index=by_time)
                 prior = [by_time[bar.at - timedelta(minutes=i)] for i in range(1, 16)]
             except (KeyError, ValueError):
                 continue
@@ -195,5 +274,6 @@ def reference_summary(bars: list[Bar]) -> dict[int, dict[str, float]]:
                 / by_time[bar.at - timedelta(minutes=1)].close
             )
             samples["volume15"].append(sum(b.volume for b in prior))
-        result[hour] = {k: median(v) for k, v in samples.items() if v}
+        if 8 <= hour <= 16 or any(samples.values()):  # US hours always, as before; others if seen
+            result[hour] = {k: median(v) for k, v in samples.items() if v}
     return result

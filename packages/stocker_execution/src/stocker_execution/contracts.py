@@ -7,9 +7,23 @@ from decimal import ROUND_CEILING, Decimal
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from stocker_execution.config import MARKETS, Environment
+from stocker_execution.config import (
+    MARKETS,
+    MAX_PREMIUM_RISK_GBP,
+    MAX_PREMIUM_RISK_PENNIES,
+    QUOTE_MAX_AGE_SECONDS,
+    Environment,
+)
 
-MULTIPLIERS = {"CL": 1000, "GC": 100, "NG": 10000, "NQ": 20, "SI": 5000}
+MULTIPLIERS = {"CL": 1000, "ES": 50, "GC": 100, "NQ": 20}
+# Saxo InstrumentSessionState for continuous trading. Saxo documents no "Open" state;
+# auctions, breaks, halts, pre/post sessions and unknown values all stay blocked.
+TRADING_SESSION_STATES = {"AUTOMATEDTRADING"}
+# Saxo price qualities that represent a current price. Saxo marks Tradable obsolete and
+# documents Indicative as its normal price ("in most cases as relevant as a Tradable price";
+# the exception is FX options). OldIndicative (stale), Pending, NoMarket, NoAccess, None and
+# unknown values are never usable. Real-time delivery is checked separately.
+USABLE_PRICE_TYPES = {"Tradable", "Indicative"}
 
 
 def utc(value: str) -> datetime:
@@ -111,6 +125,11 @@ def option_identity(
         raise ValueError("OPTION_STRIKE_MISMATCH")
     if space.get("Expiry") and str(raw.get("ExpiryDate", ""))[:10] != str(space["Expiry"])[:10]:
         raise ValueError("OPTION_EXPIRY_MISMATCH")
+    # LIVE reports the amount step as IncrementSize and MinimumLotSize 0 for no further minimum
+    # (2026-10-01 CL/GC/NQ details); the smallest order is one step or the minimum, if larger.
+    step = positive(raw.get("IncrementSize"), "INCREMENT_SIZE")
+    scheme = tick_scheme(raw.get("TickSizeScheme", space.get("TickSizeScheme")))
+    tick = raw.get("TickSizeLimitOrder", raw.get("TickSize"))
     return {
         "provider": "SAXO",
         "environment": future["environment"],
@@ -129,32 +148,31 @@ def option_identity(
         "contract_month": future["contract_month"],
         "multiplier": positive(raw.get("ContractSize"), "MULTIPLIER"),
         "price_factor": positive(raw.get("PriceToContractFactor"), "PRICE_FACTOR"),
-        "tick_size": positive(raw.get("TickSizeLimitOrder", raw.get("TickSize")), "TICK_SIZE"),
-        "minimum_quantity": positive(raw.get("MinimumTradeSize"), "MINIMUM_QUANTITY"),
-        "lot_size": positive(raw.get("LotSize"), "LOT_SIZE"),
+        # NQ options give only a price-tiered scheme; tick_at() applies it.
+        "tick_size": None if scheme and tick is None else positive(tick, "TICK_SIZE"),
+        "minimum_quantity": max(step, nonnegative(raw.get("MinimumLotSize"), "MINIMUM_LOT_SIZE")),
+        "lot_size": step,
         "amount_decimals": raw.get("AmountDecimals"),
         "exercise_cutoff": raw.get("ExerciseCutOffTime"),
         "last_trade_at": space.get("LastTradeDate"),
         "settlement_style": raw.get("SettlementStyle"),
         "exercise_style": space.get("ExerciseStyle"),
         "notice_date": raw.get("NoticeDate"),
-        "tick_size_scheme": raw.get("TickSizeScheme", space.get("TickSizeScheme")),
+        "tick_size_scheme": scheme,
         "trading_sessions": raw.get("TradingSessions"),
         "is_tradable": raw.get("IsTradable"),
     }
 
 
 def quote_check(value: dict[str, Any], receipt: float | None, at: datetime) -> dict[str, Any]:
-    if receipt is None or not 0 <= at.timestamp() - receipt <= 5:
+    if receipt is None or not 0 <= at.timestamp() - receipt <= QUOTE_MAX_AGE_SECONDS:
         raise ValueError("QUOTE_STALE_OR_UNAVAILABLE")
     quote = value.get("Quote") or {}
     if quote.get("DelayedByMinutes") != 0:
         raise ValueError("QUOTE_DELAYED_OR_DELAY_UNKNOWN")
     if quote.get("ErrorCode") not in (None, "None"):
         raise ValueError("QUOTE_PERMISSION_OR_SIZE_ERROR")
-    if any(
-        quote.get(k) not in {"Tradable", "Indicative"} for k in ("PriceTypeBid", "PriceTypeAsk")
-    ):
+    if any(quote.get(k) not in USABLE_PRICE_TYPES for k in ("PriceTypeBid", "PriceTypeAsk")):
         raise ValueError("QUOTE_NOT_USABLE")
     bid, ask = positive(quote.get("Bid"), "BID"), positive(quote.get("Ask"), "ASK")
     if bid > ask:
@@ -170,13 +188,10 @@ def executable_quote(
     quote = quote_check(value, receipt, at)
     if option.get("is_tradable") is not True:
         raise ValueError("OPTION_TRADING_PERMISSION_UNVERIFIED")
-    if session_state({"TradingSessions": option.get("trading_sessions")}, at) not in {
-        "OPEN",
-        "OPENFORTRADING",
-    }:
+    if session_state({"TradingSessions": option.get("trading_sessions")}, at) not in (
+        TRADING_SESSION_STATES
+    ):
         raise ValueError("OPTION_CURRENT_SESSION_NOT_OPEN_OR_UNVERIFIED")
-    if any(quote.get(k) != "Tradable" for k in ("PriceTypeBid", "PriceTypeAsk")):
-        raise ValueError("OPTION_QUOTE_NOT_TRADABLE")
     return quote
 
 
@@ -190,6 +205,73 @@ def nonnegative(value: Any, name: str) -> float:
     if not math.isfinite(result) or result < 0:
         raise ValueError("INVALID_" + name)
     return result
+
+
+def grid_price(price: float, tick: float, rounding: str, ticks: int) -> float:
+    """Snap a price to the tick grid, then move a whole number of ticks.
+
+    Decimal from the printed values: float division (0.3 / 0.1 = 2.999…) lands a tick off.
+    """
+    grid = Decimal(str(positive(tick, "TICK_SIZE")))
+    steps = (Decimal(str(positive(price, "PRICE"))) / grid).to_integral_value(rounding=rounding)
+    return float((steps + ticks) * grid)
+
+
+def tick_scheme(value: Any) -> dict[str, Any] | None:
+    if not value:
+        return None
+    elements = [
+        {
+            "HighPrice": positive(e.get("HighPrice"), "TICK_TIER_PRICE"),
+            "TickSize": positive(e.get("TickSize"), "TICK_SIZE"),
+        }
+        for e in value.get("Elements") or []
+    ]
+    return {
+        "DefaultTickSize": positive(value.get("DefaultTickSize"), "TICK_SIZE"),
+        "Elements": sorted(elements, key=lambda e: e["HighPrice"]),
+    }
+
+
+def tick_at(option: dict[str, Any], price: float, side: int) -> float:
+    """The option's tick for prices just above (side 1) or just below (side -1) `price`.
+
+    Saxo gives each scheme tick "for prices up to HighPrice". A tier boundary lies on both
+    grids, so only the step away from it depends on the side, never on boundary ownership.
+    """
+    scheme = option.get("tick_size_scheme")
+    if not scheme:
+        return positive(option["tick_size"], "TICK_SIZE")
+    for element in scheme["Elements"]:
+        if price < element["HighPrice"] or (side < 0 and price == element["HighPrice"]):
+            return float(element["TickSize"])
+    return float(scheme["DefaultTickSize"])
+
+
+def option_price(option: dict[str, Any], price: float, rounding: str, ticks: int) -> float:
+    """Snap to the option's grid at `price`, then move at most one tick the rounding way."""
+    if ticks not in (-1, 0, 1):
+        raise ValueError("ONE_TICK_STEP_ONLY")
+    side = 1 if rounding == ROUND_CEILING else -1
+    snapped = grid_price(price, tick_at(option, price, side), rounding, 0)
+    return grid_price(snapped, tick_at(option, snapped, side), rounding, ticks)
+
+
+def require_one_whole_contract(option: dict[str, Any]) -> None:
+    if option["minimum_quantity"] != 1 or option["lot_size"] != 1 or option["amount_decimals"] != 0:
+        raise ValueError("ONE_WHOLE_CONTRACT_NOT_EXECUTABLE")
+
+
+def all_in_pennies(
+    ask: float, price_factor: float, native_to_gbp: float, fees_gbp: Decimal
+) -> tuple[Decimal, int]:
+    """Premium in GBP and the whole-penny ceiling of premium plus fees (rounded up)."""
+    premium = (
+        Decimal(str(positive(ask, "ASK")))
+        * Decimal(str(positive(price_factor, "PRICE_FACTOR")))
+        * Decimal(str(positive(native_to_gbp, "GBP_CONVERSION")))
+    )
+    return premium, int(((premium + fees_gbp) * 100).to_integral_value(rounding=ROUND_CEILING))
 
 
 def cost_estimate(
@@ -207,11 +289,14 @@ def cost_estimate(
         raise ValueError("CONTRACT_OPTION_COST_CURRENCY_MISMATCH")
     if conditions.get("IsTradable") is False:
         raise ValueError("CONTRACT_OPTION_TRADING_NOT_ALLOWED")
-    if option["minimum_quantity"] != 1 or option["lot_size"] != 1 or option["amount_decimals"] != 0:
-        raise ValueError("ONE_WHOLE_CONTRACT_NOT_EXECUTABLE")
-    if option.get("tick_size_scheme"):
-        raise ValueError("VARIABLE_TICK_SCHEME_REQUIRES_VERIFIED_PRICE_TIER")
-    rate = positive(native_to_gbp, "GBP_CONVERSION")
+    require_one_whole_contract(option)
+    markup = 0.0
+    if conditions.get("AccountCurrency") != option["currency"]:
+        # Saxo converts each leg at its rate plus Markup per cent (LIVE GBP account 2026-10-01:
+        # 0.6, its AskRate/BidRate exactly 0.6% either side of mid). Entry pays the dearer side.
+        conversion = conditions.get("CurrencyConversion") or {}
+        markup = nonnegative(conversion.get("Markup"), "BROKER_FX_MARKUP") / 100
+    rate = positive(native_to_gbp, "GBP_CONVERSION") * (1 + markup)
 
     def convert(amount: float, currency: Any) -> float:
         if currency == "GBP":
@@ -220,12 +305,12 @@ def cost_estimate(
             return amount * rate
         raise ValueError("FEE_CURRENCY_CONVERSION_UNVERIFIED")
 
-    for name in ("Taxes", "ScheduledContractOptionTradingConditions", "HoldingFee", "CarryingCost"):
+    # CarryingCost is left out: Saxo charges it only on short contract options held overnight
+    # (home.saxo listed-options commissions, 2026-10-01), never on one long contract sold the
+    # same session. LIVE returns it for every option (interbank rate + 2.5% mark-up).
+    for name in ("Taxes", "ScheduledContractOptionTradingConditions", "HoldingFee"):
         if conditions.get(name):
             raise ValueError("CONTRACT_OPTION_COST_RULE_UNVERIFIED_" + name.upper())
-    conversion = conditions.get("CurrencyConversion") or {}
-    if conditions.get("AccountCurrency") != option["currency"] and conversion.get("Markup") != 0:
-        raise ValueError("BROKER_FX_MARKUP_UNVERIFIED")
     limits = [
         r for r in conditions.get("CommissionLimits", []) if r.get("OrderAction") == "ExecuteOrder"
     ]
@@ -270,13 +355,7 @@ def cost_estimate(
         if "Maximum" in exchange:
             fee = min(fee, nonnegative(exchange["Maximum"], "EXCHANGE_MAXIMUM"))
         entry += convert(fee, exchange.get("Currency"))
-    premium = (
-        Decimal(str(positive(ask, "ASK")))
-        * Decimal(str(positive(option["price_factor"], "PRICE_FACTOR")))
-        * Decimal(str(rate))
-    )
-    total = premium + Decimal(str(entry)) * 2
-    pennies = int((total * 100).to_integral_value(rounding=ROUND_CEILING))
+    premium, pennies = all_in_pennies(ask, option["price_factor"], rate, Decimal(str(entry)) * 2)
     return {
         "quantity": 1,
         "premium_gbp": float(premium),
@@ -285,11 +364,11 @@ def cost_estimate(
         "fees_gbp": entry * 2,
         "minimum_purchase_cost_gbp": float(premium) + entry,
         "total_gbp": pennies / 100,
-        "remaining_budget_gbp": (1000 - pennies) / 100,
+        "remaining_budget_gbp": (MAX_PREMIUM_RISK_PENNIES - pennies) / 100,
         "cash_pennies": pennies,
-        "budget_gbp": 10,
+        "budget_gbp": MAX_PREMIUM_RISK_GBP,
         "budget_result": "WITHIN_BUDGET"
-        if pennies <= 1000
+        if pennies <= MAX_PREMIUM_RISK_PENNIES
         else "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET",
         "basis": "ESTIMATE_NOT_BOOKED_CHARGES",
         "policy": "PREMIUM_PLUS_ENTRY_AND_RESERVED_EXIT",
@@ -300,7 +379,15 @@ def cost_estimate(
         "option": option,
         "limit": ask,
         "fx": rate,
+        "fx_markup": markup,
     }
+
+
+def fill_conversion(native_to_gbp: float, markup: float, role: str) -> float:
+    """GBP per instrument-currency unit for a paper fill: dearer to buy, cheaper to sell."""
+    return positive(native_to_gbp, "GBP_CONVERSION") * (
+        1 + (markup if role == "ENTRY" else -markup)
+    )
 
 
 def deadline_instant(value: Any, day: str, zone: str | None = None) -> str | None:
@@ -332,26 +419,20 @@ def deadline_instant(value: Any, day: str, zone: str | None = None) -> str | Non
 def budget(
     option: dict[str, Any], ask: float, fee_gbp: float, native_to_gbp: float
 ) -> dict[str, Any]:
+    """Re-price an admitted plan at its actual fill price using the plan's own fees."""
     if option["asset_type"] != "FuturesOption":
         raise ValueError("DIRECT_FUTURES_ORDERS_DISABLED")
-    if option["minimum_quantity"] != 1 or option["lot_size"] != 1 or option["amount_decimals"] != 0:
-        raise ValueError("ONE_WHOLE_CONTRACT_NOT_EXECUTABLE")
-    values = [
-        positive(ask, "ASK"),
-        nonnegative(fee_gbp, "FEES"),
-        positive(native_to_gbp, "FX"),
-        positive(option["price_factor"], "PRICE_FACTOR"),
-    ]
-    premium = Decimal(str(values[0])) * Decimal(str(values[3])) * Decimal(str(values[2]))
-    fees = Decimal(str(values[1]))
-    pennies = int(((premium + fees) * 100).to_integral_value(rounding=ROUND_CEILING))
-    if pennies > 1000:
+    require_one_whole_contract(option)
+    fees = Decimal(str(nonnegative(fee_gbp, "FEES")))
+    premium, pennies = all_in_pennies(ask, option["price_factor"], native_to_gbp, fees)
+    if pennies > MAX_PREMIUM_RISK_PENNIES:
         raise ValueError("MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET")
     return {
         "quantity": 1,
         "premium_gbp": float(premium),
         "fees_gbp": float(fees),
         "total_gbp": pennies / 100,
+        "remaining_budget_gbp": (MAX_PREMIUM_RISK_PENNIES - pennies) / 100,
         "cash_pennies": pennies,
         "currency": option["currency"],
         "multiplier": option["price_factor"],
@@ -376,7 +457,7 @@ def verified_cutoff(option: dict[str, Any], exit_at: datetime) -> datetime:
         utc(s["EndTime"])
         for s in sessions
         if utc(s["StartTime"]) <= exit_at < utc(s["EndTime"])
-        and str(s.get("State", "")).lower() in {"open", "openfortrading"}
+        and str(s.get("State", "")).upper() in TRADING_SESSION_STATES
     ]
     if not ends:
         raise ValueError("OPTION_EXIT_SESSION_UNVERIFIED")

@@ -7,8 +7,15 @@ import hmac
 import os
 from urllib.parse import urlsplit
 
+from starlette.datastructures import MutableHeaders
 from starlette.responses import JSONResponse
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+# The page has no inline script or style; nothing is embedded and nothing embeds it.
+HARDENING = {
+    "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff",
+}
 
 
 class DashboardSecurity:
@@ -20,23 +27,33 @@ class DashboardSecurity:
         if self.password and self.proxy_token:
             raise ValueError("Choose password or authenticated proxy mode, not both")
         self.protected = bool(self.password or self.proxy_token)
+        origin = urlsplit(self.origin)
+        self.origin_host = origin.netloc
         if self.protected and (
             len(self.password or self.proxy_token) < 24
-            or urlsplit(self.origin).scheme != "https"
-            or not urlsplit(self.origin).netloc
-            or urlsplit(self.origin).path
-            or urlsplit(self.origin).query
-            or urlsplit(self.origin).fragment
-            or urlsplit(self.origin).username
+            or origin.scheme != "https"
+            or not origin.netloc
+            or origin.path
+            or origin.query
+            or origin.fragment
+            or origin.username
         ):
             raise ValueError(
                 "Protected dashboard requires a 24+ character credential and HTTPS origin"
             )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] not in {"http", "websocket"}:
+        if scope["type"] != "http":  # the dashboard serves HTTP only
             await self.app(scope, receive, send)
             return
+
+        async def hardened(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                response_headers = MutableHeaders(scope=message)
+                for name, value in HARDENING.items():
+                    response_headers.setdefault(name, value)
+            await send(message)
+
         headers = dict(scope.get("headers", ()))
         host = headers.get(b"host", b"").decode("latin1")
         client = (scope.get("client") or ("", 0))[0]
@@ -61,18 +78,14 @@ class DashboardSecurity:
                 denied = (401, "Authentication required")
         elif not local:
             denied = (403, "Unauthenticated dashboard is loopback-only")
-        if self.protected and host != urlsplit(self.origin).netloc:
+        if self.protected and host != self.origin_host:
             denied = (403, "Unexpected dashboard host")
         oauth_callback = (
-            scope["type"] == "http"
-            and scope.get("path") == "/oauth/saxo/callback"
-            and scope.get("method") == "GET"
+            scope.get("path") == "/oauth/saxo/callback" and scope.get("method") == "GET"
         )
         document_navigation = (
-            scope["type"] == "http"
-            and scope.get("method") == "GET"
-            and scope.get("path")
-            in {"/", "/markets", "/opportunities", "/execution", "/trades", "/system"}
+            scope.get("method") == "GET"
+            and scope.get("path") in {"/", "/markets", "/opportunities", "/execution", "/system"}
             and headers.get(b"sec-fetch-mode") == b"navigate"
             and headers.get(b"sec-fetch-dest") == b"document"
         )
@@ -85,16 +98,13 @@ class DashboardSecurity:
         if headers.get(b"sec-fetch-site") == b"cross-site" and not cross_site_navigation:
             denied = (403, "Cross-site access rejected")
         if denied:
-            if scope["type"] == "websocket":
-                await send({"type": "websocket.close", "code": 1008})
-            else:
-                response = JSONResponse(
-                    {"detail": denied[1]},
-                    status_code=denied[0],
-                    headers={"WWW-Authenticate": 'Basic realm="SLRNO", charset="UTF-8"'}
-                    if denied[0] == 401
-                    else {},
-                )
-                await response(scope, receive, send)
+            response = JSONResponse(
+                {"detail": denied[1]},
+                status_code=denied[0],
+                headers={"WWW-Authenticate": 'Basic realm="SLRNO", charset="UTF-8"'}
+                if denied[0] == 401
+                else {},
+            )
+            await response(scope, receive, hardened)
             return
-        await self.app(scope, receive, send)
+        await self.app(scope, receive, hardened)

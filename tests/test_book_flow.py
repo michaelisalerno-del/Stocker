@@ -9,8 +9,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from saxo_support import IDENTITY, book
 from stocker_execution.book_flow import VERSION, observe
-from stocker_execution.config import MARKETS, FuturesConfig, RecorderConfig
+from stocker_execution.config import (
+    MARKETS,
+    MAX_OPEN_POSITIONS,
+    MAX_PREMIUM_RISK_GBP,
+    FuturesConfig,
+    RecorderConfig,
+)
 from stocker_execution.contracts import key
 from stocker_execution.recorder import Recorder, apply, read_row
 from stocker_execution.runtime import Runtime
@@ -18,41 +25,6 @@ from stocker_execution.saxo_client import allowed
 from stocker_execution.saxo_data import DataService
 from stocker_execution.saxo_stream import PriceState
 from stocker_execution.store import Store
-
-IDENTITY = {
-    "provider": "SAXO",
-    "environment": "SAXO_SIM",
-    "asset_type": "ContractFutures",
-    "market": "CL",
-    "uic": 123,
-    "tick_size": 0.01,
-}
-
-
-def book(n=10, bid_size=3, ask_size=1, shift=0):
-    return {
-        "Quote": {
-            "Bid": 70 + shift,
-            "Ask": 70.01 + shift,
-            "BidSize": bid_size,
-            "AskSize": ask_size,
-            "DelayedByMinutes": 0,
-            "PriceTypeBid": "Tradable",
-            "PriceTypeAsk": "Tradable",
-        },
-        "PriceInfoDetails": {"LastTraded": 70, "LastTradedSize": 2, "Volume": 100},
-        "MarketDepth": {
-            "Bid": [70 + shift - 0.01 * i for i in range(n)],
-            "Ask": [70.01 + shift + 0.01 * i for i in range(n)],
-            "BidSize": [bid_size] * n,
-            "AskSize": [ask_size] * n,
-            "BidOrders": [2] * n,
-            "AskOrders": [1] * n,
-            "NoOfBids": n,
-            "NoOfOffers": n,
-            "UsingOrders": True,
-        },
-    }
 
 
 def point(value, at, history=(), generation="one", timeout=5):
@@ -119,9 +91,25 @@ def test_repeated_last_trade_and_volume_resets_never_create_tape():
     reset["PriceInfoDetails"]["Volume"] = 9
     assert point(reset, 3, [corrected])["volume"]["change"] is None
     assert (
-        point(reset, 3, [corrected], generation="new")["volume"]["status"] == "SEMANTICS_UNVERIFIED"
+        point(reset, 3, [corrected], generation="new")["volume"]["status"] == "SESSION_CUMULATIVE"
     )
     assert "executions" not in repeated and "aggressor" not in repeated
+
+
+def test_volume_change_is_traded_volume_over_each_lookback_and_never_spans_a_fall():
+    # Saxo's Volume is the session's cumulative traded volume (verified on LIVE 2026-10-01).
+    history = []
+    for t in range(61):
+        value = book()
+        value["PriceInfoDetails"]["Volume"] = 1000 + 2 * t
+        history.append(point(value, t, history))
+    last = history[-1]
+    assert last["volume"]["changes"] == {"5": 10, "30": 60, "60": 120}
+    assert last["volume"]["change"] == 120
+    value = book()
+    value["PriceInfoDetails"]["Volume"] = 1050  # a fall: the session reset or a correction
+    fallen = point(value, 61, history)
+    assert fallen["volume"]["change"] is None and fallen["volume"]["changes"] == {}
 
 
 def test_price_shifts_match_tick_prices_and_gaps_invalidate_lookbacks():
@@ -181,7 +169,7 @@ def test_queued_delta_does_not_backdate_calculation_using_later_snapshot(tmp_pat
 
 
 @pytest.mark.parametrize("heartbeat_array", [False, True])
-def test_five_ordinary_subscriptions_shared_by_consumers_and_heartbeats(
+def test_one_ordinary_subscription_per_market_shared_by_consumers_and_heartbeats(
     tmp_path, monkeypatch, heartbeat_array
 ):
     async def scenario():
@@ -213,19 +201,25 @@ def test_five_ordinary_subscriptions_shared_by_consumers_and_heartbeats(
         monkeypatch.setattr(data, "subscribe_fx", no_fx)
         await data.startup()
         await data.startup()
-        assert len(calls) == 6  # five ordinary prices plus session, no duplicate consumers
+        # One ordinary price and one chart stream per market plus the session, no duplicates.
+        assert len(calls) == 2 * len(MARKETS) + 1
         prices = [(ref, s) for ref, s in data.subscriptions.items() if s["kind"] == "PRICE"]
-        assert len(prices) == 5
+        assert len(prices) == len(MARKETS)
+        charts = [s for s in data.subscriptions.values() if s["kind"] == "CHART"]
+        assert len(charts) == len(MARKETS) and all(
+            s["path"] == "/chart/v3/charts/subscriptions" and s["arguments"]["Horizon"] == 1
+            for s in charts
+        )
         for _ref, s in prices:
             assert s["path"] == "/trade/v1/prices/subscriptions"
-            assert {"Quote", "PriceInfoDetails", "MarketDepth"} <= set(
+            assert {"Quote", "PriceInfo", "PriceInfoDetails", "MarketDepth"} <= set(
                 s["arguments"]["FieldGroups"]
             )
             assert s["refresh_ms"] == 1500
             await asyncio.gather(
                 *(data.subscribe("PRICE", s["arguments"], s["target"]) for _ in range(4))
             )
-        assert len(calls) == 6
+        assert len(calls) == 2 * len(MARKETS) + 1  # repeated consumers share the subscription
         assert not allowed("POST", "/trade/v1/infoprices/subscriptions")
         ref, s = prices[0]
         p = data.markets[s["target"]].price
@@ -255,7 +249,7 @@ def test_five_ordinary_subscriptions_shared_by_consumers_and_heartbeats(
             )
         flow = recorder.windows[key(data.markets[s["target"]].identity)].flow
         recorded = read_row(recorder.windows[key(data.markets[s["target"]].identity)].rows[-1][1])
-        assert recorded["provider_timestamps"]["Timestamp"] == "2026-09-28T10:00:00+00:00"
+        assert recorded["provider_message"]["payload"]["Timestamp"] == "2026-09-28T10:00:00Z"
         assert flow["feed"]["granted_refresh_ms"] == 1500
         assert flow["feed"]["observed_receipt_ms"]["samples"] == 2
         assert not recorder.active and not recorder.event_ids  # flow creates no events
@@ -291,7 +285,7 @@ def test_same_recorder_checkpoint_event_overlap_limits_and_feature_manifest(tmp_
         w = r.windows["future"]
         assert w.coverage(1001) == 900
         rebuilt = w.checkpoint
-        for _, blob in w.rows:
+        for _, blob, _ in w.rows:
             rebuilt = apply(rebuilt, read_row(blob))
         assert rebuilt == w.current and w.checkpoint_flow["version"] == VERSION
         assert r.memory() <= r.config.rolling_max_bytes
@@ -393,9 +387,7 @@ def test_l2_fluctuations_do_not_change_frozen_decisions_or_create_events(tmp_pat
                 (rows[0]["decision"], rows[0]["reason"], rows[0]["signal_at"], rows[0]["exit_at"])
             )
             assert not runtime.broker.armed and not store.orders(rows[0]["id"])
-            assert (
-                runtime.config.max_open_positions == 4 and runtime.config.max_premium_risk_gbp == 10
-            )
+            assert MAX_OPEN_POSITIONS == 4 and MAX_PREMIUM_RISK_GBP == 1000
             await runtime.stop()
             store.db.close()
         assert len(set(decisions)) == 1

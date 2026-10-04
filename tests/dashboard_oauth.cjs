@@ -26,8 +26,8 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname.startsWith("/api/")) {
     res.setHeader("Content-Type","application/json");
-    return res.end(JSON.stringify(url.pathname === "/api/overview"
-      ? {system:{oauth:signedIn ? "AUTHENTICATED_FIXTURE" : "RECONNECT_REQUIRED"},markets:[],pnl:{}}
+    return res.end(JSON.stringify(url.pathname === "/api/system"
+      ? {oauth:signedIn ? "AUTHENTICATED_FIXTURE" : "RECONNECT_REQUIRED",markets:[]}
       : {active:[],completed:[]}));
   }
   const file = url.pathname.startsWith("/static/") ? path.basename(url.pathname) : "index.html";

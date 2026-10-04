@@ -1,0 +1,180 @@
+"""Dashboard views show the runtime's decisions without over-fetching or stale assets."""
+
+import asyncio
+import json
+from datetime import timedelta
+
+import httpx
+import pytest
+
+from saxo_support import AT, GC_MAPPING, fill_record, record_entry
+from stocker_dashboard.app import create_dashboard_app
+from stocker_execution.config import FuturesConfig
+from stocker_execution.runtime import Runtime
+from stocker_execution.store import Store
+
+
+def observe(store, market, minute, context=None):
+    identity = f"{market}-{minute}"
+    event = {
+        "id": identity,
+        "market": market,
+        "rule_version": "fixture",
+        "signal_at": (AT + timedelta(minutes=minute)).isoformat(),
+        "exit_at": (AT + timedelta(minutes=minute + 60)).isoformat(),
+    }
+    store.observe(event, "FIXTURE_SKIP", {"large": "x" * 2000})
+    if context is not None:
+        with store.db:
+            row = store.db.execute("SELECT detail FROM signals WHERE id=?", (identity,)).fetchone()
+            detail = {**json.loads(row[0]), "option_context": context}
+            store.db.execute(
+                "UPDATE signals SET detail=? WHERE id=?", (json.dumps(detail), identity)
+            )
+    return identity
+
+
+def ready_runtime(tmp_path, market="GC"):
+    config = FuturesConfig(execution_mode="INTERNAL_PAPER", mappings={"GC": GC_MAPPING})
+    runtime = Runtime(config, Store(tmp_path / "ledger.sqlite3"))
+    runtime.broker.armed = runtime.broker.reconciled = True
+    runtime.broker.problem = ""
+    runtime.data.connected = True
+    runtime.data.session = {"TradeLevel": "FullTradingAndChat"}
+    runtime.markets[market].problem = runtime.markets[market].history_problem = ""
+    return runtime
+
+
+def test_paused_ready_market_says_paused_on_every_page(tmp_path):
+    runtime = ready_runtime(tmp_path)
+    runtime.pause = True
+    overview = {c["market"]: c for c in runtime.overview()["markets"]}["GC"]
+    detail = runtime.market_detail("GC")["markets"][0]
+    assert overview["block_reason"] == detail["block_reason"] == "ENTRIES_PAUSED"
+    assert not overview["entry_enabled"] and not detail["entry_enabled"]
+    runtime.pause = False
+    assert runtime.market_detail("GC")["markets"][0]["entry_enabled"]
+    runtime.store.db.close()
+
+
+def test_overview_and_execution_show_each_trade_with_its_result(tmp_path, monkeypatch):
+    import stocker_execution.runtime as module
+
+    monkeypatch.setattr(module, "now", lambda: AT + timedelta(hours=2))
+    runtime = ready_runtime(tmp_path)
+    s = runtime.store
+    ref = record_entry(s)
+    s.record_fill(fill_record(ref))
+    with s.db:
+        s.db.execute(
+            "UPDATE orders SET status='Filled',filled=1,remaining=0 WHERE reference=?", (ref,)
+        )
+    exit_ref = s.prepare_order("x", "EXIT", 900, AT.isoformat(), {"con_id": 100})
+    s.record_fill({**fill_record(exit_ref, "exit.1", "SLD"), "price": 0.15})
+    with s.db:
+        s.db.execute(
+            "UPDATE orders SET status='Filled',filled=1,remaining=0 WHERE reference=?", (exit_ref,)
+        )
+        s.db.execute("UPDATE fills SET commission=1,commission_currency='USD'")
+    assert s.confirm_closed("x", 0)
+    today = runtime.overview()["today"]
+    assert (today["closed"], today["wins"]) == (1, 1)
+    assert today["net_gbp"] == pytest.approx(s.economics()["realised_net_gbp"])
+    assert [(t["market"], t["bought"], t["sold"]) for t in today["trades"]] == [("GC", 0.1, 0.15)]
+    view = runtime.execution_view()
+    assert view["recent_trades"][0]["net_gbp"] == pytest.approx(2.4)
+    assert {(f["market"], f["role"]) for f in view["fills"]} == {("GC", "ENTRY"), ("GC", "EXIT")}
+    assert "price_context" in runtime.overview()["markets"][0]
+    runtime.store.db.close()
+
+
+def test_market_detail_reads_only_its_recent_signals_and_latest_context(tmp_path):
+    runtime = ready_runtime(tmp_path)
+    for minute in range(12):
+        observe(runtime.store, "GC", minute, {"selection_status": f"S{minute}"})
+    observe(runtime.store, "CL", 30)
+    card = runtime.market_detail("GC")["markets"][0]
+    assert [s["id"] for s in card["signals"]] == [f"GC-{m}" for m in range(11, 3, -1)]
+    assert card["option_context"]["latest_event"]["context"] == {"selection_status": "S11"}
+    runtime.store.db.close()
+
+
+def test_history_rows_are_summaries_and_evidence_stays_on_demand(tmp_path):
+    async def scenario():
+        runtime = Runtime(FuturesConfig(), Store(tmp_path / "ledger.sqlite3"))
+        identity = observe(runtime.store, "CL", 1)
+        app = create_dashboard_app(runtime)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="http://127.0.0.1"
+        ) as client:
+            (row,) = (await client.get("/api/history")).json()["rows"]
+            assert set(row) == {
+                "id",
+                "market",
+                "rule_version",
+                "signal_at",
+                "exit_at",
+                "decision",
+                "reason",
+                "state",
+                "trade",  # None unless the opportunity was traded
+            }
+            assert row["trade"] is None
+            detail = (await client.get("/api/detail", params={"identity": identity})).json()
+            assert detail["inputs"]["inputs"] == {"large": "x" * 2000}
+        await runtime.stop()
+        runtime.store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_page_assets_revalidate_and_arm_rejects_malformed_bodies(tmp_path):
+    async def scenario():
+        runtime = Runtime(FuturesConfig(), Store(tmp_path / "ledger.sqlite3"))
+        app = create_dashboard_app(runtime)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="http://127.0.0.1"
+        ) as client:
+            for path in ("/", "/markets", "/static/dashboard.js", "/static/dashboard.css"):
+                response = await client.get(path)
+                assert response.status_code == 200
+                assert response.headers["cache-control"] == "no-cache", path
+            for body in ("not json", "[]", '"ENABLE PAPER ONLY"'):
+                response = await client.post(
+                    "/api/paper/arm", content=body, headers={"Content-Type": "application/json"}
+                )
+                assert response.status_code == 422, body
+            assert not runtime.broker.armed
+        await runtime.stop()
+        runtime.store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_overview_and_market_detail_share_one_card_and_evidence_stays_on_demand(tmp_path):
+    async def scenario():
+        runtime = ready_runtime(tmp_path)
+        runtime.markets["GC"].boundary_clock = AT
+        overview = {c["market"]: c for c in runtime.overview()["markets"]}["GC"]
+        detail = runtime.market_detail("GC")["markets"][0]
+        for field in (
+            "strategy_state",
+            "block_reason",
+            "entry_enabled",
+            "data_status",
+            "pending_data",
+        ):
+            assert overview[field] == detail[field], field
+        assert detail["pending_data"] and "diagnostic" not in detail
+        identity = observe(runtime.store, "GC", 1)
+        app = create_dashboard_app(runtime)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="http://127.0.0.1"
+        ) as client:
+            body = (await client.get("/api/detail", params={"identity": identity})).json()
+            assert "detail" not in body["signal"]
+            assert body["inputs"]["inputs"] == {"large": "x" * 2000}
+        await runtime.stop()
+        runtime.store.db.close()
+
+    asyncio.run(scenario())

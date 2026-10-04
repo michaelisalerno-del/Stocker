@@ -16,10 +16,10 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Syncing core and server dependencies with uv..."
-uv sync --locked --no-default-groups --group server
+echo "Syncing runtime dependencies with uv (no development or research groups)..."
+uv sync --locked --no-default-groups
 
 echo
 echo "Bootstrap complete."
 echo "Next steps:"
-echo "  uv run --no-sync stocker futures-run --config configs/futures.paper.yaml --database .stocker/futures.sqlite3"
+echo "  uv run --no-sync stocker futures-run --config configs/futures.paper.yaml --database .stocker/saxo-sim-disabled.sqlite3"

@@ -1,12 +1,166 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `5aa3a7be4c1f37245ba171dde08968eb43b54375`, deployed on
-**2026-09-28 at 18:05 UTC** through the existing immutable-release process.
-[Deployment postflight](saxo-option-deployment.json) and
-[option-context implementation/validation](saxo-option-context-addendum.md) describe this release.
-Later commits update documentation and evidence only.
+Current application release: `1cce2bb3ed581e7f447872b0a4424cdb62e40d67`, deployed 2026-10-04 17:57–18:00 UTC (Sunday, inside the
+restart window; no configuration change; backup `refresh-20261004-refresh`): the chart stream at Saxo's measured 300 ms floor
+and the chain windows at 1,000 ms instead of 2,000 (MARKET-DATA.md; the probe also found the ~10-per-session cap on chain
+subscriptions, of which the service holds eight). Verified after the restart: served assets match, 20 of 48 lines before
+candidates warm, chart streams CURRENT on all four markets, preflight clean, re-armed, FullTradingAndChat with DataLevel
+Premium, 0 recording gaps. Rollback: `93d188b…`.
 
-A fresh read-only check on **2026-09-29 at 07:51:16 UTC** confirmed the same release,
+Previous release `93d188bb7f9054946209d0e712d6642644bc1b5e`, deployed 2026-10-04 17:41–17:46 UTC (Sunday,
+inside the restart window) with the configuration addition `next_contracts: CL → CLZ6` (NYMEX, Dec-26, Saxo LIVE UIC
+31051110; previous file `saxo.live.paper.yaml.bak-20261004-nextstreams`, backup `nextstreams-20261004-nextstreams`):
+the subscription guard 32 → 48 (Saxo accepted 55 in one session, `scripts/saxo_subscription_capacity_probe.py`), the
+following expiry's chain window per market recorded as `OptionsChainNext`, and the CLZ6 pre-roll stream recorded as
+`ContractFutures` with `role: NEXT_CONTRACT` (MARKET-DATA.md). Verified after the restart: served assets match,
+20 of 48 lines before option candidates warm, chart streams CURRENT on all four markets, next-chain recording clean on
+all four, CLZ6 SUBSCRIBED, preflight clean, re-armed, FullTradingAndChat with DataLevel Premium, 0 recording gaps.
+Rollback: `ba082b8…` with the `.bak` configuration.
+
+Previous release `ba082b829dd9ee4c0fd4a6df5323c5d0b9ababcf`, deployed 2026-10-04 17:12–17:16 UTC (Sunday,
+inside the restart window; no configuration change; backup `chartstream-20261004-chartstream`): the clock's boundary
+bar from Saxo's chart stream with REST as the check (MARKET-DATA.md, "Chart stream"). Verified after the restart:
+served assets match, chart streams CURRENT on CL, ES, GC and NQ (real-time, ten samples each), 15 of 32 subscription
+lines before option candidates warm, preflight clean, re-armed, FullTradingAndChat with DataLevel Premium, 0 recording
+gaps. First live boundary decisions: the 19:00 New York clocks of 4 October; the tripwire (`chart_stream_problem`)
+had not fired at deployment. Rollback: `86f463c…`.
+
+Previous release `86f463ca1ff1bf21978ef992a1d8bada7638e3bf`, deployed 2026-10-04 15:47–16:05 UTC (Sunday,
+inside the restart window) with the configuration change `option_chain_strikes` 25 → 61 and
+`recorder.archive_max_bytes` 50 → 70 GiB (previous file `saxo.live.paper.yaml.bak-20261004-chain61`, backup
+`chain61-20261004-chain61`): the review of what Saxo delivers against what is kept (DASHBOARD-AND-DATA.md,
+"Archive runway"). Verified after the restart: served assets match the release, effective 61 strikes / 70 GiB, chain
+window and chain recording clean on CL, ES, GC and NQ, option spaces 22/24/21/17 roots (ES needed its 15-minute retry
+after Saxo's rate limit), preflight clean, re-armed, session FullTradingAndChat with DataLevel Premium, recorder
+354 MB with 0 gaps. Rollback: `b7e21f4…` with the `.bak` configuration. Earlier the same day: `aa0cb76…` (dashboard
+visual refresh, 14:25 UTC) and `b7e21f4…` (setup checklist folded, 14:56 UTC), both restart deploys, both re-armed;
+every capture of 1–2 October had ended `INTERRUPTED_RESTART`, hence the restart window in DEPLOYMENT.md.
+
+Previous release `f0cbd06d95689f308c3e370a98b1aa9c2524f8ab`, deployed 2026-10-01 21:08 UTC and re-armed
+(session stayed FullTradingAndChat): the market page's L1 label follows the server's standing-quote time
+(`l1.standing_receipt`) instead of the last price change, so a quiet market no longer flickers between
+STALE OR MISSING and CURRENT on every refresh (user's report). Backup `l1-label-20261001`. Rollback: `8dbc6df…`.
+
+Previous release `8dbc6df3267aa985a6a55280a213513bf342c6d2`, deployed 2026-10-01 20:51 UTC and re-armed
+(session stayed FullTradingAndChat): the phone-first dashboard (user's priorities: overview, trades view, Market and
+System tidy; see DASHBOARD-AND-DATA.md), per-trade results from the ledger, and the LIVE balance fix (the balance
+subscription now sends the ClientKey; Saxo LIVE answered 400 without it). Verified after the restart: balance Current
+with all three figures, today's 9 trades and net -£673.99 on the overview, trades-only history, labelled fills.
+Backup `dashboard-20261001`. Rollback: `0732d95…` (same config).
+
+Previous release `0732d9584fcc9a22a555f99d365f4d6557d580ef`, deployed 2026-10-01 20:23 UTC and re-armed
+(session stayed FullTradingAndChat): the depth table drops the order-count imbalance column, which Saxo LIVE never
+fills (`UsingOrders: false`, order fields repeat the sizes), and says why. Backup `depth-table-20261001`. Rollback:
+`792e3cf…` (same config).
+
+Previous release `792e3cf9c732152153cc98ed470f8cbee5db9d05`, deployed 2026-10-01 20:12 UTC by the
+one-shot timer after the session (no open trades) and re-armed; the session stayed FullTradingAndChat. It carries
+`ea1695e` (two-tap real-time confirm), `c902219` (an unsellable paper option is written off at zero after 60 s with
+no bid), `587812f` (no-trade runs of up to 5 minutes filled at the last close), `462605f` (smile near the money,
+traded-volume change), `942d2bd`/`ababf6d` (ladder bids on the right) and `792e3cf` (the look14 forecast and the
+option's implied move against it, recorded at every clock and shown on the ticket). Config change at the same restart:
+`event_calendar_file: /etc/stocker/v1/event-calendar.yaml`, the frozen `docs/release-calendar-2026-10-11.yaml`
+(sha256 `43ae308b…`); previous config `saxo.live.paper.yaml.bak-20261001-calendar`. Verified after the restart: all
+five option roots loaded, quotes DelayedByMinutes 0, calendar loaded, forecast OBSERVED in all five markets. Backup
+`evening-fixes-20261001`. Rollback: `c15d937…` with the previous config.
+
+Previous release `c15d937f8f19a1ad6d7bf36bdaf71e34ad8c781c`, deployed 2026-10-01 15:46 UTC and re-armed.
+It carries `e33b6d4` (a stream reconnect keeps today's option spaces instead of reloading ~70 roots before the price
+feeds) and fixes the start-up recording repair: `recover_members` looped forever when a gzip member ended inside an
+output-limited tail, so the 15:17 UTC restart of `e33b6d4` hung at 100% CPU before the stream started (service stopped
+at about 15:31 UTC; no open trades). Every capture segment was dry-run on copies first (all complete, nothing cut).
+After the restart the session came back OrdersOnly (the real-time slot must be taken again) and entries remain paused
+as they were. Backup `recorder-fix-20261001`. Rollback: `2555819…` / `acd4779…` (both have the old repair loop).
+
+Previous release `acd47794caa03de5df0efbd6e332c936cc3d7ef1`, deployed 2026-10-01 10:23 UTC, re-armed.
+At the user's request an unchanged quote now stands while Saxo confirms its feed (see the rulebook). Measured
+before (06:16 New York): options current in 0-8% of samples except NQ (61-68%). After (06:29 New York, 90 s):
+CL 88-100%, GC 99%, NQ 99%, SI 96-99%, while their last price changes were typically 3-65 s old. Backup
+`standing-quotes-20261001`. Rollback: `2555819…`.
+
+Previous release `2555819e914d9ce4a3b98cd0d546e881fbcea02d`, deployed 2026-10-01 07:28 UTC with
+a config change, re-armed. At the user's request NG and SI mappings use `expiry_rule:
+SAME_DAY_OR_NEXT_LISTED` (same-day option when one trades past the exit, otherwise the next listed expiry;
+see the rulebook); CL, GC and NQ stay same-day. `option_candidate_window: 2` (07:33 UTC) so all five
+markets' warm candidates fit the option subscription budget (with 3, GC was crowded out). Verified: SI now
+warms Friday 2 Oct puts with real-time quotes; NG's Friday strikes are 0.05 apart and none was within the
+approved 0.03 of the frozen 0.10 delta at 03:30 New York (2.85 at 0.04, 2.90 at 0.15). Backup
+`expiry-rule-20261001` (with both previous configs). Rollback: `ebb4719…` with `saxo.live.paper.yaml.before`.
+
+Previous release `ebb47197e80f652579c65977ffd42d7eca4c18dd`, deployed 2026-10-01 06:51 UTC
+and re-armed. Real-time CME data arrived overnight (quotes, charts and 10x10 depth, DelayedByMinutes 0).
+LIVE option reference data then exposed three SIM-era assumptions, fixed in `1cbe226` and `ebb4719`:
+lot fields (IncrementSize/MinimumLotSize, not MinimumTradeSize/LotSize), NQ's price-tiered
+TickSizeScheme, and cost conditions (CarryingCost, short-overnight only, is not charged; the GBP
+account's 0.6% conversion markup is priced into costs and fills). Offline on the real LIVE CL/GC/NQ data
+every check passes; on the server NQ waits only for the reference audit, CL/GC also for a fresh
+option quote. Backups `live-option-schema-20261001`, `live-costs-20261001`. Rollback: `a65b52e…`.
+
+Previous release `a65b52e22fa6bdd8436c48a7be3c96dfa408eb60`, deployed 2026-09-30 23:19 UTC and
+re-armed: a header chip and a line under the button show Real-time ON / ON but Saxo still delayed / OFF.
+The session was made primary at 23:15 UTC (FullTradingAndChat, DataLevel Premium; it survived the restart),
+yet fresh subscriptions and charts still report DelayedByMinutes 10: Saxo is not yet granting real-time CME
+data to the API (Open API Access market data in SaxoTraderGO, or the subscription itself). Backup
+`/var/lib/stocker/backups/realtime-chip-20260930`. Rollback: symlink to `a70f244…`, restart.
+
+Previous release `a70f2442a3d6391796bbe5e2492224bc2f57b964`, deployed 2026-09-30 23:06 UTC
+and re-armed after preflight. A repeat real-time click now renews the price streams too (a click made
+before the data subscription starts would otherwise leave them delayed), and the market card rounds the
+futures spread and change. Verified backup `/var/lib/stocker/backups/repeat-click-20260930`; CI green;
+installed smoke passed; all five option families reloaded. Rollback: symlink to `49c9390…`, restart.
+
+Previous release `49c9390144af3570cf1e08a2e8d90b6afc6594e9` (branch
+`codex/live-paper-l2-observation`), deployed 2026-09-30 22:40 UTC, **armed** (INTERNAL_PAPER, re-armed with
+`ENABLE PAPER ONLY` after preflight). It adds the System page's **Use real-time in SLRNO** button: Saxo
+sends real-time prices only to the user's one FullTradingAndChat session, the LIVE session is OrdersOnly,
+and entries require it. The user chose an explicit click over automatic re-taking (SaxoTraderGO shares the
+slot). Verified backup `/var/lib/stocker/backups/primary-session-20260930`; installed smoke passed; all
+five option families loaded after restart. Rollback: symlink to `/opt/stocker/releases/ebb2665…`, restart.
+
+Previous release `ebb2665e9d2c32addf599ab8e7d62d634d2bbe58` (branch
+`codex/live-paper-l2-observation`), **LIVE market data with internal paper fills**, disarmed, since
+2026-09-30 21:37 UTC. Approved by the user: pins CLX6/GCZ6/NGX6/NQZ6/SIZ6, option-root families with
+per-day expiries from Saxo timestamps at the exchange clock, delta tolerance 0.03, persistent recording,
+and a daily reference-session audit (timer, 07:30 New York). All five option families load; entries wait for
+real-time data (subscriptions start 2026-10-01). [Setup record](live-paper-setup-20260930.json). Return to SIM:
+delete `/etc/systemd/system/stocker-v1.service.d/50-live-paper.conf`, daemon-reload, restart.
+
+Previous release `2c2a6e96c78b3dd8425556f55be8d8d425563591` (branch
+`codex/live-paper-l2-observation`), deployed on **2026-09-30 at about 19:30 UTC**, replacing `82577e0`.
+It unblocks GC: gold now warms and records option candidates and is labelled like the other four
+markets, entering only once its listed mapping is approved like any market. [Postflight](unblock-gc-deployment-20260930.json):
+flat ledger, verified backup `/var/lib/stocker/backups/unblock-gc-20260930`, installed smoke, all loopback
+routes 200, anonymous HTTPS 401, GC now `BLOCKED` by `REFERENCE_CONTRACT_SELECTION_REQUIRED` like the others,
+runtime unchanged (SIM authenticated, connected, DISABLED/disarmed, no orders). Rollback: symlink to
+`/opt/stocker/releases/82577e0…` and restart.
+
+Previous release `82577e0471331aaf1e73b81a9ce961f334957951` (branch
+`codex/live-paper-l2-observation`), deployed on **2026-09-30 at 19:08:30 UTC** through the existing
+immutable-release process, replacing `bd2d7a0`. Changes: every observed clock records `book_flow` and
+`observation` (see [the experiment](LIVE-PAPER-EXPERIMENT.md)); paper admission buys one contract up to a
+£1,000 guard (was £50). The [sanitised postflight](live-paper-l2-deployment-20260930.json) records a flat
+ledger before the switch, the verified backup `/var/lib/stocker/backups/live-paper-l2-20260930`, the
+reservation-check migration rehearsed on a copy and then applied at start (`IN (1000,5000,100000)`),
+installed smoke, all loopback routes 200, anonymous HTTPS 401 and an unchanged runtime state (SIM
+authenticated, stream connected, DISABLED/disarmed, no orders). Configuration, credentials and tokens
+are unchanged. Rollback: restore the symlink to `/opt/stocker/releases/bd2d7a0…` and restart; the
+migrated reservation check also accepts every earlier amount.
+
+LIVE data and paper arming remain user actions: see [LIVE-PAPER-EXPERIMENT.md](LIVE-PAPER-EXPERIMENT.md).
+
+Previous release `bd2d7a0d7def351d583e8b85d57b8c236babb427` (branch
+`codex/audit-fixes`), deployed on **2026-09-29 at 18:19:57 UTC** through the existing
+immutable-release process, replacing `98a772c`. [Audit fixes](SLRNO-AUDIT-20260929.md) describe the
+changes; the [sanitised postflight](saxo-audit-fixes-deployment-20260929.json) records a flat ledger
+before the switch, the verified backup `/var/lib/stocker/backups/audit-fixes-20260929`, the
+`recorder.pre_event_minutes` configuration migration, installed smoke, matching served assets and an
+unchanged runtime state (SIM authenticated, stream connected, DISABLED/disarmed, no orders). The first
+token renewal after deployment (18:25:49 UTC) re-authorised the open stream without a reconnect.
+Rollback: restore the symlink to `/opt/stocker/releases/98a772c…` and restart; the migrated
+configuration loads under both releases.
+
+Earlier: release `5aa3a7b` was deployed on 2026-09-28 at 18:05 UTC
+([postflight](saxo-option-deployment.json)). A fresh read-only check on **2026-09-29 at 07:51:16 UTC** confirmed the same release,
 an active service with zero automatic restarts, authenticated Saxo SIM and a connected stream:
 [sanitised runtime snapshot](github-sync-runtime-20260929.json).
 Execution remained **DISABLED**, armed **false**, **LIVE ORDERS DISABLED**, with zero reserved/open

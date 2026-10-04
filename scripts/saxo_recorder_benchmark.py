@@ -6,6 +6,8 @@ Virtual market time is not evidence of a live Saxo cadence or entitlement.
 
 import argparse
 import asyncio
+import gzip
+import hashlib
 import json
 import resource
 import statistics
@@ -90,6 +92,7 @@ async def benchmark(
 
         task = asyncio.create_task(heartbeat())
         started = time.perf_counter()
+        cpu_started = time.process_time()
         event_count = 0
         peak_queue = 0
         for second in range(1, virtual_seconds + 1):
@@ -244,7 +247,26 @@ async def benchmark(
         await recorder.close()
         stopped = True
         await task
+        elapsed = time.perf_counter() - started
+        cpu_seconds = time.process_time() - cpu_started
         rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        evidence = []
+        duplicates = 0
+        capture_states = []
+        for path in sorted(Path(directory).glob("*.jsonl.gz")):
+            seen = set()
+            with gzip.open(path, "rt") as stream:
+                for line in stream:
+                    row = json.loads(line)
+                    if "local_sequence" in row:
+                        identity = row["identity"]
+                        identity_key = (identity["uic"], row["local_sequence"])
+                        duplicates += identity_key in seen
+                        seen.add(identity_key)
+                        evidence.append(json.dumps(row, sort_keys=True))
+        for path in Path(directory).glob("*.manifest.json"):
+            capture_states.append(json.loads(path.read_text())["state"])
+        evidence_hash = hashlib.sha256("\n".join(sorted(evidence)).encode()).hexdigest()
         rss_bytes = rss if sys.platform == "darwin" else rss * 1024
         return {
             "evidence": "OFFLINE_GENERATED_SIMULATION",
@@ -260,7 +282,13 @@ async def benchmark(
             "simultaneous_five_market_triggers": burst_events,
             "queue_peak_bytes": peak_queue,
             "shared_segments": len(list(Path(directory).glob("*.gz"))),
-            "wall_seconds": round(time.perf_counter() - started, 3),
+            "wall_seconds": round(elapsed, 3),
+            "cpu_seconds": round(cpu_seconds, 3),
+            "cpu_percent_of_one_core": round(cpu_seconds / elapsed * 100, 2),
+            "archived_message_rows": len(evidence),
+            "duplicate_message_rows_within_segment": duplicates,
+            "archived_message_sha256": evidence_hash,
+            "capture_states": sorted(capture_states),
             "process_peak_rss_bytes": rss_bytes,
             "ingest_p99_ms": round(statistics.quantiles(timings, n=100)[98] * 1000, 3),
             "ingest_max_ms": round(max(timings) * 1000, 3),

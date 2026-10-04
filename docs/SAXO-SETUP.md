@@ -38,8 +38,9 @@ Do not paste secrets into chat, Git, browser payloads, screenshots or the record
    requires an OAuth connection without pinned contracts; then edit local config and restart
    **while disarmed and after accounting for any existing obligations**. No root-only recording keys.
 5. Request/verify account market-data permission in Saxo yourself if reported unavailable. An
-   OrdersOnly session may provide delayed prices. Upgrading to FullTradingAndChat can downgrade
-   another Saxo application. SLRNO never automatically upgrades or fights another session.
+   OrdersOnly session receives delayed prices only. Upgrading to FullTradingAndChat can downgrade
+   another Saxo application. SLRNO never automatically upgrades or fights another session; the
+   System page's **Use real-time in SLRNO** button upgrades on the user's click only.
    Verify L1 delay, actual granted cadence, real received L2 fields and option quotes per market.
    A MarketDepth schema is not proof of your entitlement. Missing depth keeps L1 monitoring alive.
 6. Obtain and retain the applicable Saxo/exchange permission for your intended raw recording,
@@ -55,9 +56,12 @@ Do not paste secrets into chat, Git, browser payloads, screenshots or the record
    `ENABLE PAPER ONLY` and successful preflight less than 60 seconds old. Every restart disarms.
    Connecting a feed or resuming paused entries never arms execution.
 
-Paper fills also require a currently open option session, verified instrument trading permission,
-fresh tradable bid/ask prices and independently fresh available size on the side being filled.
-An indicative quote may be displayed but cannot generate an internally simulated fill.
+Paper fills also require a currently open (`AutomatedTrading`) option session, verified instrument
+trading permission, real-time (`DelayedByMinutes` 0) bid/ask prices under five seconds old with a
+usable price quality, and independently fresh available size on the side being filled. Usable
+means `Indicative` (Saxo's normal real-time price) or the obsolete `Tradable`; `OldIndicative`,
+`Pending`, `NoMarket`, `NoAccess` and unknown values never fill. Internal fills stay pessimistic:
+ask plus one tick in, bid minus one tick out.
 
 For a stopped service/isolated preflight owner, use:
 
@@ -117,3 +121,13 @@ These streaming URLs are service bases: the WebSocket handshake must append `/co
 `?contextId=...`, as shown in Saxo's current [streaming guide](https://www.developer.saxo/openapi/learn/streaming).
 The bare base returned HTTP 404 in the authenticated SIM check; `/connect` succeeded without
 subscriptions. Tokens remain in the Authorization header, never the connection URL.
+
+## Stream re-authorisation after token renewal
+
+When the OAuth access token is renewed (about every 18.5 minutes) the runtime sends
+`PUT …/streaming/ws/authorize?contextid=<context>` with the new bearer token instead of
+reconnecting; Saxo answers `202 Accepted` and the open subscriptions continue. Only a refused
+re-authorisation (`STREAM_REAUTHORISATION_HTTP_<status>` or `STREAM_REAUTHORISATION_UNAVAILABLE`
+in System) forces a reconnect with fresh snapshots. After the first rollout of this behaviour,
+confirm on SIM that the stream stays connected across a renewal: `reconnects` stays at 1 in System
+and no `STREAM_REAUTHORISATION_*` problem appears.

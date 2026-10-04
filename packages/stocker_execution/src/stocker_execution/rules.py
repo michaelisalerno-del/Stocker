@@ -45,9 +45,9 @@ def next_weekday(day: date) -> date:
 
 
 def session_day(now: datetime) -> date:
-    """The CME session date: after the 18:00 New York open, the next weekday's (2026-10-04)."""
+    """The CME session date: after the 18:00 New York open, and at weekends, the next weekday's."""
     local = now.astimezone(NY)
-    return next_weekday(local.date()) if local.hour >= 18 else local.date()
+    return next_weekday(local.date()) if local.hour >= 18 or local.weekday() > 4 else local.date()
 
 
 def clocks(day: date) -> list[datetime]:

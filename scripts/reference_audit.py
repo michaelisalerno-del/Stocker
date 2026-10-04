@@ -39,9 +39,10 @@ NEARBY = 4
 
 
 def audit_day(now: datetime) -> str:
-    """Today's CME session, or from 17:00 New York (after the close) the next weekday's."""
+    """Today's CME session; from 17:00 New York (after the close) and at weekends, the next."""
     local = now.astimezone(NY)
-    return (next_weekday(local.date()) if local.hour >= 17 else local.date()).isoformat()
+    later = local.hour >= 17 or local.weekday() > 4
+    return (next_weekday(local.date()) if later else local.date()).isoformat()
 
 
 def build_audit(

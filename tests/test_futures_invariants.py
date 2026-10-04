@@ -73,6 +73,8 @@ def test_session_clocks_dst_weekends_and_no_veto():
             assert opportunity(market, 1, at)["veto"] == ""
     assert session_start(datetime(2026, 9, 28, 2, tzinfo=UTC)).astimezone(NY).hour == 18
     assert session_day(datetime(2026, 10, 2, 22, tzinfo=UTC)) == date(2026, 10, 5)  # Fri 18:00 NY
+    assert session_day(datetime(2026, 10, 4, 12, tzinfo=UTC)) == date(2026, 10, 5)  # Sunday morning
+    assert session_day(datetime(2026, 10, 5, 12, tzinfo=UTC)) == date(2026, 10, 5)  # Monday 08:00
 
 
 def test_cancel_uncertainty_and_late_fill_keep_obligation(tmp_path):

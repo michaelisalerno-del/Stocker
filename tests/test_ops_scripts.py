@@ -134,3 +134,4 @@ def test_reference_audit_targets_the_next_session_after_the_close():
     assert day(2026, 10, 5, 7, 30) == "2026-10-05"  # Monday morning: today's session
     assert day(2026, 10, 8, 17, 10) == "2026-10-09"  # Thursday after the close: Friday's
     assert day(2026, 10, 9, 17, 10) == "2026-10-12"  # Friday after the close: Monday's
+    assert day(2026, 10, 4, 8, 30) == "2026-10-05"  # Sunday morning: Monday's

@@ -121,7 +121,7 @@ Previous release `ebb2665e9d2c32addf599ab8e7d62d634d2bbe58` (branch
 `codex/live-paper-l2-observation`), **LIVE market data with internal paper fills**, disarmed, since
 2026-09-30 21:37 UTC. Approved by the user: pins CLX6/GCZ6/NGX6/NQZ6/SIZ6, option-root families with
 per-day expiries from Saxo timestamps at the exchange clock, delta tolerance 0.03, persistent recording,
-and a daily reference-session audit (timer, 07:30 New York). All five option families load; entries wait for
+and a daily reference-session audit (timers, 07:30 and 17:10 New York). All four option families load; entries wait for
 real-time data (subscriptions start 2026-10-01). [Setup record](live-paper-setup-20260930.json). Return to SIM:
 delete `/etc/systemd/system/stocker-v1.service.d/50-live-paper.conf`, daemon-reload, restart.
 

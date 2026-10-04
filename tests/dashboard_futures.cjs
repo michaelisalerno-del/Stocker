@@ -39,8 +39,8 @@ const state = {
     alerts: {enabled:false, problem:"", active:[], sent:0, last_error:""},
     setup: [
       {key:"oauth",label:"Saxo login",done:true,detail:"",optional:false},
-      {key:"contracts",label:"Futures contracts verified 5/5",done:true,detail:"",optional:false},
-      {key:"approvals",label:"Option approvals 1/5",done:false,detail:"Approve product, delta tolerance, fees and expiry times (GC optional)",optional:false},
+      {key:"contracts",label:"Futures contracts verified 4/4",done:true,detail:"",optional:false},
+      {key:"approvals",label:"Option approvals 1/4",done:false,detail:"Approve product, delta tolerance, fees and expiry times (GC optional)",optional:false},
       {key:"mode",label:"Paper execution mode",done:true,detail:"",optional:false},
       {key:"armed",label:"Armed after preflight",done:false,detail:"Run preflight, then arm explicitly",optional:false},
       {key:"alerts",label:"Alerts",done:false,detail:"Optional: configure an alert URL file",optional:true},
@@ -212,7 +212,7 @@ const timeline = [
 ];
 const rows = Array.from({ length: 80 }, (_, i) => ({
   id: `fixture-${i}`,
-  market: markets[i % 5],
+  market: markets[i % markets.length],
   signal_at: new Date(Date.parse(at) - i * 60000).toISOString(),
   rule_version: "CLOCK60_NG13_20260927",
   decision: i % 3 ? "SKIPPED" : "BROKER_PAPER_FILL",

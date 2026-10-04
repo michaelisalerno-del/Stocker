@@ -77,9 +77,10 @@ labelled DELAYED. Missing L2 leaves L1 observations available, with an L2_UNAVAI
 
 Price levels entering or leaving the visible book are not executions or cancellations. LastTraded
 and LastTradedSize are displayed as the latest observation only: repetitions create no executions,
-and sizes are never summed. Volume is the reported field only. Instrument/session-specific volume
-semantics remain unverified, so volume changes are always unavailable in this release. A decrease
-is flagged RESET_OR_CORRECTION_UNCLASSIFIED, never made positive or assigned to a trade price.
+and sizes are never summed. Volume is the reported field only: Saxo LIVE's futures `Volume` was
+verified on 2026-10-01 as contracts traded since the 18:00 New York open, so V2 reports its change
+over the last 5, 30 and 60 seconds; nothing else is derived from it. A decrease is flagged
+RESET_OR_CORRECTION_UNCLASSIFIED, never made positive or assigned to a trade price.
 No aggressor volume, footprint, cumulative delta, absorption or iceberg claims are generated.
 
 ## Retention and operational boundaries

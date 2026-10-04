@@ -54,7 +54,7 @@ def test_setup_checklist_and_server_clock_are_in_every_status(tmp_path):
     runtime = runtime_for(tmp_path)
     status = runtime.status()
     items = {i["key"]: i for i in status["setup"]}
-    assert items["contracts"]["label"] == "Futures contracts verified 0/5"
+    assert items["contracts"]["label"] == "Futures contracts verified 0/4"
     assert not items["contracts"]["done"] and not items["mode"]["done"]
     assert items["recording"]["optional"] and items["alerts"]["optional"]
     assert items["references"]["detail"] == "Set reference_selections_file"

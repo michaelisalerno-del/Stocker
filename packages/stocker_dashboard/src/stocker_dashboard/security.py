@@ -15,6 +15,9 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 HARDENING = {
     "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'",
     "X-Content-Type-Options": "nosniff",
+    # API JSON (balances, evidence) is never cached by an intermediary; pages and static files
+    # set their own revalidating policy, which setdefault leaves in place.
+    "Cache-Control": "no-store",
 }
 
 

@@ -46,10 +46,6 @@ def price_problem(price: "PriceState", at: float, stream_at: float | None) -> st
     return ""
 
 
-def quote_problem(state: "MarketState", at: float, stream_at: float | None) -> str:
-    return price_problem(state.price, at, stream_at)
-
-
 def gates(
     runtime: "Runtime", market: str, state: "MarketState", at: float, paused: bool
 ) -> list[dict[str, Any]]:
@@ -67,7 +63,7 @@ def gates(
             runtime.data.problem or oauth,
         ),
         ("contract", "Contract", state.identity is not None, state.problem),
-        ("quote", "Quote", not (problem := quote_problem(state, at, stream)), problem),
+        ("quote", "Quote", not (problem := price_problem(state.price, at, stream)), problem),
         ("fx", "GBP/USD rate", not (fx := price_problem(runtime.data.fx, at, stream)), fx),
         (
             "history",
@@ -145,15 +141,16 @@ def setup(runtime: "Runtime") -> list[dict[str, Any]]:
         ("realtime", "Real-time market data", realtime, realtime_detail, False),
         (
             "contracts",
-            f"Futures contracts verified {verified}/5",
-            verified == 5,
-            f"{len(config.contracts)}/5 configured; select from Saxo ContractFutures data",
+            f"Futures contracts verified {verified}/{len(MARKETS)}",
+            verified == len(MARKETS),
+            f"{len(config.contracts)}/{len(MARKETS)} configured; "
+            "select from Saxo ContractFutures data",
             False,
         ),
         (
             "references",
-            f"Reference sessions verified {references}/5",
-            references == 5,
+            f"Reference sessions verified {references}/{len(MARKETS)}",
+            references == len(MARKETS),
             "Set reference_selections_file"
             if not config.reference_selections_file
             else "Awaiting five verified prior sessions per market",

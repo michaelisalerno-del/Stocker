@@ -20,6 +20,21 @@ def script(name):
     return module
 
 
+def test_every_tracked_config_still_loads():
+    """A bound change in config.py that invalidated a shipped YAML used to pass CI and fail at
+    deploy; the smoke builds its runtime from FuturesConfig() and never read them."""
+    from stocker_execution.config import load
+    from stocker_execution.event_calendar import load_calendar
+
+    paths = sorted(Path("configs").glob("*.yaml"))
+    assert paths
+    for path in paths:
+        if "calendar" in path.name:
+            load_calendar(path)
+        else:
+            load(path)
+
+
 def test_ledger_backup_is_consistent_verifiable_and_never_overwrites(tmp_path):
     backup = script("ledger_backup")
     database, config = tmp_path / "live" / "ledger.sqlite3", tmp_path / "saxo.sim.yaml"

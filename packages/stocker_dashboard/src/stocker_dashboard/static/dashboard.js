@@ -30,9 +30,10 @@ const money = (v) => v == null ? "Unavailable" : GBP.format(v);
 const time = (v) => v ? LONDON.format(new Date(v)) : "—";
 const hhmm = (v) => v ? NEW_YORK.format(new Date(v)) : "—";
 const london = (v) => v ? LONDON_HM.format(new Date(v)) : "—";
-// A result with its sign, and the class that colours it.
-const signed = (v) => typeof v === "number" ? `${v < 0 ? "−" : "+"}${GBP.format(Math.abs(v))}` : "—";
-const tone = (v) => typeof v === "number" && v !== 0 ? (v > 0 ? "pos" : "neg") : "";
+// A result with its sign, and the class that colours it; both judged in whole pence, as shown.
+const pence = (v) => Math.round(v * 100);
+const signed = (v) => typeof v === "number" ? `${pence(v) < 0 ? "−" : "+"}${GBP.format(Math.abs(v))}` : "—";
+const tone = (v) => typeof v === "number" && pence(v) !== 0 ? (pence(v) > 0 ? "pos" : "neg") : "";
 const price = (v) => typeof v === "number" && Number.isFinite(v) ? String(Number(v.toFixed(4))) : "—";
 const numeric = (v, suffix = "") => typeof v === "number" && Number.isFinite(v) ? `${Number(v.toFixed(4))}${suffix}` : "UNAVAILABLE";
 const text = (id, v) => {
@@ -74,7 +75,7 @@ const explanations = {
   SAXO_HISTORY_UNAVAILABLE: "Saxo price history unavailable",
   SAXO_COMPLETED_OHLCV_UNAVAILABLE: "No completed price bars from Saxo yet",
   UNSUPPORTED_EXIT_BEFORE_CONTRACT_CUTOFF: "Too late today: the option stops trading before the hour would end",
-  NG_CLOCK_13: "Natural gas skips 13:00 NY by rule",
+  INCOMPLETE_COMPLETED_HISTORY_DEADLINE: "The final minute's bar did not arrive within the 20-second deadline",
   SKIPPED: "Skipped", CLOSED_PAPER_TRADE: "Traded", INTERNALLY_SIMULATED_FILL: "Traded · open",
   L2_AVAILABLE: "available", L2_UNAVAILABLE: "unavailable", DISCONNECTED: "disconnected",
 };

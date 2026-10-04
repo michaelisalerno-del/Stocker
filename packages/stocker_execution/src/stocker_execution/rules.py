@@ -56,14 +56,17 @@ def session_day(now: datetime) -> date:
 
 
 def clocks(day: date) -> list[datetime]:
-    """Every hour the CME session trades (the user's decision, 2026-10-04): it opens at 18:00 New
-    York Sunday to Thursday and runs to 17:00 the next weekday, so the clocks are 18:00-23:00 on
-    those evenings and 00:00-16:00 on weekdays (a 16:00 clock exits at the close). The original
-    09:00-16:00 clocks are among them, unchanged."""
+    """Every hour of the CME session at which a trade is possible (the user's decision, 2026-10-04,
+    amended the same day): the session opens at 18:00 New York Sunday to Thursday and runs to
+    17:00 the next weekday. The 18:00 clock has no completed minutes before it (17:00-18:00 is the
+    maintenance break) and a 16:00 clock would exit at the 17:00 close, outside every option's
+    trading session, so neither could ever enter and both are left out: the clocks are 19:00-23:00
+    on those evenings and 00:00-15:00 on weekdays. The original 09:00-15:00 clocks are among them,
+    unchanged (docs/CLOCK-SET-AMENDMENT-20261004.md)."""
     weekday = day.weekday()
-    hours = list(range(0, 17)) if weekday <= 4 else []
+    hours = list(range(0, 16)) if weekday <= 4 else []
     if weekday == 6 or weekday <= 3:
-        hours += range(18, 24)
+        hours += range(19, 24)
     return [datetime.combine(day, time(h), NY).astimezone(UTC) for h in hours]
 
 

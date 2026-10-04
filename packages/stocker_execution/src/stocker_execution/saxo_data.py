@@ -547,7 +547,9 @@ class DataService:
             "ContextId": context,
             "ReferenceId": ref,
             "Arguments": arguments,
-            "RefreshRate": 10000 if kind == "BALANCE" else 2000 if kind == "BOARD" else 1000,
+            # Measured floors on this account (2026-10-04 probe): prices and chains 1,000 ms,
+            # charts 300 ms; Saxo grants the floor when less is asked.
+            "RefreshRate": 10000 if kind == "BALANCE" else 300 if kind == "CHART" else 1000,
             "Format": "application/json",
         }
         if old:

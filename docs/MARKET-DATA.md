@@ -2,12 +2,16 @@
 
 One server data owner per environment/root keeps all configured five underlyings subscribed even
 with no browser. Browsers read existing authenticated APIs and never subscribe to Saxo.
-Price/depth subscriptions request 1,000 ms; the option discovery board requests its supported
-2,000 ms minimum. Actual returned RefreshRate is reported. The selected option receives a regular
+Price/depth and chain subscriptions request 1,000 ms and chart subscriptions 300 ms: the floors
+Saxo grants this account (probe of 2026-10-04: 100, 250 and 500 ms requests all came back as
+1,000 ms for prices, depth and chains, and 300 ms for charts). The same probe met
+`SubscriptionLimitExceeded` on the eleventh concurrent options-chain subscription of the
+session, so chains are capped at about ten; the service holds eight. Actual returned
+RefreshRate is reported. The selected option receives a regular
 price subscription for its account and intended quantity of one. Board quotes are not executable prices.
 
 Chart stream (2026-10-04): each pinned future also has a `/chart/v3/charts` subscription on the
-same connection (Horizon 1, ten samples, RefreshRate 1,000 ms). On 1–2 October a fifth of the
+same connection (Horizon 1, ten samples, RefreshRate 300 ms — Saxo's chart floor). On 1–2 October a fifth of the
 clocks were skipped `INCOMPLETE_COMPLETED_HISTORY` because the final minute's bar reached the
 five-second REST poll after the 20-second entry deadline. Saxo opens the next sample when a
 minute ends and sends the closed bar with it, so a clock whose only missing bar is that minute

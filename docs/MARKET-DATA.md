@@ -17,6 +17,13 @@ must equal the streamed bar, and any difference trips the stream until a restart
 (`chart_stream_problem`, a `CHART_STREAM_MISMATCH` lifecycle row on the clock, the status bar's
 "Chart stream fell back to REST"). Delayed, paused, reset or silent streams supply nothing.
 
+Second chain window and following contract (2026-10-04): each market also subscribes the chain of
+the following expiry day (`market:next`, its own root, centred on its own money) and records it
+as the instrument `OptionsChainNext`, separate from the nearest chain so readers of the nearest
+window never meet two expiries. Where `next_contracts` names the following contract month
+(CLZ6 ahead of the CL re-pin), its quotes and depth are streamed and recorded with every clock
+as a `ContractFutures` instrument with `role: NEXT_CONTRACT`; neither is a decision input.
+
 The bounded binary parser handles initial snapshots, field patches, null clears, price-array
 replacement, indexed option-board updates, heartbeats and duplicate opaque message IDs. A separate
 local ingest sequence is retained. Conflicting replays, reset/disabled subscriptions, session downgrade,
@@ -50,7 +57,7 @@ Defaults, selected against this workstation's 230 GiB available disk (server res
 
 | Resource | Limit/default |
 |---|---:|
-| Rolling window | 15 minutes, 32 MiB aggregate, maximum 32 instrument windows |
+| Rolling window | 15 minutes, 32 MiB aggregate, maximum 48 instrument windows |
 | One message | 256 KiB |
 | Raw write queue | 512 items and 8 MiB |
 | Concurrent/recent captures | 32; 256 event identities per shared interval |
@@ -59,7 +66,7 @@ Defaults, selected against this workstation's 230 GiB available disk (server res
 | Completed one-minute bar cache | 128 MiB, separate compressed contract/day files |
 | Runtime logs | 2 MiB plus 3 rotated files |
 | REST | 32 queued calls; 4 MiB response; conservative 0.55 s spacing |
-| Subscriptions | 32 total, at most 16 regular option quotes |
+| Subscriptions | 48 total (our guard; Saxo accepted 55 in one session on 2026-10-04), at most 16 regular option quotes |
 | Pending snapshot updates / WebSocket queue | 1 MiB / 16 bounded frames |
 
 Time expiry and byte limits both apply. Limits shorten reported history rather than pretending 15

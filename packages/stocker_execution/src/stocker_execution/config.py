@@ -26,7 +26,9 @@ MAX_SIMULTANEOUS_ENTRY_RISK_GBP = MAX_PREMIUM_RISK_GBP * MAX_OPEN_POSITIONS
 # (2026-10-01, the user's request) any later moment the socket delivered while its subscription
 # was heartbeated, unpaused and gap-free, since Saxo sends a price only when it changes.
 QUOTE_MAX_AGE_SECONDS: Final = 5
-SUBSCRIPTION_LIMIT = 32  # Saxo streaming subscriptions owned by this application
+# Saxo streaming subscriptions owned by this application: our own guard. Saxo publishes no count
+# limit; scripts/saxo_subscription_capacity_probe.py held 55 in one session on 2026-10-04.
+SUBSCRIPTION_LIMIT = 48
 ROLLING_WINDOW_SECONDS = 15 * 60  # server-held L1/L2 prehistory per instrument
 OPTION_METADATA_MAX_AGE_SECONDS = 15 * 60
 PAGE_SIZE = 100  # dashboard history/execution rows per request
@@ -165,6 +167,9 @@ class FuturesConfig(Strict):
     markets: tuple[Market, ...] = MARKETS
     saxo: SaxoSettings = Field(default_factory=SaxoSettings)
     contracts: dict[Market, ContractSelection] = Field(default_factory=dict)
+    # The following contract month, streamed and recorded with every clock before its re-pin
+    # (2026-10-04) so the roll starts with history; never a decision input.
+    next_contracts: dict[Market, ContractSelection] = Field(default_factory=dict)
     mappings: dict[Market, OptionApproval] = Field(default_factory=dict)
     reference_selections_file: Path | None = None
     # Optional display/observation context; never an entry rule.
@@ -190,10 +195,17 @@ class FuturesConfig(Strict):
             raise ValueError("EXACT_MARKET_UNIVERSE_REQUIRED")
         if self.execution_mode == "SAXO_SIM" and self.data_environment != "SAXO_SIM":
             raise ValueError("SIM_EXECUTION_REQUIRES_SIM_DATA_AND_ACCOUNT")
-        if any(v.environment != self.data_environment for v in self.contracts.values()) or any(
-            v.environment != self.data_environment for v in self.mappings.values()
+        if any(
+            v.environment != self.data_environment
+            for group in (self.contracts, self.next_contracts, self.mappings)
+            for v in group.values()
         ):
             raise ValueError("CROSS_ENVIRONMENT_IDENTITY_REJECTED")
+        if any(
+            m in self.contracts and v.uic == self.contracts[m].uic
+            for m, v in self.next_contracts.items()
+        ):
+            raise ValueError("NEXT_CONTRACT_MUST_DIFFER_FROM_PINNED_CONTRACT")
         if self.armed:
             raise ValueError("START_DISARMED_USE_EXPLICIT_PAPER_ARM_AFTER_PREFLIGHT")
         return self

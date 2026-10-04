@@ -618,8 +618,12 @@ class Runtime:
                     and i["underlying_uic"] == state.identity["uic"]
                     and i["uic"] in state.warm_uics
                 ]
-                # The chain window near the money is evidence too (observation only).
+                # The chain windows near the money (nearest and following expiry) and the
+                # following contract month are evidence too (observation only).
                 option_keys.append(key(chain_identity(state.identity)))
+                option_keys.append(key(chain_identity(state.identity, "next")))
+                if state.market in self.data.next_contracts:
+                    option_keys.append(key(self.data.next_contracts[state.market][0]))
                 capture = self.recorder.trigger(
                     key(state.identity), event, time.time(), option_keys
                 )

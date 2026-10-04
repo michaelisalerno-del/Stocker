@@ -63,9 +63,22 @@ def same_instant(option: dict[str, Any], instant: datetime) -> bool:
         return False
 
 
-def chain_identity(future: dict[str, Any]) -> dict[str, Any]:
-    """The recorder instrument for a future's chain window (observation only, never traded)."""
-    return {**future, "asset_type": CHAIN}
+def chain_identity(future: dict[str, Any], slot: str = "") -> dict[str, Any]:
+    """The recorder instrument for a future's chain window (observation only, never traded).
+
+    Slot "" is the nearest expiry's window; "next" the following expiry day's (2026-10-04),
+    recorded as its own instrument so readers of the nearest chain never see two expiries.
+    """
+    return {
+        **future,
+        "asset_type": CHAIN + ("Next" if slot else ""),
+        "chain_slot": slot or "nearest",
+    }
+
+
+def board_target(target: str) -> tuple[str, str]:
+    """A chain subscription's target is the market, or market:next for the following expiry."""
+    return (target[:-5], "next") if target.endswith(":next") else (target, "")
 
 
 def roots_verified(state: "MarketState", approved: tuple[int, ...]) -> bool:
@@ -106,6 +119,8 @@ class MarketState:
     option_space: list[dict[str, Any]] = field(default_factory=list)
     option_board: dict[str, Any] = field(default_factory=dict)
     option_root: int | None = None  # the chain board's root: the nearest expiry from today
+    next_option_root: int | None = None  # the following expiry day's root: a second window
+    next_option_board: dict[str, Any] = field(default_factory=dict)
     option_roots: tuple[int, ...] = ()  # approved roots found for the pinned future
     expiry_instants: dict[str, datetime] = field(default_factory=dict)
     option_space_day: str = ""
@@ -176,6 +191,8 @@ class DataService:
         self.chart_stream_problem = ""
         self.chart_mismatch: dict[str, Any] | None = None
         self.chart_audits: list[tuple[str, dict[str, Any]]] = []
+        # The configured following contract month per market: (identity, price), target market:next.
+        self.next_contracts: dict[str, tuple[dict[str, Any], PriceState]] = {}
 
     def drain_chart_audits(self) -> list[tuple[str, dict[str, Any]]]:
         audits, self.chart_audits = self.chart_audits, []
@@ -405,6 +422,12 @@ class DataService:
         state.option_roots = tuple(chosen)
         state.option_space, state.expiry_instants = space_rows, instants
         state.option_root = upcoming[0][1] if upcoming else None
+        # The following expiry day's root feeds a second, separately recorded chain window.
+        state.next_option_root = (
+            next((root for day, root in upcoming if day > upcoming[0][0]), None)
+            if upcoming
+            else None
+        )
         state.option_space_day = today
         state.capabilities["options"] = (
             {
@@ -444,35 +467,42 @@ class DataService:
                 raise SaxoError("CONFIGURED_REFERENCE_IDENTITY_MISMATCH")
             await self.load_options(state, raw)
             await self.subscribe_board(state)
+            await self.subscribe_board(state, "next")
         except (SaxoError, ValueError, KeyError, TypeError) as exc:
             state.options_retry_at = time.monotonic() + 900
             state.capabilities["options"] = {"problem": str(exc)}
 
-    async def subscribe_board(self, state: MarketState) -> None:
-        """Observation-only chain window on the root of the nearest expiry."""
-        if not state.option_root:
+    async def subscribe_board(self, state: MarketState, slot: str = "") -> None:
+        """Observation-only chain window on the root of the nearest expiry (slot "") or of the
+        following expiry day (slot "next", 2026-10-04: term structure for the monthly search)."""
+        root = state.next_option_root if slot else state.option_root
+        if not root:
             return
         arguments = {
-            "Identifier": state.option_root,
+            "Identifier": root,
             "AssetType": "FuturesOption",
             "AccountKey": self.client.oauth.account_key,
             "MaxStrikesPerExpiry": self.config.option_chain_strikes,
             "Expiries": [{"Index": 0}],
         }
+        target = state.market + (":next" if slot else "")
         current = next(
             (
                 (ref, s)
                 for ref, s in self.subscriptions.items()
-                if s["kind"] == "BOARD" and s["target"] == state.market
+                if s.get("kind") == "BOARD" and s.get("target") == target
             ),
             None,
         )
-        if current and current[1]["arguments"].get("Identifier") == state.option_root:
+        if current and current[1]["arguments"].get("Identifier") == root:
             return
         try:
-            await self.subscribe("BOARD", arguments, state.market, current[0] if current else None)
+            await self.subscribe("BOARD", arguments, target, current[0] if current else None)
         except (SaxoError, ValueError) as exc:
-            state.capabilities["options"] = {"problem": str(exc)}
+            if slot:
+                state.capabilities["next_chain_problem"] = str(exc)
+            else:
+                state.capabilities["options"] = {"problem": str(exc)}
 
     async def subscribe(
         self,
@@ -588,9 +618,15 @@ class DataService:
             chart.inactivity_timeout = self.subscriptions[ref]["timeout"]
             chart.snapshot(snapshot, ref, time.time())
         else:
-            self.markets[target].option_board = snapshot or {}
-            self.record_board(self.markets[target], snapshot or {}, time.time())
-            self.record_chain(self.markets[target], "SNAPSHOT", snapshot or {}, time.time())
+            market, slot = board_target(target)
+            state = self.markets[market]
+            if slot:
+                state.next_option_board = snapshot or {}
+                self.record_chain(state, "SNAPSHOT", snapshot or {}, time.time(), slot)
+            else:
+                state.option_board = snapshot or {}
+                self.record_board(state, snapshot or {}, time.time())
+                self.record_chain(state, "SNAPSHOT", snapshot or {}, time.time())
         for message in self.drop_pending(ref):
             await self.receive(message["message"], message["receipt"])
         return ref
@@ -603,6 +639,9 @@ class DataService:
     def price_target(self, target: str) -> tuple[PriceState, dict[str, Any] | None]:
         if target == "FX":
             return self.fx, None
+        if target.endswith(":next"):
+            identity, price = self.next_contracts[target[:-5]]
+            return price, identity
         if target in self.markets:
             state = self.markets[target]
             return state.price, state.identity
@@ -830,6 +869,7 @@ class DataService:
             if identity["market"] == state.market and self.option_protected(uic):
                 await self.focus_board(state, identity)
                 break
+        await self.focus_next_board(state)
         if not state.identity or not state.bars:
             return
         try:
@@ -921,6 +961,30 @@ class DataService:
         if not expiry:
             state.capabilities["option_chain_problem"] = "SELECTED_EXPIRY_NOT_IN_CHAIN"
             return
+        await self.centre_window(ref, current, expiry, state, "option_chain_problem")
+
+    async def focus_next_board(self, state: MarketState) -> None:
+        """Keep the following expiry's window centred on its own money."""
+        subscription = next(
+            (
+                (r, s)
+                for r, s in self.subscriptions.items()
+                if s.get("kind") == "BOARD" and s["target"] == state.market + ":next"
+            ),
+            None,
+        )
+        expiry = next(iter(state.next_option_board.get("Expiries", []) or []), None)
+        if subscription and expiry:
+            await self.centre_window(*subscription, expiry, state, "next_chain_problem")
+
+    async def centre_window(
+        self,
+        ref: str,
+        current: dict[str, Any],
+        expiry: dict[str, Any],
+        state: MarketState,
+        problem: str,
+    ) -> None:
         mid = expiry.get("MidStrikePrice")
         strikes = [
             s for s in expiry.get("Strikes", []) or [] if isinstance(s.get("Strike"), (int, float))
@@ -945,23 +1009,26 @@ class DataService:
                 "PATCH", current["path"] + f"/{self.context}/{ref}", body=patch
             )
             current["board_window"] = patch
-            state.capabilities["option_chain_problem"] = (
+            state.capabilities[problem] = (
                 "" if "StrikeStartIndex" in selection else "AWAITING_CHAIN_STRIKES"
             )
         except SaxoError as exc:
-            state.capabilities["option_chain_problem"] = str(exc)
+            state.capabilities[problem] = str(exc)
 
-    def record_chain(self, state: MarketState, kind: str, data: dict[str, Any], at: float) -> None:
+    def record_chain(
+        self, state: MarketState, kind: str, data: dict[str, Any], at: float, slot: str = ""
+    ) -> None:
         """Observation only: every chain-window message joins the future's captures."""
         if not state.identity:
             return
-        identity = chain_identity(state.identity)
+        identity = chain_identity(state.identity, slot)
+        problem = "chain_recording_problem" + ("_next" if slot else "")
         try:
             self.recorder.register(key(identity), identity)
             self.recorder.ingest(key(identity), kind, data, at, context_source="OPTIONS_CHAIN")
-            state.capabilities["chain_recording_problem"] = ""
+            state.capabilities[problem] = ""
         except ValueError as exc:
-            state.capabilities["chain_recording_problem"] = str(exc)
+            state.capabilities[problem] = str(exc)
 
     def record_board(self, state: MarketState, update: dict[str, Any], at: float) -> None:
         for expiry in update.get("Expiries", []) or []:
@@ -1272,7 +1339,9 @@ class DataService:
             except (SaxoError, ValueError) as exc:
                 state.problem = str(exc)
             await self.subscribe_board(state)
+            await self.subscribe_board(state, "next")
             await self.subscribe_chart(state)
+            await self.subscribe_next_contract(state)
         # Discover this environment's GBPUSD UIC; never reuse a SIM identifier in LIVE.
         # An FX problem blocks entries under its own name; it never resets price streams.
         try:
@@ -1303,6 +1372,74 @@ class DataService:
             )
         except (SaxoError, ValueError) as exc:
             state.chart.gap(str(exc))
+
+    async def subscribe_next_contract(self, state: MarketState) -> None:
+        """The configured following contract month, streamed (quotes and depth) and recorded with
+        every clock before its re-pin (2026-10-04) so the roll starts with history. Never a
+        decision input; a failure here changes nothing but its own status."""
+        selection = self.config.next_contracts.get(state.market)
+        target = state.market + ":next"
+        if not selection or any(
+            s.get("kind") == "PRICE" and s.get("target") == target
+            for s in self.subscriptions.values()
+        ):
+            return
+        try:
+            if state.market in self.next_contracts:
+                identity = self.next_contracts[state.market][0]
+            else:
+                raw = await self.client.request(
+                    "GET",
+                    f"/ref/v1/instruments/details/{selection.uic}/ContractFutures",
+                    params={
+                        "AccountKey": self.client.oauth.account_key,
+                        "FieldGroups": "TradingSessions",
+                    },
+                )
+                identity = future_identity(state.market, self.config.data_environment, raw)
+                if (
+                    identity["uic"] != selection.uic
+                    or identity["symbol"] != selection.symbol
+                    or identity["exchange"] != selection.exchange
+                    or identity["contract_month"] != selection.contract_month
+                ):
+                    raise SaxoError("CONFIGURED_NEXT_CONTRACT_IDENTITY_MISMATCH")
+                identity["role"] = "NEXT_CONTRACT"
+                self.recorder.register(key(identity), identity)
+                self.recorder.metadata_version(
+                    key(identity),
+                    {"identity": identity, "reference": self.safe_reference(raw)},
+                    time.time(),
+                )
+                self.next_contracts[state.market] = (identity, PriceState())
+            await self.subscribe(
+                "PRICE",
+                {
+                    "Uic": identity["uic"],
+                    "AssetType": "ContractFutures",
+                    "Amount": 1,
+                    "AccountKey": self.client.oauth.account_key,
+                    "FieldGroups": [
+                        "Quote",
+                        "PriceInfo",
+                        "PriceInfoDetails",
+                        "MarketDepth",
+                        "InstrumentPriceDetails",
+                    ],
+                },
+                target,
+            )
+            state.capabilities["next_contract"] = {
+                "symbol": identity["symbol"],
+                "uic": identity["uic"],
+                "status": "SUBSCRIBED",
+            }
+        except (SaxoError, ValueError, KeyError, TypeError) as exc:
+            state.capabilities["next_contract"] = {
+                "problem": str(exc)
+                if isinstance(exc, (SaxoError, ValueError))
+                else "NEXT_CONTRACT_SCHEMA_UNVERIFIED"
+            }
 
     async def subscribe_fx(self) -> None:
         fx = await self.client.request(
@@ -1448,10 +1585,15 @@ class DataService:
             elif subscription["kind"] == "ACTIVITIES":
                 self.last_activity = time.monotonic()
             elif subscription["kind"] == "BOARD":
-                state = self.markets[subscription["target"]]
-                self.record_board(state, data, receipt)
-                self.record_chain(state, "UPDATE", data, receipt)
-                state.option_board = merge_board(state.option_board, data)
+                market, slot = board_target(subscription["target"])
+                state = self.markets[market]
+                if slot:
+                    self.record_chain(state, "UPDATE", data, receipt, slot)
+                    state.next_option_board = merge_board(state.next_option_board, data)
+                else:
+                    self.record_board(state, data, receipt)
+                    self.record_chain(state, "UPDATE", data, receipt)
+                    state.option_board = merge_board(state.option_board, data)
             elif subscription["kind"] == "CHART":
                 self.markets[subscription["target"]].chart.update(data, receipt)
             else:
@@ -1559,6 +1701,8 @@ class DataService:
                 for market in self.markets:
                     self.mark_gap(market, self.problem)
                     self.markets[market].chart.gap(self.problem)
+                for market in self.next_contracts:
+                    self.mark_gap(market + ":next", self.problem)
                 for uic in self.options:
                     self.mark_gap(str(uic), self.problem)
                 self.fx.gap(self.problem)

@@ -84,6 +84,23 @@ def test_session_clocks_dst_weekends_and_no_veto():
     assert session_day(datetime(2026, 10, 5, 12, tzinfo=UTC)) == date(2026, 10, 5)  # Monday 08:00
 
 
+def test_a_reservation_without_any_order_closes_as_unfilled(tmp_path):
+    """The process died between reserve() and the entry order: nothing was ever sent, so the
+    slot is released instead of leaking until the ledger is edited by hand."""
+    from saxo_support import ledger_plan
+
+    s = Store(tmp_path / "futures.sqlite")
+    event = {**opportunity("GC", 1, AT), "id": "orphan"}
+    s.observe(event, "", {})
+    assert s.reserve("orphan", ledger_plan()) == ""
+    assert s.capacity()["reserved_open_trades"] == 1
+    assert s.confirm_closed("orphan", 0)
+    assert s.capacity()["reserved_open_trades"] == 0
+    row = s.db.execute("SELECT state FROM reservations WHERE id='orphan'").fetchone()
+    assert row[0] == "UNFILLED_CONFIRMED"
+    s.db.close()
+
+
 def test_cancel_uncertainty_and_late_fill_keep_obligation(tmp_path):
     s = Store(tmp_path / "futures.sqlite")
     ref = record_entry(s)

@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from stocker_execution.saxo_auth import OAuth, SaxoError
+from stocker_execution.saxo_auth import OAuth, SaxoError, SaxoRefused
 
 READ_PATHS = (
     r"/root/v2/user",
@@ -138,15 +138,16 @@ class SaxoClient:
         execution: bool = False,
         primary_session: bool = False,
     ) -> dict[str, Any]:
+        # Refusals before anything is sent are SaxoRefused: an order so refused cannot exist.
         sim_orders = execution and self.environment == "SAXO_SIM" and self.sim_account_verified
         if not allowed(method, path, sim_orders=sim_orders, primary_session=primary_session):
-            raise SaxoError("ENDPOINT_BLOCKED_LIVE_ORDERS_DISABLED")
+            raise SaxoRefused("ENDPOINT_BLOCKED_LIVE_ORDERS_DISABLED")
         if primary_session and (body != PRIMARY_SESSION or params or execution):
-            raise SaxoError("ONLY_PRIMARY_SESSION_REQUEST")
+            raise SaxoRefused("ONLY_PRIMARY_SESSION_REQUEST")
         if execution and (
             not sim_orders or (body or params or {}).get("AccountKey") != self.oauth.account_key
         ):
-            raise SaxoError("SIM_ACCOUNT_NOT_VERIFIED")
+            raise SaxoRefused("SIM_ACCOUNT_NOT_VERIFIED")
         if (
             execution
             and method == "POST"
@@ -158,14 +159,19 @@ class SaxoClient:
                 not in {("Buy", "ToOpen"), ("Sell", "ToClose")}
             )
         ):
-            raise SaxoError("ONLY_LONG_FUTURES_OPTION_ORDERS")
+            raise SaxoRefused("ONLY_LONG_FUTURES_OPTION_ORDERS")
         if self.waiters >= REST_QUEUE_LIMIT:
-            raise SaxoError("REST_QUEUE_LIMIT")
+            raise SaxoRefused("REST_QUEUE_LIMIT")
         self.waiters += 1
         try:
             attempt = 0
             while True:
-                token = await self.oauth.access_token()
+                try:
+                    token = await self.oauth.access_token()
+                except SaxoError as exc:
+                    if attempt == 0:
+                        raise SaxoRefused(str(exc)) from None  # nothing has been sent yet
+                    raise
                 async with self.pace:
                     await asyncio.sleep(max(0, self.next_request - time.monotonic()))
                     self.next_request = time.monotonic() + 0.55

@@ -73,6 +73,12 @@ the server are untouched.
 - Setup checklist (user's follow-up): it starts folded on every page — the summary line carries
   "n of m required steps done" — and the markup no longer ships it `open`. Overview still shows
   the (folded) section only while a required step is missing.
+- Archive runway (same day, from the review of what Saxo delivers against what is kept): the
+  recorder samples its archive size once a minute (`archive_growth` in `/api/system`), the
+  System tile shows the stored size in GiB once the cap is above 1 GiB, the growth in GiB/day and
+  the days left before `archive_max_bytes` stops captures, and the status bar lists
+  "Archive n days left" under 14 days. The same change widened the chain window to 61 strikes and
+  the cap to 70 GiB on the server.
 
 ## Additional Saxo data
 

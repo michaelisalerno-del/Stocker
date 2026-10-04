@@ -1,6 +1,17 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `f0cbd06d95689f308c3e370a98b1aa9c2524f8ab`, deployed 2026-10-01 21:08 UTC and re-armed
+Current application release: `86f463ca1ff1bf21978ef992a1d8bada7638e3bf`, deployed 2026-10-04 15:47–16:05 UTC (Sunday,
+inside the restart window) with the configuration change `option_chain_strikes` 25 → 61 and
+`recorder.archive_max_bytes` 50 → 70 GiB (previous file `saxo.live.paper.yaml.bak-20261004-chain61`, backup
+`chain61-20261004-chain61`): the review of what Saxo delivers against what is kept (DASHBOARD-AND-DATA.md,
+"Archive runway"). Verified after the restart: served assets match the release, effective 61 strikes / 70 GiB, chain
+window and chain recording clean on CL, ES, GC and NQ, option spaces 22/24/21/17 roots (ES needed its 15-minute retry
+after Saxo's rate limit), preflight clean, re-armed, session FullTradingAndChat with DataLevel Premium, recorder
+354 MB with 0 gaps. Rollback: `b7e21f4…` with the `.bak` configuration. Earlier the same day: `aa0cb76…` (dashboard
+visual refresh, 14:25 UTC) and `b7e21f4…` (setup checklist folded, 14:56 UTC), both restart deploys, both re-armed;
+every capture of 1–2 October had ended `INTERRUPTED_RESTART`, hence the restart window in DEPLOYMENT.md.
+
+Previous release `f0cbd06d95689f308c3e370a98b1aa9c2524f8ab`, deployed 2026-10-01 21:08 UTC and re-armed
 (session stayed FullTradingAndChat): the market page's L1 label follows the server's standing-quote time
 (`l1.standing_receipt`) instead of the last price change, so a quiet market no longer flickers between
 STALE OR MISSING and CURRENT on every refresh (user's report). Backup `l1-label-20261001`. Rollback: `8dbc6df…`.

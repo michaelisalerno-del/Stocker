@@ -1,6 +1,16 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `ba082b829dd9ee4c0fd4a6df5323c5d0b9ababcf`, deployed 2026-10-04 17:12–17:16 UTC (Sunday,
+Current application release: `93d188bb7f9054946209d0e712d6642644bc1b5e`, deployed 2026-10-04 17:41–17:46 UTC (Sunday,
+inside the restart window) with the configuration addition `next_contracts: CL → CLZ6` (NYMEX, Dec-26, Saxo LIVE UIC
+31051110; previous file `saxo.live.paper.yaml.bak-20261004-nextstreams`, backup `nextstreams-20261004-nextstreams`):
+the subscription guard 32 → 48 (Saxo accepted 55 in one session, `scripts/saxo_subscription_capacity_probe.py`), the
+following expiry's chain window per market recorded as `OptionsChainNext`, and the CLZ6 pre-roll stream recorded as
+`ContractFutures` with `role: NEXT_CONTRACT` (MARKET-DATA.md). Verified after the restart: served assets match,
+20 of 48 lines before option candidates warm, chart streams CURRENT on all four markets, next-chain recording clean on
+all four, CLZ6 SUBSCRIBED, preflight clean, re-armed, FullTradingAndChat with DataLevel Premium, 0 recording gaps.
+Rollback: `ba082b8…` with the `.bak` configuration.
+
+Previous release `ba082b829dd9ee4c0fd4a6df5323c5d0b9ababcf`, deployed 2026-10-04 17:12–17:16 UTC (Sunday,
 inside the restart window; no configuration change; backup `chartstream-20261004-chartstream`): the clock's boundary
 bar from Saxo's chart stream with REST as the check (MARKET-DATA.md, "Chart stream"). Verified after the restart:
 served assets match, chart streams CURRENT on CL, ES, GC and NQ (real-time, ten samples each), 15 of 32 subscription

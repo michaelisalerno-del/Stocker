@@ -1,6 +1,14 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `86f463ca1ff1bf21978ef992a1d8bada7638e3bf`, deployed 2026-10-04 15:47–16:05 UTC (Sunday,
+Current application release: `ba082b829dd9ee4c0fd4a6df5323c5d0b9ababcf`, deployed 2026-10-04 17:12–17:16 UTC (Sunday,
+inside the restart window; no configuration change; backup `chartstream-20261004-chartstream`): the clock's boundary
+bar from Saxo's chart stream with REST as the check (MARKET-DATA.md, "Chart stream"). Verified after the restart:
+served assets match, chart streams CURRENT on CL, ES, GC and NQ (real-time, ten samples each), 15 of 32 subscription
+lines before option candidates warm, preflight clean, re-armed, FullTradingAndChat with DataLevel Premium, 0 recording
+gaps. First live boundary decisions: the 19:00 New York clocks of 4 October; the tripwire (`chart_stream_problem`)
+had not fired at deployment. Rollback: `86f463c…`.
+
+Previous release `86f463ca1ff1bf21978ef992a1d8bada7638e3bf`, deployed 2026-10-04 15:47–16:05 UTC (Sunday,
 inside the restart window) with the configuration change `option_chain_strikes` 25 → 61 and
 `recorder.archive_max_bytes` 50 → 70 GiB (previous file `saxo.live.paper.yaml.bak-20261004-chain61`, backup
 `chain61-20261004-chain61`): the review of what Saxo delivers against what is kept (DASHBOARD-AND-DATA.md,

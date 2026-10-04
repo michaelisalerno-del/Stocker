@@ -103,7 +103,8 @@ last half hour in the direction of the first (Gao, Han, Li & Zhou), on 5 October
 breakout rule on NQ from 5 October 2026 (abandon check 31 March 2027, verdict 30 September 2027).
 [PRICED-BELOW-PROTOCOL.md](PRICED-BELOW-PROTOCOL.md) judges five conditions under which options might be priced below the
 movement that follows (after bursts, look14 above the price, dealers short gamma, the cheapest hours, below yesterday),
-on the hourly ledger built from these recordings, clocks 5 October to 27 November 2026.
+on the hourly ledger built from these recordings, clocks 5 October to 27 November 2026. [PRICED-BELOW-AMENDMENT-1.md](PRICED-BELOW-AMENDMENT-1.md)
+adds a verdict per market (CL, GC, NQ) at a stricter t > 3.
 [MARKET-CHANGE-AMENDMENT-20261004.md](MARKET-CHANGE-AMENDMENT-20261004.md): from 5 October the app trades CL, ES, GC
 and NQ at every hour of the CME session (gas and silver removed, their data deleted); every protocol above is judged
 on its original 09:00-16:00 clocks and markets.

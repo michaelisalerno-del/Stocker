@@ -1,6 +1,13 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `93d188bb7f9054946209d0e712d6642644bc1b5e`, deployed 2026-10-04 17:41–17:46 UTC (Sunday,
+Current application release: `1cce2bb3ed581e7f447872b0a4424cdb62e40d67`, deployed 2026-10-04 17:57–18:00 UTC (Sunday, inside the
+restart window; no configuration change; backup `refresh-20261004-refresh`): the chart stream at Saxo's measured 300 ms floor
+and the chain windows at 1,000 ms instead of 2,000 (MARKET-DATA.md; the probe also found the ~10-per-session cap on chain
+subscriptions, of which the service holds eight). Verified after the restart: served assets match, 20 of 48 lines before
+candidates warm, chart streams CURRENT on all four markets, preflight clean, re-armed, FullTradingAndChat with DataLevel
+Premium, 0 recording gaps. Rollback: `93d188b…`.
+
+Previous release `93d188bb7f9054946209d0e712d6642644bc1b5e`, deployed 2026-10-04 17:41–17:46 UTC (Sunday,
 inside the restart window) with the configuration addition `next_contracts: CL → CLZ6` (NYMEX, Dec-26, Saxo LIVE UIC
 31051110; previous file `saxo.live.paper.yaml.bak-20261004-nextstreams`, backup `nextstreams-20261004-nextstreams`):
 the subscription guard 32 → 48 (Saxo accepted 55 in one session, `scripts/saxo_subscription_capacity_probe.py`), the

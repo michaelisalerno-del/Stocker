@@ -48,7 +48,11 @@ def test_price_context_reports_only_numeric_provider_fields():
         "fixture",
         time.time(),
     )
-    state = type("State", (), {"price": price, "daily_range": 1.8, "daily_problem": ""})()
+    state = type(
+        "State",
+        (),
+        {"price": price, "daily_range": 1.8, "daily_problem": "", "daily_open_interest": []},
+    )()
     context = views.price_context(state)
     assert context["high"] == 71.2 and context["low"] == 69.5 and context["open"] == 69.9
     assert context["last_close"] == 69.6 and context["open_interest"] == 250000

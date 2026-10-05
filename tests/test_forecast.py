@@ -86,3 +86,53 @@ def test_an_option_priced_at_the_forecast_reads_one():
     assert seen["option"]["ask_over_forecast_fair"] == pytest.approx((fair + 0.25) / fair)
     stale = {**option, "quote_status": "STALE_OR_MISSING"}
     assert forecast.observe(bars, clock, "NQ", stale, {})["option"]["reason"] == "QUOTE_NOT_USABLE"
+
+
+def test_break_even_is_the_move_that_gets_the_bid_back_to_the_ask():
+    """Display only (2026-10-05): the move a purchase at the ask needs (the frozen veto's)."""
+    forward, strike, hours = 100.0, 102.0, 6.0
+    mid = forecast.black(forward, strike, 0.02, True)
+    bid, ask = mid * 0.9, mid * 1.1
+    move = forecast.break_even_move(bid, ask, forward, strike, True, hours)
+    assert move is not None and move > 0
+    # At that move the model bid after an hour equals the ask paid.
+    after = forecast.implied_move(mid, forward, strike, True) * math.sqrt((hours - 1) / hours)
+    assert forecast.black(forward * math.exp(move), strike, after, True) - (
+        mid - bid
+    ) == pytest.approx(ask, rel=1e-6)
+    # A wider spread or a fall in implied volatility needs a bigger move; a put needs it downwards.
+    assert forecast.break_even_move(mid * 0.8, mid * 1.2, forward, strike, True, hours) > move
+    assert forecast.break_even_move(bid, ask, forward, strike, True, hours, iv_scale=0.9) > move
+    put_mid = forecast.black(forward, 98.0, 0.02, False)
+    assert forecast.break_even_move(put_mid * 0.9, put_mid * 1.1, forward, 98.0, False, hours) > 0
+    # An option expiring inside the hour is worth its intrinsic value; no implied move, no answer.
+    assert forecast.break_even_move(bid, ask, forward, strike, True, 0.5) > math.log(
+        strike / forward
+    )
+    assert forecast.break_even_move(0.0, 0.0, forward, strike, True, hours) is None
+
+
+def test_break_even_view_reads_in_normal_hours_and_names_what_is_missing():
+    at = datetime(2026, 10, 6, 14, tzinfo=UTC)
+    identity = {
+        "uic": 1,
+        "right": "Put",
+        "strike": 98.0,
+        "expiry_instant": (at + timedelta(hours=6)).isoformat(),
+    }
+    mid = forecast.black(100.0, 98.0, 0.02, False)
+    option = {
+        "identity": identity,
+        "quote_status": "OBSERVED",
+        "quote": {"Bid": mid * 0.9, "Ask": mid * 1.1},
+    }
+    futures = {"Bid": 99.99, "Ask": 100.01}
+    view = forecast.break_even_view(option, futures, 0.004, at)
+    assert view["ratio"] > 0 and 0 < view["chance"] < 0.5 and view["ratio_iv_down"] > view["ratio"]
+    assert forecast.break_even_view(option, futures, None, at) == {"reason": "NORMAL_HOUR_UNKNOWN"}
+    assert (
+        forecast.break_even_view(
+            {**option, "quote_status": "STALE_OR_MISSING"}, futures, 0.004, at
+        )["reason"]
+        == "QUOTE_NOT_USABLE"
+    )

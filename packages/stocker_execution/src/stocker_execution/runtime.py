@@ -11,6 +11,7 @@ from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from statistics import median
 from typing import Any
 
 from stocker_execution import forecast, option_context, saxo_balance, saxo_history, views
@@ -373,6 +374,13 @@ class Runtime:
             for uic, (i, _) in self.data.options.items()
             if i["market"] == market
         ]
+        # Observation only: the break-even of buying each contract now, for the next clock's hour.
+        normal_hour = self.normal_hour_move(state, at)
+        for contract in contracts:
+            try:
+                contract["break_even"] = forecast.break_even_view(contract, quote, normal_hour, at)
+            except (ArithmeticError, KeyError, TypeError, ValueError) as exc:
+                contract["break_even"] = {"reason": type(exc).__name__}
         card.update(
             {
                 "identity": identity,
@@ -476,6 +484,16 @@ class Runtime:
         ]
         results = self.store.trade_results([r["id"] for r in rows])
         return [{**r, **results[r["id"]]} for r in rows]
+
+    @staticmethod
+    def normal_hour_move(state: MarketState, at: datetime) -> float | None:
+        """A normal hour's move for the next clock's New York hour: twice the median 15-minute
+        realised move of that hour over the last five reference sessions (display only)."""
+        hour = next_clock(at).astimezone(NY).hour
+        values = [
+            r[hour]["rv15"] for r in state.references[-5:] if hour in r and r[hour].get("rv15")
+        ]
+        return 2 * median(values) if values else None
 
     def forecast_view(
         self, state: MarketState, at: datetime, option: dict[str, Any] | None

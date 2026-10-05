@@ -121,6 +121,86 @@ def implied_move(price: float, forward: float, strike: float, call: bool) -> flo
     return (lo + hi) / 2
 
 
+def break_even_move(
+    bid: float,
+    ask: float,
+    forward: float,
+    strike: float,
+    call: bool,
+    hours_left: float,
+    hold_hours: float = 1.0,
+    iv_scale: float = 1.0,
+) -> float | None:
+    """The futures log move in the option's direction after `hold_hours` at which the option's bid
+    gets back to the ask paid now: Black on the implied move of the mid, scaled by `iv_scale` and by
+    the time left, less today's half-spread. 0 when no move is needed; None without an implied move
+    or beyond a 50% move (display only, 2026-10-05)."""
+    mid = (bid + ask) / 2
+    implied = implied_move(mid, forward, strike, call) if hours_left > 0 else None
+    if not implied:
+        return None
+    left = max(hours_left - hold_hours, 0.0)
+    after = implied * iv_scale * math.sqrt(left / hours_left) if left > 0 else 0.0
+
+    def bid_after(x: float) -> float:
+        return black(forward * math.exp(x if call else -x), strike, after, call) - (mid - bid)
+
+    if bid_after(0.0) >= ask:
+        return 0.0
+    lo, hi = 0.0, 0.5
+    if bid_after(hi) < ask:
+        return None
+    for _ in range(60):
+        mid_x = (lo + hi) / 2
+        lo, hi = (mid_x, hi) if bid_after(mid_x) < ask else (lo, mid_x)
+    return (lo + hi) / 2
+
+
+def break_even_view(
+    option: dict[str, Any], futures: dict[str, Any], normal_hour_move: float | None, at: datetime
+) -> dict[str, Any]:
+    """Observation only: how big an hour a new purchase of this option needs, in normal hours for
+    this time of day. Same definition as the hourly ledger's frozen break-even veto
+    (docs/BREAK-EVEN-VETO-PROTOCOL.md)."""
+    identity, quote = option["identity"], option.get("quote") or {}
+    raw = (quote.get("Bid"), quote.get("Ask"), futures.get("Bid"), futures.get("Ask"))
+    prices = [float(x) for x in raw if isinstance(x, (int, float))]
+    if option.get("quote_status") != "OBSERVED" or len(prices) != 4:
+        return {"reason": "QUOTE_NOT_USABLE"}
+    bid, ask, f_bid, f_ask = prices
+    if ask <= 0 or bid < 0 or f_bid <= 0 or f_ask <= 0:
+        return {"reason": "QUOTE_NOT_USABLE"}
+    if not identity.get("expiry_instant"):
+        return {"reason": "EXPIRY_INSTANT_UNKNOWN"}
+    if not normal_hour_move or normal_hour_move <= 0:
+        return {"reason": "NORMAL_HOUR_UNKNOWN"}
+    hours_left = (datetime.fromisoformat(identity["expiry_instant"]) - at).total_seconds() / 3600
+    args = (
+        bid,
+        ask,
+        (f_bid + f_ask) / 2,
+        float(identity["strike"]),
+        identity["right"] == "Call",
+        hours_left,
+    )
+    move, move_iv_down = break_even_move(*args), break_even_move(*args, iv_scale=0.9)
+    if move is None:
+        return {
+            "reason": "BEYOND_A_50_PERCENT_MOVE" if hours_left > 0 else "EXPIRED",
+            "hours_left": hours_left,
+        }
+    ratio = move / normal_hour_move
+    return {
+        "ratio": ratio,
+        # A normal hour as one standard deviation: the chance of an hour this good your way.
+        "chance": 1 - N(ratio),
+        "ratio_iv_down": move_iv_down / normal_hour_move if move_iv_down is not None else None,
+        "normal_hour_move": normal_hour_move,
+        "hours_left": hours_left,
+        "hold_minutes": 60,
+    }
+
+
 def option_check(
     option: dict[str, Any], value: float, market: str, at: datetime, futures: dict[str, Any]
 ) -> dict[str, Any]:

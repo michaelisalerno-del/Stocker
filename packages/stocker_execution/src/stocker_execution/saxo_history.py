@@ -92,7 +92,9 @@ def streamed_bar(chart: ChartState, minute: datetime, at: datetime) -> Bar | Non
 def confirm_streamed_bars(data: DataService, state: MarketState, bars: list[Bar]) -> None:
     """Every boundary bar a decision took from the stream is checked against the next REST read
     of that minute. Any difference trips the stream until a restart: decisions use REST alone
-    and the clock's evidence records both bars."""
+    and the clock's evidence records both bars. Pending checks live in memory: a restart in
+    the minute between a stream-decided clock and that REST read drops the check, and the
+    clock's `boundary_bar` detail is what remains for an offline comparison."""
     if not state.stream_bars:
         return
     by_time = {b.at: b for b in bars}

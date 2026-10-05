@@ -156,7 +156,7 @@ h1 { font-size: 26px; letter-spacing: -0.03em; font-weight: 650; margin: 0; }
 /* Market cards */
 .markets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
 #markets.single-market { grid-template-columns: minmax(0, 1fr); max-width: 1240px; }
-/* A card is a flex column with a fixed gap, so cards in a row share a height and the foot sits at the bottom. */
+/* A card is a flex column (the gap plus each block's own margin below), so cards in a row share a height and the foot sits at the bottom. */
 .market {
   position: relative; display: flex; flex-direction: column; gap: 8px; background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 18px 18px 14px; min-width: 0; box-shadow: var(--shadow); overflow: hidden; transition: border-color 0.3s;

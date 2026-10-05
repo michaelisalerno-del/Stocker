@@ -12,9 +12,9 @@ from typing import Any
 from stocker_execution.config import MAX_OPEN_POSITIONS, MAX_PREMIUM_RISK_PENNIES, PAGE_SIZE
 
 TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
-# Historical £10 (1,000p) and £50 (5,000p) reservations keep their policy amount;
-# new ones use the current ceiling.
-POLICIES = ",".join(str(p) for p in (1000, 5000, MAX_PREMIUM_RISK_PENNIES))
+# Every ceiling a reservation was ever written under (£10, £50, £1,000) and the current one:
+# rows keep their policy amount, and a rebuild for a new ceiling must accept all of them.
+POLICIES = ",".join(str(p) for p in sorted({1000, 5000, 100000, MAX_PREMIUM_RISK_PENNIES}))
 # Per-trade GBP sums over a reservation's fills (r, f), shared by the totals and the trade rows.
 INCOMPLETE = """SUM(CASE WHEN f.exec_id IS NOT NULL AND (f.commission IS NULL OR f.fx IS NULL
     OR f.commission_currency IS NULL
@@ -371,7 +371,9 @@ class Store:
     def confirm_closed(self, identity: str, position: float) -> bool:
         orders = self.orders(identity)
         fills = self.fills(identity)
-        if not orders or any(o["status"] not in TERMINAL for o in orders):
+        # A reservation with no order at all (the process died between reserve() and the entry
+        # order) is unfilled and closes here; the broker lock keeps enter() atomic otherwise.
+        if any(o["status"] not in TERMINAL for o in orders):
             return False
         for order in orders:
             actual = sum(f["quantity"] for f in fills if f["reference"] == order["reference"])

@@ -44,8 +44,8 @@ async def preflight(config: Path, database: Path, seconds: int) -> dict:
             task.result()
         try:
             result = await runtime.broker.preflight()
-        except ValueError:
-            result = {"non_transmitting": True, "problem": "PREFLIGHT_UNAVAILABLE"}
+        except ValueError as exc:  # coded reasons only (ACCOUNT_SELECTION_REQUIRED, ...)
+            result = {"non_transmitting": True, "problem": str(exc) or "PREFLIGHT_UNAVAILABLE"}
         return {
             "at": datetime.now(UTC).isoformat(),
             "orders_sent": 0,

@@ -27,6 +27,10 @@ from stocker_execution.saxo_stream import merge, merge_board
 
 log = logging.getLogger(__name__)
 CHAIN = "OptionsChain"  # a market's observation-only chain window, recorded like an instrument
+# Rows gather this long before each gzip member: at 0.1 s a member held 1-3 rows and cost about
+# three times the disk of a one-second batch (review 2026-10-04). A crash loses at most this much,
+# and recover() already marks such a capture INTERRUPTED_RESTART. Bursts still drain at once.
+BATCH_SECONDS = 1.0
 # One queued write: segment, the capture manifest when it changed (None for rows only),
 # zlib-packed rows and the bytes charged against the queue budget.
 Item = tuple[str, dict[str, Any] | None, list[bytes], int]
@@ -180,14 +184,20 @@ class Recorder:
         # Only own atomic-write leftovers; never touch the execution ledger.
         for path in self.directory.glob("*.tmp-*"):
             path.unlink()
-        self.disk_bytes = sum(p.stat().st_size for p in self.directory.iterdir() if p.is_file())
         self.disk_free = shutil.disk_usage(self.directory).free
         for path in sorted(self.directory.glob("*.manifest.json")):
             manifest = json.loads(path.read_text())
-            if manifest.get("state") == "CAPTURING":
-                manifest.update(state="INCOMPLETE", reason="INTERRUPTED_RESTART")
+            interrupted = manifest.get("state") == "CAPTURING"
+            # A write that failed mid-append (ENOSPC, say) can also leave a partial member; its
+            # marker says RECORDER_IO_FAILED. Either is repaired once, then recorded as such.
+            if interrupted or (
+                manifest.get("reason") == "RECORDER_IO_FAILED" and "recovered_bytes" not in manifest
+            ):
+                if interrupted:
+                    manifest.update(state="INCOMPLETE", reason="INTERRUPTED_RESTART")
                 data = self.directory / (manifest["segment"] + ".jsonl.gz")
                 # Keep complete gzip members. Only truncate an interrupted, uncommitted tail.
+                manifest["recovered_bytes"] = 0
                 if data.exists():
                     self.recover_members(data)
                     manifest["recovered_bytes"] = data.stat().st_size
@@ -202,6 +212,8 @@ class Recorder:
                     "protected": manifest.get("protected", False),
                 }
             )
+        # Counted after the repairs and manifest rewrites above, so the figure is what is on disk.
+        self.disk_bytes = sum(p.stat().st_size for p in self.directory.iterdir() if p.is_file())
         if len(self.catalog) >= 10000:
             self.problem = "STORAGE_LIMIT_REACHED"
 
@@ -277,8 +289,12 @@ class Recorder:
         blob = packed(raw)
         version = hashlib.sha256(blob).hexdigest()
         if version not in window.metadata:
-            if len(blob) > 65536 or len(window.metadata) >= 16:
+            if len(blob) > 65536:
                 raise ValueError("REFERENCE_CACHE_LIMIT")
+            # Session schedules and trading status change daily, so a long-lived process sees a
+            # new version per reconnect: the oldest gives way rather than blocking the market.
+            while len(window.metadata) >= 16:
+                window.metadata.pop(next(iter(window.metadata)))
             window.metadata[version] = {"received_at": received_at, "value": json.loads(blob)}
             for segment, capture in self.active.items():
                 if key in capture["instruments"]:
@@ -479,9 +495,10 @@ class Recorder:
             self.active[segment] = capture
         segment = capture["segment"]
         if len(capture["events"]) >= 256 or len(packed(event)) > 16384:
-            self.problem = "CAPTURE_EVENT_LIMIT"
-            capture.update(state="INCOMPLETE", reason=self.problem)
-            return {"state": "INCOMPLETE", "reason": self.problem}
+            # This capture alone ends; other segments and later captures keep recording.
+            capture.update(state="INCOMPLETE", reason="CAPTURE_EVENT_LIMIT")
+            self.markers_pending.add(segment)
+            return {"state": "INCOMPLETE", "reason": "CAPTURE_EVENT_LIMIT"}
         capture["state"] = "CAPTURING"
         capture["end"] = max(capture["end"], end)
         capture["events"].append(
@@ -728,10 +745,9 @@ class Recorder:
             except TimeoutError:
                 continue
             items = [first]
-            # Keep modest batching at normal cadence; drain promptly during bursts.
             if self.queue.qsize() < 64:
                 with suppress(TimeoutError):
-                    await asyncio.wait_for(self.write_ready.wait(), 0.1)
+                    await asyncio.wait_for(self.write_ready.wait(), BATCH_SECONDS)
             self.write_ready.clear()
             while not self.queue.empty() and len(items) < 256:
                 items.append(self.queue.get_nowait())
@@ -857,3 +873,9 @@ class Recorder:
                 self.disk_bytes -= p.stat().st_size
                 p.unlink()
         self.catalog = [c for c in self.catalog if c["segment"] != segment]
+        if (
+            self.problem == "STORAGE_LIMIT_REACHED"
+            and len(self.catalog) < 10000
+            and self.disk_bytes < self.config.archive_max_bytes
+        ):
+            self.problem = ""  # room was made; recording resumes with the next capture

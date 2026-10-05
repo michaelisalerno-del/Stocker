@@ -184,6 +184,45 @@ def test_transport_failure_during_refresh_keeps_the_refresh_token(tmp_path):
     asyncio.run(scenario())
 
 
+def test_auth_server_failure_during_refresh_keeps_the_refresh_token(tmp_path):
+    """A 5xx (or Saxo's own transient codes) from the token endpoint is the server failing, not
+    the grant: wiping the tokens would demand a browser login for a one-minute outage."""
+
+    async def scenario():
+        path = tmp_path / "credentials.json"
+        atomic_json(path, CREDENTIALS)
+        responses = [
+            httpx.Response(503, json={"error": "temporarily_unavailable"}),
+            httpx.Response(500, text="<html>upstream</html>"),
+            httpx.Response(
+                200,
+                json={
+                    "access_token": "fixture-new-access",
+                    "refresh_token": "fixture-new-refresh",
+                    "expires_in": 1200,
+                    "refresh_token_expires_in": 2400,
+                },
+            ),
+        ]
+        auth = OAuth(
+            "SAXO_SIM",
+            SaxoSettings(credentials_file=path),
+            tmp_path,
+            transport=httpx.MockTransport(lambda request: responses.pop(0)),
+        )
+        auth.tokens, auth.status = tokens(expires_in=30), "AUTHENTICATED"
+        with pytest.raises(SaxoError, match="^OAUTH_TEMPORARILY_UNAVAILABLE$"):
+            await auth.access_token()
+        with pytest.raises(SaxoError, match="^OAUTH_TOKEN_HTTP_500$"):
+            await auth.access_token()
+        assert auth.tokens["refresh_token"] == "fixture-keep-refresh"
+        assert auth.status == "AUTHENTICATED"
+        assert await auth.access_token() == "fixture-new-access"
+        await auth.close()
+
+    asyncio.run(scenario())
+
+
 def test_rejected_access_token_forces_a_refresh_and_a_failed_refresh_stays_expired(tmp_path):
     """A 401 must not be erased by the next access_token() call a second later."""
 

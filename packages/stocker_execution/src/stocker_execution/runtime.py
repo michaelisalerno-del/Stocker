@@ -63,6 +63,19 @@ def skip_reason(exc: ValueError | KeyError) -> str:
     return str(exc)
 
 
+def trailing_missing(present: set[datetime], clock: datetime) -> list[datetime]:
+    """The run of minutes absent from the completed bars up to clock-1, oldest first: the REST
+    read's dropped newest sample and, before it, at most the no-trade minutes the fill rule covers.
+    Empty when clock-1 is present (the shortfall lies earlier and is final)."""
+    minutes: list[datetime] = []
+    for i in range(1, saxo_history.MAX_FILLED_GAP_MINUTES + 2):
+        minute = clock - timedelta(minutes=i)
+        if minute in present:
+            break
+        minutes.insert(0, minute)
+    return minutes
+
+
 class Runtime:
     def __init__(self, config: FuturesConfig, store: Store, data: DataService | None = None):
         self.config, self.store = config, store
@@ -519,10 +532,11 @@ class Runtime:
 
     async def decisions(self) -> None:
         at = now()
+        day_clocks = clocks(at.astimezone(NY).date())
         for state in self.markets.values():
             if not state.identity:
                 continue
-            for clock in clocks(at.astimezone(NY).date()):
+            for clock in day_clocks:
                 if (
                     clock < self.started_at
                     or clock > at
@@ -548,7 +562,12 @@ class Runtime:
                 try:
                     if not reason:
                         if (at - clock).total_seconds() >= self.config.entry_deadline_seconds:
-                            raise ValueError("STALE_SIGNAL_NO_REPLAY")
+                            # A boundary wait that ran out names its cause, not a slow loop.
+                            raise ValueError(
+                                "INCOMPLETE_COMPLETED_HISTORY_DEADLINE"
+                                if state.boundary_clock == clock
+                                else "STALE_SIGNAL_NO_REPLAY"
+                            )
                         if state.problem or state.history_problem:
                             raise ValueError(state.problem or state.history_problem)
                         quote_check(
@@ -563,18 +582,27 @@ class Runtime:
                 except ValueError as exc:
                     reason = str(exc)
                 if reason == "INCOMPLETE_COMPLETED_HISTORY" and not self.data.chart_stream_problem:
-                    # The chart stream may already hold the final minute (the REST read drops
-                    # its newest sample): decide on it now; the next REST read confirms it.
-                    streamed = saxo_history.streamed_bar(
-                        state.chart, clock - timedelta(minutes=1), at
-                    )
-                    if streamed is not None and all(b.at < streamed.at for b in state.bars):
-                        state.bars = [*state.bars, streamed]
-                        state.stream_bars[streamed.at] = (streamed, str(event["id"]))
-                        state.chart_used += 1
+                    # The chart stream may already hold the trailing minutes the REST read lacks
+                    # (it drops its newest sample, and a read inside clock-2 ends at clock-3):
+                    # decide on them now; the next REST read confirms each one.
+                    trailing = trailing_missing({b.at for b in state.bars}, clock)
+                    streamed = [
+                        saxo_history.streamed_bar(state.chart, minute, at) for minute in trailing
+                    ]
+                    taken = [b for b in streamed if b is not None]
+                    if (
+                        trailing
+                        and len(taken) == len(trailing)
+                        and all(b.at < trailing[0] for b in state.bars)
+                    ):
+                        state.bars = [*state.bars, *taken]
+                        for bar in taken:
+                            state.stream_bars[bar.at] = (bar, str(event["id"]))
+                        state.chart_used += len(taken)
                         event["boundary_bar"] = {
                             "source": "CHART_STREAM",
-                            "minute": streamed.at.isoformat(),
+                            "minute": taken[-1].at.isoformat(),
+                            "minutes": [b.at.isoformat() for b in taken],
                             "seconds_after_clock": round((at - clock).total_seconds(), 3),
                         }
                         try:
@@ -587,16 +615,20 @@ class Runtime:
                             reason = ""
                         except ValueError as exc:
                             reason = str(exc)
-                # Only the final completed-minute boundary may wait. Earlier gaps,
-                # invalid bars, reference failures and other gates remain final skips.
+                # Only the final completed-minute boundary may wait: the minute the REST read has
+                # not reached and, before it, at most the no-trade minutes the fill rule covers once
+                # that read supplies the bar after them. Earlier gaps, invalid bars, reference
+                # failures and other gates remain final skips.
                 by_time = {b.at: b for b in state.bars}
+                trailing = trailing_missing(set(by_time), clock)
                 if (
                     reason == "INCOMPLETE_COMPLETED_HISTORY"
                     and (at - clock).total_seconds() < self.config.entry_deadline_seconds
-                    and clock - timedelta(minutes=1) not in by_time
+                    and trailing
                     and all(
-                        (b := by_time.get(clock - timedelta(minutes=i))) is not None and b.valid()
-                        for i in range(2, 32)
+                        (b := by_time.get(trailing[0] - timedelta(minutes=i))) is not None
+                        and b.valid()
+                        for i in range(1, 31)
                     )
                 ):
                     if state.boundary_clock != clock:
@@ -611,81 +643,96 @@ class Runtime:
                 observed = self.store.observe(event, reason, inputs)
                 if not observed:
                     continue
-                option_keys = [
-                    key(i)
-                    for i, _ in self.data.options.values()
-                    if i["market"] == state.market
-                    and i["underlying_uic"] == state.identity["uic"]
-                    and i["uic"] in state.warm_uics
-                ]
-                # The chain windows near the money (nearest and following expiry) and the
-                # following contract month are evidence too (observation only).
-                option_keys.append(key(chain_identity(state.identity)))
-                option_keys.append(key(chain_identity(state.identity, "next")))
-                if state.market in self.data.next_contracts:
-                    option_keys.append(key(self.data.next_contracts[state.market][0]))
-                capture = self.recorder.trigger(
-                    key(state.identity), event, time.time(), option_keys
+                try:
+                    await self.decide(state, event, clock, reason, inputs)
+                except Exception:
+                    # The clock is observed; a decision row keeps it from showing as undecided
+                    # forever while the worker's sticky fatal blocks arming.
+                    self.store.decision(
+                        str(event["id"]), "SKIPPED", "DECISION_WORKER_ERROR_REVIEW_REQUIRED"
+                    )
+                    raise
+
+    async def decide(
+        self,
+        state: MarketState,
+        event: dict[str, Any],
+        clock: datetime,
+        reason: str,
+        inputs: dict[str, float],
+    ) -> None:
+        """One observed clock of one market: evidence capture, option context, entry."""
+        assert state.identity is not None
+        option_keys = [
+            key(i)
+            for i, _ in self.data.options.values()
+            if i["market"] == state.market
+            and i["underlying_uic"] == state.identity["uic"]
+            and i["uic"] in state.warm_uics
+        ]
+        # The chain windows near the money (nearest and following expiry) and the
+        # following contract month are evidence too (observation only).
+        option_keys.append(key(chain_identity(state.identity)))
+        option_keys.append(key(chain_identity(state.identity, "next")))
+        if state.market in self.data.next_contracts:
+            option_keys.append(key(self.data.next_contracts[state.market][0]))
+        capture = self.recorder.trigger(key(state.identity), event, time.time(), option_keys)
+        self.store.depth_capture(str(event["id"]), capture)
+        context: dict[str, Any] = {"selection_status": "NOT_SELECTED", "reason": reason}
+        if not reason:
+            try:
+                selected, _ = await self.broker.select_option(event, state, inputs)
+                context = self.data.option_view(selected["uic"], time.time())
+                context.update(
+                    **views.iv_spread(context, inputs.get("rv15")),
+                    selection_status="SELECTED",
+                    strategy_exit_at=event["exit_at"],
+                    pre_trigger_seconds=max(
+                        0,
+                        context["coverage_seconds"] - max(0, time.time() - clock.timestamp()),
+                    ),
                 )
-                self.store.depth_capture(str(event["id"]), capture)
-                context: dict[str, Any] = {"selection_status": "NOT_SELECTED", "reason": reason}
-                if not reason:
-                    try:
-                        selected, _ = await self.broker.select_option(event, state, inputs)
-                        context = self.data.option_view(selected["uic"], time.time())
-                        context.update(
-                            **views.iv_spread(context, inputs.get("rv15")),
-                            selection_status="SELECTED",
-                            strategy_exit_at=event["exit_at"],
-                            pre_trigger_seconds=max(
-                                0,
-                                context["coverage_seconds"]
-                                - max(0, time.time() - clock.timestamp()),
-                            ),
-                        )
-                    except (ValueError, KeyError) as exc:
-                        context["reason"] = skip_reason(exc)
-                self.recorder.annotate(str(event["id"]), {"option_context": context})
-                with self.store.db:
-                    row = self.store.db.execute(
-                        "SELECT detail FROM signals WHERE id=?", (event["id"],)
-                    ).fetchone()
-                    detail = json.loads(row[0])
-                    detail["option_context"] = context
-                    # Observation only, never an entry rule: the futures book at this clock and
-                    # the volatility ingredients needed to judge vetoes afterwards.
-                    detail["book_flow"] = self.recorder.book_flow_view(
-                        key(state.identity), time.time()
-                    )
-                    detail["observation"] = observation(state.bars, clock, state.references)
-                    # Observation only: the look14 forecast and, for the selected option, the
-                    # movement its price implies against the forecast's.
-                    detail["forecast"] = self.forecast_view(
-                        state,
-                        clock,
-                        context if context.get("selection_status") == "SELECTED" else None,
-                    )
-                    # Observation only: the chain as seen at this clock (provider units).
-                    detail["option_chain"] = views.smile(
-                        state.option_board,
-                        clock.astimezone(NY).date().isoformat(),
-                        self.config.provider_volatility_scale,
-                        views.model_sigma(inputs.get("rv15")),
-                    )
-                    self.store.db.execute(
-                        "UPDATE signals SET detail=? WHERE id=?", (encode(detail), event["id"])
-                    )
-                if not reason:
-                    reason = "ENTRIES_PAUSED" if self.pause else self.broker.entry_reason()
-                if not reason:
-                    try:
-                        plan = await self.broker.prepare(event, state, inputs)
-                        reason = await self.broker.enter(event, plan)
-                    except (ValueError, KeyError) as exc:
-                        reason = skip_reason(exc)
-                if reason:
-                    self.store.decision(str(event["id"]), "SKIPPED", reason)
-                self.recorder.annotate(str(event["id"]), {"skip_reason": reason, "inputs": inputs})
+            except (ValueError, KeyError) as exc:
+                context["reason"] = skip_reason(exc)
+        self.recorder.annotate(str(event["id"]), {"option_context": context})
+        with self.store.db:
+            row = self.store.db.execute(
+                "SELECT detail FROM signals WHERE id=?", (event["id"],)
+            ).fetchone()
+            detail = json.loads(row[0])
+            detail["option_context"] = context
+            # Observation only, never an entry rule: the futures book at this clock and
+            # the volatility ingredients needed to judge vetoes afterwards.
+            detail["book_flow"] = self.recorder.book_flow_view(key(state.identity), time.time())
+            detail["observation"] = observation(state.bars, clock, state.references)
+            # Observation only: the look14 forecast and, for the selected option, the
+            # movement its price implies against the forecast's.
+            detail["forecast"] = self.forecast_view(
+                state,
+                clock,
+                context if context.get("selection_status") == "SELECTED" else None,
+            )
+            # Observation only: the chain as seen at this clock (provider units).
+            detail["option_chain"] = views.smile(
+                state.option_board,
+                clock.astimezone(NY).date().isoformat(),
+                self.config.provider_volatility_scale,
+                views.model_sigma(inputs.get("rv15")),
+            )
+            self.store.db.execute(
+                "UPDATE signals SET detail=? WHERE id=?", (encode(detail), event["id"])
+            )
+        if not reason:
+            reason = "ENTRIES_PAUSED" if self.pause else self.broker.entry_reason()
+        if not reason:
+            try:
+                plan = await self.broker.prepare(event, state, inputs)
+                reason = await self.broker.enter(event, plan)
+            except (ValueError, KeyError) as exc:
+                reason = skip_reason(exc)
+        if reason:
+            self.store.decision(str(event["id"]), "SKIPPED", reason)
+        self.recorder.annotate(str(event["id"]), {"skip_reason": reason, "inputs": inputs})
 
     async def manager(self) -> None:
         self.manager_health = "RUNNING"
@@ -739,10 +786,18 @@ class Runtime:
 
     def record_chart_audits(self) -> None:
         """A REST read contradicted a streamed boundary bar: the clock's evidence says so."""
-        for event_id, evidence in self.data.drain_chart_audits():
-            with self.store.db:
-                self.store.audit(event_id, "CHART_STREAM_MISMATCH", evidence)
-            self.recorder.annotate(event_id, {"chart_stream_mismatch": evidence})
+        audits = self.data.drain_chart_audits()
+        for index, (event_id, evidence) in enumerate(audits):
+            try:
+                with self.store.db:
+                    self.store.audit(event_id, "CHART_STREAM_MISMATCH", evidence)
+                self.recorder.annotate(event_id, {"chart_stream_mismatch": evidence})
+            except Exception as exc:
+                # Observation evidence: keep what is unwritten for the next pass and never let
+                # it stop the history worker (and with it the runtime).
+                self.data.chart_audits = audits[index:] + self.data.chart_audits
+                self.report_failure("chart-audit", exc)
+                return
 
     async def alert_worker(self) -> None:
         # Isolated: an alert failure is recorded in alerts.status() and never stops trading.
@@ -759,6 +814,7 @@ class Runtime:
             await self.refresh_histories()
             if not self.history_needed.is_set():
                 try:
+                    await self.data.retry_failed_startups()
                     await self.data.release_unused_options(
                         {json.loads(r["plan"])["option"]["uic"] for r in self.store.active()}
                     )

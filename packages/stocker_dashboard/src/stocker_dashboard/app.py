@@ -97,7 +97,6 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
                     "problem": s.problem,
                     "reference_sessions": len(s.references),
                     "capabilities": runtime.data.capability_view(s),
-                    "candidates": s.candidates if diagnostics else None,
                 }
                 for s in runtime.markets.values()
             ],
@@ -232,8 +231,11 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
 
     @app.get("/api/recordings")
     async def recordings() -> dict[str, Any]:
+        # The same six fields as the catalog: an active capture also carries every reference
+        # payload and annotation, megabytes the page does not read, serialised on the trading loop.
+        fields = ("segment", "state", "start", "end", "key", "protected")
         return {
-            "active": list(runtime.recorder.active.values()),
+            "active": [{k: c[k] for k in fields} for c in runtime.recorder.active.values()],
             "completed": runtime.recorder.catalog[-100:],
         }
 
@@ -258,8 +260,10 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
     @app.post("/api/recordings/{segment}/prune")
     async def prune_recording(segment: str) -> dict[str, Any]:
         referenced = {
-            json.loads(r[0]).get("segment", "")
-            for r in runtime.store.db.execute("SELECT summary FROM depth_captures")
+            r[0] or ""
+            for r in runtime.store.db.execute(
+                "SELECT json_extract(summary,'$.segment') FROM depth_captures"
+            )
         }
         try:
             # Completed, unreferenced, unprotected records only: two unlinks, on the loop so

@@ -38,7 +38,7 @@ in the runtime trading hot path.
 ## Architecture rules
 
 - One repository and one application/codebase with clear modules.
-- One frozen five-market Saxo futures-options PAPER pipeline. This repository holds only the
+- One frozen four-market Saxo futures-options PAPER pipeline. This repository holds only the
   runtime, its dashboard, their tests and operations material; retired providers and research
   live in git history, never in active packages.
 - The existing authenticated dashboard is a consumer of runtime state; its failure must not stop position management.

@@ -81,7 +81,6 @@ class PriceState:
         self.receipt: float | None = None
         self.quote_times: dict[str, float] = {}
         self.depth_receipt: float | None = None
-        self.size_receipt: float | None = None
         self.size_times: dict[str, float] = {}
         self.last_contact: float | None = None
         self.problem = "AWAITING_SNAPSHOT"
@@ -100,7 +99,7 @@ class PriceState:
         self.seen.clear()
         self.quote_times.clear()
         self.size_times.clear()
-        self.receipt = self.depth_receipt = self.size_receipt = None
+        self.receipt = self.depth_receipt = None
         self.last_contact = at
         self.last_receipt = at
         self.last_field_change = at
@@ -130,8 +129,6 @@ class PriceState:
                 field not in current_quote and field in (value.get("PriceInfoDetails") or {})
             ):
                 self.size_times[side] = at
-        if len(self.size_times) == 2:
-            self.size_receipt = min(self.size_times.values())
 
     def update(self, value: dict[str, Any], message_id: str, at: float) -> bool:
         self.last_contact = at
@@ -187,7 +184,7 @@ class PriceState:
     def gap(self, reason: str) -> None:
         self.value = None
         self.analytics.clear()
-        self.receipt = self.depth_receipt = self.size_receipt = None
+        self.receipt = self.depth_receipt = None
         self.quote_times.clear()
         self.size_times.clear()
         self.problem = reason

@@ -75,7 +75,7 @@ async def benchmark(legacy: bool) -> dict:
             identity = f"fixture-{i}"
             event = {
                 "id": identity,
-                "market": MARKETS[i % 5],
+                "market": MARKETS[i % len(MARKETS)],
                 "rule_version": "fixture",
                 "signal_at": (at - timedelta(hours=i)).isoformat(),
                 "exit_at": at.isoformat(),

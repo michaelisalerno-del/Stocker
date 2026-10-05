@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -39,7 +40,11 @@ NEARBY = 4
 
 
 def audit_day(now: datetime) -> str:
-    """Today's CME session; from 17:00 New York (after the close) and at weekends, the next."""
+    """The session the audit prepares: today's, or from 17:00 New York (the close) and at weekends
+    the next. This runs an hour before `rules.session_day` turns over at the 18:00 open on
+    purpose, so the 17:10 timer's file names the coming session. The runtime reads the file only
+    once its own day matches, so a restart between 17:10 and 18:00 sees a mismatch and retries
+    15 minutes later, in time for the first evening clock at 19:00."""
     local = now.astimezone(NY)
     later = local.hour >= 17 or local.weekday() > 4
     return (next_weekday(local.date()) if later else local.date()).isoformat()
@@ -108,10 +113,13 @@ def fetch(config: FuturesConfig, token: str, account_key: str, market: str) -> t
             "/ref/v1/instruments", Keywords=market, AssetTypes="ContractFutures", **{"$top": 100}
         )
         nearby = []
+        # The standard family only (contracts.future_identity's pattern), before any details GET:
+        # minis, micros and spreads share the keyword and the RefData minute limit is the service's.
+        family = re.compile(market + r"[FGHJKMNQUVXZ][0-9]{1,4}(?::[A-Za-z0-9_-]+)?")
         for row in found.get("Data", []):
-            if row.get("AssetType") != "ContractFutures" or not str(
-                row.get("Symbol", "")
-            ).startswith(market):
+            if row.get("AssetType") != "ContractFutures" or not family.fullmatch(
+                str(row.get("Symbol", ""))
+            ):
                 continue
             raw = get(
                 f"/ref/v1/instruments/details/{row['Identifier']}/ContractFutures",

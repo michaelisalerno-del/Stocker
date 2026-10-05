@@ -139,6 +139,105 @@ def test_clock_decides_on_the_streamed_boundary_bar_and_records_it(tmp_path, mon
     asyncio.run(scenario())
 
 
+def test_clock_takes_every_trailing_minute_the_rest_read_lacks_from_the_stream(
+    tmp_path, monkeypatch
+):
+    """A REST read inside clock-2 ends at clock-3 (it drops its newest sample); the stream
+    holds both missing minutes, so the clock decides on them (review 2026-10-04)."""
+    import stocker_execution.runtime as module
+
+    monkeypatch.setattr(module, "now", lambda: AT + timedelta(seconds=2))
+
+    async def scenario():
+        runtime = Runtime(FuturesConfig(), Store(tmp_path / "ledger.sqlite"))
+        runtime.started_at = AT - timedelta(seconds=1)
+        state = runtime.markets["CL"]
+        state.identity = FUTURE
+        state.problem = state.history_problem = ""
+        state.references = [{9: {"rv15": 0.01, "range15": 0.01, "volume15": 150}} for _ in range(5)]
+        bars = [
+            Bar(
+                AT - timedelta(minutes=60 - i),
+                70 + i * 0.01,
+                71 + i * 0.01,
+                69 + i * 0.01,
+                70 + i * 0.01,
+                10,
+            )
+            for i in range(60)
+        ]
+        state.bars = bars[:-2]
+        state.price = quote(70, 71, (AT + timedelta(seconds=2)).timestamp())
+        runtime.recorder.register(key(FUTURE), FUTURE)
+        state.chart.snapshot(
+            {
+                "DataVersion": 1,
+                "ChartInfo": {"DelayedByMinutes": 0},
+                "Data": [from_bar(bars[-2]), from_bar(bars[-1]), sample(AT, 70.6, 1)],
+            },
+            "g",
+            AT.timestamp() + 1,
+        )
+        await runtime.decisions()
+        rows = runtime.store.history(None, None, None)
+        assert len(rows) == 1 and rows[0]["reason"] == "EXECUTION_DISABLED"
+        detail = json.loads(runtime.store.db.execute("SELECT detail FROM signals").fetchone()[0])
+        assert detail["boundary_bar"]["minutes"] == [b.at.isoformat() for b in bars[-2:]]
+        assert detail["boundary_bar"]["minute"] == bars[-1].at.isoformat()
+        assert [b.at for b in state.bars[-2:]] == [b.at for b in bars[-2:]]
+        assert state.chart_used == 2 and list(state.stream_bars) == [b.at for b in bars[-2:]]
+        await runtime.stop()
+        runtime.store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_quiet_minutes_before_the_boundary_wait_for_the_rest_read(tmp_path, monkeypatch):
+    """Two no-trade minutes before clock-1 are missing from REST and the stream alike. The
+    boundary REST read will fill them (the <=5-minute rule) once it carries clock-1, so the
+    clock waits instead of skipping; a sixth quiet minute is a gap and stays final."""
+    import stocker_execution.runtime as module
+
+    monkeypatch.setattr(module, "now", lambda: AT + timedelta(seconds=2))
+
+    async def scenario(missing):
+        runtime = Runtime(FuturesConfig(), Store(tmp_path / f"ledger-{missing}.sqlite"))
+        runtime.started_at = AT - timedelta(seconds=1)
+        state = runtime.markets["CL"]
+        state.identity = FUTURE
+        state.problem = state.history_problem = ""
+        state.references = [{9: {"rv15": 0.01, "range15": 0.01, "volume15": 150}} for _ in range(5)]
+        bars = [
+            Bar(
+                AT - timedelta(minutes=60 - i),
+                70 + i * 0.01,
+                71 + i * 0.01,
+                69 + i * 0.01,
+                70 + i * 0.01,
+                10,
+            )
+            for i in range(60)
+        ]
+        state.bars = bars[:-missing]
+        state.price = quote(70, 71, (AT + timedelta(seconds=2)).timestamp())
+        runtime.recorder.register(key(FUTURE), FUTURE)
+        state.chart.snapshot(
+            {"DataVersion": 1, "ChartInfo": {"DelayedByMinutes": 0}, "Data": [sample(AT)]},
+            "g",
+            AT.timestamp() + 1,
+        )
+        await runtime.decisions()
+        waiting = state.boundary_clock == AT
+        reasons = [r["reason"] for r in runtime.store.history(None, None, None)]
+        await runtime.stop()
+        runtime.store.db.close()
+        return waiting, reasons
+
+    assert asyncio.run(scenario(3)) == (True, [])  # clock-1 plus two quiet minutes
+    assert asyncio.run(scenario(6)) == (True, [])  # the longest run the fill rule covers
+    assert asyncio.run(scenario(7)) == (False, ["INCOMPLETE_COMPLETED_HISTORY"])
+
+
 def test_a_tripped_stream_leaves_the_clock_waiting_for_rest(tmp_path, monkeypatch):
     import stocker_execution.runtime as module
 

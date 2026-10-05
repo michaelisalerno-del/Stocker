@@ -259,6 +259,12 @@ async def daily_context(data: DataService, state: MarketState) -> None:
             },
         )
         rows = sorted(result.get("Data", []), key=lambda r: r.get("Time", ""))[:-1]
+        # Daily samples carry the session's official open interest (0 until CME publishes it).
+        state.daily_open_interest = [
+            {"day": str(r["Time"])[:10], "open_interest": float(r["Interest"])}
+            for r in rows[-5:]
+            if isinstance(r.get("Interest"), (int, float)) and r["Interest"] > 0
+        ]
         ranges = [float(r["High"]) - float(r["Low"]) for r in rows[-20:]]
         if len(ranges) < 5 or any(not math.isfinite(x) or x < 0 for x in ranges):
             raise ValueError("DAILY_SAMPLES_INSUFFICIENT")

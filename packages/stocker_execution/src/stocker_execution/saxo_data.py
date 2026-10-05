@@ -144,6 +144,9 @@ class MarketState:
     daily_range: float | None = None
     daily_day: str = ""
     daily_problem: str = ""
+    # Display and evidence only: the futures' official open interest of the last completed sessions
+    # (daily bars; CME publishes it once a day, so minute bars carry 0).
+    daily_open_interest: list[dict[str, Any]] = field(default_factory=list)
 
 
 class DataService:

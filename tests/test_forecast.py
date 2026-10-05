@@ -136,3 +136,48 @@ def test_break_even_view_reads_in_normal_hours_and_names_what_is_missing():
         )["reason"]
         == "QUOTE_NOT_USABLE"
     )
+
+
+def test_daily_context_keeps_the_published_open_interest(tmp_path):
+    """Saxo's daily bars carry the official open interest; minute bars carry 0 (2026-10-05)."""
+    import asyncio
+
+    from saxo_support import setup
+    from stocker_execution import saxo_history
+
+    data = setup(tmp_path)[1]
+    state = data.markets["CL"]
+    rows = [
+        {
+            "Time": f"2026-09-{d:02d}T00:00:00Z",
+            "Open": 70,
+            "High": 71,
+            "Low": 69,
+            "Close": 70,
+            "Interest": oi,
+        }
+        for d, oi in (
+            (21, 0.0),
+            (22, 90.0),
+            (23, 95.0),
+            (24, 100.0),
+            (25, 110.0),
+            (28, 120.0),
+            (29, 0.0),
+            (30, 0.0),
+        )
+    ]
+
+    async def request(method, path, **kwargs):
+        return {"Data": rows}
+
+    data.client.request = request
+    asyncio.run(saxo_history.daily_context(data, state))
+    # The newest sample (today, unfinished) is dropped and unpublished zeros are left out.
+    assert state.daily_open_interest == [
+        {"day": "2026-09-23", "open_interest": 95.0},
+        {"day": "2026-09-24", "open_interest": 100.0},
+        {"day": "2026-09-25", "open_interest": 110.0},
+        {"day": "2026-09-28", "open_interest": 120.0},
+    ]
+    assert state.daily_problem == "" and state.daily_range == 2

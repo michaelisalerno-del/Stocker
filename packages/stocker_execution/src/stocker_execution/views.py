@@ -406,6 +406,7 @@ def price_context(state: "MarketState") -> dict[str, Any]:
         else None,
         "daily_range": state.daily_range,
         "daily_problem": state.daily_problem,
+        "daily_open_interest": state.daily_open_interest,
         "basis": "Saxo-reported session fields; NetChange is mid minus last close",
     }
 

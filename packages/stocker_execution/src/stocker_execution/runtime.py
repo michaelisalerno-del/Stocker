@@ -723,6 +723,8 @@ class Runtime:
             # the volatility ingredients needed to judge vetoes afterwards.
             detail["book_flow"] = self.recorder.book_flow_view(key(state.identity), time.time())
             detail["observation"] = observation(state.bars, clock, state.references)
+            # Observation only: the futures' open interest over the last completed sessions.
+            detail["daily_open_interest"] = state.daily_open_interest
             # Observation only: the look14 forecast and, for the selected option, the
             # movement its price implies against the forecast's.
             detail["forecast"] = self.forecast_view(

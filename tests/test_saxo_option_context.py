@@ -982,7 +982,9 @@ def test_an_options_problem_at_connect_does_not_block_the_verified_future(tmp_pa
             "Exchange": {"ExchangeId": FUTURE["exchange"]},
             "TickSize": 0.01,
             "PriceToContractFactor": 1000,
-            "RelatedOptionRootsEnhanced": [{"AssetType": "FuturesOption", "OptionRootId": 51}],
+            "RelatedOptionRootsEnhanced": [
+                {"AssetType": "FuturesOption", "OptionRootId": r} for r in (51, 52, 53)
+            ],
         }
 
         async def request(method, path, **_):
@@ -1014,5 +1016,114 @@ def test_an_options_problem_at_connect_does_not_block_the_verified_future(tmp_pa
         state.option_space_day = "2026-09-30"  # a new day still loads them
         await data.discover(state)
         assert any("contractoptionspaces" in p for p in calls)
+
+    asyncio.run(run())
+
+
+def test_a_failed_price_feed_at_connect_is_retried_from_the_history_pass(tmp_path):
+    """One timeout on a market's PRICE subscribe used to leave the market blocked until an
+    unrelated reconnect; it is retried a minute later, and only then."""
+
+    async def run():
+        config = FuturesConfig(
+            contracts={
+                "CL": {
+                    "environment": "SAXO_SIM",
+                    "uic": 100,
+                    "symbol": FUTURE["symbol"],
+                    "exchange": FUTURE["exchange"],
+                    "contract_month": FUTURE["contract_month"],
+                    "approval": "fixture pin approval",
+                }
+            }
+        )
+        data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
+        state = data.markets["CL"]
+        details = {
+            "AssetType": "ContractFutures",
+            "Uic": 100,
+            "Symbol": FUTURE["symbol"],
+            "ContractSize": 1000,
+            "ExpiryDate": "2026-10-20",
+            "CurrencyCode": "USD",
+            "Exchange": {"ExchangeId": FUTURE["exchange"]},
+            "TickSize": 0.01,
+            "PriceToContractFactor": 1000,
+            "RelatedOptionRootsEnhanced": [],
+        }
+
+        async def request(method, path, **_):
+            if path.startswith("/ref/v1/instruments/details/"):
+                return details
+            raise SaxoError("RateLimitExceeded")
+
+        attempts = []
+
+        async def subscribe(kind, arguments, target, old=None):
+            attempts.append((kind, target))
+            if attempts.count(("PRICE", "CL")) == 1:
+                raise SaxoError("SAXO_TRANSPORT_UNAVAILABLE")
+            return "ref"
+
+        data.client.request = request
+        data.subscribe = subscribe
+        data.connected = True
+        await data.start_market(state)
+        assert state.identity["uic"] == 100 and state.problem == "SAXO_TRANSPORT_UNAVAILABLE"
+        await data.retry_failed_startups()
+        assert state.problem == "" and attempts.count(("PRICE", "CL")) == 2
+        state.problem = "SAXO_TRANSPORT_UNAVAILABLE"
+        await data.retry_failed_startups()  # not again inside the minute
+        assert attempts.count(("PRICE", "CL")) == 2
+
+    asyncio.run(run())
+
+
+def test_an_approved_root_saxo_does_not_relate_blocks_the_family(tmp_path):
+    """Loading only the roots Saxo lists would move SAME_DAY_OR_NEXT_LISTED to the following
+    day's option when a weekday root is missing; the family loads whole or not at all."""
+    from stocker_execution.saxo_data import roots_verified
+
+    async def run():
+        config = FuturesConfig(
+            contracts={
+                "CL": {
+                    "environment": "SAXO_SIM",
+                    "uic": 100,
+                    "symbol": FUTURE["symbol"],
+                    "exchange": FUTURE["exchange"],
+                    "contract_month": FUTURE["contract_month"],
+                    "approval": "fixture pin approval",
+                }
+            },
+            mappings={"CL": family_mapping()},
+        )
+        data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
+        state = data.markets["CL"]
+        details = {
+            "AssetType": "ContractFutures",
+            "Uic": 100,
+            "Symbol": FUTURE["symbol"],
+            "ContractSize": 1000,
+            "ExpiryDate": "2026-10-20",
+            "CurrencyCode": "USD",
+            "Exchange": {"ExchangeId": FUTURE["exchange"]},
+            "TickSize": 0.01,
+            "PriceToContractFactor": 1000,
+            "RelatedOptionRootsEnhanced": [
+                {"AssetType": "FuturesOption", "OptionRootId": r} for r in (51, 53)
+            ],
+        }
+
+        async def request(method, path, **_):
+            if path.startswith("/ref/v1/instruments/details/"):
+                return details
+            raise AssertionError(path)  # no option space is loaded for a partial family
+
+        data.client.request = request
+        await data.discover(state)
+        assert state.problem == ""  # the future itself is verified
+        assert state.capabilities["options"] == {"problem": "APPROVED_OPTION_ROOT_NOT_RELATED"}
+        assert not roots_verified(state, (51, 52, 53))
 
     asyncio.run(run())

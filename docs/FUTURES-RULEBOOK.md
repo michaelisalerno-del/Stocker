@@ -91,5 +91,5 @@ plan records `expiry_rule`, and the option's expiry date shows how far out it wa
 CL, GC and NQ stay `SAME_DAY`.
 
 Reference sessions: `scripts/reference_audit.py` writes the daily selection audit before the session (a
-systemd timer at 07:30 New York) under the user's standing approval of the prior-session volume rule, using
+systemd timers at 07:30 and 17:10 New York) under the user's standing approval of the prior-session volume rule, using
 Saxo daily-chart volume. It reads the service's current access token and never refreshes it.

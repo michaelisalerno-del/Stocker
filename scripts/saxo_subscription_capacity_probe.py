@@ -47,6 +47,8 @@ async def main() -> None:
     config = load(args.config)
     client = SaxoClient(CurrentToken(config.data_environment, config.saxo, args.state))
     uics = [c.uic for c in config.contracts.values()]
+    if not uics:
+        raise SystemExit("No contracts pinned in the config: nothing to subscribe to")
     context = "SLRNOCAPPROBE" + secrets.token_hex(6)
     opened: list[str] = []
     try:

@@ -25,6 +25,7 @@ from stocker_execution.contracts import (
     utc,
     verified_cutoff,
 )
+from stocker_execution.saxo_auth import SaxoRefused
 from stocker_execution.saxo_data import DataService, MarketState, roots_verified
 from stocker_execution.store import TERMINAL, Store, encode
 
@@ -310,7 +311,8 @@ class PaperBroker:
                     "UPDATE orders SET status='Submitted' WHERE reference=?", (reference,)
                 )
         except Exception as exc:
-            if transmitted:
+            # A request the client refused locally never left the process: no order can exist.
+            if transmitted and not isinstance(exc, SaxoRefused):
                 self.reconciled = False
                 self.problem = "ORDER_STATUS_UNCERTAIN_RECONCILE_REQUIRED"
                 self.store.decision(identity, "ORDER_STATUS_UNCERTAIN", self.problem)
@@ -840,8 +842,15 @@ class PaperBroker:
                             -1 if self.config.execution_mode == "INTERNAL_PAPER" else 0,
                         )
                         positive(price, "EXIT_BID")
+                        if self.config.execution_mode == "INTERNAL_PAPER":
+                            # No displayed bid size means no paper sale this cycle: retry in
+                            # two seconds without writing an order row for the attempt.
+                            positive(state[1].sizes().get("Bid"), "AVAILABLE_OPTION_SIZE")
                         exits = [o for o in self.store.orders(identity) if o["role"] == "EXIT"]
-                        if len(exits) >= 3:
+                        if self.config.execution_mode == "SAXO_SIM" and len(exits) >= 3:
+                            # Three transmitted exits are a broker question. Paper exits
+                            # transmit nothing, so a rejected size check simply retries until
+                            # the bid is sellable, written off or the cutoff passes.
                             raise ValueError("FAILED_CLOSURE_REQUIRES_OPERATOR")
                         await self.submit(identity, plan, "EXIT", price)
                     position = self.store.db.execute(

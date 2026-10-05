@@ -95,7 +95,6 @@ class MarketState:
     market: Market
     identity: dict[str, Any] | None = None
     reference: dict[str, Any] = field(default_factory=dict)
-    candidates: list[dict[str, Any]] = field(default_factory=list)
     price: PriceState = field(default_factory=PriceState)
     bars: list[Bar] = field(default_factory=list)
     # Streamed one-minute samples: the boundary bar at a clock before the REST read has it.
@@ -108,7 +107,6 @@ class MarketState:
     references: list[dict[int, dict[str, float]]] = field(default_factory=list)
     capabilities: dict[str, Any] = field(
         default_factory=lambda: {
-            "discovery": "UNVERIFIED",
             "permission": "UNVERIFIED",
             "quote": "UNVERIFIED",
             "l2": "UNVERIFIED",
@@ -125,6 +123,7 @@ class MarketState:
     expiry_instants: dict[str, datetime] = field(default_factory=dict)
     option_space_day: str = ""
     options_retry_at: float = 0.0
+    startup_retry_at: float = 0.0  # a failed connect-time step is retried from the history pass
     problem: str = "AUTHENTICATION_REQUIRED"
     history_problem: str = "SAXO_HISTORY_NOT_VERIFIED"
     last_clock: datetime | None = None
@@ -277,25 +276,6 @@ class DataService:
             self.renew_streams()
 
     async def discover(self, state: MarketState) -> None:
-        result = await self.client.request(
-            "GET",
-            "/ref/v1/instruments",
-            params={
-                "Keywords": state.market,
-                "AssetTypes": "ContractFutures",
-                "$top": 100,
-            },
-        )
-        state.candidates = [
-            {
-                k: row.get(k)
-                for k in ("Identifier", "Symbol", "AssetType", "Description", "ExchangeId")
-            }
-            for row in result.get("Data", [])
-            if row.get("AssetType") == "ContractFutures"
-            and str(row.get("Symbol", "")).startswith(state.market)
-        ]
-        state.capabilities["discovery"] = "AVAILABLE" if state.candidates else "NO_LISTED_FUTURES"
         selection = self.config.contracts.get(state.market)
         if not selection:
             raise SaxoError("REFERENCE_CONTRACT_SELECTION_REQUIRED")
@@ -360,6 +340,11 @@ class DataService:
             if mapping
             else (roots if len(roots) == 1 else [])
         )
+        if mapping and set(chosen) != set(mapping.option_root_ids):
+            # An approved weekday root Saxo does not relate to this future would silently move
+            # SAME_DAY_OR_NEXT_LISTED to the following day's option; the family loads whole or
+            # not at all, and the market says why.
+            raise SaxoError("APPROVED_OPTION_ROOT_NOT_RELATED")
         space_rows: list[dict[str, Any]] = []
         for i, root in enumerate(chosen):
             if i:
@@ -635,7 +620,7 @@ class DataService:
 
     def drop_pending(self, ref: str) -> list[dict[str, Any]]:
         pending = self.pending.pop(ref, [])
-        self.pending_bytes -= sum(len(json.dumps(m)) for m in pending)
+        self.pending_bytes -= sum(m["size"] for m in pending)
         return pending
 
     def price_target(self, target: str) -> tuple[PriceState, dict[str, Any] | None]:
@@ -1179,7 +1164,9 @@ class DataService:
     async def refresh_option_metadata(self) -> None:
         for uic, (identity, _) in list(self.options.items()):
             prior = self.option_references.get(uic, {})
-            if time.time() - prior.get("received_at", 0) < OPTION_METADATA_MAX_AGE_SECONDS:
+            # A minute ahead of option_view's age limit, so a clock never lands in the gap
+            # between the costs going stale and this pass reaching them.
+            if time.time() - prior.get("received_at", 0) < OPTION_METADATA_MAX_AGE_SECONDS - 60:
                 continue
             try:
                 raw = await self.client.request(
@@ -1248,7 +1235,10 @@ class DataService:
             ):
                 continue
             async with self.subscription_lock:
-                await self.unsubscribe_option(uic)
+                # Decided again under the lock: a clock decision may have protected (or a
+                # candidate change retired) this option while the lock was held.
+                if uic in self.options and not self.option_protected(uic):
+                    await self.unsubscribe_option(uic)
         # Retired strikes keep separate rolling history until its ordinary expiry.
         for instrument, window in list(self.recorder.windows.items()):
             if window.identity.get("asset_type") != "FuturesOption":
@@ -1292,14 +1282,47 @@ class DataService:
         await self.subscribe("SESSION", {}, "SESSION")
         await saxo_balance.ensure_balance_subscription(self)
         for state in self.markets.values():
-            try:
-                await self.discover(state)
-            except SaxoError as exc:
-                state.problem = str(exc)
-            except (ValueError, KeyError, TypeError):
-                state.problem = "REFERENCE_SCHEMA_NOT_VERIFIED"
-            if not state.identity:
-                continue
+            await self.start_market(state)
+        # Discover this environment's GBPUSD UIC; never reuse a SIM identifier in LIVE.
+        # An FX problem blocks entries under its own name; it never resets price streams.
+        await self.start_fx()
+
+    async def retry_failed_startups(self) -> None:
+        """A market (or the FX rate) whose connect-time steps failed once, say on a timeout or a
+        rate limit, is retried a minute later from the history pass instead of staying blocked
+        until an unrelated reconnect (review 2026-10-04). A market's problem never touches the
+        others' feeds."""
+        if not self.connected:
+            return
+        for state in self.markets.values():
+            if state.problem and time.monotonic() >= state.startup_retry_at:
+                state.startup_retry_at = time.monotonic() + 60
+                await self.start_market(state)
+        if self.fx.problem and not any(s["target"] == "FX" for s in self.subscriptions.values()):
+            await self.start_fx()
+
+    async def start_fx(self) -> None:
+        try:
+            await self.subscribe_fx()
+        except (SaxoError, ValueError) as exc:
+            self.fx.gap(
+                str(exc) if isinstance(exc, SaxoError) else "FX_REFERENCE_SCHEMA_UNVERIFIED"
+            )
+
+    async def start_market(self, state: MarketState) -> None:
+        """Verify the pinned future, then its price feed and the observation-only streams."""
+        try:
+            await self.discover(state)
+        except SaxoError as exc:
+            state.problem = str(exc)
+        except (ValueError, KeyError, TypeError):
+            state.problem = "REFERENCE_SCHEMA_NOT_VERIFIED"
+        if not state.identity:
+            return
+        if not any(
+            s["kind"] == "PRICE" and s["target"] == state.market
+            for s in self.subscriptions.values()
+        ):
             try:
                 arguments = {
                     "Uic": state.identity["uic"],
@@ -1340,18 +1363,10 @@ class DataService:
                 state.last_clock = state.last_clock or state.live_since
             except (SaxoError, ValueError) as exc:
                 state.problem = str(exc)
-            await self.subscribe_board(state)
-            await self.subscribe_board(state, "next")
-            await self.subscribe_chart(state)
-            await self.subscribe_next_contract(state)
-        # Discover this environment's GBPUSD UIC; never reuse a SIM identifier in LIVE.
-        # An FX problem blocks entries under its own name; it never resets price streams.
-        try:
-            await self.subscribe_fx()
-        except (SaxoError, ValueError) as exc:
-            self.fx.gap(
-                str(exc) if isinstance(exc, SaxoError) else "FX_REFERENCE_SCHEMA_UNVERIFIED"
-            )
+        await self.subscribe_board(state)
+        await self.subscribe_board(state, "next")
+        await self.subscribe_chart(state)
+        await self.subscribe_next_contract(state)
 
     async def subscribe_chart(self, state: MarketState) -> None:
         """Streamed one-minute samples of the pinned future (2026-10-04): the final minute's bar
@@ -1491,7 +1506,7 @@ class DataService:
             size = len(json.dumps(queued))
             if self.pending_bytes + size > 1024**2:
                 raise SaxoError("SNAPSHOT_PENDING_QUEUE_LIMIT")
-            self.pending[ref].append(queued)
+            self.pending[ref].append({**queued, "size": size})
             self.pending_bytes += size
             return
         if ref == "_heartbeat":
@@ -1537,7 +1552,9 @@ class DataService:
                                     receipt,
                                     message_id=message["message_id"],
                                     generation=price.generation,
-                                    provider_message=message,
+                                    # This subscription's heartbeat only: the frame lists every
+                                    # subscription and was stored once per PRICE feed it named.
+                                    provider_message=heartbeat,
                                     observation_context=price.observation_context(),
                                 )
                         if subscription["kind"] == "CHART":
@@ -1589,13 +1606,21 @@ class DataService:
             elif subscription["kind"] == "BOARD":
                 market, slot = board_target(subscription["target"])
                 state = self.markets[market]
-                if slot:
-                    self.record_chain(state, "UPDATE", data, receipt, slot)
-                    state.next_option_board = merge_board(state.next_option_board, data)
-                else:
-                    self.record_board(state, data, receipt)
-                    self.record_chain(state, "UPDATE", data, receipt)
-                    state.option_board = merge_board(state.option_board, data)
+                try:
+                    if slot:
+                        self.record_chain(state, "UPDATE", data, receipt, slot)
+                        state.next_option_board = merge_board(state.next_option_board, data)
+                    else:
+                        self.record_board(state, data, receipt)
+                        self.record_chain(state, "UPDATE", data, receipt)
+                        state.option_board = merge_board(state.option_board, data)
+                except (KeyError, TypeError, ValueError) as exc:
+                    # Observation only: a malformed chain delta takes a fresh snapshot of that
+                    # window and never resets the trading feeds.
+                    state.capabilities["chain_board_problem" + ("_next" if slot else "")] = (
+                        str(exc) if isinstance(exc, ValueError) else "CHAIN_SCHEMA_UNVERIFIED"
+                    )
+                    self.reset_refs.add(ref)
             elif subscription["kind"] == "CHART":
                 self.markets[subscription["target"]].chart.update(data, receipt)
             else:
@@ -1615,19 +1640,25 @@ class DataService:
                     )
 
     async def replace_reset_subscriptions(self) -> None:
-        """Fresh snapshots for the subscriptions Saxo or a timeout singled out, one at a time."""
+        """Fresh snapshots for the subscriptions Saxo or a timeout singled out, one at a time.
+
+        Runs as its own task beside the socket reader: a session upgrade renews every feed,
+        ~37 paced POSTs, and the reader must keep draining meanwhile. A ref stays in
+        `reset_refs` until replaced so the reader's silence check does not count it twice."""
         while self.reset_refs:
-            ref = self.reset_refs.pop()
+            ref = next(iter(self.reset_refs))
             subscription = self.subscriptions.get(ref)
             if subscription:
                 await self.subscribe(
                     subscription["kind"], subscription["arguments"], subscription["target"], old=ref
                 )
+            self.reset_refs.discard(ref)
 
     async def run(self) -> None:
         backoff = 2
         while not self.stopping:
             setup: asyncio.Task[None] | None = None
+            replacer: asyncio.Task[None] | None = None
             try:
                 await self.verify_account()
                 self.context = "SLRNO-" + secrets.token_hex(12)
@@ -1675,6 +1706,7 @@ class DataService:
                             if time.monotonic() - s["contact"] > s["timeout"]
                             # Optional account/event streams must not reset price streams.
                             and s["kind"] not in {"BALANCE", "ACTIVITIES"}
+                            and ref not in self.reset_refs  # already being replaced
                         ]
                         if len(silent) > 1 or any(
                             self.subscriptions[r]["kind"] == "SESSION" for r in silent
@@ -1692,12 +1724,17 @@ class DataService:
                                     "SUBSCRIPTION_HEARTBEAT_TIMEOUT"
                                 )
                             self.reset_refs.add(ref)
-                        await self.replace_reset_subscriptions()
+                        if replacer is not None and replacer.done():
+                            replacer.result()  # a refused replacement reconnects, as before
+                            replacer = None
+                        if self.reset_refs and replacer is None:
+                            replacer = asyncio.create_task(self.replace_reset_subscriptions())
             except Exception as exc:
-                if setup:
-                    setup.cancel()
-                    await asyncio.gather(setup, return_exceptions=True)
-                    setup = None
+                for task in (setup, replacer):
+                    if task:
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
+                setup = replacer = None
                 self.connected = False
                 self.problem = str(exc) if isinstance(exc, SaxoError) else "SAXO_RECONNECT_REQUIRED"
                 for market in self.markets:
@@ -1708,12 +1745,11 @@ class DataService:
                 for uic in self.options:
                     self.mark_gap(str(uic), self.problem)
                 self.fx.gap(self.problem)
-                # Explicitly delete server-owned subscriptions before a new context.
-                for ref, subscription in list(self.subscriptions.items()):
+                # Explicitly delete server-owned subscriptions before a new context: one call per
+                # service for the whole context rather than one per subscription (~48 paced calls).
+                for path in sorted({s["path"] for s in self.subscriptions.values()}):
                     with suppress(SaxoError):
-                        await self.client.request(
-                            "DELETE", subscription["path"] + f"/{self.context}/{ref}"
-                        )
+                        await self.client.request("DELETE", f"{path}/{self.context}")
                 self.subscriptions.clear()
                 self.reset_refs.clear()
                 # A new context carries no server-side disables; a repeat just disables again.
@@ -1723,9 +1759,10 @@ class DataService:
                 await asyncio.sleep(backoff)
                 backoff = min(60, backoff * 2)
             finally:
-                if setup:
-                    setup.cancel()
-                    await asyncio.gather(setup, return_exceptions=True)
+                for task in (setup, replacer):
+                    if task:
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
 
     def capability_view(self, state: MarketState) -> dict[str, Any]:
         value = state.price.value or {}

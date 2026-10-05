@@ -33,6 +33,14 @@ class SaxoError(ValueError):
     """Coded transport or authentication failure; never carries provider text."""
 
 
+class SaxoRefused(SaxoError):
+    """A request the client refused locally: nothing reached Saxo, so nothing can have happened."""
+
+
+class _TransientAuthFailure(Exception):
+    """The token endpoint failed (5xx or its own transient codes); the grant itself stands."""
+
+
 def private_read(path: Path) -> dict[str, Any]:
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.getuid():
@@ -157,6 +165,13 @@ class OAuth:
                     "temporarily_unavailable",
                 }:
                     reason = "OAUTH_" + code.upper()
+                if response.status_code >= 500 or code in {
+                    "server_error",
+                    "temporarily_unavailable",
+                }:
+                    # The auth server failed, not the grant: the refresh token cannot have
+                    # rotated, so keep it for the next attempt (as for a transport error).
+                    raise _TransientAuthFailure(reason)
                 raise SaxoError(reason)
             reason = "OAUTH_TOKEN_RESPONSE_INVALID"
             raw = response.json()
@@ -184,9 +199,9 @@ class OAuth:
             self.generation += 1
             self.status = "AUTHENTICATED"
             self.failure_reason = ""
-        except httpx.HTTPError:
-            # The request never completed, so the refresh token cannot have rotated:
-            # keep it for the next attempt inside the pre-expiry window.
+        except (httpx.HTTPError, _TransientAuthFailure):
+            # The request never completed, or the server failed: the refresh token cannot have
+            # rotated, so keep it for the next attempt inside the pre-expiry window.
             self.failure_reason = reason
             raise SaxoError(reason) from None
         except Exception:

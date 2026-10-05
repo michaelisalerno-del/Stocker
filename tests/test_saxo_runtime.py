@@ -340,6 +340,36 @@ def test_sim_ambiguous_order_keeps_reservation_and_is_never_retried(tmp_path):
     asyncio.run(scenario())
 
 
+def test_sim_order_refused_before_sending_is_a_skip_not_an_ambiguous_order(tmp_path):
+    """The client's own refusals (queue limit, blocked endpoint, a failed token refresh) happen
+    before any byte is sent; treating them as transmitted left SIM blocked on a broker audit
+    that could find nothing."""
+    from stocker_execution.saxo_auth import SaxoRefused
+
+    async def scenario():
+        broker, data, store = setup(tmp_path, "SAXO_SIM")
+        fake = data.client.request
+
+        async def request(method, path, **kwargs):
+            if path == "/trade/v2/orders":
+                raise SaxoRefused("REST_QUEUE_LIMIT")
+            return await fake(method, path, **kwargs)
+
+        data.client.request = request
+        event = signal(1)
+        store.observe(event, "", {})
+        await broker.enter(event, plan())
+        assert broker.reconciled and broker.problem == ""
+        assert [o["status"] for o in store.orders(event["id"])] == ["Inactive"]
+        row = store.db.execute(
+            "SELECT decision,reason FROM signals WHERE id=?", (event["id"],)
+        ).fetchone()
+        assert tuple(row) == ("SKIPPED", "REST_QUEUE_LIMIT")
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
 def test_preflight_is_non_transmitting_unknown_exposure_blocks(tmp_path):
     async def scenario():
         broker, data, store = setup(tmp_path, "SAXO_SIM")

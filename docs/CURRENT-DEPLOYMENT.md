@@ -1,6 +1,22 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `1cce2bb3ed581e7f447872b0a4424cdb62e40d67`, deployed 2026-10-04 17:57–18:00 UTC (Sunday, inside the
+Current application release: `b5b739e922e7b776cb0a97d6a2dff84229fdf85e`, deployed 2026-10-04 22:17–22:21 UTC (Sunday
+18:17 New York, 17 minutes after the open, with `FORCE=1` on the user's decision: no open trades, and the only capture cut was
+the 18:00 clock's, which this release removes; no configuration change; backup `review-20261004-review`): the fixes from the
+2026-10-04 code review of main. Clocks are now 19:00–23:00 and 00:00–15:00 New York (CLOCK-SET-AMENDMENT-20261004.md; the
+18:00 and 16:00 clocks could never enter; rule version unchanged); a clock decides on every trailing minute the chart stream
+holds and may wait for up to five quiet minutes before the boundary (a wait that runs out is
+`INCOMPLETE_COMPLETED_HISTORY_DEADLINE`); a market's or the FX feed's failed connect-time step is retried after a minute;
+the recorder's sixteenth reference version evicts the oldest; an approved option root Saxo does not relate blocks the
+family (`APPROVED_OPTION_ROOT_NOT_RELATED`); subscription replacement runs beside the socket reader; reconnect cleanup
+deletes per context; SIM orders refused before sending are skips; paper exits retry instead of locking after three; a
+reservation without an order closes; the reservations CHECK lists every ceiling; a 5xx from the token endpoint keeps the
+refresh token; recorder write batches of one second; setup checklist and benchmarks follow the four markets. Verified after
+the restart: served assets match, 27 of 48 lines, chart streams CURRENT on all four markets, option families loaded at the
+same counts as before (CL 22 / ES 24 / GC 21 / NQ 17), five reference sessions per market, preflight clean, re-armed,
+FullTradingAndChat with DataLevel Premium, 0 recording gaps, next clock 23:00 UTC. Rollback: `1cce2bb…`.
+
+Previous release `1cce2bb3ed581e7f447872b0a4424cdb62e40d67`, deployed 2026-10-04 17:57–18:00 UTC (Sunday, inside the
 restart window; no configuration change; backup `refresh-20261004-refresh`): the chart stream at Saxo's measured 300 ms floor
 and the chain windows at 1,000 ms instead of 2,000 (MARKET-DATA.md; the probe also found the ~10-per-session cap on chain
 subscriptions, of which the service holds eight). Verified after the restart: served assets match, 20 of 48 lines before
@@ -121,7 +137,7 @@ Previous release `ebb2665e9d2c32addf599ab8e7d62d634d2bbe58` (branch
 `codex/live-paper-l2-observation`), **LIVE market data with internal paper fills**, disarmed, since
 2026-09-30 21:37 UTC. Approved by the user: pins CLX6/GCZ6/NGX6/NQZ6/SIZ6, option-root families with
 per-day expiries from Saxo timestamps at the exchange clock, delta tolerance 0.03, persistent recording,
-and a daily reference-session audit (timer, 07:30 New York). All five option families load; entries wait for
+and a daily reference-session audit (timers, 07:30 and 17:10 New York). All four option families load; entries wait for
 real-time data (subscriptions start 2026-10-01). [Setup record](live-paper-setup-20260930.json). Return to SIM:
 delete `/etc/systemd/system/stocker-v1.service.d/50-live-paper.conf`, daemon-reload, restart.
 

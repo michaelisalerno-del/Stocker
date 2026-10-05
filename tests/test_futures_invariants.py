@@ -37,6 +37,11 @@ def test_source_fixture_rv_clocks_and_original_exit_anchor():
             for i, p in enumerate(row["pre31"])
         ]
         assert prior_rv(bars, at) == pytest.approx(row["rv15"], rel=1e-10, abs=1e-14)
+        if at not in clocks(at.astimezone(NY).date()):
+            # The fixture's 16:00 clock left the clock set on 2026-10-04 (its exit is the close).
+            with pytest.raises(ValueError, match="OUTSIDE_ENTRY_WINDOW"):
+                opportunity(row["market"], row["con_id"], at)
+            continue
         event = opportunity(row["market"], row["con_id"], at)
         assert datetime.fromisoformat(event["exit_at"]) == at + timedelta(minutes=60)
         expiry = at.replace(hour=21)
@@ -62,11 +67,13 @@ def test_session_clocks_dst_weekends_and_no_veto():
     assert nine(date(2026, 11, 2)) == 14
     hours = lambda day: [c.astimezone(NY).hour for c in clocks(day)]  # noqa: E731
     assert hours(date(2026, 10, 3)) == []  # Saturday
-    assert hours(date(2026, 9, 27)) == list(range(18, 24))  # Sunday: the session opens at 18:00
-    assert hours(date(2026, 10, 2)) == list(range(17))  # Friday: no evening session
-    assert hours(date(2026, 9, 28)) == list(range(17)) + list(range(18, 24))
+    # The session opens at 18:00; that clock has no completed minutes before it, and a 16:00 clock
+    # would exit at the close, so the first evening clock is 19:00 and the last day clock 15:00.
+    assert hours(date(2026, 9, 27)) == list(range(19, 24))  # Sunday evening
+    assert hours(date(2026, 10, 2)) == list(range(16))  # Friday: no evening session
+    assert hours(date(2026, 9, 28)) == list(range(16)) + list(range(19, 24))
     assert [c for c in clocks(date(2026, 9, 28)) if us_clock(c)] == [
-        datetime.combine(date(2026, 9, 28), time(h), NY).astimezone(UTC) for h in range(9, 17)
+        datetime.combine(date(2026, 9, 28), time(h), NY).astimezone(UTC) for h in range(9, 16)
     ]
     for market in MARKETS:
         for at in clocks(date(2026, 9, 28)):
@@ -75,6 +82,23 @@ def test_session_clocks_dst_weekends_and_no_veto():
     assert session_day(datetime(2026, 10, 2, 22, tzinfo=UTC)) == date(2026, 10, 5)  # Fri 18:00 NY
     assert session_day(datetime(2026, 10, 4, 12, tzinfo=UTC)) == date(2026, 10, 5)  # Sunday morning
     assert session_day(datetime(2026, 10, 5, 12, tzinfo=UTC)) == date(2026, 10, 5)  # Monday 08:00
+
+
+def test_a_reservation_without_any_order_closes_as_unfilled(tmp_path):
+    """The process died between reserve() and the entry order: nothing was ever sent, so the
+    slot is released instead of leaking until the ledger is edited by hand."""
+    from saxo_support import ledger_plan
+
+    s = Store(tmp_path / "futures.sqlite")
+    event = {**opportunity("GC", 1, AT), "id": "orphan"}
+    s.observe(event, "", {})
+    assert s.reserve("orphan", ledger_plan()) == ""
+    assert s.capacity()["reserved_open_trades"] == 1
+    assert s.confirm_closed("orphan", 0)
+    assert s.capacity()["reserved_open_trades"] == 0
+    row = s.db.execute("SELECT state FROM reservations WHERE id='orphan'").fetchone()
+    assert row[0] == "UNFILLED_CONFIRMED"
+    s.db.close()
 
 
 def test_cancel_uncertainty_and_late_fill_keep_obligation(tmp_path):

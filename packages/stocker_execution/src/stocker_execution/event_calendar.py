@@ -54,7 +54,9 @@ class EventCalendar(Strict):
     def near(self, market: str, clock: datetime) -> list[dict[str, str]]:
         """Releases in the hour before a clock or inside its 60-minute holding window."""
         result = []
-        for at, name in self.occurrences(market, clock.astimezone(NY).date()):
+        # The hour before the 00:00 clock lies on the previous New York date.
+        days = {clock.astimezone(NY).date(), (clock - timedelta(minutes=60)).astimezone(NY).date()}
+        for at, name in sorted(o for day in sorted(days) for o in self.occurrences(market, day)):
             if clock - timedelta(minutes=60) <= at < clock:
                 relation = "HOUR_BEFORE_CLOCK"
             elif clock <= at < clock + timedelta(minutes=60):

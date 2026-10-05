@@ -59,8 +59,8 @@ async def benchmark(
                     "environment": "SAXO_SIM",
                     "asset_type": "FuturesOption",
                     "uic": n + 1000,
-                    "underlying_uic": 100 + n % 5,
-                    "market": MARKETS[n % 5],
+                    "underlying_uic": 100 + n % len(MARKETS),
+                    "market": MARKETS[n % len(MARKETS)],
                     "right": "Call",
                     "strike": 70,
                 },
@@ -275,7 +275,7 @@ async def benchmark(
             "option_count": option_count,
             "virtual_seconds": virtual_seconds,
             "requested_delivered_cadence_ms": 1000,
-            "messages": 5 * (virtual_seconds + 1)
+            "messages": len(MARKETS) * (virtual_seconds + 1)
             + (virtual_seconds + 1 + virtual_seconds // 2) * option_count,
             "option_chain_cadence_ms": 2000,
             "events": event_count,

@@ -91,8 +91,9 @@ def test_boundary_bar_waits_only_inside_original_deadline(tmp_path, monkeypatch,
         await runtime.decisions()
         rows = runtime.store.history(None, None, None)
         assert len(rows) == 1
+        # A wait that ran out is named as such, not as a slow decision loop.
         assert rows[0]["reason"] == (
-            "EXECUTION_DISABLED" if arrival < 20 else "STALE_SIGNAL_NO_REPLAY"
+            "EXECUTION_DISABLED" if arrival < 20 else "INCOMPLETE_COMPLETED_HISTORY_DEADLINE"
         )
         assert rows[0]["exit_at"] == (AT + timedelta(hours=1)).isoformat()
         assert len(runtime.recorder.event_ids) == 1

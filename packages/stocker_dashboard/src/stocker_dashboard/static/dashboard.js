@@ -133,6 +133,7 @@ function marketCard(m) {
           <dt>Delta</dt><dd id="ticket-delta-${m}"></dd>
           <dt>Volatility</dt><dd id="ticket-iv-${m}"></dd>
           <dt>Forecast</dt><dd id="ticket-forecast-${m}"></dd>
+          <dt>Break-even</dt><dd id="ticket-breakeven-${m}"></dd>
           <dt>Cutoff</dt><dd id="ticket-cutoff-${m}"></dd>
         </dl>
         <div class="cost-meter" aria-label="All-in cost against the per-trade ceiling"><div class="cost-fill" id="ticket-fill-${m}"></div></div>
@@ -284,6 +285,11 @@ function ticket(m, {held, uic, o, context}) {
   // look14, observation only: the option's price against the movement the forecast expects.
   const f = m.forecast, fo = f?.option?.uic === uic ? f.option : null;
   text(`ticket-forecast-${m.market}`, f?.status === "OBSERVED" ? `Movement ${f.level.toFixed(2)}× normal for the time of day · next hour ±${(100 * f.next_hour_move).toFixed(2)}%${typeof fo?.implied_over_forecast === "number" ? ` · priced for ${fo.implied_over_forecast.toFixed(2)}× the forecast move to expiry (${(100 * fo.implied_move_to_expiry).toFixed(2)}% vs ${(100 * fo.forecast_move_to_expiry).toFixed(2)}%)` : ""}` : `Forecast unavailable · ${display(f?.reason) || "no bars"}`);
+  // Observation only: the move a purchase at the ask now needs within the hour for the bid to get back to that ask.
+  const be = o?.break_even || {};
+  text(`ticket-breakeven-${m.market}`, typeof be.ratio === "number"
+    ? `${be.ratio === 0 ? "No move needed" : `Needs ${be.ratio.toFixed(2)}× a normal hour your way`} to get the bid back to the ask (an hour that good ≈ ${Math.round(100 * be.chance)}%)${typeof be.ratio_iv_down === "number" ? ` · ${be.ratio_iv_down.toFixed(2)}× if IV falls 10%` : ""}${be.ratio > 1 ? " · above the frozen veto's 1.0× line" : ""}`
+    : o ? `Break-even unavailable · ${display(be.reason) || "unknown"}` : "—");
   text(`ticket-cutoff-${m.market}`, o ? `Last trading ${id.last_trade_at ? hhmm(id.last_trade_at) + " NY" : "UNVERIFIED"} · exit ${held?.exit_at ? hhmm(held.exit_at) + " NY" : "clock + 60 min"}` : "—");
   const ceiling = limits.per_trade_gbp, total = cost.total_gbp;
   const fill = $(`ticket-fill-${m.market}`);

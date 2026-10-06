@@ -1,0 +1,475 @@
+{
+ "at": "2026-10-06",
+ "environment": "SAXO_LIVE",
+ "script": "scripts/saxo_option_capability_probe.py",
+ "note": "GET only, service token not refreshed; option UICs = the app's attached candidates in the latest captures (GC, ES, CL, NQ)",
+ "options": [
+  {
+   "uic": 61281380,
+   "symbol": "G1T/V26P4140:xcme",
+   "detail_flags": {
+    "AmountDecimals": 0,
+    "DefaultAmount": 1.0,
+    "ExerciseCutOffTime": "16:15:00",
+    "IsRedemptionByAmounts": false,
+    "IsTradable": true,
+    "LotSizeText": "0",
+    "LotSizeType": "OddLotsNotAllowed",
+    "MinimumLotSize": 0.0,
+    "NonTradableReason": "ETFsWithoutKIIDs",
+    "StandardAmounts": [
+     1.0,
+     5.0,
+     10.0,
+     25.0,
+     50.0,
+     100.0,
+     500.0,
+     1000.0
+    ],
+    "SupportedOrderTypes": [
+     "Limit",
+     "Market",
+     "StopIfTraded",
+     "StopLimit"
+    ],
+    "TickSize": 0.1,
+    "TradableAs": [
+     "FuturesOption"
+    ],
+    "TradableOn": [
+     "76000/200445"
+    ],
+    "TradingStatus": "ReduceOnly"
+   },
+   "market_depth": null,
+   "quote": {
+    "Bid": 6.4,
+    "Ask": 7.5,
+    "BidSize": 10.0,
+    "AskSize": 1.0,
+    "DelayedByMinutes": 0,
+    "PriceTypeBid": "Indicative"
+   }
+  },
+  {
+   "uic": 60704012,
+   "symbol": "E1B/V26P7810:xcme",
+   "detail_flags": {
+    "AmountDecimals": 0,
+    "DefaultAmount": 1.0,
+    "ExerciseCutOffTime": "17:00:00",
+    "IsRedemptionByAmounts": false,
+    "IsTradable": true,
+    "LotSizeText": "0",
+    "LotSizeType": "OddLotsNotAllowed",
+    "MinimumLotSize": 0.0,
+    "NonTradableReason": "None",
+    "StandardAmounts": [
+     1.0,
+     5.0,
+     10.0,
+     25.0,
+     50.0,
+     100.0,
+     500.0,
+     1000.0
+    ],
+    "SupportedOrderTypes": [
+     "Limit",
+     "Market",
+     "StopIfTraded",
+     "StopLimit"
+    ],
+    "TickSizeScheme": {
+     "DefaultTickSize": 0.5,
+     "Elements": [
+      {
+       "HighPrice": 5.0,
+       "TickSize": 0.05
+      },
+      {
+       "HighPrice": 20.0,
+       "TickSize": 0.1
+      },
+      {
+       "HighPrice": 100.0,
+       "TickSize": 0.25
+      }
+     ]
+    },
+    "TradableAs": [
+     "FuturesOption"
+    ],
+    "TradableOn": [
+     "76000/200445"
+    ],
+    "TradingStatus": "Tradable"
+   },
+   "market_depth": null,
+   "quote": {
+    "Bid": 7.7,
+    "Ask": 8.0,
+    "BidSize": 24.0,
+    "AskSize": 23.0,
+    "DelayedByMinutes": 0,
+    "PriceTypeBid": "Indicative"
+   },
+   "supported_order_type_settings": [
+    {
+     "DurationTypes": [
+      "GoodTillCancel",
+      "DayOrder",
+      "GoodTillDate"
+     ],
+     "OrderType": "Limit"
+    },
+    {
+     "DurationTypes": [
+      "DayOrder"
+     ],
+     "OrderType": "Market"
+    },
+    {
+     "DurationTypes": [
+      "GoodTillCancel",
+      "DayOrder",
+      "GoodTillDate"
+     ],
+     "OrderType": "StopIfTraded"
+    },
+    {
+     "DurationTypes": [
+      "GoodTillCancel",
+      "DayOrder",
+      "GoodTillDate"
+     ],
+     "OrderType": "StopLimit"
+    }
+   ],
+   "order_distances": {
+    "EntryDefaultDistance": 0.0,
+    "EntryDefaultDistanceType": "Percentage",
+    "LimitDefaultDistance": 0.0,
+    "LimitDefaultDistanceType": "Percentage",
+    "StopLimitDefaultDistance": 5.0,
+    "StopLimitDefaultDistanceType": "Pips",
+    "StopLossDefaultDistance": 0.5,
+    "StopLossDefaultDistanceType": "Percentage",
+    "StopLossDefaultEnabled": false,
+    "StopLossDefaultOrderType": "Stop",
+    "TakeProfitDefaultDistance": 0.5,
+    "TakeProfitDefaultDistanceType": "Percentage",
+    "TakeProfitDefaultEnabled": false
+   },
+   "related_roots": [
+    {
+     "AssetType": "FuturesOption",
+     "OptionRootId": 4196,
+     "OptionType": "Default",
+     "SupportedStrategies": []
+    }
+   ],
+   "root": {
+    "id": 4196,
+    "keys": [
+     "AmountDecimals",
+     "AssetType",
+     "CanParticipateInMultiLegOrder",
+     "ContractSize",
+     "CurrencyCode",
+     "DefaultAmount",
+     "DefaultExpiry",
+     "DefaultOption",
+     "Description",
+     "Exchange",
+     "ExerciseStyle",
+     "Format",
+     "GroupId",
+     "GroupOptionRootId",
+     "IncrementSize",
+     "IsTradable",
+     "LotSize",
+     "LotSizeType",
+     "MaximumStrikePrice",
+     "MinimumStrikePrice",
+     "OptionRootId",
+     "OrderDistances",
+     "PriceToContractFactor",
+     "RelatedOptionRoots",
+     "RelatedOptionRootsEnhanced",
+     "SettlementStyle",
+     "StandardAmounts",
+     "SupportedOrderTypes",
+     "SupportedStrategies",
+     "Symbol",
+     "TickSize",
+     "TradableOn",
+     "UnderlyingAssetType"
+    ],
+    "flags": {
+     "AmountDecimals": 0,
+     "CanParticipateInMultiLegOrder": false,
+     "DefaultAmount": 1.0,
+     "ExerciseStyle": "European",
+     "IsTradable": true,
+     "LotSize": 1.0,
+     "LotSizeType": "OddLotsNotAllowed",
+     "StandardAmounts": [
+      1.0,
+      5.0,
+      10.0,
+      25.0,
+      50.0,
+      100.0,
+      500.0,
+      1000.0
+     ],
+     "SupportedOrderTypes": [
+      "StopLimit",
+      "StopIfTraded",
+      "Market",
+      "Limit"
+     ],
+     "TickSize": 0.05,
+     "TradableOn": [
+      "76000/200445"
+     ]
+    }
+   }
+  },
+  {
+   "uic": 60684452,
+   "symbol": "NL1/V26C89.75:xcme",
+   "detail_flags": {
+    "AmountDecimals": 0,
+    "DefaultAmount": 1.0,
+    "ExerciseCutOffTime": "16:15:00",
+    "IsRedemptionByAmounts": false,
+    "IsTradable": true,
+    "LotSizeText": "0",
+    "LotSizeType": "OddLotsNotAllowed",
+    "MinimumLotSize": 0.0,
+    "NonTradableReason": "None",
+    "StandardAmounts": [
+     1.0,
+     5.0,
+     10.0,
+     25.0,
+     50.0,
+     100.0,
+     500.0,
+     1000.0
+    ],
+    "SupportedOrderTypes": [
+     "Limit",
+     "Market",
+     "StopIfTraded",
+     "StopLimit"
+    ],
+    "TickSize": 0.01,
+    "TradableAs": [
+     "FuturesOption"
+    ],
+    "TradableOn": [
+     "76000/200445"
+    ],
+    "TradingStatus": "Tradable"
+   },
+   "market_depth": null,
+   "quote": {
+    "Bid": 0.59,
+    "Ask": 0.7,
+    "BidSize": 11.0,
+    "AskSize": 57.0,
+    "DelayedByMinutes": 0,
+    "PriceTypeBid": "Indicative"
+   },
+   "supported_order_type_settings": [
+    {
+     "DurationTypes": [
+      "GoodTillCancel",
+      "DayOrder",
+      "GoodTillDate"
+     ],
+     "OrderType": "Limit"
+    },
+    {
+     "DurationTypes": [
+      "DayOrder"
+     ],
+     "OrderType": "Market"
+    },
+    {
+     "DurationTypes": [
+      "GoodTillCancel",
+      "DayOrder",
+      "GoodTillDate"
+     ],
+     "OrderType": "StopIfTraded"
+    },
+    {
+     "DurationTypes": [
+      "GoodTillCancel",
+      "DayOrder",
+      "GoodTillDate"
+     ],
+     "OrderType": "StopLimit"
+    }
+   ],
+   "order_distances": {
+    "EntryDefaultDistance": 0.0,
+    "EntryDefaultDistanceType": "Percentage",
+    "LimitDefaultDistance": 0.0,
+    "LimitDefaultDistanceType": "Percentage",
+    "StopLimitDefaultDistance": 5.0,
+    "StopLimitDefaultDistanceType": "Pips",
+    "StopLossDefaultDistance": 0.5,
+    "StopLossDefaultDistanceType": "Percentage",
+    "StopLossDefaultEnabled": false,
+    "StopLossDefaultOrderType": "Stop",
+    "TakeProfitDefaultDistance": 0.5,
+    "TakeProfitDefaultDistanceType": "Percentage",
+    "TakeProfitDefaultEnabled": false
+   },
+   "related_roots": [
+    {
+     "AssetType": "FuturesOption",
+     "OptionRootId": 5252,
+     "OptionType": "Default",
+     "SupportedStrategies": []
+    }
+   ],
+   "root": {
+    "id": 5252,
+    "keys": [
+     "AmountDecimals",
+     "AssetType",
+     "CanParticipateInMultiLegOrder",
+     "ContractSize",
+     "CurrencyCode",
+     "DefaultAmount",
+     "DefaultExpiry",
+     "DefaultOption",
+     "Description",
+     "Exchange",
+     "ExerciseStyle",
+     "Format",
+     "GroupId",
+     "GroupOptionRootId",
+     "IncrementSize",
+     "IsTradable",
+     "LotSize",
+     "LotSizeType",
+     "MaximumStrikePrice",
+     "MinimumStrikePrice",
+     "OptionRootId",
+     "OrderDistances",
+     "PriceToContractFactor",
+     "RelatedOptionRoots",
+     "SettlementStyle",
+     "StandardAmounts",
+     "SupportedOrderTypes",
+     "SupportedStrategies",
+     "Symbol",
+     "TickSize",
+     "TradableOn",
+     "UnderlyingAssetType"
+    ],
+    "flags": {
+     "AmountDecimals": 0,
+     "CanParticipateInMultiLegOrder": false,
+     "DefaultAmount": 1.0,
+     "ExerciseStyle": "American",
+     "IsTradable": true,
+     "LotSize": 1.0,
+     "LotSizeType": "OddLotsNotAllowed",
+     "StandardAmounts": [
+      1.0,
+      5.0,
+      10.0,
+      25.0,
+      50.0,
+      100.0,
+      500.0,
+      1000.0
+     ],
+     "SupportedOrderTypes": [
+      "StopLimit",
+      "StopIfTraded",
+      "Market",
+      "Limit"
+     ],
+     "TickSize": 0.01,
+     "TradableOn": [
+      "76000/200445"
+     ]
+    }
+   }
+  },
+  {
+   "uic": 61296077,
+   "symbol": "Q1B/V26P31240:xcme",
+   "detail_flags": {
+    "AmountDecimals": 0,
+    "DefaultAmount": 1.0,
+    "ExerciseCutOffTime": "17:00:00",
+    "IsRedemptionByAmounts": false,
+    "IsTradable": true,
+    "LotSizeText": "0",
+    "LotSizeType": "OddLotsNotAllowed",
+    "MinimumLotSize": 0.0,
+    "NonTradableReason": "None",
+    "StandardAmounts": [
+     1.0,
+     5.0,
+     10.0,
+     25.0,
+     50.0,
+     100.0,
+     500.0,
+     1000.0
+    ],
+    "SupportedOrderTypes": [
+     "Limit",
+     "Market",
+     "StopIfTraded",
+     "StopLimit"
+    ],
+    "TickSizeScheme": {
+     "DefaultTickSize": 1.0,
+     "Elements": [
+      {
+       "HighPrice": 5.0,
+       "TickSize": 0.05
+      },
+      {
+       "HighPrice": 100.0,
+       "TickSize": 0.25
+      },
+      {
+       "HighPrice": 500.0,
+       "TickSize": 0.5
+      }
+     ]
+    },
+    "TradableAs": [
+     "FuturesOption"
+    ],
+    "TradableOn": [
+     "76000/200445"
+    ],
+    "TradingStatus": "Tradable"
+   },
+   "market_depth": null,
+   "quote": {
+    "Bid": 52.5,
+    "Ask": 56.0,
+    "BidSize": 8.0,
+    "AskSize": 2.0,
+    "DelayedByMinutes": 0,
+    "PriceTypeBid": "Indicative"
+   }
+  }
+ ]
+}

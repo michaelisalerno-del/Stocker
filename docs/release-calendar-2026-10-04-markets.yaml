@@ -1,0 +1,62 @@
+# Scheduled US releases, 2026-10-01 to 2026-11-30, New York time (EDT -04:00 to Nov 1, EST -05:00 after).
+# Observation and display context in the app; the calendar of RELEASE-EXIT-PROTOCOL.md (hashed there).
+# Compiled 2026-10-01 from the publishers' own calendars:
+#   BLS (Employment Situation, CPI, PPI, JOLTS) bls.gov/schedule/2026/home.htm and per-release pages;
+#   Census (Retail Sales, New Residential Sales) census.gov/economic-indicators/calendar-listview.html;
+#   BEA (GDP, Personal Income & Outlays) bea.gov/news/schedule/full; DOL claims oui.doleta.gov/unemploy/claims_arch.asp;
+#   ISM press releases' "next report" lines (PR Newswire); Conference Board consumer-confidence page;
+#   University of Michigan release-date list (docid 75443); NAR 2026 statistical release schedule;
+#   EIA weekly petroleum and natural gas storage schedules (holiday rows); Federal Reserve 2026 October and
+#   November calendars. No federal funding lapse in the window (P.L. 119-103 funds agencies to 2026-12-11).
+# Left out: Conference Board on 2026-11-24 (not yet confirmed by the publisher). ISM Services on 2026-11-04 is
+# from the third-business-day rule and search extracts of ISM's calendar; ISM's 2026-10-05 release confirms it.
+# Markets: macro releases and the Federal Reserve CL/ES/GC/NQ; EIA petroleum CL. 2026-10-04: gas and silver
+# removed and E-mini S&P added (the user's decision; MARKET-CHANGE-AMENDMENT-20261004.md).
+events:
+  - {name: US Initial Jobless Claims, markets: [CL, ES, GC, NQ], at: "2026-10-01T08:30:00-04:00"}
+  - {name: ISM Manufacturing PMI, markets: [CL, ES, GC, NQ], at: "2026-10-01T10:00:00-04:00"}
+  - {name: US Employment Situation, markets: [CL, ES, GC, NQ], at: "2026-10-02T08:30:00-04:00"}
+  - {name: ISM Services PMI, markets: [CL, ES, GC, NQ], at: "2026-10-05T10:00:00-04:00"}
+  - {name: EIA Weekly Petroleum Status Report, markets: [CL], at: "2026-10-07T10:30:00-04:00"}
+  - {name: FOMC Minutes, markets: [CL, ES, GC, NQ], at: "2026-10-07T14:00:00-04:00"}
+  - {name: US Initial Jobless Claims, markets: [CL, ES, GC, NQ], at: "2026-10-08T08:30:00-04:00"}
+  - {name: UMich Consumer Sentiment (Prelim), markets: [CL, ES, GC, NQ], at: "2026-10-09T10:00:00-04:00"}
+  - {name: US Existing-Home Sales, markets: [CL, ES, GC, NQ], at: "2026-10-13T10:00:00-04:00"}
+  - {name: US CPI, markets: [CL, ES, GC, NQ], at: "2026-10-14T08:30:00-04:00"}
+  - {name: US PPI, markets: [CL, ES, GC, NQ], at: "2026-10-15T08:30:00-04:00"}
+  - {name: US Retail Sales, markets: [CL, ES, GC, NQ], at: "2026-10-15T08:30:00-04:00"}
+  - {name: US Initial Jobless Claims, markets: [CL, ES, GC, NQ], at: "2026-10-15T08:30:00-04:00"}
+  - {name: EIA Weekly Petroleum Status Report, markets: [CL], at: "2026-10-15T12:00:00-04:00"}  # Columbus Day week
+  - {name: EIA Weekly Petroleum Status Report, markets: [CL], at: "2026-10-21T10:30:00-04:00"}
+  - {name: US Initial Jobless Claims, markets: [CL, ES, GC, NQ], at: "2026-10-22T08:30:00-04:00"}
+  - {name: UMich Consumer Sentiment (Final), markets: [CL, ES, GC, NQ], at: "2026-10-23T10:00:00-04:00"}
+  - {name: Conference Board Consumer Confidence, markets: [CL, ES, GC, NQ], at: "2026-10-27T10:00:00-04:00"}
+  - {name: US New Home Sales, markets: [CL, ES, GC, NQ], at: "2026-10-27T10:00:00-04:00"}
+  - {name: EIA Weekly Petroleum Status Report, markets: [CL], at: "2026-10-28T10:30:00-04:00"}
+  - {name: FOMC Statement, markets: [CL, ES, GC, NQ], at: "2026-10-28T14:00:00-04:00"}
+  - {name: FOMC Press Conference, markets: [CL, ES, GC, NQ], at: "2026-10-28T14:30:00-04:00"}
+  - {name: US GDP (Advance), markets: [CL, ES, GC, NQ], at: "2026-10-29T08:30:00-04:00"}
+  - {name: US Personal Income & Outlays (PCE), markets: [CL, ES, GC, NQ], at: "2026-10-29T08:30:00-04:00"}
+  - {name: US Initial Jobless Claims, markets: [CL, ES, GC, NQ], at: "2026-10-29T08:30:00-04:00"}
+  - {name: ISM Manufacturing PMI, markets: [CL, ES, GC, NQ], at: "2026-11-02T10:00:00-05:00"}
+  - {name: US JOLTS, markets: [CL, ES, GC, NQ], at: "2026-11-03T10:00:00-05:00"}
+  - {name: ISM Services PMI, markets: [CL, ES, GC, NQ], at: "2026-11-04T10:00:00-05:00"}
+  - {name: EIA Weekly Petroleum Status Report, markets: [CL], at: "2026-11-04T10:30:00-05:00"}
+  - {name: US Initial Jobless Claims, markets: [CL, ES, GC, NQ], at: "2026-11-05T08:30:00-05:00"}
+  - {name: US Employment Situation, markets: [CL, ES, GC, NQ], at: "2026-11-06T08:30:00-05:00"}
+  - {name: UMich Consumer Sentiment (Prelim), markets: [CL, ES, GC, NQ], at: "2026-11-06T10:00:00-05:00"}
+  - {name: US CPI, markets: [CL, ES, GC, NQ], at: "2026-11-10T08:30:00-05:00"}
+  - {name: US Initial Jobless Claims, markets: [CL, ES, GC, NQ], at: "2026-11-12T08:30:00-05:00"}
+  - {name: US Existing-Home Sales, markets: [CL, ES, GC, NQ], at: "2026-11-12T10:00:00-05:00"}
+  - {name: EIA Weekly Petroleum Status Report, markets: [CL], at: "2026-11-12T12:00:00-05:00"}  # Veterans Day week
+  - {name: US PPI, markets: [CL, ES, GC, NQ], at: "2026-11-13T08:30:00-05:00"}
+  - {name: US Retail Sales, markets: [CL, ES, GC, NQ], at: "2026-11-17T08:30:00-05:00"}
+  - {name: EIA Weekly Petroleum Status Report, markets: [CL], at: "2026-11-18T10:30:00-05:00"}
+  - {name: FOMC Minutes, markets: [CL, ES, GC, NQ], at: "2026-11-18T14:00:00-05:00"}
+  - {name: US Initial Jobless Claims, markets: [CL, ES, GC, NQ], at: "2026-11-19T08:30:00-05:00"}
+  - {name: UMich Consumer Sentiment (Final), markets: [CL, ES, GC, NQ], at: "2026-11-20T10:00:00-05:00"}
+  - {name: US GDP (Second), markets: [CL, ES, GC, NQ], at: "2026-11-25T08:30:00-05:00"}
+  - {name: US Personal Income & Outlays (PCE), markets: [CL, ES, GC, NQ], at: "2026-11-25T08:30:00-05:00"}
+  - {name: US Initial Jobless Claims, markets: [CL, ES, GC, NQ], at: "2026-11-25T08:30:00-05:00"}  # Thanksgiving week
+  - {name: US New Home Sales, markets: [CL, ES, GC, NQ], at: "2026-11-25T10:00:00-05:00"}
+  - {name: EIA Weekly Petroleum Status Report, markets: [CL], at: "2026-11-25T10:30:00-05:00"}

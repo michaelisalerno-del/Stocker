@@ -111,6 +111,7 @@ def test_day_and_session_trades_exit_at_their_own_times():
     ten = opportunity("ES", 1, datetime.combine(day, time(10), NY).astimezone(UTC))
     out = datetime.fromisoformat(ten["exit_at"]).astimezone(NY)
     assert (ten["policy"], out.date(), out.hour, out.minute) == ("DAY", day, 11, 0)
+    assert ten["floor"] == [1.2, 1.05]
     seven = opportunity("ES", 1, datetime.combine(day, time(19), NY).astimezone(UTC))
     out = datetime.fromisoformat(seven["exit_at"]).astimezone(NY)
     assert (seven["policy"], out.date(), out.hour, out.minute) == (

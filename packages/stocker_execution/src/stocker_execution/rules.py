@@ -140,8 +140,9 @@ def day_against_veto(bars: list[Bar], at: datetime, market: str) -> str:
     local = at.astimezone(NY)
     start = datetime.combine(local.date(), time(9, 30), NY).astimezone(UTC)
     by_time = {b.at: b for b in bars}
-    window = [by_time.get(start + timedelta(minutes=i)) for i in range(30)]
-    if any(b is None for b in window):
+    found = [by_time.get(start + timedelta(minutes=i)) for i in range(30)]
+    window = [b for b in found if b is not None]
+    if len(window) < 30:
         return ""
     sign = 1 if RIGHTS[market] == "C" else -1
     open_ = window[0].open

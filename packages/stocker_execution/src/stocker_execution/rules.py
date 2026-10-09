@@ -11,6 +11,10 @@ from stocker_execution.frozen_sources import FROZEN, SOURCE_HASHES
 
 NY = ZoneInfo("America/New_York")
 RIGHTS = {"CL": "C", "ES": "P", "GC": "P", "NQ": "P"}
+# The overnight SESSION trade buys calls in every market (the user's "Flip it", 2026-10-09): the
+# overnight drift is up in ES/NQ/GC (14 y ETF t 2.2-3.5; 57-58% of 2024-26 nights) and puts were
+# right on only 42-43% of nights; CL already buys calls. Hourly and DAY trades keep RIGHTS.
+SESSION_RIGHT = "C"
 
 
 @dataclass(frozen=True)
@@ -196,7 +200,7 @@ def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:
             if day
             else {}
         ),
-        "right": RIGHTS[market],
+        "right": SESSION_RIGHT if session else RIGHTS[market],
         "target_delta": 0.1,
         "veto": "",
         "frozen_definition": FROZEN[market],

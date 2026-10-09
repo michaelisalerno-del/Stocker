@@ -12,6 +12,10 @@
   entries lose a median 93–95% at every time of day), holds to 15:00 New York, or sells earlier on the same 1.50 / 0.60
   trail. The event carries `expiry_after` (the clock day's 17:00 New York close) and the selector takes the first expiry
   after it. Untested on recordings (the following-expiry capture is sparse in US hours); this is what produces the data.
+  One veto, ES and NQ only (`DAY_OPEN_AGAINST`): no day trade when every one-minute close from 09:30 to 09:59 New York
+  sat at least 10 bp against the market's direction relative to the 09:30 open (on ~400 ETF days those legs lost 23–26 bp
+  from 10:00 to 15:00; GC and CL showed nothing; it fires on roughly one day in eight). A missing bar means no veto. The
+  clock still selects and records its option; the veto is recorded as the skip reason.
 - Every other clock trades exactly as before (60-minute hold; the armed trail of EXIT-SET-3 rule AT, 1.20 / 0.75), so the
   hourly incumbent keeps producing its fills and the frozen hourly tests keep their data. Selection, recording and the
   chain views are unchanged at every clock. The event carries `policy` ("SESSION" or "HOURLY") and `trail` (arm, keep).

@@ -124,6 +124,28 @@ def day_expiry_floor(at: datetime) -> datetime:
 
 SESSION_TRAIL = (1.50, 0.60)
 HOURLY_TRAIL = (1.20, 0.75)
+DAY_VETO_MARKETS = ("ES", "NQ")
+DAY_VETO_BP = 10.0
+
+
+def day_against_veto(bars: list[Bar], at: datetime, market: str) -> str:
+    """Skip the DAY trade when the open went against it (the user's decision, 2026-10-09; the
+    look in STUDY_LOOK.md: ES/NQ lose 23-26 bp from 10:00 to 15:00 on such days, GC/CL show
+    nothing). Over the 30 completed one-minute bars from 09:30 New York, every close sat at
+    least DAY_VETO_BP basis points against the market's direction relative to the 09:30 open.
+    Any missing bar means no veto."""
+    if market not in DAY_VETO_MARKETS or not day_clock(at):
+        return ""
+    local = at.astimezone(NY)
+    start = datetime.combine(local.date(), time(9, 30), NY).astimezone(UTC)
+    by_time = {b.at: b for b in bars}
+    window = [by_time.get(start + timedelta(minutes=i)) for i in range(30)]
+    if any(b is None for b in window):
+        return ""
+    sign = 1 if RIGHTS[market] == "C" else -1
+    open_ = window[0].open
+    best = max((b.close - open_) * sign / open_ * 1e4 for b in window)
+    return "DAY_OPEN_AGAINST" if best <= -DAY_VETO_BP else ""
 
 
 def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:

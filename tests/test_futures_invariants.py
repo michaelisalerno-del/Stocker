@@ -14,6 +14,7 @@ from stocker_execution.rules import (
     NY,
     Bar,
     clocks,
+    day_against_veto,
     eligibility,
     model_delta,
     opportunity,
@@ -102,6 +103,32 @@ def test_session_clocks_dst_weekends_and_no_veto():
     assert session_day(datetime(2026, 10, 2, 22, tzinfo=UTC)) == date(2026, 10, 5)  # Fri 18:00 NY
     assert session_day(datetime(2026, 10, 4, 12, tzinfo=UTC)) == date(2026, 10, 5)  # Sunday morning
     assert session_day(datetime(2026, 10, 5, 12, tzinfo=UTC)) == date(2026, 10, 5)  # Monday 08:00
+
+
+def test_day_veto_fires_only_when_the_whole_open_sat_against_an_index_market():
+    """DAY_OPEN_AGAINST: ES/NQ only, the 10:00 clock only, every 09:30-09:59 close >= 10 bp
+    against the market's direction (puts: above the 09:30 open); a missing bar means no veto."""
+    day = date(2026, 9, 28)
+    ten = datetime.combine(day, time(10), NY).astimezone(UTC)
+    start = datetime.combine(day, time(9, 30), NY).astimezone(UTC)
+
+    def bars(closes):
+        return [
+            Bar(start + timedelta(minutes=i), 100.0, 100.3, 99.7, c, 1)
+            for i, c in enumerate(closes)
+        ]
+
+    against = bars([100.12] * 30)  # +12 bp above the open for every minute: bad for a put
+    assert day_against_veto(against, ten, "ES") == "DAY_OPEN_AGAINST"
+    assert day_against_veto(against, ten, "NQ") == "DAY_OPEN_AGAINST"
+    assert day_against_veto(against, ten, "GC") == ""  # not an index market
+    nine = datetime.combine(day, time(9), NY).astimezone(UTC)
+    assert day_against_veto(against, nine, "ES") == ""  # an hourly clock
+    dipped = bars([100.12] * 29 + [100.05])  # one close within 10 bp: the open was not all against
+    assert day_against_veto(dipped, ten, "ES") == ""
+    assert day_against_veto(against[:-1], ten, "ES") == ""  # a missing bar
+    for_us = bars([99.85] * 30)  # 15 bp below the open: with the put
+    assert day_against_veto(for_us, ten, "ES") == ""
 
 
 def test_a_reservation_without_any_order_closes_as_unfilled(tmp_path):

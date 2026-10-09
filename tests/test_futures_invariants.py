@@ -15,6 +15,7 @@ from stocker_execution.rules import (
     Bar,
     clocks,
     day_against_veto,
+    day_spread_veto,
     eligibility,
     model_delta,
     opportunity,
@@ -120,6 +121,15 @@ def test_day_and_session_trades_exit_at_their_own_times():
     )
     nine = opportunity("ES", 1, datetime.combine(day, time(9), NY).astimezone(UTC))
     assert nine["policy"] == "HOURLY"
+
+
+def test_day_spread_gate_buys_only_a_tight_two_sided_quote():
+    assert day_spread_veto({"Bid": 9.75, "Ask": 10.0}) == ""  # 2.5%
+    assert day_spread_veto({"Bid": 9.70, "Ask": 10.0}) == ""  # 3.0%, at the gate
+    assert day_spread_veto({"Bid": 9.6, "Ask": 10.0}) == "DAY_SPREAD_ABOVE_GATE"  # 4%
+    assert day_spread_veto({"Bid": 0, "Ask": 10.0}) == "DAY_SPREAD_ABOVE_GATE"  # no bid
+    assert day_spread_veto({"Ask": 10.0}) == "DAY_SPREAD_ABOVE_GATE"
+    assert day_spread_veto({}) == "DAY_SPREAD_ABOVE_GATE"
 
 
 def test_day_veto_fires_only_when_the_whole_open_sat_against_an_index_market():

@@ -126,6 +126,22 @@ def day_expiry_floor(at: datetime) -> datetime:
 SESSION_TRAIL = (1.50, 0.60)
 HOURLY_TRAIL = (1.20, 0.75)
 DAY_VETO_MARKETS = ("ES", "NQ")
+DAY_SPREAD_MAX = 0.03
+
+
+def day_spread_veto(quote: dict[str, object]) -> str:
+    """The DAY trade buys only when (ask - bid) / ask <= DAY_SPREAD_MAX at entry (the user's
+    decision, 2026-10-09): in the option model the 10:00-11:00 leg breaks even at a round-trip
+    toll of about 3% (ES), 3.4% (NQ), 3.8% (GC), 8.8% (CL), so a dearer quote cannot pay for
+    itself. No two-sided quote means no trade."""
+    bid, ask = quote.get("Bid"), quote.get("Ask")
+    if not isinstance(bid, (int, float)) or not isinstance(ask, (int, float)):
+        return "DAY_SPREAD_ABOVE_GATE"
+    if bid <= 0 or ask <= 0 or bid > ask or (ask - bid) / ask > DAY_SPREAD_MAX + 1e-9:
+        return "DAY_SPREAD_ABOVE_GATE"
+    return ""
+
+
 DAY_VETO_BP = 10.0
 
 

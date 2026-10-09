@@ -25,6 +25,7 @@ from stocker_execution.contracts import (
     utc,
     verified_cutoff,
 )
+from stocker_execution.rules import day_spread_veto
 from stocker_execution.saxo_auth import SaxoRefused
 from stocker_execution.saxo_data import DataService, MarketState, roots_verified
 from stocker_execution.store import TERMINAL, Store, encode
@@ -143,6 +144,8 @@ class PaperBroker:
         plan: dict[str, Any] = context["costs"]
         if plan["budget_result"] != "WITHIN_BUDGET":
             raise ValueError(plan.get("reason", plan["budget_result"]))
+        if event.get("policy") == "DAY" and (gate := day_spread_veto(context.get("quote") or {})):
+            raise ValueError(gate)
         plan.update(
             option=option,
             cutoff=cutoff.isoformat(),

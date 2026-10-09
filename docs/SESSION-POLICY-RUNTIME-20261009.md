@@ -17,6 +17,9 @@
   sat at least 10 bp against the market's direction relative to the 09:30 open (on ~400 ETF days those legs lost 23–26 bp
   from 10:00 to 15:00; GC and CL showed nothing; it fires on roughly one day in eight). A missing bar means no veto. The
   clock still selects and records its option; the veto is recorded as the skip reason.
+  Cost gate (`DAY_SPREAD_ABOVE_GATE`, all markets): the day trade buys only when (ask − bid) / ask ≤ 3% at entry. In the
+  option model the 10:00→11:00 leg breaks even at a round-trip toll of about 3.1% (ES), 3.4% (NQ), 3.8% (GC), 8.8% (CL);
+  observed tolls are ~2–4% ES, ~4–7% NQ, ~9–16% GC, ~14–25% CL, so in practice it trades mostly ES, sometimes NQ.
 - Every other clock trades exactly as before (60-minute hold; the armed trail of EXIT-SET-3 rule AT, 1.20 / 0.75), so the
   hourly incumbent keeps producing its fills and the frozen hourly tests keep their data. Selection, recording and the
   chain views are unchanged at every clock. The event carries `policy` ("SESSION" or "HOURLY") and `trail` (arm, keep).

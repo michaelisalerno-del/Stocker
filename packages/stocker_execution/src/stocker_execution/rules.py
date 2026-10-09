@@ -17,6 +17,14 @@ RIGHTS = {"CL": "C", "ES": "P", "GC": "P", "NQ": "P"}
 SESSION_RIGHT = "C"
 
 
+def direction_text(market: str) -> str:
+    """The markets page's Direction row: one line per policy when they differ."""
+    word = {"C": "BUY CALL", "P": "BUY PUT"}
+    if RIGHTS[market] == SESSION_RIGHT:
+        return f"{word[SESSION_RIGHT]} (overnight, day and hourly)"
+    return f"Overnight 19:00: {word[SESSION_RIGHT]} · Day 10:00 & hourly: {word[RIGHTS[market]]}"
+
+
 @dataclass(frozen=True)
 class Bar:
     at: datetime  # UTC interval start, complete only at at + one minute

@@ -442,11 +442,14 @@ function chart(m) {
 function smileChart(m) {
   const svg = $(`smile-${m.market}`), data = m.smile;
   if (!svg) return;
-  const right = m.market === "CL" ? "call" : "put";
+  // The side of the option actually held or selected (overnight trades buy calls everywhere since
+  // 2026-10-09); without one, the day/hourly side of the market.
+  const held = optionChoice(m).o?.identity?.right;
+  const right = held === "Call" || held === "Put" ? held.toLowerCase() : m.market === "CL" ? "call" : "put";
   const verified = data && data.scaling !== "PROVIDER_NATIVE_UNVERIFIED";
   const points = (data?.strikes || []).map((s) => ({strike: s.strike, vol: verified ? s[right]?.iv : s[right]?.mid_volatility ?? s.mid_volatility_pct, spread: s[right]?.iv_minus_model, oi: s[right]?.open_interest})).filter((p) => typeof p.vol === "number");
   const {o} = optionChoice(m);
-  const signature = JSON.stringify([points, o?.identity?.strike, data?.mid_strike_price]);
+  const signature = JSON.stringify([right, points, o?.identity?.strike, data?.mid_strike_price]);
   if (svg.dataset.signature === signature) return;
   svg.dataset.signature = signature;
   if (points.length < 2) {

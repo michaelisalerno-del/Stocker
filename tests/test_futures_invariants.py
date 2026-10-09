@@ -16,6 +16,7 @@ from stocker_execution.rules import (
     clocks,
     day_against_veto,
     day_spread_veto,
+    direction_text,
     eligibility,
     model_delta,
     opportunity,
@@ -122,6 +123,12 @@ def test_day_and_session_trades_exit_at_their_own_times():
     )
     nine = opportunity("ES", 1, datetime.combine(day, time(9), NY).astimezone(UTC))
     assert nine["policy"] == "HOURLY"
+
+
+def test_markets_page_direction_names_both_policies():
+    assert direction_text("CL") == "BUY CALL (overnight, day and hourly)"
+    for market in ("ES", "GC", "NQ"):
+        assert direction_text(market) == "Overnight 19:00: BUY CALL · Day 10:00 & hourly: BUY PUT"
 
 
 def test_day_spread_gate_buys_only_a_tight_two_sided_quote():

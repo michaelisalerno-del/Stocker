@@ -35,6 +35,7 @@ from stocker_execution.rules import (
     NY,
     clocks,
     day_against_veto,
+    direction_text,
     eligibility,
     next_clock,
     observation,
@@ -386,7 +387,7 @@ class Runtime:
             {
                 "identity": identity,
                 "market_status": session_state(state.reference, at),
-                "direction": "BUY CALL" if market == "CL" else "BUY PUT",
+                "direction": direction_text(market),
                 "conditions": features,
                 "l1": {
                     "status": card["data_status"],

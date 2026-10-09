@@ -9,7 +9,8 @@
 - The 10:00 New York clock becomes the DAY trade (the user's "one trade out of hours and one in hours", 2026-10-09): the
   end of the open's first pullback (the futures anatomy in STUDY_LOOK.md: the first move is retraced 70–109% by ~10:00–10:30
   and a second push of about the same size follows). It buys the NEXT trading day's expiry (never the same day's, whose
-  entries lose a median 93–95% at every time of day), holds to 15:00 New York, or sells earlier on the same 1.50 / 0.60
+  entries lose a median 93–95% at every time of day), holds to 11:00 New York (changed from 15:00 the same day, on the user's "Change it": in a model of ~383 days per
+  market 11:00 beat 15:00 on 68–77% of days, with less time decay and a cheaper exit toll), or sells earlier on the same 1.50 / 0.60
   trail. The event carries `expiry_after` (the clock day's 17:00 New York close) and the selector takes the first expiry
   after it. Untested on recordings (the following-expiry capture is sparse in US hours); this is what produces the data.
   One veto, ES and NQ only (`DAY_OPEN_AGAINST`): no day trade when every one-minute close from 09:30 to 09:59 New York

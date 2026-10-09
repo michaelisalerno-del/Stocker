@@ -51,11 +51,11 @@ def test_source_fixture_rv_clocks_and_original_exit_anchor():
             assert exit_at.date() > at.astimezone(NY).date()
             assert (event["policy"], event["trail"]) == ("SESSION", [1.5, 0.6])
         elif at.astimezone(NY).hour == 10:
-            # The day trade: out at 15:00 New York the same day, next day's expiry, wider trail.
+            # The day trade: out at 11:00 New York the same day, next day's expiry, wider trail.
             exit_at = datetime.fromisoformat(event["exit_at"]).astimezone(NY)
             assert (exit_at.date(), exit_at.hour, exit_at.minute) == (
                 at.astimezone(NY).date(),
-                15,
+                11,
                 0,
             )
             floor = datetime.fromisoformat(event["expiry_after"]).astimezone(NY)
@@ -103,6 +103,23 @@ def test_session_clocks_dst_weekends_and_no_veto():
     assert session_day(datetime(2026, 10, 2, 22, tzinfo=UTC)) == date(2026, 10, 5)  # Fri 18:00 NY
     assert session_day(datetime(2026, 10, 4, 12, tzinfo=UTC)) == date(2026, 10, 5)  # Sunday morning
     assert session_day(datetime(2026, 10, 5, 12, tzinfo=UTC)) == date(2026, 10, 5)  # Monday 08:00
+
+
+def test_day_and_session_trades_exit_at_their_own_times():
+    day = date(2026, 9, 28)  # Monday
+    ten = opportunity("ES", 1, datetime.combine(day, time(10), NY).astimezone(UTC))
+    out = datetime.fromisoformat(ten["exit_at"]).astimezone(NY)
+    assert (ten["policy"], out.date(), out.hour, out.minute) == ("DAY", day, 11, 0)
+    seven = opportunity("ES", 1, datetime.combine(day, time(19), NY).astimezone(UTC))
+    out = datetime.fromisoformat(seven["exit_at"]).astimezone(NY)
+    assert (seven["policy"], out.date(), out.hour, out.minute) == (
+        "SESSION",
+        date(2026, 9, 29),
+        9,
+        25,
+    )
+    nine = opportunity("ES", 1, datetime.combine(day, time(9), NY).astimezone(UTC))
+    assert nine["policy"] == "HOURLY"
 
 
 def test_day_veto_fires_only_when_the_whole_open_sat_against_an_index_market():

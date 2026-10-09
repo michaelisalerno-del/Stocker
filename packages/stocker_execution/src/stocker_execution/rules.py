@@ -107,13 +107,14 @@ def session_exit(at: datetime) -> datetime:
 def day_clock(at: datetime) -> bool:
     """The 10:00 New York clock carries the DAY trade (the user's decision, 2026-10-09): the end
     of the open's first pullback, on the NEXT trading day's expiry (never the same day's), held
-    to 15:00 New York or sold earlier on the session trail."""
+    to 11:00 New York or sold earlier on the session trail (11:00 beat 15:00 on 68-77% of
+    ~383 modelled days per market: less time decay, a cheaper exit toll; STUDY_LOOK.md)."""
     return at.astimezone(NY).hour == 10
 
 
 def day_exit(at: datetime) -> datetime:
     local = at.astimezone(NY)
-    return datetime.combine(local.date(), time(15), NY).astimezone(UTC)
+    return datetime.combine(local.date(), time(11), NY).astimezone(UTC)
 
 
 def day_expiry_floor(at: datetime) -> datetime:

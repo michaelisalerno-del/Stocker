@@ -299,6 +299,46 @@ def test_unsellable_paper_option_is_written_off_at_zero_only_on_a_current_quote(
     asyncio.run(scenario())
 
 
+def test_armed_trail_sells_before_the_hour_only_after_arming_and_giving_back(tmp_path):
+    """EXIT-SET-3 rule AT: arm at 1.20x entry, sell at the first current bid <= 0.75x the high."""
+
+    async def scenario():
+        broker, data, store = setup(tmp_path)
+        _, price = data.options[101]
+        event = signal(1)
+        store.observe(event, "", {})
+        assert await broker.enter(event, plan()) == ""
+        entry = next(f["price"] for f in store.fills(event["id"]) if f["side"] == "BOT")
+
+        def bid(value, at=None):
+            price.update(
+                {"Quote": {"Bid": value, "Ask": value * 1.1}},
+                f"move-{value}-{at}",
+                at or time.time(),
+            )
+
+        bid(entry * 1.15)  # not armed yet
+        await broker.manage()
+        bid(entry * 0.80)  # below 0.75x the 1.15x high, but never armed: hold
+        await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        bid(entry * 2.0)  # armed; high 2.0x
+        await broker.manage()
+        bid(entry * 1.6)  # gave back 20%: hold
+        await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        bid(entry * 1.4, time.time() - 30)  # a stale quote never triggers a sale
+        await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        bid(entry * 1.5)  # 0.75x the high: sell now, an hour before the scheduled exit
+        await broker.manage()
+        assert store.exposure(event["id"]) == 0
+        assert store.get_meta("trail_exit:" + event["id"])["peak"] == pytest.approx(entry * 2.0)
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
 def test_no_naked_short_futures_or_stale_size_fill(tmp_path):
     async def scenario():
         broker, data, store = setup(tmp_path)

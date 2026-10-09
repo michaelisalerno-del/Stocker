@@ -104,6 +104,24 @@ def session_exit(at: datetime) -> datetime:
     return datetime.combine(day, time(9, 25), NY).astimezone(UTC)
 
 
+def day_clock(at: datetime) -> bool:
+    """The 10:00 New York clock carries the DAY trade (the user's decision, 2026-10-09): the end
+    of the open's first pullback, on the NEXT trading day's expiry (never the same day's), held
+    to 15:00 New York or sold earlier on the session trail."""
+    return at.astimezone(NY).hour == 10
+
+
+def day_exit(at: datetime) -> datetime:
+    local = at.astimezone(NY)
+    return datetime.combine(local.date(), time(15), NY).astimezone(UTC)
+
+
+def day_expiry_floor(at: datetime) -> datetime:
+    """Expiries at or before the 17:00 New York close of the clock's day are not the DAY trade's."""
+    local = at.astimezone(NY)
+    return datetime.combine(local.date(), time(17), NY).astimezone(UTC)
+
+
 SESSION_TRAIL = (1.50, 0.60)
 HOURLY_TRAIL = (1.20, 0.75)
 
@@ -112,7 +130,13 @@ def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:
     local = at.astimezone(NY)
     if at not in clocks(local.date()):
         raise ValueError("OUTSIDE_ENTRY_WINDOW")
-    session = session_clock(at)
+    session, day = session_clock(at), day_clock(at)
+    if session:
+        exit_at, policy = session_exit(at), "SESSION"
+    elif day:
+        exit_at, policy = day_exit(at), "DAY"
+    else:
+        exit_at, policy = at + timedelta(minutes=60), "HOURLY"
     return {
         "id": f"{RULE_VERSION}|{market}|{con_id}|{at.isoformat()}",
         "market": market,
@@ -120,9 +144,10 @@ def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:
         "signal_con_id": con_id,
         "signal_at": at.isoformat(),
         "purchase_at": at.isoformat(),
-        "exit_at": (session_exit(at) if session else at + timedelta(minutes=60)).isoformat(),
-        "policy": "SESSION" if session else "HOURLY",
-        "trail": list(SESSION_TRAIL if session else HOURLY_TRAIL),
+        "exit_at": exit_at.isoformat(),
+        "policy": policy,
+        "trail": list(SESSION_TRAIL if policy != "HOURLY" else HOURLY_TRAIL),
+        **({"expiry_after": day_expiry_floor(at).isoformat()} if day else {}),
         "right": RIGHTS[market],
         "target_delta": 0.1,
         "veto": "",

@@ -49,9 +49,21 @@ def test_source_fixture_rv_clocks_and_original_exit_anchor():
             assert (exit_at.hour, exit_at.minute, exit_at.weekday() <= 4) == (9, 25, True)
             assert exit_at.date() > at.astimezone(NY).date()
             assert (event["policy"], event["trail"]) == ("SESSION", [1.5, 0.6])
+        elif at.astimezone(NY).hour == 10:
+            # The day trade: out at 15:00 New York the same day, next day's expiry, wider trail.
+            exit_at = datetime.fromisoformat(event["exit_at"]).astimezone(NY)
+            assert (exit_at.date(), exit_at.hour, exit_at.minute) == (
+                at.astimezone(NY).date(),
+                15,
+                0,
+            )
+            floor = datetime.fromisoformat(event["expiry_after"]).astimezone(NY)
+            assert (floor.date(), floor.hour) == (at.astimezone(NY).date(), 17)
+            assert (event["policy"], event["trail"]) == ("DAY", [1.5, 0.6])
         else:
             assert datetime.fromisoformat(event["exit_at"]) == at + timedelta(minutes=60)
             assert (event["policy"], event["trail"]) == ("HOURLY", [1.2, 0.75])
+            assert "expiry_after" not in event
         expiry = at.replace(hour=21)
         strike = frozen_strike(
             row["price"], row["rv15"], at, expiry, event["right"], event["target_delta"]

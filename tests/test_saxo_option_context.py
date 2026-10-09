@@ -316,6 +316,55 @@ def test_frozen_model_ranking_preserved_and_provider_delta_not_substituted(tmp_p
     assert not state.option_board  # Missing provider Greeks are optional to this existing rule.
 
 
+def test_day_trade_takes_the_next_days_expiry_and_hourly_clocks_keep_the_same_day(tmp_path):
+    """The 10:00 New York clock (the DAY trade) never buys the same day's expiry, even though its
+    15:00 exit would allow it; the 09:00 clock, an hourly trade, still does."""
+    config = FuturesConfig(
+        mappings={
+            "CL": {
+                "environment": "SAXO_SIM",
+                "option_root_ids": [50],
+                "delta_tolerance": 0.05,
+                "source": "frozen source",
+                "approval": "explicit approval",
+                "fee_per_side_gbp": 0.1,
+                "fee_evidence": "fixture evidence",
+                "expiry_rule": "SAME_DAY_OR_NEXT_LISTED",
+                "expiry_time_evidence": "verified fixture instant",
+                "expiry_instants": {
+                    "2026-09-28": "2026-09-28T20:00:00Z",
+                    "2026-09-29": "2026-09-29T20:00:00Z",
+                },
+            }
+        }
+    )
+    data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
+    state = data.markets["CL"]
+    state.identity, state.option_roots = FUTURE, (50,)
+    state.expiry_instants = {
+        "2026-09-28": datetime(2026, 9, 28, 20, tzinfo=UTC),
+        "2026-09-29": datetime(2026, 9, 29, 20, tzinfo=UTC),
+    }
+    day_clock = datetime(2026, 9, 28, 14, tzinfo=UTC)  # 10:00 New York
+    state.option_space = [
+        {
+            "Uic": uic,
+            "UnderlyingUic": 100,
+            "PutCall": "Call",
+            "StrikePrice": frozen_strike(70, 0.01, day_clock, state.expiry_instants[day], "C", 0.1),
+            "Expiry": day,
+        }
+        for uic, day in ((101, "2026-09-28"), (102, "2026-09-29"))
+    ]
+    inputs = {"futures_price": 70, "rv15": 0.01}
+    event = opportunity("CL", 100, day_clock)
+    assert event["policy"] == "DAY"
+    assert data.rank_candidates(state, event, inputs)[0][2]["Uic"] == 102
+    hourly = opportunity("CL", 100, datetime(2026, 9, 28, 13, tzinfo=UTC))  # 09:00 New York
+    assert hourly["policy"] == "HOURLY"
+    assert data.rank_candidates(state, hourly, inputs)[0][2]["Uic"] == 101
+
+
 def test_chain_history_stays_with_contract_and_never_modifies_regular_price(tmp_path):
     _, data, store = setup(tmp_path)
     state = data.markets["CL"]

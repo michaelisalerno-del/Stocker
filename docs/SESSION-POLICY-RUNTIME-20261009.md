@@ -6,6 +6,12 @@
   09:25 New York on the next weekday — or earlier, on an armed trail that arms when a current bid reaches 1.50 x the entry
   price and sells at the first later current bid at or below 0.60 x the highest bid since entry. An empty bid never
   triggers a sale (the scheduled exit still applies). The option subscription is kept until the exit.
+- The 10:00 New York clock becomes the DAY trade (the user's "one trade out of hours and one in hours", 2026-10-09): the
+  end of the open's first pullback (the futures anatomy in STUDY_LOOK.md: the first move is retraced 70–109% by ~10:00–10:30
+  and a second push of about the same size follows). It buys the NEXT trading day's expiry (never the same day's, whose
+  entries lose a median 93–95% at every time of day), holds to 15:00 New York, or sells earlier on the same 1.50 / 0.60
+  trail. The event carries `expiry_after` (the clock day's 17:00 New York close) and the selector takes the first expiry
+  after it. Untested on recordings (the following-expiry capture is sparse in US hours); this is what produces the data.
 - Every other clock trades exactly as before (60-minute hold; the armed trail of EXIT-SET-3 rule AT, 1.20 / 0.75), so the
   hourly incumbent keeps producing its fills and the frozen hourly tests keep their data. Selection, recording and the
   chain views are unchanged at every clock. The event carries `policy` ("SESSION" or "HOURLY") and `trail` (arm, keep).

@@ -339,6 +339,47 @@ def test_armed_trail_sells_before_the_hour_only_after_arming_and_giving_back(tmp
     asyncio.run(scenario())
 
 
+def test_session_trail_uses_the_plan_thresholds_and_ignores_an_empty_bid(tmp_path):
+    """Session policy: arm at 1.50x entry, sell at the first current bid <= 0.60x the high;
+    a zero bid never triggers the trail (the scheduled exit still applies)."""
+
+    async def scenario():
+        broker, data, store = setup(tmp_path)
+        _, price = data.options[101]
+        event = signal(1)
+        store.observe(event, "", {})
+        session = {**plan(), "policy": "SESSION", "trail": [1.5, 0.6]}
+        assert await broker.enter(event, session) == ""
+        entry = next(f["price"] for f in store.fills(event["id"]) if f["side"] == "BOT")
+
+        def bid(value):
+            price.update(
+                {"Quote": {"Bid": value, "Ask": max(value, 0.01) * 1.1}},
+                f"session-{value}-{time.time()}",
+                time.time(),
+            )
+
+        bid(entry * 1.3)  # the hourly trail would be armed; the session trail is not
+        await broker.manage()
+        bid(entry * 0.9)  # 0.69x the high: hold (not armed)
+        await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        bid(entry * 2.0)  # armed; high 2.0x
+        await broker.manage()
+        bid(entry * 1.4)  # 0.70x the high: hold (the session trail keeps 0.60)
+        await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        bid(0.0)  # an empty bid is no sale price
+        await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        bid(entry * 1.1)  # 0.55x the high: sell
+        await broker.manage()
+        assert store.exposure(event["id"]) == 0
+        store.db.close()
+
+    asyncio.run(scenario())
+
+
 def test_no_naked_short_futures_or_stale_size_fill(tmp_path):
     async def scenario():
         broker, data, store = setup(tmp_path)

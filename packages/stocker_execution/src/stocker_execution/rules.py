@@ -91,10 +91,28 @@ def next_clock(now: datetime) -> datetime:
     raise ValueError("NO_NEXT_CLOCK")
 
 
+def session_clock(at: datetime) -> bool:
+    """The first clock of the CME session (19:00 New York) carries the session trade
+    (docs/SESSION-POLICY-RUNTIME-20261009.md): held to 09:25 New York on the next weekday, or
+    sold earlier on a wider armed trail (arm 1.50x entry, keep 0.60x the high)."""
+    return at.astimezone(NY).hour == 19
+
+
+def session_exit(at: datetime) -> datetime:
+    """09:25 New York on the first weekday after the session clock's evening."""
+    day = next_weekday(at.astimezone(NY).date())
+    return datetime.combine(day, time(9, 25), NY).astimezone(UTC)
+
+
+SESSION_TRAIL = (1.50, 0.60)
+HOURLY_TRAIL = (1.20, 0.75)
+
+
 def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:
     local = at.astimezone(NY)
     if at not in clocks(local.date()):
         raise ValueError("OUTSIDE_ENTRY_WINDOW")
+    session = session_clock(at)
     return {
         "id": f"{RULE_VERSION}|{market}|{con_id}|{at.isoformat()}",
         "market": market,
@@ -102,7 +120,9 @@ def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:
         "signal_con_id": con_id,
         "signal_at": at.isoformat(),
         "purchase_at": at.isoformat(),
-        "exit_at": (at + timedelta(minutes=60)).isoformat(),
+        "exit_at": (session_exit(at) if session else at + timedelta(minutes=60)).isoformat(),
+        "policy": "SESSION" if session else "HOURLY",
+        "trail": list(SESSION_TRAIL if session else HOURLY_TRAIL),
         "right": RIGHTS[market],
         "target_delta": 0.1,
         "veto": "",

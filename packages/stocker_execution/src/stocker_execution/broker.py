@@ -149,6 +149,8 @@ class PaperBroker:
             exit_at=event["exit_at"],
             fee_evidence=self.data.option_references[option["uic"]]["version"],
             delta_distance=distance,
+            policy=event.get("policy", "HOURLY"),
+            trail=event.get("trail"),
             expiry_rule=mapping.expiry_rule,
             underlying=state.identity,
             simulated=self.config.execution_mode == "INTERNAL_PAPER",
@@ -167,7 +169,7 @@ class PaperBroker:
         event.update(selected_option=option, delta_distance=distance)
         self.data.option_required_at[option["uic"]] = max(
             self.data.option_required_at.get(option["uic"], 0),
-            utc(event["signal_at"]).timestamp() + 3600,
+            utc(event["exit_at"]).timestamp(),
         )
         self.data.recorder.attach(str(event["id"]), key(option), time.time())
         return option, distance
@@ -487,11 +489,14 @@ class PaperBroker:
         if not entry:
             return False
         bid, key = float(quote["Bid"]), "trail_peak:" + identity
+        if bid <= 0:
+            return False  # an empty bid is no sale price; the scheduled exit still applies
         peak = float(self.store.get_meta(key, 0))
         if bid > peak:
             peak = bid
             self.store.set_meta(key, peak)
-        due = peak >= TRAIL_ARM * entry and bid <= TRAIL_KEEP * peak
+        arm, keep = plan.get("trail") or (TRAIL_ARM, TRAIL_KEEP)
+        due = peak >= arm * entry and bid <= keep * peak
         if due and self.store.get_meta("trail_exit:" + identity) is None:
             self.store.set_meta(
                 "trail_exit:" + identity, {"at": now().isoformat(), "bid": bid, "peak": peak}

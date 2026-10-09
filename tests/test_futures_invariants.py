@@ -43,7 +43,15 @@ def test_source_fixture_rv_clocks_and_original_exit_anchor():
                 opportunity(row["market"], row["con_id"], at)
             continue
         event = opportunity(row["market"], row["con_id"], at)
-        assert datetime.fromisoformat(event["exit_at"]) == at + timedelta(minutes=60)
+        if at.astimezone(NY).hour == 19:
+            # The session trade: out at 09:25 New York on the next weekday, wider trail.
+            exit_at = datetime.fromisoformat(event["exit_at"]).astimezone(NY)
+            assert (exit_at.hour, exit_at.minute, exit_at.weekday() <= 4) == (9, 25, True)
+            assert exit_at.date() > at.astimezone(NY).date()
+            assert (event["policy"], event["trail"]) == ("SESSION", [1.5, 0.6])
+        else:
+            assert datetime.fromisoformat(event["exit_at"]) == at + timedelta(minutes=60)
+            assert (event["policy"], event["trail"]) == ("HOURLY", [1.2, 0.75])
         expiry = at.replace(hour=21)
         strike = frozen_strike(
             row["price"], row["rv15"], at, expiry, event["right"], event["target_delta"]

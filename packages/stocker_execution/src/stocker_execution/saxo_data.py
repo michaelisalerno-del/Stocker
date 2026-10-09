@@ -807,8 +807,11 @@ class DataService:
         at = utc(event["signal_at"])
         wanted = at.astimezone(NY).date().isoformat()
         if mapping.expiry_rule == "SAME_DAY_OR_NEXT_LISTED":
-            # verified_cutoff needs the exit two minutes before the option stops trading.
+            # verified_cutoff needs the exit two minutes before the option stops trading; the DAY
+            # trade also refuses any expiry at or before its clock day's close (`expiry_after`).
             last_exit = utc(event["exit_at"]) + timedelta(seconds=120)
+            if event.get("expiry_after"):
+                last_exit = max(last_exit, utc(event["expiry_after"]))
             wanted = min((d for d, i in state.expiry_instants.items() if i > last_exit), default="")
         candidates = []
         deltas: dict[int, float] = {}

@@ -91,10 +91,92 @@ def next_clock(now: datetime) -> datetime:
     raise ValueError("NO_NEXT_CLOCK")
 
 
+def session_clock(at: datetime) -> bool:
+    """The first clock of the CME session (19:00 New York) carries the session trade
+    (docs/SESSION-POLICY-RUNTIME-20261009.md): held to 09:25 New York on the next weekday, or
+    sold earlier on a wider armed trail (arm 1.50x entry, keep 0.60x the high)."""
+    return at.astimezone(NY).hour == 19
+
+
+def session_exit(at: datetime) -> datetime:
+    """09:25 New York on the first weekday after the session clock's evening."""
+    day = next_weekday(at.astimezone(NY).date())
+    return datetime.combine(day, time(9, 25), NY).astimezone(UTC)
+
+
+def day_clock(at: datetime) -> bool:
+    """The 10:00 New York clock carries the DAY trade (the user's decision, 2026-10-09): the end
+    of the open's first pullback, on the NEXT trading day's expiry (never the same day's), held
+    to 11:00 New York or sold earlier on the session trail (11:00 beat 15:00 on 68-77% of
+    ~383 modelled days per market: less time decay, a cheaper exit toll; STUDY_LOOK.md)."""
+    return at.astimezone(NY).hour == 10
+
+
+def day_exit(at: datetime) -> datetime:
+    local = at.astimezone(NY)
+    return datetime.combine(local.date(), time(11), NY).astimezone(UTC)
+
+
+def day_expiry_floor(at: datetime) -> datetime:
+    """Expiries at or before the 17:00 New York close of the clock's day are not the DAY trade's."""
+    local = at.astimezone(NY)
+    return datetime.combine(local.date(), time(17), NY).astimezone(UTC)
+
+
+SESSION_TRAIL = (1.50, 0.60)
+HOURLY_TRAIL = (1.20, 0.75)
+DAY_VETO_MARKETS = ("ES", "NQ")
+DAY_SPREAD_MAX = 0.03
+
+
+def day_spread_veto(quote: dict[str, object]) -> str:
+    """The DAY trade buys only when (ask - bid) / ask <= DAY_SPREAD_MAX at entry (the user's
+    decision, 2026-10-09): in the option model the 10:00-11:00 leg breaks even at a round-trip
+    toll of about 3% (ES), 3.4% (NQ), 3.8% (GC), 8.8% (CL), so a dearer quote cannot pay for
+    itself. No two-sided quote means no trade."""
+    bid, ask = quote.get("Bid"), quote.get("Ask")
+    if not isinstance(bid, (int, float)) or not isinstance(ask, (int, float)):
+        return "DAY_SPREAD_ABOVE_GATE"
+    if bid <= 0 or ask <= 0 or bid > ask or (ask - bid) / ask > DAY_SPREAD_MAX + 1e-9:
+        return "DAY_SPREAD_ABOVE_GATE"
+    return ""
+
+
+DAY_VETO_BP = 10.0
+
+
+def day_against_veto(bars: list[Bar], at: datetime, market: str) -> str:
+    """Skip the DAY trade when the open went against it (the user's decision, 2026-10-09; the
+    look in STUDY_LOOK.md: ES/NQ lose 23-26 bp from 10:00 to 15:00 on such days, GC/CL show
+    nothing). Over the 30 completed one-minute bars from 09:30 New York, every close sat at
+    least DAY_VETO_BP basis points against the market's direction relative to the 09:30 open.
+    Any missing bar means no veto."""
+    if market not in DAY_VETO_MARKETS or not day_clock(at):
+        return ""
+    local = at.astimezone(NY)
+    start = datetime.combine(local.date(), time(9, 30), NY).astimezone(UTC)
+    by_time = {b.at: b for b in bars}
+    found = [by_time.get(start + timedelta(minutes=i)) for i in range(30)]
+    window = [b for b in found if b is not None]
+    if len(window) < 30:
+        return ""
+    sign = 1 if RIGHTS[market] == "C" else -1
+    open_ = window[0].open
+    best = max((b.close - open_) * sign / open_ * 1e4 for b in window)
+    return "DAY_OPEN_AGAINST" if best <= -DAY_VETO_BP else ""
+
+
 def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:
     local = at.astimezone(NY)
     if at not in clocks(local.date()):
         raise ValueError("OUTSIDE_ENTRY_WINDOW")
+    session, day = session_clock(at), day_clock(at)
+    if session:
+        exit_at, policy = session_exit(at), "SESSION"
+    elif day:
+        exit_at, policy = day_exit(at), "DAY"
+    else:
+        exit_at, policy = at + timedelta(minutes=60), "HOURLY"
     return {
         "id": f"{RULE_VERSION}|{market}|{con_id}|{at.isoformat()}",
         "market": market,
@@ -102,7 +184,10 @@ def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:
         "signal_con_id": con_id,
         "signal_at": at.isoformat(),
         "purchase_at": at.isoformat(),
-        "exit_at": (at + timedelta(minutes=60)).isoformat(),
+        "exit_at": exit_at.isoformat(),
+        "policy": policy,
+        "trail": list(SESSION_TRAIL if policy != "HOURLY" else HOURLY_TRAIL),
+        **({"expiry_after": day_expiry_floor(at).isoformat()} if day else {}),
         "right": RIGHTS[market],
         "target_delta": 0.1,
         "veto": "",

@@ -34,6 +34,7 @@ from stocker_execution.recorder import Recorder
 from stocker_execution.rules import (
     NY,
     clocks,
+    day_against_veto,
     eligibility,
     next_clock,
     observation,
@@ -742,6 +743,9 @@ class Runtime:
             self.store.db.execute(
                 "UPDATE signals SET detail=? WHERE id=?", (encode(detail), event["id"])
             )
+        if not reason and event.get("policy") == "DAY":
+            # After the clock's option is selected and recorded: the day trade's one veto.
+            reason = day_against_veto(state.bars, clock, state.market)
         if not reason:
             reason = "ENTRIES_PAUSED" if self.pause else self.broker.entry_reason()
         if not reason:

@@ -55,6 +55,10 @@ CLOSED_POSITION_FIELDS = (
 )
 ORDER_DEADLINE_SECONDS = 20  # a working order unconfirmed after this is reconciled/cancelled
 NO_BID_GRACE_SECONDS = 60  # a current quote with no sellable bid this long after the exit: zero
+# Armed trail (docs/EXIT-SET-3-PROTOCOL.md, rule AT): once a bid reaches 1.20x the entry price,
+# sell at the first later bid at or below 0.75x the highest bid since entry.
+TRAIL_ARM = 1.20
+TRAIL_KEEP = 0.75
 
 
 def now() -> datetime:
@@ -466,6 +470,34 @@ class PaperBroker:
             },
         )
 
+    def trail_due(self, identity: str, plan: dict[str, Any]) -> bool:
+        """Armed trail: True when an owned option should be sold before its scheduled exit.
+
+        Only a current, usable quote counts; an unknown quote never triggers a sale (the
+        scheduled exit still applies). The highest bid is kept in the store across restarts.
+        """
+        state = self.data.options.get(plan["option"]["uic"])
+        if not state:
+            return False
+        try:
+            quote = quote_check(state[1].value or {}, self.data.quote_receipt(state[1]), now())
+        except ValueError:
+            return False
+        entry = next((f["price"] for f in self.store.fills(identity) if f["side"] == "BOT"), 0)
+        if not entry:
+            return False
+        bid, key = float(quote["Bid"]), "trail_peak:" + identity
+        peak = float(self.store.get_meta(key, 0))
+        if bid > peak:
+            peak = bid
+            self.store.set_meta(key, peak)
+        due = peak >= TRAIL_ARM * entry and bid <= TRAIL_KEEP * peak
+        if due and self.store.get_meta("trail_exit:" + identity) is None:
+            self.store.set_meta(
+                "trail_exit:" + identity, {"at": now().isoformat(), "bid": bid, "peak": peak}
+            )
+        return due
+
     def write_off_reason(self, plan: dict[str, Any], exit_at: datetime) -> str:
         """INTERNAL_PAPER only: why an owed exit cannot be sold and is booked at zero, or "".
 
@@ -818,7 +850,9 @@ class PaperBroker:
                     )
                     if reason:
                         self.write_off(identity, plan, reason)
-                    elif self.store.exposure(identity) > 0 and now() >= exit_at:
+                    elif self.store.exposure(identity) > 0 and (
+                        now() >= exit_at or self.trail_due(identity, plan)
+                    ):
                         if now() >= utc(plan["cutoff"]):
                             raise ValueError("FAILED_CLOSURE_EXPIRY_EXPOSURE_EXCEPTION")
                         state = self.data.options.get(plan["option"]["uic"])

@@ -261,7 +261,7 @@ function optionContext(m) {
   };
   const analytics = {...(o?.chain_analytics || {}), ...(o?.analytics || {})};
   text(`option-identity-${m.market}`, o ? `${held ? "Owned contract" : uic === eventUic ? "Event-selected contract" : "Current candidate"}: ${id.symbol || id.uic} · ${id.right} ${id.strike} · UIC ${id.uic} · underlying ${id.underlying_symbol || "unknown"} / ${id.underlying_uic}` : `No selected contract · ${context.problem || "UNAVAILABLE"}`);
-  text(`option-deadline-${m.market}`, `Expiry ${id.expiry || "unknown"} · last trading ${id.last_trade_at || "UNVERIFIED"} · strategy exit ${held?.exit_at || (uic === eventUic && event?.context?.strategy_exit_at) || "set by event + 60 minutes"}`);
+  text(`option-deadline-${m.market}`, `Expiry ${id.expiry || "unknown"} · last trading ${id.last_trade_at || "UNVERIFIED"} · strategy exit ${held?.exit_at || (uic === eventUic && event?.context?.strategy_exit_at) || "set by the clock (19:00 → 09:25 next day, 10:00 → 11:00, other hours +60 min)"}`);
   text(`option-quote-${m.market}`, `Regular quote ${o?.quote_status || "MISSING"} · bid ${numeric(q.Bid)} × ${numeric(o?.sizes?.Bid)} (${q.PriceTypeBid || "unknown"}) · ask ${numeric(q.Ask)} × ${numeric(o?.sizes?.Ask)} (${q.PriceTypeAsk || "unknown"}) · spread ${numeric(typeof q.Ask === "number" && typeof q.Bid === "number" ? q.Ask - q.Bid : null)} · delay ${q.DelayedByMinutes ?? "unknown"} min · bid size ${o?.size_status?.Bid || "UNVERIFIED"} · ask size ${o?.size_status?.Ask || "UNVERIFIED"}`);
   text(`option-analytics-${m.market}`, `Provider delta ${obs("Greeks.Delta", analytics)} · IV ${obs(analytics["Greeks.MidVolatility"] ? "Greeks.MidVolatility" : "Greeks.MidVol", analytics)} · provider units / scaling unverified`);
   text(`option-volume-${m.market}`, `Option volume ${obs("PriceInfoDetails.Volume", analytics)} · OI ${obs("InstrumentPriceDetails.OpenInterest", analytics)}`);
@@ -290,7 +290,7 @@ function ticket(m, {held, uic, o, context}) {
   text(`ticket-breakeven-${m.market}`, typeof be.ratio === "number"
     ? `${be.ratio === 0 ? "No move needed" : `Needs ${be.ratio.toFixed(2)}× a normal hour your way`} to get the bid back to the ask (an hour that good ≈ ${Math.round(100 * be.chance)}%)${typeof be.ratio_iv_down === "number" ? ` · ${be.ratio_iv_down.toFixed(2)}× if IV falls 10%` : ""}${be.ratio > 1 ? " · above the frozen veto's 1.0× line" : ""}`
     : o ? `Break-even unavailable · ${display(be.reason) || "unknown"}` : "—");
-  text(`ticket-cutoff-${m.market}`, o ? `Last trading ${id.last_trade_at ? hhmm(id.last_trade_at) + " NY" : "UNVERIFIED"} · exit ${held?.exit_at ? hhmm(held.exit_at) + " NY" : "clock + 60 min"}` : "—");
+  text(`ticket-cutoff-${m.market}`, o ? `Last trading ${id.last_trade_at ? hhmm(id.last_trade_at) + " NY" : "UNVERIFIED"} · exit ${held?.exit_at ? hhmm(held.exit_at) + " NY" : "by clock rule (19:00 → 09:25, 10:00 → 11:00, else +60 min)"}` : "—");
   const ceiling = limits.per_trade_gbp, total = cost.total_gbp;
   const fill = $(`ticket-fill-${m.market}`);
   if (fill) {
@@ -661,11 +661,19 @@ function render(d) {
     chart(m);
   }
 }
+// The exit rule a trade runs under: its policy, floor and trail, from the trade's own plan.
+function exitRule(t) {
+  const name = {SESSION: "Overnight", DAY: "Day", HOURLY: "Hourly"}[t.policy] || display(t.policy || "HOURLY");
+  const pct = (x) => `${Math.round((x - 1) * 100)}%`;
+  const floor = t.floor ? `floor: once +${pct(t.floor[0])}, sell at +${pct(t.floor[1])} · ` : "";
+  const trail = t.trail ? `trail: arm +${pct(t.trail[0])}, keep ${Math.round(t.trail[1] * 100)}% of high` : "trail as hourly";
+  return `${name} · ${floor}${trail}`;
+}
 // An open or pending trade in one line: what, how it stands, when it exits.
 function position(t) {
   const option = t.option?.right ? `${t.option.right} ${t.option.strike}` : "Option";
   const value = t.quantity ? ` · bid estimate ${t.valuation?.fresh ? signed(t.valuation.value_gbp) : "unavailable"}` : "";
-  return `${t.quantity ? "Open" : display(t.state)}: ${option}${value} · exits ${hhmm(t.exit_at)} NY (${london(t.exit_at)})`;
+  return `${t.quantity ? "Open" : display(t.state)}: ${option}${value} · ${exitRule(t)} · exits ${hhmm(t.exit_at)} NY (${london(t.exit_at)}) at the latest`;
 }
 function renderToday(t, cards = []) {
   const trades = t.trades || [];

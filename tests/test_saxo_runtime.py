@@ -339,6 +339,58 @@ def test_armed_trail_sells_before_the_hour_only_after_arming_and_giving_back(tmp
     asyncio.run(scenario())
 
 
+def test_day_floor_banks_a_small_peak_and_leaves_a_big_one_to_the_trail(tmp_path):
+    """DAY rising floor: once 1.20x entry, sell at the first bid <= max(1.05x entry, 0.60x high)."""
+
+    async def scenario():
+        broker, data, store = setup(tmp_path)
+        _, price = data.options[101]
+
+        def bid(value, tag):
+            price.update({"Quote": {"Bid": value, "Ask": value * 1.1}}, tag, time.time())
+
+        day = {**plan(), "policy": "DAY", "trail": [1.5, 0.6], "floor": [1.2, 1.05]}
+        small = signal(1)
+        store.observe(small, "", {})
+        assert await broker.enter(small, day) == ""
+        entry = next(f["price"] for f in store.fills(small["id"]) if f["side"] == "BOT")
+        bid(entry * 1.10, "s1")  # not armed
+        await broker.manage()
+        bid(entry * 1.25, "s2")  # armed at +25%
+        await broker.manage()
+        bid(entry * 1.08, "s3")  # above +5%: hold
+        await broker.manage()
+        assert store.exposure(small["id"]) == 1
+        bid(entry * 1.04, "s4")  # at/below +5%: bank it
+        await broker.manage()
+        assert store.exposure(small["id"]) == 0
+        store.db.close()
+
+    asyncio.run(scenario())
+
+    async def big():
+        broker, data, store = setup(tmp_path / "big")
+        _, price = data.options[101]
+        day = {**plan(), "policy": "DAY", "trail": [1.5, 0.6], "floor": [1.2, 1.05]}
+        event = signal(2)
+        store.observe(event, "", {})
+        assert await broker.enter(event, day) == ""
+        entry = next(f["price"] for f in store.fills(event["id"]) if f["side"] == "BOT")
+        for i, v in enumerate((2.5, 1.7)):  # high 2.5x; 1.7x is above 0.60 x 2.5 = 1.5x: hold
+            price.update(
+                {"Quote": {"Bid": entry * v, "Ask": entry * v * 1.1}}, f"b{i}", time.time()
+            )
+            await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        price.update({"Quote": {"Bid": entry * 1.45, "Ask": entry * 1.6}}, "b9", time.time())
+        await broker.manage()  # 0.58x the high: the wide trail sells
+        assert store.exposure(event["id"]) == 0
+        store.db.close()
+
+    (tmp_path / "big").mkdir()
+    asyncio.run(big())
+
+
 def test_session_trail_uses_the_plan_thresholds_and_ignores_an_empty_bid(tmp_path):
     """Session policy: arm at 1.50x entry, sell at the first current bid <= 0.60x the high;
     a zero bid never triggers the trail (the scheduled exit still applies)."""

@@ -154,6 +154,7 @@ class PaperBroker:
             delta_distance=distance,
             policy=event.get("policy", "HOURLY"),
             trail=event.get("trail"),
+            floor=event.get("floor"),
             expiry_rule=mapping.expiry_rule,
             underlying=state.identity,
             simulated=self.config.execution_mode == "INTERNAL_PAPER",
@@ -500,6 +501,9 @@ class PaperBroker:
             self.store.set_meta(key, peak)
         arm, keep = plan.get("trail") or (TRAIL_ARM, TRAIL_KEEP)
         due = peak >= arm * entry and bid <= keep * peak
+        if plan.get("floor"):
+            floor_arm, floor_at = plan["floor"]
+            due = due or (peak >= floor_arm * entry and bid <= max(floor_at * entry, keep * peak))
         if due and self.store.get_meta("trail_exit:" + identity) is None:
             self.store.set_meta(
                 "trail_exit:" + identity, {"at": now().isoformat(), "bid": bid, "peak": peak}

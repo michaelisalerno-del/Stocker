@@ -125,6 +125,10 @@ def day_expiry_floor(at: datetime) -> datetime:
 
 SESSION_TRAIL = (1.50, 0.60)
 HOURLY_TRAIL = (1.20, 0.75)
+# DAY rising floor (the user's decision, 2026-10-09): once the bid has reached 1.20x entry, sell at
+# the first bid <= max(1.05x entry, keep x high). Real US-hours paths: 37% positive vs 26%,
+# same share of the largest moves kept; overnight floors sold the grind early (SESSION has none).
+DAY_FLOOR = (1.20, 1.05)
 DAY_VETO_MARKETS = ("ES", "NQ")
 DAY_SPREAD_MAX = 0.03
 
@@ -187,7 +191,11 @@ def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:
         "exit_at": exit_at.isoformat(),
         "policy": policy,
         "trail": list(SESSION_TRAIL if policy != "HOURLY" else HOURLY_TRAIL),
-        **({"expiry_after": day_expiry_floor(at).isoformat()} if day else {}),
+        **(
+            {"expiry_after": day_expiry_floor(at).isoformat(), "floor": list(DAY_FLOOR)}
+            if day
+            else {}
+        ),
         "right": RIGHTS[market],
         "target_delta": 0.1,
         "veto": "",

@@ -105,6 +105,47 @@ def test_next_chain_subscribes_the_following_root_and_records_separately(tmp_pat
     asyncio.run(scenario())
 
 
+def test_next_window_moves_to_the_following_expiry_day_not_the_roots_first(tmp_path):
+    """A root can list several expiry days; the next window must sit on the following day's."""
+
+    async def scenario():
+        _, data, _ = setup(tmp_path)
+        state = data.markets["CL"]
+        data.subscriptions["board-next"] = {
+            "kind": "BOARD",
+            "target": "CL:next",
+            "path": "/trade/v1/optionschain/subscriptions",
+            "arguments": {"Identifier": 4953},
+        }
+        state.next_option_day = "2026-10-07"
+        state.next_option_board = {
+            "Expiries": [
+                {
+                    "Index": 0,
+                    "Expiry": "2026-10-06",
+                    "MidStrikePrice": 70,
+                    "Strikes": [{"Index": 3, "Strike": 70}],
+                },
+                {"Index": 1, "Expiry": "2026-10-07", "MidStrikePrice": 70, "Strikes": []},
+            ]
+        }
+        calls = []
+
+        async def request(method, path, **kwargs):
+            calls.append((method, kwargs))
+            return {}
+
+        data.client.request = request
+        await data.focus_next_board(state)
+        assert calls and calls[-1][1]["body"]["Expiries"][0]["Index"] == 1
+        state.next_option_day = "2026-10-08"  # not listed: flagged, no move
+        calls.clear()
+        await data.focus_next_board(state)
+        assert not calls and state.capabilities["next_chain_problem"] == "NEXT_EXPIRY_NOT_IN_CHAIN"
+
+    asyncio.run(scenario())
+
+
 def test_next_contract_is_streamed_recorded_and_idempotent(tmp_path):
     async def scenario():
         _, data, _ = setup(tmp_path)

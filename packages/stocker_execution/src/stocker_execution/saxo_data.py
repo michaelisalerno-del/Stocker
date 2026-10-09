@@ -118,6 +118,7 @@ class MarketState:
     option_board: dict[str, Any] = field(default_factory=dict)
     option_root: int | None = None  # the chain board's root: the nearest expiry from today
     next_option_root: int | None = None  # the following expiry day's root: a second window
+    next_option_day: str = ""  # that following expiry day (a root can list several expiry days)
     next_option_board: dict[str, Any] = field(default_factory=dict)
     option_roots: tuple[int, ...] = ()  # approved roots found for the pinned future
     expiry_instants: dict[str, datetime] = field(default_factory=dict)
@@ -411,11 +412,11 @@ class DataService:
         state.option_space, state.expiry_instants = space_rows, instants
         state.option_root = upcoming[0][1] if upcoming else None
         # The following expiry day's root feeds a second, separately recorded chain window.
-        state.next_option_root = (
-            next((root for day, root in upcoming if day > upcoming[0][0]), None)
-            if upcoming
-            else None
+        following = (
+            next(((d, r) for d, r in upcoming if d > upcoming[0][0]), None) if upcoming else None
         )
+        state.next_option_root = following[1] if following else None
+        state.next_option_day = following[0] if following else ""
         state.option_space_day = today
         state.capabilities["options"] = (
             {
@@ -966,7 +967,16 @@ class DataService:
             ),
             None,
         )
-        expiry = next(iter(state.next_option_board.get("Expiries", []) or []), None)
+        expiries = state.next_option_board.get("Expiries", []) or []
+        # A root can list several expiry days and the window opens on its first (often today's):
+        # move it to the following expiry day itself (2026-10-09: the US-hours capture was today's).
+        expiry = next(
+            (e for e in expiries if str(e.get("Expiry", ""))[:10] == state.next_option_day),
+            None if state.next_option_day else next(iter(expiries), None),
+        )
+        if subscription and state.next_option_day and not expiry and expiries:
+            state.capabilities["next_chain_problem"] = "NEXT_EXPIRY_NOT_IN_CHAIN"
+            return
         if subscription and expiry:
             await self.centre_window(*subscription, expiry, state, "next_chain_problem")
 

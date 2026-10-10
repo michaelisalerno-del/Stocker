@@ -62,7 +62,11 @@ def test_source_fixture_rv_clocks_and_original_exit_anchor():
             )
             floor = datetime.fromisoformat(event["expiry_after"]).astimezone(NY)
             assert (floor.date(), floor.hour) == (at.astimezone(NY).date(), 17)
-            assert (event["policy"], event["trail"]) == ("DAY", [1.5, 0.6])
+            # DAY exit v3: the floor and the late stall from 10:50 New York; no trail.
+            assert (event["policy"], event["trail"], event["floor"]) == ("DAY", None, [1.2, 1.05])
+            stall_from = datetime.fromisoformat(event["stall"][0]).astimezone(NY)
+            assert (stall_from.hour, stall_from.minute) == (10, 50)
+            assert event["stall"][1:] == [300, 0.9]
         else:
             assert datetime.fromisoformat(event["exit_at"]) == at + timedelta(minutes=60)
             assert (event["policy"], event["trail"]) == ("HOURLY", [1.2, 0.75])
@@ -112,7 +116,9 @@ def test_day_and_session_trades_exit_at_their_own_times():
     ten = opportunity("ES", 1, datetime.combine(day, time(10), NY).astimezone(UTC))
     out = datetime.fromisoformat(ten["exit_at"]).astimezone(NY)
     assert (ten["policy"], out.date(), out.hour, out.minute) == ("DAY", day, 11, 0)
-    assert ten["floor"] == [1.2, 1.05]
+    assert (ten["floor"], ten["trail"]) == ([1.2, 1.05], None)
+    stall_from = datetime.fromisoformat(ten["stall"][0]).astimezone(NY)
+    assert (stall_from.date(), stall_from.hour, stall_from.minute) == (day, 10, 50)
     seven = opportunity("ES", 1, datetime.combine(day, time(19), NY).astimezone(UTC))
     out = datetime.fromisoformat(seven["exit_at"]).astimezone(NY)
     assert (seven["policy"], out.date(), out.hour, out.minute) == (

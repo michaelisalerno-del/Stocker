@@ -545,6 +545,7 @@ class Runtime:
             "policy": plan.get("policy", "HOURLY"),
             "trail": plan.get("trail"),
             "floor": plan.get("floor"),
+            "stall": plan.get("stall"),
             "option": plan["option"],
             "premium_gbp": plan["premium_gbp"],
             "fees_gbp": plan["fees_gbp"],

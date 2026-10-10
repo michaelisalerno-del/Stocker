@@ -16,8 +16,10 @@
   end of the open's first pullback (the futures anatomy in STUDY_LOOK.md: the first move is retraced 70–109% by ~10:00–10:30
   and a second push of about the same size follows). It buys the NEXT trading day's expiry (never the same day's, whose
   entries lose a median 93–95% at every time of day), holds to 11:00 New York (changed from 15:00 the same day, on the user's "Change it": in a model of ~383 days per
-  market 11:00 beat 15:00 on 68–77% of days, with less time decay and a cheaper exit toll), or sells earlier on the same 1.50 / 0.60
-  trail. The event carries `expiry_after` (the clock day's 17:00 New York close) and the selector takes the first expiry
+  market 11:00 beat 15:00 on 68–77% of days, with less time decay and a cheaper exit toll), or sells earlier under the DAY exit v3 of
+  2026-10-10 (`DAY-EXIT-V3-20261010.md`: the 1.20 / 1.05 floor and, from 10:50 New York, a high at least 300 s old sells at
+  0.90x; no trail — the 1.50 / 0.60 trail of 2026-10-09 and the capped stall agreed that night are withdrawn and run as
+  shadows). The event carries `floor`, `stall` and `trail: null`, and `expiry_after` (the clock day's 17:00 New York close) and the selector takes the first expiry
   after it. Untested on recordings (the following-expiry capture is sparse in US hours); this is what produces the data.
   One veto, ES and NQ only (`DAY_OPEN_AGAINST`): no day trade when every one-minute close from 09:30 to 09:59 New York
   sat at least 10 bp against the market's direction relative to the 09:30 open (on ~400 ETF days those legs lost 23–26 bp

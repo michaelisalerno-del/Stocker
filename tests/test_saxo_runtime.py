@@ -340,7 +340,8 @@ def test_armed_trail_sells_before_the_hour_only_after_arming_and_giving_back(tmp
 
 
 def test_day_floor_banks_a_small_peak_and_leaves_a_big_one_to_the_trail(tmp_path):
-    """DAY rising floor: once 1.20x entry, sell at the first bid <= max(1.05x entry, 0.60x high)."""
+    """A DAY plan reserved before v3 (floor and trail, no `stall`) keeps its v1 semantics across a
+    restart: once 1.20x entry, sell at the first bid <= max(1.05x entry, 0.60x high)."""
 
     async def scenario():
         broker, data, store = setup(tmp_path)
@@ -389,6 +390,98 @@ def test_day_floor_banks_a_small_peak_and_leaves_a_big_one_to_the_trail(tmp_path
 
     (tmp_path / "big").mkdir()
     asyncio.run(big())
+
+
+def test_day_exit_v3_floor_then_late_stall_and_no_trail(tmp_path):
+    """DAY exit v3 (docs/DAY-EXIT-V3-20261010.md): once the bid has reached 1.20x entry, sell at the
+    first bid <= 1.05x entry; from the stall time, while the high is >= 300 s old, at <= 0.90x the
+    high at any level. No trail: a bid at 0.65x the high holds. An equal bid never resets the
+    high's age; a strictly higher bid does."""
+
+    def day(stall_from):
+        return {
+            **plan(),
+            "policy": "DAY",
+            "trail": None,
+            "floor": [1.2, 1.05],
+            "stall": [stall_from.isoformat(), 300, 0.9],
+        }
+
+    async def before_the_stall_time():
+        broker, data, store = setup(tmp_path / "floor")
+        _, price = data.options[101]
+
+        def bid(value, tag):
+            price.update({"Quote": {"Bid": value, "Ask": value * 1.1}}, tag, time.time())
+
+        event = signal(1)
+        store.observe(event, "", {})
+        assert await broker.enter(event, day(datetime.now(UTC) + timedelta(hours=1))) == ""
+        entry = next(f["price"] for f in store.fills(event["id"]) if f["side"] == "BOT")
+        bid(entry * 1.10, "a1")  # not armed
+        await broker.manage()
+        bid(entry * 0.80, "a2")  # never armed: hold
+        await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        bid(entry * 2.0, "a3")  # armed; high 2.0x
+        await broker.manage()
+        bid(entry * 1.3, "a4")  # 0.65x the high: there is no trail, hold
+        await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        bid(entry * 1.04, "a5")  # at/below +5%: the floor banks it
+        await broker.manage()
+        assert store.exposure(event["id"]) == 0
+        exit_ = store.get_meta("trail_exit:" + event["id"])
+        assert (exit_["cause"], exit_["version"]) == ("FLOOR", "DAY-v3-fLS50")
+        assert exit_["peak"] == pytest.approx(entry * 2.0)
+        store.db.close()
+
+    async def after_the_stall_time():
+        broker, data, store = setup(tmp_path / "stall")
+        _, price = data.options[101]
+
+        def bid(value, tag):
+            price.update({"Quote": {"Bid": value, "Ask": value * 1.1}}, tag, time.time())
+
+        event = signal(2)
+        store.observe(event, "", {})
+        assert await broker.enter(event, day(datetime.now(UTC) - timedelta(minutes=1))) == ""
+        entry = next(f["price"] for f in store.fills(event["id"]) if f["side"] == "BOT")
+        key = "trail_peak_at:" + event["id"]
+        bid(entry * 2.0, "b1")  # armed; a high seconds old
+        await broker.manage()
+        bid(entry * 1.75, "b2")  # 0.875x a fresh high: hold
+        await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        store.set_meta(key, (datetime.now(UTC) - timedelta(seconds=400)).isoformat())  # it ages
+        bid(entry * 2.0, "b3")  # an equal retest never resets the age
+        await broker.manage()
+        assert datetime.fromisoformat(store.get_meta(key)) < datetime.now(UTC) - timedelta(
+            seconds=300
+        )
+        bid(entry * 1.9, "b4")  # 0.95x: hold
+        await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        bid(entry * 2.1, "b5")  # a strictly higher bid resets the age
+        await broker.manage()
+        assert datetime.fromisoformat(store.get_meta(key)) > datetime.now(UTC) - timedelta(
+            seconds=5
+        )
+        bid(entry * 1.85, "b6")  # 0.88x a fresh high: hold
+        await broker.manage()
+        assert store.exposure(event["id"]) == 1
+        store.set_meta(key, (datetime.now(UTC) - timedelta(seconds=301)).isoformat())
+        bid(entry * 1.85, "b7")  # 0.88x a high 301 s old: the late stall sells
+        await broker.manage()
+        assert store.exposure(event["id"]) == 0
+        exit_ = store.get_meta("trail_exit:" + event["id"])
+        assert exit_["cause"] == "LATE_STALL" and exit_["peak"] == pytest.approx(entry * 2.1)
+        store.db.close()
+
+    (tmp_path / "floor").mkdir()
+    (tmp_path / "stall").mkdir()
+    asyncio.run(before_the_stall_time())
+    asyncio.run(after_the_stall_time())
 
 
 def test_session_trail_uses_the_plan_thresholds_and_ignores_an_empty_bid(tmp_path):

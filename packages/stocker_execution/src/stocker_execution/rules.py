@@ -119,8 +119,9 @@ def session_exit(at: datetime) -> datetime:
 def day_clock(at: datetime) -> bool:
     """The 10:00 New York clock carries the DAY trade (the user's decision, 2026-10-09): the end
     of the open's first pullback, on the NEXT trading day's expiry (never the same day's), held
-    to 11:00 New York or sold earlier on the session trail (11:00 beat 15:00 on 68-77% of
-    ~383 modelled days per market: less time decay, a cheaper exit toll; STUDY_LOOK.md)."""
+    to 11:00 New York (11:00 beat 15:00 on 68-77% of ~383 modelled days per market: less time
+    decay, a cheaper exit toll; STUDY_LOOK.md) or sold earlier by the DAY exit v3 (DAY_FLOOR,
+    DAY_STALL; no trail)."""
     return at.astimezone(NY).hour == 10
 
 
@@ -137,10 +138,23 @@ def day_expiry_floor(at: datetime) -> datetime:
 
 SESSION_TRAIL = (1.50, 0.60)
 HOURLY_TRAIL = (1.20, 0.75)
-# DAY rising floor (the user's decision, 2026-10-09): once the bid has reached 1.20x entry, sell at
-# the first bid <= max(1.05x entry, keep x high). Real US-hours paths: 37% positive vs 26%,
-# same share of the largest moves kept; overnight floors sold the grind early (SESSION has none).
+# DAY exit v3, floor plus late stall (the user's "Go", 2026-10-10; docs/DAY-EXIT-V3-20261010.md):
+# once the bid has reached 1.20x entry, sell at the first bid <= 1.05x entry; from 10:50 New York,
+# when the highest bid is at least 300 s old, sell at the first bid <= 0.90x that high, at any
+# level. No trail: on 1-minute bars the 0.60 trail only cost the largest winners (top-5% peaks
+# kept 42% against 49% with the floor alone), and the capped stall agreed on 2026-10-09 (v2) lost
+# 1.1 pts and 7 pts of tail to the floor-and-trail rule (v1), a 5-minute-close artefact. v1 and v2
+# are replayed as shadows from the recorded quotes (hourly ledger, day_v3_shadows.py).
 DAY_FLOOR = (1.20, 1.05)
+DAY_STALL = (50, 300, 0.90)  # minutes after the clock, age of the high in seconds, keep x high
+
+
+def day_stall(at: datetime) -> list[object]:
+    """The event's `stall`: [from (ISO), age in seconds, keep] for the DAY clock at `at`."""
+    minutes, age, keep = DAY_STALL
+    return [(at + timedelta(minutes=minutes)).isoformat(), age, keep]
+
+
 DAY_VETO_MARKETS = ("ES", "NQ")
 DAY_SPREAD_MAX = 0.03
 
@@ -202,9 +216,14 @@ def opportunity(market: str, con_id: int, at: datetime) -> dict[str, object]:
         "purchase_at": at.isoformat(),
         "exit_at": exit_at.isoformat(),
         "policy": policy,
-        "trail": list(SESSION_TRAIL if policy != "HOURLY" else HOURLY_TRAIL),
+        # The DAY trade has no trail (v3); its exit is the floor and the late stall below.
+        "trail": None if day else list(SESSION_TRAIL if policy != "HOURLY" else HOURLY_TRAIL),
         **(
-            {"expiry_after": day_expiry_floor(at).isoformat(), "floor": list(DAY_FLOOR)}
+            {
+                "expiry_after": day_expiry_floor(at).isoformat(),
+                "floor": list(DAY_FLOOR),
+                "stall": day_stall(at),
+            }
             if day
             else {}
         ),

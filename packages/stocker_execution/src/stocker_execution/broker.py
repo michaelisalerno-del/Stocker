@@ -477,16 +477,22 @@ class PaperBroker:
         )
 
     def trail_due(self, identity: str, plan: dict[str, Any]) -> bool:
-        """Armed trail: True when an owned option should be sold before its scheduled exit.
+        """Armed exit: True when an owned option should be sold before its scheduled exit.
 
+        Hourly and SESSION plans run the armed trail (arm x entry, then keep x the high), plus a
+        floor when the plan carries one. A DAY plan with `stall` (v3, 2026-10-10) has no trail:
+        once the high has reached floor_arm x entry it sells at floor_at x entry, or, from the
+        stall time while the high is at least stall_age seconds old, at stall_keep x the high.
         Only a current, usable quote counts; an unknown quote never triggers a sale (the
-        scheduled exit still applies). The highest bid is kept in the store across restarts.
+        scheduled exit still applies). The highest bid and the time it was first seen are kept
+        in the store across restarts; an equal bid is a retest and never resets that time.
         """
         state = self.data.options.get(plan["option"]["uic"])
         if not state:
             return False
+        at = now()
         try:
-            quote = quote_check(state[1].value or {}, self.data.quote_receipt(state[1]), now())
+            quote = quote_check(state[1].value or {}, self.data.quote_receipt(state[1]), at)
         except ValueError:
             return False
         entry = next((f["price"] for f in self.store.fills(identity) if f["side"] == "BOT"), 0)
@@ -499,16 +505,42 @@ class PaperBroker:
         if bid > peak:
             peak = bid
             self.store.set_meta(key, peak)
-        arm, keep = plan.get("trail") or (TRAIL_ARM, TRAIL_KEEP)
-        due = peak >= arm * entry and bid <= keep * peak
-        if plan.get("floor"):
+            self.store.set_meta("trail_peak_at:" + identity, at.isoformat())
+        if plan.get("stall"):
             floor_arm, floor_at = plan["floor"]
-            due = due or (peak >= floor_arm * entry and bid <= max(floor_at * entry, keep * peak))
+            stall_from, stall_age, stall_keep = plan["stall"]
+            peak_at = self.store.get_meta("trail_peak_at:" + identity)
+            if peak_at is None:  # a high recorded before this rule existed: its age starts now
+                peak_at = at.isoformat()
+                self.store.set_meta("trail_peak_at:" + identity, peak_at)
+            level = floor_at * entry
+            stalled = at >= utc(stall_from) and (at - utc(peak_at)).total_seconds() >= stall_age
+            if stalled:
+                level = max(level, stall_keep * peak)
+            due = peak >= floor_arm * entry and bid <= level
+            cause = "LATE_STALL" if bid > floor_at * entry else "FLOOR"
+        else:
+            arm, keep = plan.get("trail") or (TRAIL_ARM, TRAIL_KEEP)
+            due = peak >= arm * entry and bid <= keep * peak
+            cause = "TRAIL"
+            if plan.get("floor"):
+                floor_arm, floor_at = plan["floor"]
+                floored = peak >= floor_arm * entry and bid <= max(floor_at * entry, keep * peak)
+                cause = "FLOOR" if floored and bid > keep * peak else cause
+                due = due or floored
         if due and self.store.get_meta("trail_exit:" + identity) is None:
             self.store.set_meta(
-                "trail_exit:" + identity, {"at": now().isoformat(), "bid": bid, "peak": peak}
+                "trail_exit:" + identity,
+                {
+                    "at": at.isoformat(),
+                    "bid": bid,
+                    "peak": peak,
+                    "peak_at": self.store.get_meta("trail_peak_at:" + identity),
+                    "cause": cause,
+                    "version": "DAY-v3-fLS50" if plan.get("stall") else "",
+                },
             )
-        return due
+        return bool(due)
 
     def write_off_reason(self, plan: dict[str, Any], exit_at: datetime) -> str:
         """INTERNAL_PAPER only: why an owed exit cannot be sold and is booked at zero, or "".

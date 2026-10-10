@@ -664,13 +664,14 @@ function render(d) {
     chart(m);
   }
 }
-// The exit rule a trade runs under: its policy, floor and trail, from the trade's own plan.
+// The exit rule a trade runs under: its policy, floor, late stall and trail, from the trade's own plan.
 function exitRule(t) {
   const name = {SESSION: "Overnight", DAY: "Day", HOURLY: "Hourly"}[t.policy] || display(t.policy || "HOURLY");
   const pct = (x) => `${Math.round((x - 1) * 100)}%`;
   const floor = t.floor ? `floor: once +${pct(t.floor[0])}, sell at +${pct(t.floor[1])} · ` : "";
+  const stall = t.stall ? `late stall: from ${hhmm(t.stall[0])} NY a high ${Math.round(t.stall[1] / 60)} min old sells at ${Math.round(t.stall[2] * 100)}% of it · no trail` : "";
   const trail = t.trail ? `trail: arm +${pct(t.trail[0])}, keep ${Math.round(t.trail[1] * 100)}% of high` : "trail as hourly";
-  return `${name} · ${floor}${trail}`;
+  return `${name} · ${floor}${stall || trail}`;
 }
 // An open or pending trade in one line: what, how it stands, when it exits.
 function position(t) {

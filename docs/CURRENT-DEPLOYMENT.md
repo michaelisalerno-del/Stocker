@@ -1,6 +1,22 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `b5b739e922e7b776cb0a97d6a2dff84229fdf85e`, deployed 2026-10-04 22:17–22:21 UTC (Sunday
+Current application release: `6a768b0c4ce81eb513a00b02fb08114ecd054cab` (main after PR #26), deployed 2026-10-10 11:46–11:47 UTC
+(Saturday 07:46 New York, inside the weekend restart window; no configuration change; backup `day-exit-v3-20261010-1146`, verified,
+472 signals / 377 reservations / 753 orders / 752 fills / 0 positions; previous release `e9c187bade7b5ddb80febed97c837a69d4c24c99`,
+the PR #23 merge, kept for rollback): the DAY exit v3 of `DAY-EXIT-V3-20261010.md` — floor plus late stall, no trail (the DAY event
+carries `stall` and `trail: null`; `broker.trail_due` keeps the high's time in the store and records the exit cause and version) and
+PR #24's markets-page direction row. Staged by `git archive` into `/opt/stocker/releases/<commit>` with `release.env`, locked `uv sync`
+(19 runtime packages), installed smoke PASS as `stocker`, symlink switch, daemon-reload, restart at 11:46:56 UTC (NRestarts 0, 58 MB).
+Verified after the restart on the authenticated loopback: `/api/health`, `/api/system`, `/api/overview` 200; the served
+`/static/dashboard.js` is the release's (it carries the v3 exit-rule text); setup checklist complete; session Elevated,
+FullTradingAndChat, DataLevel Standard; chart streams CURRENT on CL, ES, GC and NQ; 0 recording gaps; no chart, calendar or
+closed-position problem; non-transmitting preflight clean (reconciled, live orders disabled); re-armed paper at 11:56 UTC. The four
+markets were BLOCKED `REFERENCE_SESSION_AUDIT_OR_SAXO_COVERAGE_UNVERIFIED` with 0 reference sessions, as on any restart before the
+pre-session reference audit (`stocker-reference-audit.timer`) has run; next clock Sunday 23:00 UTC. Rollback: `e9c187b…` (same
+configuration). The releases `f555cd2…`, `871ec51…` and `e9c187b…` deployed between 4 and 9 October (backups `dailyoi-20261005`,
+`breakeven-20261005`, `session-20261009`) were not recorded here at the time.
+
+Previous release `b5b739e922e7b776cb0a97d6a2dff84229fdf85e`, deployed 2026-10-04 22:17–22:21 UTC (Sunday
 18:17 New York, 17 minutes after the open, with `FORCE=1` on the user's decision: no open trades, and the only capture cut was
 the 18:00 clock's, which this release removes; no configuration change; backup `review-20261004-review`): the fixes from the
 2026-10-04 code review of main. Clocks are now 19:00–23:00 and 00:00–15:00 New York (CLOCK-SET-AMENDMENT-20261004.md; the

@@ -90,6 +90,19 @@ def roots_verified(state: "MarketState", approved: tuple[int, ...]) -> bool:
     )
 
 
+def first_weekday_expiry(after: datetime, clock: str) -> str:
+    """The first weekday whose expiry at the approved New York clock comes after `after`: the CME
+    lists a same-day series every weekday, so any later expiry means that day's root is missing."""
+    hour, minute = map(int, clock.split(":"))
+    day = after.astimezone(NY).date()
+    while (
+        day.weekday() > 4
+        or datetime(day.year, day.month, day.day, hour, minute, tzinfo=NY) <= after
+    ):
+        day += timedelta(days=1)
+    return day.isoformat()
+
+
 @dataclass
 class MarketState:
     market: Market
@@ -344,10 +357,12 @@ class DataService:
             if mapping
             else (roots if len(roots) == 1 else [])
         )
-        if mapping and set(chosen) != set(mapping.option_root_ids):
-            # An approved weekday root Saxo does not relate to this future would silently move
-            # SAME_DAY_OR_NEXT_LISTED to the following day's option; the family loads whole or
-            # not at all, and the market says why.
+        if mapping and not chosen:
+            # Saxo relates a weekly root only while it lists a series (2026-10-12: expired week-1
+            # and week-5 roots dropped over a weekend and blocked every market), so the approved
+            # family loads whichever of its roots Saxo relates. A weekday whose expiry is missing
+            # is refused at ranking (EXPECTED_WEEKDAY_EXPIRY_NOT_LISTED), never moved to a later
+            # expiry.
             raise SaxoError("APPROVED_OPTION_ROOT_NOT_RELATED")
         space_rows: list[dict[str, Any]] = []
         for i, root in enumerate(chosen):
@@ -814,6 +829,12 @@ class DataService:
             if event.get("expiry_after"):
                 last_exit = max(last_exit, utc(event["expiry_after"]))
             wanted = min((d for d, i in state.expiry_instants.items() if i > last_exit), default="")
+            if (
+                wanted
+                and mapping.expiry_clock_new_york
+                and wanted != first_weekday_expiry(last_exit, mapping.expiry_clock_new_york)
+            ):
+                raise ValueError("EXPECTED_WEEKDAY_EXPIRY_NOT_LISTED")
         candidates = []
         deltas: dict[int, float] = {}
         for selected in state.option_space:

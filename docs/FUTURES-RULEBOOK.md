@@ -74,7 +74,8 @@ execution evidence leave P&L provisional, never zero-filled. Failed closure is a
 
 CME lists a separate option root for each weekday of each week (crude "Mon Weekly (1)", "Tue Weekly (1)" ...,
 gold, NQ likewise), each with one expiry. A mapping therefore approves the **family** of roots on the pinned
-future (`option_root_ids`). The runtime loads every approved root's options, re-reads them once per New York
+future (`option_root_ids`). The runtime loads the options of every approved root Saxo relates to the future
+(Saxo relates a weekly root only while it lists a series; 2026-10-12), re-reads them once per New York
 day (new weekly listings), points the observation chain at the root of the nearest expiry, and ranks only
 options expiring today unless the mapping's expiry rule says otherwise (below). An expiry instant is either
 listed in `expiry_instants`, or derived per day from Saxo's timestamped `LastTradeDate` only when it falls on
@@ -85,7 +86,9 @@ day unverified, and a series expiring the same day at another time (for example 
 Expiry rule (2026-10-01, the user's decision: "go longer for some"): a mapping may set
 `expiry_rule: SAME_DAY_OR_NEXT_LISTED`. The runtime then ranks the nearest listed expiry whose verified
 instant is more than two minutes after the 60-minute exit: today's when there is one, otherwise the next
-listed day (for example silver on a Thursday buys Friday's options). Strike, target delta, the 60-minute
+listed day. With an approved expiry clock that day must be the first weekday whose expiry comes after the
+exit: a later one means a weekday's root is missing, and the clock is refused
+(`EXPECTED_WEEKDAY_EXPIRY_NOT_LISTED`, 2026-10-12). Strike, target delta, the 60-minute
 hold, costs and every other gate are unchanged; the frozen model prices the longer time to expiry. Each
 plan records `expiry_rule`, and the option's expiry date shows how far out it was. NG and SI use it;
 CL, GC and NQ stay `SAME_DAY`.

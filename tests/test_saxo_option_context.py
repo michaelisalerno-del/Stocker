@@ -940,8 +940,8 @@ def test_a_series_expiring_the_same_day_at_another_time_is_never_a_candidate(tmp
 def test_next_listed_expiry_only_where_approved_and_only_without_a_usable_same_day(tmp_path):
     from stocker_execution.rules import NY
 
-    # Thursday 09:00 New York: silver lists Fridays only; the 14:00 clock exits after a 14:30
-    # same-day expiry would be too late (exit + 2 minutes must come before it).
+    # Thursday 09:00 New York: with only Friday listed, Thursday's root is missing. The 14:00 clock
+    # exits after a 14:30 same-day expiry would be too late (exit + 2 minutes must come before it).
     thursday, friday = "2026-10-01", "2026-10-02"
 
     def ranked_days(rule, at, days):
@@ -975,11 +975,18 @@ def test_next_listed_expiry_only_where_approved_and_only_without_a_usable_same_d
     with pytest.raises(ValueError, match="NO_VERIFIED_REAL_0DTE_EXPIRY_TIME"):
         ranked_days(None, nine, [friday])  # frozen same-day rule is unchanged
     nxt = "SAME_DAY_OR_NEXT_LISTED"
-    assert ranked_days(nxt, nine, [friday]) == {friday}
+    with pytest.raises(ValueError, match="EXPECTED_WEEKDAY_EXPIRY_NOT_LISTED"):
+        ranked_days(nxt, nine, [friday])  # Thursday's root is missing: never Friday's instead
     assert ranked_days(nxt, nine, [thursday, friday]) == {thursday}  # same day still first
     assert ranked_days(nxt, two, [thursday, friday]) == {friday}  # same day ends before exit
+    assert ranked_days(nxt, two, [friday]) == {friday}
     with pytest.raises(ValueError, match="NO_VERIFIED_LISTED_EXPIRY_TIME"):
         ranked_days(nxt, two, [thursday])
+    # Friday after its expiry: Monday's comes next across the weekend; Tuesday's would skip Monday.
+    late_friday = datetime(2026, 10, 2, 19, tzinfo=UTC)  # 15:00 New York
+    assert ranked_days(nxt, late_friday, ["2026-10-05"]) == {"2026-10-05"}
+    with pytest.raises(ValueError, match="EXPECTED_WEEKDAY_EXPIRY_NOT_LISTED"):
+        ranked_days(nxt, late_friday, ["2026-10-06"])
     assert two.astimezone(NY).hour == 14
 
 
@@ -1128,51 +1135,25 @@ def test_a_failed_price_feed_at_connect_is_retried_from_the_history_pass(tmp_pat
     asyncio.run(run())
 
 
-def test_an_approved_root_saxo_does_not_relate_blocks_the_family(tmp_path):
-    """Loading only the roots Saxo lists would move SAME_DAY_OR_NEXT_LISTED to the following
-    day's option when a weekday root is missing; the family loads whole or not at all."""
+def test_the_family_loads_the_approved_roots_saxo_relates_and_none_blocks(tmp_path):
+    """Saxo relates a weekly root only while it lists a series (2026-10-12: expired week-1 and
+    week-5 roots dropped over a weekend and blocked every market), so the family loads the approved
+    roots Saxo relates; a missing weekday is refused at ranking instead (next-listed test below)."""
+    from stocker_execution.rules import NY
+    from stocker_execution.saxo_auth import SaxoError
     from stocker_execution.saxo_data import roots_verified
 
-    async def run():
-        config = FuturesConfig(
-            contracts={
-                "CL": {
-                    "environment": "SAXO_SIM",
-                    "uic": 100,
-                    "symbol": FUTURE["symbol"],
-                    "exchange": FUTURE["exchange"],
-                    "contract_month": FUTURE["contract_month"],
-                    "approval": "fixture pin approval",
-                }
-            },
-            mappings={"CL": family_mapping()},
-        )
-        data = DataService(config, FakeClient(), Recorder(config.recorder, tmp_path))
-        state = data.markets["CL"]
-        details = {
-            "AssetType": "ContractFutures",
-            "Uic": 100,
-            "Symbol": FUTURE["symbol"],
-            "ContractSize": 1000,
-            "ExpiryDate": "2026-10-20",
-            "CurrencyCode": "USD",
-            "Exchange": {"ExchangeId": FUTURE["exchange"]},
-            "TickSize": 0.01,
-            "PriceToContractFactor": 1000,
-            "RelatedOptionRootsEnhanced": [
-                {"AssetType": "FuturesOption", "OptionRootId": r} for r in (51, 53)
-            ],
-        }
-
-        async def request(method, path, **_):
-            if path.startswith("/ref/v1/instruments/details/"):
-                return details
-            raise AssertionError(path)  # no option space is loaded for a partial family
-
-        data.client.request = request
-        await data.discover(state)
-        assert state.problem == ""  # the future itself is verified
-        assert state.capabilities["options"] == {"problem": "APPROVED_OPTION_ROOT_NOT_RELATED"}
-        assert not roots_verified(state, (51, 52, 53))
-
-    asyncio.run(run())
+    day = session_day(datetime.now(NY)).isoformat()
+    spaces = {
+        51: weekly_space(day, ny_stamp(day, 14, 30), 201),
+        53: weekly_space(day, ny_stamp(day, 14, 30), 203),
+    }
+    data, state, raw = family_service(tmp_path, spaces)
+    related = lambda *roots: [{"AssetType": "FuturesOption", "OptionRootId": r} for r in roots]  # noqa: E731
+    raw["RelatedOptionRootsEnhanced"] = related(51, 53, 54)
+    asyncio.run(data.load_options(state, raw))
+    assert state.option_roots == (51, 53)  # 52 not related now, 54 never approved
+    assert roots_verified(state, (51, 52, 53))
+    raw["RelatedOptionRootsEnhanced"] = related(54)
+    with pytest.raises(SaxoError, match="APPROVED_OPTION_ROOT_NOT_RELATED"):
+        asyncio.run(data.load_options(state, raw))

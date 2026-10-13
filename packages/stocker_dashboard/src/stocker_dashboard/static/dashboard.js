@@ -181,12 +181,14 @@ function marketCard(m) {
         <dt>Spread</dt><dd id="flow-spread-${m}"></dd><dt>Midpoint</dt><dd id="flow-mid-${m}"></dd>
         <dt>Changes</dt><dd id="flow-changes-${m}"></dd><dt>Persistence</dt><dd id="flow-persistence-${m}"></dd>
         <dt>Last trade</dt><dd id="flow-last-${m}"></dd><dt>Volume</dt><dd id="flow-volume-${m}"></dd>
+        <dt>Buyers − sellers</dt><dd id="flow-side-${m}"></dd>
       </dl>
       <details id="book-history-${m}"><summary>15-minute book history</summary>
         <div class="sparks">
           <figure><figcaption>Spread (ticks)</figcaption><svg viewBox="0 0 300 60" id="spark-spread-${m}" class="spark"></svg></figure>
           <figure><figcaption>Top-of-book size · bid / ask</figcaption><svg viewBox="0 0 300 60" id="spark-size-${m}" class="spark"></svg></figure>
           <figure><figcaption>Five-level imbalance</figcaption><svg viewBox="0 0 300 60" id="spark-imbalance-${m}" class="spark"></svg></figure>
+          <figure><figcaption>Buyers − sellers, running (estimated)</figcaption><svg viewBox="0 0 300 60" id="spark-side-${m}" class="spark"></svg></figure>
         </div>
         <canvas class="heatmap" id="heatmap-${m}" width="900" height="260" aria-label="${m} sampled depth heatmap"></canvas>
         <p class="muted" id="heatmap-note-${m}">Open to load the retained window.</p>
@@ -330,6 +332,8 @@ function bookFlow(m, f, rec = {}, identity = {}) {
   const p = f.lookbacks?.[60]?.[5] || {};
   text(`flow-persistence-${m}`, p.bid_heavy_fraction == null ? "INSUFFICIENT_HISTORY" : `60s · BID_HEAVY ${numeric(p.bid_heavy_fraction * 100, "%")} / ASK_HEAVY ${numeric(p.ask_heavy_fraction * 100, "%")} / BALANCED ${numeric(p.balanced_fraction * 100, "%")}`);
   text(`flow-last-${m}`, `${numeric(f.latest_trade?.price)} × ${numeric(f.latest_trade?.size)} · no inferred execution count`);
+  const t = f.trade_flow || {}, minute = t.changes?.[60];
+  text(`flow-side-${m}`, typeof t.net !== "number" ? "UNAVAILABLE" : `Estimated ${t.net > 0 ? "+" : ""}${numeric(t.net)} since ${hhmm(t.since * 1000)} New York · bought ${numeric(t.buy)} / sold ${numeric(t.sell)} / unclassified ${numeric(t.unclassified)} · ${minute ? `last 60 s bought ${numeric(minute.buy)} / sold ${numeric(minute.sell)}` : "60 s INSUFFICIENT_HISTORY"} · side of the latest trade against the prior bid/ask`);
   text(`flow-volume-${m}`, `Reported ${numeric(f.volume?.value)} · ${typeof f.volume?.change === "number" ? `traded in the last 60 s ${numeric(f.volume.change)}` : "change UNAVAILABLE"} · ${f.volume?.status || "UNAVAILABLE"}`);
   if ($(`flow-detail-${m}`).open) text(`flow-meta-${m}`, JSON.stringify({version: f.version, calculated_at: f.at, last_receipt: feed.last_receipt, last_field_change: feed.last_field_change, last_contact: feed.last_contact, cadence, available_fields: f.available_fields, recording: rec, matched_price_changes: f.lookbacks}, null, 2));
 }
@@ -521,6 +525,8 @@ async function bookHistory(m, signal) {
   spark(`spark-spread-${m}`, [rows.map((r) => r.spread_ticks)]);
   spark(`spark-size-${m}`, [rows.map((r) => r.bid[0]?.[1]), rows.map((r) => r.ask[0]?.[1])]);
   spark(`spark-imbalance-${m}`, [rows.map((r) => r.imbalance5)], {min: -1, max: 1, zero: true});
+  const since = rows.at(-1)?.trade_since;
+  spark(`spark-side-${m}`, [rows.map((r) => (r.trade_since === since ? r.trade_net : null))], {zero: true});
   heatmap(m, data);
 }
 

@@ -96,6 +96,7 @@ class Window:
                 "depth",
                 "basis",
                 "volume",
+                "trade_flow",
             )
         }
         size = len(packed(point)) * 8 + 128

@@ -346,7 +346,8 @@ def book_series(
     """Downsampled sampled-book history from the recorder's own rolling rows.
 
     Each bucket keeps the last observation inside it. Levels are tick indices and sizes
-    exactly as recorded by book_flow; no cancellations, trades or gaps are inferred.
+    exactly as recorded by book_flow; no cancellations or gaps are inferred, and the trade side
+    is book_flow's estimate.
     A five-second series is served for five seconds: the window changes with every message.
     """
     cached = _book_cache.get(instrument)
@@ -367,6 +368,8 @@ def book_series(
             "spread_ticks": flow.get("spread_ticks"),
             "imbalance1": (depth.get("1") or {}).get("imbalance"),
             "imbalance5": (depth.get("5") or {}).get("imbalance"),
+            "trade_net": (flow.get("trade_flow") or {}).get("net"),
+            "trade_since": (flow.get("trade_flow") or {}).get("since"),
             "bid": basis.get("bid", [])[:10],
             "ask": basis.get("ask", [])[:10],
         }

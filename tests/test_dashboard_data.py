@@ -122,6 +122,7 @@ def test_book_series_buckets_recorded_depth_without_inferring_anything(tmp_path)
     first, second = result["series"]
     assert first["bid"][0] == [7000, 9] and first["ask"][0] == [7001, 1]  # last obs in bucket
     assert second["ask"][0] == [7001, 4] and second["spread_ticks"] == 1
+    assert (first["trade_net"], first["trade_since"]) == (0, 1000)  # no volume traded yet
     assert views.book_series(tick, blobs, "future") is result  # served for five seconds
     assert views.book_rows(recorder, "missing") == (None, [])
 

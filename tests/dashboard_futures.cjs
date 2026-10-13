@@ -190,13 +190,14 @@ for (const m of state.markets) {
     status:"CURRENT", quality_flags:[], delay_minutes:0, spread_ticks:1,
     available_levels:{bid:5,ask:5}, weighted_midpoint:70.0075, weighted_displacement_ticks:.25,
     latest_trade:{price:70,size:2}, volume:{value:100,change:null,status:"SEMANTICS_UNVERIFIED"},
+    trade_flow:{status:"CURRENT",since:Date.parse("2026-09-28T13:30:00Z")/1000,side:"BUY",traded:3,buy:1250,sell:1010,unclassified:40,net:240,changes:{60:{buy:30,sell:12,unclassified:0}}},
     feed:{granted_refresh_ms:1500,observed_receipt_ms:{samples:20,mean:1800,minimum:1000,maximum:3000},last_receipt:Date.parse(at)/1000,last_field_change:Date.parse(at)/1000-50,last_contact:Date.parse(at)/1000},
     depth:Object.fromEntries([1,3,5,10].map(n=>[n,n<=5?{bid:3*n,ask:n,imbalance:.5,order_imbalance:null,label:"BID_HEAVY"}:{}])),
     lookbacks:Object.fromEntries([5,30,60].map(s=>[s,{5:{status:"AVAILABLE",bid_change:2,ask_change:-1,bid_heavy_fraction:.5,ask_heavy_fraction:.25,balanced_fraction:.25}}]))
   };
 }
 const bookSeries = {status:"AVAILABLE",tick_size:0.1,bucket_seconds:5,semantics:"Sampled Saxo depth, last observation per bucket; not an execution tape",
-  series:Array.from({length:120},(_,i)=>({at:Date.parse(at)/1000-600+i*5,status:"CURRENT",spread_ticks:1+(i%7===0),imbalance1:Math.sin(i/9),imbalance5:Math.sin(i/15)*.6,
+  series:Array.from({length:120},(_,i)=>({at:Date.parse(at)/1000-600+i*5,status:"CURRENT",spread_ticks:1+(i%7===0),imbalance1:Math.sin(i/9),imbalance5:Math.sin(i/15)*.6,trade_net:Math.round(200*Math.sin(i/25)),trade_since:Date.parse(at)/1000-600,
     bid:Array.from({length:10},(_,n)=>[26500-n-Math.round(Math.sin(i/20)*3),5+n*2+(n===4?40:0)]),
     ask:Array.from({length:10},(_,n)=>[26501+n-Math.round(Math.sin(i/20)*3),4+n*2+(n===6?35:0)])}))};
 state.today = {day:"2026-09-28", closed:1, wins:0, net_gbp:-27.77, trades:[
@@ -361,6 +362,7 @@ async function label(page) {
     assert.deepEqual(await page.locator("#flow-depth-GC-5 td").allTextContents(), ["15", "5", "0.5", "BID_HEAVY"]);
     assert.match(await page.locator("#book-flow-GC").textContent(), /Saxo sends no order counts/);
     assert.match(await page.locator("#flow-volume-GC").textContent(), /change UNAVAILABLE/);
+    assert.match(await page.locator("#flow-side-GC").textContent(), /^Estimated \+240 since 09:30 New York · bought 1250 \/ sold 1010 \/ unclassified 40 · last 60 s bought 30 \/ sold 12/);
     assert.match(await page.locator("#flow-feed-GC").textContent(), /granted 1500 ms.*mean 1800 ms/);
     assert.match(await page.locator("#option-identity-GC").textContent(), /UIC 1002.*underlying GCZ6 \/ 101/);
     assert.match(await page.locator("#option-quote-GC").textContent(), /bid size STALE_OR_MISSING/);
@@ -393,6 +395,7 @@ async function label(page) {
     await page.waitForFunction(() => document.querySelector("#heatmap-GC").dataset.columns === "120");
     assert.match(await page.locator("#heatmap-note-GC").textContent(), /120 × 5s buckets/);
     assert(await page.locator("#spark-imbalance-GC polyline").count() >= 1);
+    assert.equal((await page.locator("#spark-side-GC polyline").getAttribute("points")).split(" ").length, 120);
     await label(page);
     await page.screenshot({path:path.join(output,"book-history-desktop-fixture.png"),fullPage:true});
     await page.locator("#book-history-GC summary").click();

@@ -274,7 +274,7 @@ h1 { font-size: 26px; letter-spacing: -0.03em; font-weight: 650; margin: 0; }
 .bar.bid i { background: linear-gradient(90deg, rgba(79, 209, 138, 0.65), rgba(79, 209, 138, 0.25)); }
 .bar.ask i { background: linear-gradient(270deg, rgba(242, 118, 106, 0.65), rgba(242, 118, 106, 0.25)); }
 .flow-facts { margin-top: 14px; font-size: 11.5px; }
-.sparks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+.sparks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
 .sparks figure { margin: 0; }
 .sparks figcaption { font-size: 10.5px; color: var(--muted); margin-bottom: 5px; letter-spacing: 0.04em; text-transform: uppercase; }
 .spark { width: 100%; height: 64px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-xs); }

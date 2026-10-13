@@ -1,7 +1,7 @@
 """Fixed, causal diagnostics of sampled books. Never imported by trading rules/broker.
 
 History comes from the recorder's retained observations, not another subscription or archive.
-See docs/BOOK-FLOW.md for formulas, units and deliberately unsupported tape/volume claims.
+See docs/BOOK-FLOW.md for formulas, units, the estimated trade side and unsupported tape claims.
 """
 
 import math
@@ -9,7 +9,7 @@ from typing import Any
 
 from stocker_execution.contracts import USABLE_PRICE_TYPES
 
-VERSION = "SAXO_SAMPLED_BOOK_FLOW_V2"  # V2 (2026-10-01): volume change
+VERSION = "SAXO_SAMPLED_BOOK_FLOW_V3"  # V2 (2026-10-01): volume change; V3 (2026-10-13): trade side
 LEVELS = (1, 3, 5, 10)
 LOOKBACKS = (5, 30, 60)
 FIELDS = {
@@ -234,6 +234,18 @@ def observe(
             "changes": {},
             "status": "SESSION_CUMULATIVE",
         },
+        "trade_flow": {
+            "status": "UNAVAILABLE",
+            "since": None,
+            "side": None,
+            "traded": None,
+            "buy": None,
+            "sell": None,
+            "unclassified": None,
+            "net": None,
+            "changes": {},
+            "quote_ticks": [bid, ask] if quote_usable else None,
+        },
         "feed": context,
     }
     previous = history[-1] if history else None
@@ -289,4 +301,66 @@ def observe(
             ):
                 result["volume"]["changes"][str(seconds)] = values[-1] - values[0]
         result["volume"]["change"] = result["volume"]["changes"].get("60")
+    trade_flow(result, previous, history, grid(details.get("LastTraded"), tick))
     return result
+
+
+def trade_flow(
+    result: dict[str, Any],
+    previous: dict[str, Any] | None,
+    history: list[dict[str, Any]],
+    trade: int | None,
+) -> None:
+    """Estimated buyer/seller split of the reported volume, observation only (docs/BOOK-FLOW.md).
+
+    The volume added since the previous observation goes to buyers when the latest trade printed at
+    or above that observation's ask, to sellers at or below its bid, else it stays unclassified.
+    Several trades inside one sampling interval all take the latest trade's side.
+    """
+    flow, volume = result["trade_flow"], result["volume"]["value"]
+    if result["status"] == "UNAVAILABLE" or volume is None:
+        return
+    old = (previous or {}).get("trade_flow") or {}
+    if (
+        previous is None
+        or old.get("buy") is None
+        or not old.get("quote_ticks")
+        or previous["at"] > result["at"]
+        or previous["generation"] != result["generation"]
+        or previous["delay_minutes"] != result["delay_minutes"]
+        or previous["valid_until"] < result["at"]
+        or previous["volume"]["value"] is None
+        or result["volume"]["status"] != "SESSION_CUMULATIVE"
+    ):
+        flow.update(
+            status=result["status"], since=result["at"], buy=0.0, sell=0.0, unclassified=0.0
+        )
+    else:
+        traded = volume - previous["volume"]["value"]
+        bid, ask = old["quote_ticks"]
+        side = (
+            None
+            if traded == 0
+            else "BUY"
+            if trade is not None and trade >= ask
+            else "SELL"
+            if trade is not None and trade <= bid
+            else "UNCLASSIFIED"
+        )
+        flow.update(
+            status=result["status"],
+            since=old["since"],
+            side=side,
+            traded=traded,
+            **{k: old[k] for k in ("buy", "sell", "unclassified")},
+        )
+        if side:
+            flow[side.lower()] += traded
+    flow["net"] = flow["buy"] - flow["sell"]
+    for seconds in LOOKBACKS:
+        points = interval(history, result, seconds)
+        start = points[0].get("trade_flow") or {} if points else {}
+        if start.get("since") == flow["since"] and start.get("buy") is not None:
+            flow["changes"][str(seconds)] = {
+                k: flow[k] - start[k] for k in ("buy", "sell", "unclassified")
+            }

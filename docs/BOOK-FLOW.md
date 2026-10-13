@@ -1,6 +1,6 @@
 # Observation-only book flow — incremental Saxo addendum
 
-Feature version: `SAXO_SAMPLED_BOOK_FLOW_V2` (2026-10-01; V1 before). V2 adds `volume.changes` (traded volume over
+Feature version: `SAXO_SAMPLED_BOOK_FLOW_V3` (2026-10-13: estimated trade side, see Fixed formulas; V2 2026-10-01; V1 before). V2 adds `volume.changes` (traded volume over
 5/30/60 s) and `volume.change` (60 s): Saxo's Volume was verified on LIVE as the contracts traded since the 18:00
 New York session open; a fall inside a window (session reset or correction) leaves that change unset.
 Order-count imbalance stays unset: LIVE sends `UsingOrders: false` with order arrays equal to the sizes.
@@ -81,7 +81,17 @@ and sizes are never summed. Volume is the reported field only: Saxo LIVE's futur
 verified on 2026-10-01 as contracts traded since the 18:00 New York open, so V2 reports its change
 over the last 5, 30 and 60 seconds; nothing else is derived from it. A decrease is flagged
 RESET_OR_CORRECTION_UNCLASSIFIED, never made positive or assigned to a trade price.
-No aggressor volume, footprint, cumulative delta, absorption or iceberg claims are generated.
+V3 (2026-10-13, the user's request) adds `trade_flow`, an ESTIMATED split of that traded volume. Each
+observation's volume increase goes to buyers when `LastTraded` is at or above the previous observation's
+ask, to sellers at or below its bid, otherwise to unclassified. Running totals (`buy`, `sell`,
+`unclassified`, `net` = buy − sell) start at `since`: the first usable observation of a contiguous
+stream (same generation and delay, no expiry, no volume fall), so a session reset, gap or restart starts
+a new run. `changes` holds each total's change over 5, 30 and 60 s within the same run. Limits: the
+feed is sampled about once a second and LastTraded is only the latest print, so all trades inside one
+interval take its side; trades inside a wider spread stay unclassified. A historical stand-in built
+from QQQ/SPY 1-minute bars (~/Codex/2026-10-13-delta-diverge, prereg sha d937f015) found no edge beyond
+price. It is observation only: no rule, gate or order reads it. No footprint, absorption or iceberg
+claims are generated.
 
 ## Retention and operational boundaries
 

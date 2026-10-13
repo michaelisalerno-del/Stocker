@@ -96,6 +96,47 @@ def test_repeated_last_trade_and_volume_resets_never_create_tape():
     assert "executions" not in repeated and "aggressor" not in repeated
 
 
+def test_trade_side_estimate_uses_the_prior_quote_and_restarts_on_any_break():
+    # Volume added since the previous observation: at/above its ask bought, at/below its bid sold.
+    history = []
+    for t, volume, last, ask in (
+        (0, 100, 70, 70.01),
+        (1, 105, 70.01, 70.01),
+        (2, 108, 70, 70.01),
+        (3, 108, 70, 70.02),  # no volume, and a two-tick spread for the next trade
+        (4, 110, 70.01, 70.01),  # inside the prior spread
+        (5, 111, 70.02, 70.01),
+        (6, 111, 70.02, 70.01),
+    ):
+        value = book()
+        value["Quote"]["Ask"] = ask
+        value["PriceInfoDetails"].update(Volume=volume, LastTraded=last)
+        history.append(point(value, t, history))
+    flows = [p["trade_flow"] for p in history]
+    assert [f["side"] for f in flows] == [None, "BUY", "SELL", None, "UNCLASSIFIED", "BUY", None]
+    last = flows[-1]
+    assert (last["since"], last["buy"], last["sell"], last["unclassified"], last["net"]) == (
+        0,
+        6,
+        3,
+        2,
+        3,
+    )
+    assert last["changes"]["5"] == {"buy": 1, "sell": 3, "unclassified": 2}
+    assert "30" not in last["changes"]
+    value = book()
+    value["PriceInfoDetails"]["Volume"] = 120
+    for restarted in (
+        point(value, 7, history, generation="new"),  # replaced subscription
+        point(value, 20, history),  # the previous observation expired
+        point(book(), 7, history),  # Volume fell: session reset or correction
+    ):
+        f = restarted["trade_flow"]
+        assert (f["since"], f["side"], f["net"], f["changes"]) == (restarted["at"], None, 0, {})
+    value["Quote"]["Bid"] = 70.0001
+    assert point(value, 7, history)["trade_flow"]["net"] is None
+
+
 def test_volume_change_is_traded_volume_over_each_lookback_and_never_spans_a_fall():
     # Saxo's Volume is the session's cumulative traded volume (verified on LIVE 2026-10-01).
     history = []

@@ -1,6 +1,25 @@
 # Current deployed SLRNO — Saxo option context
 
-Current application release: `6a768b0c4ce81eb513a00b02fb08114ecd054cab` (main after PR #26), deployed 2026-10-10 11:46–11:47 UTC
+Current application release: `4cd2c0d50a076b71f540c83e28c8eaa4ea709d25` (branch `claude/release-20261013-trade-flow`: main after
+PR #32 merged with PR #28's `da72902`, which was deployed on 2026-10-12 and is not yet on main), deployed 2026-10-13 21:34–21:42 UTC
+(Tuesday 17:34 New York, inside the 17:00–18:00 restart window; no configuration change; CI green on the commit, run 38471408057;
+backup `session-20261013-tradeflow`, verified; previous release `da7290275ce01ec76ca1e1d196ff81a3f22170cb` kept for rollback): book
+flow V3 of `BOOK-FLOW.md` — an estimated buyer/seller split of Saxo's reported traded volume (latest trade against the previous
+observation's bid/ask), running totals and 5/30/60 s changes, shown on the Markets page as "Buyers − sellers" with a 15-minute
+running sparkline; observation only. Verified after the restart on the authenticated loopback: served `index.html`,
+`dashboard.js` and `dashboard.css` match the release by sha256; the installed smoke passed; chart streams CURRENT on CL, ES, GC and
+NQ; option families loaded (CL 23 / ES 23 / GC 22 / NQ 19 roots); non-transmitting preflight clean (reconciled); re-armed
+INTERNAL_PAPER (live orders disabled); session Elevated, DataLevel Premium, FullTradingAndChat; paused False; 0 recording gaps.
+`/api/market/{m}` serves `SAXO_SAMPLED_BOOK_FLOW_V3` (UNAVAILABLE with `QUOTE_STATUS_UNAVAILABLE` during the 17:00–18:00 break, as
+expected). At 18:06 New York all four were CURRENT with runs `since` the 18:00 open (22:00:00 UTC); first six minutes, contracts
+bought / sold / unclassified: CL 104 / 203 / 36, ES 188 / 361 / 102, GC 63 / 69 / 19, NQ 237 / 324 / 165; armed, 0 recording gaps.
+Rollback: `da72902…` (same configuration).
+
+Previous release `da7290275ce01ec76ca1e1d196ff81a3f22170cb` (PR #28, option roots Saxo relates; refuse a skipped weekday),
+deployed 2026-10-12 15:51 UTC with the settings change to the union of every option root seen (CL 25, ES 24, GC 24, NQ 22; config
+backup `.bak-20261012-family`), after a settings-only quick fix at 15:38 UTC; not recorded here at the time.
+
+Previous release `6a768b0c4ce81eb513a00b02fb08114ecd054cab` (main after PR #26), deployed 2026-10-10 11:46–11:47 UTC
 (Saturday 07:46 New York, inside the weekend restart window; no configuration change; backup `day-exit-v3-20261010-1146`, verified,
 472 signals / 377 reservations / 753 orders / 752 fills / 0 positions; previous release `e9c187bade7b5ddb80febed97c837a69d4c24c99`,
 the PR #23 merge, kept for rollback): the DAY exit v3 of `DAY-EXIT-V3-20261010.md` — floor plus late stall, no trail (the DAY event

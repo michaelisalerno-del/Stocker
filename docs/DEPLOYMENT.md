@@ -83,20 +83,24 @@ future changes; repository changes alone cannot guarantee a server supervisor re
 
 ## Server runtime
 
-The server runs `stocker futures-run` (console script for `stocker_execution.__main__`; the exact
-command, paths, proxy routes and rollout steps are above). The authenticated reverse proxy remains
-required. Uvicorn uses `proxy_headers=False` so the dashboard's security layer sees the actual
-loopback peer. Execution starts disabled and disarmed on every launch; arming is a separate,
-explicit operator action.
+Since the paper-record release (October 2026) the server runs `stocker paper-run`:
 
-**Restart window (2026-10-04).** With a frozen clock every hour of the CME session the recorder
-keeps each market's capture open from 18:00 New York to 17:00 the next day, and any restart marks
-every open capture `INTERRUPTED_RESTART` (every capture of 1–2 October was cut that way by a
-deploy). Restart the service only between 17:00 and 18:00 New York on a weekday, or at the
-weekend before Sunday 18:00 New York; the deploy scripts refuse other times unless `FORCE=1`.
-Reloading the option spaces after a restart takes 5–20 minutes (Saxo rate limits), so start early
-in the window. The System page shows the archive's measured growth and the days left before
-`recorder.archive_max_bytes` stops captures; the status bar warns under 14 days.
+```text
+/opt/stocker/current/.venv/bin/stocker paper-run --config /etc/stocker/v1/paper.live.yaml --database /var/lib/stocker/v1/paper-record-live.sqlite3 --host 127.0.0.1 --port 8765
+```
+
+The configuration holds only `data_environment` and the `saxo` credentials file and redirect; see
+`configs/paper.example.yaml`. The database's parent directory is the state root, so the existing
+`/var/lib/stocker/v1/SAXO_LIVE/oauth-tokens.json` carries over and no new login is needed. The
+retired futures ledgers stay in `/var/lib/stocker/v1/` untouched. The authenticated reverse proxy
+remains required: it must pass GET for `/`, `/record`, `/system`, `/static/*` and `/api/*`, plus the
+OAuth start POST and callback GET. Uvicorn uses `proxy_headers=False` so the dashboard's security
+layer sees the actual loopback peer.
+
+**Restart window.** Restart only when no recorded event can be due: on a weekday before 09:25 or after
+16:20 New York, or at the weekend. A restart inside the session never replays a missed entry
+(the event is recorded `MISSED`); open paper trades resume from the record. The futures runtime's
+17:00-18:00 window protected its continuous recorder, which no longer exists.
 
 Configuration migration for releases after `21d9077`: remove the `recorder.pre_event_minutes`
 line from `/etc/stocker/v1/saxo.sim.yaml` before switching the release symlink. The key was never

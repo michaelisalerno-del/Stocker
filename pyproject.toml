@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "stocker"
 version = "0.1.0"
-description = "SLRNO: Saxo futures-options PAPER runtime and its authenticated dashboard."
+description = "SLRNO: a Saxo CFD and QQQ option paper record and its authenticated dashboard."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "Proprietary" }
@@ -17,7 +17,6 @@ dependencies = [
   "fastapi>=0.111",
   "starlette",
   "uvicorn>=0.30",
-  "websockets>=15,<17",
 ]
 
 [project.scripts]

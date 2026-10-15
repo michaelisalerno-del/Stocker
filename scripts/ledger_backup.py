@@ -1,4 +1,4 @@
-"""Consistent, offline-verifiable SLRNO ledger and configuration backup. No broker access.
+"""Consistent, offline-verifiable SLRNO paper-record and configuration backup. No broker access.
 
 Credentials, OAuth tokens and event archives are deliberately excluded; back those up with
 their own protected procedure.
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 LEDGER = "ledger.sqlite3"
-TABLES = ("signals", "reservations", "orders", "fills", "positions", "lifecycle")
+TABLES = ("events", "signals", "cfd_trades", "option_trades", "snapshots")
 
 
 def digest(path: Path) -> str:
@@ -30,7 +30,7 @@ def inspect(connection: sqlite3.Connection) -> dict[str, Any]:
     if connection.execute("PRAGMA foreign_key_check").fetchone():
         raise ValueError("LEDGER_FOREIGN_KEY_FAILURE")
     provenance = connection.execute(
-        "SELECT value FROM futures_meta WHERE key='provenance'"
+        "SELECT value FROM paper_meta WHERE key='provenance'"
     ).fetchone()
     return {
         "provenance": json.loads(provenance[0]) if provenance else None,

@@ -1,916 +1,770 @@
-"""Existing SLRNO runtime, now Saxo-only and unarmed on every startup."""
+"""The paper record's clock: each New York trading day's events, CFD stop checks and the login.
+
+Nothing here can place an order. Every decision reads Saxo prices and writes the paper record.
+QQQ prices reach this session delayed (Saxo's real-time slot belongs to the user's SaxoTraderGO),
+so a QQQ event due at T is read at T + the delay Saxo reports, and recorded as of T.
+"""
 
 import asyncio
 import fcntl
-import hashlib
-import json
 import logging
+import os
 import re
+import sqlite3
 import time
-from contextlib import suppress
-from datetime import UTC, datetime, timedelta
+from collections.abc import Awaitable, Callable
+from datetime import UTC, date, datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from statistics import median
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from stocker_execution import forecast, option_context, saxo_balance, saxo_history, views
-from stocker_execution.alerts import Alerts
-from stocker_execution.broker import PaperBroker, now
-from stocker_execution.config import (
-    MAX_OPEN_POSITIONS,
-    MAX_PREMIUM_RISK_GBP,
-    MAX_SIMULTANEOUS_ENTRY_RISK_GBP,
-    PAGE_SIZE,
-    QUOTE_MAX_AGE_SECONDS,
-    ROLLING_WINDOW_SECONDS,
-    RULE_VERSION,
-    SUBSCRIPTION_LIMIT,
-    FuturesConfig,
-)
-from stocker_execution.contracts import key, quote_check, session_state
-from stocker_execution.event_calendar import EventCalendar, load_calendar
-from stocker_execution.recorder import Recorder
-from stocker_execution.rules import (
-    NY,
-    clocks,
-    day_against_veto,
-    direction_text,
-    eligibility,
-    next_clock,
-    observation,
-    opportunity,
-    prior_rv,
-)
-from stocker_execution.saxo_auth import OAuth
-from stocker_execution.saxo_client import REST_QUEUE_LIMIT, SaxoClient
-from stocker_execution.saxo_data import DataService, MarketState, chain_identity
-from stocker_execution.store import Store, encode
+from stocker_execution import market, methods
+from stocker_execution.config import PaperConfig
+from stocker_execution.methods import CFDS, NY, QQQ_OPTION_ROOT, QQQ_UIC, Session
+from stocker_execution.saxo_auth import OAuth, SaxoError
+from stocker_execution.saxo_client import SaxoClient
+from stocker_execution.store import Store, stamp
 
 log = logging.getLogger(__name__)
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+UK = ZoneInfo("Europe/London")
+ENTRY_GRACE = timedelta(seconds=60)  # an entry later than this is missed, never replayed
+# An exit read more than this after its time (a restart, a lost read, a delay that changed
+# under it) has no price: it is recorded missed, never filled at a much later price.
+EXIT_GRACE = timedelta(minutes=30)
+RETRY_EVERY = 5.0  # seconds between attempts at a failed event
+STOP_POLL_SECONDS = 2.0
+LOGIN_CHECK_SECONDS = 30.0
+FC, FC_QQQ, CONNORS_QQQ = "FIRST_CANDLE", "FIRST_CANDLE_QQQ", "CONNORS_QQQ"
+
+
+class Problem(Exception):
+    """A coded reason this attempt could not complete; the event retries until its deadline."""
+
+
+class Done(Exception):
+    """The event completed without a trade, for the coded reason given."""
 
 
 def failure_code(exc: BaseException) -> str:
-    """Coded ValueErrors are the application's own reasons; other text may hold secrets."""
-    if isinstance(exc, ValueError) and re.fullmatch(r"[A-Za-z0-9_]{1,120}", str(exc)):
+    """Coded errors are the application's own reasons; other text may hold secrets."""
+    if isinstance(exc, ValueError | Problem | Done) and re.fullmatch(
+        r"[A-Za-z0-9_]{1,120}", str(exc)
+    ):
         return str(exc)
     return type(exc).__name__
 
 
-def skip_reason(exc: ValueError | KeyError) -> str:
-    """Trading gates raise coded ValueErrors; a KeyError is a data/code gap, not a reason."""
-    if isinstance(exc, KeyError):
-        log.error("decision input missing field %r", exc.args[0] if exc.args else None)
-        return "UNEXPECTED_MISSING_FIELD"
-    return str(exc)
-
-
-def trailing_missing(present: set[datetime], clock: datetime) -> list[datetime]:
-    """The run of minutes absent from the completed bars up to clock-1, oldest first: the REST
-    read's dropped newest sample and, before it, at most the no-trade minutes the fill rule covers.
-    Empty when clock-1 is present (the shortfall lies earlier and is final)."""
-    minutes: list[datetime] = []
-    for i in range(1, saxo_history.MAX_FILLED_GAP_MINUTES + 2):
-        minute = clock - timedelta(minutes=i)
-        if minute in present:
-            break
-        minutes.insert(0, minute)
-    return minutes
+def at(text: str) -> datetime:
+    return datetime.fromisoformat(text)
 
 
 class Runtime:
-    def __init__(self, config: FuturesConfig, store: Store, data: DataService | None = None):
+    def __init__(
+        self,
+        config: PaperConfig,
+        store: Store,
+        client: SaxoClient | None = None,
+        clock: Callable[[], datetime] | None = None,
+    ):
         self.config, self.store = config, store
-        store.bind(config.data_environment, config.execution_mode)
+        store.bind(config.data_environment)
         self.root = Path(store.db.execute("PRAGMA database_list").fetchone()[2]).parent
-        if data is None:
-            recorder = Recorder(config.recorder, self.root / config.data_environment / "events")
-            client = SaxoClient(OAuth(config.data_environment, config.saxo, self.root))
-            data = DataService(config, client, recorder)
-        self.data = data
-        self.recorder = data.recorder
-        self.broker = PaperBroker(config, store, self.data)
-        self.data.owned_options = {json.loads(r["plan"])["option"]["uic"] for r in store.active()}
-        self.markets = self.data.markets
-        self.worker_health = self.manager_health = self.web_health = "STARTING"
+        self.client = client or SaxoClient(OAuth(config.data_environment, config.saxo, self.root))
+        self.now = clock or (lambda: datetime.now(UTC))
+        self.worker_health = self.web_health = "STARTING"
         self.stopping = False
-        self.history_needed = asyncio.Event()
-        self.tasks: set[asyncio.Task[Any]] = set()
         self.owner: Any = None
-        self.config_hash = hashlib.sha256(config.model_dump_json().encode()).hexdigest()
-        self.started_at = now()
-        self.alerts = Alerts(config.alerts)
-        # Optional context: an unreadable calendar is reported, never fatal.
-        self.calendar: EventCalendar | None = None
-        self.calendar_problem = ""
-        if config.event_calendar_file:
-            try:
-                self.calendar = load_calendar(config.event_calendar_file)
-            except (OSError, ValueError):
-                self.calendar_problem = "EVENT_CALENDAR_UNREADABLE"
+        self.started_at = self.now()
+        self.sessions: list[Session] = []
+        self.sessions_day: date | None = None
+        self.sessions_retry_at = 0.0
+        self.cfd_info: dict[int, tuple[int, float]] = {}
+        self.cfd_quotes: dict[int, market.Quote] = {}
+        self.cfd_polled = 0.0
+        self.login_checked = 0.0
+        self.capabilities: dict[str, Any] = {}
+        self.capabilities_read = 0.0
+        self.attempted: dict[tuple[str, str], float] = {}
+        self.problems: dict[str, str] = {}
+        self.qqq_delay: int | None = None
         directory = self.root / config.data_environment
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        handler = RotatingFileHandler(directory / "slrno.log", maxBytes=2 * 1024**2, backupCount=3)
+        handler = RotatingFileHandler(directory / "paper.log", maxBytes=2 * 1024**2, backupCount=3)
         handler.setFormatter(logging.Formatter(LOG_FORMAT))
         log.addHandler(handler)
         log.setLevel(logging.INFO)
         self.log_handler = handler
-        for name in ("httpx", "httpcore", "websockets"):
+        for name in ("httpx", "httpcore"):
             logging.getLogger(name).setLevel(logging.WARNING)
-        selections = {k: v.model_dump(mode="json") for k, v in config.contracts.items()}
-        if store.get_meta("display_contracts") != selections:
-            with store.db:
-                store.audit(
-                    "configuration",
-                    "EXPLICIT_DISPLAY_CONTRACT_SELECTION",
-                    {
-                        "before": store.get_meta("display_contracts"),
-                        "after": selections,
-                        "configuration_hash": self.config_hash,
-                    },
-                )
-            store.set_meta("display_contracts", selections)
 
-    @property
-    def pause(self) -> bool:
-        return bool(self.store.get_meta("paused", False))
-
-    @pause.setter
-    def pause(self, value: bool) -> None:
-        self.store.set_meta("paused", value)
-
-    async def decision_pass(self) -> None:
-        try:
-            await self.decisions()
-        except Exception as exc:
-            # Sticky and alerted: reconciliation must not clear it; an operator restart does.
-            self.broker.armed = False
-            self.broker.fatal_error = "DECISION_WORKER_ERROR_REVIEW_REQUIRED"
-            self.report_failure("decisions", exc)
-
-    def report_failure(self, worker: str, exc: BaseException) -> None:
-        # Only coded reasons are logged; other exception text can contain URLs or credentials.
-        log.error("%s failed: %s", worker, failure_code(exc))
-
-    async def cancel_tasks(self, tasks: set[asyncio.Task[Any]]) -> None:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-    def status(self) -> dict[str, Any]:
-        at = now()
-        return {
-            "application": "SLRNO",
-            # Clients derive countdowns from server time, so a skewed browser clock is harmless.
-            "server_time": at.timestamp(),
-            "next_clock": next_clock(at).isoformat(),
-            "setup": views.setup(self),
-            "alerts": self.alerts.status(),
-            "activity_events": self.data.activity_problem
-            or (
-                "SUBSCRIBED"
-                if any(s["kind"] == "ACTIVITIES" for s in self.data.subscriptions.values())
-                else "NOT_SUBSCRIBED"
-            ),
-            "closed_positions_problem": self.broker.closed_problem,
-            "calendar_problem": self.calendar_problem,
-            "chart_stream_problem": self.data.chart_stream_problem,
-            "chart_mismatch": self.data.chart_mismatch,
-            "limits": {
-                "per_trade_gbp": MAX_PREMIUM_RISK_GBP,
-                "slots": MAX_OPEN_POSITIONS,
-                "allocation_gbp": MAX_SIMULTANEOUS_ENTRY_RISK_GBP,
-                "quote_max_age_seconds": QUOTE_MAX_AGE_SECONDS,
-            },
-            "data_environment": self.config.data_environment,
-            "execution_mode": self.config.execution_mode,
-            "account": "Verified configured Saxo account"
-            if self.data.account_verified
-            else "Unverified",
-            "connected": self.data.connected,
-            "reconciled": self.broker.reconciled,
-            "armed": self.broker.armed,
-            "paused": self.pause,
-            "entry_block_reason": self.broker.entry_reason(),
-            "problem": self.data.problem,
-            "worker_health": self.worker_health,
-            "manager_health": self.manager_health,
-            "web_health": self.web_health,
-            "rule_version": RULE_VERSION,
-            "configuration_hash": self.config_hash,
-            "live_available": False,
-            "live_orders_disabled": True,
-            "oauth": self.data.client.oauth.status,
-            "oauth_problem": self.data.client.oauth.failure_reason,
-            "session": self.data.session,
-            "stream": {
-                "connected": self.data.connected,
-                "reconnects": self.data.reconnects,
-                "last_message_id": self.data.last_message_id,
-            },
-            "market_data": {
-                "owned_lines": len(self.data.subscriptions),
-                "app_budget": SUBSCRIPTION_LIMIT,
-                "option_budget": self.config.option_subscription_budget,
-                "option_lines": len(self.data.options),
-                "candidate_window": self.config.option_candidate_window,
-                "rate_limits": self.data.client.rate_headers,
-                "rest_queue": self.data.client.waiters,
-                "rest_queue_limit": REST_QUEUE_LIMIT,
-            },
-            "l2_recording": self.recorder.status(),
-            "bar_storage": {
-                "bytes": self.data.bar_cache.size,
-                "limit": self.config.recorder.bar_max_bytes,
-                "problem": self.data.bar_cache.problem,
-            },
-            "management_problems": self.broker.management_problems,
-            **self.store.capacity(),
-        }
-
-    def block_reason(self, state: MarketState, paused: bool) -> str:
-        """The first display gate a clock decision would hit; the decision re-checks itself."""
-        reason = state.problem or state.history_problem
-        if not reason and state.market not in self.config.mappings:
-            reason = "LISTED_PRODUCT_AND_DELTA_TOLERANCE_UNAPPROVED"
-        return reason or ("ENTRIES_PAUSED" if paused else self.broker.entry_reason())
-
-    def market_card(
-        self, state: MarketState, at: datetime, trades: list[dict[str, Any]], paused: bool
-    ) -> dict[str, Any]:
-        """The fields the overview and market pages must agree on."""
-        market, reason = state.market, self.block_reason(state, paused)
-        return {
-            "market": market,
-            "contract": (state.identity or {}).get("symbol"),
-            "strategy_state": trades[0]["state"]
-            if trades
-            else "BLOCKED"
-            if reason
-            else "MONITORING",
-            "block_reason": reason,
-            "entry_enabled": not reason,
-            "data_status": "CURRENT"
-            if views.quote_current(state, at.timestamp(), self.data.stream_at)
-            else "STALE_OR_MISSING",
-            "last_receipt": state.price.receipt,
-            "candidate_uic": state.candidate_uic,
-            "trades": trades,
-            "next_time": (state.boundary_clock or next_clock(at)).isoformat(),
-            "pending_data": state.boundary_clock is not None,
-            "gates": views.gates(self, market, state, at.timestamp(), paused),
-        }
-
-    def overview(self) -> dict[str, Any]:
-        trades = [self.trade_view(t) for t in self.store.active()]
-        at, paused = now(), self.pause
-        clock = next_clock(at)
-        cards = [
-            {
-                **self.market_card(state, at, [t for t in trades if t["market"] == market], paused),
-                "events": self.calendar.near(market, clock) if self.calendar else [],
-                # Display only: where the future is, for the phone overview.
-                "quote": (state.price.value or {}).get("Quote") or {},
-                "price_context": views.price_context(state),
-            }
-            for market, state in self.markets.items()
-        ]
-        today = self.store.day_trades(at.date().isoformat())
-        closed = [t for t in today if t["net_gbp"] is not None]
-        pnl = self.store.economics()
-        pnl = {
-            **pnl,
-            "broker_reported": {**pnl["broker_reported"], "currency": self.data.account_currency},
-        }
-        return {
-            "system": self.status(),
-            "account": saxo_balance.balance_view(self.data, at.timestamp()),
-            "markets": cards,
-            "pnl": pnl,
-            "today": {
-                "day": at.date().isoformat(),
-                "trades": today,
-                "closed": len(closed),
-                "wins": sum(t["net_gbp"] > 0 for t in closed),
-                "net_gbp": sum(t["net_gbp"] for t in closed) if closed else None,
-            },
-        }
-
-    def execution_view(self) -> dict[str, Any]:
-        rows = self.store.active()
-        return {
-            "system": self.status(),
-            "trades": [self.trade_view(r) for r in rows],
-            "orders": [o for r in rows for o in self.store.orders(r["id"])],
-            "fills": [
-                dict(r)
-                for r in self.store.db.execute(
-                    "SELECT f.*,o.event_id,o.role,s.market,"
-                    "json_extract(r.plan,'$.option.right') AS option_right,"
-                    "json_extract(r.plan,'$.option.strike') AS option_strike "
-                    "FROM fills f JOIN orders o USING(reference) "
-                    "LEFT JOIN reservations r ON r.id=o.event_id "
-                    "LEFT JOIN signals s ON s.id=o.event_id "
-                    "ORDER BY at DESC,exec_id LIMIT ?",
-                    (PAGE_SIZE,),
-                )
-            ],
-            "recent_trades": self.recent_trades(),
-            "positions": [
-                dict(r)
-                for r in self.store.db.execute(
-                    "SELECT * FROM positions WHERE quantity<>0 ORDER BY con_id LIMIT ?",
-                    (PAGE_SIZE,),
-                )
-            ],
-        }
-
-    def market_detail(self, selected: str, *, diagnostics: bool = False) -> dict[str, Any]:
-        active = self.store.active()
-        recent = self.store.recent_signals(selected)
-        market, state = selected, self.markets[selected]
-        last_event = recent[0] if recent else None
-        event_context = (
-            json.loads(
-                self.store.db.execute(
-                    "SELECT detail FROM signals WHERE id=?", (last_event["id"],)
-                ).fetchone()[0]
-            ).get("option_context")
-            if last_event
-            else None
-        )
-        at = now()
-        card = self.market_card(
-            state, at, [self.trade_view(t) for t in active if t["market"] == market], self.pause
-        )
-        quote = (state.price.value or {}).get("Quote") or {}
-        identity = state.identity
-        depth = state.price.depth(at.timestamp())
-        depth["last_receipt"] = (
-            datetime.fromtimestamp(state.price.depth_receipt, UTC).isoformat()
-            if state.price.depth_receipt
-            else None
-        )
-        recording = (
-            self.recorder.view(key(identity), at.timestamp())
-            if identity
-            else {"state": "UNAVAILABLE", "prehistory_seconds": 0}
-        )
-        depth.update(
-            pre_seconds=recording["prehistory_seconds"],
-            target_pre_seconds=ROLLING_WINDOW_SECONDS,
-        )
-        features = {}
-        try:
-            if state.bars:
-                features["rv15"] = prior_rv(
-                    state.bars,
-                    state.bars[-1].at.replace(second=0) + timedelta(minutes=1),
-                )
-        except ValueError:
-            pass
-        day = at.astimezone(NY).date()
-        contracts = [
-            self.data.option_view(uic, at.timestamp())
-            for uic, (i, _) in self.data.options.items()
-            if i["market"] == market
-        ]
-        # Observation only: the break-even of buying each contract now, for the next clock's hour.
-        normal_hour = self.normal_hour_move(state, at)
-        for contract in contracts:
-            try:
-                contract["break_even"] = forecast.break_even_view(contract, quote, normal_hour, at)
-            except (ArithmeticError, KeyError, TypeError, ValueError) as exc:
-                contract["break_even"] = {"reason": type(exc).__name__}
-        card.update(
-            {
-                "identity": identity,
-                "market_status": session_state(state.reference, at),
-                "direction": direction_text(market),
-                "conditions": features,
-                "l1": {
-                    "status": card["data_status"],
-                    "quote": quote,
-                    "sizes": {side.lower(): size for side, size in state.price.sizes().items()},
-                    "spread": quote["Ask"] - quote["Bid"]
-                    if isinstance(quote.get("Ask"), (int, float))
-                    and isinstance(quote.get("Bid"), (int, float))
-                    else None,
-                    "delay_minutes": quote.get("DelayedByMinutes"),
-                    "last_receipt": datetime.fromtimestamp(state.price.receipt, UTC).isoformat()
-                    if state.price.receipt
-                    else None,
-                    # When the quote was last known current: its last change, or later while it
-                    # stands on a live feed (the rulebook's standing-quote rule).
-                    "standing_receipt": datetime.fromtimestamp(standing, UTC).isoformat()
-                    if (standing := self.data.quote_receipt(state.price)) is not None
-                    else None,
-                },
-                "l2": depth,
-                "book_flow": self.recorder.book_flow_view(key(identity), at.timestamp())
-                if identity
-                else {"status": "UNAVAILABLE"},
-                "recorder": recording,
-                "capabilities": dict(state.capabilities) if diagnostics else None,
-                "underlying_context": option_context.view(state.price.analytics, at.timestamp()),
-                "option_context": {
-                    "latest_event": {
-                        "id": last_event["id"],
-                        "signal_at": last_event["signal_at"],
-                        "context": event_context,
-                    }
-                    if last_event and event_context
-                    else None,
-                    "candidate_uic": state.candidate_uic,
-                    "problem": state.candidate_problem,
-                    "candidate_changes": list(state.candidate_changes) if diagnostics else None,
-                    "contracts": contracts,
-                },
-                "forecast": self.forecast_view(
-                    state,
-                    state.bars[-1].at + timedelta(minutes=1),
-                    next(
-                        (c for c in contracts if c["identity"]["uic"] == state.candidate_uic),
-                        None,
-                    ),
-                )
-                if state.bars
-                else None,
-                "chart": [{"at": b.at.isoformat(), "close": b.close} for b in state.bars[-90:]],
-                "chart_context": views.chart_context(state, at),
-                "sessions_today": views.sessions_today(state, at),
-                "events_today": [
-                    {"at": when.isoformat(), "name": name}
-                    for when, name in self.calendar.occurrences(market, day)
-                ]
-                if self.calendar
-                else [],
-                "candidate_deltas": {str(k): v for k, v in state.candidate_deltas.items()},
-                "price_context": views.price_context(state),
-                "smile": views.smile(
-                    state.option_board,
-                    day.isoformat(),
-                    self.config.provider_volatility_scale,
-                    views.model_sigma(features.get("rv15")),
-                ),
-                "model_sigma": views.model_sigma(features.get("rv15")),
-                "target_delta": 0.1,
-                "signals": [
-                    {k: s[k] for k in ("id", "signal_at", "decision", "reason")} for s in recent
-                ],
-                "details": {
-                    "signal_contract": identity,
-                    "reference_sessions": len(state.references),
-                    "entry_clocks": "Hourly through the CME session: 18:00-16:00 America/New_York",
-                    "exit_anchor": "Original opportunity + 60 minutes",
-                    "options_block": "Verify actual 0DTE expiry, product and delta tolerance",
-                    "recording": recording,
-                    "option_board": state.option_board,
-                }
-                if diagnostics
-                else None,
-            }
-        )
-        return {"system": self.status(), "markets": [card]}
-
-    def recent_trades(self, limit: int = 20) -> list[dict[str, Any]]:
-        """Display only: the latest trades, newest first, one row each with their result."""
-        rows = [
-            dict(r)
-            for r in self.store.db.execute(
-                "SELECT s.id,s.market,s.signal_at,s.exit_at FROM reservations r "
-                "JOIN signals s USING(id) ORDER BY s.signal_at DESC,s.market LIMIT ?",
-                (limit,),
-            )
-        ]
-        results = self.store.trade_results([r["id"] for r in rows])
-        return [{**r, **results[r["id"]]} for r in rows]
-
-    @staticmethod
-    def normal_hour_move(state: MarketState, at: datetime) -> float | None:
-        """A normal hour's move for the next clock's New York hour: twice the median 15-minute
-        realised move of that hour over the last five reference sessions (display only)."""
-        hour = next_clock(at).astimezone(NY).hour
-        values = [
-            r[hour]["rv15"] for r in state.references[-5:] if hour in r and r[hour].get("rv15")
-        ]
-        return 2 * median(values) if values else None
-
-    def forecast_view(
-        self, state: MarketState, at: datetime, option: dict[str, Any] | None
-    ) -> dict[str, Any]:
-        # Observation only: a failure here is recorded and never reaches the entry decision.
-        try:
-            return forecast.observe(
-                state.bars, at, state.market, option, (state.price.value or {}).get("Quote") or {}
-            )
-        except (ArithmeticError, KeyError, TypeError, ValueError) as exc:
-            return {"version": forecast.VERSION, "status": "UNAVAILABLE", "reason": repr(exc)}
-
-    def trade_view(self, row: dict[str, Any]) -> dict[str, Any]:
-        plan = json.loads(row["plan"])
-        fills = self.store.fills(row["id"])
-        quantity = self.store.exposure(row["id"])
-        valuation: dict[str, Any] = {
-            "value_gbp": None,
-            "fresh": False,
-            "method": "CONSERVATIVE_BID_ESTIMATE",
-        }
-        try:
-            _, price = self.data.options[plan["option"]["uic"]]
-            q = quote_check(price.value or {}, self.data.quote_receipt(price), now())
-            fx = quote_check(self.data.fx.value or {}, self.data.quote_receipt(self.data.fx), now())
-            entries = [f for f in fills if f["side"] == "BOT"]
-            if quantity and entries and all(f["fx"] is not None for f in entries):
-                cost = sum(f["quantity"] * f["price"] * f["fx"] for f in entries)
-                valuation.update(
-                    value_gbp=(quantity * float(q["Bid"]) / float(fx["Ask"]) - cost)
-                    * plan["multiplier"],
-                    fresh=True,
-                    quote_at=datetime.fromtimestamp(price.receipt or 0, UTC).isoformat(),
-                    fx_at=self.data.fx.receipt,
-                )
-        except (KeyError, ValueError):
-            pass
-        return {
-            "id": row["id"],
-            "market": row["market"],
-            "allocation_pennies": row["allocation_pennies"],
-            "policy_pennies": row["policy_pennies"],
-            "state": row["state"],
-            "quantity": quantity,
-            "entry_at": next((f["at"] for f in fills if f["side"] == "BOT"), None),
-            "exit_at": row["exit_at"],
-            "policy": plan.get("policy", "HOURLY"),
-            "trail": plan.get("trail"),
-            "floor": plan.get("floor"),
-            "stall": plan.get("stall"),
-            "option": plan["option"],
-            "premium_gbp": plan["premium_gbp"],
-            "fees_gbp": plan["fees_gbp"],
-            "total_gbp": plan["total_gbp"],
-            "valuation": valuation,
-            "basis": self.config.execution_mode,
-        }
-
-    async def decisions(self) -> None:
-        at = now()
-        day_clocks = clocks(at.astimezone(NY).date())
-        for state in self.markets.values():
-            if not state.identity:
-                continue
-            for clock in day_clocks:
-                if (
-                    clock < self.started_at
-                    or clock > at
-                    or (state.last_clock and clock <= state.last_clock)
-                ):
-                    continue
-                event = opportunity(state.market, state.identity["uic"], clock)
-                event["id"] = self.config.data_environment + "|" + str(event["id"])
-                event.update(
-                    provider="SAXO",
-                    environment=self.config.data_environment,
-                    contract=state.identity,
-                    configuration_hash=self.config_hash,
-                )
-                if self.calendar:
-                    # Observation only: recorded with the event, never an entry rule.
-                    event["scheduled_events"] = self.calendar.near(state.market, clock)
-                reason = str(event["veto"])
-                inputs: dict[str, float] = {}
-                # Earlier markets await broker I/O: gates need the time now, not at loop entry,
-                # or a quote refreshed meanwhile has a negative age and reads as stale.
-                at = now()
-                try:
-                    if not reason:
-                        if (at - clock).total_seconds() >= self.config.entry_deadline_seconds:
-                            # A boundary wait that ran out names its cause, not a slow loop.
-                            raise ValueError(
-                                "INCOMPLETE_COMPLETED_HISTORY_DEADLINE"
-                                if state.boundary_clock == clock
-                                else "STALE_SIGNAL_NO_REPLAY"
-                            )
-                        if state.problem or state.history_problem:
-                            raise ValueError(state.problem or state.history_problem)
-                        quote_check(
-                            state.price.value or {}, self.data.quote_receipt(state.price), at
-                        )
-                        inputs = eligibility(
-                            state.bars,
-                            clock,
-                            datetime.fromisoformat(state.identity["expiry"][:10]).date(),
-                            state.references,
-                        )
-                except ValueError as exc:
-                    reason = str(exc)
-                if reason == "INCOMPLETE_COMPLETED_HISTORY" and not self.data.chart_stream_problem:
-                    # The chart stream may already hold the trailing minutes the REST read lacks
-                    # (it drops its newest sample, and a read inside clock-2 ends at clock-3):
-                    # decide on them now; the next REST read confirms each one.
-                    trailing = trailing_missing({b.at for b in state.bars}, clock)
-                    streamed = [
-                        saxo_history.streamed_bar(state.chart, minute, at) for minute in trailing
-                    ]
-                    taken = [b for b in streamed if b is not None]
-                    if (
-                        trailing
-                        and len(taken) == len(trailing)
-                        and all(b.at < trailing[0] for b in state.bars)
-                    ):
-                        state.bars = [*state.bars, *taken]
-                        for bar in taken:
-                            state.stream_bars[bar.at] = (bar, str(event["id"]))
-                        state.chart_used += len(taken)
-                        event["boundary_bar"] = {
-                            "source": "CHART_STREAM",
-                            "minute": taken[-1].at.isoformat(),
-                            "minutes": [b.at.isoformat() for b in taken],
-                            "seconds_after_clock": round((at - clock).total_seconds(), 3),
-                        }
-                        try:
-                            inputs = eligibility(
-                                state.bars,
-                                clock,
-                                datetime.fromisoformat(state.identity["expiry"][:10]).date(),
-                                state.references,
-                            )
-                            reason = ""
-                        except ValueError as exc:
-                            reason = str(exc)
-                # Only the final completed-minute boundary may wait: the minute the REST read has
-                # not reached and, before it, at most the no-trade minutes the fill rule covers once
-                # that read supplies the bar after them. Earlier gaps, invalid bars, reference
-                # failures and other gates remain final skips.
-                by_time = {b.at: b for b in state.bars}
-                trailing = trailing_missing(set(by_time), clock)
-                if (
-                    reason == "INCOMPLETE_COMPLETED_HISTORY"
-                    and (at - clock).total_seconds() < self.config.entry_deadline_seconds
-                    and trailing
-                    and all(
-                        (b := by_time.get(trailing[0] - timedelta(minutes=i))) is not None
-                        and b.valid()
-                        for i in range(1, 31)
-                    )
-                ):
-                    if state.boundary_clock != clock:
-                        state.boundary_clock = clock
-                        state.boundary_checked = float("-inf")
-                        self.history_needed.set()
-                    continue
-                state.boundary_clock = None
-                state.last_clock = clock
-                # Capture an observed frozen clock even for veto, capacity, option or data skips.
-                event["skip_reason"] = reason
-                observed = self.store.observe(event, reason, inputs)
-                if not observed:
-                    continue
-                try:
-                    await self.decide(state, event, clock, reason, inputs)
-                except Exception:
-                    # The clock is observed; a decision row keeps it from showing as undecided
-                    # forever while the worker's sticky fatal blocks arming.
-                    self.store.decision(
-                        str(event["id"]), "SKIPPED", "DECISION_WORKER_ERROR_REVIEW_REQUIRED"
-                    )
-                    raise
-
-    async def decide(
-        self,
-        state: MarketState,
-        event: dict[str, Any],
-        clock: datetime,
-        reason: str,
-        inputs: dict[str, float],
-    ) -> None:
-        """One observed clock of one market: evidence capture, option context, entry."""
-        assert state.identity is not None
-        option_keys = [
-            key(i)
-            for i, _ in self.data.options.values()
-            if i["market"] == state.market
-            and i["underlying_uic"] == state.identity["uic"]
-            and i["uic"] in state.warm_uics
-        ]
-        # The chain windows near the money (nearest and following expiry) and the
-        # following contract month are evidence too (observation only).
-        option_keys.append(key(chain_identity(state.identity)))
-        option_keys.append(key(chain_identity(state.identity, "next")))
-        if state.market in self.data.next_contracts:
-            option_keys.append(key(self.data.next_contracts[state.market][0]))
-        capture = self.recorder.trigger(key(state.identity), event, time.time(), option_keys)
-        self.store.depth_capture(str(event["id"]), capture)
-        context: dict[str, Any] = {"selection_status": "NOT_SELECTED", "reason": reason}
-        if not reason:
-            try:
-                selected, _ = await self.broker.select_option(event, state, inputs)
-                context = self.data.option_view(selected["uic"], time.time())
-                context.update(
-                    **views.iv_spread(context, inputs.get("rv15")),
-                    selection_status="SELECTED",
-                    strategy_exit_at=event["exit_at"],
-                    pre_trigger_seconds=max(
-                        0,
-                        context["coverage_seconds"] - max(0, time.time() - clock.timestamp()),
-                    ),
-                )
-            except (ValueError, KeyError) as exc:
-                context["reason"] = skip_reason(exc)
-        self.recorder.annotate(str(event["id"]), {"option_context": context})
-        with self.store.db:
-            row = self.store.db.execute(
-                "SELECT detail FROM signals WHERE id=?", (event["id"],)
-            ).fetchone()
-            detail = json.loads(row[0])
-            detail["option_context"] = context
-            # Observation only, never an entry rule: the futures book at this clock and
-            # the volatility ingredients needed to judge vetoes afterwards.
-            detail["book_flow"] = self.recorder.book_flow_view(key(state.identity), time.time())
-            detail["observation"] = observation(state.bars, clock, state.references)
-            # Observation only: the futures' open interest over the last completed sessions.
-            detail["daily_open_interest"] = state.daily_open_interest
-            # Observation only: the look14 forecast and, for the selected option, the
-            # movement its price implies against the forecast's.
-            detail["forecast"] = self.forecast_view(
-                state,
-                clock,
-                context if context.get("selection_status") == "SELECTED" else None,
-            )
-            # Observation only: the chain as seen at this clock (provider units).
-            detail["option_chain"] = views.smile(
-                state.option_board,
-                clock.astimezone(NY).date().isoformat(),
-                self.config.provider_volatility_scale,
-                views.model_sigma(inputs.get("rv15")),
-            )
-            self.store.db.execute(
-                "UPDATE signals SET detail=? WHERE id=?", (encode(detail), event["id"])
-            )
-        if not reason and event.get("policy") == "DAY":
-            # After the clock's option is selected and recorded: the day trade's one veto.
-            reason = day_against_veto(state.bars, clock, state.market)
-        if not reason:
-            reason = "ENTRIES_PAUSED" if self.pause else self.broker.entry_reason()
-        if not reason:
-            try:
-                plan = await self.broker.prepare(event, state, inputs)
-                reason = await self.broker.enter(event, plan)
-            except (ValueError, KeyError) as exc:
-                reason = skip_reason(exc)
-        if reason:
-            self.store.decision(str(event["id"]), "SKIPPED", reason)
-        self.recorder.annotate(str(event["id"]), {"skip_reason": reason, "inputs": inputs})
-
-    async def manager(self) -> None:
-        self.manager_health = "RUNNING"
-        last_failure = ""
-        while not self.stopping:
-            try:
-                await self.broker.manage()
-                last_failure = ""
-            except Exception as exc:
-                self.broker.reconciled = False
-                # Log transitions, not every two-second retry of the same failure.
-                if failure_code(exc) != last_failure:
-                    self.report_failure("management", exc)
-                last_failure = failure_code(exc)
-            await asyncio.sleep(2)
-
-    async def refresh_histories(self) -> None:
-        # A small priority pass at the normal five-second worker cadence, woken once
-        # by a newly pending clock. Do not put optional option work ahead of this pass.
-        for state in self.markets.values():
-            clock = state.boundary_clock
-            if (
-                self.data.connected
-                and clock is not None
-                and 0 <= (now() - clock).total_seconds() < self.config.entry_deadline_seconds
-                and time.monotonic() - state.boundary_checked >= 5
-            ):
-                state.boundary_checked = time.monotonic()
-                try:
-                    await saxo_history.history(self.data, state, boundary=True)
-                except Exception as exc:
-                    self.report_failure("boundary-history", exc)
-        for state in self.markets.values():
-            if self.history_needed.is_set():
-                return
-            if (
-                self.data.connected
-                and state.boundary_clock is None
-                and time.monotonic() - state.history_checked >= 60
-            ):
-                try:
-                    await saxo_history.history(self.data, state)
-                    await self.data.refresh_options(state)
-                    await self.data.warm_candidates(state)
-                    await saxo_history.daily_context(self.data, state)
-                except Exception as exc:
-                    state.history_problem = "SAXO_HISTORY_UNAVAILABLE"
-                    state.history_checked = time.monotonic()
-                    self.report_failure("history", exc)
-        self.record_chart_audits()
-
-    def record_chart_audits(self) -> None:
-        """A REST read contradicted a streamed boundary bar: the clock's evidence says so."""
-        audits = self.data.drain_chart_audits()
-        for index, (event_id, evidence) in enumerate(audits):
-            try:
-                with self.store.db:
-                    self.store.audit(event_id, "CHART_STREAM_MISMATCH", evidence)
-                self.recorder.annotate(event_id, {"chart_stream_mismatch": evidence})
-            except Exception as exc:
-                # Observation evidence: keep what is unwritten for the next pass and never let
-                # it stop the history worker (and with it the runtime).
-                self.data.chart_audits = audits[index:] + self.data.chart_audits
-                self.report_failure("chart-audit", exc)
-                return
-
-    async def alert_worker(self) -> None:
-        # Isolated: an alert failure is recorded in alerts.status() and never stops trading.
-        while not self.stopping:
-            try:
-                await self.alerts.check(self)
-            except Exception as exc:
-                self.report_failure("alerts", exc)
-            await asyncio.sleep(30)
-
-    async def history_worker(self) -> None:
-        while not self.stopping:
-            self.history_needed.clear()
-            await self.refresh_histories()
-            if not self.history_needed.is_set():
-                try:
-                    await self.data.retry_failed_startups()
-                    await self.data.release_unused_options(
-                        {json.loads(r["plan"])["option"]["uic"] for r in self.store.active()}
-                    )
-                    if self.data.connected:
-                        await self.data.refresh_option_metadata()
-                        await saxo_balance.ensure_balance_subscription(self.data)
-                        await saxo_balance.ensure_activity_subscription(self.data)
-                        await self.broker.refresh_closed_positions()
-                except Exception as exc:
-                    self.report_failure("option-subscription-maintenance", exc)
-            with suppress(TimeoutError):
-                await asyncio.wait_for(self.history_needed.wait(), timeout=5)
-
+    # the loop ---------------------------------------------------------------------------------
     async def run(self) -> None:
-        # Environment lock prevents another browser/server instance duplicating subscriptions.
+        # One OAuth owner: Saxo rotates the refresh token, so a second refresher would break both.
         lock = self.root / self.config.data_environment / "data.owner.lock"
         lock.parent.mkdir(parents=True, exist_ok=True)
         self.owner = lock.open("a")
         fcntl.flock(self.owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.worker_health = "RUNNING"
         try:
-            await self.recorder.start()
-        except (OSError, ValueError):
-            self.recorder.problem = "RECORDER_STORAGE_UNAVAILABLE"
-        for row in self.store.db.execute(
-            "SELECT s.id,c.summary FROM signals s LEFT JOIN depth_captures c USING(id) "
-            "WHERE c.id IS NULL OR json_extract(c.summary,'$.state')='CAPTURING'"
-        ).fetchall():
-            summary = json.loads(row["summary"]) if row["summary"] else {}
-            self.store.depth_capture(
-                row["id"],
-                {**summary, "state": "INCOMPLETE", "reason": "INTERRUPTED_RESTART_CHECK_MANIFEST"},
-            )
-        self.tasks.update(
-            {
-                asyncio.create_task(self.data.run()),
-                asyncio.create_task(self.manager()),
-                asyncio.create_task(self.history_worker()),
-                asyncio.create_task(self.alert_worker()),
-            }
-        )
-        try:
             while not self.stopping:
                 try:
-                    self.recorder.tick(time.time())
-                except Exception as exc:
-                    self.recorder.problem = "RECORDER_FAILED"
-                    self.report_failure("recorder", exc)
-                await self.decision_pass()
-                for task in self.tasks:
-                    if task.done() and not task.cancelled():
-                        raise RuntimeError("BACKGROUND_WORKER_STOPPED") from task.exception()
-                await asyncio.sleep(0.25)
+                    await self.step()
+                except Exception as exc:  # one bad pass is logged; the record keeps running
+                    self.note("loop", exc)
+                await asyncio.sleep(1)
         finally:
             await self.stop()
 
-    async def stop(self) -> None:
-        if self.stopping:
+    async def step(self) -> None:
+        await self.keep_login()
+        now = self.now()
+        day = now.astimezone(NY).date()
+        if self.sessions_day != day and time.monotonic() >= self.sessions_retry_at:
+            try:
+                self.sessions = await market.sessions(self.client)
+                self.sessions_day = day
+                self.problems.pop("calendar", None)
+            except SaxoError as exc:
+                self.sessions_retry_at = time.monotonic() + 60
+                self.note("calendar", exc)
+        session = methods.session_on(self.sessions, day) if self.sessions_day == day else None
+        if session is not None:
+            for name, due, delayed, handler in self.plan(session):
+                await self.event(day.isoformat(), name, due, delayed, handler, now)
+        await self.watch_stops(self.now(), session)
+
+    def plan(
+        self, s: Session
+    ) -> list[tuple[str, datetime, bool, Callable[[datetime, int], Awaitable[None]]]]:
+        """(event, due, read QQQ delayed?, handler) in the order they run."""
+        nine35 = s.open + timedelta(minutes=5)
+        return sorted(
+            [
+                (FC, nine35, False, lambda t, d: self.first_candle(s, t)),
+                (FC_QQQ + "_ENTRY", nine35, True, lambda t, d: self.option_entry(s, t, d)),
+                (
+                    FC_QQQ + "_EXIT",
+                    methods.ny_time(s.day, methods.OPTION_EXIT),
+                    True,
+                    lambda t, d: self.option_exit(s, t, d),
+                ),
+                (
+                    CONNORS_QQQ,
+                    s.close - timedelta(minutes=10),
+                    True,
+                    lambda t, d: self.connors(s, t, d),
+                ),
+                (
+                    FC_QQQ + "_LATE",
+                    s.close - timedelta(minutes=5),
+                    True,
+                    lambda t, d: self.option_late(s, t, d),
+                ),
+                (
+                    CONNORS_QQQ + "_EXIT",
+                    s.close - timedelta(minutes=5),
+                    True,
+                    lambda t, d: self.connors_exit(s, t, d),
+                ),
+                ("CFD_EXIT", s.close, False, lambda t, d: self.cfd_exit(s, t)),
+            ],
+            key=lambda e: e[1],
+        )
+
+    async def event(
+        self,
+        day: str,
+        name: str,
+        due: datetime,
+        delayed: bool,
+        handler: Callable[[datetime, int], Awaitable[None]],
+        now: datetime,
+    ) -> None:
+        row = self.store.event(day, name)
+        if now < due or (row is not None and row["status"] in {"DONE", "FAILED", "MISSED"}):
             return
-        self.stopping = self.data.stopping = True
-        self.broker.armed = False
-        await self.cancel_tasks(self.tasks)
-        await self.recorder.close()
-        await self.data.client.close()
-        await self.alerts.close()
+        entry = name in {FC, FC_QQQ + "_ENTRY", CONNORS_QQQ}
+        if row is None and entry and now > due + ENTRY_GRACE:
+            # An entry first tried late is never replayed at a later price.
+            note = "APP_NOT_RUNNING_AT_ENTRY" if self.started_at > due else "NOT_TRIED_IN_TIME"
+            self.store.set_event(day, name, due, "MISSED", note=note)
+            return
+        if time.monotonic() - self.attempted.get((day, name), -1e9) < RETRY_EVERY:
+            return
+        self.attempted[(day, name)] = time.monotonic()
+        delay = 0
+        if delayed:
+            if row is None or row["effective"] is None:
+                try:
+                    delay = await self.measure_qqq_delay()
+                except (SaxoError, Problem) as exc:
+                    self.give_up_or_retry(day, name, due, due, entry, now, exc)
+                    return
+                self.store.set_event(
+                    day, name, due, "WAITING", effective=due + timedelta(minutes=delay)
+                )
+                row = self.store.event(day, name)
+            assert row is not None
+            delay = round((at(row["effective"]) - due).total_seconds() / 60)
+        effective = due + timedelta(minutes=delay)
+        if now < effective:
+            return
+        if entry and now > effective + ENTRY_GRACE:
+            # An entry only ever runs within a minute of its time: never at a later price.
+            failed = row is not None and row["status"] == "RETRYING"
+            late = (
+                "APP_NOT_RUNNING_AT_ENTRY" if self.started_at > effective else "NOT_TRIED_IN_TIME"
+            )
+            self.store.set_event(
+                day,
+                name,
+                due,
+                "FAILED" if failed else "MISSED",
+                effective=effective,
+                note=row["note"] if failed and row else late,
+            )
+            self.problems.pop(name, None)
+            return
+        try:
+            await handler(due, delay)
+        except Done as reason:
+            self.store.set_event(day, name, due, "DONE", effective=effective, note=str(reason))
+            self.problems.pop(name, None)
+            return
+        except (SaxoError, Problem, KeyError, TypeError, ValueError) as exc:
+            self.give_up_or_retry(day, name, due, effective, entry, now, exc)
+            return
+        self.store.set_event(day, name, due, "DONE", effective=effective)
+        self.problems.pop(name, None)
+
+    def give_up_or_retry(
+        self,
+        day: str,
+        name: str,
+        due: datetime,
+        effective: datetime,
+        entry: bool,
+        now: datetime,
+        exc: BaseException,
+    ) -> None:
+        code = failure_code(exc)
+        self.note(name, exc)
+        final = now > effective + (ENTRY_GRACE if entry else EXIT_GRACE)
+        if final:
+            self.problems.pop(name, None)  # the event's status now carries the reason
+        # The delay follows who holds Saxo's real-time slot (a SaxoTraderGO login takes it). An
+        # entry cannot recover its as-of price; an exit measures again and reads at the new time.
+        remeasure = code == "QQQ_DELAY_CHANGED" and not entry
+        self.store.set_event(
+            day,
+            name,
+            due,
+            "FAILED" if final else "RETRYING",
+            effective=None if remeasure or effective == due else effective,
+            note=code,
+        )
+
+    def note(self, area: str, exc: BaseException) -> None:
+        code = failure_code(exc)
+        if self.problems.get(area) != code:
+            log.warning("%s: %s", area, code)
+        self.problems[area] = code
+
+    async def keep_login(self) -> None:
+        """Refresh the access token before it lapses, even on days with nothing to record."""
+        if time.monotonic() - self.login_checked < LOGIN_CHECK_SECONDS:
+            return
+        self.login_checked = time.monotonic()
+        try:
+            await self.client.oauth.access_token()
+            self.problems.pop("login", None)
+            if time.monotonic() - self.capabilities_read >= 600:
+                self.capabilities_read = time.monotonic()
+                self.capabilities = await self.client.get("/root/v1/sessions/capabilities")
+        except SaxoError as exc:
+            self.note("login", exc)
+
+    async def measure_qqq_delay(self) -> int:
+        q = (await market.quotes(self.client, [QQQ_UIC], "Etf")).get(QQQ_UIC)
+        if q is None or q.delayed is None or not 0 <= q.delayed <= 30:
+            raise Problem("QQQ_DELAY_UNKNOWN")
+        self.qqq_delay = q.delayed
+        return q.delayed
+
+    # first candle on the CFDs -----------------------------------------------------------------
+    async def first_candle(self, s: Session, due: datetime) -> None:
+        day = s.day.isoformat()
+        if not s.regular:
+            raise Done("EARLY_CLOSE_DAY_SKIPPED")
+        pending = ""
+        for cfd in CFDS:
+            signal = self.store.signal(day, FC, cfd.market)
+            if self.store.cfd_trade(day, cfd.market) or (signal and signal["side"] == 0):
+                continue
+            try:
+                await self.first_candle_market(s, cfd, due)
+            except (SaxoError, Problem) as exc:
+                pending = failure_code(exc)
+        if pending:  # retried until the entry deadline, then the event is FAILED
+            raise Problem(pending)
+
+    async def first_candle_market(self, s: Session, cfd: methods.Cfd, due: datetime) -> None:
+        day = s.day.isoformat()
+        saved = self.store.signal(day, FC, cfd.market)
+        if saved is None:
+            bars, delay = await market.cfd_bars(self.client, cfd.uic)
+            if delay != 0:
+                raise Problem("CFD_CHART_DELAYED")
+            signal = methods.first_candle(bars, s.open)
+            if signal.reason in {"NO_FIRST_CANDLE", "FIRST_CANDLE_NOT_FINAL"}:
+                raise Problem(signal.reason)
+            # Saved at once: the QQQ option follows the signal even if the CFD trade cannot open.
+            self.store.add_signal(
+                day,
+                FC,
+                cfd.market,
+                signal.side,
+                signal.reason,
+                {
+                    "close": signal.close,
+                    "ema": signal.ema,
+                    "prior_candles": signal.prior_bars,
+                    "bars_read": len(bars),
+                    "last_bars": [[stamp(b.start), b.close] for b in bars[-40:]],
+                },
+            )
+            side = signal.side
+        else:
+            side = saved["side"]
+        if side == 0:
+            return
+        if cfd.uic not in self.cfd_info:
+            self.cfd_info[cfd.uic] = await market.cfd_details(self.client, cfd.uic)
+        decimals, factor = self.cfd_info[cfd.uic]
+        q = (await market.quotes(self.client, [cfd.uic], "CfdOnIndex")).get(cfd.uic)
+        read = self.now()
+        if read > due + ENTRY_GRACE:
+            raise Problem("ENTRY_DEADLINE_PASSED")
+        if q is None or not q.live:
+            raise Problem("CFD_QUOTE_NOT_LIVE")
+        assert q.bid is not None and q.ask is not None
+        entry = q.ask if side > 0 else q.bid
+        amount = methods.cfd_amount(entry, cfd.stop_bp, decimals, factor)
+        if amount <= 0:
+            raise Problem("CFD_SIZE_ROUNDS_TO_ZERO")
+        self.store.insert(
+            "cfd_trades",
+            {
+                "day": day,
+                "market": cfd.market,
+                "uic": cfd.uic,
+                "side": side,
+                "amount": amount,
+                "factor": factor,
+                "stop": round(methods.stop_price(entry, side, cfd.stop_bp), 2),
+                "entry_at": stamp(read),
+                "entry_price": entry,
+                "entry_bid": q.bid,
+                "entry_ask": q.ask,
+            },
+        )
+        log.info("%s %s %s %.2f at %.2f", day, cfd.market, side, amount, entry)
+
+    async def watch_stops(self, now: datetime, session: Session | None) -> None:
+        """Stops are watched during their own session only. A trade still open on a later day
+        missed its 16:00 exit: it is recorded without a price, never closed at a later one."""
+        trades = self.store.open_cfd()
+        today = session.day.isoformat() if session else None
+        for t in trades:
+            if today is None or t["day"] < today:
+                self.store.update(
+                    "cfd_trades", t["id"], {"exit_at": stamp(now), "exit_reason": "MISSED_EXIT"}
+                )
+        watched = [t for t in trades if t["day"] == today and session and now < session.close]
+        if not watched:
+            self.problems.pop("stops", None)
+            return
+        if time.monotonic() - self.cfd_polled < STOP_POLL_SECONDS:
+            return
+        self.cfd_polled = time.monotonic()
+        try:
+            self.cfd_quotes = await market.quotes(
+                self.client, sorted({t["uic"] for t in watched}), "CfdOnIndex"
+            )
+        except SaxoError as exc:
+            self.note("stops", exc)
+            return
+        stale = False
+        for t in watched:
+            q = self.cfd_quotes.get(t["uic"])
+            if q is None or not q.live:
+                stale = True
+                continue
+            assert q.bid is not None and q.ask is not None
+            fill = methods.stop_fill(t["side"], t["stop"], q.bid, q.ask)
+            if fill is not None:
+                self.close_cfd(t, fill, q, "STOP", now)
+        if stale:
+            self.problems["stops"] = "CFD_QUOTE_NOT_LIVE"
+        else:
+            self.problems.pop("stops", None)
+
+    def close_cfd(
+        self, t: sqlite3.Row, price: float, q: market.Quote, reason: str, now: datetime
+    ) -> None:
+        pnl = methods.cfd_pnl(t["side"], t["entry_price"], price, t["amount"], t["factor"])
+        self.store.update(
+            "cfd_trades",
+            t["id"],
+            {
+                "exit_at": stamp(now),
+                "exit_price": price,
+                "exit_bid": q.bid,
+                "exit_ask": q.ask,
+                "exit_reason": reason,
+                "pnl_usd": round(pnl, 2),
+            },
+        )
+        log.info("%s %s closed %s %.2f", t["day"], t["market"], reason, pnl)
+
+    async def cfd_exit(self, s: Session, due: datetime) -> None:
+        trades = [t for t in self.store.open_cfd() if t["day"] == s.day.isoformat()]
+        if not trades:
+            raise Done("NO_OPEN_CFD_TRADE")
+        quotes = await market.quotes(self.client, sorted({t["uic"] for t in trades}), "CfdOnIndex")
+        read = self.now()
+        for t in trades:
+            if read > due + EXIT_GRACE:  # too far from 16:00 to be its price
+                self.store.update(
+                    "cfd_trades", t["id"], {"exit_at": stamp(read), "exit_reason": "MISSED_EXIT"}
+                )
+                continue
+            q = quotes.get(t["uic"])
+            if q is None or not q.live:
+                raise Problem("CFD_QUOTE_NOT_LIVE")
+            assert q.bid is not None and q.ask is not None
+            late = read > due + ENTRY_GRACE
+            self.close_cfd(
+                t, q.bid if t["side"] > 0 else q.ask, q, "CLOSE_LATE" if late else "CLOSE", read
+            )
+
+    # QQQ options ------------------------------------------------------------------------------
+    async def qqq_price(self, delay: int) -> float:
+        q = (await market.quotes(self.client, [QQQ_UIC], "Etf")).get(QQQ_UIC)
+        if q is None or q.mid is None:
+            raise Problem("QQQ_QUOTE_UNAVAILABLE")
+        if q.delayed != delay:
+            raise Problem("QQQ_DELAY_CHANGED")
+        return q.mid
+
+    async def choose(
+        self,
+        due: datetime,
+        day: str,
+        method: str,
+        side: int,
+        expiry: date,
+        put_call: str,
+        target: float,
+        band: tuple[float, float],
+        delay: int,
+    ) -> None:
+        centre = await self.qqq_price(delay)
+        listed = await market.series(self.client, QQQ_OPTION_ROOT, expiry)
+        board, raw = await market.board(self.client, listed, centre, methods.BOARD_HALF_WIDTH)
+        read = self.now()  # the board's prices apply to read - delay
+        if any(o.delayed != delay for o in board):
+            raise Problem("QQQ_DELAY_CHANGED")
+        if read - timedelta(minutes=delay) > due + ENTRY_GRACE:
+            raise Problem("ENTRY_DEADLINE_PASSED")
+        self.store.snapshot(
+            day,
+            method + "_ENTRY",
+            {
+                "read": stamp(read),
+                "delay": delay,
+                "underlying": centre,
+                "expiry": expiry.isoformat(),
+                "rows": [vars(o) for o in board],
+            },
+        )
+        pick = methods.pick_option(board, put_call, target, band)
+        if pick is None:
+            raise Done("NO_QUALIFYING_STRIKE")
+        assert pick.bid is not None and pick.ask is not None
+        self.store.insert(
+            "option_trades",
+            {
+                "day": day,
+                "method": method,
+                "side": side,
+                "uic": pick.uic,
+                "expiry": expiry.isoformat(),
+                "put_call": pick.put_call,
+                "strike": pick.strike,
+                "exit_day": expiry.isoformat() if method == CONNORS_QQQ else day,
+                "entry_for": stamp(read - timedelta(minutes=delay)),
+                "entry_read": stamp(read),
+                "entry_delay": delay,
+                "entry_bid": pick.bid,
+                "entry_ask": pick.ask,
+                "entry_delta": pick.delta,
+                "entry_vol": pick.mid_vol,
+                "entry_underlying": centre,
+                "cost_buy": pick.cost_buy,
+            },
+        )
+        log.info("%s %s %s %s at %.2f", day, method, pick.put_call, pick.strike, pick.ask)
+
+    async def option_entry(self, s: Session, due: datetime, delay: int) -> None:
+        day = s.day.isoformat()
+        if not s.regular:
+            raise Done("EARLY_CLOSE_DAY_SKIPPED")
+        if self.store.option(day, FC_QQQ):
+            return
+        signal = self.store.signal(day, FC, methods.SIGNAL_MARKET)
+        first = self.store.event(day, FC)
+        if signal is None and (first is None or first["status"] not in {"FAILED", "MISSED"}):
+            raise Problem("WAITING_FOR_NASDAQ_SIGNAL")
+        if signal is None or signal["side"] == 0:
+            raise Done("NO_NASDAQ_SIGNAL")
+        if s.day not in await market.expiries(self.client, QQQ_OPTION_ROOT):
+            raise Done("NO_SAME_DAY_EXPIRY")
+        await self.choose(
+            due,
+            day,
+            FC_QQQ,
+            signal["side"],
+            s.day,
+            "Call" if signal["side"] > 0 else "Put",
+            methods.FIRST_CANDLE_DELTA,
+            methods.FIRST_CANDLE_DELTA_RANGE,
+            delay,
+        )
+
+    async def mark(self, t: sqlite3.Row, delay: int) -> tuple[datetime, methods.OptionQuote, float]:
+        underlying = await self.qqq_price(delay)
+        q = await market.option_quote(
+            self.client, {"Uic": t["uic"], "StrikePrice": t["strike"], "PutCall": t["put_call"]}
+        )
+        read = self.now()  # the quotes apply to read - delay
+        if q is None:
+            raise Problem("OPTION_QUOTE_UNAVAILABLE")
+        if q.delayed != delay:
+            raise Problem("QQQ_DELAY_CHANGED")
+        return read, q, underlying
+
+    def missed_exit(self, t: sqlite3.Row, as_of: datetime, delay: int) -> None:
+        """No price inside the exit's window (the app was down, or the market had closed)."""
+        self.store.update(
+            "option_trades",
+            t["id"],
+            {
+                "exit_read": stamp(self.now()),
+                "exit_for": stamp(as_of),
+                "exit_delay": delay,
+                "exit_reason": "MISSED_EXIT",
+            },
+        )
+
+    async def close_option(
+        self, t: sqlite3.Row, delay: int, reason: str, due: datetime, close: datetime
+    ) -> None:
+        if self.now() - timedelta(minutes=delay) >= close:
+            self.missed_exit(t, self.now() - timedelta(minutes=delay), delay)
+            return
+        read, q, underlying = await self.mark(t, delay)
+        as_of = read - timedelta(minutes=delay)
+        if as_of >= close or as_of > due + EXIT_GRACE:
+            self.missed_exit(t, as_of, delay)
+            return
+        bid = q.bid or 0.0  # no bid: the option cannot be sold, so it is worth nothing
+        reason += "_LATE" if as_of > due + ENTRY_GRACE else ""
+        self.store.update(
+            "option_trades",
+            t["id"],
+            {
+                "exit_for": stamp(as_of),
+                "exit_read": stamp(read),
+                "exit_delay": delay,
+                "exit_bid": bid,
+                "exit_ask": q.ask,
+                "exit_delta": q.delta,
+                "exit_underlying": underlying,
+                "cost_sell": q.cost_sell,
+                "exit_reason": reason if q.bid else reason + "_NO_BID",
+                "pnl_usd": methods.option_pnl(t["entry_ask"], bid, t["cost_buy"], q.cost_sell),
+            },
+        )
+
+    async def option_exit(self, s: Session, due: datetime, delay: int) -> None:
+        today = s.day.isoformat()
+        for old in self.store.open_options():  # a same-day option left open on an earlier day
+            if old["method"] == FC_QQQ and old["day"] < today:
+                self.missed_exit(old, due, delay)
+        t = self.store.option(today, FC_QQQ)
+        if t is None or t["exit_read"] is not None:
+            raise Done("NO_OPEN_OPTION")
+        await self.close_option(t, delay, "AT_13_00", due, s.close)
+
+    async def option_late(self, s: Session, due: datetime, delay: int) -> None:
+        """Reported only: the same option's quote five minutes before the close."""
+        t = self.store.option(s.day.isoformat(), FC_QQQ)
+        if t is None:
+            raise Done("NO_OPTION_TODAY")
+        read, q, underlying = await self.mark(t, delay)
+        as_of = read - timedelta(minutes=delay)
+        if as_of >= s.close or as_of > due + ENTRY_GRACE:
+            raise Done("LATE_MARK_MISSED")
+        self.store.update(
+            "option_trades",
+            t["id"],
+            {
+                "late_for": stamp(as_of),
+                "late_bid": q.bid,
+                "late_ask": q.ask,
+                "late_underlying": underlying,
+            },
+        )
+
+    async def connors(self, s: Session, due: datetime, delay: int) -> None:
+        day = s.day.isoformat()
+        if not s.regular:
+            raise Done("EARLY_CLOSE_DAY_SKIPPED")
+        if self.store.option(day, CONNORS_QQQ):
+            return
+        if self.store.signal(day, "CONNORS", "QQQ") is None:
+            dated = await market.daily_closes(self.client, QQQ_UIC, s.day)
+            # The newest close must be the last session's: at most a long weekend old.
+            if not dated or (s.day - dated[-1][0]).days > 4:
+                self.store.add_signal(
+                    day,
+                    "CONNORS",
+                    "QQQ",
+                    0,
+                    "DAILY_CLOSES_OUT_OF_DATE",
+                    {"newest_close_day": dated[-1][0].isoformat() if dated else None},
+                )
+                raise Done("DAILY_CLOSES_OUT_OF_DATE")
+            closes = [close for _, close in dated]
+            price = await self.qqq_price(delay)
+            c = methods.connors([*closes, price])
+            self.store.add_signal(
+                day,
+                "CONNORS",
+                "QQQ",
+                int(c.signal),
+                c.reason,
+                {
+                    "price_15_50": c.close,
+                    "sma200": c.sma200,
+                    "rsi2": c.rsi,
+                    "rsi2_prev": c.rsi_prev,
+                    "daily_closes": len(closes),
+                    "newest_close_day": dated[-1][0].isoformat(),
+                },
+            )
+        signal = self.store.signal(day, "CONNORS", "QQQ")
+        assert signal is not None
+        if signal["side"] != 1:
+            raise Done("NO_CONNORS_SIGNAL" if not signal["reason"] else signal["reason"])
+        later = [e for e in await market.expiries(self.client, QQQ_OPTION_ROOT) if e > s.day]
+        if not later:
+            raise Done("NO_LATER_EXPIRY")
+        await self.choose(
+            due,
+            day,
+            CONNORS_QQQ,
+            1,
+            later[0],
+            "Call",
+            methods.CONNORS_DELTA,
+            methods.CONNORS_DELTA_RANGE,
+            delay,
+        )
+
+    async def connors_exit(self, s: Session, due: datetime, delay: int) -> None:
+        trades = [t for t in self.store.open_options() if t["method"] == CONNORS_QQQ]
+        today = s.day.isoformat()
+        for t in trades:
+            if t["exit_day"] < today:  # the app was not running on its expiry day
+                self.missed_exit(t, due, delay)
+        due_today = [t for t in trades if t["exit_day"] == today]
+        if not due_today:
+            raise Done("NO_CONNORS_EXIT_TODAY")
+        for t in due_today:
+            await self.close_option(t, delay, "BEFORE_CLOSE", due, s.close)
+
+    # dashboard -------------------------------------------------------------------------------
+    def status(self) -> dict[str, Any]:
+        oauth = self.client.oauth
+        refresh_left = float(oauth.tokens.get("refresh_expires_at", 0)) - time.time()
+        now = self.now()
+        day = now.astimezone(NY).date()
+        session = methods.session_on(self.sessions, day) if self.sessions_day == day else None
+        return {
+            "server_time": stamp(now),
+            "build": os.environ.get("STOCKER_BUILD_REVISION", "development"),
+            "data_environment": self.config.data_environment,
+            "worker_health": self.worker_health,
+            "web_health": self.web_health,
+            "oauth": oauth.status,
+            "oauth_failure": oauth.failure_reason,
+            "login_minutes_left": round(refresh_left / 60) if oauth.tokens else None,
+            "trade_level": self.capabilities.get("TradeLevel"),
+            "data_level": self.capabilities.get("DataLevel"),
+            "qqq_delay_minutes": self.qqq_delay,
+            "session": None
+            if session is None
+            else {
+                "open": stamp(session.open),
+                "close": stamp(session.close),
+                "regular": session.regular,
+            },
+            "calendar_loaded": self.sessions_day.isoformat() if self.sessions_day else None,
+            "problems": dict(sorted(self.problems.items())),
+            "rate_limits": dict(sorted(self.client.rate_headers.items())),
+            "saxo_calls": self.client.calls,
+        }
+
+    def today(self) -> dict[str, Any]:
+        now = self.now()
+        day = now.astimezone(NY).date()
+        view = self.store.day_view(day.isoformat())
+        for t in view["cfd"]:
+            q = self.cfd_quotes.get(t["uic"])
+            if t["exit_at"] is None and q is not None and q.bid and q.ask:
+                mark = q.bid if t["side"] > 0 else q.ask
+                t["open_pnl_usd"] = round(
+                    methods.cfd_pnl(t["side"], t["entry_price"], mark, t["amount"], t["factor"]), 2
+                )
+        session = methods.session_on(self.sessions, day) if self.sessions_day == day else None
+        plan = []
+        if session is not None:
+            for name, due, delayed, _ in self.plan(session):
+                plan.append(
+                    {
+                        "event": name,
+                        "due": stamp(due),
+                        "qqq_delayed": delayed,
+                        "new_york": due.astimezone(NY).strftime("%H:%M"),
+                        "uk": due.astimezone(UK).strftime("%H:%M"),
+                    }
+                )
+        return {"day": day.isoformat(), "plan": plan, **view, "system": self.status()}
+
+    async def stop(self) -> None:
+        if self.stopping and self.owner is None:
+            return
+        self.stopping = True
+        await self.client.close()
         log.removeHandler(self.log_handler)
         self.log_handler.close()
         if self.owner:
             self.owner.close()
             self.owner = None
+
+    def report_failure(self, worker: str, exc: BaseException) -> None:
+        log.error("%s failed: %s", worker, failure_code(exc))

@@ -88,7 +88,7 @@ class DashboardSecurity:
         )
         document_navigation = (
             scope.get("method") == "GET"
-            and scope.get("path") in {"/", "/markets", "/opportunities", "/execution", "/system"}
+            and scope.get("path") in {"/", "/record", "/system"}
             and headers.get(b"sec-fetch-mode") == b"navigate"
             and headers.get(b"sec-fetch-dest") == b"document"
         )

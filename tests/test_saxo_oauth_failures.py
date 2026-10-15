@@ -242,11 +242,11 @@ def test_rejected_access_token_forces_a_refresh_and_a_failed_refresh_stays_expir
         auth.tokens = tokens()
         client = SaxoClient(auth, transport=transport)
         with pytest.raises(SaxoError, match="^HTTP_401$"):
-            await client.request("GET", "/root/v2/user")
+            await client.get("/root/v1/sessions/capabilities")
         assert auth.status == "AUTHENTICATION_EXPIRED_RECONNECT_REQUIRED"
         with pytest.raises(SaxoError, match="^OAUTH_INVALID_GRANT$"):
-            await client.request("GET", "/root/v2/user")
-        assert [c.rsplit("/", 1)[-1] for c in calls] == ["user", "token"]
+            await client.get("/root/v1/sessions/capabilities")
+        assert [c.rsplit("/", 1)[-1] for c in calls] == ["capabilities", "token"]
         assert auth.status == "AUTHENTICATION_EXPIRED_RECONNECT_REQUIRED" and not auth.tokens
         await client.close()
 

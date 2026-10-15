@@ -1,4 +1,4 @@
-"""`stocker futures-run`: the single frozen futures-options PAPER pipeline and its dashboard."""
+"""`stocker paper-run`: the CFD and QQQ paper record and its dashboard. It never places orders."""
 
 import argparse
 import asyncio
@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 
-def futures_run(config: Path, database: Path, host: str, port: int) -> None:
+def paper_run(config: Path, database: Path, host: str, port: int) -> None:
     import uvicorn
 
     from stocker_dashboard.app import create_dashboard_app
@@ -45,17 +45,16 @@ def futures_run(config: Path, database: Path, host: str, port: int) -> None:
             worker_error = worker.exception() if worker in done and not worker.cancelled() else None
             if worker in done and (worker_error is not None or web not in done):
                 runtime.worker_health = "FAILED"
-                runtime.broker.fatal_error = "EXECUTION_WORKER_TERMINATED"
-                error = worker_error or RuntimeError(
-                    "futures-options execution worker terminated unexpectedly"
-                )
+                error = worker_error or RuntimeError("paper record worker terminated unexpectedly")
                 runtime.report_failure("worker", error)
                 server.should_exit = True
                 raise error
             await web
         finally:
             await runtime.stop()
-            await runtime.cancel_tasks({worker, web})
+            for task in (worker, web):
+                task.cancel()
+            await asyncio.gather(worker, web, return_exceptions=True)
 
     asyncio.run(serve())
 
@@ -63,13 +62,13 @@ def futures_run(config: Path, database: Path, host: str, port: int) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="stocker", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    run = commands.add_parser("futures-run", help="run the PAPER pipeline and dashboard")
-    run.add_argument("--config", type=Path, default=Path("configs/futures.paper.yaml"))
-    run.add_argument("--database", type=Path, default=Path(".stocker/saxo-sim-disabled.sqlite3"))
+    run = commands.add_parser("paper-run", help="run the paper record and its dashboard")
+    run.add_argument("--config", type=Path, default=Path("configs/paper.example.yaml"))
+    run.add_argument("--database", type=Path, default=Path(".stocker/paper-record.sqlite3"))
     run.add_argument("--host", default="127.0.0.1")
     run.add_argument("--port", type=int, default=8765)
     arguments = parser.parse_args(argv)
-    futures_run(arguments.config, arguments.database, arguments.host, arguments.port)
+    paper_run(arguments.config, arguments.database, arguments.host, arguments.port)
 
 
 if __name__ == "__main__":

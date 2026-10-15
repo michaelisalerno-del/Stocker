@@ -33,4 +33,4 @@ echo
 echo "Bootstrap complete."
 echo "Next steps:"
 echo "  bash scripts/check.sh"
-echo "  uv run --no-sync stocker futures-run --config configs/futures.paper.yaml --database .stocker/saxo-sim-disabled.sqlite3"
+echo "  uv run --no-sync stocker paper-run --config configs/paper.example.yaml --database .stocker/paper-record.sqlite3"

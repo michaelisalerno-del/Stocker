@@ -91,7 +91,7 @@ def test_hardening_headers_are_on_every_response(monkeypatch):
         assert response.headers["x-content-type-options"] == "nosniff"
 
 
-def test_futures_server_preserves_authenticated_proxy_socket_peer(monkeypatch, tmp_path):
+def test_paper_server_preserves_authenticated_proxy_socket_peer(monkeypatch, tmp_path):
     from unittest.mock import AsyncMock
 
     import httpx
@@ -128,9 +128,9 @@ def test_futures_server_preserves_authenticated_proxy_socket_peer(monkeypatch, t
                     statuses.append((await client.get("/api/system", headers=headers)).status_code)
 
     monkeypatch.setattr(uvicorn, "Server", Server)
-    config = tmp_path / "futures.yaml"
-    config.write_text("armed: false\n")
-    main(["futures-run", "--config", str(config), "--database", str(tmp_path / "state.sqlite")])
+    config = tmp_path / "paper.yaml"
+    config.write_text("data_environment: SAXO_SIM\n")
+    main(["paper-run", "--config", str(config), "--database", str(tmp_path / "state.sqlite")])
     assert statuses == [200, 200, 403]
 
 
@@ -141,7 +141,7 @@ def test_oauth_redirect_origin_reaches_state_validation_and_landing(
     import httpx
 
     from stocker_dashboard.app import create_dashboard_app
-    from stocker_execution.config import FuturesConfig, SaxoSettings
+    from stocker_execution.config import PaperConfig, SaxoSettings
     from stocker_execution.runtime import Runtime
     from stocker_execution.saxo_auth import atomic_json
     from stocker_execution.store import Store
@@ -158,7 +158,7 @@ def test_oauth_redirect_origin_reaches_state_validation_and_landing(
 
     async def scenario():
         runtime = Runtime(
-            FuturesConfig(
+            PaperConfig(
                 saxo=SaxoSettings(
                     credentials_file=path,
                     redirect_uri="https://stocker.example/oauth/saxo/callback",
@@ -180,8 +180,8 @@ def test_oauth_redirect_origin_reaches_state_validation_and_landing(
                 },
             )
 
-        await runtime.data.client.oauth.http.aclose()
-        runtime.data.client.oauth.http = httpx.AsyncClient(transport=httpx.MockTransport(exchange))
+        await runtime.client.oauth.http.aclose()
+        runtime.client.oauth.http = httpx.AsyncClient(transport=httpx.MockTransport(exchange))
         application = create_dashboard_app(runtime)
         transport = httpx.ASGITransport(application, client=("127.0.0.1", 123))
         async with httpx.AsyncClient(
@@ -264,7 +264,7 @@ def test_oauth_redirect_origin_reaches_state_validation_and_landing(
                 headers=navigation,
             )
             assert replay.status_code == 400 and exchanges == ["/token"]
-            assert not runtime.broker.armed and not runtime.data.account_verified
+            assert runtime.client.oauth.status == "AUTHENTICATED"
         await runtime.stop()
         runtime.store.db.close()
 

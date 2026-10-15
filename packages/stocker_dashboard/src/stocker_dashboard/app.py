@@ -1,25 +1,18 @@
-"""Authenticated futures views, independent of position management."""
+"""The paper record's pages: Today, Record and System. Display only; nothing here trades."""
 
-import asyncio
-import json
 import sqlite3
-from datetime import date
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
 from starlette.types import Scope
 
 from stocker_dashboard.security import DashboardSecurity
-from stocker_execution import views
-from stocker_execution.config import MARKETS, PAGE_SIZE
-from stocker_execution.contracts import key
 from stocker_execution.runtime import Runtime
-from stocker_execution.saxo_auth import SaxoError
 
+PAGES = {"", "record", "system"}
 # Revalidate page assets so a deploy never pairs a stale script with new markup.
 NO_CACHE = {"Cache-Control": "no-cache"}
 
@@ -31,168 +24,38 @@ class RevalidatedStaticFiles(StaticFiles):
         return response
 
 
-class ArmRequest(BaseModel):
-    acknowledgement: str = Field("", max_length=64)
-
-
 def create_dashboard_app(runtime: Runtime) -> FastAPI:
-    app = FastAPI(title="SLRNO — Futures PAPER")
+    app = FastAPI(title="SLRNO — paper record")
     app.add_middleware(DashboardSecurity)
     static = Path(__file__).with_name("static")
     app.mount("/static", RevalidatedStaticFiles(directory=static), name="static")
 
     @app.exception_handler(sqlite3.Error)
     async def database_unavailable(request: Any, exc: sqlite3.Error) -> JSONResponse:
-        # A failed display read never changes execution state; the runtime's own
-        # ledger access fails closed and disarms independently.
-        return JSONResponse(status_code=503, content={"error": "LEDGER_UNAVAILABLE"})
+        # A failed display read never changes the record; the runtime keeps running.
+        return JSONResponse(status_code=503, content={"error": "RECORD_UNAVAILABLE"})
 
     @app.get("/api/health")
     async def health() -> JSONResponse:
-        ok = (
-            runtime.worker_health == runtime.manager_health == "RUNNING"
-            and not runtime.broker.fatal_error
-        )
+        ok = runtime.worker_health == "RUNNING"
         return JSONResponse(status_code=200 if ok else 503, content=runtime.status())
 
-    @app.get("/api/overview")
-    async def overview() -> dict[str, Any]:
-        return runtime.overview()
+    @app.get("/api/today")
+    async def today() -> dict[str, Any]:
+        return runtime.today()
 
-    @app.get("/api/market/{market}")
-    async def market_detail(market: str, diagnostics: bool = False) -> dict[str, Any]:
-        if market not in MARKETS:
-            raise HTTPException(422, "Unknown futures market")
-        return runtime.market_detail(market, diagnostics=diagnostics)
-
-    @app.get("/api/market/{market}/book")
-    async def market_book(market: str) -> dict[str, Any]:
-        if market not in MARKETS:
-            raise HTTPException(422, "Unknown futures market")
-        identity = runtime.markets[market].identity
-        if identity is None:
-            return {"series": [], "tick_size": None, "status": "CONTRACT_NOT_VERIFIED"}
-        instrument = key(identity)
-        tick, blobs = views.book_rows(runtime.recorder, instrument)
-        # Decode the retained rows off the event loop that also runs trading.
-        return {
-            "status": "AVAILABLE" if blobs else "NO_RETAINED_ROWS",
-            **await asyncio.to_thread(views.book_series, tick, blobs, instrument),
-        }
-
-    @app.get("/api/execution")
-    async def execution() -> dict[str, Any]:
-        return runtime.execution_view()
+    @app.get("/api/record")
+    async def record(offset: int = Query(0, ge=0)) -> dict[str, Any]:
+        return {**runtime.store.record(offset), "offset": offset, "system": runtime.status()}
 
     @app.get("/api/system")
-    async def system(diagnostics: bool = False) -> dict[str, Any]:
-        return {
-            **runtime.status(),
-            "configuration": runtime.config.model_dump(mode="json", exclude={"saxo"})
-            if diagnostics
-            else None,
-            "markets": [
-                {
-                    "market": s.market,
-                    "problem": s.problem,
-                    "reference_sessions": len(s.references),
-                    "capabilities": runtime.data.capability_view(s),
-                }
-                for s in runtime.markets.values()
-            ],
-        }
-
-    @app.get("/api/history")
-    async def history(
-        market: str | None = None,
-        day: date | None = None,
-        version: str | None = Query(None, max_length=80),
-        offset: int = Query(0, ge=0),
-        sort: Literal["asc", "desc"] = "desc",
-        trades: bool = False,
-    ) -> dict[str, Any]:
-        if market is not None and market not in MARKETS:
-            raise HTTPException(422, "Unknown futures market")
-        rows = runtime.store.history(
-            market, day.isoformat() if day else None, version, offset, sort, trades_only=trades
-        )
-        return {
-            "rows": rows,
-            "offset": offset,
-            "page_size": PAGE_SIZE,
-            "has_more": len(rows) == PAGE_SIZE,
-            "system": runtime.status(),
-        }
-
-    @app.get("/api/detail")
-    async def detail(identity: str = Query(max_length=250)) -> dict[str, Any]:
-        row = runtime.store.db.execute("SELECT * FROM signals WHERE id=?", (identity,)).fetchone()
-        if not row:
-            raise HTTPException(404, "Opportunity not found")
-        lifecycle = [
-            dict(r)
-            for r in runtime.store.db.execute(
-                "SELECT * FROM lifecycle WHERE reference=? OR reference IN "
-                "(SELECT reference FROM orders WHERE event_id=?) "
-                "ORDER BY sequence DESC LIMIT 100",
-                (identity, identity),
-            )
-        ]
-        fills = runtime.store.fills(identity)
-        signal = dict(row)
-        return {
-            "timeline": views.timeline(signal, lifecycle, fills),
-            # The evidence blob is served once, decoded, as `inputs`.
-            "signal": {k: v for k, v in signal.items() if k != "detail"},
-            "orders": runtime.store.orders(identity),
-            "fills": fills,
-            "inputs": json.loads(row["detail"]),
-            "l2_observation": runtime.store.depth_summary(identity),
-            "lifecycle": lifecycle,
-        }
-
-    @app.post("/api/entries/pause")
-    async def pause() -> dict[str, Any]:
-        runtime.pause = True
-        return runtime.status()
-
-    @app.post("/api/entries/resume")
-    async def resume() -> dict[str, Any]:
-        runtime.pause = False
-        return runtime.status()
-
-    @app.post("/api/paper/preflight")
-    async def preflight() -> dict[str, Any]:
-        try:
-            return await runtime.broker.preflight()
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from None
-
-    @app.post("/api/paper/arm")
-    async def arm(body: ArmRequest) -> dict[str, Any]:
-        try:
-            runtime.broker.arm(body.acknowledgement)
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from None
-        return runtime.status()
-
-    @app.post("/api/paper/disarm")
-    async def disarm() -> dict[str, Any]:
-        runtime.broker.armed = False
-        return runtime.status()
-
-    @app.post("/api/session/primary")
-    async def primary_session() -> dict[str, Any]:
-        try:
-            await runtime.data.take_primary_session()
-        except SaxoError as exc:
-            raise HTTPException(409, str(exc)) from None
+    async def system() -> dict[str, Any]:
         return runtime.status()
 
     @app.post("/oauth/saxo/start")
     async def oauth_start(request: Request) -> Response:
         try:
-            location, binding = runtime.data.client.oauth.begin()
+            location, binding = runtime.client.oauth.begin()
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
         response: Response = (
@@ -216,7 +79,7 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
     @app.get("/oauth/saxo/callback")
     async def oauth_callback(request: Request) -> RedirectResponse:
         try:
-            await runtime.data.client.oauth.callback(
+            await runtime.client.oauth.callback(
                 request.query_params.get("state", ""),
                 request.cookies.get("slrno_oauth_binding", ""),
                 request.query_params.get("code", ""),
@@ -229,53 +92,9 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
-    @app.get("/api/recordings")
-    async def recordings() -> dict[str, Any]:
-        # The same six fields as the catalog: an active capture also carries every reference
-        # payload and annotation, megabytes the page does not read, serialised on the trading loop.
-        fields = ("segment", "state", "start", "end", "key", "protected")
-        return {
-            "active": [{k: c[k] for k in fields} for c in runtime.recorder.active.values()],
-            "completed": runtime.recorder.catalog[-100:],
-        }
-
-    @app.get("/api/recordings/{segment}")
-    async def recording(segment: str) -> FileResponse:
-        if len(segment) != 64 or any(c not in "0123456789abcdef" for c in segment):
-            raise HTTPException(404, "Unknown recording")
-        path = runtime.recorder.directory / (segment + ".jsonl.gz")
-        if not path.is_file():
-            raise HTTPException(404, "Recording unavailable")
-        return FileResponse(path, media_type="application/gzip", filename=path.name)
-
-    @app.get("/api/recordings/{segment}/manifest")
-    async def recording_manifest(segment: str) -> FileResponse:
-        if len(segment) != 64 or any(c not in "0123456789abcdef" for c in segment):
-            raise HTTPException(404, "Unknown recording")
-        path = runtime.recorder.directory / (segment + ".manifest.json")
-        if not path.is_file():
-            raise HTTPException(404, "Manifest unavailable")
-        return FileResponse(path, media_type="application/json", filename=path.name)
-
-    @app.post("/api/recordings/{segment}/prune")
-    async def prune_recording(segment: str) -> dict[str, Any]:
-        referenced = {
-            r[0] or ""
-            for r in runtime.store.db.execute(
-                "SELECT json_extract(summary,'$.segment') FROM depth_captures"
-            )
-        }
-        try:
-            # Completed, unreferenced, unprotected records only: two unlinks, on the loop so
-            # the recorder's counters are never touched from two threads.
-            runtime.recorder.prune(segment, referenced)
-        except (OSError, ValueError):
-            raise HTTPException(409, "ACTIVE_REFERENCED_PROTECTED_OR_UNAVAILABLE") from None
-        return {"pruned": segment}
-
     @app.get("/{page:path}")
     async def page(page: str) -> Any:
-        if page not in {"", "markets", "opportunities", "execution", "system"}:
+        if page not in PAGES:
             raise HTTPException(404, "No such SLRNO page")
         return FileResponse(static / "index.html", headers=NO_CACHE)
 

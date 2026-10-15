@@ -1,4 +1,8 @@
-"""Explicit endpoint permissions. The LIVE client cannot transmit broker mutations."""
+"""Read-only Saxo access: an explicit list of GET endpoints and nothing else.
+
+The paper record never places, changes or cancels an order and never touches the session, so it
+can never take the user's real-time slot from SaxoTraderGO.
+"""
 
 import asyncio
 import json
@@ -11,69 +15,23 @@ import httpx
 from stocker_execution.saxo_auth import OAuth, SaxoError, SaxoRefused
 
 READ_PATHS = (
-    r"/root/v2/user",
     r"/root/v1/sessions/capabilities",
     r"/port/v1/accounts/me",
-    r"/port/v1/clients/me",
-    r"/port/v1/balances",
-    r"/port/v1/(orders|positions|netpositions)/me",
-    r"/port/v1/closedpositions",
-    r"/ref/v1/instruments",
-    r"/ref/v1/instruments/details/[0-9]+/(ContractFutures|FuturesOption|FxSpot)",
+    r"/ref/v1/instruments/details/[0-9]+/(CfdOnIndex|Etf|StockOption)",
     r"/ref/v1/instruments/contractoptionspaces/[0-9]+",
-    r"/cs/v1/tradingconditions/ContractOptionSpaces/(?:[A-Za-z0-9_=-]|%(?:2F|2B|3D|7C))+/[0-9]+",
     r"/ref/v1/exchanges/[A-Za-z0-9_-]+",
-    r"/ref/v1/currencypairs",
-    r"/trade/v1/(prices|infoprices)",
+    r"/trade/v1/infoprices(/list)?",
     r"/chart/v3/charts",
-    r"/cs/v1/audit/orderactivities",
-    r"/ens/v1/activities",
 )
 REST_QUEUE_LIMIT = 32  # requests waiting for the pacer before new ones are refused
-SUBSCRIPTIONS = (
-    "/port/v1/balances/subscriptions",
-    "/trade/v1/prices/subscriptions",
-    "/trade/v1/optionschain/subscriptions",
-    "/root/v1/sessions/events/subscriptions",
-    "/chart/v3/charts/subscriptions",
-    "/ens/v1/activities/subscriptions",
-)
+REQUEST_SPACING = 0.55  # seconds between requests, inside Saxo's per-session limit
 
 
-PRIMARY_SESSION = {"TradeLevel": "FullTradingAndChat"}
-
-
-def allowed(
-    method: str, path: str, *, sim_orders: bool = False, primary_session: bool = False
-) -> bool:
+def allowed(method: str, path: str) -> bool:
     # Accept canonical local paths only; no URL, traversal, escaping or query ambiguity.
     if not re.fullmatch(r"/[A-Za-z0-9/%=_-]+", path) or "//" in path:
         return False
-    if method == "GET":
-        return any(re.fullmatch(p, path) for p in READ_PATHS)
-    if method == "POST" and path in SUBSCRIPTIONS:
-        return True
-    if method == "PATCH" and re.fullmatch(
-        r"/trade/v1/optionschain/subscriptions/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", path
-    ):
-        return True
-    # One subscription (.../{ContextId}/{ReferenceId}) or every subscription of a context.
-    if method == "DELETE" and any(
-        re.fullmatch(re.escape(p) + r"/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?", path)
-        for p in SUBSCRIPTIONS
-    ):
-        return True
-    if primary_session:
-        # Only the user's System-page click: one primary session per user, so this can delay or
-        # log off SaxoTraderGO. Never automatic.
-        return method == "PATCH" and path == "/root/v1/sessions/capabilities"
-    return sim_orders and (
-        (method == "POST" and path in {"/trade/v2/orders", "/trade/v2/orders/precheck"})
-        or (
-            method == "DELETE"
-            and re.fullmatch(r"/trade/v2/orders/[A-Za-z0-9_-]+", path) is not None
-        )
-    )
+    return method == "GET" and any(re.fullmatch(p, path) for p in READ_PATHS)
 
 
 def retry_after(headers: Any) -> float:
@@ -109,57 +67,10 @@ class SaxoClient:
         self.pace = asyncio.Lock()
         self.waiters = 0
         self.calls = 0
-        self.sim_account_verified = False
 
-    async def authorize_stream(self, context: str) -> None:
-        """Bind a renewed access token to the open streaming context (Saxo: 202 Accepted).
-
-        This is the streaming host, not the REST gateway, so it sits outside the allow-list.
-        """
-        token = await self.oauth.access_token()
-        try:
-            response = await self.http.put(
-                self.oauth.urls["stream"].replace("wss://", "https://", 1) + "/authorize",
-                params={"contextid": context},
-                headers={"Authorization": "Bearer " + token},
-            )
-        except httpx.HTTPError:
-            raise SaxoError("STREAM_REAUTHORISATION_UNAVAILABLE") from None
-        if response.status_code != 202:
-            raise SaxoError("STREAM_REAUTHORISATION_HTTP_" + str(response.status_code))
-
-    async def request(
-        self,
-        method: str,
-        path: str,
-        *,
-        params: dict[str, Any] | None = None,
-        body: dict[str, Any] | None = None,
-        execution: bool = False,
-        primary_session: bool = False,
-    ) -> dict[str, Any]:
-        # Refusals before anything is sent are SaxoRefused: an order so refused cannot exist.
-        sim_orders = execution and self.environment == "SAXO_SIM" and self.sim_account_verified
-        if not allowed(method, path, sim_orders=sim_orders, primary_session=primary_session):
-            raise SaxoRefused("ENDPOINT_BLOCKED_LIVE_ORDERS_DISABLED")
-        if primary_session and (body != PRIMARY_SESSION or params or execution):
-            raise SaxoRefused("ONLY_PRIMARY_SESSION_REQUEST")
-        if execution and (
-            not sim_orders or (body or params or {}).get("AccountKey") != self.oauth.account_key
-        ):
-            raise SaxoRefused("SIM_ACCOUNT_NOT_VERIFIED")
-        if (
-            execution
-            and method == "POST"
-            and (
-                not body
-                or body.get("AssetType") != "FuturesOption"
-                or body.get("Amount") != 1
-                or (body.get("BuySell"), body.get("ToOpenClose"))
-                not in {("Buy", "ToOpen"), ("Sell", "ToClose")}
-            )
-        ):
-            raise SaxoRefused("ONLY_LONG_FUTURES_OPTION_ORDERS")
+    async def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if not allowed("GET", path):
+            raise SaxoRefused("ENDPOINT_NOT_ALLOWED")
         if self.waiters >= REST_QUEUE_LIMIT:
             raise SaxoRefused("REST_QUEUE_LIMIT")
         self.waiters += 1
@@ -169,18 +80,15 @@ class SaxoClient:
                 try:
                     token = await self.oauth.access_token()
                 except SaxoError as exc:
-                    if attempt == 0:
-                        raise SaxoRefused(str(exc)) from None  # nothing has been sent yet
-                    raise
+                    raise SaxoRefused(str(exc)) from None  # nothing has been sent
                 async with self.pace:
                     await asyncio.sleep(max(0, self.next_request - time.monotonic()))
-                    self.next_request = time.monotonic() + 0.55
+                    self.next_request = time.monotonic() + REQUEST_SPACING
                 try:
                     async with self.http.stream(
-                        method,
+                        "GET",
                         self.oauth.urls["rest"] + path,
                         params=params,
-                        json=body,
                         headers={"Authorization": "Bearer " + token},
                     ) as streamed:
                         # aiter_bytes decodes the wire compression once; the body is
@@ -192,9 +100,7 @@ class SaxoClient:
                             content.extend(chunk)
                         status, headers = streamed.status_code, streamed.headers
                 except httpx.HTTPError:
-                    raise SaxoError(
-                        "AMBIGUOUS_REQUEST" if execution else "SAXO_TRANSPORT_UNAVAILABLE"
-                    ) from None
+                    raise SaxoError("SAXO_TRANSPORT_UNAVAILABLE") from None
                 self.calls += 1
                 self.rate_headers = {
                     k: v for k, v in headers.items() if k.lower().startswith("x-ratelimit-")
@@ -202,7 +108,7 @@ class SaxoClient:
                 if status == 429:
                     seconds = retry_after(headers)
                     self.next_request = max(self.next_request, time.monotonic() + seconds)
-                    if method == "GET" and attempt < 2:  # reads retry twice; writes never
+                    if attempt < 2:
                         attempt += 1
                         continue
                 if status == 401:

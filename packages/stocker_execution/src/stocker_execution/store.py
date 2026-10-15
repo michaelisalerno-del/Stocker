@@ -1,47 +1,56 @@
-"""Fresh execution namespace, durable intent, reservations and broker evidence."""
+"""The paper record: one SQLite file of signals, paper trades, event states and saved boards."""
 
-import hashlib
 import json
 import sqlite3
-import time
-from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from stocker_execution.config import MAX_OPEN_POSITIONS, MAX_PREMIUM_RISK_PENNIES, PAGE_SIZE
+from stocker_execution.config import PAGE_SIZE
 
-TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
-# Every ceiling a reservation was ever written under (£10, £50, £1,000) and the current one:
-# rows keep their policy amount, and a rebuild for a new ceiling must accept all of them.
-POLICIES = ",".join(str(p) for p in sorted({1000, 5000, 100000, MAX_PREMIUM_RISK_PENNIES}))
-# Per-trade GBP sums over a reservation's fills (r, f), shared by the totals and the trade rows.
-INCOMPLETE = """SUM(CASE WHEN f.exec_id IS NOT NULL AND (f.commission IS NULL OR f.fx IS NULL
-    OR f.commission_currency IS NULL
-    OR f.commission_currency NOT IN (json_extract(r.plan,'$.currency'),'GBP'))
-    THEN 1 ELSE 0 END)"""
-VALUE_GBP = """f.quantity*f.price*json_extract(r.plan,'$.multiplier')
-    *json_extract(r.plan,'$.price_unit_factor')*f.fx"""
-FEE_GBP = "f.commission*(CASE WHEN f.commission_currency='GBP' THEN 1 ELSE f.fx END)"
-NET_GBP = f"SUM((CASE WHEN f.side='SLD' THEN 1 ELSE -1 END)*{VALUE_GBP}-{FEE_GBP})"
-PAID_GBP = f"SUM(CASE WHEN f.side='BOT' THEN {VALUE_GBP}+{FEE_GBP} END)"
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS paper_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS events (
+  day TEXT NOT NULL, name TEXT NOT NULL, due TEXT NOT NULL, effective TEXT,
+  status TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', updated TEXT NOT NULL,
+  PRIMARY KEY (day, name));
+CREATE TABLE IF NOT EXISTS signals (
+  day TEXT NOT NULL, method TEXT NOT NULL, market TEXT NOT NULL,
+  side INTEGER NOT NULL CHECK (side IN (-1, 0, 1)), reason TEXT NOT NULL,
+  detail TEXT NOT NULL, created TEXT NOT NULL,
+  PRIMARY KEY (day, method, market));
+CREATE TABLE IF NOT EXISTS cfd_trades (
+  id INTEGER PRIMARY KEY, day TEXT NOT NULL, market TEXT NOT NULL, uic INTEGER NOT NULL,
+  side INTEGER NOT NULL CHECK (side IN (-1, 1)), amount REAL NOT NULL CHECK (amount > 0),
+  factor REAL NOT NULL, stop REAL NOT NULL,
+  entry_at TEXT NOT NULL, entry_price REAL NOT NULL, entry_bid REAL NOT NULL,
+  entry_ask REAL NOT NULL,
+  exit_at TEXT, exit_price REAL, exit_bid REAL, exit_ask REAL, exit_reason TEXT, pnl_usd REAL,
+  UNIQUE (day, market));
+CREATE TABLE IF NOT EXISTS option_trades (
+  id INTEGER PRIMARY KEY, day TEXT NOT NULL, method TEXT NOT NULL,
+  side INTEGER NOT NULL CHECK (side IN (-1, 1)), uic INTEGER NOT NULL, expiry TEXT NOT NULL,
+  put_call TEXT NOT NULL, strike REAL NOT NULL, exit_day TEXT NOT NULL,
+  entry_for TEXT NOT NULL, entry_read TEXT NOT NULL, entry_delay INTEGER,
+  entry_bid REAL NOT NULL, entry_ask REAL NOT NULL, entry_delta REAL, entry_vol REAL,
+  entry_underlying REAL, cost_buy REAL,
+  exit_for TEXT, exit_read TEXT, exit_delay INTEGER, exit_bid REAL, exit_ask REAL,
+  exit_delta REAL, exit_underlying REAL, cost_sell REAL, exit_reason TEXT, pnl_usd REAL,
+  late_for TEXT, late_bid REAL, late_ask REAL, late_underlying REAL,
+  UNIQUE (day, method));
+CREATE TABLE IF NOT EXISTS snapshots (
+  id INTEGER PRIMARY KEY, day TEXT NOT NULL, event TEXT NOT NULL, taken TEXT NOT NULL,
+  payload TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS snapshot_day ON snapshots (day, event);
+"""
 
-RESERVATIONS = f"""CREATE TABLE {{table}} (
-    id TEXT PRIMARY KEY REFERENCES signals(id),
-    allocation_pennies INTEGER NOT NULL,
-    active INTEGER NOT NULL CHECK(active IN (0,1)),
-    state TEXT NOT NULL, plan TEXT NOT NULL, created_at TEXT NOT NULL,
-    policy_pennies INTEGER NOT NULL
-    CHECK(policy_pennies IN ({POLICIES})),
-    CHECK(allocation_pennies=policy_pennies))"""
 
-
-def stamp() -> str:
-    return datetime.now(UTC).isoformat()
+def stamp(at: datetime | None = None) -> str:
+    return (at or datetime.now(UTC)).astimezone(UTC).isoformat()
 
 
 def encode(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, allow_nan=False)
+    return json.dumps(value, sort_keys=True, allow_nan=False, default=str)
 
 
 class Store:
@@ -52,512 +61,150 @@ class Store:
         tables = {
             x[0] for x in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-        if tables and "futures_meta" not in tables:
+        if tables and "paper_meta" not in tables:
+            # Never write paper rows into the retired futures ledger or any other database.
             self.db.close()
-            raise ValueError("FRESH_FUTURES_LEDGER_REQUIRED")
+            raise ValueError("PAPER_RECORD_DATABASE_REQUIRED")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
-        self.db.execute("PRAGMA foreign_keys=ON")
-        self.db.executescript("""
-        CREATE TABLE IF NOT EXISTS futures_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS signals (
-          id TEXT PRIMARY KEY, market TEXT NOT NULL, rule_version TEXT NOT NULL,
-          signal_at TEXT NOT NULL, exit_at TEXT NOT NULL, decision TEXT NOT NULL,
-          reason TEXT NOT NULL, detail TEXT NOT NULL);
-        CREATE INDEX IF NOT EXISTS signal_history ON signals(signal_at,market,rule_version);
-        CREATE INDEX IF NOT EXISTS signal_decision ON signals(decision);
-        CREATE INDEX IF NOT EXISTS signal_reason ON signals(reason);
-        CREATE TABLE IF NOT EXISTS depth_captures (
-          id TEXT PRIMARY KEY REFERENCES signals(id), summary TEXT NOT NULL);
-        DROP INDEX IF EXISTS depth_capture_status;
-        CREATE TABLE IF NOT EXISTS orders (
-          reference TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES reservations(id),
-          role TEXT NOT NULL CHECK(role IN ('ENTRY','EXIT')), order_id INTEGER NOT NULL UNIQUE,
-          perm_id INTEGER, status TEXT NOT NULL, filled REAL NOT NULL DEFAULT 0,
-          remaining REAL NOT NULL DEFAULT 1, deadline TEXT NOT NULL, payload TEXT NOT NULL);
-        CREATE INDEX IF NOT EXISTS order_event ON orders(event_id,role);
-        CREATE TABLE IF NOT EXISTS fills (
-          exec_id TEXT PRIMARY KEY, reference TEXT NOT NULL REFERENCES orders(reference),
-          con_id INTEGER NOT NULL, quantity REAL NOT NULL, price REAL NOT NULL,
-          side TEXT NOT NULL, at TEXT NOT NULL, commission REAL, commission_currency TEXT,
-          fx REAL, fx_at TEXT, superseded INTEGER NOT NULL DEFAULT 0);
-        CREATE INDEX IF NOT EXISTS fill_order ON fills(reference,superseded);
-        CREATE TABLE IF NOT EXISTS positions (
-          con_id INTEGER PRIMARY KEY, quantity REAL NOT NULL, detail TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS lifecycle (
-          sequence INTEGER PRIMARY KEY, at TEXT NOT NULL, reference TEXT NOT NULL,
-          kind TEXT NOT NULL, detail TEXT NOT NULL);
-        CREATE INDEX IF NOT EXISTS lifecycle_reference ON lifecycle(reference,sequence);
-        """)
-        if "reservations" in tables:
-            self.migrate_allocation()
-        else:
-            with self.db:
-                self.db.execute(RESERVATIONS.format(table="reservations"))
-                self.db.execute("INSERT INTO futures_meta VALUES('allocation_schema','2')")
-        self._economics_cache: tuple[tuple[int, int], float, dict[str, Any]] | None = None
+        self.db.executescript(SCHEMA)
         if self.db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
-            raise ValueError("LEDGER_INTEGRITY_FAILURE")
+            raise ValueError("PAPER_RECORD_INTEGRITY_FAILURE")
 
-    def migrate_allocation(self) -> None:
-        """Rebuild an older reservation table (fixed £10, or the £50 ceiling's policy check);
-        retain every row and its policy amount.
+    def bind(self, environment: str) -> None:
+        """Rows from one Saxo environment never share a file with another's."""
+        expected = encode({"record": "PAPER", "data_environment": environment})
+        row = self.db.execute("SELECT value FROM paper_meta WHERE key='provenance'").fetchone()
+        if row is None:
+            with self.db:
+                self.db.execute("INSERT INTO paper_meta VALUES ('provenance', ?)", (expected,))
+        elif row[0] != expected:
+            raise ValueError("PAPER_RECORD_PROVENANCE_MISMATCH")
 
-        Foreign keys are disabled outside the transaction solely for SQLite's table
-        rebuild. Validate them before commit and restore enforcement even on failure.
-        """
-        columns = {r[1] for r in self.db.execute("PRAGMA table_info(reservations)")}
-        (sql,) = self.db.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='reservations'"
+    # events ---------------------------------------------------------------------------------
+    def event(self, day: str, name: str) -> sqlite3.Row | None:
+        row: sqlite3.Row | None = self.db.execute(
+            "SELECT * FROM events WHERE day=? AND name=?", (day, name)
         ).fetchone()
-        if "policy_pennies" in columns and f"IN ({POLICIES})" in sql:
-            return
-        # The fixed-£10 table predates the policy column; later tables already carry it.
-        rows = "*" if "policy_pennies" in columns else "*,allocation_pennies"
-        self.db.execute("PRAGMA foreign_keys=OFF")
-        try:
-            self.db.execute("BEGIN IMMEDIATE")
-            self.db.execute(RESERVATIONS.format(table="reservations_new"))
-            self.db.execute(f"INSERT INTO reservations_new SELECT {rows} FROM reservations")
-            self.db.execute("DROP TABLE reservations")
-            self.db.execute("ALTER TABLE reservations_new RENAME TO reservations")
-            if self.db.execute("PRAGMA foreign_key_check").fetchone():
-                raise ValueError("ALLOCATION_MIGRATION_FOREIGN_KEY_FAILURE")
-            self.db.execute("INSERT OR REPLACE INTO futures_meta VALUES('allocation_schema','2')")
-            self.db.commit()
-        except BaseException:
-            self.db.rollback()
-            raise
-        finally:
-            self.db.execute("PRAGMA foreign_keys=ON")
+        return row
 
-    def bind(self, environment: str, execution_mode: str) -> None:
-        expected = {
-            "provider": "SAXO",
-            "data_environment": environment,
-            "execution_mode": execution_mode,
-        }
-        saved = self.get_meta("provenance")
-        if saved is None and any(
-            self.db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
-            for table in ("signals", "orders", "positions")
-        ):
-            raise ValueError("EXISTING_LEDGER_PROVENANCE_MUST_NOT_BE_RELABELLED")
-        if saved is not None and saved != expected:
-            raise ValueError("SEPARATE_ENVIRONMENT_AND_EXECUTION_LEDGER_REQUIRED")
-        self.set_meta("provenance", expected)
-
-    def set_meta(self, key: str, value: Any) -> None:
-        with self.db:
-            self.db.execute(
-                "INSERT OR REPLACE INTO futures_meta VALUES (?,?)", (key, encode(value))
-            )
-
-    def get_meta(self, key: str, default: Any = None) -> Any:
-        row = self.db.execute("SELECT value FROM futures_meta WHERE key=?", (key,)).fetchone()
-        return json.loads(row[0]) if row else default
-
-    def audit(self, reference: str, kind: str, detail: Any) -> None:
-        self.db.execute(
-            "INSERT INTO lifecycle(at,reference,kind,detail) VALUES(?,?,?,?)",
-            (stamp(), reference, kind, encode(detail)),
-        )
-
-    def observe(self, event: dict[str, Any], reason: str, detail: Any) -> bool:
-        with self.db:
-            cur = self.db.execute(
-                "INSERT OR IGNORE INTO signals VALUES(?,?,?,?,?,?,?,?)",
-                (
-                    event["id"],
-                    event["market"],
-                    event["rule_version"],
-                    event["signal_at"],
-                    event["exit_at"],
-                    "SKIPPED" if reason else "SIGNAL_OBSERVED",
-                    reason,
-                    encode({**event, "inputs": detail, "capacity": self.capacity()}),
-                ),
-            )
-            return cur.rowcount == 1
-
-    def decision(self, identity: str, decision: str, reason: str = "") -> None:
-        with self.db:
-            self.db.execute(
-                "UPDATE signals SET decision=?,reason=? WHERE id=?", (decision, reason, identity)
-            )
-            self.audit(
-                identity,
-                "DECISION",
-                {"decision": decision, "reason": reason, "capacity": self.capacity()},
-            )
-
-    def depth_capture(self, identity: str, summary: dict[str, Any]) -> None:
-        # One small durable denominator row per opportunity/window, never per depth callback.
-        with self.db:
-            self.db.execute(
-                "INSERT OR REPLACE INTO depth_captures VALUES(?,?)", (identity, encode(summary))
-            )
-
-    def depth_summary(self, identity: str) -> dict[str, Any]:
-        row = self.db.execute(
-            "SELECT summary FROM depth_captures WHERE id=?", (identity,)
-        ).fetchone()
-        return (
-            json.loads(row[0])
-            if row
-            else {"state": "NOT_RECORDED", "reason": "NO_CAPTURE_METADATA"}
-        )
-
-    def capacity(self) -> dict[str, int]:
-        row = self.db.execute(
-            "SELECT COUNT(*),COALESCE(SUM(allocation_pennies),0) FROM reservations WHERE active=1"
-        ).fetchone()
-        return {"reserved_open_trades": row[0], "allocation_pennies": row[1]}
-
-    def reserve(self, identity: str, plan: dict[str, Any]) -> str:
-        """Serialize admission across tasks/processes; reserve the current per-trade ceiling."""
-        with self.db:
-            self.db.execute("BEGIN IMMEDIATE")
-            if self.db.execute("SELECT 1 FROM reservations WHERE id=?", (identity,)).fetchone():
-                return "DUPLICATE_OPPORTUNITY"
-            capacity = self.capacity()
-            if plan["quantity"] != 1 or not 0 < plan["cash_pennies"] <= MAX_PREMIUM_RISK_PENNIES:
-                reason = "MINIMUM_CONTRACT_COST_EXCEEDS_BUDGET"
-            elif capacity["reserved_open_trades"] >= MAX_OPEN_POSITIONS:
-                reason = (
-                    "SKIP_CAPACITY_FULL"  # four slots at the per-trade ceiling is the allocation
-                )
-            else:
-                reason = ""
-            self.audit(identity, "ADMISSION", {**capacity, "reason": reason, "plan": plan})
-            if reason:
-                self.db.execute(
-                    "UPDATE signals SET decision='SKIPPED',reason=? WHERE id=?", (reason, identity)
-                )
-                return reason
-            self.db.execute(
-                "INSERT INTO reservations VALUES(?,?,1,'RESERVED',?,?,?)",
-                (
-                    identity,
-                    MAX_PREMIUM_RISK_PENNIES,
-                    encode(plan),
-                    stamp(),
-                    MAX_PREMIUM_RISK_PENNIES,
-                ),
-            )
-            self.db.execute("UPDATE signals SET decision='ORDER_ELIGIBLE' WHERE id=?", (identity,))
-        return ""
-
-    def prepare_order(
-        self, identity: str, role: str, order_id: int, deadline: str, payload: dict[str, Any]
-    ) -> str:
-        with self.db:
-            self.db.execute("BEGIN IMMEDIATE")
-            reservation = self.db.execute(
-                "SELECT active FROM reservations WHERE id=?", (identity,)
-            ).fetchone()
-            if not reservation or not reservation[0]:
-                raise ValueError("NO_ACTIVE_RESERVATION")
-            previous = list(
-                self.db.execute(
-                    "SELECT * FROM orders WHERE event_id=? AND role=?", (identity, role)
-                )
-            )
-            if role == "ENTRY" and previous:
-                raise ValueError("ENTRY_ALREADY_ATTEMPTED")
-            if any(o["status"] not in TERMINAL for o in previous):
-                raise ValueError("RECONCILE_BEFORE_RETRY")
-            reference = (
-                "SLRNOF-"
-                + hashlib.sha256(identity.encode()).hexdigest()[:20]
-                + f"-{'B' if role == 'ENTRY' else 'S'}{len(previous)}"
-            )
-            self.db.execute(
-                "INSERT INTO orders(reference,event_id,role,order_id,status,deadline,payload) "
-                "VALUES(?,?,?,?,'SUBMITTING',?,?)",
-                (reference, identity, role, order_id, deadline, encode(payload)),
-            )
-            self.audit(reference, "DURABLE_SUBMISSION_INTENT", payload)
-        return reference
-
-    def active(self) -> list[dict[str, Any]]:
-        return [
-            dict(r)
-            for r in self.db.execute(
-                "SELECT r.*,s.market,s.exit_at,s.signal_at "
-                "FROM reservations r JOIN signals s USING(id) "
-                "WHERE active=1 ORDER BY s.signal_at,s.market"
-            )
-        ]
-
-    def orders(self, identity: str) -> list[dict[str, Any]]:
-        return [
-            dict(r)
-            for r in self.db.execute(
-                "SELECT * FROM orders WHERE event_id=? ORDER BY order_id", (identity,)
-            )
-        ]
-
-    def fills(self, identity: str) -> list[dict[str, Any]]:
-        return [
-            dict(r)
-            for r in self.db.execute(
-                "SELECT f.*,o.role FROM fills f JOIN orders o USING(reference) "
-                "WHERE event_id=? ORDER BY at,exec_id",
-                (identity,),
-            )
-        ]
-
-    def exposure(self, identity: str) -> float:
-        return float(
-            sum(f["quantity"] * (1 if f["side"] == "BOT" else -1) for f in self.fills(identity))
-        )
-
-    def record_fill(self, values: dict[str, Any], *, commit: bool = True) -> None:
-        # A broker audit update can include the fill and cumulative order counters
-        # in one transaction; never commit halfway through that caller's update.
-        with self.db if commit else nullcontext():
-            existing = self.db.execute(
-                "SELECT * FROM fills WHERE exec_id=?", (values["exec_id"],)
-            ).fetchone()
-            if existing:
-                for key in ("reference", "con_id", "quantity", "price", "side", "at"):
-                    if existing[key] != values[key]:
-                        raise ValueError("EXECUTION_ID_REUSED_WITH_DIFFERENT_EVIDENCE")
-                return
-            # Saxo corrections arrive as cumulative order evidence (see PaperBroker), so each
-            # execution id is recorded once; `superseded` is a retained, always-zero column.
-            self.db.execute(
-                "INSERT INTO fills"
-                "(exec_id,reference,con_id,quantity,price,side,at,fx,fx_at) "
-                "VALUES(:exec_id,:reference,:con_id,:quantity,:price,:side,:at,:fx,:fx_at)",
-                values,
-            )
-            mode = self.get_meta("provenance", {}).get("execution_mode")
-            self.audit(
-                values["reference"],
-                "INTERNAL_SIMULATED_FILL" if mode == "INTERNAL_PAPER" else "SAXO_SIM_BROKER_FILL",
-                values,
-            )
-            event = self.db.execute(
-                "SELECT event_id FROM orders WHERE reference=?", (values["reference"],)
-            ).fetchone()[0]
-            # A late fill reopens its obligation even if a prior snapshot looked flat.
-            self.db.execute(
-                "UPDATE reservations SET active=1,state='EXPOSURE_REQUIRES_RECONCILIATION' "
-                "WHERE id=?",
-                (event,),
-            )
-            self.db.execute(
-                "UPDATE signals SET decision=? WHERE id=?",
-                (
-                    "INTERNALLY_SIMULATED_FILL"
-                    if mode == "INTERNAL_PAPER"
-                    else "BROKER_PAPER_FILL",
-                    event,
-                ),
-            )
-
-    def mark_reconciled(self) -> None:
-        """Exposure matched the authoritative source: open trades are plainly open.
-
-        Runs inside the caller's transaction.
-        """
-        self.db.execute(
-            "UPDATE reservations SET state='OPEN' "
-            "WHERE active=1 AND state='EXPOSURE_REQUIRES_RECONCILIATION'"
-        )
-
-    def confirm_closed(self, identity: str, position: float) -> bool:
-        orders = self.orders(identity)
-        fills = self.fills(identity)
-        # A reservation with no order at all (the process died between reserve() and the entry
-        # order) is unfilled and closes here; the broker lock keeps enter() atomic otherwise.
-        if any(o["status"] not in TERMINAL for o in orders):
-            return False
-        for order in orders:
-            actual = sum(f["quantity"] for f in fills if f["reference"] == order["reference"])
-            if actual != order["filled"]:
-                return False
-        if self.exposure(identity) != 0 or position != 0:
-            return False
-        with self.db:
-            self.db.execute(
-                "UPDATE reservations SET active=0,state=? WHERE id=?",
-                ("CLOSED" if fills else "UNFILLED_CONFIRMED", identity),
-            )
-            self.db.execute(
-                "UPDATE signals SET decision=? WHERE id=?",
-                ("CLOSED_PAPER_TRADE" if fills else "UNFILLED_CONFIRMED", identity),
-            )
-            self.audit(identity, "CLOSURE_CONFIRMED", {"position": position})
-        return True
-
-    def history(
+    def set_event(
         self,
-        market: str | None,
-        day: str | None,
-        version: str | None,
-        offset: int = 0,
-        sort: str = "desc",
-        trades_only: bool = False,
-    ) -> list[dict[str, Any]]:
-        if sort not in {"asc", "desc"}:
-            raise ValueError("INVALID_HISTORY_SORT")
-        # Summary columns only; evidence blobs are fetched per opportunity on demand.
-        rows = [
-            dict(r)
-            for r in self.db.execute(
-                "SELECT s.id,s.market,s.rule_version,s.signal_at,s.exit_at,s.decision,s.reason,"
-                "r.state FROM signals s "
-                "LEFT JOIN reservations r USING(id) WHERE (? IS NULL OR market=?) "
-                "AND (? IS NULL OR substr(signal_at,1,10)=?) AND (? IS NULL OR rule_version=?) "
-                f"{'AND r.id IS NOT NULL ' if trades_only else ''}"
-                f"ORDER BY signal_at {sort},market,id LIMIT ? OFFSET ?",
-                (market, market, day, day, version, version, PAGE_SIZE, offset),
+        day: str,
+        name: str,
+        due: datetime,
+        status: str,
+        *,
+        effective: datetime | None = None,
+        note: str = "",
+    ) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT INTO events VALUES (?,?,?,?,?,?,?) ON CONFLICT (day, name) DO UPDATE SET "
+                "due=excluded.due, effective=excluded.effective, status=excluded.status, "
+                "note=excluded.note, updated=excluded.updated",
+                (day, name, stamp(due), effective and stamp(effective), status, note, stamp()),
             )
-        ]
-        results = self.trade_results([r["id"] for r in rows if r["state"]])
-        for row in rows:
-            row["trade"] = results.get(row["id"])
-        return rows
 
-    def trade_results(self, ids: list[str]) -> dict[str, dict[str, Any]]:
-        """Display only: each trade's option, average fill prices and GBP result after costs.
-
-        `net_gbp` (the same sum as the realised total) and `paid_gbp` stay unset until every fill
-        has its commission and conversion; `net_gbp` also until the trade is closed.
-        """
-        if not ids:
-            return {}
-        result = {}
-        for row in self.db.execute(
-            f"""
-            SELECT r.id,r.state,json_extract(r.plan,'$.option.right') AS right,
-              json_extract(r.plan,'$.option.strike') AS strike,
-              SUM(CASE WHEN f.side='BOT' THEN f.quantity*f.price END)
-                /SUM(CASE WHEN f.side='BOT' THEN f.quantity END) AS bought,
-              SUM(CASE WHEN f.side='SLD' THEN f.quantity*f.price END)
-                /SUM(CASE WHEN f.side='SLD' THEN f.quantity END) AS sold,
-              MIN(CASE WHEN f.side='BOT' THEN f.at END) AS bought_at,
-              MAX(CASE WHEN f.side='SLD' THEN f.at END) AS sold_at,
-              COUNT(f.exec_id) AS executions,{INCOMPLETE} AS incomplete,
-              {PAID_GBP} AS paid,{NET_GBP} AS net
-            FROM reservations r LEFT JOIN orders o ON o.event_id=r.id
-            LEFT JOIN fills f ON f.reference=o.reference
-            WHERE r.id IN ({",".join("?" * len(ids))}) GROUP BY r.id
-            """,
-            ids,
-        ):
-            complete = row["executions"] > 0 and not row["incomplete"]
-            result[row["id"]] = {
-                "state": row["state"],
-                "option": f"{row['right']} {row['strike']:g}" if row["right"] else None,
-                "bought": row["bought"],
-                "sold": row["sold"],
-                "bought_at": row["bought_at"],
-                "sold_at": row["sold_at"],
-                "paid_gbp": row["paid"] if complete else None,
-                "net_gbp": row["net"] if complete and row["state"] == "CLOSED" else None,
-            }
-        return result
-
-    def day_trades(self, day: str) -> list[dict[str, Any]]:
-        """Display only: the trades whose clock fell on a UTC day, oldest first."""
-        rows = [
-            dict(r)
-            for r in self.db.execute(
-                "SELECT s.id,s.market,s.signal_at,s.exit_at FROM reservations r "
-                "JOIN signals s USING(id) WHERE substr(s.signal_at,1,10)=? "
-                "ORDER BY s.signal_at,s.market",
-                (day,),
+    # signals and trades -----------------------------------------------------------------------
+    def add_signal(
+        self, day: str, method: str, market: str, side: int, reason: str, detail: dict[str, Any]
+    ) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR IGNORE INTO signals VALUES (?,?,?,?,?,?,?)",
+                (day, method, market, side, reason, encode(detail), stamp()),
             )
-        ]
-        results = self.trade_results([r["id"] for r in rows])
-        return [{**r, **results[r["id"]]} for r in rows]
 
-    def recent_signals(self, market: str, limit: int = 8) -> list[dict[str, Any]]:
-        return [
-            dict(r)
-            for r in self.db.execute(
-                "SELECT id,market,signal_at,decision,reason FROM signals WHERE market=? "
-                "ORDER BY signal_at DESC,market,id LIMIT ?",
-                (market, limit),
+    def signal(self, day: str, method: str, market: str) -> sqlite3.Row | None:
+        row: sqlite3.Row | None = self.db.execute(
+            "SELECT * FROM signals WHERE day=? AND method=? AND market=?", (day, method, market)
+        ).fetchone()
+        return row
+
+    def insert(self, table: str, values: dict[str, Any]) -> int:
+        assert table in {"cfd_trades", "option_trades"}
+        columns = ",".join(values)
+        with self.db:
+            cursor = self.db.execute(
+                f"INSERT INTO {table} ({columns}) VALUES ({','.join('?' * len(values))})",
+                tuple(values.values()),
             )
-        ]
+        return int(cursor.lastrowid or 0)
 
-    def economics(self) -> dict[str, Any]:
-        # Display only: own writes invalidate immediately; other connections via data_version.
-        revision = (self.db.total_changes, self.db.execute("PRAGMA data_version").fetchone()[0])
-        at = time.monotonic()
-        if (
-            self._economics_cache
-            and self._economics_cache[0] == revision
-            and at - self._economics_cache[1] < 5
-        ):
-            return self._economics_cache[2]
-        result = self._economics()
-        self._economics_cache = (revision, at, result)
-        return result
-
-    def _economics(self) -> dict[str, Any]:
-        net, closed, wins, provisional = 0.0, 0, 0, 0
-        # One indexed join, not one fills query per historical trade on every UI refresh.
-        rows = self.db.execute(f"""
-            SELECT r.id,COUNT(f.exec_id) AS executions,{INCOMPLETE} AS incomplete,{NET_GBP} AS pnl
-            FROM reservations r LEFT JOIN orders o ON o.event_id=r.id
-            LEFT JOIN fills f ON f.reference=o.reference
-            WHERE r.state='CLOSED' GROUP BY r.id
-        """)
-        for row in rows:
-            if not row["executions"] or row["incomplete"]:
-                provisional += 1
-                continue
-            pnl = row["pnl"]
-            net += pnl
-            closed += 1
-            wins += pnl > 0
-        counts = {
-            r[0]: r[1]
-            for r in self.db.execute("SELECT decision,COUNT(*) FROM signals GROUP BY decision")
-        }
-        reasons = {
-            r[0]: r[1]
-            for r in self.db.execute("SELECT reason,COUNT(*) FROM signals GROUP BY reason")
-        }
-        reported = [
-            json.loads(r[0])
-            for r in self.db.execute(
-                "SELECT value FROM futures_meta WHERE key LIKE 'broker_closed:%'"
+    def update(self, table: str, row_id: int, values: dict[str, Any]) -> None:
+        assert table in {"cfd_trades", "option_trades"}
+        assignments = ",".join(f"{k}=?" for k in values)
+        with self.db:
+            self.db.execute(
+                f"UPDATE {table} SET {assignments} WHERE id=?", (*values.values(), row_id)
             )
-        ]
 
-        def reported_total(*names: str) -> float | None:
-            values = [r.get(n) for r in reported for n in names]
-            if not reported or not all(isinstance(v, (int, float)) for v in values):
-                return None
-            return float(sum(values))
+    def cfd_trade(self, day: str, market: str) -> sqlite3.Row | None:
+        row: sqlite3.Row | None = self.db.execute(
+            "SELECT * FROM cfd_trades WHERE day=? AND market=?", (day, market)
+        ).fetchone()
+        return row
 
+    def open_cfd(self) -> list[sqlite3.Row]:
+        return list(self.db.execute("SELECT * FROM cfd_trades WHERE exit_at IS NULL ORDER BY id"))
+
+    def open_options(self) -> list[sqlite3.Row]:
+        return list(
+            self.db.execute("SELECT * FROM option_trades WHERE exit_read IS NULL ORDER BY id")
+        )
+
+    def option(self, day: str, method: str) -> sqlite3.Row | None:
+        row: sqlite3.Row | None = self.db.execute(
+            "SELECT * FROM option_trades WHERE day=? AND method=?", (day, method)
+        ).fetchone()
+        return row
+
+    def snapshot(self, day: str, event: str, payload: dict[str, Any]) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT INTO snapshots (day, event, taken, payload) VALUES (?,?,?,?)",
+                (day, event, stamp(), encode(payload)),
+            )
+
+    # dashboard reads ------------------------------------------------------------------------
+    def day_view(self, day: str) -> dict[str, Any]:
+        def rows(sql: str) -> list[dict[str, Any]]:
+            return [dict(r) for r in self.db.execute(sql, {"d": day})]
+
+        signals = rows("SELECT * FROM signals WHERE day=:d ORDER BY method, market")
+        for s in signals:
+            s["detail"] = json.loads(s["detail"])
         return {
-            # Saxo's own figures in the account base currency; never mixed with GBP totals.
-            "broker_reported": {
-                "count": len(reported),
-                "closed_profit_loss_base": reported_total("ClosedProfitLossInBaseCurrency"),
-                "costs_base": reported_total(
-                    "CostOpeningInBaseCurrency", "CostClosingInBaseCurrency"
-                ),
-            },
-            "realised_net_gbp": net if closed or not provisional else None,
-            "closed_with_complete_costs": closed,
-            "wins": wins,
-            "win_rate": wins / closed if closed else None,
-            "provisional_closed": provisional,
-            "opportunities": sum(counts.values()),
-            "decisions": counts,
-            "skip_reasons": reasons,
-            "eligible_trades": self.db.execute("SELECT COUNT(*) FROM reservations").fetchone()[0],
-            "fills": self.db.execute("SELECT COUNT(*) FROM fills").fetchone()[0],
-            "basis": "INTERNALLY_SIMULATED"
-            if self.get_meta("provenance", {}).get("execution_mode") == "INTERNAL_PAPER"
-            else "SAXO_SIM_BROKER_EXECUTIONS",
+            "events": rows("SELECT * FROM events WHERE day=:d ORDER BY due, name"),
+            "signals": signals,
+            "cfd": rows("SELECT * FROM cfd_trades WHERE day=:d ORDER BY id"),
+            # Today's option trades and any earlier one that closes today (Connors).
+            "options": rows("SELECT * FROM option_trades WHERE day=:d OR exit_day=:d ORDER BY id"),
         }
+
+    def record(self, offset: int) -> dict[str, Any]:
+        trades = [
+            dict(r)
+            for r in self.db.execute(
+                """SELECT 'CFD ' || market AS method, day, side, entry_at AS opened,
+                          exit_at AS closed, exit_reason, pnl_usd FROM cfd_trades
+                   UNION ALL
+                   SELECT method, day, side, entry_for, exit_for, exit_reason, pnl_usd
+                     FROM option_trades
+                   ORDER BY day DESC, method LIMIT ? OFFSET ?""",
+                (PAGE_SIZE, offset),
+            )
+        ]
+        summary = [
+            dict(r)
+            for r in self.db.execute(
+                """SELECT method, COUNT(*) AS trades, COUNT(pnl_usd) AS closed,
+                          SUM(pnl_usd > 0) AS wins, ROUND(SUM(pnl_usd), 2) AS total_usd,
+                          ROUND(AVG(pnl_usd), 2) AS mean_usd, MIN(day) AS first_day
+                     FROM (SELECT 'CFD ' || market AS method, day, pnl_usd FROM cfd_trades
+                           UNION ALL SELECT method, day, pnl_usd FROM option_trades)
+                    GROUP BY method ORDER BY method"""
+            )
+        ]
+        return {"trades": trades, "summary": summary, "has_more": len(trades) == PAGE_SIZE}

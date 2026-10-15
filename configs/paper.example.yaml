@@ -1,0 +1,7 @@
+# The paper record's only settings. The rules are frozen in methods.py and
+# docs/PAPER-RECORD-PROTOCOL.md; nothing here can enable orders.
+data_environment: SAXO_LIVE
+saxo:
+  # mode-0600 JSON: {environment, client_id, client_secret, account_key}
+  credentials_file: /etc/stocker/v1/saxo.live.credentials.json
+  redirect_uri: https://139.59.178.164/oauth/saxo/callback

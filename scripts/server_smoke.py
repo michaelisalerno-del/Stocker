@@ -15,9 +15,9 @@ from pathlib import Path
 def smoke() -> None:
     import httpx
 
-    import stocker_execution.__main__  # noqa: F401 - the deployed `stocker futures-run` entry point
+    import stocker_execution.__main__  # noqa: F401 - the deployed `stocker paper-run` entry point
     from stocker_dashboard.app import create_dashboard_app
-    from stocker_execution.config import FuturesConfig
+    from stocker_execution.config import PaperConfig
     from stocker_execution.runtime import Runtime
     from stocker_execution.store import Store
 
@@ -30,7 +30,7 @@ def smoke() -> None:
         assert importlib.util.find_spec(name) is None, name
     with tempfile.TemporaryDirectory(prefix="stocker-smoke-state-") as directory:
         root = Path(directory)
-        runtime = Runtime(FuturesConfig(), Store(root / "state.sqlite"))
+        runtime = Runtime(PaperConfig(), Store(root / "state.sqlite"))
         app = create_dashboard_app(runtime)
 
         async def check() -> None:
@@ -40,12 +40,19 @@ def smoke() -> None:
                     transport=httpx.ASGITransport(app), base_url="http://127.0.0.1"
                 ) as client,
             ):
-                for path in ("/", "/static/dashboard.js", "/api/system", "/api/overview"):
+                for path in (
+                    "/",
+                    "/record",
+                    "/static/dashboard.js",
+                    "/api/system",
+                    "/api/today",
+                    "/api/record",
+                ):
                     response = await client.get(path)
                     assert response.status_code == 200, (path, response.text)
 
         asyncio.run(check())
-    print("PASS: runtime-only imports, futures-options and offline dashboard startup/assets")
+    print("PASS: runtime-only imports, paper record and offline dashboard startup/assets")
 
 
 def main() -> None:

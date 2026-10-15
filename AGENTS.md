@@ -38,17 +38,18 @@ in the runtime trading hot path.
 ## Architecture rules
 
 - One repository and one application/codebase with clear modules.
-- One frozen four-market Saxo futures-options PAPER pipeline. This repository holds only the
-  runtime, its dashboard, their tests and operations material; retired providers and research
-  live in git history, never in active packages.
-- The existing authenticated dashboard is a consumer of runtime state; its failure must not stop position management.
-- Pure frozen futures calculations receive completed Saxo bars and never request broker data.
-- Frozen synthetic research prices must never substitute for listed contracts, quotes or executions.
-- Account exposure, permissions, reconciliation and emergency controls remain shared.
-- Existing IBKR execution evidence retains its provenance. New Saxo broker-paper and internal
-  paper ledgers are separate by data environment and execution mode; never relabel history.
+- One frozen paper record (docs/PAPER-RECORD-PROTOCOL.md): the first-candle rule on two Saxo index
+  CFDs and QQQ options, and Connors on QQQ options. It reads Saxo prices and writes the record; it
+  never places, changes or cancels an order and never changes the Saxo session. This repository
+  holds only the runtime, its dashboard, their tests and operations material; retired futures code,
+  providers and research live in git history, never in active packages.
+- The authenticated dashboard is a consumer of runtime state; its failure must not stop the record.
+- Pure frozen calculations (`methods.py`) receive parsed Saxo values and never request broker data.
+- Research prices and models must never substitute for Saxo quotes in the record; a missing or
+  delayed input is recorded as the reason no trade was made.
+- Paper records are separate by data environment; never relabel history. The retired futures
+  ledgers stay on the server as they are.
 - Calculate shared data and features once where sensible.
-- The broker's actual position is authoritative for broker positions.
 - Keep enough local audit information to explain each decision without prematurely building an
   event-sourcing framework.
 

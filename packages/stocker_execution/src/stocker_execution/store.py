@@ -38,6 +38,14 @@ CREATE TABLE IF NOT EXISTS option_trades (
   exit_delta REAL, exit_underlying REAL, cost_sell REAL, exit_reason TEXT, pnl_usd REAL,
   late_for TEXT, late_bid REAL, late_ask REAL, late_underlying REAL,
   UNIQUE (day, method));
+CREATE TABLE IF NOT EXISTS cross_trades (
+  id INTEGER PRIMARY KEY, day TEXT NOT NULL, signal_candle TEXT NOT NULL, market TEXT NOT NULL,
+  uic INTEGER NOT NULL, qqq_close REAL NOT NULL, qqq_vwap REAL NOT NULL, qqq_ema REAL NOT NULL,
+  amount REAL, factor REAL, entry_at TEXT, entry_price REAL, entry_bid REAL, entry_ask REAL,
+  exit_candle TEXT, qqq_exit_close REAL,
+  exit_at TEXT, exit_price REAL, exit_bid REAL, exit_ask REAL, exit_reason TEXT, pnl_usd REAL,
+  note TEXT NOT NULL DEFAULT '',
+  UNIQUE (day, signal_candle));
 CREATE TABLE IF NOT EXISTS snapshots (
   id INTEGER PRIMARY KEY, day TEXT NOT NULL, event TEXT NOT NULL, taken TEXT NOT NULL,
   payload TEXT NOT NULL);
@@ -123,7 +131,7 @@ class Store:
         return row
 
     def insert(self, table: str, values: dict[str, Any]) -> int:
-        assert table in {"cfd_trades", "option_trades"}
+        assert table in {"cfd_trades", "option_trades", "cross_trades"}
         columns = ",".join(values)
         with self.db:
             cursor = self.db.execute(
@@ -133,7 +141,7 @@ class Store:
         return int(cursor.lastrowid or 0)
 
     def update(self, table: str, row_id: int, values: dict[str, Any]) -> None:
-        assert table in {"cfd_trades", "option_trades"}
+        assert table in {"cfd_trades", "option_trades", "cross_trades"}
         assignments = ",".join(f"{k}=?" for k in values)
         with self.db:
             self.db.execute(
@@ -148,6 +156,15 @@ class Store:
 
     def open_cfd(self) -> list[sqlite3.Row]:
         return list(self.db.execute("SELECT * FROM cfd_trades WHERE exit_at IS NULL ORDER BY id"))
+
+    def cross_trade(self, day: str, signal_candle: str) -> sqlite3.Row | None:
+        row: sqlite3.Row | None = self.db.execute(
+            "SELECT * FROM cross_trades WHERE day=? AND signal_candle=?", (day, signal_candle)
+        ).fetchone()
+        return row
+
+    def open_crosses(self) -> list[sqlite3.Row]:
+        return list(self.db.execute("SELECT * FROM cross_trades WHERE exit_at IS NULL ORDER BY id"))
 
     def open_options(self) -> list[sqlite3.Row]:
         return list(
@@ -181,6 +198,7 @@ class Store:
             "cfd": rows("SELECT * FROM cfd_trades WHERE day=:d ORDER BY id"),
             # Today's option trades and any earlier one that closes today (Connors).
             "options": rows("SELECT * FROM option_trades WHERE day=:d OR exit_day=:d ORDER BY id"),
+            "crosses": rows("SELECT * FROM cross_trades WHERE day=:d ORDER BY signal_candle"),
         }
 
     def record(self, offset: int) -> dict[str, Any]:
@@ -192,6 +210,9 @@ class Store:
                    UNION ALL
                    SELECT method, day, side, entry_for, exit_for, exit_reason, pnl_usd
                      FROM option_trades
+                   UNION ALL
+                   SELECT 'CROSS ' || market, day, 1, entry_at, exit_at, exit_reason, pnl_usd
+                     FROM cross_trades
                    ORDER BY day DESC, method LIMIT ? OFFSET ?""",
                 (PAGE_SIZE, offset),
             )
@@ -203,7 +224,8 @@ class Store:
                           SUM(pnl_usd > 0) AS wins, ROUND(SUM(pnl_usd), 2) AS total_usd,
                           ROUND(AVG(pnl_usd), 2) AS mean_usd, MIN(day) AS first_day
                      FROM (SELECT 'CFD ' || market AS method, day, pnl_usd FROM cfd_trades
-                           UNION ALL SELECT method, day, pnl_usd FROM option_trades)
+                           UNION ALL SELECT method, day, pnl_usd FROM option_trades
+                           UNION ALL SELECT 'CROSS ' || market, day, pnl_usd FROM cross_trades)
                     GROUP BY method ORDER BY method"""
             )
         ]

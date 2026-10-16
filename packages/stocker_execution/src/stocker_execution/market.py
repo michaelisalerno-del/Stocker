@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from stocker_execution.methods import Bar, OptionQuote, Session, trading_sessions, utc
+from stocker_execution.methods import Bar, Candle, OptionQuote, Session, trading_sessions, utc
 from stocker_execution.saxo_client import SaxoClient
 
 LIST_CHUNK = 50  # instruments per infoprices/list request
@@ -91,6 +91,34 @@ async def cfd_bars(client: SaxoClient, uic: int, count: int = 200) -> tuple[list
         if x.get("Time") and x.get("CloseBid") and x.get("CloseAsk")
     ]
     return bars, (result.get("ChartInfo") or {}).get("DelayedByMinutes")
+
+
+async def etf_candles(
+    client: SaxoClient, uic: int, count: int = 400
+) -> tuple[list[Candle], int | None]:
+    """5-minute ETF candles (high, low, close, volume; regular session) and the chart's delay."""
+    result = await client.get(
+        "/chart/v3/charts",
+        {
+            "AssetType": "Etf",
+            "Uic": uic,
+            "Horizon": 5,
+            "Count": count,
+            "FieldGroups": "Data,ChartInfo",
+        },
+    )
+    candles = [
+        Candle(
+            utc(x["Time"]), float(x["High"]), float(x["Low"]), float(x["Close"]), float(x["Volume"])
+        )
+        for x in result.get("Data") or []
+        if x.get("Time")
+        and x.get("High")
+        and x.get("Low")
+        and x.get("Close")
+        and x.get("Volume") is not None
+    ]
+    return candles, (result.get("ChartInfo") or {}).get("DelayedByMinutes")
 
 
 async def daily_closes(

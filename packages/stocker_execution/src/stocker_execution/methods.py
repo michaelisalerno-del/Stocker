@@ -7,6 +7,9 @@
    13:00.
 3. Connors on QQQ: close above its 200-day average and RSI2(today) + RSI2(yesterday) < 35 at 15:50
    -> the next expiry's call with delta nearest 0.50, ask at 15:50, bid at 15:55 on its expiry day.
+4. VWAP crossings (amendment 2): on a day the Nasdaq first candle is long, each 10:00-15:00 close at
+   which QQQ's EMA(10) crosses up through QQQ's session VWAP -> a paper long Nasdaq CFD, out at the
+   first later close back below VWAP or at 16:00; one at a time.
 """
 
 import math
@@ -194,6 +197,92 @@ def connors(closes: Sequence[float]) -> Connors:
     r = rsi2(closes)
     signal = closes[-1] > average and r[-1] + r[-2] < 35
     return Connors(signal, closes[-1], average, r[-1], r[-2], "")
+
+
+CROSS_ALPHA = 2 / 11  # EMA(10)
+CANDLE = timedelta(minutes=5)
+CROSS_FIRST = time(10, 0)  # entry candles closing 10:00-15:00 New York
+CROSS_LAST = time(15, 0)
+CROSS_EXIT_LAST = time(15, 55)  # a cross back at the 16:00 close is the 16:00 exit itself
+
+
+@dataclass(frozen=True)
+class Candle:
+    start: datetime  # UTC
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+@dataclass(frozen=True)
+class Cross:
+    entry: datetime  # start of the candle whose close crossed up; the trade enters at its close
+    entry_close: float
+    entry_vwap: float
+    entry_ema: float
+    exit: datetime | None  # start of the candle whose close fell back below VWAP; None: not yet
+    exit_close: float | None
+
+
+def vwap_crosses(candles: Sequence[Candle], day: date) -> list[Cross]:
+    """Method 4 replayed on QQQ's 5-minute candles as Saxo returns them (the newest still forming):
+    EMA(10) of every final regular-session close, sessions joined, seeded with the oldest read;
+    the day's VWAP of typical price x volume from 09:30. Long when EMA - VWAP turns from <= 0 to
+    > 0 at a close; out at the first later close below 0; the next entry only after that exit."""
+    if not candles:
+        return []
+    newest = max(c.start for c in candles)
+    by_start = {c.start: c for c in candles if c.start < newest}
+    regular = [
+        by_start[k]
+        for k in sorted(by_start)
+        if REGULAR_OPEN <= k.astimezone(NY).time() < REGULAR_CLOSE
+    ]
+    today = [c for c in regular if c.start.astimezone(NY).date() == day]
+    if not today or today[0].start.astimezone(NY).time() != REGULAR_OPEN:
+        return []
+    value, ema_at = regular[0].close, {}
+    for c in regular:
+        value += CROSS_ALPHA * (c.close - value)
+        ema_at[c.start] = value
+    vwaps: list[float | None] = []
+    pv = vol = 0.0
+    for c in today:
+        pv += (c.high + c.low + c.close) / 3 * c.volume
+        vol += c.volume
+        vwaps.append(pv / vol if vol > 0 else None)
+    gap = [None if w is None else ema_at[c.start] - w for c, w in zip(today, vwaps, strict=True)]
+
+    def closes(k: int) -> time:
+        return (today[k].start + CANDLE).astimezone(NY).time()
+
+    out: list[Cross] = []
+    i = 1
+    while i < len(today) and closes(i) <= CROSS_LAST:
+        g0, g1 = gap[i - 1], gap[i]
+        if closes(i) < CROSS_FIRST or g0 is None or g1 is None or not g0 <= 0 < g1:
+            i += 1
+            continue
+        back = next((k for k in range(i + 1, len(today)) if (gap[k] or 0) < 0), None)
+        if back is not None and closes(back) > CROSS_EXIT_LAST:
+            back = None
+        c, w = today[i], vwaps[i]
+        assert w is not None
+        out.append(
+            Cross(
+                c.start,
+                c.close,
+                w,
+                ema_at[c.start],
+                None if back is None else today[back].start,
+                None if back is None else today[back].close,
+            )
+        )
+        if back is None:
+            break  # held to 16:00 (or still open): no later entry today
+        i = back + 1
+    return out
 
 
 @dataclass(frozen=True)

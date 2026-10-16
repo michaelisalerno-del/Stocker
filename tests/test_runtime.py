@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from fake_saxo import NAS, SPX, FakeSaxo, client, regular_sessions, trend_bars
+from fake_saxo import NAS, SPX, FakeSaxo, client, qqq_candles, regular_sessions, trend_bars
 from stocker_execution import runtime as runtime_module
 from stocker_execution import saxo_client
 from stocker_execution.config import PaperConfig
@@ -22,6 +22,8 @@ def fast(monkeypatch):
     monkeypatch.setattr(runtime_module, "RETRY_EVERY", 0)
     monkeypatch.setattr(runtime_module, "STOP_POLL_SECONDS", 0)
     monkeypatch.setattr(runtime_module, "LOGIN_CHECK_SECONDS", 0)
+    monkeypatch.setattr(runtime_module, "CROSS_POLL_SECONDS", 0)
+    monkeypatch.setattr(runtime_module, "CROSS_DELAYED_POLL_SECONDS", 0)
 
 
 class Clock:
@@ -359,6 +361,134 @@ def test_a_connors_call_is_never_sold_after_the_close(tmp_path):
             await at(rt, clock, datetime(2026, 10, 20, 20, 10, second, tzinfo=UTC))
         connors = rt.store.option("2026-10-19", "CONNORS_QQQ")
         assert connors["exit_reason"] == "MISSED_EXIT" and connors["pnl_usd"] is None
+        await rt.client.close()
+
+    asyncio.run(scenario())
+
+
+FRI = date(2026, 10, 16)
+# QQQ: flat 700 (EMA = VWAP), up through VWAP at the 10:30 close, back below at 11:00, up again
+# at 13:00 and held to the close.
+CROSSING_DAY = [700.0] * 11 + [701.0] * 6 + [690.0] * 24 + [720.0] * 37
+
+
+def ny(h, m, s=3):
+    return datetime(2026, 10, 19, h + 4, m, s, tzinfo=UTC)  # New York (EDT) to UTC
+
+
+async def until(rt, fake, clock, when):
+    fake.qqq_upto = when
+    await at(rt, clock, when)
+
+
+def crosses(rt):
+    return [dict(r) for r in rt.store.db.execute("SELECT * FROM cross_trades ORDER BY id")]
+
+
+def test_vwap_crossings_on_a_long_first_candle_day(tmp_path):
+    fake, clock = FakeSaxo(), Clock(OPEN)
+    market(fake)
+    fake.qqq_bars = qqq_candles([FRI, MON], CROSSING_DAY)
+
+    async def scenario():
+        rt = make(tmp_path, fake, clock)
+        await until(rt, fake, clock, ny(9, 35, 2))  # the Nasdaq first candle is long
+        await until(rt, fake, clock, ny(10, 0))
+        assert crosses(rt) == []
+        # 10:30: EMA10 closes above VWAP -> long the Nasdaq CFD at the live ask, sized as the
+        # first-candle trade, with the QQQ readings that made the decision.
+        await until(rt, fake, clock, ny(10, 30))
+        (t,) = crosses(rt)
+        assert (t["entry_price"], t["amount"], t["qqq_close"]) == (30000.0, 0.66, 701.0)
+        assert t["signal_candle"].startswith("2026-10-19T14:25") and t["exit_at"] is None
+        # 11:00: back below VWAP -> sold at the bid.
+        fake.cfd_quote(NAS, 30099.0, 30100.0)
+        await until(rt, fake, clock, ny(11, 0))
+        (t,) = crosses(rt)
+        assert (t["exit_reason"], t["exit_price"], t["qqq_exit_close"]) == (
+            "BACK_BELOW_VWAP",
+            30099.0,
+            690.0,
+        )
+        assert t["pnl_usd"] == pytest.approx(99 * 0.66)
+        # A restart repeats nothing; 13:00 opens the second crossing, held to 16:00.
+        again = make(tmp_path, fake, clock, rt.store)
+        await until(again, fake, clock, ny(11, 0, 30))
+        await until(again, fake, clock, ny(13, 0))
+        first, second = crosses(again)
+        assert second["entry_price"] == 30100.0 and second["exit_at"] is None
+        fake.cfd_quote(NAS, 30199.0, 30200.0)
+        await until(again, fake, clock, ny(16, 0, 1))
+        first, second = crosses(again)
+        assert (second["exit_reason"], second["exit_price"]) == ("CLOSE", 30199.0)
+        assert again.store.event("2026-10-19", "VWAP_CROSS_EXIT")["status"] == "DONE"
+        record = again.store.record(0)
+        assert {"method": "CROSS NAS100", "trades": 2, "closed": 2}.items() <= next(
+            m for m in record["summary"] if m["method"] == "CROSS NAS100"
+        ).items()
+        # Nothing but reads left the app.
+        assert {m for m, _, _ in fake.requests} == {"GET"}
+        await rt.client.close()
+        await again.client.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_crossing_not_acted_on_in_time_is_recorded_missed(tmp_path):
+    fake, clock = FakeSaxo(), Clock(OPEN)
+    market(fake)
+    fake.qqq_bars = qqq_candles([FRI, MON], CROSSING_DAY)
+
+    async def scenario():
+        rt = make(tmp_path, fake, clock)
+        await until(rt, fake, clock, ny(9, 35, 2))
+        await until(rt, fake, clock, ny(10, 40))  # no pass between 10:30 and 10:40
+        (t,) = crosses(rt)
+        assert (t["exit_reason"], t["note"], t["entry_price"]) == (
+            "MISSED_ENTRY",
+            "NOT_TRIED_IN_TIME",
+            None,
+        )
+        # The missed trade is not open: the 13:00 crossing still trades.
+        await until(rt, fake, clock, ny(11, 0))
+        await until(rt, fake, clock, ny(13, 0))
+        assert [r["exit_reason"] for r in crosses(rt)] == ["MISSED_ENTRY", None]
+        await rt.client.close()
+
+        # QQQ's chart 15 minutes late: the 10:30 crossing is seen at 10:45, too late to enter.
+        delayed = FakeSaxo()
+        market(delayed)
+        delayed.qqq_bars, delayed.qqq_chart_delay = qqq_candles([FRI, MON], CROSSING_DAY), 15
+        dclock = Clock(OPEN)
+        late = make(tmp_path / "delayed", delayed, dclock)
+        await until(late, delayed, dclock, ny(9, 35, 2))
+        await until(late, delayed, dclock, ny(10, 30))
+        assert crosses(late) == []
+        await until(late, delayed, dclock, ny(10, 45))
+        (t,) = crosses(late)
+        assert (t["exit_reason"], t["note"]) == ("MISSED_ENTRY", "QQQ_CHART_DELAYED")
+        assert late.status()["problems"]["VWAP_CROSS"] == "QQQ_CHART_DELAYED"
+        await late.client.close()
+
+    asyncio.run(scenario())
+
+
+def test_no_crossing_trades_on_a_short_first_candle_day(tmp_path):
+    fake, clock = FakeSaxo(), Clock(OPEN)
+    market(fake)
+    fake.bars[NAS] = trend_bars(OPEN, 30100, -2.0)  # falling into the open -> short
+    fake.qqq_bars = qqq_candles([FRI, MON], CROSSING_DAY)
+
+    async def scenario():
+        rt = make(tmp_path, fake, clock)
+        for when in (ny(9, 35, 2), ny(10, 30), ny(13, 0), ny(16, 0, 1)):
+            await until(rt, fake, clock, when)
+        assert rt.store.signal("2026-10-19", "FIRST_CANDLE", "NAS100")["side"] == -1
+        assert crosses(rt) == []
+        assert not [
+            p for _, _, p in fake.requests if (p.get("AssetType"), p.get("Horizon")) == ("Etf", "5")
+        ]
+        assert rt.store.event("2026-10-19", "VWAP_CROSS_EXIT")["note"] == "NO_OPEN_CROSS_TRADE"
         await rt.client.close()
 
     asyncio.run(scenario())

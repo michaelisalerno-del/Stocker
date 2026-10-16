@@ -50,6 +50,13 @@
     "qqq_delayed": false,
     "new_york": "16:00",
     "uk": "21:00"
+   },
+   {
+    "event": "VWAP_CROSS_EXIT",
+    "due": "2026-10-19T20:00:00+00:00",
+    "qqq_delayed": false,
+    "new_york": "16:00",
+    "uk": "21:00"
    }
   ],
   "events": [
@@ -535,7 +542,59 @@
    "problems": {},
    "rate_limits": {},
    "saxo_calls": 27
-  }
+  },
+  "crosses": [
+   {
+    "id": 1,
+    "day": "2026-10-19",
+    "signal_candle": "2026-10-19T14:25:00+00:00",
+    "market": "NAS100",
+    "uic": 4912,
+    "qqq_close": 701.0,
+    "qqq_vwap": 700.0833,
+    "qqq_ema": 700.1818,
+    "amount": 0.66,
+    "factor": 1.0,
+    "entry_at": "2026-10-19T14:30:03+00:00",
+    "entry_price": 30000.0,
+    "entry_bid": 29999.0,
+    "entry_ask": 30000.0,
+    "exit_candle": "2026-10-19T14:55:00+00:00",
+    "qqq_exit_close": 690.0,
+    "exit_at": "2026-10-19T15:00:03+00:00",
+    "exit_price": 30099.0,
+    "exit_bid": 30099.0,
+    "exit_ask": 30100.0,
+    "exit_reason": "BACK_BELOW_VWAP",
+    "pnl_usd": 65.34,
+    "note": ""
+   },
+   {
+    "id": 2,
+    "day": "2026-10-19",
+    "signal_candle": "2026-10-19T16:55:00+00:00",
+    "market": "NAS100",
+    "uic": 4912,
+    "qqq_close": 720.0,
+    "qqq_vwap": 694.9,
+    "qqq_ema": 695.45,
+    "amount": null,
+    "factor": null,
+    "entry_at": null,
+    "entry_price": null,
+    "entry_bid": null,
+    "entry_ask": null,
+    "exit_candle": null,
+    "qqq_exit_close": null,
+    "exit_at": "2026-10-19T17:10:00+00:00",
+    "exit_price": null,
+    "exit_bid": null,
+    "exit_ask": null,
+    "exit_reason": "MISSED_ENTRY",
+    "pnl_usd": null,
+    "note": "QQQ_CHART_DELAYED"
+   }
+  ]
  },
  "/api/record": {
   "trades": [

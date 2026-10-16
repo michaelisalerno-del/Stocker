@@ -38,8 +38,9 @@ in the runtime trading hot path.
 ## Architecture rules
 
 - One repository and one application/codebase with clear modules.
-- One frozen paper record (docs/PAPER-RECORD-PROTOCOL.md): the first-candle rule on two Saxo index
-  CFDs and QQQ options, and Connors on QQQ options. It reads Saxo prices and writes the record; it
+- One frozen paper record (docs/PAPER-RECORD-PROTOCOL.md and its amendments): the first-candle rule
+  on two Saxo index CFDs and QQQ options, Connors on QQQ options, and VWAP crossings on the Nasdaq CFD
+  (amendment 2). It reads Saxo prices and writes the record; it
   never places, changes or cancels an order and never changes the Saxo session. This repository
   holds only the runtime, its dashboard, their tests and operations material; retired futures code,
   providers and research live in git history, never in active packages.

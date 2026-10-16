@@ -12,9 +12,10 @@ const EVENTS = {
   FIRST_CANDLE_QQQ_LATE: "QQQ option 15:55 mark (reported)",
   CONNORS_QQQ_EXIT: "Connors · QQQ call sold",
   CFD_EXIT: "CFD trades closed",
+  VWAP_CROSS_EXIT: "VWAP-crossing trades closed",
 };
 const MARKETS = {NAS100: "Nasdaq CFD", US500: "S&P CFD"};
-const METHODS = {"CFD NAS100": "Nasdaq CFD · first candle", "CFD US500": "S&P CFD · first candle", FIRST_CANDLE_QQQ: "QQQ option · first candle", CONNORS_QQQ: "QQQ call · Connors"};
+const METHODS = {"CFD NAS100": "Nasdaq CFD · first candle", "CFD US500": "S&P CFD · first candle", FIRST_CANDLE_QQQ: "QQQ option · first candle", CONNORS_QQQ: "QQQ call · Connors", "CROSS NAS100": "Nasdaq CFD · VWAP crossings"};
 const USD = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD"});
 let offset = 0, pending = null, lastRefresh = "";
 
@@ -112,6 +113,13 @@ function renderToday(d) {
     (t) => t.exit_reason === "MISSED_EXIT" ? "Missed exit · no price" : t.exit_at ? `${price(t.exit_price)} · ${display(t.exit_reason)} ${ny(t.exit_at)} NY` : "Open",
     (t) => t.exit_at ? money(t.pnl_usd) : t.open_pnl_usd != null ? `${money(t.open_pnl_usd)} open` : "Open",
   ], {6: (t) => tone(t.exit_at ? t.pnl_usd : t.open_pnl_usd)});
+  rows("crosses", d.crosses || [], [
+    (t) => `${ny(new Date(Date.parse(t.signal_candle) + 300000).toISOString())} NY · QQQ ${price(t.qqq_close)} vs VWAP ${price(t.qqq_vwap)}`,
+    (t) => t.amount ?? "—",
+    (t) => t.entry_price == null ? `Missed entry · ${display(t.note)}` : `${price(t.entry_price)} · ${ny(t.entry_at)} NY`,
+    (t) => t.entry_price == null ? "—" : t.exit_reason === "MISSED_EXIT" ? "Missed exit · no price" : t.exit_at ? `${price(t.exit_price)} · ${display(t.exit_reason)} ${ny(t.exit_at)} NY` : "Open · out back below VWAP or 16:00",
+    (t) => t.exit_at ? money(t.pnl_usd) : t.open_pnl_usd != null ? `${money(t.open_pnl_usd)} open` : "Open",
+  ], {4: (t) => tone(t.exit_at ? t.pnl_usd : t.open_pnl_usd)});
   rows("options", d.options, [
     (o) => METHODS[o.method] || o.method,
     (o) => `${o.put_call} ${o.strike} · expires ${o.expiry}`,

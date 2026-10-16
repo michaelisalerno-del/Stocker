@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 LEDGER = "ledger.sqlite3"
-TABLES = ("events", "signals", "cfd_trades", "option_trades", "snapshots")
+TABLES = ("events", "signals", "cfd_trades", "option_trades", "cross_trades", "snapshots")
 
 
 def digest(path: Path) -> str:

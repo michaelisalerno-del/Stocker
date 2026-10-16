@@ -120,3 +120,57 @@ def test_sessions_regular_days_and_early_closes():
     assert [s.day for s in sessions] == [date(2026, 11, 27), date(2026, 11, 30)]
     assert not sessions[0].regular and sessions[1].regular  # EST: 09:30-16:00 is 14:30-21:00
     assert methods.session_on(sessions, date(2026, 11, 28)) is None
+
+
+def candles(day_closes, prior=78, newest_forming=True):
+    """QQQ candles: one flat-700 session the day before, then the day's closes (typical price =
+    close, volume 1,000), plus a forming candle after the last one."""
+    out = []
+    prev = OPEN - timedelta(days=3)  # the Friday before, 09:30 New York
+    for i in range(prior):
+        out.append(methods.Candle(prev + timedelta(minutes=5 * i), 700.1, 699.9, 700.0, 1000.0))
+    for i, c in enumerate(day_closes):
+        out.append(methods.Candle(OPEN + timedelta(minutes=5 * i), c + 0.1, c - 0.1, c, 1000.0))
+    if newest_forming:
+        nxt = OPEN + timedelta(minutes=5 * len(day_closes))
+        out.append(methods.Candle(nxt, 0.0, 0.0, 0.0, 0.0))
+    return out
+
+
+DAY = date(2026, 10, 19)
+
+
+def test_vwap_crossing_up_enters_and_the_close_back_below_exits():
+    # Flat 700 (EMA = VWAP: gap 0), 701 from the candle closing 10:30, 690 from 11:00.
+    closes = [700.0] * 11 + [701.0] * 6 + [690.0] * 20
+    (c,) = methods.vwap_crosses(candles(closes), DAY)
+    assert c.entry == OPEN + timedelta(minutes=55)  # the 10:25 candle, closing 10:30
+    assert c.entry_close == 701.0
+    assert c.entry_ema == pytest.approx(700 + 2 / 11)
+    assert c.entry_vwap == pytest.approx((11 * 700 + 701) / 12)
+    assert c.exit == OPEN + timedelta(minutes=85) and c.exit_close == 690.0  # closes 11:00
+
+
+def test_vwap_crossings_are_one_at_a_time_inside_10_00_to_15_00():
+    # A jump on the candle closing 10:00 moves the EMA (2/11) more than the six-candle VWAP
+    # (1/6): a crossing at exactly 10:00 is taken. One at 15:10 is not.
+    (at_ten,) = methods.vwap_crosses(candles([700.0] * 5 + [701.0] * 20), DAY)
+    assert at_ten.entry == OPEN + timedelta(minutes=25)
+    assert methods.vwap_crosses(candles([700.0] * 67 + [701.0] * 5), DAY) == []
+    # A second crossing after the exit is a new trade; it is open while no close is below VWAP.
+    closes = [700.0] * 11 + [701.0] * 6 + [690.0] * 24 + [720.0] * 10
+    first, second = methods.vwap_crosses(candles(closes), DAY)
+    assert first.exit is not None
+    assert second.entry == OPEN + timedelta(minutes=5 * 41) and second.exit is None
+    # The candle still forming never counts: without a newer one the 13:00 close is unseen.
+    seen = methods.vwap_crosses(candles(closes[:42], newest_forming=False), DAY)
+    assert len(seen) == 1
+    # No 09:30 candle today, or another day's candles only: nothing.
+    assert methods.vwap_crosses(candles(closes)[78:][1:], DAY) == []
+    assert methods.vwap_crosses(candles(closes), date(2026, 10, 20)) == []
+
+
+def test_a_crossing_held_past_15_55_ends_with_the_16_00_exit():
+    closes = [700.0] * 11 + [701.0] * 66 + [690.0]  # back below only at the 16:00 close
+    (c,) = methods.vwap_crosses(candles(closes), DAY)
+    assert c.exit is None

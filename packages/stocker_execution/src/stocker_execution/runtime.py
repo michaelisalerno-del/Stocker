@@ -37,6 +37,9 @@ RETRY_EVERY = 5.0  # seconds between attempts at a failed event
 STOP_POLL_SECONDS = 2.0
 LOGIN_CHECK_SECONDS = 30.0
 FC, FC_QQQ, CONNORS_QQQ = "FIRST_CANDLE", "FIRST_CANDLE_QQQ", "CONNORS_QQQ"
+CROSS = "VWAP_CROSS"
+CROSS_POLL_SECONDS = 5.0  # while a QQQ candle is due
+CROSS_DELAYED_POLL_SECONDS = 60.0  # while QQQ's chart is delayed: entries are missed anyway
 
 
 class Problem(Exception):
@@ -89,6 +92,8 @@ class Runtime:
         self.attempted: dict[tuple[str, str], float] = {}
         self.problems: dict[str, str] = {}
         self.qqq_delay: int | None = None
+        self.cross_done: datetime | None = None  # the latest QQQ candle close acted on
+        self.cross_next = 0.0
         directory = self.root / config.data_environment
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         handler = RotatingFileHandler(directory / "paper.log", maxBytes=2 * 1024**2, backupCount=3)
@@ -134,6 +139,7 @@ class Runtime:
             for name, due, delayed, handler in self.plan(session):
                 await self.event(day.isoformat(), name, due, delayed, handler, now)
         await self.watch_stops(self.now(), session)
+        await self.watch_crosses(self.now(), session)
 
     def plan(
         self, s: Session
@@ -169,6 +175,7 @@ class Runtime:
                     lambda t, d: self.connors_exit(s, t, d),
                 ),
                 ("CFD_EXIT", s.close, False, lambda t, d: self.cfd_exit(s, t)),
+                (CROSS + "_EXIT", s.close, False, lambda t, d: self.cross_exit(s, t)),
             ],
             key=lambda e: e[1],
         )
@@ -449,6 +456,174 @@ class Runtime:
             self.close_cfd(
                 t, q.bid if t["side"] > 0 else q.ask, q, "CLOSE_LATE" if late else "CLOSE", read
             )
+
+    # VWAP crossings (amendment 2) ---------------------------------------------------------------
+    async def watch_crosses(self, now: datetime, s: Session | None) -> None:
+        """On a long Nasdaq first-candle day, after each 5-minute close from 10:00, read QQQ's
+        candles, replay the rule and bring the record into line: open at the crossing's close,
+        close at the close back below VWAP. A crossing or exit not acted on within its grace is
+        recorded missed, never filled at a later price."""
+        today = s.day.isoformat() if s else None
+        for t in self.store.open_crosses():
+            if today is None or t["day"] < today:
+                self.store.update(
+                    "cross_trades", t["id"], {"exit_at": stamp(now), "exit_reason": "MISSED_EXIT"}
+                )
+        if s is None or not s.regular or not s.open + timedelta(minutes=30) <= now < s.close:
+            return
+        signal = self.store.signal(today or "", FC, methods.SIGNAL_MARKET)
+        if signal is None or signal["side"] != 1:
+            return
+        due = s.open + methods.CANDLE * int((now - s.open) / methods.CANDLE)  # latest close
+        if self.cross_done == due or time.monotonic() < self.cross_next:
+            return
+        self.cross_next = time.monotonic() + CROSS_POLL_SECONDS
+        try:
+            candles, delay = await market.etf_candles(self.client, QQQ_UIC)
+        except SaxoError as exc:
+            self.note(CROSS, exc)
+            return
+        if delay != 0:
+            self.cross_next = time.monotonic() + CROSS_DELAYED_POLL_SECONDS
+        crosses = methods.vwap_crosses(candles, s.day)
+        settled = await self.reconcile_crosses(today or "", crosses, now, delay)
+        if settled and candles and max(c.start for c in candles) >= due:
+            self.cross_done = due  # the candle closing at `due` is final and acted on
+            if delay == 0:
+                self.problems.pop(CROSS, None)
+        if delay != 0:
+            self.problems[CROSS] = "QQQ_CHART_DELAYED"
+
+    async def reconcile_crosses(
+        self, day: str, crosses: list[methods.Cross], now: datetime, delay: int | None
+    ) -> bool:
+        settled = True
+        for c in crosses:
+            key, opens_at = stamp(c.entry), c.entry + methods.CANDLE
+            row = self.store.cross_trade(day, key)
+            if row is None and now > opens_at + ENTRY_GRACE:
+                why = (
+                    "APP_NOT_RUNNING_AT_ENTRY"
+                    if self.started_at > opens_at
+                    else "QQQ_CHART_DELAYED"
+                    if delay
+                    else self.problems.get(CROSS, "NOT_TRIED_IN_TIME")
+                )
+                self.store.insert(
+                    "cross_trades",
+                    self.cross_row(day, c)
+                    | {"exit_at": stamp(now), "exit_reason": "MISSED_ENTRY", "note": why},
+                )
+                continue
+            if row is None:
+                if self.store.open_crosses():
+                    continue  # one at a time, whatever the replay says
+                try:
+                    await self.open_cross(day, c, opens_at)
+                except (SaxoError, Problem) as exc:
+                    self.note(CROSS, exc)
+                    settled = False
+                continue
+            if c.exit is None or row["exit_at"] is not None:
+                continue
+            closes_at = c.exit + methods.CANDLE
+            if now > closes_at + EXIT_GRACE:
+                self.store.update(
+                    "cross_trades", row["id"], {"exit_at": stamp(now), "exit_reason": "MISSED_EXIT"}
+                )
+                continue
+            try:
+                q = await self.live_cfd()
+            except (SaxoError, Problem) as exc:
+                self.note(CROSS, exc)
+                settled = False
+                continue
+            assert q.bid is not None
+            late = self.now() > closes_at + ENTRY_GRACE
+            self.close_cross(row, q, "BACK_BELOW_VWAP_LATE" if late else "BACK_BELOW_VWAP", c)
+        return settled
+
+    def cross_row(self, day: str, c: methods.Cross) -> dict[str, Any]:
+        nas = next(x for x in CFDS if x.market == methods.SIGNAL_MARKET)
+        return {
+            "day": day,
+            "signal_candle": stamp(c.entry),
+            "market": nas.market,
+            "uic": nas.uic,
+            "qqq_close": c.entry_close,
+            "qqq_vwap": round(c.entry_vwap, 4),
+            "qqq_ema": round(c.entry_ema, 4),
+        }
+
+    async def live_cfd(self) -> market.Quote:
+        uic = next(x.uic for x in CFDS if x.market == methods.SIGNAL_MARKET)
+        q = (await market.quotes(self.client, [uic], "CfdOnIndex")).get(uic)
+        if q is None or not q.live:
+            raise Problem("CFD_QUOTE_NOT_LIVE")
+        return q
+
+    async def open_cross(self, day: str, c: methods.Cross, opens_at: datetime) -> None:
+        nas = next(x for x in CFDS if x.market == methods.SIGNAL_MARKET)
+        if nas.uic not in self.cfd_info:
+            self.cfd_info[nas.uic] = await market.cfd_details(self.client, nas.uic)
+        decimals, factor = self.cfd_info[nas.uic]
+        q = await self.live_cfd()
+        read = self.now()
+        if read > opens_at + ENTRY_GRACE:
+            raise Problem("ENTRY_DEADLINE_PASSED")
+        assert q.ask is not None
+        # Sized as the first-candle Nasdaq trade ($200 over a 100 bp move); the rule has no stop.
+        amount = methods.cfd_amount(q.ask, nas.stop_bp, decimals, factor)
+        if amount <= 0:
+            raise Problem("CFD_SIZE_ROUNDS_TO_ZERO")
+        self.store.insert(
+            "cross_trades",
+            self.cross_row(day, c)
+            | {
+                "amount": amount,
+                "factor": factor,
+                "entry_at": stamp(read),
+                "entry_price": q.ask,
+                "entry_bid": q.bid,
+                "entry_ask": q.ask,
+            },
+        )
+        log.info("%s %s cross long %.2f at %.2f", day, nas.market, amount, q.ask)
+
+    def close_cross(
+        self, t: sqlite3.Row, q: market.Quote, reason: str, c: methods.Cross | None = None
+    ) -> None:
+        assert q.bid is not None
+        pnl = methods.cfd_pnl(1, t["entry_price"], q.bid, t["amount"], t["factor"])
+        self.store.update(
+            "cross_trades",
+            t["id"],
+            {
+                "exit_candle": stamp(c.exit) if c and c.exit else None,
+                "qqq_exit_close": c.exit_close if c else None,
+                "exit_at": stamp(self.now()),
+                "exit_price": q.bid,
+                "exit_bid": q.bid,
+                "exit_ask": q.ask,
+                "exit_reason": reason,
+                "pnl_usd": round(pnl, 2),
+            },
+        )
+        log.info("%s cross closed %s %.2f", t["day"], reason, pnl)
+
+    async def cross_exit(self, s: Session, due: datetime) -> None:
+        trades = [t for t in self.store.open_crosses() if t["day"] == s.day.isoformat()]
+        if not trades:
+            raise Done("NO_OPEN_CROSS_TRADE")
+        q = await self.live_cfd()
+        read = self.now()
+        for t in trades:
+            if read > due + EXIT_GRACE:
+                self.store.update(
+                    "cross_trades", t["id"], {"exit_at": stamp(read), "exit_reason": "MISSED_EXIT"}
+                )
+                continue
+            self.close_cross(t, q, "CLOSE_LATE" if read > due + ENTRY_GRACE else "CLOSE")
 
     # QQQ options ------------------------------------------------------------------------------
     async def qqq_price(self, delay: int) -> float:

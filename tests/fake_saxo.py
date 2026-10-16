@@ -42,6 +42,21 @@ def trend_bars(
     return rows
 
 
+def qqq_candles(days: list[date], closes: list[float]) -> list[dict]:
+    """QQQ 5-minute regular-session candles: a flat 700 session per earlier day, then `closes`
+    for the last day (high/low 0.10 either side, volume 1,000, so typical price = close)."""
+    rows = []
+    for n, d in enumerate(days):
+        start = datetime(d.year, d.month, d.day, 13, 30, tzinfo=UTC)
+        series = closes if n == len(days) - 1 else [700.0] * 78
+        for i, c in enumerate(series):
+            at = start + timedelta(minutes=5 * i)
+            rows.append(
+                {"Time": iso(at), "High": c + 0.1, "Low": c - 0.1, "Close": c, "Volume": 1000.0}
+            )
+    return rows
+
+
 class FakeSaxo:
     def __init__(self) -> None:
         self.requests: list[tuple[str, str, dict]] = []
@@ -54,6 +69,9 @@ class FakeSaxo:
         self.options: dict[date, list[dict]] = {}  # SpecificOptions per expiry
         self.option_quotes: dict[int, dict] = {}
         self.qqq_delay = 15
+        self.qqq_bars: list[dict] = []
+        self.qqq_upto: datetime | None = None  # QQQ candles exist up to this time (the clock)
+        self.qqq_chart_delay = 0
 
     def cfd_quote(self, uic: int, bid: float, ask: float, state: str = "Open") -> None:
         self.quotes[uic] = {
@@ -107,6 +125,15 @@ class FakeSaxo:
             )
         if path == "/chart/v3/charts":
             uic = int(params["Uic"])
+            if params["AssetType"] == "Etf" and params["Horizon"] == "5":
+                upto = (self.qqq_upto or datetime.max.replace(tzinfo=UTC)) - timedelta(
+                    minutes=self.qqq_chart_delay
+                )
+                data = [b for b in self.qqq_bars if datetime.fromisoformat(b["Time"]) <= upto]
+                return httpx.Response(
+                    200,
+                    json={"Data": data, "ChartInfo": {"DelayedByMinutes": self.qqq_chart_delay}},
+                )
             if params["AssetType"] == "Etf":
                 return httpx.Response(
                     200, json={"Data": self.daily, "ChartInfo": {"DelayedByMinutes": 15}}

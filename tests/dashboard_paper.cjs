@@ -33,10 +33,12 @@ const server = http.createServer((req, res) => {
       assert.equal(await page.locator("nav a[aria-current]").textContent(), "Today");
       assert.match(await page.locator("#sig-NAS100").textContent(), /^Long · candle 30018\.00 vs EMA12/);
       assert.match(await page.locator("#sig-US500").textContent(), /^Short/);
-      assert.equal(await page.locator("#plan tr").count(), 7);
+      assert.equal(await page.locator("#plan tr").count(), 8);
       assert.match(await page.locator("#plan tr").first().textContent(), /First candle · CFD trades.*09:35.*14:35.*Done/);
       assert.match(await page.locator("#cfd tr").nth(1).textContent(), /Stop 09:40 NY.*-\$204\.00/);
       assert.match(await page.locator("#options tr").first().textContent(), /Call 701.*\+\$59\.92/);
+      assert.match(await page.locator("#crosses tr").first().textContent(), /10:30 NY · QQQ 701\.00 vs VWAP 700\.08.*Back below vwap.*\+\$65\.34/);
+      assert.match(await page.locator("#crosses tr").nth(1).textContent(), /Missed entry · Qqq chart delayed/);
       assert.equal(await page.locator("#status").getAttribute("data-tone"), "ok");
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 0);
 

@@ -7,6 +7,7 @@ so a QQQ event due at T is read at T + the delay Saxo reports, and recorded as o
 
 import asyncio
 import fcntl
+import json
 import logging
 import os
 import re
@@ -38,6 +39,9 @@ STOP_POLL_SECONDS = 2.0
 LOGIN_CHECK_SECONDS = 30.0
 FC, FC_QQQ, CONNORS_QQQ = "FIRST_CANDLE", "FIRST_CANDLE_QQQ", "CONNORS_QQQ"
 CROSS = "VWAP_CROSS"
+DIP = "DIP"
+# The dip rules and their entry readings, in the order the one-at-a-time book takes them.
+DIP_RULES = (("CONNORS", "connors_in"), ("TURNAROUND", "turnaround"))
 CROSS_POLL_SECONDS = 5.0  # while a QQQ candle is due
 CROSS_DELAYED_POLL_SECONDS = 60.0  # while QQQ's chart is delayed: entries are missed anyway
 
@@ -163,6 +167,18 @@ class Runtime:
                     lambda t, d: self.connors(s, t, d),
                 ),
                 (
+                    DIP + "_EXIT",
+                    s.close - timedelta(minutes=10),
+                    False,
+                    lambda t, d: self.dip_exit(s, t),
+                ),
+                (
+                    DIP + "_ENTRY",
+                    s.close - timedelta(minutes=10),
+                    False,
+                    lambda t, d: self.dip_entry(s, t),
+                ),
+                (
                     FC_QQQ + "_LATE",
                     s.close - timedelta(minutes=5),
                     True,
@@ -192,7 +208,7 @@ class Runtime:
         row = self.store.event(day, name)
         if now < due or (row is not None and row["status"] in {"DONE", "FAILED", "MISSED"}):
             return
-        entry = name in {FC, FC_QQQ + "_ENTRY", CONNORS_QQQ}
+        entry = name in {FC, FC_QQQ + "_ENTRY", CONNORS_QQQ, DIP + "_ENTRY"}
         if row is None and entry and now > due + ENTRY_GRACE:
             # An entry first tried late is never replayed at a later price.
             note = "APP_NOT_RUNNING_AT_ENTRY" if self.started_at > due else "NOT_TRIED_IN_TIME"
@@ -624,6 +640,168 @@ class Runtime:
                 )
                 continue
             self.close_cross(t, q, "CLOSE_LATE" if read > due + ENTRY_GRACE else "CLOSE")
+
+    # dip rules (amendment 3) ------------------------------------------------------------------
+    async def dip_signal(self, s: Session) -> sqlite3.Row:
+        """Today's Connors and Turnaround Tuesday readings, saved once and shared by the exit and
+        entry events. The CFD trades at its live price, so QQQ's price must be live too."""
+        day = s.day.isoformat()
+        saved = self.store.signal(day, DIP, "QQQ")
+        if saved is not None:
+            return saved
+        if self.now() >= s.close:
+            raise Problem("SESSION_CLOSED")
+        dated = await market.daily_closes(self.client, QQQ_UIC, s.day)
+        if not dated or (s.day - dated[-1][0]).days > 4:
+            raise Problem("DAILY_CLOSES_OUT_OF_DATE")
+        q = (await market.quotes(self.client, [QQQ_UIC], "Etf")).get(QQQ_UIC)
+        if q is None or q.mid is None:
+            raise Problem("QQQ_QUOTE_UNAVAILABLE")
+        if q.delayed != 0:
+            raise Problem("QQQ_PRICE_DELAYED")
+        closes = [close for _, close in dated]
+        d = methods.dip_rules([*closes, q.mid], s.day)
+        self.store.add_signal(
+            day,
+            DIP,
+            "QQQ",
+            int(d.connors.signal or d.turnaround),
+            d.reason,
+            {
+                "price_15_50": q.mid,
+                "previous_close": closes[-1],
+                "change": d.change,
+                "sma200": d.connors.sma200,
+                "rsi2": d.connors.rsi,
+                "rsi2_prev": d.connors.rsi_prev,
+                "connors_in": d.connors.signal,
+                "connors_exit": d.connors_exit,
+                "turnaround": d.turnaround,
+                "daily_closes": len(closes),
+                "newest_close_day": dated[-1][0].isoformat(),
+            },
+        )
+        saved = self.store.signal(day, DIP, "QQQ")
+        assert saved is not None
+        return saved
+
+    async def dip_exit(self, s: Session, due: datetime) -> None:
+        """Turnaround Tuesday closes at the next session; Connors at the first later 15:50 with
+        RSI2 above 65. An exit day the app did not record leaves the trade without a price."""
+        today = s.day.isoformat()
+        trades = [t for t in self.store.open_dips() if t["day"] < today]
+        if not trades:
+            raise Done("NO_OPEN_DIP_TRADE")
+        dated = await market.daily_closes(self.client, QQQ_UIC, s.day)
+        if not dated or (s.day - dated[-1][0]).days > 4:
+            raise Problem("DAILY_CLOSES_OUT_OF_DATE")
+        d: dict[str, Any] | None = None  # today's readings: only Connors needs QQQ's live price
+        pending = ""  # a Connors check that could not run yet; the other exits go ahead
+        for t in trades:
+            passed = [x.isoformat() for x, _ in dated if x.isoformat() > t["day"]]
+            if t["rule"] == "TURNAROUND":  # sessions since its entry: its exit day has gone
+                missed, due_now = bool(passed), True
+            else:  # a session since its entry whose exit check the app did not complete
+                missed = any(
+                    (e := self.store.event(x, DIP + "_EXIT")) is None or e["status"] != "DONE"
+                    for x in passed
+                )
+                if not missed and d is None:
+                    try:
+                        signal = await self.dip_signal(s)
+                    except (SaxoError, Problem) as exc:
+                        pending = failure_code(exc)
+                        continue
+                    if signal["reason"]:
+                        pending = signal["reason"]
+                        continue
+                    d = json.loads(signal["detail"])
+                due_now = not missed and d is not None and d["connors_exit"]
+            if not (missed or due_now):
+                continue
+            q = None if missed else await self.live_cfd()
+            read = self.now()
+            if q is None or read >= s.close:  # never closed at a price from after the close
+                self.store.update(
+                    "dip_trades",
+                    t["id"],
+                    {"exit_day": today, "exit_at": stamp(read), "exit_reason": "MISSED_EXIT"},
+                )
+                continue
+            assert q.bid is not None
+            reason = "RSI2_ABOVE_65" if t["rule"] == "CONNORS" else "NEXT_SESSION"
+            pnl = methods.cfd_pnl(1, t["entry_price"], q.bid, t["amount"], t["factor"])
+            self.store.update(
+                "dip_trades",
+                t["id"],
+                {
+                    "exit_day": today,
+                    "exit_at": stamp(read),
+                    "exit_price": q.bid,
+                    "exit_bid": q.bid,
+                    "exit_ask": q.ask,
+                    "exit_reason": reason + ("_LATE" if read > due + ENTRY_GRACE else ""),
+                    "qqq_exit_price": d["price_15_50"] if d else None,
+                    "pnl_usd": round(pnl, 2),
+                },
+            )
+            log.info("%s dip %s closed %s %.2f", t["day"], t["rule"], reason, pnl)
+        # Retried until the exit's grace, then FAILED: the next session records the trade missed.
+        if pending:
+            raise Problem(pending)
+
+    async def dip_entry(self, s: Session, due: datetime) -> None:
+        """Each rule holds one trade at a time; the book flag marks the trades a one-at-a-time
+        book would hold (the first dip trade while none of its own is open)."""
+        day = s.day.isoformat()
+        if not s.regular:
+            raise Done("EARLY_CLOSE_DAY_SKIPPED")
+        signal = await self.dip_signal(s)
+        if signal["reason"]:
+            raise Done(signal["reason"])
+        d = json.loads(signal["detail"])
+        held = self.store.open_dips()
+        wanted = [
+            rule
+            for rule, key in DIP_RULES
+            if d[key] and not self.store.dip(day, rule) and all(t["rule"] != rule for t in held)
+        ]
+        if not wanted:
+            raise Done("ALREADY_IN_A_TRADE" if signal["side"] else "NO_DIP_SIGNAL")
+        nas = next(x for x in CFDS if x.market == methods.SIGNAL_MARKET)
+        if nas.uic not in self.cfd_info:
+            self.cfd_info[nas.uic] = await market.cfd_details(self.client, nas.uic)
+        decimals, factor = self.cfd_info[nas.uic]
+        q = await self.live_cfd()
+        read = self.now()
+        if read > due + ENTRY_GRACE:
+            raise Problem("ENTRY_DEADLINE_PASSED")
+        assert q.ask is not None and q.bid is not None
+        # Sized as the first-candle Nasdaq trade ($200 over a 100 bp move); the rules have no stop.
+        amount = methods.cfd_amount(q.ask, nas.stop_bp, decimals, factor)
+        if amount <= 0:
+            raise Problem("CFD_SIZE_ROUNDS_TO_ZERO")
+        book_busy = any(t["book"] for t in held)
+        for rule in wanted:
+            self.store.insert(
+                "dip_trades",
+                {
+                    "day": day,
+                    "rule": rule,
+                    "market": nas.market,
+                    "uic": nas.uic,
+                    "book": int(not book_busy),
+                    "qqq_price": d["price_15_50"],
+                    "amount": amount,
+                    "factor": factor,
+                    "entry_at": stamp(read),
+                    "entry_price": q.ask,
+                    "entry_bid": q.bid,
+                    "entry_ask": q.ask,
+                },
+            )
+            book_busy = True
+            log.info("%s dip %s long %.2f at %.2f", day, rule, amount, q.ask)
 
     # QQQ options ------------------------------------------------------------------------------
     async def qqq_price(self, delay: int) -> float:

@@ -96,6 +96,21 @@ def test_rsi2_and_connors_rule():
     assert not methods.connors([200 - 0.1 * i for i in range(198)] + [178.0, 177.0]).signal
 
 
+def test_dip_rules_turnaround_monday_and_connors_exit():
+    mon, tue, wed = date(2026, 10, 19), date(2026, 10, 20), date(2026, 10, 21)
+    rising = [100 + 0.1 * i for i in range(199)]
+    down = methods.dip_rules([*rising, rising[-1] * 0.989], mon)
+    assert down.turnaround and down.change == pytest.approx(-0.011) and down.reason == ""
+    assert not methods.dip_rules([*rising, rising[-1] * 0.989], tue).turnaround  # not a Monday
+    assert not methods.dip_rules([*rising, rising[-1] * 0.991], mon).turnaround  # only -0.9%
+    # Method 3's dip opens Connors; a strong up day after it takes RSI2 above 65 and closes it.
+    dip = [100 + 0.1 * i for i in range(198)] + [118.0, 117.0]
+    opened = methods.dip_rules(dip, tue)
+    assert opened.connors.signal and not opened.connors_exit
+    assert methods.dip_rules([*dip, 120.0], wed).connors_exit
+    assert methods.dip_rules([1.0] * 199, mon).reason == "TOO_FEW_DAILY_CLOSES"
+
+
 def test_sessions_regular_days_and_early_closes():
     exchange = {
         "ExchangeSessions": [

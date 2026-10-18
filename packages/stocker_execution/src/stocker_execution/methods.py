@@ -10,6 +10,10 @@
 4. VWAP crossings (amendment 2): on a day the Nasdaq first candle is long, each 10:00-15:00 close at
    which QQQ's EMA(10) crosses up through QQQ's session VWAP -> a paper long Nasdaq CFD, out at the
    first later close back below VWAP or at 16:00; one at a time.
+5. Dip rules (amendment 3): at 15:50, on QQQ's daily closes with the 15:50 price as today's, a
+   paper long Nasdaq CFD held over days: Connors (method 3's signal; out at the first later 15:50
+   with RSI2 above 65) and Turnaround Tuesday (a Monday at least 1% below the last close; out at
+   the next session's 15:50).
 """
 
 import math
@@ -197,6 +201,31 @@ def connors(closes: Sequence[float]) -> Connors:
     r = rsi2(closes)
     signal = closes[-1] > average and r[-1] + r[-2] < 35
     return Connors(signal, closes[-1], average, r[-1], r[-2], "")
+
+
+CONNORS_EXIT_RSI = 65.0
+TURNAROUND_DROP = -0.01
+
+
+@dataclass(frozen=True)
+class Dip:
+    connors: Connors
+    change: float | None  # today's price against the last daily close
+    connors_exit: bool  # RSI2(today) above 65: an open Connors trade closes
+    turnaround: bool  # a Monday at least 1% down: Turnaround Tuesday buys
+    reason: str
+
+
+def dip_rules(closes: Sequence[float], day: date) -> Dip:
+    """Method 5 on daily closes oldest first, the last one today's 15:50 price (as `connors`)."""
+    c = connors(closes)
+    if c.reason:
+        return Dip(c, None, False, False, c.reason)
+    assert c.rsi is not None
+    change = closes[-1] / closes[-2] - 1
+    return Dip(
+        c, change, c.rsi > CONNORS_EXIT_RSI, day.weekday() == 0 and change <= TURNAROUND_DROP, ""
+    )
 
 
 CROSS_ALPHA = 2 / 11  # EMA(10)

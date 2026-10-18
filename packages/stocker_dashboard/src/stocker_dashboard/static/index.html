@@ -28,7 +28,7 @@
 
       <section id="today" hidden>
         <p class="eyebrow" id="today-day">TODAY</p>
-        <h1>First candle, VWAP crossings and Connors, recorded on paper</h1>
+        <h1>First candle, VWAP crossings, Connors and dip rules, recorded on paper</h1>
         <div class="grid">
           <div class="panel">
             <h3>Signals</h3>
@@ -36,6 +36,7 @@
               <div><dt>Nasdaq CFD · first candle</dt><dd id="sig-NAS100">—</dd></div>
               <div><dt>S&amp;P CFD · first candle</dt><dd id="sig-US500">—</dd></div>
               <div><dt>QQQ · Connors at 15:50</dt><dd id="sig-CONNORS">—</dd></div>
+              <div><dt>QQQ · dip rules at 15:50</dt><dd id="sig-DIP">—</dd></div>
             </dl>
           </div>
           <div class="panel">
@@ -50,10 +51,13 @@
         <h3>VWAP crossings · Nasdaq CFD, long first-candle days only</h3>
         <div class="table-scroll"><table><thead><tr><th>Signal (candle close)</th><th>Contracts</th><th>Entry (ask)</th><th>Exit (bid)</th><th>Result</th></tr></thead><tbody id="crosses"></tbody></table></div>
         <p class="muted" id="crosses-empty">No VWAP crossing traded today. On a long first-candle day, each 10:00–15:00 close where QQQ's EMA10 crosses up through its VWAP buys the Nasdaq CFD; it is sold at the first close back below VWAP, or at 16:00.</p>
+        <h3>Dip rules · Nasdaq CFD, held over days</h3>
+        <div class="table-scroll"><table><thead><tr><th>Rule</th><th>Bought</th><th>Contracts</th><th>Entry (ask)</th><th>Exit (bid)</th><th>Result</th></tr></thead><tbody id="dips"></tbody></table></div>
+        <p class="muted" id="dips-empty">No dip trade held. At 15:50 New York, Connors buys the Nasdaq CFD after a dip in an uptrend and sells at the first 15:50 with RSI2 above 65; Turnaround Tuesday buys after a Monday down 1% or more and sells at the next session's 15:50. Both read QQQ's live price at 15:50.</p>
         <h3>QQQ option paper trades · one contract</h3>
         <div class="table-scroll"><table><thead><tr><th>Method</th><th>Option</th><th>Delta</th><th>Bought (ask)</th><th>Sold (bid)</th><th>Result</th></tr></thead><tbody id="options"></tbody></table></div>
         <p class="muted" id="options-empty">No QQQ option paper trade today.</p>
-        <p class="muted">While SaxoTraderGO holds Saxo's live slot, QQQ prices reach the server 15 minutes late: each QQQ step is then read 15 minutes after its time and recorded as of that time. CFD prices are always live.</p>
+        <p class="muted">While SaxoTraderGO holds Saxo's live slot, QQQ prices reach the server 15 minutes late: each QQQ step is then read 15 minutes after its time and recorded as of that time. CFD prices are always live. The dip rules trade the CFD at once, so their 15:50 entries and the Connors exit check are missed while QQQ is late.</p>
       </section>
 
       <section id="record" hidden>

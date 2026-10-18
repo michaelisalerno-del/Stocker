@@ -46,6 +46,15 @@ CREATE TABLE IF NOT EXISTS cross_trades (
   exit_at TEXT, exit_price REAL, exit_bid REAL, exit_ask REAL, exit_reason TEXT, pnl_usd REAL,
   note TEXT NOT NULL DEFAULT '',
   UNIQUE (day, signal_candle));
+CREATE TABLE IF NOT EXISTS dip_trades (
+  id INTEGER PRIMARY KEY, day TEXT NOT NULL, rule TEXT NOT NULL, market TEXT NOT NULL,
+  uic INTEGER NOT NULL, book INTEGER NOT NULL CHECK (book IN (0, 1)), qqq_price REAL NOT NULL,
+  amount REAL NOT NULL CHECK (amount > 0), factor REAL NOT NULL,
+  entry_at TEXT NOT NULL, entry_price REAL NOT NULL, entry_bid REAL NOT NULL,
+  entry_ask REAL NOT NULL,
+  exit_day TEXT, exit_at TEXT, exit_price REAL, exit_bid REAL, exit_ask REAL, exit_reason TEXT,
+  qqq_exit_price REAL, pnl_usd REAL,
+  UNIQUE (day, rule));
 CREATE TABLE IF NOT EXISTS snapshots (
   id INTEGER PRIMARY KEY, day TEXT NOT NULL, event TEXT NOT NULL, taken TEXT NOT NULL,
   payload TEXT NOT NULL);
@@ -131,7 +140,7 @@ class Store:
         return row
 
     def insert(self, table: str, values: dict[str, Any]) -> int:
-        assert table in {"cfd_trades", "option_trades", "cross_trades"}
+        assert table in {"cfd_trades", "option_trades", "cross_trades", "dip_trades"}
         columns = ",".join(values)
         with self.db:
             cursor = self.db.execute(
@@ -141,7 +150,7 @@ class Store:
         return int(cursor.lastrowid or 0)
 
     def update(self, table: str, row_id: int, values: dict[str, Any]) -> None:
-        assert table in {"cfd_trades", "option_trades", "cross_trades"}
+        assert table in {"cfd_trades", "option_trades", "cross_trades", "dip_trades"}
         assignments = ",".join(f"{k}=?" for k in values)
         with self.db:
             self.db.execute(
@@ -165,6 +174,15 @@ class Store:
 
     def open_crosses(self) -> list[sqlite3.Row]:
         return list(self.db.execute("SELECT * FROM cross_trades WHERE exit_at IS NULL ORDER BY id"))
+
+    def open_dips(self) -> list[sqlite3.Row]:
+        return list(self.db.execute("SELECT * FROM dip_trades WHERE exit_at IS NULL ORDER BY id"))
+
+    def dip(self, day: str, rule: str) -> sqlite3.Row | None:
+        row: sqlite3.Row | None = self.db.execute(
+            "SELECT * FROM dip_trades WHERE day=? AND rule=?", (day, rule)
+        ).fetchone()
+        return row
 
     def open_options(self) -> list[sqlite3.Row]:
         return list(
@@ -199,6 +217,11 @@ class Store:
             # Today's option trades and any earlier one that closes today (Connors).
             "options": rows("SELECT * FROM option_trades WHERE day=:d OR exit_day=:d ORDER BY id"),
             "crosses": rows("SELECT * FROM cross_trades WHERE day=:d ORDER BY signal_candle"),
+            # Dip trades bought today, closed today or still held from an earlier day.
+            "dips": rows(
+                "SELECT * FROM dip_trades WHERE day=:d OR exit_day=:d OR exit_at IS NULL "
+                "ORDER BY id"
+            ),
         }
 
     def record(self, offset: int) -> dict[str, Any]:
@@ -213,6 +236,9 @@ class Store:
                    UNION ALL
                    SELECT 'CROSS ' || market, day, 1, entry_at, exit_at, exit_reason, pnl_usd
                      FROM cross_trades
+                   UNION ALL
+                   SELECT 'DIP ' || rule, day, 1, entry_at, exit_at, exit_reason, pnl_usd
+                     FROM dip_trades
                    ORDER BY day DESC, method LIMIT ? OFFSET ?""",
                 (PAGE_SIZE, offset),
             )
@@ -225,7 +251,10 @@ class Store:
                           ROUND(AVG(pnl_usd), 2) AS mean_usd, MIN(day) AS first_day
                      FROM (SELECT 'CFD ' || market AS method, day, pnl_usd FROM cfd_trades
                            UNION ALL SELECT method, day, pnl_usd FROM option_trades
-                           UNION ALL SELECT 'CROSS ' || market, day, pnl_usd FROM cross_trades)
+                           UNION ALL SELECT 'CROSS ' || market, day, pnl_usd FROM cross_trades
+                           UNION ALL SELECT 'DIP ' || rule, day, pnl_usd FROM dip_trades
+                           -- the one-at-a-time book: the dip trades it would have held
+                           UNION ALL SELECT 'DIP BOOK', day, pnl_usd FROM dip_trades WHERE book=1)
                     GROUP BY method ORDER BY method"""
             )
         ]

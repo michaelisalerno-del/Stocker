@@ -31,6 +31,20 @@
     "uk": "20:50"
    },
    {
+    "event": "DIP_EXIT",
+    "due": "2026-10-19T19:50:00+00:00",
+    "qqq_delayed": false,
+    "new_york": "15:50",
+    "uk": "20:50"
+   },
+   {
+    "event": "DIP_ENTRY",
+    "due": "2026-10-19T19:50:00+00:00",
+    "qqq_delayed": false,
+    "new_york": "15:50",
+    "uk": "20:50"
+   },
+   {
     "event": "FIRST_CANDLE_QQQ_LATE",
     "due": "2026-10-19T19:55:00+00:00",
     "qqq_delayed": true,
@@ -440,6 +454,27 @@
      "prior_candles": 36
     },
     "created": "2026-10-15T22:46:27.740740+00:00"
+   },
+   {
+    "day": "2026-10-19",
+    "method": "DIP",
+    "market": "QQQ",
+    "side": 1,
+    "reason": "",
+    "created": "2026-10-19T19:50:02+00:00",
+    "detail": {
+     "price_15_50": 710.0,
+     "previous_close": 718.0,
+     "change": -0.011142,
+     "sma200": 674.5,
+     "rsi2": 4.1,
+     "rsi2_prev": 11.6,
+     "connors_in": true,
+     "connors_exit": false,
+     "turnaround": true,
+     "daily_closes": 249,
+     "newest_close_day": "2026-10-16"
+    }
    }
   ],
   "cfd": [
@@ -593,6 +628,54 @@
     "exit_reason": "MISSED_ENTRY",
     "pnl_usd": null,
     "note": "QQQ_CHART_DELAYED"
+   }
+  ],
+  "dips": [
+   {
+    "id": 1,
+    "day": "2026-10-14",
+    "rule": "CONNORS",
+    "book": 1,
+    "qqq_price": 700.5,
+    "market": "NAS100",
+    "uic": 4912,
+    "factor": 1.0,
+    "amount": 0.66,
+    "entry_bid": 29999.0,
+    "entry_ask": 30000.0,
+    "entry_price": 30000.0,
+    "entry_at": "2026-10-14T19:50:01+00:00",
+    "exit_day": "2026-10-19",
+    "exit_at": "2026-10-19T19:50:02+00:00",
+    "exit_price": 30299.0,
+    "exit_bid": 30299.0,
+    "exit_ask": 30300.0,
+    "exit_reason": "RSI2_ABOVE_65",
+    "qqq_exit_price": 710.0,
+    "pnl_usd": 197.34
+   },
+   {
+    "id": 2,
+    "day": "2026-10-19",
+    "rule": "TURNAROUND",
+    "book": 1,
+    "qqq_price": 710.0,
+    "market": "NAS100",
+    "uic": 4912,
+    "factor": 1.0,
+    "amount": 0.66,
+    "entry_bid": 29999.0,
+    "entry_ask": 30000.0,
+    "entry_price": 30000.0,
+    "entry_at": "2026-10-19T19:50:03+00:00",
+    "exit_day": null,
+    "exit_at": null,
+    "exit_price": null,
+    "exit_bid": null,
+    "exit_ask": null,
+    "exit_reason": null,
+    "qqq_exit_price": null,
+    "pnl_usd": null
    }
   ]
  },

@@ -13,9 +13,12 @@ const EVENTS = {
   CONNORS_QQQ_EXIT: "Connors · QQQ call sold",
   CFD_EXIT: "CFD trades closed",
   VWAP_CROSS_EXIT: "VWAP-crossing trades closed",
+  DIP_EXIT: "Dip rules · trades closed",
+  DIP_ENTRY: "Dip rules · Nasdaq CFD bought",
 };
 const MARKETS = {NAS100: "Nasdaq CFD", US500: "S&P CFD"};
-const METHODS = {"CFD NAS100": "Nasdaq CFD · first candle", "CFD US500": "S&P CFD · first candle", FIRST_CANDLE_QQQ: "QQQ option · first candle", CONNORS_QQQ: "QQQ call · Connors", "CROSS NAS100": "Nasdaq CFD · VWAP crossings"};
+const METHODS = {"CFD NAS100": "Nasdaq CFD · first candle", "CFD US500": "S&P CFD · first candle", FIRST_CANDLE_QQQ: "QQQ option · first candle", CONNORS_QQQ: "QQQ call · Connors", "CROSS NAS100": "Nasdaq CFD · VWAP crossings", "DIP CONNORS": "Nasdaq CFD · Connors (days)", "DIP TURNAROUND": "Nasdaq CFD · Turnaround Tuesday", "DIP BOOK": "Nasdaq CFD · dip book, one at a time"};
+const RULES = {CONNORS: "Connors", TURNAROUND: "Turnaround Tuesday"};
 const USD = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD"});
 let offset = 0, pending = null, lastRefresh = "";
 
@@ -91,6 +94,12 @@ function signalText(s) {
     const sum = d.rsi2 != null && d.rsi2_prev != null ? (d.rsi2 + d.rsi2_prev).toFixed(1) : "?";
     return `${s.side ? "Signal: buy the call" : "No signal"} · RSI2 sum ${sum} · price ${price(d.price_15_50)} vs 200-day ${price(d.sma200)}`;
   }
+  if (s.method === "DIP") {
+    if (s.reason) return display(s.reason);
+    const connors = d.connors_in ? "Connors: buy" : d.connors_exit ? "Connors: RSI2 above 65, sell" : "Connors: no signal";
+    const change = d.change == null ? "?" : `${(d.change * 100).toFixed(2)}%`;
+    return `${connors} · ${d.turnaround ? "Turnaround Tuesday: buy" : "Turnaround Tuesday: no signal"} · QQQ ${price(d.price_15_50)} (${change} on the day)`;
+  }
   if (!s.side) return `No trade · ${display(s.reason) || "close equals EMA"}`;
   return `${side(s.side)} · candle ${price(d.close)} vs EMA12 ${price(d.ema)}`;
 }
@@ -102,6 +111,7 @@ function renderToday(d) {
   text("sig-NAS100", signalText(signal("FIRST_CANDLE", "NAS100")));
   text("sig-US500", signalText(signal("FIRST_CANDLE", "US500")));
   text("sig-CONNORS", signalText(signal("CONNORS", "QQQ")));
+  text("sig-DIP", signalText(signal("DIP", "QQQ")));
   const status = new Map(d.events.map((e) => [e.name, e]));
   rows("plan", d.plan, [
     (p) => EVENTS[p.event] || p.event, (p) => p.new_york, (p) => p.uk,
@@ -120,6 +130,13 @@ function renderToday(d) {
     (t) => t.entry_price == null ? "—" : t.exit_reason === "MISSED_EXIT" ? "Missed exit · no price" : t.exit_at ? `${price(t.exit_price)} · ${display(t.exit_reason)} ${ny(t.exit_at)} NY` : "Open · out back below VWAP or 16:00",
     (t) => t.exit_at ? money(t.pnl_usd) : t.open_pnl_usd != null ? `${money(t.open_pnl_usd)} open` : "Open",
   ], {4: (t) => tone(t.exit_at ? t.pnl_usd : t.open_pnl_usd)});
+  rows("dips", d.dips || [], [
+    (t) => `${RULES[t.rule] || t.rule}${t.book ? " · in the book" : ""}`,
+    (t) => `${t.day} ${ny(t.entry_at)} NY`, (t) => t.amount,
+    (t) => price(t.entry_price),
+    (t) => t.exit_reason === "MISSED_EXIT" ? "Missed exit · no price" : t.exit_at ? `${price(t.exit_price)} · ${display(t.exit_reason)} ${t.exit_day} ${ny(t.exit_at)} NY` : "Open · sells on its rule at 15:50",
+    (t) => t.exit_at ? money(t.pnl_usd) : "Open",
+  ], {5: (t) => tone(t.pnl_usd)});
   rows("options", d.options, [
     (o) => METHODS[o.method] || o.method,
     (o) => `${o.put_call} ${o.strike} · expires ${o.expiry}`,

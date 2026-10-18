@@ -492,3 +492,108 @@ def test_no_crossing_trades_on_a_short_first_candle_day(tmp_path):
         await rt.client.close()
 
     asyncio.run(scenario())
+
+
+def dip_market(fake: FakeSaxo) -> None:
+    """Monday 15:50 with live QQQ at 710: 1.1% under Friday's 718 (Turnaround Tuesday) and a
+    Connors dip in the rising daily closes."""
+    market(fake)
+    fake.qqq_delay = 0
+    fake.qqq(709.98, 710.02)
+
+
+MON_1550 = datetime(2026, 10, 19, 19, 50, 1, tzinfo=UTC)
+
+
+def tuesday(fake: FakeSaxo, qqq_mid: float) -> None:
+    fake.daily.append({"Time": "2026-10-19T00:00:00Z", "Close": 710.0})
+    fake.qqq(qqq_mid - 0.02, qqq_mid + 0.02)
+    fake.cfd_quote(NAS, 30299.0, 30300.0)
+
+
+def test_dip_rules_buy_the_nasdaq_cfd_at_15_50_and_close_on_their_own_exits(tmp_path):
+    fake, clock = FakeSaxo(), Clock(MON_1550 - timedelta(minutes=1))
+    dip_market(fake)
+
+    async def scenario():
+        rt = make(tmp_path, fake, clock)
+        await at(rt, clock, MON_1550)
+        signal = rt.store.signal("2026-10-19", "DIP", "QQQ")
+        assert signal["side"] == 1 and signal["reason"] == ""
+        dips = {r["rule"]: dict(r) for r in rt.store.db.execute("SELECT * FROM dip_trades")}
+        assert set(dips) == {"CONNORS", "TURNAROUND"}
+        # Both at the live ask, sized as the first-candle Nasdaq trade; the one-at-a-time book
+        # holds the first (Connors) only.
+        assert (dips["CONNORS"]["entry_price"], dips["CONNORS"]["amount"]) == (30000.0, 0.66)
+        assert (dips["CONNORS"]["book"], dips["TURNAROUND"]["book"]) == (1, 0)
+        assert dips["TURNAROUND"]["qqq_price"] == pytest.approx(710.0)
+
+        # Tuesday 15:50: a strong day. Turnaround Tuesday closes at its next session, Connors on
+        # RSI2 above 65; both at the live bid. No new dip signal.
+        tuesday(fake, 730.0)
+        await at(rt, clock, datetime(2026, 10, 20, 19, 50, 1, tzinfo=UTC))
+        dips = {r["rule"]: dict(r) for r in rt.store.db.execute("SELECT * FROM dip_trades")}
+        assert dips["TURNAROUND"]["exit_reason"] == "NEXT_SESSION"
+        assert dips["CONNORS"]["exit_reason"] == "RSI2_ABOVE_65"
+        assert dips["CONNORS"]["pnl_usd"] == pytest.approx(0.66 * 299)
+        entry = rt.store.event("2026-10-20", "DIP_ENTRY")
+        assert (entry["status"], entry["note"]) == ("DONE", "NO_DIP_SIGNAL")
+        summary = {m["method"]: m for m in rt.store.record(0)["summary"]}
+        assert summary["DIP BOOK"]["trades"] == 1 and summary["DIP TURNAROUND"]["closed"] == 1
+        assert {m for m, _, _ in fake.requests} == {"GET"}
+        await rt.client.close()
+
+    asyncio.run(scenario())
+
+
+def test_a_delayed_qqq_price_misses_dip_entries_and_the_connors_check_only(tmp_path):
+    fake, clock = FakeSaxo(), Clock(MON_1550 - timedelta(minutes=1))
+    dip_market(fake)
+
+    async def scenario():
+        rt = make(tmp_path, fake, clock)
+        await at(rt, clock, MON_1550)  # both bought with live QQQ
+        # Tuesday: SaxoTraderGO holds the live slot. Turnaround Tuesday still closes (it needs
+        # only the CFD); the Connors check cannot run, and its entry window passes.
+        fake.qqq_delay = 15
+        tuesday(fake, 730.0)
+        await at(rt, clock, datetime(2026, 10, 20, 19, 50, 1, tzinfo=UTC))
+        tt = rt.store.dip("2026-10-19", "TURNAROUND")
+        assert tt["exit_reason"] == "NEXT_SESSION"
+        assert rt.store.dip("2026-10-19", "CONNORS")["exit_at"] is None
+        await at(rt, clock, datetime(2026, 10, 20, 20, 21, tzinfo=UTC))
+        entry = rt.store.event("2026-10-20", "DIP_ENTRY")
+        assert (entry["status"], entry["note"]) == ("FAILED", "QQQ_PRICE_DELAYED")
+        assert rt.store.event("2026-10-20", "DIP_EXIT")["status"] == "FAILED"
+        # Wednesday: Tuesday's Connors check never completed, so the trade has no exit price.
+        fake.qqq_delay = 0
+        fake.daily.append({"Time": "2026-10-20T00:00:00Z", "Close": 730.0})
+        fake.qqq(729.98, 730.02)
+        await at(rt, clock, datetime(2026, 10, 21, 19, 50, 1, tzinfo=UTC))
+        con = rt.store.dip("2026-10-19", "CONNORS")
+        assert con["exit_reason"] == "MISSED_EXIT" and con["pnl_usd"] is None
+        await rt.client.close()
+
+    asyncio.run(scenario())
+
+
+def test_dip_exits_the_app_was_down_for_are_recorded_missed(tmp_path):
+    fake, clock = FakeSaxo(), Clock(MON_1550 - timedelta(minutes=1))
+    dip_market(fake)
+
+    async def scenario():
+        rt = make(tmp_path, fake, clock)
+        await at(rt, clock, MON_1550)
+        await rt.client.close()
+        tuesday(fake, 730.0)
+        fake.daily.append({"Time": "2026-10-20T00:00:00Z", "Close": 730.0})
+        clock.at = datetime(2026, 10, 21, 19, 50, 1, tzinfo=UTC)  # back on Wednesday
+        again = make(tmp_path, fake, clock, rt.store)
+        await at(again, clock, clock.at)
+        reasons = {
+            r["rule"]: r["exit_reason"] for r in again.store.db.execute("SELECT * FROM dip_trades")
+        }
+        assert reasons == {"CONNORS": "MISSED_EXIT", "TURNAROUND": "MISSED_EXIT"}
+        await again.client.close()
+
+    asyncio.run(scenario())

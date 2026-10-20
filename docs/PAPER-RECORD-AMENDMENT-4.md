@@ -127,3 +127,5 @@ earlier dip rules are unchanged in behaviour: their 60 tests pass unchanged; fou
 Written before any trade with context or any fear trade could be recorded: the deployed release
 (1f792f3) saves no context and has no fear rule; the first possible context is the first 09:35 after
 this is deployed, and the first possible fear entry the first 15:50.
+
+Dashboard text order fixed in commit c2b74a9 (dashboard.js and the browser test only; the hashes above are unchanged).

@@ -41,7 +41,8 @@ FC, FC_QQQ, CONNORS_QQQ = "FIRST_CANDLE", "FIRST_CANDLE_QQQ", "CONNORS_QQQ"
 CROSS = "VWAP_CROSS"
 DIP = "DIP"
 # The dip rules and their entry readings, in the order the one-at-a-time book takes them.
-DIP_RULES = (("CONNORS", "connors_in"), ("TURNAROUND", "turnaround"))
+DIP_RULES = (("CONNORS", "connors_in"), ("TURNAROUND", "turnaround"), ("FEAR", "fear"))
+DIP_EXITS = {"CONNORS": "RSI2_ABOVE_65", "TURNAROUND": "NEXT_SESSION", "FEAR": "FIFTH_SESSION"}
 CROSS_POLL_SECONDS = 5.0  # while a QQQ candle is due
 CROSS_DELAYED_POLL_SECONDS = 60.0  # while QQQ's chart is delayed: entries are missed anyway
 
@@ -343,6 +344,7 @@ class Runtime:
             signal = methods.first_candle(bars, s.open)
             if signal.reason in {"NO_FIRST_CANDLE", "FIRST_CANDLE_NOT_FINAL"}:
                 raise Problem(signal.reason)
+            context = await self.day_context(cfd.market, s.day)
             # Saved at once: the QQQ option follows the signal even if the CFD trade cannot open.
             self.store.add_signal(
                 day,
@@ -356,6 +358,7 @@ class Runtime:
                     "prior_candles": signal.prior_bars,
                     "bars_read": len(bars),
                     "last_bars": [[stamp(b.start), b.close] for b in bars[-40:]],
+                    **context,
                 },
             )
             side = signal.side
@@ -394,6 +397,19 @@ class Runtime:
             },
         )
         log.info("%s %s %s %.2f at %.2f", day, cfd.market, side, amount, entry)
+
+    async def day_context(self, cfd_market: str, day: date) -> dict[str, Any]:
+        """Amendment 4: the reference ETF's closes through the prior session, saved with the
+        signal for the books and the playbook. Reported only: a read that fails leaves its
+        reason and never holds up the trade."""
+        try:
+            dated = await market.daily_closes(self.client, methods.TREND_UIC[cfd_market], day)
+        except SaxoError as exc:
+            return {"context_reason": failure_code(exc)}
+        if not dated or (day - dated[-1][0]).days > 4:
+            return {"context_reason": "DAILY_CLOSES_OUT_OF_DATE"}
+        context = methods.trend_context([close for _, close in dated])
+        return context.detail() if context else {"context_reason": "TOO_FEW_DAILY_CLOSES"}
 
     async def watch_stops(self, now: datetime, session: Session | None) -> None:
         """Stops are watched during their own session only. A trade still open on a later day
@@ -660,12 +676,13 @@ class Runtime:
         if q.delayed != 0:
             raise Problem("QQQ_PRICE_DELAYED")
         closes = [close for _, close in dated]
-        d = methods.dip_rules([*closes, q.mid], s.day)
+        vol = await self.atm_vol_30d(s.day, q.mid)
+        d = methods.dip_rules([*closes, q.mid], s.day, vol["atm_vol_30d"])
         self.store.add_signal(
             day,
             DIP,
             "QQQ",
-            int(d.connors.signal or d.turnaround),
+            int(d.connors.signal or d.turnaround or d.fear),
             d.reason,
             {
                 "price_15_50": q.mid,
@@ -677,13 +694,37 @@ class Runtime:
                 "connors_in": d.connors.signal,
                 "connors_exit": d.connors_exit,
                 "turnaround": d.turnaround,
+                "fear": d.fear,
+                "down_closes": d.down_closes,
                 "daily_closes": len(closes),
                 "newest_close_day": dated[-1][0].isoformat(),
+                **vol,
             },
         )
         saved = self.store.signal(day, DIP, "QQQ")
         assert saved is not None
         return saved
+
+    async def atm_vol_30d(self, day: date, centre: float) -> dict[str, Any]:
+        """Amendment 4: Saxo's MidVol of the QQQ call and put at the strike nearest the price on
+        the expiry nearest 30 days out — the fear rule's reading. A read that fails is recorded
+        with its reason; the other dip rules go ahead without it."""
+        try:
+            later = [e for e in await market.expiries(self.client, QQQ_OPTION_ROOT) if e > day]
+            if not later:
+                return {"atm_vol_30d": None, "atm_vol_reason": "NO_LATER_EXPIRY"}
+            expiry = min(later, key=lambda e: abs((e - day).days - methods.FEAR_DAYS))
+            listed = await market.series(self.client, QQQ_OPTION_ROOT, expiry)
+            board, _ = await market.board(self.client, listed, centre, 1)
+        except SaxoError as exc:
+            return {"atm_vol_30d": None, "atm_vol_reason": failure_code(exc)}
+        vol = methods.atm_vol(board, centre)
+        return {
+            "atm_vol_30d": vol,
+            "atm_vol_expiry": expiry.isoformat(),
+            "atm_vol_delay": max((o.delayed or 0 for o in board), default=None),
+            "atm_vol_reason": "" if vol is not None else "NO_ATM_VOL",
+        }
 
     async def dip_exit(self, s: Session, due: datetime) -> None:
         """Turnaround Tuesday closes at the next session; Connors at the first later 15:50 with
@@ -701,6 +742,9 @@ class Runtime:
             passed = [x.isoformat() for x, _ in dated if x.isoformat() > t["day"]]
             if t["rule"] == "TURNAROUND":  # sessions since its entry: its exit day has gone
                 missed, due_now = bool(passed), True
+            elif t["rule"] == "FEAR":  # out at the fifth session's 15:50; any later, it has gone
+                missed = len(passed) >= methods.FEAR_HOLD
+                due_now = len(passed) == methods.FEAR_HOLD - 1
             else:  # a session since its entry whose exit check the app did not complete
                 missed = any(
                     (e := self.store.event(x, DIP + "_EXIT")) is None or e["status"] != "DONE"
@@ -729,7 +773,7 @@ class Runtime:
                 )
                 continue
             assert q.bid is not None
-            reason = "RSI2_ABOVE_65" if t["rule"] == "CONNORS" else "NEXT_SESSION"
+            reason = DIP_EXITS[t["rule"]]
             pnl = methods.cfd_pnl(1, t["entry_price"], q.bid, t["amount"], t["factor"])
             self.store.update(
                 "dip_trades",
@@ -1106,7 +1150,33 @@ class Runtime:
                         "uk": due.astimezone(UK).strftime("%H:%M"),
                     }
                 )
-        return {"day": day.isoformat(), "plan": plan, **view, "system": self.status()}
+        return {
+            "day": day.isoformat(),
+            "plan": plan,
+            **view,
+            "playbook": self.playbook(view["signals"], day),
+            "system": self.status(),
+        }
+
+    @staticmethod
+    def playbook(signals: list[dict[str, Any]], day: date) -> list[dict[str, Any]]:
+        """Amendment 4: what the research leads say about today's first-candle signals."""
+        fc = {s["market"]: s for s in signals if s["method"] == FC}
+        out = []
+        for cfd in CFDS:
+            s = fc.get(cfd.market)
+            if s is None:
+                continue
+            other = fc.get(next(x.market for x in CFDS if x.market != cfd.market))
+            agree = (
+                None
+                if other is None or not other["side"] or not s["side"]
+                else other["side"] == s["side"]
+            )
+            d = methods.Day(s["side"], day.weekday(), agree, s["detail"])
+            action, tags = methods.playbook(d, cfd.market)
+            out.append({"market": cfd.market, "action": action, "tags": tags})
+        return out
 
     async def stop(self) -> None:
         if self.stopping and self.owner is None:

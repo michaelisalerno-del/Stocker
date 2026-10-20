@@ -189,3 +189,77 @@ def test_a_crossing_held_past_15_55_ends_with_the_16_00_exit():
     closes = [700.0] * 11 + [701.0] * 66 + [690.0]  # back below only at the 16:00 close
     (c,) = methods.vwap_crosses(candles(closes), DAY)
     assert c.exit is None
+
+
+def test_trend_context_books_and_playbook():
+    rising = [100.0 + i for i in range(110)]
+    up = methods.trend_context(rising)
+    assert (up.prior_close, up.down_closes) == (209.0, 0)
+    assert up.sma50 == pytest.approx(sum(rising[-50:]) / 50)
+    assert up.detail()["below_50d"] is False and up.detail()["prior_change"] == pytest.approx(
+        1 / 208, abs=1e-6
+    )
+    falling = [300.0 - i for i in range(110)]
+    down = methods.trend_context(falling).detail()
+    assert down["below_50d"] and down["below_100d"] and down["down_closes"] == 109
+    assert down["rsi2_prior"] == 0.0
+    assert methods.trend_context(rising[:100]) is None  # 101 closes are needed
+    assert methods.down_run([1.0, 3.0, 2.0, 1.0]) == 2
+
+    cell = methods.Day(1, 0, True, down)  # Monday, long, below the 50-day, S&P agrees
+    assert methods.in_book("PULLBACK", cell, "NAS100") and not methods.in_book(
+        "WEEKDAYS", cell, "NAS100"
+    )
+    assert methods.in_book("AGREE", cell, "NAS100")
+    # The playbook takes the call in the cell (and the S&P there), not the Nasdaq CFD.
+    assert [methods.in_book("PLAYBOOK", cell, i) for i in ("NAS100", "US500", "QQQ option")] == [
+        False,
+        True,
+        True,
+    ]
+    assert methods.playbook(cell, "NAS100") == (
+        "QQQ call",
+        ["pullback cell: long below the 50-day", "Monday", "agrees with the other index"],
+    )
+    assert methods.playbook(cell, "US500")[0] == "S&P CFD"
+    oversold_short = methods.Day(-1, 2, False, down)
+    assert not methods.in_book("NO OVERSOLD SHORTS", oversold_short, "NAS100")
+    assert methods.playbook(oversold_short, "NAS100") == (
+        "skip the short",
+        ["short after an oversold close", "disagrees with the other index"],
+    )
+    short = methods.Day(-1, 2, None, up.detail())
+    assert methods.in_book("NO OVERSOLD SHORTS", short, "NAS100")
+    assert methods.in_book("PLAYBOOK", short, "NAS100")
+    assert methods.playbook(short, "NAS100") == ("Nasdaq CFD short, not a put", [])
+    assert methods.playbook(short, "US500")[0] == "skip: no S&P edge outside the pullback cell"
+    big = methods.Day(1, 1, True, methods.trend_context([*rising, 230.0]).detail())
+    assert methods.in_book("AFTER A +1% DAY", big, "NAS100")
+    assert "after a +1% day" in methods.playbook(big, "NAS100")[1]
+    unknown = methods.Day(1, 2, None, {"close": 1.0})  # recorded before amendment 4
+    assert not methods.in_book("PULLBACK", unknown, "NAS100") and methods.in_book(
+        "WEEKDAYS", unknown, "NAS100"
+    )
+    assert methods.playbook(unknown, "NAS100") == ("context not read", [])
+    assert methods.playbook(methods.Day(0, 2, None, down), "NAS100")[0] == "no trade"
+
+
+def test_dip_rules_fear_and_the_30_day_vol_reading():
+    closes = [100.0 + 0.5 * i for i in range(231)] + [214.5, 214.0, 213.5]
+    high = methods.dip_rules([*closes, 213.0], date(2026, 10, 20), 0.35)
+    assert high.connors.signal and high.fear and high.down_closes == 4
+    assert not methods.dip_rules([*closes, 213.0], date(2026, 10, 20), 0.25).fear
+    assert not methods.dip_rules([*closes, 213.0], date(2026, 10, 20), None).fear
+    assert not methods.dip_rules([*closes[:-2], 213.0], date(2026, 10, 20), 0.35).fear  # 2 down
+
+    def q(k, pc, vol):
+        return OptionQuote(1, k, pc, 1.0, 1.1, 0.5, vol, 2.0, 2.0, 0, "Open")
+
+    board = [
+        q(699.0, "Call", 0.40),
+        q(700.0, "Call", 0.30),
+        q(700.0, "Put", 0.32),
+        q(701.0, "Put", 0.20),
+    ]
+    assert methods.atm_vol(board, 700.3) == pytest.approx(0.31)
+    assert methods.atm_vol([q(700.0, "Call", None)], 700.0) is None

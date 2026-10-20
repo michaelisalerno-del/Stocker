@@ -2,10 +2,11 @@
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from stocker_execution import methods
 from stocker_execution.config import PAGE_SIZE
 
 SCHEMA = """
@@ -258,4 +259,65 @@ class Store:
                     GROUP BY method ORDER BY method"""
             )
         ]
-        return {"trades": trades, "summary": summary, "has_more": len(trades) == PAGE_SIZE}
+        return {
+            "trades": trades,
+            "summary": summary,
+            "books": self.books(),
+            "has_more": len(trades) == PAGE_SIZE,
+        }
+
+    def books(self) -> list[dict[str, Any]]:
+        """Amendment 4: the frozen subsets of the first-candle trades (methods.BOOKS) and of the
+        VWAP crossings (methods.CROSS_BOOKS), summed by instrument. A day recorded without its
+        context belongs only to the books that need none (weekday, agreement)."""
+        signals = {
+            (r["day"], r["market"]): (r["side"], json.loads(r["detail"]))
+            for r in self.db.execute(
+                "SELECT day, market, side, detail FROM signals WHERE method='FIRST_CANDLE'"
+            )
+        }
+
+        def day_of(day: str, market: str) -> methods.Day | None:
+            own = signals.get((day, market))
+            if own is None:
+                return None
+            other = signals.get((day, "US500" if market == "NAS100" else "NAS100"))
+            agree = None if other is None or not other[0] or not own[0] else other[0] == own[0]
+            return methods.Day(own[0], date.fromisoformat(day).weekday(), agree, own[1])
+
+        rows: list[tuple[str, methods.Day | None, float | None, bool]] = []
+        for r in self.db.execute("SELECT day, market, pnl_usd FROM cfd_trades"):
+            rows.append((r["market"], day_of(r["day"], r["market"]), r["pnl_usd"], False))
+        for r in self.db.execute(
+            "SELECT day, pnl_usd FROM option_trades WHERE method='FIRST_CANDLE_QQQ'"
+        ):
+            rows.append(("QQQ option", day_of(r["day"], "NAS100"), r["pnl_usd"], False))
+        for r in self.db.execute(
+            "SELECT day, signal_candle, pnl_usd FROM cross_trades WHERE entry_at IS NOT NULL"
+        ):
+            closes = datetime.fromisoformat(r["signal_candle"]) + timedelta(minutes=5)
+            early = closes.astimezone(methods.NY).hour < methods.CROSS_LATE_HOUR
+            rows.append(("CROSS", day_of(r["day"], "NAS100"), r["pnl_usd"], early))
+        out = []
+        for book in methods.BOOKS + methods.CROSS_BOOKS:
+            cells: dict[str, dict[str, Any]] = {}
+            for instrument, d, pnl, early in rows:
+                if d is None or (instrument == "CROSS") != (book in methods.CROSS_BOOKS):
+                    continue
+                if book == "CROSS PULLBACK":
+                    member = d.known and d.pullback
+                elif book == "CROSS BEFORE 14:00":
+                    member = early
+                else:
+                    member = methods.in_book(book, d, instrument)
+                if not member:
+                    continue
+                c = cells.setdefault(instrument, {"trades": 0, "closed": 0, "total_usd": 0.0})
+                c["trades"] += 1
+                if pnl is not None:
+                    c["closed"] += 1
+                    c["total_usd"] = round(c["total_usd"] + pnl, 2)
+            for c in cells.values():
+                c["mean_usd"] = round(c["total_usd"] / c["closed"], 2) if c["closed"] else None
+            out.append({"book": book, "cells": cells})
+        return out

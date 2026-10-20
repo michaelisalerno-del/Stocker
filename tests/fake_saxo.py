@@ -72,6 +72,7 @@ class FakeSaxo:
         self.qqq_bars: list[dict] = []
         self.qqq_upto: datetime | None = None  # QQQ candles exist up to this time (the clock)
         self.qqq_chart_delay = 0
+        self.mid_vol = 0.2  # Saxo's MidVol on every option quote
 
     def cfd_quote(self, uic: int, bid: float, ask: float, state: str = "Open") -> None:
         self.quotes[uic] = {
@@ -161,7 +162,7 @@ class FakeSaxo:
                                 "DelayedByMinutes": self.qqq_delay,
                                 "MarketState": "Open",
                             },
-                            "Greeks": {"Delta": q["Delta"], "MidVol": 0.2},
+                            "Greeks": {"Delta": q["Delta"], "MidVol": self.mid_vol},
                             "Commissions": {"CostBuy": 2.04, "CostSell": 2.04},
                         }
                     )

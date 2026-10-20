@@ -39,7 +39,8 @@ const server = http.createServer((req, res) => {
       assert.match(await page.locator("#options tr").first().textContent(), /Call 701.*\+\$59\.92/);
       assert.match(await page.locator("#crosses tr").first().textContent(), /10:30 NY · QQQ 701\.00 vs VWAP 700\.08.*Back below vwap.*\+\$65\.34/);
       assert.match(await page.locator("#crosses tr").nth(1).textContent(), /Missed entry · Qqq chart delayed/);
-      assert.match(await page.locator("#sig-DIP").textContent(), /^Connors: buy · Turnaround Tuesday: buy · QQQ 710\.00 \(-1\.11% on the day\)/);
+      assert.match(await page.locator("#sig-DIP").textContent(), /^Connors: buy · Turnaround Tuesday: buy · QQQ 710\.00 \(-1\.11% on the day\) · Fear rule: no reading$/);
+      assert.equal(await page.locator("#play-NAS100").textContent(), "Waiting for the 09:35 signal");
       assert.match(await page.locator("#dips tr").first().textContent(), /Connors · in the book.*Rsi2 above 65 2026-10-19.*\+\$197\.34/);
       assert.match(await page.locator("#dips tr").nth(1).textContent(), /Turnaround Tuesday.*Open · sells on its rule/);
       assert.equal(await page.locator("#status").getAttribute("data-tone"), "ok");

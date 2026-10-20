@@ -200,3 +200,13 @@ No schema migration. New optional config keys default to off. The chain window w
 - Runtime-only locked install smoke passed with network connections refused.
 - Dashboard benchmark (five clients, 400 closed trades): 0 broker requests; Overview response
   3.6 → 8.5 KB with gates and setup; page p95 latency stayed at or below about 1 ms.
+
+## Cockpit (20 October 2026)
+
+The Today page opens with four tiles (day P&L closed and open, open positions, the next event with a countdown,
+feeds and login), then a playbook panel (the research leads' action per market with the first-candle signal and
+its trend context under it, and the 15:50 dip readings) beside the day's events as a timeline; the trade tables
+follow. The Record page opens with net P&L, closed trades, win rate and the first recorded day, then the
+by-method table, the Books table (amendment 4) and the trades. Every id the browser test reads is unchanged.
+Phone width stacks the tiles two across and the playbook rows vertically; checked at a true 390 px viewport
+(headless Chrome's window will not go below ~485 px, so the check renders the page inside a 390 px iframe).

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS cfd_trades (
   entry_at TEXT NOT NULL, entry_price REAL NOT NULL, entry_bid REAL NOT NULL,
   entry_ask REAL NOT NULL,
   exit_at TEXT, exit_price REAL, exit_bid REAL, exit_ask REAL, exit_reason TEXT, pnl_usd REAL,
+  worst REAL,
   UNIQUE (day, market));
 CREATE TABLE IF NOT EXISTS option_trades (
   id INTEGER PRIMARY KEY, day TEXT NOT NULL, method TEXT NOT NULL,
@@ -86,6 +87,10 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(SCHEMA)
+        # Amendment 4 addendum: the worst adverse price seen while a CFD trade was open.
+        if "worst" not in {r[1] for r in self.db.execute("PRAGMA table_info(cfd_trades)")}:
+            with self.db:
+                self.db.execute("ALTER TABLE cfd_trades ADD COLUMN worst REAL")
         if self.db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
             raise ValueError("PAPER_RECORD_INTEGRITY_FAILURE")
 
@@ -286,8 +291,23 @@ class Store:
             return methods.Day(own[0], date.fromisoformat(day).weekday(), agree, own[1])
 
         rows: list[tuple[str, methods.Day | None, float | None, bool]] = []
-        for r in self.db.execute("SELECT day, market, pnl_usd FROM cfd_trades"):
+        what_if: list[float] = []  # the Nasdaq CFD trades re-run with the what-if stop
+        for r in self.db.execute(
+            "SELECT day, market, side, entry_price, worst, pnl_usd FROM cfd_trades"
+        ):
             rows.append((r["market"], day_of(r["day"], r["market"]), r["pnl_usd"], False))
+            if r["market"] == methods.SIGNAL_MARKET:
+                live = next(c.stop_bp for c in methods.CFDS if c.market == r["market"])
+                v = methods.what_if_stop(
+                    r["side"],
+                    r["entry_price"],
+                    r["worst"],
+                    r["pnl_usd"],
+                    methods.WHAT_IF_STOP_BP,
+                    live,
+                )
+                if v is not None:
+                    what_if.append(v)
         for r in self.db.execute(
             "SELECT day, pnl_usd FROM option_trades WHERE method='FIRST_CANDLE_QQQ'"
         ):
@@ -299,15 +319,22 @@ class Store:
             early = closes.astimezone(methods.NY).hour < methods.CROSS_LATE_HOUR
             rows.append(("CROSS", day_of(r["day"], "NAS100"), r["pnl_usd"], early))
         out = []
-        for book in methods.BOOKS + methods.CROSS_BOOKS:
+        for book in methods.BOOKS + methods.SIZED_BOOKS + methods.CROSS_BOOKS:
             cells: dict[str, dict[str, Any]] = {}
             for instrument, d, pnl, early in rows:
                 if d is None or (instrument == "CROSS") != (book in methods.CROSS_BOOKS):
                     continue
+                size = 1
                 if book == "CROSS PULLBACK":
                     member = d.known and d.pullback
                 elif book == "CROSS BEFORE 14:00":
                     member = early
+                elif book == "SIZED V2":
+                    size = methods.size_v2(d, instrument)
+                    member = size > 0
+                elif book == "SIZED V3":
+                    size = methods.size_v3(d) if instrument != "QQQ option" or d.pullback else 0
+                    member = size > 0
                 else:
                     member = methods.in_book(book, d, instrument)
                 if not member:
@@ -316,8 +343,23 @@ class Store:
                 c["trades"] += 1
                 if pnl is not None:
                     c["closed"] += 1
-                    c["total_usd"] = round(c["total_usd"] + pnl, 2)
+                    c["total_usd"] = round(c["total_usd"] + pnl * size, 2)
             for c in cells.values():
                 c["mean_usd"] = round(c["total_usd"] / c["closed"], 2) if c["closed"] else None
             out.append({"book": book, "cells": cells})
+        if what_if:
+            total = round(sum(what_if), 2)
+            out.append(
+                {
+                    "book": "STOP 75 BP",
+                    "cells": {
+                        methods.SIGNAL_MARKET: {
+                            "trades": len(what_if),
+                            "closed": len(what_if),
+                            "total_usd": total,
+                            "mean_usd": round(total / len(what_if), 2),
+                        }
+                    },
+                }
+            )
         return out

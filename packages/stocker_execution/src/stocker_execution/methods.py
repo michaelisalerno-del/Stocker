@@ -371,6 +371,50 @@ def in_book(book: str, d: Day, instrument: str) -> bool:
     raise ValueError(book)
 
 
+SIZED_BOOKS = ("SIZED V2", "SIZED V3")
+WHAT_IF_STOP_BP = (
+    75.0  # the Nasdaq CFD trade re-run with this stop at the same $200 risk (report only)
+)
+
+
+def size_v2(d: Day, instrument: str) -> int:
+    """The playbook as units of size: the pullback cell 2; other longs 1; shorts 1 unless it is
+    a Monday or the close was oversold; the QQQ option and the S&P only in the cell."""
+    if not d.known or d.side == 0:
+        return 0
+    if instrument in ("QQQ option", "US500"):
+        return 2 if d.pullback else 0
+    if d.pullback:
+        return 2
+    if d.side == 1:
+        return 1
+    return 0 if d.weekday == 0 or d.oversold else 1
+
+
+def size_v3(d: Day) -> int:
+    """Score the leads: +1 pullback cell, +1 after a +1% day, +1 the other index agrees,
+    -1 Monday, -1 a short after an oversold close; size = 1 + score, kept within 0..3."""
+    if not d.known or d.side == 0:
+        return 0
+    score = int(d.pullback) + int(float(d.context.get("prior_change", 0.0)) >= BIG_DAY)
+    score += int(d.agree is True) - int(d.weekday == 0) - int(d.side == -1 and d.oversold)
+    return max(0, min(3, 1 + score))
+
+
+def what_if_stop(
+    side: int, entry: float, worst: float | None, pnl: float | None, stop_bp: float, live_bp: float
+) -> float | None:
+    """A trade's result had its stop been `stop_bp` wide at the same dollar risk: stopped at
+    RISK_USD lost when the worst adverse price crossed that stop, else the recorded result
+    scaled by the size the narrower stop allows. None when the worst price was not recorded."""
+    if worst is None or pnl is None:
+        return None
+    adverse_bp = side * (entry - worst) / entry * 1e4
+    if adverse_bp >= stop_bp:
+        return -RISK_USD
+    return pnl * live_bp / stop_bp
+
+
 def playbook(d: Day, market: str) -> tuple[str, list[str]]:
     """The action the research leads imply for today's signal, and the leads that apply."""
     tags = []

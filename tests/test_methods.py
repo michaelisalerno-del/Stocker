@@ -263,3 +263,25 @@ def test_dip_rules_fear_and_the_30_day_vol_reading():
     ]
     assert methods.atm_vol(board, 700.3) == pytest.approx(0.31)
     assert methods.atm_vol([q(700.0, "Call", None)], 700.0) is None
+
+
+def test_sizing_overlays_and_the_what_if_stop():
+    down = methods.trend_context([300.0 - i for i in range(110)]).detail()
+    up = methods.trend_context([100.0 + i for i in range(110)]).detail()
+    cell = methods.Day(1, 1, True, down)
+    assert methods.size_v2(cell, "NAS100") == 2 and methods.size_v2(cell, "QQQ option") == 2
+    assert methods.size_v3(cell) == 3  # 1 + cell + agree (no +1% day: the prior change is negative)
+    monday_cell = methods.Day(1, 0, None, down)
+    assert (methods.size_v2(monday_cell, "NAS100"), methods.size_v3(monday_cell)) == (2, 1)
+    short_ok = methods.Day(-1, 2, False, up)
+    assert (methods.size_v2(short_ok, "NAS100"), methods.size_v2(short_ok, "US500")) == (1, 0)
+    assert methods.size_v3(short_ok) == 1
+    oversold_short = methods.Day(-1, 2, False, down)
+    assert methods.size_v2(oversold_short, "NAS100") == 0 and methods.size_v3(oversold_short) == 0
+    assert methods.size_v3(methods.Day(1, 2, None, {})) == 0  # no context: no size
+    # A long from 30000 that saw 29800 at worst: a 75 bp stop (29775) was not reached, so the
+    # result scales to the size that stop allows; 29770 would have stopped it for $200.
+    assert methods.what_if_stop(1, 30000.0, 29800.0, 60.0, 75.0, 100.0) == pytest.approx(80.0)
+    assert methods.what_if_stop(1, 30000.0, 29770.0, 60.0, 75.0, 100.0) == -200.0
+    assert methods.what_if_stop(-1, 7700.0, 7760.0, -204.0, 75.0, 50.0) == -200.0
+    assert methods.what_if_stop(1, 30000.0, None, 60.0, 75.0, 100.0) is None

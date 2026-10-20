@@ -99,6 +99,7 @@ def test_a_full_paper_day_and_the_next_day_connors_exit(tmp_path):
         spx = db.execute("SELECT * FROM cfd_trades WHERE market='US500'").fetchone()
         assert (spx["exit_reason"], spx["exit_price"]) == ("STOP", 7740.0)
         assert spx["pnl_usd"] == pytest.approx(-5.1 * 40)
+        assert spx["worst"] == 7740.0  # the ask that stopped it was its worst adverse price
 
         # 09:50: the call with delta nearest 0.40 at its ask, recorded as of 09:35.
         await at(rt, clock, OPEN + timedelta(minutes=20, seconds=1))
@@ -123,6 +124,9 @@ def test_a_full_paper_day_and_the_next_day_connors_exit(tmp_path):
         nas = db.execute("SELECT * FROM cfd_trades WHERE market='NAS100'").fetchone()
         assert (nas["exit_reason"], nas["exit_price"]) == ("CLOSE", 29999.0)
         assert nas["pnl_usd"] == pytest.approx(-0.66)
+        assert nas["worst"] == 29999.0  # the bid never moved
+        what_if = next(b for b in rt.store.record(0)["books"] if b["book"] == "STOP 75 BP")
+        assert what_if["cells"]["NAS100"]["total_usd"] == pytest.approx(-0.66 * 100 / 75)
 
         # 15:50 Connors, read at 16:05: the next expiry's call nearest 0.50 delta.
         fake.qqq(714.98, 715.02)
@@ -649,6 +653,8 @@ def test_first_candle_context_books_and_playbook(tmp_path):
         assert books["WEEKDAYS"] == {} and books["AGREE"] == {}  # a Monday; long against short
         assert set(books["NO OVERSOLD SHORTS"]) == {"NAS100", "QQQ option"}  # the S&P short is out
         assert set(books["PLAYBOOK"]) == {"QQQ option"}  # the call stands in for the Nasdaq CFD
+        assert books["SIZED V2"]["NAS100"]["trades"] == 1 and "US500" not in books["SIZED V2"]
+        assert books["SIZED V3"]["NAS100"]["trades"] == 1  # Monday cell long: 1 + 1 - 1 = 1 unit
         await rt.client.close()
 
     asyncio.run(scenario())

@@ -475,6 +475,9 @@ class Runtime:
                 stale = True
                 continue
             assert q.bid is not None and q.ask is not None
+            adverse = q.bid if t["side"] > 0 else q.ask  # the price the trade would close at
+            if t["worst"] is None or t["side"] * (adverse - t["worst"]) < 0:
+                self.store.update("cfd_trades", t["id"], {"worst": adverse})
             fill = methods.stop_fill(t["side"], t["stop"], q.bid, q.ask)
             if fill is not None:
                 self.close_cfd(t, fill, q, "STOP", now)

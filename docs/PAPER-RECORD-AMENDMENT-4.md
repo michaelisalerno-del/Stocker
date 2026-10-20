@@ -129,3 +129,17 @@ Written before any trade with context or any fear trade could be recorded: the d
 this is deployed, and the first possible fear entry the first 15:50.
 
 Dashboard text order fixed in commit c2b74a9 (dashboard.js and the browser test only; the hashes above are unchanged).
+
+## Addendum (20 October 2026, 09:15 New York, before the first signal with context)
+
+Report-only additions from the sizing study (`~/Codex/2026-10-20-fc-pullback/sizing/SIZING.md`, `m4/M4.md`):
+- `cfd_trades.worst`: the worst adverse price seen while a CFD trade was open (the bid for a long, the ask
+  for a short, read at the stop watch's 2-second poll). Recorded, never used by a rule.
+- Books `SIZED V2` (the playbook as units: pullback cell 2, other longs 1, shorts 1 unless Monday or
+  oversold, the option and the S&P in the cell only) and `SIZED V3` (score: +1 cell, +1 after a +1% day,
+  +1 the other index agrees, −1 Monday, −1 oversold short; 1 + score kept within 0..3): the same recorded
+  trades multiplied by their units. V3 raised the Sharpe ratio in all four market-periods of the research
+  (QQQ 2013-19 1.14 → 1.56, 2020-26 1.26 → 1.47) at equal average size; V2 only in 2020-26.
+- Book `STOP 75 BP`: each Nasdaq CFD trade re-run with a 75 bp stop at the same $200 risk — stopped for
+  −$200 when `worst` crossed it, else the recorded result scaled by 100/75. The research found 75 bp
+  about $900 a year better than 100 bp (t 2.5 / 1.3). The live 100 bp stop is unchanged.

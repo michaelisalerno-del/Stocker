@@ -19,7 +19,7 @@ const EVENTS = {
 const MARKETS = {NAS100: "Nasdaq CFD", US500: "S&P CFD"};
 const METHODS = {"CFD NAS100": "Nasdaq CFD · first candle", "CFD US500": "S&P CFD · first candle", FIRST_CANDLE_QQQ: "QQQ option · first candle", CONNORS_QQQ: "QQQ call · Connors", "CROSS NAS100": "Nasdaq CFD · VWAP crossings", "DIP CONNORS": "Nasdaq CFD · Connors (days)", "DIP TURNAROUND": "Nasdaq CFD · Turnaround Tuesday", "DIP FEAR": "Nasdaq CFD · fear rule (3 down closes, 30-day IV ≥ 30%)", "DIP BOOK": "Nasdaq CFD · dip book, one at a time"};
 const RULES = {CONNORS: "Connors", TURNAROUND: "Turnaround Tuesday", FEAR: "Fear rule"};
-const BOOKS = {PULLBACK: "Pullback cell · long signal, prior close below the 50-day", WEEKDAYS: "Tuesday to Friday", AGREE: "Nasdaq and S&P signals agree", "NO OVERSOLD SHORTS": "Shorts skipped after an oversold close (3+ down closes or RSI2 < 10)", "AFTER A +1% DAY": "After a +1% day", PLAYBOOK: "Playbook · the call in the pullback cell, the Nasdaq CFD otherwise, no Monday or oversold shorts, S&P in the cell only", "CROSS PULLBACK": "VWAP crossings · pullback days", "CROSS BEFORE 14:00": "VWAP crossings · entered before 14:00"};
+const BOOKS = {PULLBACK: "Pullback cell · long signal, prior close below the 50-day", WEEKDAYS: "Tuesday to Friday", AGREE: "Nasdaq and S&P signals agree", "NO OVERSOLD SHORTS": "Shorts skipped after an oversold close (3+ down closes or RSI2 < 10)", "AFTER A +1% DAY": "After a +1% day", PLAYBOOK: "Playbook · the call in the pullback cell, the Nasdaq CFD otherwise, no Monday or oversold shorts, S&P in the cell only", "SIZED V2": "Sized · playbook units (cell 2, other longs 1, shorts 1 unless Monday or oversold)", "SIZED V3": "Sized · score units 0-3 (+cell, +after a +1% day, +agree, −Monday, −oversold short)", "STOP 75 BP": "Nasdaq CFD · what a 75 bp stop at the same $200 risk would have done", "CROSS PULLBACK": "VWAP crossings · pullback days", "CROSS BEFORE 14:00": "VWAP crossings · entered before 14:00"};
 const USD = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD"});
 let offset = 0, pending = null, lastRefresh = "";
 
@@ -276,7 +276,7 @@ function renderToday(d) {
   ], {3: (p) => ({FAILED: "neg", MISSED: "neg", DONE: "pos"})[status.get(p.event)?.status] || ""});
   rows("cfd", d.cfd, [
     (t) => MARKETS[t.market] || t.market, (t) => side(t.side), (t) => t.amount,
-    (t) => `${price(t.entry_price)} · ${ny(t.entry_at)} NY`, (t) => price(t.stop),
+    (t) => `${price(t.entry_price)} · ${ny(t.entry_at)} NY`, (t) => `${price(t.stop)}${t.worst != null ? ` · worst ${price(t.worst)}` : ""}`,
     (t) => t.exit_reason === "MISSED_EXIT" ? "Missed exit · no price" : t.exit_at ? `${price(t.exit_price)} · ${display(t.exit_reason)} ${ny(t.exit_at)} NY` : "Open",
     (t) => t.exit_at ? money(t.pnl_usd) : t.open_pnl_usd != null ? `${money(t.open_pnl_usd)} open` : "Open",
   ], {6: (t) => tone(t.exit_at ? t.pnl_usd : t.open_pnl_usd)});

@@ -241,12 +241,12 @@ def test_dashboard_views_render_the_day(tmp_path):
             assert all("open_pnl_usd" in t for t in today["cfd"])
             record = (await http.get("/api/record")).json()
             assert {m["method"] for m in record["summary"]} == {"CFD NAS100", "CFD US500"}
-            # The chart cache: every market read, CFD candles at the bid/ask midpoint.
+            # The chart cache: QQQ and the S&P CFD, CFD candles at the bid/ask midpoint.
             charts = (await http.get("/api/charts")).json()
-            assert set(charts["markets"]) == {"NAS100", "US500", "QQQ"}
-            nas = charts["markets"]["NAS100"]
-            assert nas["delay"] == 0 and len(nas["bars"]) == 61 and len(nas["bars"][-2]) == 6
-            assert nas["bars"][-2][4] == pytest.approx(30018.0)  # the 09:30 candle's close
+            assert set(charts["markets"]) == {"US500", "QQQ"}
+            spx = charts["markets"]["US500"]
+            assert spx["delay"] == 0 and len(spx["bars"]) == 61 and len(spx["bars"][-2]) == 6
+            assert spx["bars"][-2][4] == pytest.approx(7701.0)  # the 09:30 candle's close
             for page in ("/", "/record", "/system"):
                 assert (await http.get(page)).status_code == 200
             assert (await http.get("/markets")).status_code == 404

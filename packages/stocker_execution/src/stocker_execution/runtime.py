@@ -47,7 +47,9 @@ CROSS_POLL_SECONDS = 5.0  # while a QQQ candle is due
 CROSS_DELAYED_POLL_SECONDS = 60.0  # while QQQ's chart is delayed: entries are missed anyway
 # The dashboard's chart: each market's latest 5-minute candles, refreshed every minute from three
 # hours before the open to ten minutes after the close, every fifteen minutes otherwise.
-CHARTS = tuple((c.market, "CfdOnIndex", c.uic) for c in CFDS) + (("QQQ", "Etf", QQQ_UIC),)
+CHARTS = tuple((c.market, "CfdOnIndex", c.uic) for c in CFDS if c.market == "US500") + (
+    ("QQQ", "Etf", QQQ_UIC),
+)
 CHART_REFRESH_SECONDS = 60.0
 CHART_IDLE_SECONDS = 900.0
 

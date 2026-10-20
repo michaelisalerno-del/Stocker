@@ -37,6 +37,8 @@
               <div><dt>S&amp;P CFD · first candle</dt><dd id="sig-US500">—</dd></div>
               <div><dt>QQQ · Connors at 15:50</dt><dd id="sig-CONNORS">—</dd></div>
               <div><dt>QQQ · dip rules at 15:50</dt><dd id="sig-DIP">—</dd></div>
+              <div><dt>Playbook · Nasdaq (research leads, not verdicts)</dt><dd id="play-NAS100">—</dd></div>
+              <div><dt>Playbook · S&amp;P</dt><dd id="play-US500">—</dd></div>
             </dl>
           </div>
           <div class="panel">
@@ -65,6 +67,10 @@
         <h1>Record</h1>
         <div class="table-scroll"><table><thead><tr><th>Method</th><th>Trades</th><th>Closed</th><th>Wins</th><th>Total</th><th>Average</th><th>Since</th></tr></thead><tbody id="summary"></tbody></table></div>
         <p class="muted" id="summary-empty">No paper trades yet. The sample starts on Friday 16 October 2026.</p>
+        <h3>Books · the research leads as subsets of the trades above (amendment 4)</h3>
+        <div class="table-scroll"><table><thead><tr><th>Book</th><th>Nasdaq CFD</th><th>S&amp;P CFD</th><th>QQQ option</th><th>VWAP crossings</th></tr></thead><tbody id="books"></tbody></table></div>
+        <p class="muted" id="books-empty">No trades in any book yet.</p>
+        <p class="muted">Each cell: trades · total (average per closed trade). The first-candle signals carry their reference ETF's closes through the prior session (QQQ for the Nasdaq, SPY for the S&amp;P); days recorded before 21 October 2026 have no context and count only in the weekday and agreement books. Nothing traded changes: a book is a sum over the same recorded trades.</p>
         <h3>Trades, newest first</h3>
         <div class="table-scroll"><table><thead><tr><th>Day</th><th>Method</th><th>Side</th><th>Opened</th><th>Closed</th><th>Why</th><th>Result</th></tr></thead><tbody id="trades"></tbody></table></div>
         <div class="paging"><button id="prev" type="button">Newer</button><button id="next" type="button">Older</button></div>

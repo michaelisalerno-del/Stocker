@@ -1,6 +1,7 @@
 """A whole paper day against an offline Saxo: entries, stops, delayed QQQ reads and exits."""
 
 import asyncio
+import json
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -595,5 +596,89 @@ def test_dip_exits_the_app_was_down_for_are_recorded_missed(tmp_path):
         }
         assert reasons == {"CONNORS": "MISSED_EXIT", "TURNAROUND": "MISSED_EXIT"}
         await again.client.close()
+
+    asyncio.run(scenario())
+
+
+def test_first_candle_context_books_and_playbook(tmp_path):
+    fake, clock = FakeSaxo(), Clock(OPEN - timedelta(minutes=10))
+    market(fake)
+    # The reference ETFs' closes fell for 300 sessions (the fake serves one daily chart for
+    # both): the prior close sits below its 50-day average at the end of a run of down closes.
+    fake.daily = [
+        {
+            "Time": (datetime(2025, 8, 1, tzinfo=UTC) + timedelta(days=i)).strftime(
+                "%Y-%m-%dT00:00:00Z"
+            ),
+            "Close": 760 - 0.2 * i,
+        }
+        for i in range(300)
+    ]
+    fake.daily[-1]["Time"] = "2026-10-16T00:00:00Z"
+
+    async def scenario():
+        rt = make(tmp_path, fake, clock)
+        await at(rt, clock, OPEN + timedelta(minutes=5, seconds=2))
+        nas = json.loads(rt.store.signal("2026-10-19", "FIRST_CANDLE", "NAS100")["detail"])
+        assert nas["below_50d"] is True and nas["down_closes"] == 299
+        assert nas["prior_close"] == pytest.approx(700.2)
+        assert nas["sma50"] == pytest.approx(sum(760 - 0.2 * i for i in range(250, 300)) / 50)
+        assert {p["Uic"] for _, _, p in fake.requests if p.get("Horizon") == "1440"} == {
+            "4328771",
+            "36590",
+        }
+        play = {p["market"]: p for p in rt.today()["playbook"]}
+        assert play["NAS100"]["action"] == "QQQ call"
+        assert play["NAS100"]["tags"][0] == "pullback cell: long below the 50-day"
+        assert play["US500"]["action"] == "skip: no S&P edge outside the pullback cell"
+        assert {"Monday", "short after an oversold close"} <= set(play["US500"]["tags"])
+        await at(rt, clock, OPEN + timedelta(minutes=20, seconds=1))  # the call follows
+        books = {b["book"]: b["cells"] for b in rt.store.record(0)["books"]}
+        assert books["PULLBACK"]["NAS100"]["trades"] == 1
+        assert books["PULLBACK"]["QQQ option"]["trades"] == 1 and "US500" not in books["PULLBACK"]
+        assert books["WEEKDAYS"] == {} and books["AGREE"] == {}  # a Monday; long against short
+        assert set(books["NO OVERSOLD SHORTS"]) == {"NAS100", "QQQ option"}  # the S&P short is out
+        assert set(books["PLAYBOOK"]) == {"QQQ option"}  # the call stands in for the Nasdaq CFD
+        await rt.client.close()
+
+    asyncio.run(scenario())
+
+
+def test_the_fear_rule_buys_after_three_down_closes_when_30_day_vol_is_high(tmp_path):
+    fake, clock = FakeSaxo(), Clock(MON_1550 - timedelta(minutes=1))
+    dip_market(fake)
+    # 723.5 -> 722 -> 720 -> 718 are three down closes; QQQ at 710 at 15:50 makes four.
+    fake.daily[-1:] = [
+        {"Time": f"2026-10-{d}T00:00:00Z", "Close": c}
+        for d, c in ((14, 722.0), (15, 720.0), (16, 718.0))
+    ]
+    fake.sessions = regular_sessions(
+        MON, TUE, WED, date(2026, 10, 22), date(2026, 10, 23), date(2026, 10, 26)
+    )
+    fake.mid_vol = 0.35
+    fake.chain(date(2026, 11, 20), [690.0 + i for i in range(21)], 700.0, 300000)
+
+    async def scenario():
+        rt = make(tmp_path, fake, clock)
+        await at(rt, clock, MON_1550)
+        d = json.loads(rt.store.signal("2026-10-19", "DIP", "QQQ")["detail"])
+        assert d["fear"] and d["down_closes"] == 4 and d["atm_vol_30d"] == pytest.approx(0.35)
+        assert (d["atm_vol_expiry"], d["atm_vol_reason"]) == ("2026-11-20", "")
+        dips = {r["rule"]: dict(r) for r in rt.store.db.execute("SELECT * FROM dip_trades")}
+        assert set(dips) == {"CONNORS", "TURNAROUND", "FEAR"} and dips["FEAR"]["book"] == 0
+        # Tuesday: Connors and Turnaround Tuesday close; the fear trade is held.
+        tuesday(fake, 730.0)
+        await at(rt, clock, datetime(2026, 10, 20, 19, 50, 1, tzinfo=UTC))
+        assert rt.store.dip("2026-10-19", "FEAR")["exit_at"] is None
+        # The fifth session after its entry (Monday 26 October): sold at 15:50 at the live bid.
+        for day in (20, 21, 22, 23):
+            fake.daily.append({"Time": f"2026-10-{day}T00:00:00Z", "Close": 730.0})
+        await at(rt, clock, datetime(2026, 10, 26, 19, 50, 1, tzinfo=UTC))
+        fear = rt.store.dip("2026-10-19", "FEAR")
+        assert (fear["exit_reason"], fear["exit_day"]) == ("FIFTH_SESSION", "2026-10-26")
+        assert fear["pnl_usd"] == pytest.approx(0.66 * 299)
+        summary = {m["method"]: m for m in rt.store.record(0)["summary"]}
+        assert summary["DIP FEAR"]["closed"] == 1
+        await rt.client.close()
 
     asyncio.run(scenario())

@@ -13,7 +13,12 @@
 5. Dip rules (amendment 3): at 15:50, on QQQ's daily closes with the 15:50 price as today's, a
    paper long Nasdaq CFD held over days: Connors (method 3's signal; out at the first later 15:50
    with RSI2 above 65) and Turnaround Tuesday (a Monday at least 1% below the last close; out at
-   the next session's 15:50).
+   the next session's 15:50). Amendment 4 adds the fear rule: three down closes with QQQ's 30-day
+   at-the-money implied volatility at 30% or more; out at the fifth session's 15:50.
+6. Context and books (amendment 4): each first-candle signal is saved with its reference ETF's
+   closes through the prior session (50- and 100-day averages, the prior day's change, the run of
+   down closes, RSI2); the Record page sums the frozen subsets in BOOKS and the Today page shows
+   the playbook those subsets imply. Nothing traded changes.
 """
 
 import math
@@ -205,6 +210,20 @@ def connors(closes: Sequence[float]) -> Connors:
 
 CONNORS_EXIT_RSI = 65.0
 TURNAROUND_DROP = -0.01
+FEAR_DOWN_CLOSES = 3  # the fear rule (amendment 4): three down closes, today's 15:50 price last
+FEAR_VOL = 0.30  # ... with QQQ's 30-day at-the-money implied volatility at 30% or more
+FEAR_DAYS = 30  # the expiry nearest this many calendar days out gives the reading
+FEAR_HOLD = 5  # sessions held: out at the fifth session's 15:50 after the entry day
+
+
+def down_run(closes: Sequence[float]) -> int:
+    """Consecutive down closes ending at the last one."""
+    run = 0
+    for i in range(len(closes) - 1, 0, -1):
+        if closes[i] >= closes[i - 1]:
+            break
+        run += 1
+    return run
 
 
 @dataclass(frozen=True)
@@ -214,18 +233,170 @@ class Dip:
     connors_exit: bool  # RSI2(today) above 65: an open Connors trade closes
     turnaround: bool  # a Monday at least 1% down: Turnaround Tuesday buys
     reason: str
+    fear: bool = False  # three down closes with the 30-day implied volatility at 30% or more
+    down_closes: int = 0
 
 
-def dip_rules(closes: Sequence[float], day: date) -> Dip:
-    """Method 5 on daily closes oldest first, the last one today's 15:50 price (as `connors`)."""
+def dip_rules(closes: Sequence[float], day: date, atm_vol: float | None = None) -> Dip:
+    """Method 5 on daily closes oldest first, the last one today's 15:50 price (as `connors`);
+    `atm_vol` is QQQ's 30-day at-the-money implied volatility, None when it could not be read."""
     c = connors(closes)
     if c.reason:
         return Dip(c, None, False, False, c.reason)
     assert c.rsi is not None
     change = closes[-1] / closes[-2] - 1
+    run = down_run(closes)
     return Dip(
-        c, change, c.rsi > CONNORS_EXIT_RSI, day.weekday() == 0 and change <= TURNAROUND_DROP, ""
+        c,
+        change,
+        c.rsi > CONNORS_EXIT_RSI,
+        day.weekday() == 0 and change <= TURNAROUND_DROP,
+        "",
+        run >= FEAR_DOWN_CLOSES and atm_vol is not None and atm_vol >= FEAR_VOL,
+        run,
     )
+
+
+def atm_vol(board: Iterable[OptionQuote], centre: float) -> float | None:
+    """Saxo's MidVol averaged over the call and put at the strike nearest `centre`."""
+    quotes = [o for o in board if o.mid_vol]
+    if not quotes:
+        return None
+    strike = min((o.strike for o in quotes), key=lambda k: abs(k - centre))
+    vols = [o.mid_vol for o in quotes if o.strike == strike and o.mid_vol]
+    return sum(vols) / len(vols) if vols else None
+
+
+# context and books (amendment 4) ------------------------------------------------------------
+SPY_UIC = 36590  # SPY:arcx; the research judged the S&P trade against SPY's own closes
+TREND_UIC = {"NAS100": QQQ_UIC, "US500": SPY_UIC}  # each CFD's reference ETF
+TREND_DAYS, TREND_DAYS_LONG = 50, 100
+OVERSOLD_RSI2 = 10.0
+BIG_DAY = 0.01
+BOOKS = (
+    "PULLBACK",  # long signal with the prior close below the 50-day average (any weekday)
+    "WEEKDAYS",  # Tuesday to Friday
+    "AGREE",  # the Nasdaq and S&P signals point the same way
+    "NO OVERSOLD SHORTS",  # longs, and shorts unless 3+ down closes or RSI2 below 10
+    "AFTER A +1% DAY",  # the prior session closed at least 1% up
+    "PLAYBOOK",  # what the leads together say: see `playbook`
+)
+CROSS_BOOKS = ("CROSS PULLBACK", "CROSS BEFORE 14:00")
+CROSS_LATE_HOUR = 14
+
+
+@dataclass(frozen=True)
+class Context:
+    """The reference ETF's closes through the prior session, as the research used them."""
+
+    prior_close: float
+    sma50: float
+    sma100: float
+    prior_change: float  # the prior close against the close before it
+    down_closes: int  # consecutive down closes ending at the prior close
+    rsi2: float  # Wilder RSI(2) at the prior close
+
+    def detail(self) -> dict[str, Any]:
+        return {
+            "prior_close": self.prior_close,
+            "sma50": round(self.sma50, 4),
+            "sma100": round(self.sma100, 4),
+            "below_50d": self.prior_close < self.sma50,
+            "below_100d": self.prior_close < self.sma100,
+            "prior_change": round(self.prior_change, 6),
+            "down_closes": self.down_closes,
+            "rsi2_prior": round(self.rsi2, 4),
+        }
+
+
+def trend_context(closes: Sequence[float]) -> Context | None:
+    """Daily closes oldest first, the last one the prior session's; None with too few."""
+    if len(closes) < TREND_DAYS_LONG + 1:
+        return None
+    return Context(
+        closes[-1],
+        sum(closes[-TREND_DAYS:]) / TREND_DAYS,
+        sum(closes[-TREND_DAYS_LONG:]) / TREND_DAYS_LONG,
+        closes[-1] / closes[-2] - 1,
+        down_run(closes),
+        rsi2(closes)[-1],
+    )
+
+
+@dataclass(frozen=True)
+class Day:
+    """A first-candle day as the books see it: the signal and its saved context."""
+
+    side: int
+    weekday: int  # Monday 0
+    agree: bool | None  # the other index's signal points the same way; None when unknown
+    context: dict[str, Any]  # the signal detail; context keys absent before amendment 4
+
+    @property
+    def known(self) -> bool:
+        return "below_50d" in self.context
+
+    @property
+    def pullback(self) -> bool:
+        return self.side == 1 and bool(self.context.get("below_50d"))
+
+    @property
+    def oversold(self) -> bool:
+        return bool(
+            self.context.get("down_closes", 0) >= FEAR_DOWN_CLOSES
+            or self.context.get("rsi2_prior", 100.0) < OVERSOLD_RSI2
+        )
+
+
+def in_book(book: str, d: Day, instrument: str) -> bool:
+    """Membership of one first-candle trade (instrument 'NAS100', 'US500' or 'QQQ option')."""
+    if book == "WEEKDAYS":
+        return d.weekday != 0
+    if book == "AGREE":
+        return d.agree is True
+    if not d.known:
+        return False
+    if book == "PULLBACK":
+        return d.pullback
+    if book == "NO OVERSOLD SHORTS":
+        return d.side == 1 or not d.oversold
+    if book == "AFTER A +1% DAY":
+        return float(d.context.get("prior_change", 0.0)) >= BIG_DAY
+    if book == "PLAYBOOK":
+        if instrument == "QQQ option" or instrument == "US500":
+            return d.pullback  # the pullback cell: the call, and the S&P only there
+        return (d.side == 1 and not d.pullback) or (
+            d.side == -1 and d.weekday != 0 and not d.oversold
+        )
+    raise ValueError(book)
+
+
+def playbook(d: Day, market: str) -> tuple[str, list[str]]:
+    """The action the research leads imply for today's signal, and the leads that apply."""
+    tags = []
+    if d.pullback:
+        tags.append("pullback cell: long below the 50-day")
+    if d.weekday == 0:
+        tags.append("Monday")
+    if d.side == -1 and d.known and d.oversold:
+        tags.append("short after an oversold close")
+    if d.known and float(d.context.get("prior_change", 0.0)) >= BIG_DAY:
+        tags.append("after a +1% day")
+    if d.agree is not None:
+        tags.append("agrees with the other index" if d.agree else "disagrees with the other index")
+    if d.side == 0:
+        return "no trade", tags
+    if not d.known:
+        return "context not read", tags
+    if market == "US500":
+        return ("S&P CFD" if d.pullback else "skip: no S&P edge outside the pullback cell"), tags
+    if d.pullback:
+        return "QQQ call", tags
+    if d.side == 1:
+        return "Nasdaq CFD long", tags
+    if d.weekday == 0 or d.oversold:
+        return "skip the short", tags
+    return "Nasdaq CFD short, not a put", tags
 
 
 CROSS_ALPHA = 2 / 11  # EMA(10)

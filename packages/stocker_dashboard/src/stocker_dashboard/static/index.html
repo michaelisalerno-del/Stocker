@@ -37,6 +37,19 @@
           <div class="tile"><span class="tile-label">Next event</span><strong class="tile-value" id="tile-next">—</strong><span class="tile-sub" id="tile-next-sub">—</span></div>
           <div class="tile"><span class="tile-label">Feeds</span><strong class="tile-value" id="tile-feed">—</strong><span class="tile-sub" id="tile-feed-sub">—</span></div>
         </div>
+        <div class="grid charts">
+          <div class="panel chart-panel">
+            <div class="chart-head"><h3>QQQ <span class="h3-note">5-minute candles · New York time · session VWAP and EMA10 are method 4's lines</span></h3></div>
+            <p class="chart-stat" id="chart-stat">Waiting for the first chart read</p>
+            <div class="chart" id="chart"></div>
+          </div>
+          <div class="panel chart-panel">
+            <div class="chart-head"><h3>S&amp;P <span class="h3-note">US 500 CFD · 5-minute candles · the first-candle trade's entry and stop</span></h3></div>
+            <p class="chart-stat" id="chart-stat-US500">Waiting for the first chart read</p>
+            <div class="chart" id="chart-US500"></div>
+          </div>
+        </div>
+        <div class="chart-legend"><span><i class="lg-ema12"></i>EMA12 · the first-candle signal</span><span><i class="lg-vwap"></i>session VWAP · <i class="lg-ema10"></i>EMA10 · method 4</span><span><i class="lg-strike"></i>option strike</span><span><i class="lg-entry"></i>entry</span><span><i class="lg-stop"></i>stop</span><span><i class="lg-exit"></i>exit</span><span><i class="lg-open"></i>09:30 open</span><span class="muted">refreshed each minute</span></div>
         <div class="grid cockpit">
           <div class="panel">
             <h3>Playbook <span class="h3-note">research leads, not verdicts</span></h3>

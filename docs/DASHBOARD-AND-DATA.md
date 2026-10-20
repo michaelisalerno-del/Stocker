@@ -210,3 +210,16 @@ follow. The Record page opens with net P&L, closed trades, win rate and the firs
 by-method table, the Books table (amendment 4) and the trades. Every id the browser test reads is unchanged.
 Phone width stacks the tiles two across and the playbook rows vertically; checked at a true 390 px viewport
 (headless Chrome's window will not go below ~485 px, so the check renders the page inside a 390 px iframe).
+
+## Chart (20 October 2026)
+
+The Today page shows two chart panels side by side (stacked on a phone): QQQ and the S&P (the US 500 CFD),
+5-minute candles from `GET /api/charts`. The runtime keeps each one's latest 200 candles in memory
+(`Runtime.watch_charts`, `market.chart_rows`; CFD prices at the bid/ask midpoint), refreshed every minute from
+three hours before the open to ten minutes after the close and every fifteen minutes otherwise — two Saxo chart
+reads a minute at most, display only; a failed read keeps the last candles and notes the reason. The page draws
+inline SVG with CSS classes (the CSP allows no inline styles and no chart library). QQQ: the regular session's
+candles, EMA12 of the candles served, the session VWAP and EMA10 of regular-session closes (method 4's lines),
+the day's option strike, the first-candle side at its 09:35 candle and the crossing entries and exits. S&P:
+candles from 04:00 New York, EMA12, and the first-candle trade's entry, stop and exit levels. Levels and markers
+come from `/api/today`; the 09:30 open is a dotted line. The browser test's fixture carries synthetic candles.

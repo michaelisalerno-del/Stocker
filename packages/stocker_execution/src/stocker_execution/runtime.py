@@ -45,6 +45,13 @@ DIP_RULES = (("CONNORS", "connors_in"), ("TURNAROUND", "turnaround"), ("FEAR", "
 DIP_EXITS = {"CONNORS": "RSI2_ABOVE_65", "TURNAROUND": "NEXT_SESSION", "FEAR": "FIFTH_SESSION"}
 CROSS_POLL_SECONDS = 5.0  # while a QQQ candle is due
 CROSS_DELAYED_POLL_SECONDS = 60.0  # while QQQ's chart is delayed: entries are missed anyway
+# The dashboard's chart: each market's latest 5-minute candles, refreshed every minute from three
+# hours before the open to ten minutes after the close, every fifteen minutes otherwise.
+CHARTS = tuple((c.market, "CfdOnIndex", c.uic) for c in CFDS if c.market == "US500") + (
+    ("QQQ", "Etf", QQQ_UIC),
+)
+CHART_REFRESH_SECONDS = 60.0
+CHART_IDLE_SECONDS = 900.0
 
 
 class Problem(Exception):
@@ -99,6 +106,8 @@ class Runtime:
         self.qqq_delay: int | None = None
         self.cross_done: datetime | None = None  # the latest QQQ candle close acted on
         self.cross_next = 0.0
+        self.chart_bars: dict[str, dict[str, Any]] = {}  # display only: the dashboard's candles
+        self.charts_next = 0.0
         directory = self.root / config.data_environment
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         handler = RotatingFileHandler(directory / "paper.log", maxBytes=2 * 1024**2, backupCount=3)
@@ -145,6 +154,30 @@ class Runtime:
                 await self.event(day.isoformat(), name, due, delayed, handler, now)
         await self.watch_stops(self.now(), session)
         await self.watch_crosses(self.now(), session)
+        await self.watch_charts(self.now(), session)
+
+    async def watch_charts(self, now: datetime, session: Session | None) -> None:
+        """Display only: keep each market's latest candles for the dashboard's chart. A failed
+        read keeps the last candles and notes the reason; nothing recorded depends on it."""
+        if time.monotonic() < self.charts_next:
+            return
+        busy = session is not None and (
+            session.open - timedelta(hours=3) <= now <= session.close + timedelta(minutes=10)
+        )
+        self.charts_next = time.monotonic() + (
+            CHART_REFRESH_SECONDS if busy else CHART_IDLE_SECONDS
+        )
+        for name, asset_type, uic in CHARTS:
+            try:
+                rows, delay = await market.chart_rows(self.client, asset_type, uic)
+            except SaxoError as exc:
+                self.note("charts", exc)
+                return
+            self.chart_bars[name] = {"read": stamp(self.now()), "delay": delay, "bars": rows}
+        self.problems.pop("charts", None)
+
+    def charts(self) -> dict[str, Any]:
+        return {"markets": self.chart_bars}
 
     def plan(
         self, s: Session

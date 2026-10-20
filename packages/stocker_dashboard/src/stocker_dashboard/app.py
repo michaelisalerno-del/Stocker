@@ -52,6 +52,10 @@ def create_dashboard_app(runtime: Runtime) -> FastAPI:
     async def system() -> dict[str, Any]:
         return runtime.status()
 
+    @app.get("/api/charts")
+    async def charts() -> dict[str, Any]:
+        return runtime.charts()
+
     @app.post("/oauth/saxo/start")
     async def oauth_start(request: Request) -> Response:
         try:

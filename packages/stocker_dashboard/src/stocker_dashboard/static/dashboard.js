@@ -100,7 +100,7 @@ function signalText(s) {
     const connors = d.connors_in ? "Connors: buy" : d.connors_exit ? "Connors: RSI2 above 65, sell" : "Connors: no signal";
     const change = d.change == null ? "?" : `${(d.change * 100).toFixed(2)}%`;
     const fear = d.fear ? "Fear rule: buy" : d.atm_vol_30d == null ? `Fear rule: no reading${d.atm_vol_reason ? ` (${display(d.atm_vol_reason)})` : ""}` : `Fear rule: no signal (30-day IV ${(d.atm_vol_30d * 100).toFixed(0)}%, ${d.down_closes ?? "?"} down closes)`;
-    return `${connors} · ${d.turnaround ? "Turnaround Tuesday: buy" : "Turnaround Tuesday: no signal"} · ${fear} · QQQ ${price(d.price_15_50)} (${change} on the day)`;
+    return `${connors} · ${d.turnaround ? "Turnaround Tuesday: buy" : "Turnaround Tuesday: no signal"} · QQQ ${price(d.price_15_50)} (${change} on the day) · ${fear}`;
   }
   if (!s.side) return `No trade · ${display(s.reason) || "close equals EMA"}`;
   const trend = d.below_50d === true ? " · prior close below the 50-day" : d.below_50d === false ? " · prior close above the 50-day" : d.context_reason ? ` · context not read (${display(d.context_reason)})` : "";

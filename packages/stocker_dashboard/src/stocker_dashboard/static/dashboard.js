@@ -111,6 +111,37 @@ function playbookText(p) {
   if (!p) return "Waiting for the 09:35 signal";
   return `${p.action.charAt(0).toUpperCase()}${p.action.slice(1)}${p.tags.length ? ` · ${p.tags.join(" · ")}` : ""}`;
 }
+const playbookTone = (p) => !p ? "" : /^(skip|no trade|context not read)/.test(p.action) ? "skip" : "go";
+const countdown = (iso) => {
+  const ms = Date.parse(iso) - Date.now();
+  if (!(ms > 0)) return "due now";
+  const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+  return `in ${h ? `${h}h ` : ""}${m}m`;
+};
+
+function renderTiles(d) {
+  const s = d.system, status = new Map(d.events.map((e) => [e.name, e]));
+  const closed = [...d.cfd, ...(d.crosses || []), ...(d.options || []).filter((o) => o.exit_day === d.day), ...(d.dips || []).filter((t) => t.exit_day === d.day)]
+    .reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0);
+  const open = [...d.cfd, ...(d.crosses || [])].reduce((sum, t) => sum + (t.exit_at ? 0 : (t.open_pnl_usd ?? 0)), 0);
+  text("tile-pnl", money(closed + open)); $("tile-pnl").className = `tile-value ${tone(closed + open)}`;
+  text("tile-pnl-sub", `closed ${money(closed)} · open ${money(open)}`);
+  const positions = [
+    ...d.cfd.filter((t) => !t.exit_at).map((t) => `${MARKETS[t.market] || t.market} ${side(t.side).toLowerCase()}`),
+    ...(d.crosses || []).filter((t) => t.entry_price != null && !t.exit_at).map(() => "Nasdaq CFD crossing"),
+    ...(d.dips || []).filter((t) => !t.exit_at).map((t) => `${RULES[t.rule] || t.rule} dip`),
+    ...(d.options || []).filter((o) => !o.exit_read).map((o) => `QQQ ${o.put_call.toLowerCase()} ${o.strike}`),
+  ];
+  text("tile-open", positions.length); text("tile-open-sub", positions.join(" · ") || "Flat");
+  const next = d.plan.find((p) => !["DONE", "FAILED", "MISSED"].includes(status.get(p.event)?.status));
+  text("tile-next", next ? `${next.new_york} NY` : d.plan.length ? "Done for today" : "No session");
+  text("tile-next-sub", next ? `${EVENTS[next.event] || next.event} · ${countdown(next.due)}` : "Nothing left to record today");
+  const late = s.qqq_delay_minutes;
+  text("tile-feed", late == null ? "QQQ delay unknown" : late ? `QQQ ${late} min late` : "QQQ live");
+  $("tile-feed").className = `tile-value ${late == null ? "" : late ? "warn" : "pos"}`;
+  const problems = Object.keys(s.problems || {}).length;
+  text("tile-feed-sub", `CFD quotes live · login ${s.login_minutes_left ?? "?"} min · ${problems ? `${problems} problem${problems > 1 ? "s" : ""}` : "no problems"}`);
+}
 
 function renderToday(d) {
   renderStatus(d.system);
@@ -120,7 +151,11 @@ function renderToday(d) {
   text("sig-US500", signalText(signal("FIRST_CANDLE", "US500")));
   text("sig-CONNORS", signalText(signal("CONNORS", "QQQ")));
   text("sig-DIP", signalText(signal("DIP", "QQQ")));
-  for (const market of ["NAS100", "US500"]) text(`play-${market}`, playbookText((d.playbook || []).find((p) => p.market === market)));
+  for (const market of ["NAS100", "US500"]) {
+    const p = (d.playbook || []).find((x) => x.market === market);
+    text(`play-${market}`, playbookText(p)); $(`play-${market}`).dataset.tone = playbookTone(p);
+  }
+  renderTiles(d);
   const status = new Map(d.events.map((e) => [e.name, e]));
   rows("plan", d.plan, [
     (p) => EVENTS[p.event] || p.event, (p) => p.new_york, (p) => p.uk,
@@ -158,6 +193,13 @@ function renderToday(d) {
 
 function renderRecord(d) {
   renderStatus(d.system);
+  const real = d.summary.filter((m) => m.method !== "DIP BOOK");
+  const total = real.reduce((s, m) => s + (m.total_usd ?? 0), 0), closed = real.reduce((s, m) => s + (m.closed ?? 0), 0), wins = real.reduce((s, m) => s + (m.wins ?? 0), 0);
+  text("rec-total", money(total)); $("rec-total").className = `tile-value ${tone(total)}`;
+  text("rec-closed", closed); text("rec-closed-sub", `${real.reduce((s, m) => s + (m.trades ?? 0), 0)} recorded, ${real.reduce((s, m) => s + ((m.trades ?? 0) - (m.closed ?? 0)), 0)} open or without a price`);
+  text("rec-win", closed ? `${Math.round((100 * wins) / closed)}%` : "—"); text("rec-win-sub", closed ? `${wins} of ${closed} closed trades` : "no closed trades yet");
+  const since = real.map((m) => m.first_day).filter(Boolean).sort()[0];
+  text("rec-since", since || "—");
   rows("summary", d.summary, [
     (m) => METHODS[m.method] || m.method, (m) => m.trades, (m) => m.closed, (m) => m.wins ?? 0,
     (m) => money(m.total_usd), (m) => money(m.mean_usd), (m) => m.first_day,

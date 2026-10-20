@@ -121,6 +121,38 @@ async def etf_candles(
     return candles, (result.get("ChartInfo") or {}).get("DelayedByMinutes")
 
 
+async def chart_rows(
+    client: SaxoClient, asset_type: str, uic: int, count: int = 200
+) -> tuple[list[list[Any]], int | None]:
+    """5-minute candles for the dashboard's chart as [start, open, high, low, close, volume]:
+    a CFD's prices at the bid/ask midpoint with no volume, an ETF's as Saxo gives them."""
+    result = await client.get(
+        "/chart/v3/charts",
+        {
+            "AssetType": asset_type,
+            "Uic": uic,
+            "Horizon": 5,
+            "Count": count,
+            "FieldGroups": "Data,ChartInfo",
+        },
+    )
+    rows: list[list[Any]] = []
+    for x in result.get("Data") or []:
+        if not x.get("Time"):
+            continue
+        if asset_type == "Etf":
+            keys = ("Open", "High", "Low", "Close")
+            if any(x.get(k) is None for k in keys):
+                continue
+            rows.append([x["Time"], *(float(x[k]) for k in keys), float(x.get("Volume") or 0)])
+        else:
+            sides = [(f"{k}Bid", f"{k}Ask") for k in ("Open", "High", "Low", "Close")]
+            if any(x.get(b) is None or x.get(a) is None for b, a in sides):
+                continue
+            rows.append([x["Time"], *((x[b] + x[a]) / 2 for b, a in sides), 0.0])
+    return rows, (result.get("ChartInfo") or {}).get("DelayedByMinutes")
+
+
 async def daily_closes(
     client: SaxoClient, uic: int, before: date, count: int = 260
 ) -> list[tuple[date, float]]:

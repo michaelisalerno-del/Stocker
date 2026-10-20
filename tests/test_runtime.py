@@ -241,6 +241,12 @@ def test_dashboard_views_render_the_day(tmp_path):
             assert all("open_pnl_usd" in t for t in today["cfd"])
             record = (await http.get("/api/record")).json()
             assert {m["method"] for m in record["summary"]} == {"CFD NAS100", "CFD US500"}
+            # The chart cache: every market read, CFD candles at the bid/ask midpoint.
+            charts = (await http.get("/api/charts")).json()
+            assert set(charts["markets"]) == {"NAS100", "US500", "QQQ"}
+            nas = charts["markets"]["NAS100"]
+            assert nas["delay"] == 0 and len(nas["bars"]) == 61 and len(nas["bars"][-2]) == 6
+            assert nas["bars"][-2][4] == pytest.approx(30018.0)  # the 09:30 candle's close
             for page in ("/", "/record", "/system"):
                 assert (await http.get(page)).status_code == 200
             assert (await http.get("/markets")).status_code == 404
@@ -486,9 +492,13 @@ def test_no_crossing_trades_on_a_short_first_candle_day(tmp_path):
             await until(rt, fake, clock, when)
         assert rt.store.signal("2026-10-19", "FIRST_CANDLE", "NAS100")["side"] == -1
         assert crosses(rt) == []
-        assert not [
-            p for _, _, p in fake.requests if (p.get("AssetType"), p.get("Horizon")) == ("Etf", "5")
-        ]
+        assert (
+            not [  # the crossings' 400-candle QQQ reads; the chart's 200-candle reads are display
+                p
+                for _, _, p in fake.requests
+                if (p.get("AssetType"), p.get("Horizon"), p.get("Count")) == ("Etf", "5", "400")
+            ]
+        )
         assert rt.store.event("2026-10-19", "VWAP_CROSS_EXIT")["note"] == "NO_OPEN_CROSS_TRADE"
         await rt.client.close()
 

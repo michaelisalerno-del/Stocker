@@ -38,7 +38,10 @@ def trend_bars(
     for i in range(count + int(forming)):
         at = open_at - timedelta(minutes=5 * (count - 1 - i))
         mid = start + step * min(i, count - 1)
-        rows.append({"Time": iso(at), "CloseBid": mid - 0.5, "CloseAsk": mid + 0.5})
+        row = {"Time": iso(at), "CloseBid": mid - 0.5, "CloseAsk": mid + 0.5}
+        for k, off in (("Open", -step), ("High", abs(step) + 1), ("Low", -abs(step) - 1)):
+            row[k + "Bid"], row[k + "Ask"] = mid + off - 0.5, mid + off + 0.5
+        rows.append(row)
     return rows
 
 
@@ -52,7 +55,14 @@ def qqq_candles(days: list[date], closes: list[float]) -> list[dict]:
         for i, c in enumerate(series):
             at = start + timedelta(minutes=5 * i)
             rows.append(
-                {"Time": iso(at), "High": c + 0.1, "Low": c - 0.1, "Close": c, "Volume": 1000.0}
+                {
+                    "Time": iso(at),
+                    "Open": c,
+                    "High": c + 0.1,
+                    "Low": c - 0.1,
+                    "Close": c,
+                    "Volume": 1000.0,
+                }
             )
     return rows
 

@@ -41,6 +41,14 @@ const server = http.createServer((req, res) => {
       assert.match(await page.locator("#crosses tr").nth(1).textContent(), /Missed entry · Qqq chart delayed/);
       assert.match(await page.locator("#sig-DIP").textContent(), /^Connors: buy · Turnaround Tuesday: buy · QQQ 710\.00 \(-1\.11% on the day\) · Fear rule: no reading$/);
       assert.equal(await page.locator("#play-NAS100").textContent(), "Waiting for the 09:35 signal");
+      await page.waitForFunction(() => document.querySelector("#chart svg"));
+      assert.equal(await page.locator("#chart-markets button[aria-pressed='true']").textContent(), "Nasdaq CFD");
+      assert.match(await page.locator("#chart-stat").textContent(), /^Nasdaq CFD 30\d{3} · [-+]\d+ bp since the 09:30 open · last candle 16:00 NY · 145 candles$/);
+      await page.locator("#chart-markets button[data-market='QQQ']").click();
+      await page.waitForFunction(() => document.querySelector("#chart-stat").textContent.startsWith("QQQ "));
+      assert.equal(await page.locator("#chart path.c-vwap").count(), 1);
+      assert.equal(await page.locator("#chart line.c-strike").count(), 1);
+      await page.locator("#chart-markets button[data-market='NAS100']").click();
       assert.match(await page.locator("#dips tr").first().textContent(), /Connors · in the book.*Rsi2 above 65 2026-10-19.*\+\$197\.34/);
       assert.match(await page.locator("#dips tr").nth(1).textContent(), /Turnaround Tuesday.*Open · sells on its rule/);
       assert.equal(await page.locator("#status").getAttribute("data-tone"), "ok");
@@ -61,7 +69,7 @@ const server = http.createServer((req, res) => {
       await page.close();
     }
     // Each page asks only for its own data.
-    assert.deepEqual([...new Set(calls)].sort(), ["/api/record", "/api/system", "/api/today"]);
+    assert.deepEqual([...new Set(calls)].sort(), ["/api/charts", "/api/record", "/api/system", "/api/today"]);
     console.log("PASS: Today, Record and System render the paper day at desktop and phone width");
   } finally {
     await browser.close();

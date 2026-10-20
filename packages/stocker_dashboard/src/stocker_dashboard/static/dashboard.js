@@ -143,7 +143,116 @@ function renderTiles(d) {
   text("tile-feed-sub", `CFD quotes live · login ${s.login_minutes_left ?? "?"} min · ${problems ? `${problems} problem${problems > 1 ? "s" : ""}` : "no problems"}`);
 }
 
+// chart --------------------------------------------------------------------------------------
+const CHART_MARKETS = {NAS100: "Nasdaq CFD", US500: "S&P CFD", QQQ: "QQQ"};
+let charts = null, todayData = null, chartMarket = "NAS100";
+try { if (CHART_MARKETS[localStorage.getItem("slrno-chart")]) chartMarket = localStorage.getItem("slrno-chart"); } catch (e) { /* storage unavailable */ }
+const SVG = "http://www.w3.org/2000/svg";
+const svgEl = (tag, attrs = {}, content) => { const e = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (content != null) e.textContent = content; return e; };
+const nyFormat = new Intl.DateTimeFormat("en-CA", {timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23"});
+function nyParts(ms) {
+  const p = {}; for (const {type, value} of nyFormat.formatToParts(new Date(ms))) p[type] = value;
+  return {date: `${p.year}-${p.month}-${p.day}`, hm: `${p.hour}:${p.minute}`};
+}
+const ema = (values, alpha) => { let v = null; return values.map((x) => (v = v == null ? x : v + alpha * (x - v))); };
+const slot5 = (iso) => Math.floor(Date.parse(iso) / 300000) * 300000;
+
+function chartLevels() {
+  const d = todayData; if (!d) return [];
+  if (chartMarket === "QQQ") {
+    return (d.options || []).filter((o) => o.method === "FIRST_CANDLE_QQQ").map((o) => ({price: o.strike, cls: "c-strike", label: `${o.put_call.toLowerCase()} ${o.strike}`}));
+  }
+  const t = d.cfd.find((x) => x.market === chartMarket); if (!t) return [];
+  const out = [{price: t.entry_price, cls: "c-entry", label: `entry ${side(t.side).toLowerCase()} ${price(t.entry_price)}`}];
+  if (t.exit_at && t.exit_price != null) out.push({price: t.exit_price, cls: "c-exit", label: `exit ${display(t.exit_reason)}`});
+  else out.push({price: t.stop, cls: "c-stop", label: `stop ${price(t.stop)}`});
+  return out;
+}
+
+function chartMarkers(bars) {
+  const d = todayData; if (!d) return [];
+  const at = (ms) => bars.findIndex((b) => b.ms === ms);
+  const out = [];
+  if (chartMarket === "QQQ") {
+    for (const c of d.crosses || []) {
+      if (c.entry_price != null) out.push({index: at(slot5(c.signal_candle)), up: true, cls: "c-mark-up"});
+      if (c.exit_candle) out.push({index: at(slot5(c.exit_candle)), up: false, cls: "c-mark-x"});
+    }
+  } else {
+    const t = d.cfd.find((x) => x.market === chartMarket);
+    if (t) { out.push({index: at(slot5(t.entry_at)), up: t.side > 0, cls: t.side > 0 ? "c-mark-up" : "c-mark-dn"}); if (t.exit_at && t.exit_price != null) out.push({index: at(slot5(t.exit_at)), up: t.side < 0, cls: "c-mark-x"}); }
+  }
+  return out.filter((m) => m.index >= 0);
+}
+
+function drawChart() {
+  const box = $("chart"); if (!box) return;
+  for (const b of $("chart-markets").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.market === chartMarket));
+  show("legend-qqq", chartMarket === "QQQ");
+  const data = charts?.markets?.[chartMarket];
+  const all = (data?.bars || []).map((b) => { const ms = Date.parse(b[0]); return {ms, o: b[1], h: b[2], l: b[3], c: b[4], v: b[5], ny: nyParts(ms)}; }).filter((b) => Number.isFinite(b.ms));
+  if (!all.length) { box.replaceChildren(); text("chart-stat", data ? "No candles in the last read" : "Waiting for the first chart read"); return; }
+  const day = all[all.length - 1].ny.date;
+  const first = all.findIndex((b) => b.ny.date === day && (chartMarket === "QQQ" || b.ny.hm >= "04:00"));
+  const bars = all.slice(first);
+  const ema12 = ema(all.map((b) => b.c), 2 / 13);
+  let vwap = null, ema10 = null;
+  if (chartMarket === "QQQ") {
+    const rth = []; all.forEach((b, i) => { if (b.ny.hm >= "09:30" && b.ny.hm < "16:00") rth.push(i); });
+    const e = ema(rth.map((i) => all[i].c), 2 / 11); ema10 = new Map(rth.map((i, k) => [i, e[k]]));
+    let pv = 0, vol = 0; vwap = new Map();
+    bars.forEach((b, k) => { if (b.ny.hm >= "09:30") { pv += ((b.h + b.l + b.c) / 3) * b.v; vol += b.v; if (vol > 0) vwap.set(first + k, pv / vol); } });
+  }
+  const levels = chartLevels(), markers = chartMarkers(bars);
+  const W = Math.max(320, box.clientWidth || 800), H = W < 600 ? 230 : 320, padL = 8, padR = 60, padT = 12, padB = 22;
+  const slot = (W - padL - padR) / Math.max(bars.length, 72);
+  const ymin = Math.min(...bars.map((b) => b.l), ...levels.map((x) => x.price)), ymax = Math.max(...bars.map((b) => b.h), ...levels.map((x) => x.price));
+  const span = ymax - ymin || 1;
+  const y = (p) => padT + ((ymax - p) / span) * (H - padT - padB), x = (k) => padL + (k + 0.5) * slot;
+  const digits = chartMarket === "QQQ" ? 2 : 0;
+  const svg = svgEl("svg", {viewBox: `0 0 ${W} ${H}`, class: "chart-svg", role: "img", "aria-label": `${CHART_MARKETS[chartMarket]} 5-minute candles`});
+  for (let i = 0; i <= 4; i++) {
+    const p = ymin + (span * i) / 4;
+    svg.append(svgEl("line", {x1: padL, x2: W - padR, y1: y(p).toFixed(1), y2: y(p).toFixed(1), class: "c-grid"}));
+    svg.append(svgEl("text", {x: W - padR + 6, y: (y(p) + 4).toFixed(1), class: "c-axis"}, p.toFixed(digits)));
+  }
+  bars.forEach((b, k) => {
+    if (b.ny.hm.endsWith(":00")) {
+      svg.append(svgEl("line", {x1: x(k).toFixed(1), x2: x(k).toFixed(1), y1: padT, y2: H - padB, class: "c-grid"}));
+      if (x(k) > padL + 18 && (slot * 12 >= 34 || b.ny.hm.slice(0, 2) % 2 === 0)) svg.append(svgEl("text", {x: x(k).toFixed(1), y: H - 6, class: "c-axis c-mid"}, b.ny.hm));
+    }
+    if (b.ny.hm === "09:30") svg.append(svgEl("line", {x1: (x(k) - slot / 2).toFixed(1), x2: (x(k) - slot / 2).toFixed(1), y1: padT, y2: H - padB, class: "c-open"}));
+  });
+  const bw = Math.max(1, Math.min(9, slot * 0.62));
+  bars.forEach((b, k) => {
+    const cls = b.c >= b.o ? "c-up" : "c-dn";
+    svg.append(svgEl("line", {x1: x(k).toFixed(1), x2: x(k).toFixed(1), y1: y(b.h).toFixed(1), y2: y(b.l).toFixed(1), class: cls}));
+    svg.append(svgEl("rect", {x: (x(k) - bw / 2).toFixed(1), y: y(Math.max(b.o, b.c)).toFixed(1), width: bw.toFixed(1), height: Math.max(1, Math.abs(y(b.o) - y(b.c))).toFixed(1), class: cls}));
+  });
+  const path = (pts, cls) => { pts = pts.filter(Boolean); if (pts.length > 1) svg.append(svgEl("path", {d: pts.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)} ${py.toFixed(1)}`).join(" "), class: cls})); };
+  path(bars.map((b, k) => [x(k), y(ema12[first + k])]), "c-ema12");
+  if (vwap) path(bars.map((b, k) => (vwap.has(first + k) ? [x(k), y(vwap.get(first + k))] : null)), "c-vwap");
+  if (ema10) path(bars.map((b, k) => (ema10.has(first + k) ? [x(k), y(ema10.get(first + k))] : null)), "c-ema10");
+  for (const L of levels) {
+    svg.append(svgEl("line", {x1: padL, x2: W - padR, y1: y(L.price).toFixed(1), y2: y(L.price).toFixed(1), class: L.cls}));
+    svg.append(svgEl("text", {x: padL + 4, y: (y(L.price) - 4).toFixed(1), class: `c-label ${L.cls}`}, L.label));
+  }
+  for (const m of markers) {
+    const b = bars[m.index], px = x(m.index);
+    svg.append(svgEl("path", {d: m.up ? `M${px.toFixed(1)} ${(y(b.l) + 6).toFixed(1)} l-5 9 h10 z` : `M${px.toFixed(1)} ${(y(b.h) - 6).toFixed(1)} l-5 -9 h10 z`, class: m.cls}));
+  }
+  box.replaceChildren(svg);
+  const last = bars[bars.length - 1], ref = bars.find((b) => b.ny.hm >= "09:30") || bars[0];
+  const bp = (last.c / ref.o - 1) * 1e4;
+  text("chart-stat", `${CHART_MARKETS[chartMarket]} ${last.c.toFixed(digits)} · ${bp >= 0 ? "+" : ""}${bp.toFixed(0)} bp since the ${ref.ny.hm} open · last candle ${last.ny.hm} NY${data.delay ? ` · ${data.delay} min late` : ""} · ${bars.length} candles`);
+}
+
+async function refreshCharts() {
+  try { charts = await request("/api/charts"); drawChart(); } catch (e) { if (e.name !== "AbortError") text("chart-stat", `${e.message} · chart may be stale`); }
+}
+
 function renderToday(d) {
+  todayData = d;
   renderStatus(d.system);
   text("today-day", `${new Date(d.day + "T12:00:00Z").toLocaleDateString("en-GB", {weekday: "long", day: "numeric", month: "long", year: "numeric"})}`.toUpperCase());
   const signal = (method, market) => d.signals.find((s) => s.method === method && s.market === market);
@@ -189,6 +298,7 @@ function renderToday(d) {
     (o) => o.exit_reason === "MISSED_EXIT" ? "Missed exit · no price" : o.exit_for ? `${price(o.exit_bid)} · ${ny(o.exit_for)} NY` : `Open · sells ${o.method === "CONNORS_QQQ" ? o.exit_day + " 15:55" : "13:00"} NY`,
     (o) => o.pnl_usd == null ? (o.exit_reason ? display(o.exit_reason) : "Open") : money(o.pnl_usd),
   ], {5: (o) => tone(o.pnl_usd)});
+  if (charts) drawChart();
 }
 
 function renderRecord(d) {
@@ -265,6 +375,15 @@ $("saxo-connect").onsubmit = async (event) => {
   try { const result = await request("/oauth/saxo/start", {method: "POST", timeout: 15000}); window.location.assign(result.authorization_url); }
   catch (e) { text("oauth-notice", e.message); button.disabled = false; }
 };
+$("chart-markets").addEventListener("click", (event) => {
+  const market = event.target.closest("button")?.dataset.market;
+  if (!market || !CHART_MARKETS[market]) return;
+  chartMarket = market;
+  try { localStorage.setItem("slrno-chart", market); } catch (e) { /* storage unavailable */ }
+  drawChart();
+});
+window.addEventListener("resize", () => { if (page === "today" && charts) drawChart(); });
+if (page === "today") { refreshCharts(); setInterval(refreshCharts, 60000); }
 $("prev").onclick = () => { offset = Math.max(0, offset - 100); refresh(true); };
 $("next").onclick = () => { offset += 100; refresh(true); };
 $("system-detail").addEventListener("toggle", () => refresh(true));

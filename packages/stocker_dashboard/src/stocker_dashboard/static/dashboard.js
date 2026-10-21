@@ -15,7 +15,7 @@ const EVENTS = {
   VWAP_CROSS_EXIT: "VWAP-crossing trades closed",
   DIP_EXIT: "Dip rules · trades closed",
   DIP_ENTRY: "Dip rules · Nasdaq CFD bought",
-  STOCK_DIPS: "Stock dips · after-close scan: fills, exits, orders for the next session",
+  STOCK_DIPS: "Stock dips · after-close scan of Saxo's daily bars: fills, exits, orders for the next session",
 };
 const MARKETS = {NAS100: "Nasdaq CFD", US500: "S&P CFD"};
 const METHODS = {"CFD NAS100": "Nasdaq CFD · first candle", "CFD US500": "S&P CFD · first candle", FIRST_CANDLE_QQQ: "QQQ option · first candle", CONNORS_QQQ: "QQQ call · Connors", "CROSS NAS100": "Nasdaq CFD · VWAP crossings", "DIP CONNORS": "Nasdaq CFD · Connors (days)", "DIP TURNAROUND": "Nasdaq CFD · Turnaround Tuesday", "DIP FEAR": "Nasdaq CFD · fear rule (3 down closes, 30-day IV ≥ 30%)", "DIP BOOK": "Nasdaq CFD · dip book, one at a time", "STOCK DIP": "US stocks · Connors pullback (8% limit, out above ConnorsRSI 70)"};
@@ -356,7 +356,6 @@ function renderSystem(s) {
     ["QQQ delay", s.qqq_delay_minutes == null ? "Not measured yet" : `${s.qqq_delay_minutes} min`],
     ["Calendar", s.calendar_loaded ? `Loaded for ${s.calendar_loaded}` : "Not loaded"],
     ["Saxo requests since start", s.saxo_calls],
-    ["EODHD requests since start", s.eodhd_calls ?? "—"],
   ];
   $("facts").replaceChildren(...facts.map(([k, v]) => {
     const div = document.createElement("div"), dt = document.createElement("dt"), dd = document.createElement("dd");

@@ -17,6 +17,7 @@ from stocker_execution.saxo_auth import OAuth, SaxoError, SaxoRefused
 READ_PATHS = (
     r"/root/v1/sessions/capabilities",
     r"/port/v1/accounts/me",
+    r"/ref/v1/instruments",
     r"/ref/v1/instruments/details/[0-9]+/(CfdOnIndex|Etf|StockOption)",
     r"/ref/v1/instruments/contractoptionspaces/[0-9]+",
     r"/ref/v1/exchanges/[A-Za-z0-9_-]+",

@@ -83,6 +83,37 @@ class FakeSaxo:
         self.qqq_upto: datetime | None = None  # QQQ candles exist up to this time (the clock)
         self.qqq_chart_delay = 0
         self.mid_vol = 0.2  # Saxo's MidVol on every option quote
+        # Stocks (amendment 5): listing rows, daily bars per Uic and the day they run to.
+        self.listed: list[dict] = []
+        self.daily_stock: dict[int, list[dict]] = {}
+        self.stock_upto: str = "9999-12-31"
+
+    def stock(self, code: str, uic: int, exchange: str, bars: list) -> None:
+        """List a stock and give it daily bars (StockBar rows, oldest first)."""
+        if exchange:
+            self.listed.append(
+                {
+                    "Symbol": f"{code}:x",
+                    "Identifier": uic,
+                    "AssetType": "Stock",
+                    "ExchangeId": exchange,
+                }
+            )
+        self.daily_stock[uic] = [
+            {
+                "Time": b.day + "T00:00:00.000000Z",
+                "Open": b.open,
+                "High": b.high,
+                "Low": b.low,
+                "Close": b.close,
+                "Volume": b.volume,
+            }
+            for b in bars
+        ]
+
+    def stock_bars_upto(self, uic: int, count: int) -> list[dict]:
+        rows = [b for b in self.daily_stock.get(uic, []) if b["Time"][:10] <= self.stock_upto]
+        return rows[-count:]
 
     def cfd_quote(self, uic: int, bid: float, ask: float, state: str = "Open") -> None:
         self.quotes[uic] = {
@@ -127,6 +158,9 @@ class FakeSaxo:
         self.requests.append((request.method, path, params))
         if path == "/ref/v1/exchanges/NASDAQ":
             return httpx.Response(200, json={"ExchangeSessions": self.sessions})
+        if path == "/ref/v1/instruments":
+            rows = [r for r in self.listed if r["ExchangeId"] == params.get("ExchangeId")]
+            return httpx.Response(200, json={"Data": rows})
         if path == "/root/v1/sessions/capabilities":
             return httpx.Response(200, json={"TradeLevel": "OrdersOnly", "DataLevel": "Standard"})
         if path.startswith("/ref/v1/instruments/details/"):
@@ -136,6 +170,11 @@ class FakeSaxo:
             )
         if path == "/chart/v3/charts":
             uic = int(params["Uic"])
+            if params["Horizon"] == "1440" and uic in self.daily_stock:
+                data = self.stock_bars_upto(uic, int(params.get("Count", 300)))
+                return httpx.Response(
+                    200, json={"Data": data, "ChartInfo": {"DelayedByMinutes": 0}}
+                )
             if params["AssetType"] == "Etf" and params["Horizon"] == "5":
                 upto = (self.qqq_upto or datetime.max.replace(tzinfo=UTC)) - timedelta(
                     minutes=self.qqq_chart_delay
@@ -159,6 +198,27 @@ class FakeSaxo:
         if path == "/trade/v1/infoprices/list":
             data = []
             for uic in (int(u) for u in params["Uics"].split(",")):
+                if params.get("AssetType") == "Stock" and uic in self.daily_stock:
+                    bars = self.stock_bars_upto(uic, 2)
+                    if bars:
+                        last = bars[-1]
+                        data.append(
+                            {
+                                "Uic": uic,
+                                "Quote": {
+                                    "Bid": last["Close"],
+                                    "Ask": last["Close"],
+                                    "DelayedByMinutes": 0,
+                                },
+                                "PriceInfoDetails": {
+                                    "LastTraded": last["Close"],
+                                    "Volume": last["Volume"],
+                                    "Open": last["Open"],
+                                    "LastClose": bars[0]["Close"],
+                                },
+                            }
+                        )
+                    continue
                 if uic in self.quotes:
                     data.append({"Uic": uic, "Quote": self.quotes[uic], "LastUpdated": "fixture"})
                 elif uic in self.option_quotes:

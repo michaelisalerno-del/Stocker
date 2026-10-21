@@ -4,10 +4,20 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from stocker_execution.methods import Bar, Candle, OptionQuote, Session, trading_sessions, utc
+from stocker_execution.methods import (
+    Bar,
+    Candle,
+    OptionQuote,
+    Session,
+    StockBar,
+    trading_sessions,
+    utc,
+)
 from stocker_execution.saxo_client import SaxoClient
 
 LIST_CHUNK = 50  # instruments per infoprices/list request
+US_STOCK_EXCHANGES = ("NASDAQ", "NYSE")  # the stock dips' universe (amendment 5)
+STOCK_PAGE = 1000  # instruments per listing page
 
 
 @dataclass(frozen=True)
@@ -243,6 +253,77 @@ async def board(
         client, [int(o["Uic"]) for o in chosen], "StockOption", "Quote,Greeks,Commissions"
     )
     return [option_from(o, rows[int(o["Uic"])]) for o in chosen if int(o["Uic"]) in rows], rows
+
+
+# stock dips (amendment 5) ---------------------------------------------------------------------
+async def us_stocks(client: SaxoClient) -> dict[str, int]:
+    """Every stock Saxo lists on NASDAQ and NYSE as {code: Uic}; a code listed twice keeps the
+    first. Codes with punctuation (share classes) are left out."""
+    out: dict[str, int] = {}
+    for exchange in US_STOCK_EXCHANGES:
+        skip = 0
+        while True:
+            result = await client.get(
+                "/ref/v1/instruments",
+                {"AssetTypes": "Stock", "ExchangeId": exchange, "$top": STOCK_PAGE, "$skip": skip},
+            )
+            rows = result.get("Data") or []
+            for r in rows:
+                code, uic = str(r.get("Symbol", "")).split(":")[0], r.get("Identifier")
+                if r.get("AssetType") == "Stock" and isinstance(uic, int) and code.isalnum():
+                    out.setdefault(code, uic)
+            if len(rows) < STOCK_PAGE or not result.get("__next"):
+                break
+            skip += STOCK_PAGE
+    return out
+
+
+@dataclass(frozen=True)
+class StockSnapshot:
+    last: float | None  # the day's last traded price
+    volume: float | None  # the day's shares
+    delayed: int | None
+
+
+async def stock_snapshots(client: SaxoClient, uics: list[int]) -> dict[int, StockSnapshot]:
+    """Each stock's last price and the day's volume: the cheap first filter after the close."""
+    out = {}
+    for uic, row in (await info_rows(client, uics, "Stock", "Quote,PriceInfoDetails")).items():
+        d, q = row.get("PriceInfoDetails") or {}, row.get("Quote") or {}
+        out[uic] = StockSnapshot(d.get("LastTraded"), d.get("Volume"), q.get("DelayedByMinutes"))
+    return out
+
+
+async def stock_daily(client: SaxoClient, uic: int, asset_type: str, count: int) -> list[StockBar]:
+    """The newest `count` daily bars (split-adjusted by Saxo; `adj` repeats the close), oldest
+    first; a bar with an impossible range is left out."""
+    result = await client.get(
+        "/chart/v3/charts",
+        {
+            "AssetType": asset_type,
+            "Uic": uic,
+            "Horizon": 1440,
+            "Count": count,
+            "FieldGroups": "Data,ChartInfo",
+        },
+    )
+    bars = []
+    for x in result.get("Data") or []:
+        try:
+            bar = StockBar(
+                str(x["Time"])[:10],
+                float(x["Open"]),
+                float(x["High"]),
+                float(x["Low"]),
+                float(x["Close"]),
+                float(x["Close"]),
+                float(x.get("Volume") or 0),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if 0 < bar.low <= bar.open <= bar.high and bar.low <= bar.close <= bar.high:
+            bars.append(bar)
+    return sorted(bars, key=lambda b: b.day)
 
 
 async def option_quote(client: SaxoClient, option: dict[str, Any]) -> OptionQuote | None:

@@ -275,7 +275,15 @@
        30018.0
       ]
      ],
-     "prior_candles": 36
+     "prior_candles": 36,
+     "prior_close": 698.4,
+     "sma50": 705.2,
+     "sma100": 690.1,
+     "below_50d": true,
+     "below_100d": false,
+     "prior_change": -0.0123,
+     "down_closes": 2,
+     "rsi2_prior": 14.2
     },
     "created": "2026-10-15T22:46:27.739500+00:00"
    },
@@ -451,7 +459,15 @@
        7701.0
       ]
      ],
-     "prior_candles": 36
+     "prior_candles": 36,
+     "prior_close": 6703.1,
+     "sma50": 6650.0,
+     "sma100": 6588.4,
+     "below_50d": false,
+     "below_100d": false,
+     "prior_change": -0.004,
+     "down_closes": 1,
+     "rsi2_prior": 35.0
     },
     "created": "2026-10-15T22:46:27.740740+00:00"
    },
@@ -677,6 +693,108 @@
     "qqq_exit_price": null,
     "pnl_usd": null
    }
+  ],
+  "playbook": [
+   {
+    "market": "NAS100",
+    "action": "QQQ call",
+    "tags": [
+     "pullback cell: long below the 50-day",
+     "disagrees with the other index"
+    ]
+   },
+   {
+    "market": "US500",
+    "action": "skip: no S&P edge outside the pullback cell",
+    "tags": [
+     "disagrees with the other index"
+    ]
+   }
+  ],
+  "stock_orders": [
+   {
+    "id": 3,
+    "signal_day": "2026-10-19",
+    "code": "ENPH",
+    "close": 41.2,
+    "limit_price": 37.904,
+    "sell_off": 0.052,
+    "closing_range": 0.11,
+    "adx": 36.4,
+    "crsi": 6.8,
+    "rank": 412,
+    "tier": "A",
+    "status": "PENDING",
+    "fill_day": null,
+    "fill_price": null,
+    "note": ""
+   },
+   {
+    "id": 1,
+    "signal_day": "2026-10-16",
+    "code": "SMCI",
+    "close": 38.5,
+    "limit_price": 35.42,
+    "sell_off": 0.061,
+    "closing_range": 0.08,
+    "adx": 41.2,
+    "crsi": 4.9,
+    "rank": 88,
+    "tier": "A",
+    "status": "FILLED",
+    "fill_day": "2026-10-19",
+    "fill_price": 35.42,
+    "note": ""
+   },
+   {
+    "id": 2,
+    "signal_day": "2026-10-16",
+    "code": "RIVN",
+    "close": 12.9,
+    "limit_price": 11.868,
+    "sell_off": 0.044,
+    "closing_range": 0.19,
+    "adx": 33.0,
+    "crsi": 8.1,
+    "rank": 640,
+    "tier": "B",
+    "status": "NOT_FILLED",
+    "fill_day": "2026-10-19",
+    "fill_price": null,
+    "note": ""
+   }
+  ],
+  "stock_trades": [
+   {
+    "id": 1,
+    "order_id": 1,
+    "code": "SMCI",
+    "tier": "A",
+    "signal_day": "2026-10-16",
+    "entry_day": "2026-10-19",
+    "entry_price": 35.42,
+    "notional_usd": 2000.0,
+    "exit_day": null,
+    "exit_price": null,
+    "exit_reason": null,
+    "crsi_exit": null,
+    "pnl_usd": null
+   },
+   {
+    "id": 2,
+    "order_id": 4,
+    "code": "MARA",
+    "tier": "B",
+    "signal_day": "2026-10-13",
+    "entry_day": "2026-10-14",
+    "entry_price": 14.1,
+    "notional_usd": 2000.0,
+    "exit_day": "2026-10-19",
+    "exit_price": 15.02,
+    "exit_reason": "CRSI_ABOVE_70",
+    "crsi_exit": 74.3,
+    "pnl_usd": 122.5
+   }
   ]
  },
  "/api/record": {
@@ -707,6 +825,15 @@
     "closed": "2026-10-19T17:00:01+00:00",
     "exit_reason": "AT_13_00",
     "pnl_usd": 59.92
+   },
+   {
+    "method": "CFD US500",
+    "day": "2026-10-16",
+    "side": 1,
+    "opened": "2026-10-16T13:35:02+00:00",
+    "closed": "2026-10-16T20:00:01+00:00",
+    "exit_reason": "CLOSE",
+    "pnl_usd": 41.5
    }
   ],
   "summary": [
@@ -721,12 +848,12 @@
    },
    {
     "method": "CFD US500",
-    "trades": 1,
-    "closed": 1,
-    "wins": 0,
-    "total_usd": -204.0,
-    "mean_usd": -204.0,
-    "first_day": "2026-10-19"
+    "trades": 2,
+    "closed": 2,
+    "wins": 1,
+    "total_usd": -162.5,
+    "mean_usd": -81.25,
+    "first_day": "2026-10-16"
    },
    {
     "method": "FIRST_CANDLE_QQQ",
@@ -761,7 +888,107 @@
    "problems": {},
    "rate_limits": {},
    "saxo_calls": 27
-  }
+  },
+  "by_day": [
+   {
+    "day": "2026-10-16",
+    "pnl_usd": 41.5,
+    "closed": 1
+   },
+   {
+    "day": "2026-10-19",
+    "pnl_usd": -144.08,
+    "closed": 2
+   }
+  ],
+  "books": [
+   {
+    "book": "PULLBACK",
+    "cells": {
+     "NAS100": {
+      "trades": 1,
+      "closed": 0,
+      "total_usd": 0.0,
+      "mean_usd": null
+     },
+     "QQQ option": {
+      "trades": 1,
+      "closed": 1,
+      "total_usd": 59.92,
+      "mean_usd": 59.92
+     }
+    }
+   },
+   {
+    "book": "WEEKDAYS",
+    "cells": {
+     "NAS100": {
+      "trades": 1,
+      "closed": 0,
+      "total_usd": 0.0,
+      "mean_usd": null
+     },
+     "US500": {
+      "trades": 2,
+      "closed": 2,
+      "total_usd": -162.5,
+      "mean_usd": -81.25
+     },
+     "QQQ option": {
+      "trades": 1,
+      "closed": 1,
+      "total_usd": 59.92,
+      "mean_usd": 59.92
+     }
+    }
+   },
+   {
+    "book": "AGREE",
+    "cells": {}
+   },
+   {
+    "book": "NO OVERSOLD SHORTS",
+    "cells": {
+     "US500": {
+      "trades": 1,
+      "closed": 1,
+      "total_usd": -204.0,
+      "mean_usd": -204.0
+     }
+    }
+   },
+   {
+    "book": "AFTER A +1% DAY",
+    "cells": {}
+   },
+   {
+    "book": "PLAYBOOK",
+    "cells": {}
+   },
+   {
+    "book": "SIZED V2",
+    "cells": {}
+   },
+   {
+    "book": "SIZED V3",
+    "cells": {}
+   },
+   {
+    "book": "CROSS PULLBACK",
+    "cells": {}
+   },
+   {
+    "book": "CROSS BEFORE 14:00",
+    "cells": {
+     "CROSS": {
+      "trades": 1,
+      "closed": 1,
+      "total_usd": 65.34,
+      "mean_usd": 65.34
+     }
+    }
+   }
+  ]
  },
  "/api/system": {
   "server_time": "2026-10-19T18:02:00+00:00",

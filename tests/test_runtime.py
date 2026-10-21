@@ -127,6 +127,10 @@ def test_a_full_paper_day_and_the_next_day_connors_exit(tmp_path):
         assert nas["worst"] == 29999.0  # the bid never moved
         what_if = next(b for b in rt.store.record(0)["books"] if b["book"] == "STOP 75 BP")
         assert what_if["cells"]["NAS100"]["total_usd"] == pytest.approx(-0.66 * 100 / 75)
+        # The equity curve books the three closed results (stop, option, close) on their day.
+        by_day = rt.store.record(0)["by_day"]
+        assert [(r["day"], r["closed"]) for r in by_day] == [("2026-10-19", 3)]
+        assert by_day[0]["pnl_usd"] == pytest.approx(-204 + 59.92 - 0.66)
 
         # 15:50 Connors, read at 16:05: the next expiry's call nearest 0.50 delta.
         fake.qqq(714.98, 715.02)
@@ -245,6 +249,7 @@ def test_dashboard_views_render_the_day(tmp_path):
             assert all("open_pnl_usd" in t for t in today["cfd"])
             record = (await http.get("/api/record")).json()
             assert {m["method"] for m in record["summary"]} == {"CFD NAS100", "CFD US500"}
+            assert record["by_day"] == []  # nothing has closed yet
             # The chart cache: QQQ and the S&P CFD, CFD candles at the bid/ask midpoint.
             charts = (await http.get("/api/charts")).json()
             assert set(charts["markets"]) == {"US500", "QQQ"}

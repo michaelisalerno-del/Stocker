@@ -36,6 +36,7 @@ ENTRY_GRACE = timedelta(seconds=60)  # an entry later than this is missed, never
 EXIT_GRACE = timedelta(minutes=30)
 RETRY_EVERY = 5.0  # seconds between attempts at a failed event
 STOP_POLL_SECONDS = 2.0
+MARK_FRESH_SECONDS = 10.0  # the dashboard marks open CFD positions only at a quote this fresh
 LOGIN_CHECK_SECONDS = 30.0
 FC, FC_QQQ, CONNORS_QQQ = "FIRST_CANDLE", "FIRST_CANDLE_QQQ", "CONNORS_QQQ"
 CROSS = "VWAP_CROSS"
@@ -1368,12 +1369,24 @@ class Runtime:
         now = self.now()
         day = now.astimezone(NY).date()
         view = self.store.day_view(day.isoformat())
-        for t in view["cfd"]:
+        # Open CFD positions (first candle, crossings, dips) marked at the stop watcher's latest
+        # quote while it is fresh; otherwise they are shown open without a figure, never at a
+        # stale price. Display only.
+        fresh = time.monotonic() - self.cfd_polled < MARK_FRESH_SECONDS
+        for t in (*view["cfd"], *view["crosses"], *view["dips"]):
             q = self.cfd_quotes.get(t["uic"])
-            if t["exit_at"] is None and q is not None and q.bid and q.ask:
-                mark = q.bid if t["side"] > 0 else q.ask
+            if (
+                fresh
+                and t["exit_at"] is None
+                and t["entry_price"] is not None
+                and q is not None
+                and q.bid
+                and q.ask
+            ):
+                side = t.get("side", 1)  # crossings and dips are always long
+                mark = q.bid if side > 0 else q.ask
                 t["open_pnl_usd"] = round(
-                    methods.cfd_pnl(t["side"], t["entry_price"], mark, t["amount"], t["factor"]), 2
+                    methods.cfd_pnl(side, t["entry_price"], mark, t["amount"], t["factor"]), 2
                 )
         session = methods.session_on(self.sessions, day) if self.sessions_day == day else None
         plan = []

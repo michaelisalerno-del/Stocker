@@ -223,3 +223,38 @@ candles, EMA12 of the candles served, the session VWAP and EMA10 of regular-sess
 the day's option strike, the first-candle side at its 09:35 candle and the crossing entries and exits. S&P:
 candles from 04:00 New York, EMA12, and the first-candle trade's entry, stop and exit levels. Levels and markers
 come from `/api/today`; the 09:30 open is a dotted line. The browser test's fixture carries synthetic candles.
+
+## Audit and redesign (21 October 2026)
+
+Display only: no trading rule, Saxo read or record write changed. The dashboard was audited against the
+paper record's protocol and redesigned so the three pages answer, in order, "is the app healthy", "what
+happened and what is next today", and "how is each method doing against its verdict point".
+
+- **Findings fixed.** Open VWAP-crossing and dip trades had no open mark (`today()` marked the first-candle
+  trades only, and from whatever quote the stop watcher last held); every open CFD position is now marked
+  from that quote only while it is under ten seconds old (`MARK_FRESH_SECONDS`), else shown open without a
+  figure. The status chip read "Logged in · 52 min left", which is the refresh token's renewal, not the
+  login's end; it now says "Saxo connected · renews in 52 min". The next-event countdown ran on the browser's
+  clock; it now runs on the server's (`server_time` offset). Both charts were rebuilt on every 5-second
+  refresh; they redraw only when the trades that place their levels change, or each minute with new candles.
+  Chart level labels collided ("exit" on "stop") and sat on candles; they are staggered and backed. The
+  heading order skipped from h1 to h3; sections are h2. A stale refresh only changed a caption; the status
+  bar now turns amber (`data-stale`).
+- **Today.** Four tiles, the two charts with a hover/touch crosshair (`#chart-readout`), the price and change
+  since the open in each chart head, the playbook, the events timeline (the next event highlighted with its
+  countdown, "n of m done"), then one card per method with a one-line summary (`#cfd-sum` etc.), the table,
+  a one-line empty state and the rule under "How it works". Phones get a bottom tab bar, a scrolling chip row
+  and one line per event.
+- **Record.** The tiles, then the equity curve (closed results booked on their closing day, from the new
+  `by_day` field of `GET /api/record`; best and worst day and the maximum drawdown in its caption) beside the
+  verdict-progress meters: the protocol's checkpoints (A at 40 closed CFD trades a market, B at 40 and C at
+  60 closed first-candle options, D at 250 Nasdaq days, E and the dip rules at 40, the crossings and the
+  stock dips at 100, the fear rule at 10, the pullback book at 40), each as "n of N" from the summary counts.
+  The by-method table carries a signed bar per total; book cells show the average and closed count beneath.
+- **System.** The login panel beside a problems panel (one line per area and code); the eight facts and the
+  diagnostics as before.
+- **Tests.** The fixture carries context on the first-candle signals, the playbook, stock orders and trades,
+  the books and `by_day`; the browser test reads the new elements. The Python suite checks `by_day` after a
+  full day. Checked locally in headless Chrome at 1440 px and in a 390 px frame (no console errors, no
+  horizontal overflow) with the browser test's assertions ported to the rendered DOM; the Playwright suite
+  itself runs in CI.

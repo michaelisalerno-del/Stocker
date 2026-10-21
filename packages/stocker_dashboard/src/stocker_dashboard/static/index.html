@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <meta name="theme-color" content="#0b0f13" />
+    <meta name="theme-color" content="#0a0d11" />
     <title>SLRNO · Paper record</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/static/dashboard.css" />
@@ -13,7 +13,7 @@
     <a class="skip" href="#main">Skip to content</a>
     <header>
       <a class="brand" href="/">SLRNO<span>PAPER RECORD</span></a>
-      <nav aria-label="Main navigation"><a href="/">Today</a><a href="/record">Record</a><a href="/system">System</a></nav>
+      <nav aria-label="Main navigation"><a href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Today</span></a><a href="/record"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Record</span></a><a href="/system"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span>System</span></a></nav>
       <div class="header-tools"><span class="clock" id="clock"></span><span class="paper">NO ORDERS · PAPER ONLY</span></div>
     </header>
     <main id="main">
@@ -29,27 +29,31 @@
       <section id="today" hidden>
         <div class="page-head">
           <div><p class="eyebrow" id="today-day">TODAY</p><h1>Cockpit</h1></div>
-          <p class="muted lede">First candle, VWAP crossings, Connors, the dip rules and the stock dips, recorded on paper from live Saxo prices and Saxo's daily stock bars.</p>
+          <p class="muted lede">Six paper methods read from live Saxo prices and Saxo's daily bars. Nothing here places an order.</p>
         </div>
         <div class="tiles">
-          <div class="tile"><span class="tile-label">Day P&amp;L</span><strong class="tile-value" id="tile-pnl">—</strong><span class="tile-sub" id="tile-pnl-sub">closed and open paper trades</span></div>
+          <div class="tile tile-hero"><span class="tile-label">Day P&amp;L</span><strong class="tile-value" id="tile-pnl">—</strong><span class="tile-sub" id="tile-pnl-sub">closed and open paper trades</span></div>
           <div class="tile"><span class="tile-label">Open positions</span><strong class="tile-value" id="tile-open">—</strong><span class="tile-sub" id="tile-open-sub">—</span></div>
           <div class="tile"><span class="tile-label">Next event</span><strong class="tile-value" id="tile-next">—</strong><span class="tile-sub" id="tile-next-sub">—</span></div>
           <div class="tile"><span class="tile-label">Feeds</span><strong class="tile-value" id="tile-feed">—</strong><span class="tile-sub" id="tile-feed-sub">—</span></div>
         </div>
+
         <div class="grid charts">
           <div class="panel chart-panel">
-            <div class="chart-head"><h3>QQQ <span class="h3-note">5-minute candles · New York time · session VWAP and EMA10 are method 4's lines</span></h3></div>
+            <div class="chart-head"><h3>QQQ <span class="h3-note">5-minute candles · New York time</span></h3><span class="chart-price" id="chart-price"></span></div>
             <p class="chart-stat" id="chart-stat">Waiting for the first chart read</p>
             <div class="chart" id="chart"></div>
+            <p class="chart-readout" id="chart-readout" aria-live="off"></p>
           </div>
           <div class="panel chart-panel">
-            <div class="chart-head"><h3>S&amp;P <span class="h3-note">US 500 CFD · 5-minute candles · the first-candle trade's entry and stop</span></h3></div>
+            <div class="chart-head"><h3>S&amp;P <span class="h3-note">US 500 CFD · 5-minute candles · New York time</span></h3><span class="chart-price" id="chart-price-US500"></span></div>
             <p class="chart-stat" id="chart-stat-US500">Waiting for the first chart read</p>
             <div class="chart" id="chart-US500"></div>
+            <p class="chart-readout" id="chart-readout-US500" aria-live="off"></p>
           </div>
         </div>
-        <div class="chart-legend"><span><i class="lg-ema12"></i>EMA12 · the first-candle signal</span><span><i class="lg-vwap"></i>session VWAP · <i class="lg-ema10"></i>EMA10 · method 4</span><span><i class="lg-strike"></i>option strike</span><span><i class="lg-entry"></i>entry</span><span><i class="lg-stop"></i>stop</span><span><i class="lg-exit"></i>exit</span><span><i class="lg-open"></i>09:30 open</span><span class="muted">refreshed each minute</span></div>
+        <div class="chart-legend"><span><i class="lg-ema12"></i>EMA12 · first-candle signal</span><span><i class="lg-vwap"></i>session VWAP · <i class="lg-ema10"></i>EMA10 · method 4</span><span><i class="lg-strike"></i>option strike</span><span><i class="lg-entry"></i>entry</span><span><i class="lg-stop"></i>stop</span><span><i class="lg-exit"></i>exit</span><span><i class="lg-open"></i>09:30 open</span><span class="muted">refreshed each minute · hover or touch a candle to read it</span></div>
+
         <div class="grid cockpit">
           <div class="panel">
             <h3>Playbook <span class="h3-note">research leads, not verdicts</span></h3>
@@ -70,29 +74,50 @@
             </div>
           </div>
           <div class="panel">
-            <h3>Today's events</h3>
+            <h3>Today's events <span class="h3-note" id="plan-progress"></span></h3>
             <div class="table-scroll"><table class="timeline"><thead><tr><th>Event</th><th>New York</th><th>UK</th><th>Status</th></tr></thead><tbody id="plan"></tbody></table></div>
-            <p class="muted" id="plan-empty">No US session today: nothing is recorded.</p>
+            <p class="empty" id="plan-empty">No US session today: nothing is recorded.</p>
           </div>
         </div>
-        <h3>CFD paper trades <span class="h3-note">$200 at risk · first candle, 09:35 → 16:00</span></h3>
-        <div class="table-scroll"><table><thead><tr><th>Market</th><th>Side</th><th>Contracts</th><th>Entry</th><th>Stop</th><th>Exit</th><th>Result</th></tr></thead><tbody id="cfd"></tbody></table></div>
-        <p class="muted" id="cfd-empty">No CFD paper trade today.</p>
-        <h3>VWAP crossings <span class="h3-note">Nasdaq CFD, long first-candle days only</span></h3>
-        <div class="table-scroll"><table><thead><tr><th>Signal (candle close)</th><th>Contracts</th><th>Entry (ask)</th><th>Exit (bid)</th><th>Result</th></tr></thead><tbody id="crosses"></tbody></table></div>
-        <p class="muted" id="crosses-empty">No VWAP crossing traded today. On a long first-candle day, each 10:00–15:00 close where QQQ's EMA10 crosses up through its VWAP buys the Nasdaq CFD; it is sold at the first close back below VWAP, or at 16:00.</p>
-        <h3>Dip rules <span class="h3-note">Nasdaq CFD, held over days</span></h3>
-        <div class="table-scroll"><table><thead><tr><th>Rule</th><th>Bought</th><th>Contracts</th><th>Entry (ask)</th><th>Exit (bid)</th><th>Result</th></tr></thead><tbody id="dips"></tbody></table></div>
-        <p class="muted" id="dips-empty">No dip trade held. At 15:50 New York, Connors buys the Nasdaq CFD after a dip in an uptrend and sells at the first 15:50 with RSI2 above 65; Turnaround Tuesday buys after a Monday down 1% or more and sells at the next session's 15:50; the fear rule buys after three down closes with QQQ's 30-day implied volatility at 30% or more and sells at the fifth session's 15:50. All read QQQ's live price at 15:50.</p>
-        <h3>Stock dips <span class="h3-note">US stocks · Connors pullback · $2,000 a trade · from Saxo's daily bars after the close</span></h3>
-        <div class="table-scroll"><table><thead><tr><th>Stock</th><th>Signal close</th><th>Buy limit (8% below)</th><th>ConnorsRSI</th><th>ADX</th><th>Tier</th><th>Order</th></tr></thead><tbody id="stock-orders"></tbody></table></div>
-        <p class="muted" id="stock-orders-empty">No stock order. Each evening the 1,500 most-traded US stocks are scanned for the worked example of the ConnorsRSI pullback (a 4% sell-off closing in the bottom quarter of its range, ADX(10) above 30, ConnorsRSI below 10); each sets a buy limit 8% below its close for the next session, filled from that session's low.</p>
-        <div class="table-scroll"><table><thead><tr><th>Stock</th><th>Bought</th><th>Entry (limit)</th><th>Exit (close)</th><th>Result</th></tr></thead><tbody id="stock-trades"></tbody></table></div>
-        <p class="muted" id="stock-trades-empty">No stock dip position. A filled stock is sold at the first close with ConnorsRSI above 70.</p>
-        <h3>QQQ option paper trades <span class="h3-note">one contract</span></h3>
-        <div class="table-scroll"><table><thead><tr><th>Method</th><th>Option</th><th>Delta</th><th>Bought (ask)</th><th>Sold (bid)</th><th>Result</th></tr></thead><tbody id="options"></tbody></table></div>
-        <p class="muted" id="options-empty">No QQQ option paper trade today.</p>
-        <p class="muted">While SaxoTraderGO holds Saxo's live slot, QQQ prices reach the server 15 minutes late: each QQQ step is then read 15 minutes after its time and recorded as of that time. CFD prices are always live. The dip rules trade the CFD at once, so their 15:50 entries and the Connors exit check are missed while QQQ is late.</p>
+
+        <h2 class="section-title">Paper trades today</h2>
+
+        <section class="method">
+          <div class="method-head"><h3>CFD first candle <span class="h3-note">Nasdaq and S&amp;P CFDs · $200 at risk · 09:35 → 16:00</span></h3><span class="method-sum" id="cfd-sum"></span></div>
+          <div class="table-scroll"><table><thead><tr><th>Market</th><th>Side</th><th>Contracts</th><th>Entry</th><th>Stop</th><th>Exit</th><th class="num">Result</th></tr></thead><tbody id="cfd"></tbody></table></div>
+          <p class="empty" id="cfd-empty">No CFD paper trade today.</p>
+          <details class="how"><summary>How it works</summary><p>At 09:35 New York the 09:30–09:35 candle of each index CFD is compared with EMA12 of its 5-minute closes, overnight included: above → long, below → short. Each paper trade is sized so its stop (100 bp Nasdaq, 50 bp S&amp;P) costs $200 and is held to the 16:00 close. CFD prices are always live.</p></details>
+        </section>
+
+        <section class="method">
+          <div class="method-head"><h3>QQQ options <span class="h3-note">one contract · the Nasdaq signal as a same-day option, and the Connors call</span></h3><span class="method-sum" id="options-sum"></span></div>
+          <div class="table-scroll"><table><thead><tr><th>Method</th><th>Option</th><th>Delta</th><th>Bought (ask)</th><th>Sold (bid)</th><th class="num">Result</th></tr></thead><tbody id="options"></tbody></table></div>
+          <p class="empty" id="options-empty">No QQQ option paper trade today.</p>
+          <details class="how"><summary>How it works</summary><p>The Nasdaq first-candle signal is also recorded as the same-day QQQ call (long) or put (short) with delta nearest 0.40, bought at the ask at 09:35 and sold at the bid at 13:00. Connors: at 15:50, QQQ above its 200-day average with RSI2(today) + RSI2(yesterday) below 35 → the next expiry's call with delta nearest 0.50, sold at the bid at 15:55 on its expiry day. While SaxoTraderGO holds Saxo's live slot, QQQ prices reach the server 15 minutes late: each QQQ step is then read 15 minutes after its time and recorded as of that time.</p></details>
+        </section>
+
+        <section class="method">
+          <div class="method-head"><h3>VWAP crossings <span class="h3-note">Nasdaq CFD · long first-candle days only · 10:00 → 15:00</span></h3><span class="method-sum" id="crosses-sum"></span></div>
+          <div class="table-scroll"><table><thead><tr><th>Signal (candle close)</th><th>Contracts</th><th>Entry (ask)</th><th>Exit (bid)</th><th class="num">Result</th></tr></thead><tbody id="crosses"></tbody></table></div>
+          <p class="empty" id="crosses-empty">No VWAP crossing traded today.</p>
+          <details class="how"><summary>How it works</summary><p>On a long first-candle day, each 10:00–15:00 close where QQQ's EMA10 crosses up through its session VWAP buys the Nasdaq CFD at the live ask; it is sold at the first close back below VWAP, or at 16:00. One at a time, no stop. A crossing not acted on within 60 seconds is recorded as a missed entry.</p></details>
+        </section>
+
+        <section class="method">
+          <div class="method-head"><h3>Dip rules <span class="h3-note">Nasdaq CFD · bought at 15:50 · held over days</span></h3><span class="method-sum" id="dips-sum"></span></div>
+          <div class="table-scroll"><table><thead><tr><th>Rule</th><th>Bought</th><th>Contracts</th><th>Entry (ask)</th><th>Exit (bid)</th><th class="num">Result</th></tr></thead><tbody id="dips"></tbody></table></div>
+          <p class="empty" id="dips-empty">No dip trade held.</p>
+          <details class="how"><summary>How it works</summary><p>At 15:50 New York, on QQQ's daily closes with its live price as today's: Connors buys the Nasdaq CFD after a dip in an uptrend and sells at the first 15:50 with RSI2 above 65; Turnaround Tuesday buys after a Monday down 1% or more and sells at the next session's 15:50; the fear rule buys after three down closes with QQQ's 30-day implied volatility at 30% or more and sells at the fifth session's 15:50. Entries and the Connors exit check are missed while QQQ is late. No stop; results exclude financing.</p></details>
+        </section>
+
+        <section class="method">
+          <div class="method-head"><h3>Stock dips <span class="h3-note">US stocks · Connors pullback · $2,000 a trade · scanned after the close</span></h3><span class="method-sum" id="stocks-sum"></span></div>
+          <div class="table-scroll"><table><thead><tr><th>Stock</th><th>Signal close</th><th>Buy limit (8% below)</th><th>ConnorsRSI</th><th>ADX</th><th>Tier</th><th>Order</th></tr></thead><tbody id="stock-orders"></tbody></table></div>
+          <p class="empty" id="stock-orders-empty">No stock order resting.</p>
+          <div class="table-scroll"><table><thead><tr><th>Stock</th><th>Bought</th><th>Entry (limit)</th><th>Exit (close)</th><th class="num">Result</th></tr></thead><tbody id="stock-trades"></tbody></table></div>
+          <p class="empty" id="stock-trades-empty">No stock dip position.</p>
+          <details class="how"><summary>How it works</summary><p>Each evening the 1,500 most-traded US stocks are scanned on Saxo's daily bars for the worked example of the ConnorsRSI pullback: a 4% sell-off closing in the bottom quarter of its range, ADX(10) above 30, ConnorsRSI below 10. Each setup rests a buy limit 8% below its close for the next session, filled from that session's low; a filled stock is sold at the first close with ConnorsRSI above 70. Tier A is the top 500 by dollar volume, tier B ranks 501–1,500.</p></details>
+        </section>
       </section>
 
       <section id="record" hidden>
@@ -101,20 +126,33 @@
           <p class="muted lede">Sample from Friday 16 October 2026. Verdicts are judged once, at the points the protocol fixes; until then only counts are read.</p>
         </div>
         <div class="tiles">
-          <div class="tile"><span class="tile-label">Net P&amp;L</span><strong class="tile-value" id="rec-total">—</strong><span class="tile-sub" id="rec-total-sub">all methods, closed trades</span></div>
+          <div class="tile tile-hero"><span class="tile-label">Net P&amp;L</span><strong class="tile-value" id="rec-total">—</strong><span class="tile-sub" id="rec-total-sub">all methods, closed trades</span></div>
           <div class="tile"><span class="tile-label">Closed trades</span><strong class="tile-value" id="rec-closed">—</strong><span class="tile-sub" id="rec-closed-sub">—</span></div>
           <div class="tile"><span class="tile-label">Win rate</span><strong class="tile-value" id="rec-win">—</strong><span class="tile-sub" id="rec-win-sub">—</span></div>
           <div class="tile"><span class="tile-label">Recording since</span><strong class="tile-value" id="rec-since">—</strong><span class="tile-sub" id="rec-since-sub">first recorded trade</span></div>
         </div>
-        <h3>By method</h3>
-        <div class="table-scroll"><table><thead><tr><th>Method</th><th>Trades</th><th>Closed</th><th>Wins</th><th>Total</th><th>Average</th><th>Since</th></tr></thead><tbody id="summary"></tbody></table></div>
-        <p class="muted" id="summary-empty">No paper trades yet. The sample starts on Friday 16 October 2026.</p>
-        <h3>Books <span class="h3-note">the research leads as subsets of the trades above · amendment 4</span></h3>
-        <div class="table-scroll"><table><thead><tr><th>Book</th><th>Nasdaq CFD</th><th>S&amp;P CFD</th><th>QQQ option</th><th>VWAP crossings</th></tr></thead><tbody id="books"></tbody></table></div>
-        <p class="muted" id="books-empty">No trades in any book yet.</p>
-        <p class="muted">Each cell: trades · total (average per closed trade). The first-candle signals carry their reference ETF's closes through the prior session (QQQ for the Nasdaq, SPY for the S&amp;P); days recorded before 21 October 2026 have no context and count only in the weekday and agreement books. Nothing traded changes: a book is a sum over the same recorded trades.</p>
-        <h3>Trades, newest first</h3>
-        <div class="table-scroll"><table><thead><tr><th>Day</th><th>Method</th><th>Side</th><th>Opened</th><th>Closed</th><th>Why</th><th>Result</th></tr></thead><tbody id="trades"></tbody></table></div>
+        <div class="grid record-grid">
+          <div class="panel chart-panel">
+            <div class="chart-head"><h3>Equity curve <span class="h3-note">closed paper P&amp;L, all methods, booked on the closing day</span></h3></div>
+            <p class="chart-stat" id="equity-stat">No closed trades yet</p>
+            <div class="chart" id="equity"></div>
+            <p class="chart-readout" id="equity-readout" aria-live="off"></p>
+          </div>
+          <div class="panel">
+            <h3>Verdict progress <span class="h3-note">the protocol's fixed checkpoints</span></h3>
+            <ol class="meters" id="verdicts"></ol>
+          </div>
+        </div>
+        <h2 class="section-title">By method</h2>
+        <div class="table-scroll"><table class="summary"><thead><tr><th>Method</th><th class="num">Trades</th><th class="num">Closed</th><th class="num">Wins</th><th class="num">Total</th><th class="bar"></th><th class="num">Average</th><th>Since</th></tr></thead><tbody id="summary"></tbody></table></div>
+        <p class="empty" id="summary-empty">No paper trades yet. The sample starts on Friday 16 October 2026.</p>
+        <h2 class="section-title">Books <span class="h3-note">the research leads as subsets of the trades above · amendment 4</span></h2>
+        <div class="table-scroll"><table class="books"><thead><tr><th>Book</th><th>Nasdaq CFD</th><th>S&amp;P CFD</th><th>QQQ option</th><th>VWAP crossings</th></tr></thead><tbody id="books"></tbody></table></div>
+        <p class="empty" id="books-empty">No trades in any book yet.</p>
+        <details class="how"><summary>About the books</summary><p>Each cell: trades · total, with the average per closed trade beneath. The first-candle signals carry their reference ETF's closes through the prior session (QQQ for the Nasdaq, SPY for the S&amp;P); days recorded before 21 October 2026 have no context and count only in the weekday and agreement books. Nothing traded changes: a book is a sum over the same recorded trades.</p></details>
+        <h2 class="section-title">Trades, newest first</h2>
+        <div class="table-scroll"><table><thead><tr><th>Day</th><th>Method</th><th>Side</th><th>Opened</th><th>Closed</th><th>Why</th><th class="num">Result</th></tr></thead><tbody id="trades"></tbody></table></div>
+        <p class="empty" id="trades-empty">No trades recorded yet.</p>
         <div class="paging"><button id="prev" type="button">Newer</button><button id="next" type="button">Older</button></div>
       </section>
 
@@ -123,10 +161,18 @@
           <div><p class="eyebrow">SAXO CONNECTION</p><h1>System</h1></div>
           <p class="muted lede">The app only reads prices. It never places orders and never asks Saxo for the real-time slot, so your SaxoTraderGO keeps live prices.</p>
         </div>
-        <div class="panel">
-          <p id="auth-state"></p>
-          <form id="saxo-connect" action="/oauth/saxo/start" method="post"><button>Connect configured Saxo environment</button></form>
-          <p id="oauth-notice" role="alert"></p>
+        <div class="grid system-grid">
+          <div class="panel">
+            <h3>Saxo login</h3>
+            <p id="auth-state"></p>
+            <form id="saxo-connect" action="/oauth/saxo/start" method="post"><button>Connect configured Saxo environment</button></form>
+            <p id="oauth-notice" role="alert"></p>
+          </div>
+          <div class="panel">
+            <h3>Problems <span class="h3-note">what the runtime could not do on its last try</span></h3>
+            <ul class="problems" id="problems"></ul>
+            <p class="empty" id="problems-empty">No problems.</p>
+          </div>
         </div>
         <dl class="facts" id="facts"></dl>
         <details id="system-detail"><summary>Diagnostics</summary><pre id="system-json"></pre></details>

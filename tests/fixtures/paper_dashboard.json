@@ -762,6 +762,50 @@
     "fill_day": "2026-10-19",
     "fill_price": null,
     "note": ""
+   },
+   {
+    "id": 5,
+    "code": "COIN",
+    "close": 210.0,
+    "limit_price": 193.2,
+    "sell_off": 0.048,
+    "closing_range": 0.12,
+    "adx": 34.1,
+    "crsi": 7.4,
+    "rank": 120,
+    "fill_day": null,
+    "fill_price": null,
+    "note": "",
+    "status": "PENDING",
+    "signal_day": "2026-10-16",
+    "tier": "A",
+    "now_price": 199.5,
+    "now_open": 204.0,
+    "now_low": 196.1,
+    "now_delay": 0,
+    "now_at": "2026-10-19T17:41:00+00:00"
+   },
+   {
+    "id": 6,
+    "code": "AFRM",
+    "close": 52.0,
+    "limit_price": 47.84,
+    "sell_off": 0.071,
+    "closing_range": 0.05,
+    "adx": 39.5,
+    "crsi": 3.9,
+    "rank": 455,
+    "fill_day": null,
+    "fill_price": null,
+    "note": "",
+    "status": "PENDING",
+    "signal_day": "2026-10-16",
+    "tier": "A",
+    "now_price": 48.9,
+    "now_open": 49.6,
+    "now_low": 47.1,
+    "now_delay": 0,
+    "now_at": "2026-10-19T17:41:00+00:00"
    }
   ],
   "stock_trades": [
@@ -778,7 +822,14 @@
     "exit_price": null,
     "exit_reason": null,
     "crsi_exit": null,
-    "pnl_usd": null
+    "pnl_usd": null,
+    "now_price": 36.1,
+    "now_open": 35.9,
+    "now_low": 35.2,
+    "now_delay": 0,
+    "now_at": "2026-10-19T17:41:00+00:00",
+    "crsi_now": 41.3,
+    "open_pnl_usd": 34.4
    },
    {
     "id": 2,
@@ -795,7 +846,27 @@
     "crsi_exit": 74.3,
     "pnl_usd": 122.5
    }
-  ]
+  ],
+  "stock_scan": {
+   "day": "2026-10-16",
+   "method": "STOCK",
+   "market": "US",
+   "side": 1,
+   "reason": "",
+   "taken": "2026-10-16T23:24:10+00:00",
+   "detail": {
+    "listed": 3021,
+    "priced": 2987,
+    "stocks_kept": 2514,
+    "histories_read": 2514,
+    "histories_failed": 0,
+    "universe": 1500,
+    "orders": 4,
+    "filled": 0,
+    "closed": 0,
+    "saxo_calls": 2650
+   }
+  }
  },
  "/api/record": {
   "trades": [

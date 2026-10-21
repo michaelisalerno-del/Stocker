@@ -171,6 +171,13 @@ class Store:
         ).fetchone()
         return row
 
+    def latest_signal(self, method: str, market: str) -> dict[str, Any] | None:
+        row = self.db.execute(
+            "SELECT * FROM signals WHERE method=? AND market=? ORDER BY day DESC LIMIT 1",
+            (method, market),
+        ).fetchone()
+        return None if row is None else {**dict(row), "detail": json.loads(row["detail"])}
+
     def insert(self, table: str, values: dict[str, Any]) -> int:
         assert table in TRADE_TABLES
         columns = ",".join(values)

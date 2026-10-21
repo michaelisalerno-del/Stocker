@@ -57,10 +57,14 @@ const server = http.createServer((req, res) => {
       assert.equal(await page.locator("#chart-US500 line.c-entry").count(), 1);
       assert.match(await page.locator("#dips tr").first().textContent(), /Connors · in the book.*Rsi2 above 65 2026-10-19.*\+\$197\.34/);
       assert.match(await page.locator("#dips tr").nth(1).textContent(), /Turnaround Tuesday.*Open · sells on its rule/);
-      assert.equal(await page.locator("#stock-orders tr").count(), 3);
+      assert.equal(await page.locator("#stock-orders tr").count(), 5);
       assert.match(await page.locator("#stock-orders tr").nth(1).textContent(), /SMCI.*Filled 2026-10-19 at 35\.42/);
+      assert.match(await page.locator("#stock-orders tr").nth(3).textContent(), /COIN.*Resting today · signal 2026-10-16199\.50low 196\.10 · needs a 3\.2% fall · 13:41 NY$/);
+      assert.match(await page.locator("#stock-orders tr").nth(4).textContent(), /AFRM.*low 47\.10, under the limit: fills at 47\.84 · 13:41 NY$/);
       assert.equal(await page.locator("#stock-trades tr").count(), 2);
-      assert.equal(await page.locator("#stocks-sum").textContent(), "1 resting order · 1 fill today · 1 open position · closed today +$122.50");
+      assert.match(await page.locator("#stock-trades tr").first().textContent(), /SMCI · tier A.*36\.1013:41 NYOpen · ConnorsRSI 41\.3 now, sells at a close above 70\+\$34\.40 open$/);
+      assert.equal(await page.locator("#stocks-sum").textContent(), "3 resting orders · 1 fill today · 1 open position · closed today +$122.50 · open +$34.40");
+      assert.equal(await page.locator("#stocks-scan").textContent(), "Last scan Fri 16 Oct · 2,514 charts read · 1,500 in the universe · 4 setups · 0 filled · 0 sold");
       assert.equal(await page.locator("#status").getAttribute("data-tone"), "ok");
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 0);
 

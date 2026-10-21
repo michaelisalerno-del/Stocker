@@ -294,6 +294,30 @@ async def stock_snapshots(client: SaxoClient, uics: list[int]) -> dict[int, Stoc
     return out
 
 
+@dataclass(frozen=True)
+class StockPrice:
+    last: float | None  # the last traded price
+    open: float | None  # the session's open
+    low: float | None  # the session's low so far
+    delayed: int | None
+
+
+async def stock_prices(client: SaxoClient, uics: list[int]) -> dict[int, StockPrice]:
+    """Display only: each stock's last price, open and low so far, read during the session."""
+    out = {}
+    fields = "Quote,PriceInfo,PriceInfoDetails"
+    for uic, row in (await info_rows(client, uics, "Stock", fields)).items():
+        d, p, q = (
+            row.get("PriceInfoDetails") or {},
+            row.get("PriceInfo") or {},
+            row.get("Quote") or {},
+        )
+        out[uic] = StockPrice(
+            d.get("LastTraded"), d.get("Open"), p.get("Low"), q.get("DelayedByMinutes")
+        )
+    return out
+
+
 async def stock_daily(client: SaxoClient, uic: int, asset_type: str, count: int) -> list[StockBar]:
     """The newest `count` daily bars (split-adjusted by Saxo; `adj` repeats the close), oldest
     first; a bar with an impossible range is left out."""

@@ -258,3 +258,19 @@ happened and what is next today", and "how is each method doing against its verd
   full day. Checked locally in headless Chrome at 1440 px and in a 390 px frame (no console errors, no
   horizontal overflow) with the browser test's assertions ported to the rendered DOM; the Playwright suite
   itself runs in CI.
+
+## Stock dips prices (21 October 2026)
+
+Display only: no rule, fill or exit changed; the evening scan still settles every order and position on the
+daily bars. In the session (09:30-16:00 New York) the runtime reads Saxo's price once a minute for the stocks
+with an order resting today or an open position (`Runtime.watch_stocks`, `market.stock_prices`: one
+`/trade/v1/infoprices/list` call per 50 stocks with `Quote,PriceInfo,PriceInfoDetails`, none when nothing
+rests or is held; after a restart Saxo's US stock list is read once for the Uics, which the scan keeps
+otherwise). `GET /api/today` adds to those rows the price, the session's open and low so far, the read time
+and any delay; on a position also the result if sold at that price and ConnorsRSI with that price as today's
+close, which is the exit rule's value if the stock closes there. It also carries `stock_scan`, the latest
+scan's counts. The Stock dips card shows a scan line (charts read, universe, setups, fills, exits, the next
+scan) and a "Price now" column: on an order, the low so far and the fall still needed to reach the limit, or
+the fill to expect once the low is under it; on a position, the open result and whether ConnorsRSI would
+sell it at the close. A failed read is the `stock prices` problem; the last figures stay, with their time.
+Two-line table cells are now one box, so a phone stacks them beside their label.

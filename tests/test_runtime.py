@@ -818,3 +818,64 @@ def test_a_stock_scan_that_waits_past_midnight_still_runs_before_the_open(tmp_pa
         await rt.stop()
 
     asyncio.run(scenario())
+
+
+def test_the_today_page_prices_resting_orders_and_open_stock_positions(tmp_path):
+    saxo, clock = FakeSaxo(), Clock(OPEN - timedelta(minutes=10))
+    market(saxo)
+    abcd = stock_world(saxo)
+    fill_bar, rebound_bar = abcd[-3], abcd[-2]
+
+    def reads(path: str, fields: str | None = None) -> int:
+        return sum(
+            p == path and (fields is None or q.get("FieldGroups") == fields)
+            for _, p, q in saxo.requests
+        )
+
+    def price_reads() -> int:
+        return reads("/trade/v1/infoprices/list", "Quote,PriceInfo,PriceInfoDetails")
+
+    async def scenario():
+        rt = make(tmp_path, saxo, clock)
+        saxo.stock_upto = MON.isoformat()
+        await at(rt, clock, OPEN + timedelta(hours=9, minutes=30))  # Monday night: ABCD sets up
+        limit = rt.store.pending_stock_orders()[0]["limit_price"]
+        assert price_reads() == 0  # never outside the session
+        # Tuesday 10:00 New York: Saxo's price so far is Tuesday's bar; read once a minute.
+        saxo.stock_upto = TUE.isoformat()
+        await at(rt, clock, OPEN + timedelta(days=1, minutes=30))
+        assert price_reads() == 1
+        order = rt.today()["stock_orders"][0]
+        assert (order["now_price"], order["now_open"], order["now_low"]) == (
+            fill_bar.close,
+            fill_bar.open,
+            fill_bar.low,
+        )
+        assert order["now_low"] < limit and "crsi_now" not in order
+        # Tuesday night it fills. Wednesday 10:00 after a restart: Saxo's list is read again.
+        await at(rt, clock, OPEN + timedelta(days=1, hours=9, minutes=30))
+        listings = reads("/ref/v1/instruments")
+        rt2 = make(tmp_path, saxo, clock, rt.store)
+        saxo.stock_upto = WED.isoformat()
+        await at(rt2, clock, OPEN + timedelta(days=2, minutes=30))
+        assert reads("/ref/v1/instruments") == listings + 2
+        view = rt2.today()
+        t = view["stock_trades"][0]
+        pnl = 2000 * ((rebound_bar.close / t["entry_price"] - 1) - 0.002)
+        assert (t["now_price"], t["open_pnl_usd"]) == (rebound_bar.close, round(pnl, 2))
+        assert t["crsi_now"] > 70  # sells at the close if it stays above 70
+        assert (view["stock_scan"]["day"], view["stock_scan"]["detail"]["filled"]) == (
+            TUE.isoformat(),
+            1,
+        )
+        # At the close the rule's ConnorsRSI is the one shown at that price.
+        await at(rt2, clock, OPEN + timedelta(days=2, hours=9, minutes=30))
+        t = rt2.store.db.execute("SELECT * FROM stock_trades").fetchone()
+        assert (
+            t["exit_reason"] == "CRSI_ABOVE_70"
+            and round(t["crsi_exit"], 1) == view["stock_trades"][0]["crsi_now"]
+        )
+        assert "now_price" not in rt2.today()["stock_trades"][0]  # closed: no mark
+        await rt2.stop()
+
+    asyncio.run(scenario())

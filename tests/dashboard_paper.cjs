@@ -61,7 +61,7 @@ const server = http.createServer((req, res) => {
 
       await page.goto(base + "/system");
       await page.waitForFunction(() => document.querySelector("#auth-state").textContent.includes("AUTHENTICATED"));
-      assert.equal(await page.locator("#facts div").count(), 8);
+      assert.equal(await page.locator("#facts div").count(), 9);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 0);
       assert.deepEqual(errors, []);
       await page.close();

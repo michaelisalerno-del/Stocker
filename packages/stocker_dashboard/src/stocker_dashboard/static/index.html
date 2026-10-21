@@ -112,11 +112,12 @@
 
         <section class="method">
           <div class="method-head"><h3>Stock dips <span class="h3-note">US stocks · Connors pullback · $2,000 a trade · scanned after the close</span></h3><span class="method-sum" id="stocks-sum"></span></div>
-          <div class="table-scroll"><table><thead><tr><th>Stock</th><th>Signal close</th><th>Buy limit (8% below)</th><th>ConnorsRSI</th><th>ADX</th><th>Tier</th><th>Order</th></tr></thead><tbody id="stock-orders"></tbody></table></div>
+          <p class="muted method-note" id="stocks-scan"></p>
+          <div class="table-scroll"><table><thead><tr><th>Stock</th><th>Signal close</th><th>Buy limit (8% below)</th><th>ConnorsRSI</th><th>ADX</th><th>Tier</th><th>Order</th><th>Price now</th></tr></thead><tbody id="stock-orders"></tbody></table></div>
           <p class="empty" id="stock-orders-empty">No stock order resting.</p>
-          <div class="table-scroll"><table><thead><tr><th>Stock</th><th>Bought</th><th>Entry (limit)</th><th>Exit (close)</th><th class="num">Result</th></tr></thead><tbody id="stock-trades"></tbody></table></div>
+          <div class="table-scroll"><table><thead><tr><th>Stock</th><th>Bought</th><th>Entry (limit)</th><th>Price now</th><th>Exit (close)</th><th class="num">Result</th></tr></thead><tbody id="stock-trades"></tbody></table></div>
           <p class="empty" id="stock-trades-empty">No stock dip position.</p>
-          <details class="how"><summary>How it works</summary><p>Each evening the 1,500 most-traded US stocks are scanned on Saxo's daily bars for the worked example of the ConnorsRSI pullback: a 4% sell-off closing in the bottom quarter of its range, ADX(10) above 30, ConnorsRSI below 10. Each setup rests a buy limit 8% below its close for the next session, filled from that session's low; a filled stock is sold at the first close with ConnorsRSI above 70. Tier A is the top 500 by dollar volume, tier B ranks 501–1,500.</p></details>
+          <details class="how"><summary>How it works</summary><p>Each evening the 1,500 most-traded US stocks are scanned on Saxo's daily bars for the worked example of the ConnorsRSI pullback: a 4% sell-off closing in the bottom quarter of its range, ADX(10) above 30, ConnorsRSI below 10. Each setup rests a buy limit 8% below its close for the next session, filled from that session's low; a filled stock is sold at the first close with ConnorsRSI above 70. Tier A is the top 500 by dollar volume, tier B ranks 501–1,500. During the session Saxo's price is read once a minute for the orders resting today and the open positions; fills and exits are still settled by the evening scan.</p></details>
         </section>
       </section>
 

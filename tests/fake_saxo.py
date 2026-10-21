@@ -216,6 +216,7 @@ class FakeSaxo:
                                     "Open": last["Open"],
                                     "LastClose": bars[0]["Close"],
                                 },
+                                "PriceInfo": {"High": last["High"], "Low": last["Low"]},
                             }
                         )
                     continue

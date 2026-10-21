@@ -79,7 +79,7 @@ function rows(id, items, columns, classes = {}, rowClass = null) {
       if (heads[i]?.classList.contains("bar")) td.classList.add("bar");
       const value = f(item);
       if (value instanceof Node) td.append(value);
-      else if (value && typeof value === "object") { td.append(document.createTextNode(String(value.main ?? "—"))); if (value.sub) td.append(el("span", "sub", value.sub)); }
+      else if (value && typeof value === "object") { const two = el("span", "", String(value.main ?? "—")); if (value.sub) two.append(el("span", "sub", value.sub)); td.append(two); } // one box: phones stack it beside the label
       else td.textContent = String(value ?? "—");
       const c = classes[i]?.(item);
       if (c) td.classList.add(c);
@@ -156,12 +156,27 @@ function playbookText(p) {
 }
 const playbookTone = (p) => !p ? "" : /^(skip|no trade|context not read)/.test(p.action) ? "skip" : "go";
 const openMark = (t) => t.exit_at ? null : t.open_pnl_usd;
+// Stock dips: Saxo's price read once a minute in the session (display only; the evening scan settles).
+const readAt = (t) => join([`${ny(t.now_at)} NY`, t.now_delay ? `${t.now_delay} min late` : ""]);
+function orderNow(o) {
+  const low = o.now_low ?? o.now_price;
+  if (low < o.limit_price) return join([`low ${price(low)}, under the limit: fills at ${price(Math.min(o.now_open ?? o.limit_price, o.limit_price))}`, readAt(o)]);
+  return join([o.now_low != null ? `low ${price(o.now_low)}` : "", `needs a ${((1 - o.limit_price / o.now_price) * 100).toFixed(1)}% fall`, readAt(o)]);
+}
+function stockScanText(d) {
+  const s = d.stock_scan, e = d.events.find((x) => x.name === "STOCK_DIPS"), p = d.plan.find((x) => x.event === "STOCK_DIPS");
+  const n = (v) => Number(v ?? 0).toLocaleString("en-US"), plural = (v, word) => `${n(v)} ${word}${v === 1 ? "" : "s"}`;
+  const last = !s ? "No scan yet" : join([`Last scan ${dayName(s.day)}`, `${plural(s.detail.histories_read, "chart")} read`, s.detail.histories_failed ? `${n(s.detail.histories_failed)} failed` : "",
+    `${n(s.detail.universe)} in the universe`, plural(s.detail.orders, "setup"), `${n(s.detail.filled)} filled`, `${n(s.detail.closed)} sold`]);
+  const next = e?.status === "RETRYING" ? `tonight's scan waits: ${display(e.note).toLowerCase()}` : p && (!e || e.status === "WAITING") ? `next scan ${p.new_york} NY` : "";
+  return join([last, next]);
+}
 
 function renderTiles(d) {
   const s = d.system, status = new Map(d.events.map((e) => [e.name, e]));
   const closed = [...d.cfd, ...(d.crosses || []), ...(d.options || []).filter((o) => o.exit_day === d.day), ...(d.dips || []).filter((t) => t.exit_day === d.day), ...(d.stock_trades || []).filter((t) => t.exit_day === d.day)]
     .reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0);
-  const open = [...d.cfd, ...(d.crosses || []), ...(d.dips || [])].reduce((sum, t) => sum + (openMark(t) ?? 0), 0);
+  const open = [...d.cfd, ...(d.crosses || []), ...(d.dips || []), ...(d.stock_trades || [])].reduce((sum, t) => sum + (openMark(t) ?? 0), 0);
   text("tile-pnl", money(closed + open)); $("tile-pnl").className = `tile-value ${tone(closed + open)}`;
   text("tile-pnl-sub", `closed ${money(closed)} · open ${money(open)}`);
   const positions = [
@@ -357,7 +372,8 @@ function methodSums(d) {
   const dips = d.dips || [];
   text("dips-sum", join([count(dips.filter((t) => !t.exit_at).length, "open"), count(dips.filter((t) => t.exit_at).length, "closed"), dips.some((t) => t.pnl_usd != null) ? money(closedOf(dips)) : "", dips.some((t) => openMark(t) != null) ? `open ${money(sum(dips, openMark))}` : ""]));
   const orders = d.stock_orders || [], stocks = d.stock_trades || [];
-  text("stocks-sum", join([count(orders.filter((o) => o.status === "PENDING").length, "resting order"), count(orders.filter((o) => o.status === "FILLED" && o.fill_day === d.day).length, "fill today"), count(stocks.filter((t) => !t.exit_day).length, "open position"), stocks.some((t) => t.pnl_usd != null && t.exit_day === d.day) ? `closed today ${money(closedOf(stocks.filter((t) => t.exit_day === d.day)))}` : ""]));
+  text("stocks-sum", join([count(orders.filter((o) => o.status === "PENDING").length, "resting order"), count(orders.filter((o) => o.status === "FILLED" && o.fill_day === d.day).length, "fill today"), count(stocks.filter((t) => !t.exit_day).length, "open position"), stocks.some((t) => t.pnl_usd != null && t.exit_day === d.day) ? `closed today ${money(closedOf(stocks.filter((t) => t.exit_day === d.day)))}` : "", stocks.some((t) => openMark(t) != null) ? `open ${money(sum(stocks, openMark))}` : ""]));
+  text("stocks-scan", stockScanText(d));
 }
 
 function renderToday(d) {
@@ -412,13 +428,15 @@ function renderToday(d) {
   rows("stock-orders", d.stock_orders || [], [
     (o) => o.code, (o) => price(o.close), (o) => price(o.limit_price), (o) => Number(o.crsi).toFixed(1), (o) => Number(o.adx).toFixed(1),
     (o) => o.tier === "A" ? "A · top 500" : "B · 501-1500",
-    (o) => o.status === "FILLED" ? `Filled ${o.fill_day} at ${price(o.fill_price)}` : o.status === "CANCELLED" ? `Cancelled · ${display(o.note)}` : o.status === "NOT_FILLED" ? `Not filled ${o.fill_day}` : `${STOCK_STATUS[o.status] || o.status} · signal ${o.signal_day}`,
-  ], {6: (o) => o.status === "FILLED" ? "pos" : ""});
+    (o) => o.status === "FILLED" ? `Filled ${o.fill_day} at ${price(o.fill_price)}` : o.status === "CANCELLED" ? `Cancelled · ${display(o.note)}` : o.status === "NOT_FILLED" ? `Not filled ${o.fill_day}` : o.status === "PENDING" && o.signal_day < d.day ? `Resting today · signal ${o.signal_day}` : `${STOCK_STATUS[o.status] || o.status} · signal ${o.signal_day}`,
+    (o) => o.now_price == null ? "—" : {main: price(o.now_price), sub: orderNow(o)},
+  ], {6: (o) => o.status === "FILLED" ? "pos" : "", 7: (o) => o.now_price != null && (o.now_low ?? o.now_price) < o.limit_price ? "pos" : ""});
   rows("stock-trades", d.stock_trades || [], [
     (t) => `${t.code} · tier ${t.tier}`, (t) => t.entry_day, (t) => price(t.entry_price),
-    (t) => t.exit_day ? `${price(t.exit_price)} · ${display(t.exit_reason)} ${t.exit_day}` : "Open · sells at the first close with ConnorsRSI above 70",
-    (t) => t.exit_day ? money(t.pnl_usd) : "Open",
-  ], {4: (t) => tone(t.pnl_usd)});
+    (t) => t.now_price == null ? "—" : {main: price(t.now_price), sub: readAt(t)},
+    (t) => t.exit_day ? `${price(t.exit_price)} · ${display(t.exit_reason)} ${t.exit_day}` : t.crsi_now == null ? "Open · sells at the first close with ConnorsRSI above 70" : t.crsi_now > 70 ? `Open · ConnorsRSI ${t.crsi_now.toFixed(1)} now: sells at the close if it stays above 70` : `Open · ConnorsRSI ${t.crsi_now.toFixed(1)} now, sells at a close above 70`,
+    (t) => t.exit_day ? money(t.pnl_usd) : t.open_pnl_usd != null ? `${money(t.open_pnl_usd)} open` : "Open",
+  ], {5: (t) => tone(t.exit_day ? t.pnl_usd : t.open_pnl_usd)});
   methodSums(d);
   // The chart's levels and markers come from the trades: redraw only when they change, not every refresh.
   const key = JSON.stringify([d.cfd, d.crosses, d.options]);

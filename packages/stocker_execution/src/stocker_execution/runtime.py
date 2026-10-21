@@ -55,6 +55,7 @@ STOCK_CHART_COUNT = 300  # daily bars read for a stock new to the record or whos
 STOCK_REFRESH_COUNT = 5  # daily bars read on other nights
 STOCK_REWRITE_TOLERANCE = 0.003  # a stored close that no longer matches Saxo's: history re-read
 STOCK_KEEP_DAYS = 600  # calendar days of bars kept
+STOCK_POLL_SECONDS = 60.0  # display only: the Today page's stock prices in the session
 CROSS_POLL_SECONDS = 5.0  # while a QQQ candle is due
 CROSS_DELAYED_POLL_SECONDS = 60.0  # while QQQ's chart is delayed: entries are missed anyway
 # The dashboard's chart: each market's latest 5-minute candles, refreshed every minute from three
@@ -120,6 +121,9 @@ class Runtime:
         self.cross_next = 0.0
         self.chart_bars: dict[str, dict[str, Any]] = {}  # display only: the dashboard's candles
         self.charts_next = 0.0
+        self.stock_uics: dict[str, int] = {}  # Saxo's US stock list, as the night's scan read it
+        self.stock_marks: dict[str, dict[str, Any]] = {}  # display only: the latest price read
+        self.stock_polled = 0.0
         directory = self.root / config.data_environment
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         handler = RotatingFileHandler(directory / "paper.log", maxBytes=2 * 1024**2, backupCount=3)
@@ -172,6 +176,7 @@ class Runtime:
         await self.watch_stops(self.now(), session)
         await self.watch_crosses(self.now(), session)
         await self.watch_charts(self.now(), session)
+        await self.watch_stocks(self.now(), session)
 
     async def watch_charts(self, now: datetime, session: Session | None) -> None:
         """Display only: keep each market's latest candles for the dashboard's chart. A failed
@@ -195,6 +200,50 @@ class Runtime:
 
     def charts(self) -> dict[str, Any]:
         return {"markets": self.chart_bars}
+
+    async def watch_stocks(self, now: datetime, s: Session | None) -> None:
+        """Display only: in the session, a price read a minute for the stocks with an order
+        resting today or an open position, and ConnorsRSI as if a held stock closed at that
+        price. Fills and exits stay the night scan's, on the daily bars."""
+        if s is None or not s.open <= now < s.close:
+            return
+        if time.monotonic() - self.stock_polled < STOCK_POLL_SECONDS:
+            return
+        self.stock_polled = time.monotonic()
+        day = s.day.isoformat()
+        held = {t["code"] for t in self.store.open_stock_trades()}
+        codes = held | {
+            o["code"] for o in self.store.pending_stock_orders() if o["signal_day"] < day
+        }
+        if not codes:
+            return
+        try:
+            if not self.stock_uics:  # after a restart, until the night's scan reads it again
+                self.stock_uics = await market.us_stocks(self.client)
+            uics = {self.stock_uics[c]: c for c in codes if c in self.stock_uics}
+            prices = await market.stock_prices(self.client, sorted(uics))
+        except SaxoError as exc:
+            self.note("stock prices", exc)
+            return
+        read, marks = stamp(self.now()), {}
+        for uic, p in prices.items():
+            code = uics[uic]
+            if not p.last:
+                continue
+            crsi = None
+            if code in held:
+                closes = [b.adj for b in self.store.stock_bars(code) if b.day < day]
+                crsi = methods.connors_rsi([*closes, p.last])
+            marks[code] = {
+                "now_price": p.last,
+                "now_open": p.open,
+                "now_low": p.low,
+                "now_delay": p.delayed,
+                "now_at": read,
+                "crsi_now": None if crsi is None else round(crsi, 1),
+            }
+        self.stock_marks = marks
+        self.problems.pop("stock prices", None)
 
     def plan(
         self, s: Session
@@ -919,7 +968,7 @@ class Runtime:
         the next session. Three stages: Saxo's US stock list, one price read per 50 stocks (the
         day's last price and volume), then daily bars for the stocks that pass."""
         key = day.isoformat()
-        listed = await market.us_stocks(self.client)
+        listed = self.stock_uics = await market.us_stocks(self.client)
         held = {t["code"] for t in self.store.open_stock_trades()}
         held |= {o["code"] for o in self.store.pending_stock_orders()}
         snaps = await market.stock_snapshots(self.client, sorted(set(listed.values())))
@@ -1388,6 +1437,18 @@ class Runtime:
                 t["open_pnl_usd"] = round(
                     methods.cfd_pnl(side, t["entry_price"], mark, t["amount"], t["factor"]), 2
                 )
+        # Stock dips: today's latest price read beside the orders resting today and the open
+        # positions, with each position's result if sold at it. Display only.
+        for row in (*view["stock_orders"], *view["stock_trades"]):
+            m = self.stock_marks.get(row["code"])
+            if m is None or at(m["now_at"]).astimezone(NY).date() != day:
+                continue
+            if row.get("status") == "PENDING" and row["signal_day"] < day.isoformat():
+                row.update({k: v for k, v in m.items() if k != "crsi_now"})
+            elif "entry_price" in row and row["exit_day"] is None:
+                row.update(m)
+                pnl = methods.stock_pnl(row["entry_price"], m["now_price"], row["tier"])
+                row["open_pnl_usd"] = round(pnl, 2)
         session = methods.session_on(self.sessions, day) if self.sessions_day == day else None
         plan = []
         if session is not None:
@@ -1406,6 +1467,7 @@ class Runtime:
             "plan": plan,
             **view,
             "playbook": self.playbook(view["signals"], day),
+            "stock_scan": self.store.latest_signal("STOCK", "US"),
             "system": self.status(),
         }
 

@@ -123,7 +123,7 @@ class Runtime:
         self.charts_next = 0.0
         self.stock_uics: dict[str, int] = {}  # Saxo's US stock list, as the night's scan read it
         self.stock_marks: dict[str, dict[str, Any]] = {}  # display only: the latest price read
-        self.stock_polled = 0.0
+        self.stocks_next = 0.0
         directory = self.root / config.data_environment
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         handler = RotatingFileHandler(directory / "paper.log", maxBytes=2 * 1024**2, backupCount=3)
@@ -207,9 +207,9 @@ class Runtime:
         price. Fills and exits stay the night scan's, on the daily bars."""
         if s is None or not s.open <= now < s.close:
             return
-        if time.monotonic() - self.stock_polled < STOCK_POLL_SECONDS:
+        if time.monotonic() < self.stocks_next:
             return
-        self.stock_polled = time.monotonic()
+        self.stocks_next = time.monotonic() + STOCK_POLL_SECONDS
         day = s.day.isoformat()
         held = {t["code"] for t in self.store.open_stock_trades()}
         codes = held | {

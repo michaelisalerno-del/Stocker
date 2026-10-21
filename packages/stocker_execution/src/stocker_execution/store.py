@@ -376,10 +376,24 @@ class Store:
                     GROUP BY method ORDER BY method"""
             )
         ]
+        # The equity curve: every closed result booked on the day it closed.
+        by_day = [
+            dict(r)
+            for r in self.db.execute(
+                """SELECT day, ROUND(SUM(pnl_usd), 2) AS pnl_usd, COUNT(*) AS closed
+                     FROM (SELECT day, pnl_usd FROM cfd_trades
+                           UNION ALL SELECT exit_day, pnl_usd FROM option_trades
+                           UNION ALL SELECT day, pnl_usd FROM cross_trades
+                           UNION ALL SELECT exit_day, pnl_usd FROM dip_trades
+                           UNION ALL SELECT exit_day, pnl_usd FROM stock_trades)
+                    WHERE pnl_usd IS NOT NULL GROUP BY day ORDER BY day"""
+            )
+        ]
         return {
             "trades": trades,
             "summary": summary,
             "books": self.books(),
+            "by_day": by_day,
             "has_more": len(trades) == PAGE_SIZE,
         }
 

@@ -29,7 +29,7 @@
       <section id="today" hidden>
         <div class="page-head">
           <div><p class="eyebrow" id="today-day">TODAY</p><h1>Cockpit</h1></div>
-          <p class="muted lede">First candle, VWAP crossings, Connors and the dip rules, recorded on paper from live Saxo prices.</p>
+          <p class="muted lede">First candle, VWAP crossings, Connors, the dip rules and the stock dips, recorded on paper from live Saxo prices and Saxo's daily stock bars.</p>
         </div>
         <div class="tiles">
           <div class="tile"><span class="tile-label">Day P&amp;L</span><strong class="tile-value" id="tile-pnl">—</strong><span class="tile-sub" id="tile-pnl-sub">closed and open paper trades</span></div>
@@ -84,6 +84,11 @@
         <h3>Dip rules <span class="h3-note">Nasdaq CFD, held over days</span></h3>
         <div class="table-scroll"><table><thead><tr><th>Rule</th><th>Bought</th><th>Contracts</th><th>Entry (ask)</th><th>Exit (bid)</th><th>Result</th></tr></thead><tbody id="dips"></tbody></table></div>
         <p class="muted" id="dips-empty">No dip trade held. At 15:50 New York, Connors buys the Nasdaq CFD after a dip in an uptrend and sells at the first 15:50 with RSI2 above 65; Turnaround Tuesday buys after a Monday down 1% or more and sells at the next session's 15:50; the fear rule buys after three down closes with QQQ's 30-day implied volatility at 30% or more and sells at the fifth session's 15:50. All read QQQ's live price at 15:50.</p>
+        <h3>Stock dips <span class="h3-note">US stocks · Connors pullback · $2,000 a trade · from Saxo's daily bars after the close</span></h3>
+        <div class="table-scroll"><table><thead><tr><th>Stock</th><th>Signal close</th><th>Buy limit (8% below)</th><th>ConnorsRSI</th><th>ADX</th><th>Tier</th><th>Order</th></tr></thead><tbody id="stock-orders"></tbody></table></div>
+        <p class="muted" id="stock-orders-empty">No stock order. Each evening the 1,500 most-traded US stocks are scanned for the worked example of the ConnorsRSI pullback (a 4% sell-off closing in the bottom quarter of its range, ADX(10) above 30, ConnorsRSI below 10); each sets a buy limit 8% below its close for the next session, filled from that session's low.</p>
+        <div class="table-scroll"><table><thead><tr><th>Stock</th><th>Bought</th><th>Entry (limit)</th><th>Exit (close)</th><th>Result</th></tr></thead><tbody id="stock-trades"></tbody></table></div>
+        <p class="muted" id="stock-trades-empty">No stock dip position. A filled stock is sold at the first close with ConnorsRSI above 70.</p>
         <h3>QQQ option paper trades <span class="h3-note">one contract</span></h3>
         <div class="table-scroll"><table><thead><tr><th>Method</th><th>Option</th><th>Delta</th><th>Bought (ask)</th><th>Sold (bid)</th><th>Result</th></tr></thead><tbody id="options"></tbody></table></div>
         <p class="muted" id="options-empty">No QQQ option paper trade today.</p>

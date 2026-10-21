@@ -15,9 +15,12 @@ const EVENTS = {
   VWAP_CROSS_EXIT: "VWAP-crossing trades closed",
   DIP_EXIT: "Dip rules · trades closed",
   DIP_ENTRY: "Dip rules · Nasdaq CFD bought",
+  STOCK_DIPS: "Stock dips · after-close scan of Saxo's daily bars: fills, exits, orders for the next session",
 };
 const MARKETS = {NAS100: "Nasdaq CFD", US500: "S&P CFD"};
-const METHODS = {"CFD NAS100": "Nasdaq CFD · first candle", "CFD US500": "S&P CFD · first candle", FIRST_CANDLE_QQQ: "QQQ option · first candle", CONNORS_QQQ: "QQQ call · Connors", "CROSS NAS100": "Nasdaq CFD · VWAP crossings", "DIP CONNORS": "Nasdaq CFD · Connors (days)", "DIP TURNAROUND": "Nasdaq CFD · Turnaround Tuesday", "DIP FEAR": "Nasdaq CFD · fear rule (3 down closes, 30-day IV ≥ 30%)", "DIP BOOK": "Nasdaq CFD · dip book, one at a time"};
+const METHODS = {"CFD NAS100": "Nasdaq CFD · first candle", "CFD US500": "S&P CFD · first candle", FIRST_CANDLE_QQQ: "QQQ option · first candle", CONNORS_QQQ: "QQQ call · Connors", "CROSS NAS100": "Nasdaq CFD · VWAP crossings", "DIP CONNORS": "Nasdaq CFD · Connors (days)", "DIP TURNAROUND": "Nasdaq CFD · Turnaround Tuesday", "DIP FEAR": "Nasdaq CFD · fear rule (3 down closes, 30-day IV ≥ 30%)", "DIP BOOK": "Nasdaq CFD · dip book, one at a time", "STOCK DIP": "US stocks · Connors pullback (8% limit, out above ConnorsRSI 70)"};
+const STOCK_STATUS = {PENDING: "Resting for the next session", NOT_FILLED: "Not filled", FILLED: "Filled", CANCELLED: "Cancelled"};
+const methodName = (m) => METHODS[m] || (m.startsWith("STOCK DIP ") ? `${METHODS["STOCK DIP"]} · ${m.slice(10)}` : m);
 const RULES = {CONNORS: "Connors", TURNAROUND: "Turnaround Tuesday", FEAR: "Fear rule"};
 const BOOKS = {PULLBACK: "Pullback cell · long signal, prior close below the 50-day", WEEKDAYS: "Tuesday to Friday", AGREE: "Nasdaq and S&P signals agree", "NO OVERSOLD SHORTS": "Shorts skipped after an oversold close (3+ down closes or RSI2 < 10)", "AFTER A +1% DAY": "After a +1% day", PLAYBOOK: "Playbook · the call in the pullback cell, the Nasdaq CFD otherwise, no Monday or oversold shorts, S&P in the cell only", "SIZED V2": "Sized · playbook units (cell 2, other longs 1, shorts 1 unless Monday or oversold)", "SIZED V3": "Sized · score units 0-3 (+cell, +after a +1% day, +agree, −Monday, −oversold short)", "STOP 75 BP": "Nasdaq CFD · what a 75 bp stop at the same $200 risk would have done", "CROSS PULLBACK": "VWAP crossings · pullback days", "CROSS BEFORE 14:00": "VWAP crossings · entered before 14:00"};
 const USD = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD"});
@@ -121,7 +124,7 @@ const countdown = (iso) => {
 
 function renderTiles(d) {
   const s = d.system, status = new Map(d.events.map((e) => [e.name, e]));
-  const closed = [...d.cfd, ...(d.crosses || []), ...(d.options || []).filter((o) => o.exit_day === d.day), ...(d.dips || []).filter((t) => t.exit_day === d.day)]
+  const closed = [...d.cfd, ...(d.crosses || []), ...(d.options || []).filter((o) => o.exit_day === d.day), ...(d.dips || []).filter((t) => t.exit_day === d.day), ...(d.stock_trades || []).filter((t) => t.exit_day === d.day)]
     .reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0);
   const open = [...d.cfd, ...(d.crosses || [])].reduce((sum, t) => sum + (t.exit_at ? 0 : (t.open_pnl_usd ?? 0)), 0);
   text("tile-pnl", money(closed + open)); $("tile-pnl").className = `tile-value ${tone(closed + open)}`;
@@ -130,6 +133,7 @@ function renderTiles(d) {
     ...d.cfd.filter((t) => !t.exit_at).map((t) => `${MARKETS[t.market] || t.market} ${side(t.side).toLowerCase()}`),
     ...(d.crosses || []).filter((t) => t.entry_price != null && !t.exit_at).map(() => "Nasdaq CFD crossing"),
     ...(d.dips || []).filter((t) => !t.exit_at).map((t) => `${RULES[t.rule] || t.rule} dip`),
+    ...(d.stock_trades || []).filter((t) => !t.exit_day).map((t) => `${t.code} dip`),
     ...(d.options || []).filter((o) => !o.exit_read).map((o) => `QQQ ${o.put_call.toLowerCase()} ${o.strike}`),
   ];
   text("tile-open", positions.length); text("tile-open-sub", positions.join(" · ") || "Flat");
@@ -294,6 +298,16 @@ function renderToday(d) {
     (t) => t.exit_reason === "MISSED_EXIT" ? "Missed exit · no price" : t.exit_at ? `${price(t.exit_price)} · ${display(t.exit_reason)} ${t.exit_day} ${ny(t.exit_at)} NY` : "Open · sells on its rule at 15:50",
     (t) => t.exit_at ? money(t.pnl_usd) : "Open",
   ], {5: (t) => tone(t.pnl_usd)});
+  rows("stock-orders", d.stock_orders || [], [
+    (o) => o.code, (o) => price(o.close), (o) => price(o.limit_price), (o) => Number(o.crsi).toFixed(1), (o) => Number(o.adx).toFixed(1),
+    (o) => o.tier === "A" ? "A · top 500" : "B · 501-1500",
+    (o) => o.status === "FILLED" ? `Filled ${o.fill_day} at ${price(o.fill_price)}` : o.status === "CANCELLED" ? `Cancelled · ${display(o.note)}` : o.status === "NOT_FILLED" ? `Not filled ${o.fill_day}` : `${STOCK_STATUS[o.status] || o.status} · signal ${o.signal_day}`,
+  ], {6: (o) => o.status === "FILLED" ? "pos" : ""});
+  rows("stock-trades", d.stock_trades || [], [
+    (t) => `${t.code} · tier ${t.tier}`, (t) => t.entry_day, (t) => price(t.entry_price),
+    (t) => t.exit_day ? `${price(t.exit_price)} · ${display(t.exit_reason)} ${t.exit_day}` : "Open · sells at the first close with ConnorsRSI above 70",
+    (t) => t.exit_day ? money(t.pnl_usd) : "Open",
+  ], {4: (t) => tone(t.pnl_usd)});
   rows("options", d.options, [
     (o) => METHODS[o.method] || o.method,
     (o) => `${o.put_call} ${o.strike} · expires ${o.expiry}`,
@@ -315,16 +329,17 @@ function renderRecord(d) {
   const since = real.map((m) => m.first_day).filter(Boolean).sort()[0];
   text("rec-since", since || "—");
   rows("summary", d.summary, [
-    (m) => METHODS[m.method] || m.method, (m) => m.trades, (m) => m.closed, (m) => m.wins ?? 0,
+    (m) => methodName(m.method), (m) => m.trades, (m) => m.closed, (m) => m.wins ?? 0,
     (m) => money(m.total_usd), (m) => money(m.mean_usd), (m) => m.first_day,
   ], {4: (m) => tone(m.total_usd)});
   const cell = (k) => (b) => { const c = b.cells[k]; return c ? `${c.trades} · ${money(c.total_usd)}${c.closed ? ` (avg ${money(c.mean_usd)})` : " · none closed"}` : "—"; };
   const books = (d.books || []).filter((b) => Object.keys(b.cells).length > 0);
   rows("books", books, [(b) => BOOKS[b.book] || b.book, cell("NAS100"), cell("US500"), cell("QQQ option"), cell("CROSS")],
     {1: (b) => tone(b.cells.NAS100?.total_usd), 2: (b) => tone(b.cells.US500?.total_usd), 3: (b) => tone(b.cells["QQQ option"]?.total_usd), 4: (b) => tone(b.cells.CROSS?.total_usd)});
+  const when = (iso) => !iso ? "—" : /^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso} close` : `${ny(iso)} NY`;
   rows("trades", d.trades, [
-    (t) => t.day, (t) => METHODS[t.method] || t.method, (t) => side(t.side),
-    (t) => t.opened ? `${ny(t.opened)} NY` : "—", (t) => t.exit_reason === "MISSED_EXIT" ? "Missed exit" : t.closed ? `${ny(t.closed)} NY` : "Open",
+    (t) => t.day, (t) => methodName(t.method), (t) => side(t.side),
+    (t) => when(t.opened), (t) => t.exit_reason === "MISSED_EXIT" ? "Missed exit" : t.closed ? when(t.closed) : "Open",
     (t) => display(t.exit_reason) || "—", (t) => money(t.pnl_usd),
   ], {6: (t) => tone(t.pnl_usd)});
   $("prev").disabled = offset === 0;

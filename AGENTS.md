@@ -40,8 +40,9 @@ in the runtime trading hot path.
 - One repository and one application/codebase with clear modules.
 - One frozen paper record (docs/PAPER-RECORD-PROTOCOL.md and its amendments): the first-candle rule
   on two Saxo index CFDs and QQQ options, Connors on QQQ options, VWAP crossings on the Nasdaq CFD
-  (amendment 2), the Connors and Turnaround Tuesday dip rules on the Nasdaq CFD (amendment 3), and
-  the signals' context, the books, the playbook and the fear rule (amendment 4).
+  (amendment 2), the Connors and Turnaround Tuesday dip rules on the Nasdaq CFD (amendment 3),
+  the signals' context, the books, the playbook and the fear rule (amendment 4), and the stock
+  dips on US stocks from Saxo's daily bars after the close (amendment 5).
   It reads Saxo prices and writes the record; it
   never places, changes or cancels an order and never changes the Saxo session. This repository
   holds only the runtime, its dashboard, their tests and operations material; retired futures code,

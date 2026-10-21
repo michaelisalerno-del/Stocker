@@ -57,11 +57,37 @@ CREATE TABLE IF NOT EXISTS dip_trades (
   exit_day TEXT, exit_at TEXT, exit_price REAL, exit_bid REAL, exit_ask REAL, exit_reason TEXT,
   qqq_exit_price REAL, pnl_usd REAL,
   UNIQUE (day, rule));
+CREATE TABLE IF NOT EXISTS stock_bars (
+  code TEXT NOT NULL, day TEXT NOT NULL, open REAL NOT NULL, high REAL NOT NULL,
+  low REAL NOT NULL, close REAL NOT NULL, adj REAL NOT NULL, volume REAL NOT NULL,
+  PRIMARY KEY (code, day));
+CREATE TABLE IF NOT EXISTS stock_orders (
+  id INTEGER PRIMARY KEY, signal_day TEXT NOT NULL, code TEXT NOT NULL, close REAL NOT NULL,
+  limit_price REAL NOT NULL, sell_off REAL NOT NULL, closing_range REAL NOT NULL,
+  adx REAL NOT NULL, crsi REAL NOT NULL, rank INTEGER NOT NULL,
+  tier TEXT NOT NULL CHECK (tier IN ('A', 'B')), status TEXT NOT NULL,
+  fill_day TEXT, fill_price REAL, note TEXT NOT NULL DEFAULT '',
+  UNIQUE (signal_day, code));
+CREATE TABLE IF NOT EXISTS stock_trades (
+  id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL UNIQUE, code TEXT NOT NULL,
+  tier TEXT NOT NULL, signal_day TEXT NOT NULL, entry_day TEXT NOT NULL,
+  entry_price REAL NOT NULL, notional_usd REAL NOT NULL,
+  exit_day TEXT, exit_price REAL, exit_reason TEXT, crsi_exit REAL, pnl_usd REAL);
 CREATE TABLE IF NOT EXISTS snapshots (
   id INTEGER PRIMARY KEY, day TEXT NOT NULL, event TEXT NOT NULL, taken TEXT NOT NULL,
   payload TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS snapshot_day ON snapshots (day, event);
 """
+
+
+TRADE_TABLES = {
+    "cfd_trades",
+    "option_trades",
+    "cross_trades",
+    "dip_trades",
+    "stock_orders",
+    "stock_trades",
+}
 
 
 def stamp(at: datetime | None = None) -> str:
@@ -146,7 +172,7 @@ class Store:
         return row
 
     def insert(self, table: str, values: dict[str, Any]) -> int:
-        assert table in {"cfd_trades", "option_trades", "cross_trades", "dip_trades"}
+        assert table in TRADE_TABLES
         columns = ",".join(values)
         with self.db:
             cursor = self.db.execute(
@@ -156,7 +182,7 @@ class Store:
         return int(cursor.lastrowid or 0)
 
     def update(self, table: str, row_id: int, values: dict[str, Any]) -> None:
-        assert table in {"cfd_trades", "option_trades", "cross_trades", "dip_trades"}
+        assert table in TRADE_TABLES
         assignments = ",".join(f"{k}=?" for k in values)
         with self.db:
             self.db.execute(
@@ -201,6 +227,77 @@ class Store:
         ).fetchone()
         return row
 
+    def pending_events(self, name: str) -> list[sqlite3.Row]:
+        """Events of `name` still being retried, oldest first."""
+        return list(
+            self.db.execute(
+                "SELECT * FROM events WHERE name=? AND status IN ('RETRYING', 'WAITING') "
+                "ORDER BY day",
+                (name,),
+            )
+        )
+
+    # stock dips (amendment 5) -------------------------------------------------------------
+    def put_stock_bar(self, code: str, b: methods.StockBar) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO stock_bars VALUES (?,?,?,?,?,?,?,?)",
+                (code, b.day, b.open, b.high, b.low, b.close, b.adj, b.volume),
+            )
+
+    def replace_stock_bars(self, code: str, bars: list[methods.StockBar]) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM stock_bars WHERE code=?", (code,))
+            self.db.executemany(
+                "INSERT OR REPLACE INTO stock_bars VALUES (?,?,?,?,?,?,?,?)",
+                [(code, b.day, b.open, b.high, b.low, b.close, b.adj, b.volume) for b in bars],
+            )
+
+    def prune_stock_bars(self, before: str) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM stock_bars WHERE day<?", (before,))
+
+    def stock_bar_count(self, code: str) -> int:
+        return int(
+            self.db.execute("SELECT COUNT(*) FROM stock_bars WHERE code=?", (code,)).fetchone()[0]
+        )
+
+    def latest_stock_bar(self, code: str) -> methods.StockBar | None:
+        row = self.db.execute(
+            "SELECT * FROM stock_bars WHERE code=? ORDER BY day DESC LIMIT 1", (code,)
+        ).fetchone()
+        return None if row is None else methods.StockBar(*row[1:])
+
+    def stock_bars(self, code: str) -> list[methods.StockBar]:
+        return [
+            methods.StockBar(*r[1:])
+            for r in self.db.execute("SELECT * FROM stock_bars WHERE code=? ORDER BY day", (code,))
+        ]
+
+    def all_stock_bars(self) -> dict[str, list[methods.StockBar]]:
+        out: dict[str, list[methods.StockBar]] = {}
+        for r in self.db.execute("SELECT * FROM stock_bars ORDER BY code, day"):
+            out.setdefault(r[0], []).append(methods.StockBar(*r[1:]))
+        return out
+
+    def sessions_after(self, day: str) -> int:
+        """Sessions since `day`, counted on SPY's bars."""
+        return int(
+            self.db.execute(
+                "SELECT COUNT(*) FROM stock_bars WHERE code='SPY' AND day>?", (day,)
+            ).fetchone()[0]
+        )
+
+    def pending_stock_orders(self) -> list[sqlite3.Row]:
+        return list(
+            self.db.execute("SELECT * FROM stock_orders WHERE status='PENDING' ORDER BY id")
+        )
+
+    def open_stock_trades(self) -> list[sqlite3.Row]:
+        return list(
+            self.db.execute("SELECT * FROM stock_trades WHERE exit_day IS NULL ORDER BY id")
+        )
+
     def snapshot(self, day: str, event: str, payload: dict[str, Any]) -> None:
         with self.db:
             self.db.execute(
@@ -228,6 +325,16 @@ class Store:
                 "SELECT * FROM dip_trades WHERE day=:d OR exit_day=:d OR exit_at IS NULL "
                 "ORDER BY id"
             ),
+            # Stock orders placed tonight, still resting, or settled today; positions open or
+            # opened or closed today.
+            "stock_orders": rows(
+                "SELECT * FROM stock_orders WHERE signal_day=:d OR status='PENDING' "
+                "OR fill_day=:d ORDER BY crsi, code"
+            ),
+            "stock_trades": rows(
+                "SELECT * FROM stock_trades WHERE exit_day IS NULL OR entry_day=:d OR exit_day=:d "
+                "ORDER BY id"
+            ),
         }
 
     def record(self, offset: int) -> dict[str, Any]:
@@ -245,6 +352,10 @@ class Store:
                    UNION ALL
                    SELECT 'DIP ' || rule, day, 1, entry_at, exit_at, exit_reason, pnl_usd
                      FROM dip_trades
+                   UNION ALL
+                   SELECT 'STOCK DIP ' || code, entry_day, 1, entry_day, exit_day, exit_reason,
+                          pnl_usd
+                     FROM stock_trades
                    ORDER BY day DESC, method LIMIT ? OFFSET ?""",
                 (PAGE_SIZE, offset),
             )
@@ -259,6 +370,7 @@ class Store:
                            UNION ALL SELECT method, day, pnl_usd FROM option_trades
                            UNION ALL SELECT 'CROSS ' || market, day, pnl_usd FROM cross_trades
                            UNION ALL SELECT 'DIP ' || rule, day, pnl_usd FROM dip_trades
+                           UNION ALL SELECT 'STOCK DIP', entry_day, pnl_usd FROM stock_trades
                            -- the one-at-a-time book: the dip trades it would have held
                            UNION ALL SELECT 'DIP BOOK', day, pnl_usd FROM dip_trades WHERE book=1)
                     GROUP BY method ORDER BY method"""

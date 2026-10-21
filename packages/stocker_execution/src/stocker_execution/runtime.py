@@ -20,8 +20,9 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from stocker_execution import market, methods
+from stocker_execution import eodhd, market, methods
 from stocker_execution.config import PaperConfig
+from stocker_execution.eodhd import EodhdClient, EodhdError
 from stocker_execution.methods import CFDS, NY, QQQ_OPTION_ROOT, QQQ_UIC, Session
 from stocker_execution.saxo_auth import OAuth, SaxoError
 from stocker_execution.saxo_client import SaxoClient
@@ -43,6 +44,15 @@ DIP = "DIP"
 # The dip rules and their entry readings, in the order the one-at-a-time book takes them.
 DIP_RULES = (("CONNORS", "connors_in"), ("TURNAROUND", "turnaround"), ("FEAR", "fear"))
 DIP_EXITS = {"CONNORS": "RSI2_ABOVE_65", "TURNAROUND": "NEXT_SESSION", "FEAR": "FIFTH_SESSION"}
+# The stock dips (amendment 5) run once a session after the close, on the day's official bars:
+# due three hours after the close, retried every quarter hour until the next morning.
+STOCK = "STOCK_DIPS"
+STOCK_DELAY = timedelta(hours=3)
+STOCK_GRACE = timedelta(hours=14)
+STOCK_RETRY_SECONDS = 900.0
+STOCK_STORE_DOLLARS = 5e6  # a stock's bar is kept once it trades this much in a day
+STOCK_RATIO_TOLERANCE = 0.003  # an adjustment (split, dividend) rewrites the stock's history
+STOCK_KEEP_DAYS = 600  # calendar days of bars kept
 CROSS_POLL_SECONDS = 5.0  # while a QQQ candle is due
 CROSS_DELAYED_POLL_SECONDS = 60.0  # while QQQ's chart is delayed: entries are missed anyway
 # The dashboard's chart: each market's latest 5-minute candles, refreshed every minute from three
@@ -87,6 +97,7 @@ class Runtime:
         store.bind(config.data_environment)
         self.root = Path(store.db.execute("PRAGMA database_list").fetchone()[2]).parent
         self.client = client or SaxoClient(OAuth(config.data_environment, config.saxo, self.root))
+        self.eodhd = EodhdClient(config.eodhd_token_file)
         self.now = clock or (lambda: datetime.now(UTC))
         self.worker_health = self.web_health = "STARTING"
         self.stopping = False
@@ -152,6 +163,11 @@ class Runtime:
         if session is not None:
             for name, due, delayed, handler in self.plan(session):
                 await self.event(day.isoformat(), name, due, delayed, handler, now)
+        for row in self.store.pending_events(STOCK):  # a night's scan that ran past midnight
+            if row["day"] < day.isoformat():
+                await self.event(
+                    row["day"], STOCK, at(row["due"]), False, self.stock_night(row["day"]), now
+                )
         await self.watch_stops(self.now(), session)
         await self.watch_crosses(self.now(), session)
         await self.watch_charts(self.now(), session)
@@ -226,6 +242,7 @@ class Runtime:
                 ),
                 ("CFD_EXIT", s.close, False, lambda t, d: self.cfd_exit(s, t)),
                 (CROSS + "_EXIT", s.close, False, lambda t, d: self.cross_exit(s, t)),
+                (STOCK, s.close + STOCK_DELAY, False, lambda t, d: self.stock_dips(s.day, t)),
             ],
             key=lambda e: e[1],
         )
@@ -248,16 +265,18 @@ class Runtime:
             note = "APP_NOT_RUNNING_AT_ENTRY" if self.started_at > due else "NOT_TRIED_IN_TIME"
             self.store.set_event(day, name, due, "MISSED", note=note)
             return
-        if time.monotonic() - self.attempted.get((day, name), -1e9) < RETRY_EVERY:
+        retry_every = STOCK_RETRY_SECONDS if name == STOCK else RETRY_EVERY
+        if time.monotonic() - self.attempted.get((day, name), -1e9) < retry_every:
             return
         self.attempted[(day, name)] = time.monotonic()
+        grace = STOCK_GRACE if name == STOCK else ENTRY_GRACE if entry else EXIT_GRACE
         delay = 0
         if delayed:
             if row is None or row["effective"] is None:
                 try:
                     delay = await self.measure_qqq_delay()
                 except (SaxoError, Problem) as exc:
-                    self.give_up_or_retry(day, name, due, due, entry, now, exc)
+                    self.give_up_or_retry(day, name, due, due, grace, entry, now, exc)
                     return
                 self.store.set_event(
                     day, name, due, "WAITING", effective=due + timedelta(minutes=delay)
@@ -291,7 +310,7 @@ class Runtime:
             self.problems.pop(name, None)
             return
         except (SaxoError, Problem, KeyError, TypeError, ValueError) as exc:
-            self.give_up_or_retry(day, name, due, effective, entry, now, exc)
+            self.give_up_or_retry(day, name, due, effective, grace, entry, now, exc)
             return
         self.store.set_event(day, name, due, "DONE", effective=effective)
         self.problems.pop(name, None)
@@ -302,13 +321,14 @@ class Runtime:
         name: str,
         due: datetime,
         effective: datetime,
+        grace: timedelta,
         entry: bool,
         now: datetime,
         exc: BaseException,
     ) -> None:
         code = failure_code(exc)
         self.note(name, exc)
-        final = now > effective + (ENTRY_GRACE if entry else EXIT_GRACE)
+        final = now > effective + grace
         if final:
             self.problems.pop(name, None)  # the event's status now carries the reason
         # The delay follows who holds Saxo's real-time slot (a SaxoTraderGO login takes it). An
@@ -883,6 +903,177 @@ class Runtime:
             book_busy = True
             log.info("%s dip %s long %.2f at %.2f", day, rule, amount, q.ask)
 
+    # stock dips (amendment 5) -----------------------------------------------------------------
+    def stock_night(self, day: str) -> Callable[[datetime, int], Awaitable[None]]:
+        night = date.fromisoformat(day)
+
+        async def run(due: datetime, delay: int) -> None:
+            await self.stock_dips(night, due)
+
+        return run
+
+    async def stock_dips(self, day: date, due: datetime) -> None:
+        """After the close, on the day's official bars: last night's orders filled or not at the
+        session's low, open positions closed on their rule at the close, and tonight's orders for
+        the next session. Nothing here reads a Saxo price."""
+        key = day.isoformat()
+        try:
+            bars = await eodhd.day_bars(self.eodhd, day)
+        except EodhdError as exc:
+            raise Problem(str(exc)) from None
+        if not bars:
+            raise Problem("EOD_BARS_NOT_PUBLISHED")
+        if "SPY" not in bars:
+            raise Problem("EOD_SPY_BAR_MISSING")
+        busy = {t["code"] for t in self.store.open_stock_trades()}
+        busy |= {o["code"] for o in self.store.pending_stock_orders()}
+        keep = busy | {"SPY"}
+        keep |= {
+            c
+            for c, b in bars.items()
+            if b.close >= methods.STOCK_MIN_PRICE and b.close * b.volume >= STOCK_STORE_DOLLARS
+        }
+        fetched = failed = 0
+        for code in sorted(keep):
+            bar = bars.get(code)
+            if bar is None:
+                continue
+            latest = self.store.latest_stock_bar(code)
+            rewritten = latest is not None and (
+                abs((bar.adj / bar.close) / (latest.adj / latest.close) - 1) > STOCK_RATIO_TOLERANCE
+            )
+            if (
+                latest is None
+                or rewritten
+                or self.store.stock_bar_count(code) < methods.STOCK_HISTORY
+            ):
+                try:
+                    rows = await eodhd.history(self.eodhd, code, day)
+                except EodhdError:
+                    rows = []
+                if not rows:
+                    failed += 1  # this stock sits out tonight; its bar is not kept half-made
+                    continue
+                self.store.replace_stock_bars(code, rows)
+                fetched += 1
+            self.store.put_stock_bar(code, bar)
+        self.store.prune_stock_bars((day - timedelta(days=STOCK_KEEP_DAYS)).isoformat())
+        filled = closed = 0
+        for o in self.store.pending_stock_orders():
+            if o["signal_day"] >= key:
+                continue
+            bar = bars.get(o["code"])
+            if bar is None:
+                self.store.update(
+                    "stock_orders",
+                    o["id"],
+                    {"status": "CANCELLED", "fill_day": key, "note": "NO_BAR"},
+                )
+                continue
+            price = methods.stock_fill(o["limit_price"], bar)
+            if price is None:
+                self.store.update(
+                    "stock_orders", o["id"], {"status": "NOT_FILLED", "fill_day": key}
+                )
+                continue
+            self.store.update(
+                "stock_orders", o["id"], {"status": "FILLED", "fill_day": key, "fill_price": price}
+            )
+            self.store.insert(
+                "stock_trades",
+                {
+                    "order_id": o["id"],
+                    "code": o["code"],
+                    "tier": o["tier"],
+                    "signal_day": o["signal_day"],
+                    "entry_day": key,
+                    "entry_price": price,
+                    "notional_usd": methods.STOCK_NOTIONAL_USD,
+                },
+            )
+            filled += 1
+            log.info("%s stock dip %s bought at %.4f", key, o["code"], price)
+        for t in self.store.open_stock_trades():
+            series = self.store.stock_bars(t["code"])
+            if not series:
+                continue
+            last = series[-1]
+            if last.day != key:
+                if self.store.sessions_after(last.day) >= methods.STOCK_NO_BAR_SESSIONS:
+                    self.close_stock(t, last, "NO_BAR_10_SESSIONS", None, key)
+                    closed += 1
+                continue
+            crsi = methods.connors_rsi([b.adj for b in series])
+            if crsi is not None and crsi > methods.STOCK_CRSI_OUT:
+                self.close_stock(t, last, "CRSI_ABOVE_70", crsi, key)
+                closed += 1
+        series_by_code = self.store.all_stock_bars()
+        if "SPY" not in series_by_code:
+            raise Problem("SPY_HISTORY_MISSING")
+        universe = methods.stock_universe(series_by_code, series_by_code["SPY"])
+        busy = {t["code"] for t in self.store.open_stock_trades()}
+        busy |= {o["code"] for o in self.store.pending_stock_orders()}
+        orders = 0
+        for code, (rank, tier) in universe.items():
+            if code in busy:
+                continue
+            setup = methods.stock_setup(code, series_by_code[code])
+            if setup is None:
+                continue
+            self.store.insert(
+                "stock_orders",
+                {
+                    "signal_day": key,
+                    "code": code,
+                    "close": setup.close,
+                    "limit_price": setup.limit,
+                    "sell_off": setup.sell_off,
+                    "closing_range": setup.closing_range,
+                    "adx": setup.adx,
+                    "crsi": setup.crsi,
+                    "rank": rank,
+                    "tier": tier,
+                    "status": "PENDING",
+                },
+            )
+            orders += 1
+        self.store.add_signal(
+            key,
+            "STOCK",
+            "US",
+            int(orders > 0),
+            "",
+            {
+                "bars_published": len(bars),
+                "stocks_kept": len(keep),
+                "histories_fetched": fetched,
+                "histories_failed": failed,
+                "universe": len(universe),
+                "orders": orders,
+                "filled": filled,
+                "closed": closed,
+                "eodhd_calls": self.eodhd.calls,
+            },
+        )
+        log.info("%s stock dips: %d orders, %d filled, %d closed", key, orders, filled, closed)
+
+    def close_stock(
+        self, t: sqlite3.Row, bar: methods.StockBar, reason: str, crsi: float | None, day: str
+    ) -> None:
+        pnl = methods.stock_pnl(t["entry_price"], bar.close, t["tier"])
+        self.store.update(
+            "stock_trades",
+            t["id"],
+            {
+                "exit_day": day,
+                "exit_price": bar.close,
+                "exit_reason": reason,
+                "crsi_exit": None if crsi is None else round(crsi, 4),
+                "pnl_usd": round(pnl, 2),
+            },
+        )
+        log.info("%s stock dip %s closed %s %.2f", day, t["code"], reason, pnl)
+
     # QQQ options ------------------------------------------------------------------------------
     async def qqq_price(self, delay: int) -> float:
         q = (await market.quotes(self.client, [QQQ_UIC], "Etf")).get(QQQ_UIC)
@@ -1160,6 +1351,7 @@ class Runtime:
             "problems": dict(sorted(self.problems.items())),
             "rate_limits": dict(sorted(self.client.rate_headers.items())),
             "saxo_calls": self.client.calls,
+            "eodhd_calls": self.eodhd.calls,
         }
 
     def today(self) -> dict[str, Any]:
@@ -1219,6 +1411,7 @@ class Runtime:
             return
         self.stopping = True
         await self.client.close()
+        await self.eodhd.close()
         log.removeHandler(self.log_handler)
         self.log_handler.close()
         if self.owner:

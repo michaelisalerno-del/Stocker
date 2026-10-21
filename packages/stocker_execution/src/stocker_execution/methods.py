@@ -22,7 +22,7 @@
 """
 
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -569,3 +569,212 @@ def session_on(sessions: Iterable[Session], day: date) -> Session | None:
 
 def ny_time(day: date, at: time) -> datetime:
     return datetime.combine(day, at, NY)
+
+
+# stock dips (amendment 5) --------------------------------------------------------------------
+# The Connors Research (2012) "ConnorsRSI Pullback" worked example, as PREREG131 tested it on
+# 2001-2026: a liquid stock that sold off hard and closed near its low is bought the next session
+# on a limit 8% below the close and sold at the first close with ConnorsRSI above 70.
+STOCK_MIN_PRICE, STOCK_MAX_PRICE = 5.0, 5000.0
+STOCK_MIN_VOLUME = 250_000  # 21-session average shares a day
+STOCK_UNIVERSE, STOCK_TOP = 1500, 500  # ranks by 21-session dollar volume; the top 500 is tier A
+STOCK_DOLLAR_CAP = 10.0  # a 21-session dollar volume above ten times SPY's is bad data
+STOCK_MIN_CORRELATION = 0.05  # with SPY's daily returns over the trailing 250 sessions
+STOCK_HISTORY = 260  # sessions of bars a stock needs before it can set up
+STOCK_SELL_OFF, STOCK_CLOSING_RANGE, STOCK_ADX, STOCK_CRSI_IN = 0.04, 0.25, 30.0, 10.0
+STOCK_LIMIT, STOCK_CRSI_OUT = 0.08, 70.0
+STOCK_NOTIONAL_USD = 2000.0  # a trade's size; the rule has no stop, so this is the money at risk
+STOCK_COST = {"A": 0.002, "B": 0.004}  # round trip, as the research charged each tier
+STOCK_NO_BAR_SESSIONS = 10  # an open trade with no bar for this long closes at its last close
+
+
+@dataclass(frozen=True)
+class StockBar:
+    day: str  # ISO date
+    open: float
+    high: float
+    low: float
+    close: float
+    adj: float  # the close adjusted for later splits and dividends (EODHD adjusted_close)
+    volume: float
+
+
+def wilder(values: Sequence[float | None], n: int) -> list[float | None]:
+    """pandas ewm(alpha=1/n, adjust=False) seeded with the first finite value."""
+    out: list[float | None] = []
+    value: float | None = None
+    for x in values:
+        if x is not None and math.isfinite(x):
+            value = x if value is None else value + (x - value) / n
+        out.append(value)
+    return out
+
+
+def adx10(bars: Sequence[StockBar]) -> float | None:
+    """Wilder's ADX(10) on split-adjusted prices, as the research computed it."""
+    if len(bars) < 2:
+        return None
+    f = [b.adj / b.close for b in bars]
+    highs, lows, closes = (
+        [b.high * k for b, k in zip(bars, f, strict=True)],
+        [b.low * k for b, k in zip(bars, f, strict=True)],
+        [b.adj for b in bars],
+    )
+    tr: list[float | None] = [highs[0] - lows[0]]
+    plus: list[float | None] = [0.0]
+    minus: list[float | None] = [0.0]
+    for i in range(1, len(bars)):
+        tr.append(
+            max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+        )
+        up, down = highs[i] - highs[i - 1], lows[i - 1] - lows[i]
+        plus.append(up if up > down and up > 0 else 0.0)
+        minus.append(down if down > up and down > 0 else 0.0)
+    s_tr, s_plus, s_minus = wilder(tr, 10), wilder(plus, 10), wilder(minus, 10)
+    dx: list[float | None] = []
+    for t, p, m in zip(s_tr, s_plus, s_minus, strict=True):
+        if not t or p is None or m is None or p + m == 0:
+            dx.append(None)
+            continue
+        pdi, mdi = 100 * p / t, 100 * m / t
+        dx.append(100 * abs(pdi - mdi) / (pdi + mdi))
+    return wilder(dx, 10)[-1]
+
+
+def rsi_n(values: Sequence[float], n: int) -> float | None:
+    """Wilder RSI(n) of a series (the research's ewm(alpha=1/n, adjust=False) of gains/losses)."""
+    up = down = None
+    for previous, current in zip(values, values[1:], strict=False):
+        gain, loss = max(current - previous, 0.0), max(previous - current, 0.0)
+        up = gain if up is None else up + (gain - up) / n
+        down = loss if down is None else down + (loss - down) / n
+    if up is None or down is None:
+        return None
+    if down == 0:
+        return 100.0 if up > 0 else None
+    return 100 - 100 / (1 + up / down)
+
+
+def streaks(closes: Sequence[float]) -> list[float]:
+    """+k after k up closes in a row, -k after k down closes, 0 on an unchanged close."""
+    out = [0.0]
+    for previous, current in zip(closes, closes[1:], strict=False):
+        sign = 1.0 if current > previous else -1.0 if current < previous else 0.0
+        same_way = sign != 0 and out[-1] != 0 and (out[-1] > 0) == (sign > 0)
+        out.append(sign * (abs(out[-1]) + 1) if same_way else sign)
+    return out
+
+
+def connors_rsi(closes: Sequence[float]) -> float | None:
+    """ConnorsRSI(3, 2, 100) at the last close: the mean of RSI(3) of the closes, RSI(2) of the
+    up/down streak, and the percent rank of today's return among the previous 100."""
+    if len(closes) < 102:
+        return None
+    returns = [b / a - 1 for a, b in zip(closes, closes[1:], strict=False)]
+    rank = sum(1 for r in returns[-101:-1] if r < returns[-1])
+    r3, r2 = rsi_n(closes, 3), rsi_n(streaks(closes), 2)
+    if r3 is None or r2 is None:
+        return None
+    return (r3 + r2 + rank) / 3
+
+
+@dataclass(frozen=True)
+class StockSetup:
+    code: str
+    close: float  # the signal day's close, in dollars as traded
+    limit: float  # the next session's buy limit, 8% below that close
+    sell_off: float  # the low's fall from the prior close
+    closing_range: float  # (close - low) / (high - low)
+    adx: float
+    crsi: float
+
+
+def stock_setup(code: str, bars: Sequence[StockBar]) -> StockSetup | None:
+    """Rules 3-6 of the worked example at the last bar (rules 1-2 and the universe are the
+    runtime's: price, volume, rank). None when a rule fails or the history is too short."""
+    if len(bars) < STOCK_HISTORY:
+        return None
+    last, prior = bars[-1], bars[-2]
+    f_last, f_prior = last.adj / last.close, prior.adj / prior.close
+    sell_off = 1 - (last.low * f_last) / (prior.close * f_prior)
+    day_range = last.high - last.low
+    closing_range = (last.close - last.low) / day_range if day_range > 0 else None
+    adx, crsi = adx10(bars), connors_rsi([b.adj for b in bars])
+    if (
+        closing_range is None
+        or adx is None
+        or crsi is None
+        or sell_off < STOCK_SELL_OFF
+        or closing_range > STOCK_CLOSING_RANGE
+        or adx <= STOCK_ADX
+        or crsi >= STOCK_CRSI_IN
+    ):
+        return None
+    return StockSetup(
+        code,
+        last.close,
+        round(last.close * (1 - STOCK_LIMIT), 4),
+        round(sell_off, 6),
+        round(closing_range, 6),
+        round(adx, 4),
+        round(crsi, 4),
+    )
+
+
+def stock_fill(limit: float, bar: StockBar) -> float | None:
+    """A resting buy limit fills when the session's low trades below it, at the open if the
+    stock opened under the limit."""
+    return min(bar.open, limit) if bar.low < limit else None
+
+
+def stock_pnl(entry: float, exit_: float, tier: str) -> float:
+    """The trade's result on STOCK_NOTIONAL_USD after the tier's round-trip cost."""
+    return STOCK_NOTIONAL_USD * ((exit_ / entry - 1) - STOCK_COST[tier])
+
+
+def correlation(a: Sequence[float], b: Sequence[float]) -> float | None:
+    n = len(a)
+    if n < 2:
+        return None
+    ma, mb = sum(a) / n, sum(b) / n
+    cov = sum((x - ma) * (y - mb) for x, y in zip(a, b, strict=True))
+    va, vb = sum((x - ma) ** 2 for x in a), sum((y - mb) ** 2 for y in b)
+    return cov / math.sqrt(va * vb) if va > 0 and vb > 0 else None
+
+
+def stock_universe(
+    bars: Mapping[str, Sequence[StockBar]], spy: Sequence[StockBar]
+) -> dict[str, tuple[int, str]]:
+    """Rules 1-2 and the research's cohorts at the last bar: {code: (rank, tier)} for the
+    1,500 largest by 21-session dollar volume among stocks priced $5-$5,000 with 250k shares a
+    day, a dollar volume at most ten times SPY's, 260 sessions of bars and a daily-return
+    correlation with SPY of at least 0.05 over the trailing 250 sessions (120 needed)."""
+    spy_dollar = sum(b.close * b.volume for b in spy[-21:]) / 21
+    spy_returns = {b.day: b.adj / a.adj - 1 for a, b in zip(spy[-251:], spy[-250:], strict=False)}
+    ranked = []
+    for code, series in bars.items():
+        if len(series) < STOCK_HISTORY or code == "SPY":
+            continue
+        last = series[-1]
+        volume = sum(b.volume for b in series[-21:]) / 21
+        dollars = sum(b.close * b.volume for b in series[-21:]) / 21
+        if not (
+            STOCK_MIN_PRICE < last.close <= STOCK_MAX_PRICE
+            and volume >= STOCK_MIN_VOLUME
+            and dollars <= STOCK_DOLLAR_CAP * spy_dollar
+        ):
+            continue
+        own, market = [], []
+        for a, b in zip(series[-251:], series[-250:], strict=False):
+            if b.day in spy_returns:
+                own.append(b.adj / a.adj - 1)
+                market.append(spy_returns[b.day])
+        rho = correlation(own, market) if len(own) >= 120 else None
+        if rho is None or rho < STOCK_MIN_CORRELATION:
+            continue
+        ranked.append((dollars, code))
+    ranked.sort(reverse=True)
+    return {
+        code: (rank, "A" if rank <= STOCK_TOP else "B")
+        for rank, (_, code) in enumerate(ranked[:STOCK_UNIVERSE], start=1)
+    }

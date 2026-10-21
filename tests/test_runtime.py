@@ -698,3 +698,125 @@ def test_the_fear_rule_buys_after_three_down_closes_when_30_day_vol_is_high(tmp_
         await rt.client.close()
 
     asyncio.run(scenario())
+
+
+# stock dips (amendment 5) ------------------------------------------------------------------
+from stock_series import dip_series, flat_series, sessions, spy_series  # noqa: E402
+
+
+class FakeEodhd:
+    """The bulk file and histories the fake publishes, by day."""
+
+    def __init__(self, series: dict[str, list]):
+        self.series = series
+        self.published: set[str] = set()
+        self.calls = 0
+
+    async def day_bars(self, client, day):
+        self.calls += 1
+        key = day.isoformat()
+        if key not in self.published:
+            return {}
+        return {c: b for c, s in self.series.items() for b in s if b.day == key}
+
+    async def history(self, client, code, through):
+        self.calls += 1
+        return [b for b in self.series.get(code, []) if b.day <= through.isoformat()]
+
+
+def stock_world(monkeypatch):
+    days = sessions(
+        WED + timedelta(days=1), 300
+    )  # the pattern's last five days: Fri, MON, TUE, WED, Thu
+    abcd = dip_series(days)
+    spy = spy_series(abcd)
+    world = {"ABCD": abcd, "FLAT": flat_series(spy), "SPY": spy}
+    fake = FakeEodhd(world)
+    monkeypatch.setattr(runtime_module.eodhd, "day_bars", fake.day_bars)
+    monkeypatch.setattr(runtime_module.eodhd, "history", fake.history)
+    monkeypatch.setattr(runtime_module, "STOCK_RETRY_SECONDS", 0)
+    return fake, abcd
+
+
+def test_stock_dips_scan_fill_and_exit_on_official_bars(tmp_path, monkeypatch):
+    fake, abcd = stock_world(monkeypatch)
+    saxo, clock = FakeSaxo(), Clock(OPEN - timedelta(minutes=10))
+    market(saxo)
+    signal_bar, fill_bar, rebound_bar = abcd[-4], abcd[-3], abcd[-2]
+    assert (signal_bar.day, fill_bar.day, rebound_bar.day) == (
+        MON.isoformat(),
+        TUE.isoformat(),
+        WED.isoformat(),
+    )
+
+    async def scenario():
+        rt = make(tmp_path, saxo, clock)
+        db = rt.store.db
+        # Monday 19:00 New York: the day's bars are not out yet; the scan waits.
+        await at(rt, clock, OPEN + timedelta(hours=9, minutes=30))
+        e = rt.store.event(MON.isoformat(), "STOCK_DIPS")
+        assert e["status"] == "RETRYING" and e["note"] == "EOD_BARS_NOT_PUBLISHED"
+        fake.published.add(MON.isoformat())
+        await at(rt, clock, OPEN + timedelta(hours=9, minutes=45))
+        assert rt.store.event(MON.isoformat(), "STOCK_DIPS")["status"] == "DONE"
+        orders = list(db.execute("SELECT * FROM stock_orders"))
+        assert [(o["code"], o["status"], o["tier"]) for o in orders] == [("ABCD", "PENDING", "A")]
+        assert orders[0]["limit_price"] == round(signal_bar.close * 0.92, 4)
+        night = json.loads(rt.store.signal(MON.isoformat(), "STOCK", "US")["detail"])
+        assert (night["orders"], night["histories_fetched"], night["universe"]) == (1, 3, 2)
+        view = rt.today()
+        assert [o["code"] for o in view["stock_orders"]] == ["ABCD"] and view["stock_trades"] == []
+        # Tuesday night: the low traded through the limit -> bought at the limit, still held.
+        fake.published.add(TUE.isoformat())
+        await at(rt, clock, OPEN + timedelta(days=1, hours=9, minutes=30))
+        order = db.execute("SELECT * FROM stock_orders").fetchone()
+        assert (order["status"], order["fill_day"], order["fill_price"]) == (
+            "FILLED",
+            TUE.isoformat(),
+            order["limit_price"],
+        )
+        t = db.execute("SELECT * FROM stock_trades").fetchone()
+        assert t["entry_day"] == TUE.isoformat() and t["exit_day"] is None
+        assert db.execute("SELECT COUNT(*) FROM stock_orders").fetchone()[0] == 1  # ABCD held
+        # Wednesday night: the rebound lifts ConnorsRSI above 70 -> sold at the close.
+        fake.published.add(WED.isoformat())
+        await at(rt, clock, OPEN + timedelta(days=2, hours=9, minutes=30))
+        t = db.execute("SELECT * FROM stock_trades").fetchone()
+        assert (t["exit_day"], t["exit_reason"]) == (WED.isoformat(), "CRSI_ABOVE_70")
+        assert t["crsi_exit"] > 70
+        expected = 2000 * ((rebound_bar.close / order["limit_price"] - 1) - 0.002)
+        assert t["pnl_usd"] == round(expected, 2) and t["pnl_usd"] > 0
+        record = rt.store.record(0)
+        summary = {m["method"]: m for m in record["summary"]}
+        assert summary["STOCK DIP"]["closed"] == 1 and summary["STOCK DIP"]["wins"] == 1
+        assert record["trades"][0]["method"] == "STOCK DIP ABCD"
+        # Two unpublished tries, the bulk read and three histories, then one bulk read a night.
+        assert fake.calls == 2 + 1 + 3 + 1 + 1
+        assert rt.status()["eodhd_calls"] == 0  # the fake bypasses the client
+        await rt.stop()
+
+    asyncio.run(scenario())
+
+
+def test_a_stock_scan_that_waits_past_midnight_still_runs_before_the_open(tmp_path, monkeypatch):
+    fake, _ = stock_world(monkeypatch)
+    saxo, clock = FakeSaxo(), Clock(OPEN - timedelta(minutes=10))
+    market(saxo)
+
+    async def scenario():
+        rt = make(tmp_path, saxo, clock)
+        await at(rt, clock, OPEN + timedelta(hours=9, minutes=30))
+        assert rt.store.event(MON.isoformat(), "STOCK_DIPS")["status"] == "RETRYING"
+        # 06:00 New York on Tuesday: Monday's bars are out at last; the orders stand for Tuesday.
+        fake.published.add(MON.isoformat())
+        await at(rt, clock, OPEN + timedelta(days=1) - timedelta(hours=3, minutes=30))
+        assert rt.store.event(MON.isoformat(), "STOCK_DIPS")["status"] == "DONE"
+        assert [o["code"] for o in rt.store.pending_stock_orders()] == ["ABCD"]
+        # Past the grace, a night with no bars is recorded failed, never scanned later.
+        await at(rt, clock, OPEN + timedelta(days=1, hours=9, minutes=30))
+        await at(rt, clock, OPEN + timedelta(days=2, hours=2))
+        e = rt.store.event(TUE.isoformat(), "STOCK_DIPS")
+        assert (e["status"], e["note"]) == ("FAILED", "EOD_BARS_NOT_PUBLISHED")
+        await rt.stop()
+
+    asyncio.run(scenario())

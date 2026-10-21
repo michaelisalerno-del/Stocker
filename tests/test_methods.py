@@ -285,3 +285,36 @@ def test_sizing_overlays_and_the_what_if_stop():
     assert methods.what_if_stop(1, 30000.0, 29770.0, 60.0, 75.0, 100.0) == -200.0
     assert methods.what_if_stop(-1, 7700.0, 7760.0, -204.0, 75.0, 50.0) == -200.0
     assert methods.what_if_stop(1, 30000.0, None, 60.0, 75.0, 100.0) is None
+
+
+# stock dips (amendment 5) ------------------------------------------------------------------
+from stock_series import AFTER, dip_series, flat_series, sessions, spy_series  # noqa: E402
+
+
+def test_stock_dip_indicators_setup_fill_and_exit():
+    assert methods.streaks([1, 2, 3, 2, 2, 1]) == [0, 1, 2, -1, 0, -1]
+    assert methods.wilder([None, 4.0, 2.0], 2) == [None, 4.0, 3.0]
+    days = sessions(date(2026, 10, 19), 300)
+    bars = dip_series(days)
+    signal = len(days) - len(AFTER) + 2  # the signal day's index + 1
+    setup = methods.stock_setup("ABCD", bars[:signal])
+    assert setup is not None
+    assert setup.sell_off >= 0.04 and setup.closing_range <= 0.25
+    assert setup.adx > 30 and setup.crsi < 10
+    assert setup.limit == round(setup.close * 0.92, 4)
+    # The day before had no 4% sell-off; the flat stock never sets up; too little history.
+    assert methods.stock_setup("ABCD", bars[: signal - 1]) is None
+    assert methods.stock_setup("ABCD", bars[-100:]) is None
+    fill_bar = bars[signal]
+    assert methods.stock_fill(setup.limit, fill_bar) == setup.limit  # opened above, traded through
+    assert methods.stock_fill(fill_bar.low * 0.99, fill_bar) is None
+    assert methods.connors_rsi([b.adj for b in bars[: signal + 1]]) < 70
+    assert methods.connors_rsi([b.adj for b in bars[: signal + 2]]) > 70  # the rebound day
+    assert methods.stock_pnl(100.0, 110.0, "A") == pytest.approx(2000 * (0.10 - 0.002))
+    assert methods.stock_pnl(100.0, 90.0, "B") == pytest.approx(2000 * (-0.10 - 0.004))
+    spy = spy_series(bars)
+    assert methods.stock_setup("FLAT", flat_series(spy)) is None
+    universe = methods.stock_universe({"ABCD": bars, "FLAT": flat_series(spy), "SPY": spy}, spy)
+    assert universe == {"ABCD": (1, "A"), "FLAT": (2, "A")}
+    thin = [b.__class__(b.day, b.open, b.high, b.low, b.close, b.adj, 100.0) for b in bars]
+    assert "ABCD" not in methods.stock_universe({"ABCD": thin, "SPY": spy}, spy)

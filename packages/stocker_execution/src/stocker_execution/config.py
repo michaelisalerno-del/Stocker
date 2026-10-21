@@ -46,6 +46,8 @@ class SaxoSettings(Strict):
 class PaperConfig(Strict):
     data_environment: Environment = "SAXO_SIM"
     saxo: SaxoSettings = Field(default_factory=SaxoSettings)
+    # Amendment 5: the mode-0600 file holding the EODHD token for the stock dips' daily bars.
+    eodhd_token_file: Path | None = None
 
 
 def load(path: Path) -> PaperConfig:

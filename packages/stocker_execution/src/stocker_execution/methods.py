@@ -17,8 +17,9 @@
    at-the-money implied volatility at 30% or more; out at the fifth session's 15:50.
 6. Context and books (amendment 4): each first-candle signal is saved with its reference ETF's
    closes through the prior session (50- and 100-day averages, the prior day's change, the run of
-   down closes, RSI2); the Record page sums the frozen subsets in BOOKS and the Today page shows
-   the playbook those subsets imply. Nothing traded changes.
+   down closes, RSI2); the Record page sums the frozen subsets in BOOKS. The Today page's playbook
+   shows the plain trade, skipped when the Nasdaq and S&P signals disagree (22 October 2026,
+   PREREG139). Nothing traded changes.
 """
 
 import math
@@ -416,31 +417,18 @@ def what_if_stop(
 
 
 def playbook(d: Day, market: str) -> tuple[str, list[str]]:
-    """The action the research leads imply for today's signal, and the leads that apply."""
+    """Today's action for a first-candle signal: the plain CFD trade, skipped when the Nasdaq and
+    S&P signals disagree (PREREG28; the one lead that held on unseen dates in PREREG139). The
+    other leads stay as books."""
     tags = []
-    if d.pullback:
-        tags.append("pullback cell: long below the 50-day")
-    if d.weekday == 0:
-        tags.append("Monday")
-    if d.side == -1 and d.known and d.oversold:
-        tags.append("short after an oversold close")
-    if d.known and float(d.context.get("prior_change", 0.0)) >= BIG_DAY:
-        tags.append("after a +1% day")
     if d.agree is not None:
         tags.append("agrees with the other index" if d.agree else "disagrees with the other index")
     if d.side == 0:
         return "no trade", tags
-    if not d.known:
-        return "context not read", tags
-    if market == "US500":
-        return ("S&P CFD" if d.pullback else "skip: no S&P edge outside the pullback cell"), tags
-    if d.pullback:
-        return "QQQ call", tags
-    if d.side == 1:
-        return "Nasdaq CFD long", tags
-    if d.weekday == 0 or d.oversold:
-        return "skip the short", tags
-    return "Nasdaq CFD short, not a put", tags
+    if d.agree is False:
+        return "skip", tags
+    name = "Nasdaq CFD" if market == "NAS100" else "S&P CFD"
+    return f"{name} {'long' if d.side == 1 else 'short'}", tags
 
 
 CROSS_ALPHA = 2 / 11  # EMA(10)

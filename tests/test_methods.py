@@ -211,36 +211,33 @@ def test_trend_context_books_and_playbook():
         "WEEKDAYS", cell, "NAS100"
     )
     assert methods.in_book("AGREE", cell, "NAS100")
-    # The playbook takes the call in the cell (and the S&P there), not the Nasdaq CFD.
+    # The PLAYBOOK book (amendment 4's playbook) takes the call in the cell (and the S&P there).
     assert [methods.in_book("PLAYBOOK", cell, i) for i in ("NAS100", "US500", "QQQ option")] == [
         False,
         True,
         True,
     ]
-    assert methods.playbook(cell, "NAS100") == (
-        "QQQ call",
-        ["pullback cell: long below the 50-day", "Monday", "agrees with the other index"],
-    )
-    assert methods.playbook(cell, "US500")[0] == "S&P CFD"
+    # The Today page's playbook is the plain trade, skipped when the two signals disagree.
+    assert methods.playbook(cell, "NAS100") == ("Nasdaq CFD long", ["agrees with the other index"])
+    assert methods.playbook(cell, "US500")[0] == "S&P CFD long"
     oversold_short = methods.Day(-1, 2, False, down)
     assert not methods.in_book("NO OVERSOLD SHORTS", oversold_short, "NAS100")
     assert methods.playbook(oversold_short, "NAS100") == (
-        "skip the short",
-        ["short after an oversold close", "disagrees with the other index"],
+        "skip",
+        ["disagrees with the other index"],
     )
     short = methods.Day(-1, 2, None, up.detail())
     assert methods.in_book("NO OVERSOLD SHORTS", short, "NAS100")
     assert methods.in_book("PLAYBOOK", short, "NAS100")
-    assert methods.playbook(short, "NAS100") == ("Nasdaq CFD short, not a put", [])
-    assert methods.playbook(short, "US500")[0] == "skip: no S&P edge outside the pullback cell"
+    assert methods.playbook(short, "NAS100") == ("Nasdaq CFD short", [])  # agreement unknown
+    assert methods.playbook(short, "US500")[0] == "S&P CFD short"
     big = methods.Day(1, 1, True, methods.trend_context([*rising, 230.0]).detail())
     assert methods.in_book("AFTER A +1% DAY", big, "NAS100")
-    assert "after a +1% day" in methods.playbook(big, "NAS100")[1]
     unknown = methods.Day(1, 2, None, {"close": 1.0})  # recorded before amendment 4
     assert not methods.in_book("PULLBACK", unknown, "NAS100") and methods.in_book(
         "WEEKDAYS", unknown, "NAS100"
     )
-    assert methods.playbook(unknown, "NAS100") == ("context not read", [])
+    assert methods.playbook(unknown, "NAS100") == ("Nasdaq CFD long", [])  # needs no context
     assert methods.playbook(methods.Day(0, 2, None, down), "NAS100")[0] == "no trade"
 
 

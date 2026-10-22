@@ -143,3 +143,23 @@ Report-only additions from the sizing study (`~/Codex/2026-10-20-fc-pullback/siz
 - Book `STOP 75 BP`: each Nasdaq CFD trade re-run with a 75 bp stop at the same $200 risk — stopped for
   −$200 when `worst` crossed it, else the recorded result scaled by 100/75. The research found 75 bp
   about $900 a year better than 100 bp (t 2.5 / 1.3). The live 100 bp stop is unchanged.
+
+## Addendum 2 (22 October 2026): the playbook line
+
+On the user's instruction ("Yes. Fix"), after PREREG139 (`~/Codex/2026-10-22-avoid-bad-trades/`, sha256
+9da3f9db…, sealed before its run). PREREG139 judged this amendment's books on the only US dates never used to
+find them: the index CFDs as the app trades them, 2011-12, with the app's stops.
+- **Sizing.** SIZED V2 and SIZED V3 did not beat the plain trade at equal size: −$4.94 and +$1.33 a day, t
+  −0.26 / +0.17.
+- **The other leads.** The Monday, oversold-short, +1% day and pullback leads were flat or reversed. The 75 bp
+  stop changed little: +$1 a trade, t 0.27.
+- **Agreement.** Only AGREE pointed the right way on both CFDs, as PREREG28 found on fresh ETFs: the direction
+  was right on 57% / 56% of agree days against 50% / 50% of the others.
+- **The option.** The QQQ call is also about break-even at real Saxo prices (21 October check).
+- **The new line.** `methods.playbook` now states the plain first-candle CFD trade ("Nasdaq CFD long", "S&P
+  CFD short"). It says "skip" when the Nasdaq and S&P signals disagree, with the agreement as its only tag,
+  and needs no trend context.
+- **The books.** Every book above is unchanged and keeps recording, including PLAYBOOK, SIZED V2 / V3 and
+  STOP 75 BP. The Record page now labels the PLAYBOOK book "Old playbook".
+
+No trade changes.

@@ -274,3 +274,11 @@ scan) and a "Price now" column: on an order, the low so far and the fall still n
 the fill to expect once the low is under it; on a position, the open result and whether ConnorsRSI would
 sell it at the close. A failed read is the `stock prices` problem; the last figures stay, with their time.
 Two-line table cells are now one box, so a phone stacks them beside their label.
+
+## Playbook line (22 October 2026)
+
+The Today page's playbook now shows the plain first-candle CFD trade for each market ("Nasdaq CFD long", "S&P
+CFD short"). It shows "Skip" when the Nasdaq and S&P signals disagree, with the agreement as its only tag, and
+the panel's note reads "skip when the Nasdaq and S&P disagree". The leads behind the old line (pullback cell,
+Mondays, oversold shorts, +1% days) did not hold on unseen dates (PREREG139; amendment 4, addendum 2). The
+Record page's books are unchanged, and the PLAYBOOK book is labelled "Old playbook".

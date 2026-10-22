@@ -1473,7 +1473,7 @@ class Runtime:
 
     @staticmethod
     def playbook(signals: list[dict[str, Any]], day: date) -> list[dict[str, Any]]:
-        """Amendment 4: what the research leads say about today's first-candle signals."""
+        """Today's action per CFD: the plain trade, skipped when the two signals disagree."""
         fc = {s["market"]: s for s in signals if s["method"] == FC}
         out = []
         for cfd in CFDS:

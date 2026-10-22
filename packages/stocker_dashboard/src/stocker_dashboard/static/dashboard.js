@@ -22,7 +22,7 @@ const METHODS = {"CFD NAS100": "Nasdaq CFD · first candle", "CFD US500": "S&P C
 const STOCK_STATUS = {PENDING: "Resting for the next session", NOT_FILLED: "Not filled", FILLED: "Filled", CANCELLED: "Cancelled"};
 const methodName = (m) => METHODS[m] || (m.startsWith("STOCK DIP ") ? `${METHODS["STOCK DIP"]} · ${m.slice(10)}` : m);
 const RULES = {CONNORS: "Connors", TURNAROUND: "Turnaround Tuesday", FEAR: "Fear rule"};
-const BOOKS = {PULLBACK: "Pullback cell · long signal, prior close below the 50-day", WEEKDAYS: "Tuesday to Friday", AGREE: "Nasdaq and S&P signals agree", "NO OVERSOLD SHORTS": "Shorts skipped after an oversold close (3+ down closes or RSI2 < 10)", "AFTER A +1% DAY": "After a +1% day", PLAYBOOK: "Playbook · the call in the pullback cell, the Nasdaq CFD otherwise, no Monday or oversold shorts, S&P in the cell only", "SIZED V2": "Sized · playbook units (cell 2, other longs 1, shorts 1 unless Monday or oversold)", "SIZED V3": "Sized · score units 0-3 (+cell, +after a +1% day, +agree, −Monday, −oversold short)", "STOP 75 BP": "Nasdaq CFD · what a 75 bp stop at the same $200 risk would have done", "CROSS PULLBACK": "VWAP crossings · pullback days", "CROSS BEFORE 14:00": "VWAP crossings · entered before 14:00"};
+const BOOKS = {PULLBACK: "Pullback cell · long signal, prior close below the 50-day", WEEKDAYS: "Tuesday to Friday", AGREE: "Nasdaq and S&P signals agree", "NO OVERSOLD SHORTS": "Shorts skipped after an oversold close (3+ down closes or RSI2 < 10)", "AFTER A +1% DAY": "After a +1% day", PLAYBOOK: "Old playbook · the call in the pullback cell, the Nasdaq CFD otherwise, no Monday or oversold shorts, S&P in the cell only", "SIZED V2": "Sized · old playbook units (cell 2, other longs 1, shorts 1 unless Monday or oversold)", "SIZED V3": "Sized · score units 0-3 (+cell, +after a +1% day, +agree, −Monday, −oversold short)", "STOP 75 BP": "Nasdaq CFD · what a 75 bp stop at the same $200 risk would have done", "CROSS PULLBACK": "VWAP crossings · pullback days", "CROSS BEFORE 14:00": "VWAP crossings · entered before 14:00"};
 // The protocol's fixed checkpoints: each is judged once, when its count is reached (PAPER-RECORD-PROTOCOL.md
 // and amendments 2-5). Counts are read from the Record summary; nothing here judges anything.
 const VERDICTS = [
@@ -154,7 +154,7 @@ function playbookText(p) {
   if (!p) return "Waiting for the 09:35 signal";
   return `${p.action.charAt(0).toUpperCase()}${p.action.slice(1)}${p.tags.length ? ` · ${p.tags.join(" · ")}` : ""}`;
 }
-const playbookTone = (p) => !p ? "" : /^(skip|no trade|context not read)/.test(p.action) ? "skip" : "go";
+const playbookTone = (p) => !p ? "" : /^(skip|no trade)/.test(p.action) ? "skip" : "go";
 const openMark = (t) => t.exit_at ? null : t.open_pnl_usd;
 // Stock dips: Saxo's price read once a minute in the session (display only; the evening scan settles).
 const readAt = (t) => join([`${ny(t.now_at)} NY`, t.now_delay ? `${t.now_delay} min late` : ""]);

@@ -697,15 +697,14 @@
   "playbook": [
    {
     "market": "NAS100",
-    "action": "QQQ call",
+    "action": "skip",
     "tags": [
-     "pullback cell: long below the 50-day",
      "disagrees with the other index"
     ]
    },
    {
     "market": "US500",
-    "action": "skip: no S&P edge outside the pullback cell",
+    "action": "skip",
     "tags": [
      "disagrees with the other index"
     ]

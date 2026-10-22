@@ -646,11 +646,11 @@ def test_first_candle_context_books_and_playbook(tmp_path):
             "4328771",
             "36590",
         }
-        play = {p["market"]: p for p in rt.today()["playbook"]}
-        assert play["NAS100"]["action"] == "QQQ call"
-        assert play["NAS100"]["tags"][0] == "pullback cell: long below the 50-day"
-        assert play["US500"]["action"] == "skip: no S&P edge outside the pullback cell"
-        assert {"Monday", "short after an oversold close"} <= set(play["US500"]["tags"])
+        # Long against short: the playbook skips both CFDs.
+        assert rt.today()["playbook"] == [
+            {"market": m, "action": "skip", "tags": ["disagrees with the other index"]}
+            for m in ("NAS100", "US500")
+        ]
         await at(rt, clock, OPEN + timedelta(minutes=20, seconds=1))  # the call follows
         books = {b["book"]: b["cells"] for b in rt.store.record(0)["books"]}
         assert books["PULLBACK"]["NAS100"]["trades"] == 1

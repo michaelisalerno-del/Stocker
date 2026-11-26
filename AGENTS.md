@@ -44,7 +44,8 @@ in the runtime trading hot path.
   the signals' context, the books, the playbook and the fear rule (amendment 4), and the stock
   dips on US stocks from Saxo's daily bars after the close (amendment 5).
   It reads Saxo prices and writes the record; it
-  never places, changes or cancels an order and never changes the Saxo session. This repository
+  never places, changes or cancels an order. Its only session change requests live data priority
+  when configured on LIVE. This repository
   holds only the runtime, its dashboard, their tests and operations material; retired futures code,
   providers and research live in git history, never in active packages.
 - The authenticated dashboard is a consumer of runtime state; its failure must not stop the record.

@@ -1,8 +1,7 @@
 """The paper record's clock: each New York trading day's events, CFD stop checks and the login.
 
 Nothing here can place an order. Every decision reads Saxo prices and writes the paper record.
-QQQ prices reach this session delayed (Saxo's real-time slot belongs to the user's SaxoTraderGO),
-so a QQQ event due at T is read at T + the delay Saxo reports, and recorded as of T.
+A QQQ event due at T is read at T + the delay Saxo reports, and recorded as of T.
 """
 
 import asyncio
@@ -38,6 +37,7 @@ RETRY_EVERY = 5.0  # seconds between attempts at a failed event
 STOP_POLL_SECONDS = 2.0
 MARK_FRESH_SECONDS = 10.0  # the dashboard marks open CFD positions only at a quote this fresh
 LOGIN_CHECK_SECONDS = 30.0
+LIVE_REQUEST_INTERVAL = 300.0  # Saxo grants upgrades asynchronously and may refuse them.
 FC, FC_QQQ, CONNORS_QQQ = "FIRST_CANDLE", "FIRST_CANDLE_QQQ", "CONNORS_QQQ"
 CROSS = "VWAP_CROSS"
 DIP = "DIP"
@@ -111,9 +111,13 @@ class Runtime:
         self.cfd_info: dict[int, tuple[int, float]] = {}
         self.cfd_quotes: dict[int, market.Quote] = {}
         self.cfd_polled = 0.0
-        self.login_checked = 0.0
+        self.next_login_check = 0.0
+        self.prefer_live_data = (
+            config.data_environment == "SAXO_LIVE" and config.saxo.prefer_live_data
+        )
         self.capabilities: dict[str, Any] = {}
-        self.capabilities_read = 0.0
+        self.next_capability_check = 0.0
+        self.next_live_request = 0.0
         self.attempted: dict[tuple[str, str], float] = {}
         self.problems: dict[str, str] = {}
         self.qqq_delay: int | None = None
@@ -401,17 +405,46 @@ class Runtime:
 
     async def keep_login(self) -> None:
         """Refresh the access token before it lapses, even on days with nothing to record."""
-        if time.monotonic() - self.login_checked < LOGIN_CHECK_SECONDS:
+        now = time.monotonic()
+        if now < self.next_login_check:
             return
-        self.login_checked = time.monotonic()
+        self.next_login_check = now + LOGIN_CHECK_SECONDS
         try:
             await self.client.oauth.access_token()
-            self.problems.pop("login", None)
-            if time.monotonic() - self.capabilities_read >= 600:
-                self.capabilities_read = time.monotonic()
-                self.capabilities = await self.client.get("/root/v1/sessions/capabilities")
         except SaxoError as exc:
+            self.capabilities = {}
+            self.qqq_delay = None
             self.note("login", exc)
+            return
+        self.problems.pop("login", None)
+        if now < self.next_capability_check:
+            return
+        self.next_capability_check = now + (LOGIN_CHECK_SECONDS if self.prefer_live_data else 600)
+        try:
+            self.capabilities = await self.client.get("/root/v1/sessions/capabilities")
+            self.problems.pop("Saxo session", None)
+        except SaxoError as exc:
+            self.capabilities = {}
+            self.note("Saxo session", exc)
+        if not self.prefer_live_data:
+            return
+        level = self.capabilities.get("TradeLevel")
+        if level == "OrdersOnly" and now >= self.next_live_request:
+            self.next_live_request = now + LIVE_REQUEST_INTERVAL
+            try:
+                await self.client.request_live_data()
+                self.problems.pop("live data request", None)
+            except SaxoError as exc:
+                self.note("live data request", exc)
+        elif level == "FullTradingAndChat":
+            self.problems.pop("live data request", None)
+        # An accepted upgrade does not guarantee a real-time exchange subscription.
+        try:
+            await self.measure_qqq_delay()
+            self.problems.pop("QQQ feed", None)
+        except (SaxoError, Problem) as exc:
+            self.qqq_delay = None
+            self.note("QQQ feed", exc)
 
     async def measure_qqq_delay(self) -> int:
         q = (await market.quotes(self.client, [QQQ_UIC], "Etf")).get(QQQ_UIC)
@@ -1399,6 +1432,7 @@ class Runtime:
             "oauth_failure": oauth.failure_reason,
             "login_minutes_left": round(refresh_left / 60) if oauth.tokens else None,
             "trade_level": self.capabilities.get("TradeLevel"),
+            "prefer_live_data": self.prefer_live_data,
             "data_level": self.capabilities.get("DataLevel"),
             "qqq_delay_minutes": self.qqq_delay,
             "session": None

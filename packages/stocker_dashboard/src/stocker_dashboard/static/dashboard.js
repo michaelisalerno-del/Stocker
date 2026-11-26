@@ -536,7 +536,8 @@ function renderSystem(s) {
   text("auth-state", `Saxo login: ${s.oauth}${s.oauth_failure ? ` · ${display(s.oauth_failure)}` : ""}`);
   const facts = [
     ["Environment", s.data_environment], ["Build", s.build], ["Worker", display(s.worker_health)],
-    ["Saxo session level", s.trade_level ? `${s.trade_level} (the app never changes it)` : "Not read yet"],
+    ["Saxo session level", s.trade_level || "Not read yet"],
+    ["Live data priority", s.prefer_live_data ? "This web app" : "Managed outside the app"],
     ["Login renewal", s.login_minutes_left == null ? "No login" : `${s.login_minutes_left} min before the next renewal is due`],
     ["QQQ delay", s.qqq_delay_minutes == null ? "Not measured yet" : `${s.qqq_delay_minutes} min`],
     ["Calendar", s.calendar_loaded ? `Loaded for ${s.calendar_loaded}` : "Not loaded"],

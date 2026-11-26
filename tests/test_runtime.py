@@ -9,7 +9,7 @@ import pytest
 from fake_saxo import NAS, SPX, FakeSaxo, client, qqq_candles, regular_sessions, trend_bars
 from stocker_execution import runtime as runtime_module
 from stocker_execution import saxo_client
-from stocker_execution.config import PaperConfig
+from stocker_execution.config import PaperConfig, SaxoSettings
 from stocker_execution.runtime import Runtime
 from stocker_execution.store import Store
 
@@ -69,6 +69,68 @@ async def at(rt: Runtime, clock: Clock, when: datetime, passes: int = 2) -> None
     clock.at = when
     for _ in range(passes):
         await rt.step()
+
+
+def test_live_session_priority_uses_the_quoted_delay_and_limits_upgrade_requests(tmp_path):
+    fake = FakeSaxo()
+    fake.qqq(699.98, 700.02)
+
+    async def scenario():
+        rt = Runtime(
+            PaperConfig(data_environment="SAXO_LIVE"),
+            Store(tmp_path / "paper.sqlite3"),
+            client(tmp_path, fake, "SAXO_LIVE"),
+        )
+        try:
+            await rt.keep_login()
+            assert rt.status()["trade_level"] == "OrdersOnly"
+            assert rt.status()["qqq_delay_minutes"] == 15
+            await rt.keep_login()
+            # Saxo confirms the new level separately. The exchange can still delay QQQ.
+            fake.trade_level = "FullTradingAndChat"
+            await rt.keep_login()
+            assert rt.status()["qqq_delay_minutes"] == 15
+            fake.qqq_delay = 0
+            fake.qqq(699.98, 700.02)
+            await rt.keep_login()
+            assert rt.status()["qqq_delay_minutes"] == 0
+            assert [p for m, p, _ in fake.requests if m == "PATCH"] == [
+                "/root/v1/sessions/capabilities"
+            ]
+
+            # A later SaxoTraderGO login can take the slot back.
+            fake.trade_level = "OrdersOnly"
+            rt.next_live_request = 0
+            fake.quotes.clear()
+            await rt.keep_login()
+            assert sum(m == "PATCH" for m, _, _ in fake.requests) == 2
+            assert rt.status()["qqq_delay_minutes"] is None
+            assert rt.problems["QQQ feed"] == "QQQ_DELAY_UNKNOWN"
+        finally:
+            await rt.stop()
+            rt.store.db.close()
+
+    asyncio.run(scenario())
+
+
+def test_live_session_priority_can_be_switched_off(tmp_path):
+    fake = FakeSaxo()
+
+    async def scenario():
+        rt = Runtime(
+            PaperConfig(data_environment="SAXO_LIVE", saxo=SaxoSettings(prefer_live_data=False)),
+            Store(tmp_path / "paper.sqlite3"),
+            client(tmp_path, fake, "SAXO_LIVE"),
+        )
+        try:
+            await rt.keep_login()
+            assert rt.status()["trade_level"] == "OrdersOnly"
+            assert all(method == "GET" for method, _, _ in fake.requests)
+        finally:
+            await rt.stop()
+            rt.store.db.close()
+
+    asyncio.run(scenario())
 
 
 def test_a_full_paper_day_and_the_next_day_connors_exit(tmp_path):

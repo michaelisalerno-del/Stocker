@@ -28,7 +28,7 @@ def test_configuration_has_no_trading_switches():
     assert PaperConfig(data_environment="SAXO_LIVE")
 
 
-def test_the_client_can_only_read():
+def test_the_only_write_allowed_is_the_session_capability_request():
     for path in (
         "/trade/v2/orders",
         "/trade/v2/orders/precheck",
@@ -41,7 +41,8 @@ def test_the_client_can_only_read():
         "/chart/v3/charts/subscriptions",
     ):
         for method in ("POST", "PUT", "PATCH", "DELETE"):
-            assert not allowed(method, path), (method, path)
+            expected = method == "PATCH" and path == "/root/v1/sessions/capabilities"
+            assert allowed(method, path) == expected, (method, path)
     for path in (
         "/trade/v1/infoprices",
         "/trade/v1/infoprices/list",

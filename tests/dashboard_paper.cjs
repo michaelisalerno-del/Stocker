@@ -7,11 +7,16 @@ const {chromium} = require("playwright");
 const root = path.resolve("packages/stocker_dashboard/src/stocker_dashboard/static");
 const fixture = JSON.parse(fs.readFileSync(path.resolve("tests/fixtures/paper_dashboard.json"), "utf8"));
 const calls = [];
+let chartUnavailable = false;
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
   if (url.pathname.startsWith("/api/")) {
     calls.push(url.pathname);
     res.setHeader("Content-Type", "application/json");
+    if (url.pathname === "/api/charts" && chartUnavailable) {
+      res.statusCode = 503;
+      return res.end(JSON.stringify({error: "CHART_UNAVAILABLE"}));
+    }
     return res.end(JSON.stringify(fixture[url.pathname] || {}));
   }
   const file = url.pathname.startsWith("/static/") ? path.basename(url.pathname) : "index.html";
@@ -88,15 +93,56 @@ const server = http.createServer((req, res) => {
       await page.waitForFunction(() => document.querySelector("#auth-state").textContent.includes("AUTHENTICATED"));
       const priority = page.locator("#facts div").filter({hasText: "Live data priority"});
       assert.equal(await priority.locator("dd").textContent(), preferLiveData ? "This web app" : "Managed outside the app");
-      assert.match(await page.locator("#facts").textContent(), /QQQ delay15 min/);
+      assert.match(await page.locator("#facts").textContent(), /QQQ quote delay15 min/);
+      if (preferLiveData) {
+        fixture["/api/charts"].markets.QQQ.delay = 0;
+        await page.evaluate(() => refreshCharts());
+        assert.equal(await page.locator("#delay-chip").textContent(), "QQQ 15 min late");
+        assert.equal(await page.locator("#qqq-chart-delay").textContent(), "0 min");
+        fixture["/api/charts"].markets.QQQ.delay = 15;
+      }
       assert.ok(await page.locator("#problems-empty").isVisible());
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 0);
       assert.deepEqual(errors, []);
       await page.close();
     }
-    // Each page asks only for its own data.
+    // A primary-session change updates the chart while the scheduled quote reading stays at 15.
+    // Every page must follow the chart, and an ordinary status refresh must not restore the old delay.
+    for (const route of ["/", "/record", "/system"]) {
+      fixture["/api/charts"].markets.QQQ.delay = 0;
+      const page = await browser.newPage();
+      await page.goto(base + route);
+      await page.waitForFunction(() => document.querySelector("#delay-chip").textContent === "QQQ live", undefined, {timeout: 3000});
+      const checkDelay = async (label, detail) => {
+        assert.equal(await page.locator("#delay-chip").textContent(), label);
+        if (route === "/") assert.equal(await page.locator("#tile-feed").textContent(), label);
+        if (route === "/system") assert.equal(await page.locator("#facts div").filter({has: page.locator("dt", {hasText: /^QQQ chart delay$/})}).locator("dd").textContent(), detail);
+      };
+      await page.evaluate(() => refresh(true));
+      await checkDelay("QQQ live", "0 min");
+      assert.equal(await page.locator("#delay-chip").getAttribute("class"), "chip");
+      fixture["/api/charts"].markets.QQQ.delay = 15;
+      await page.evaluate(() => refreshCharts());
+      await checkDelay("QQQ 15 min late", "15 min");
+      assert.equal(await page.locator("#delay-chip").getAttribute("class"), "chip warn");
+      fixture["/api/charts"].markets.QQQ.delay = 0;
+      await page.evaluate(() => refreshCharts());
+      await checkDelay("QQQ live", "0 min");
+      chartUnavailable = true;
+      await page.evaluate(() => refreshCharts());
+      await page.evaluate(() => refresh(true));
+      await checkDelay("QQQ delay unknown", "Unknown");
+      chartUnavailable = false;
+      await page.evaluate(() => refreshCharts());
+      await checkDelay("QQQ live", "0 min");
+      fixture["/api/charts"].markets.QQQ.delay = null;
+      await page.evaluate(() => refreshCharts());
+      await checkDelay("QQQ delay unknown", "Unknown");
+      await page.close();
+    }
+    // All requests stay within the dashboard's cached read endpoints.
     assert.deepEqual([...new Set(calls)].sort(), ["/api/charts", "/api/record", "/api/system", "/api/today"]);
-    console.log("PASS: Today, Record and System render the paper day at desktop and phone width");
+    console.log("PASS: paper pages render at desktop and phone width; QQQ delay follows charts across all pages");
   } finally {
     await browser.close();
     await new Promise((resolve) => server.close(resolve));

@@ -24,6 +24,8 @@ const server = http.createServer((req, res) => {
   try {
     const base = `http://127.0.0.1:${server.address().port}`;
     for (const viewport of [{width: 1280, height: 900}, {width: 390, height: 844}]) {
+      const preferLiveData = viewport.width === 1280;
+      fixture["/api/system"].prefer_live_data = preferLiveData;
       const page = await browser.newPage({viewport, timezoneId: "Europe/London"});
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message));
@@ -84,7 +86,9 @@ const server = http.createServer((req, res) => {
 
       await page.goto(base + "/system");
       await page.waitForFunction(() => document.querySelector("#auth-state").textContent.includes("AUTHENTICATED"));
-      assert.equal(await page.locator("#facts div").count(), 8);
+      const priority = page.locator("#facts div").filter({hasText: "Live data priority"});
+      assert.equal(await priority.locator("dd").textContent(), preferLiveData ? "This web app" : "Managed outside the app");
+      assert.match(await page.locator("#facts").textContent(), /QQQ delay15 min/);
       assert.ok(await page.locator("#problems-empty").isVisible());
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 0);
       assert.deepEqual(errors, []);

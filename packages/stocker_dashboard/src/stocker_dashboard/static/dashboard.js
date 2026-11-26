@@ -39,7 +39,8 @@ const VERDICTS = [
   {label: "Stock dips · first look", target: 100, note: "filled stock trades · against +3.4% a trade and 68% winners", count: (c) => c.trades("STOCK DIP")},
 ];
 const USD = new Intl.NumberFormat("en-US", {style: "currency", currency: "USD"});
-let offset = 0, pending = null, lastRefresh = "", serverOffset = 0;
+let offset = 0, pending = null, lastRefresh = "", serverOffset = 0, qqqChartDelay = null;
+let feedStatus = null;
 
 const text = (id, value) => { const el = $(id); if (el && el.textContent !== String(value)) el.textContent = String(value); };
 const show = (id, on) => { const el = $(id); if (el) el.hidden = !on; };
@@ -113,15 +114,25 @@ async function request(path, {method = "GET", signal, timeout = 8000} = {}) {
 }
 
 // status --------------------------------------------------------------------------------------
+function renderQqqDelay() {
+  // With priority off, scheduled quote reads can predate a session change.
+  const late = feedStatus && (feedStatus.prefer_live_data ? feedStatus.qqq_delay_minutes : qqqChartDelay);
+  const label = late == null ? "QQQ delay unknown" : late ? `QQQ ${late} min late` : "QQQ live";
+  text("delay-chip", label);
+  $("delay-chip").className = late == null || late ? "chip warn" : "chip";
+  text("tile-feed", label);
+  $("tile-feed").className = `tile-value ${late == null ? "" : late ? "warn" : "pos"}`;
+  text("qqq-chart-delay", qqqChartDelay == null ? "Unknown" : `${qqqChartDelay} min`);
+}
+
 function renderStatus(s) {
+  feedStatus = s;
   if (s.server_time) serverOffset = Date.parse(s.server_time) - Date.now();
   const login = s.oauth === "AUTHENTICATED";
   text("login-chip", login ? `Saxo connected · renews in ${s.login_minutes_left ?? "?"} min` : `Saxo: ${display(s.oauth)}`);
   $("login-chip").className = login ? "chip" : "chip bad";
   text("day-chip", s.session ? `US session ${ny(s.session.open)}–${ny(s.session.close)} NY${s.session.regular ? "" : " · early close, skipped"}` : "No US session today");
-  const late = s.qqq_delay_minutes;
-  text("delay-chip", late == null ? "QQQ delay not measured yet" : late ? `QQQ ${late} min late` : "QQQ live");
-  $("delay-chip").className = late ? "chip warn" : "chip";
+  renderQqqDelay();
   const problems = Object.entries(s.problems || {});
   show("problem-chip", problems.length > 0);
   text("problem-chip", problems.map(([k, v]) => `${display(k)}: ${display(v)}`).join(" · "));
@@ -190,9 +201,6 @@ function renderTiles(d) {
   const next = d.plan.find((p) => !["DONE", "FAILED", "MISSED"].includes(status.get(p.event)?.status));
   text("tile-next", next ? `${next.new_york} NY` : d.plan.length ? "Done for today" : "No session");
   text("tile-next-sub", next ? `${EVENTS[next.event] || next.event} · ${countdown(next.due)}` : "Nothing left to record today");
-  const late = s.qqq_delay_minutes;
-  text("tile-feed", late == null ? "QQQ delay unknown" : late ? `QQQ ${late} min late` : "QQQ live");
-  $("tile-feed").className = `tile-value ${late == null ? "" : late ? "warn" : "pos"}`;
   const problems = Object.keys(s.problems || {}).length;
   text("tile-feed-sub", `CFD quotes live · Saxo renews in ${s.login_minutes_left ?? "?"} min · ${problems ? `${problems} problem${problems > 1 ? "s" : ""}` : "no problems"}`);
   return next;
@@ -356,7 +364,15 @@ function drawChart({market: chartMarket, box: boxId, stat: statId, head: headId,
 }
 
 async function refreshCharts() {
-  try { charts = await request("/api/charts"); drawCharts(); } catch (e) { if (e.name !== "AbortError") for (const p of CHART_PANELS) text(p.stat, `${e.message} · chart may be stale`); }
+  try {
+    charts = await request("/api/charts");
+    qqqChartDelay = charts.markets?.QQQ?.delay ?? null;
+    if (page === "today") drawCharts();
+  } catch (e) {
+    qqqChartDelay = null;
+    if (e.name !== "AbortError") for (const p of CHART_PANELS) text(p.stat, `${e.message} · chart may be stale`);
+  }
+  renderQqqDelay();
 }
 
 function methodSums(d) {
@@ -539,12 +555,14 @@ function renderSystem(s) {
     ["Saxo session level", s.trade_level || "Not read yet"],
     ["Live data priority", s.prefer_live_data ? "This web app" : "Managed outside the app"],
     ["Login renewal", s.login_minutes_left == null ? "No login" : `${s.login_minutes_left} min before the next renewal is due`],
-    ["QQQ delay", s.qqq_delay_minutes == null ? "Not measured yet" : `${s.qqq_delay_minutes} min`],
+    ["QQQ quote delay", s.qqq_delay_minutes == null ? "Unknown" : `${s.qqq_delay_minutes} min`],
+    ["QQQ chart delay", qqqChartDelay == null ? "Unknown" : `${qqqChartDelay} min`],
     ["Calendar", s.calendar_loaded ? `Loaded for ${s.calendar_loaded}` : "Not loaded"],
     ["Saxo requests since start", s.saxo_calls],
   ];
   $("facts").replaceChildren(...facts.map(([k, v]) => {
     const div = document.createElement("div"), dt = document.createElement("dt"), dd = document.createElement("dd");
+    if (k === "QQQ chart delay") dd.id = "qqq-chart-delay";
     dt.textContent = k; dd.textContent = String(v ?? "—"); div.append(dt, dd); return div;
   }));
   const problems = Object.entries(s.problems || {});
@@ -587,7 +605,7 @@ $("saxo-connect").onsubmit = async (event) => {
 };
 let resizeTimer = null;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (page === "today" && charts) drawCharts(); if (page === "record") refresh(true); }, 150); });
-if (page === "today") { refreshCharts(); setInterval(refreshCharts, 60000); }
+refreshCharts(); setInterval(refreshCharts, 60000);
 $("prev").onclick = () => { offset = Math.max(0, offset - 100); refresh(true); };
 $("next").onclick = () => { offset += 100; refresh(true); };
 $("system-detail").addEventListener("toggle", () => refresh(true));

@@ -1,11 +1,12 @@
 """An offline Saxo for the paper record: the GET endpoints it reads, with settable prices."""
 
+import json
 import time
 from datetime import UTC, date, datetime, timedelta
 
 import httpx
 
-from stocker_execution.config import SaxoSettings
+from stocker_execution.config import Environment, SaxoSettings
 from stocker_execution.saxo_auth import OAuth, atomic_json
 from stocker_execution.saxo_client import SaxoClient
 
@@ -78,6 +79,7 @@ class FakeSaxo:
         self.expiries: list[date] = []
         self.options: dict[date, list[dict]] = {}  # SpecificOptions per expiry
         self.option_quotes: dict[int, dict] = {}
+        self.trade_level = "OrdersOnly"
         self.qqq_delay = 15
         self.qqq_bars: list[dict] = []
         self.qqq_upto: datetime | None = None  # QQQ candles exist up to this time (the clock)
@@ -154,7 +156,7 @@ class FakeSaxo:
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         params = dict(request.url.params)
-        path = request.url.path.removeprefix("/sim/openapi")
+        path = request.url.path.removeprefix("/sim").removeprefix("/openapi")
         self.requests.append((request.method, path, params))
         if path == "/ref/v1/exchanges/NASDAQ":
             return httpx.Response(200, json={"ExchangeSessions": self.sessions})
@@ -162,7 +164,12 @@ class FakeSaxo:
             rows = [r for r in self.listed if r["ExchangeId"] == params.get("ExchangeId")]
             return httpx.Response(200, json={"Data": rows})
         if path == "/root/v1/sessions/capabilities":
-            return httpx.Response(200, json={"TradeLevel": "OrdersOnly", "DataLevel": "Standard"})
+            if request.method == "PATCH":
+                assert json.loads(request.content) == {"TradeLevel": "FullTradingAndChat"}
+                return httpx.Response(202)
+            return httpx.Response(
+                200, json={"TradeLevel": self.trade_level, "DataLevel": "Standard"}
+            )
         if path.startswith("/ref/v1/instruments/details/"):
             uic = int(path.split("/")[5])
             return httpx.Response(
@@ -263,20 +270,20 @@ class FakeSaxo:
         return httpx.Response(404, json={"ErrorCode": "FIXTURE_UNKNOWN_PATH"})
 
 
-def client(tmp_path, fake: FakeSaxo) -> SaxoClient:
+def client(tmp_path, fake: FakeSaxo, env: Environment = "SAXO_SIM") -> SaxoClient:
     path = tmp_path / "credentials.json"
     atomic_json(
         path,
         {
-            "environment": "SAXO_SIM",
+            "environment": env,
             "client_id": "fixture-key",
             "client_secret": "fixture-secret",
             "account_key": "fixture-account",
         },
     )
-    oauth = OAuth("SAXO_SIM", SaxoSettings(credentials_file=path), tmp_path)
+    oauth = OAuth(env, SaxoSettings(credentials_file=path), tmp_path)
     oauth.tokens = {
-        "environment": "SAXO_SIM",
+        "environment": env,
         "access_token": "fixture-access",
         "refresh_token": "fixture-refresh",
         "expires_at": time.time() + 3600,

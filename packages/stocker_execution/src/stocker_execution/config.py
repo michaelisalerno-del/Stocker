@@ -21,6 +21,7 @@ class Strict(BaseModel):
 class SaxoSettings(Strict):
     # Secrets and account keys are read from a mode-0600 file, never from dashboard JSON.
     credentials_file: Path | None = None
+    prefer_live_data: bool = True  # Applies to the LIVE Saxo session.
     redirect_uri: str = "http://127.0.0.1:8765/oauth/saxo/callback"
 
     @field_validator("redirect_uri")

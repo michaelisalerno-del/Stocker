@@ -1,8 +1,4 @@
-"""Read-only Saxo access: an explicit list of GET endpoints and nothing else.
-
-The paper record never places, changes or cancels an order and never touches the session, so it
-can never take the user's real-time slot from SaxoTraderGO.
-"""
+"""Saxo prices and the web app's request for live session priority."""
 
 import asyncio
 import json
@@ -32,6 +28,8 @@ def allowed(method: str, path: str) -> bool:
     # Accept canonical local paths only; no URL, traversal, escaping or query ambiguity.
     if not re.fullmatch(r"/[A-Za-z0-9/%=_-]+", path) or "//" in path:
         return False
+    if method == "PATCH":
+        return path == "/root/v1/sessions/capabilities"
     return method == "GET" and any(re.fullmatch(p, path) for p in READ_PATHS)
 
 
@@ -70,7 +68,15 @@ class SaxoClient:
         self.calls = 0
 
     async def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        if not allowed("GET", path):
+        return await self._request("GET", path, params)
+
+    async def request_live_data(self) -> None:
+        await self._request("PATCH", "/root/v1/sessions/capabilities")
+
+    async def _request(
+        self, method: str, path: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if not allowed(method, path):
             raise SaxoRefused("ENDPOINT_NOT_ALLOWED")
         if self.waiters >= REST_QUEUE_LIMIT:
             raise SaxoRefused("REST_QUEUE_LIMIT")
@@ -87,9 +93,10 @@ class SaxoClient:
                     self.next_request = time.monotonic() + REQUEST_SPACING
                 try:
                     async with self.http.stream(
-                        "GET",
+                        method,
                         self.oauth.urls["rest"] + path,
                         params=params,
+                        json={"TradeLevel": "FullTradingAndChat"} if method == "PATCH" else None,
                         headers={"Authorization": "Bearer " + token},
                     ) as streamed:
                         # aiter_bytes decodes the wire compression once; the body is

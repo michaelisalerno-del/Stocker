@@ -26,9 +26,12 @@ uv sync --locked --no-default-groups
 uv run --no-sync stocker paper-run --config configs/paper.example.yaml --database .stocker/paper-record.sqlite3
 ```
 
-The Saxo client allows a short list of GET endpoints and nothing else (`saxo_client.py`). QQQ prices
-reach the app 15 minutes late whenever SaxoTraderGO holds Saxo's single real-time slot; each QQQ step
-is then read 15 minutes after its time and recorded as of that time. CFD prices are always live.
+The LIVE runtime requests Saxo's live-data session and measures the delay on a QQQ quote every
+30 seconds. This can delay prices in SaxoTraderGO or sign it out. On the System page, check the
+session level and the QQQ quote delay. Real-time QQQ requires an eligible subscription. A delayed
+QQQ paper event still uses its measured delay. Set `saxo.prefer_live_data: false` to stop requesting
+the slot and restart the service. The broker client permits price and reference reads and one
+fixed session-capability request. It has no order endpoint.
 
 The dashboard has three pages: **Today** (the day's P&L and open positions, the QQQ and S&P charts,
 the playbook, the events timeline and each method's paper trades), **Record** (every paper trade,
